@@ -1,21 +1,21 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- 统计栏 -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val">{{ users.length }}</div><div class="s-label">员工总数</div></div></div>
       <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ activeCount }}</div><div class="s-label">在职</div></div></div>
-      <div class="summary-item"><span class="s-icon">⏸️</span><div><div class="s-val" style="color:#EF4444">{{ inactiveCount }}</div><div class="s-label">停用</div></div></div>
+      <div class="summary-item"><span class="s-icon">⏸️</span><div><div class="s-val" style="color:var(--danger)">{{ inactiveCount }}</div><div class="s-label">停用</div></div></div>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>👷 普通员工管理</h3>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div class="search-box" style="background:#f0f0f0;border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" @keyup.enter="searchAndLoad" placeholder="搜索用户名/姓名/工号/电话..." style="border:none;background:transparent;outline:none;padding:8px 6px;font-size:14px;width:220px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" @keyup.enter="searchAndLoad" placeholder="搜索用户名/姓名/工号/电话..." style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:220px;box-shadow:none">
           </div>
-          <button class="btn btn-sm" @click="searchAndLoad" style="background:#E5E7EB">搜索</button>
+          <button class="btn btn-sm" @click="searchAndLoad" style="background:var(--border-light)">搜索</button>
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 添加员工</button>
         </div>
       </div>
@@ -37,15 +37,15 @@
             <tbody>
               <tr v-for="(u, idx) in filteredUsers" :key="u.id">
                 <td style="text-align:center"><span class="row-num">{{ idx + 1 }}</span></td>
-                <td><code style="font-size:12px">{{ u.username }}</code></td>
+                <td><code style="font-size:var(--text-xs)">{{ u.username }}</code></td>
                 <td style="font-weight:500">{{ u.nickname || u.name || '-' }}</td>
-                <td><span class="badge" style="background:#FEF3C7;color:#92400E;font-size:var(--text-xs-alt)">{{ getPositionName(u.position_id) }}</span></td>
+                <td><span class="badge" style="background:var(--warning-lighter);color:var(--warning-dark);font-size:var(--text-xs-alt)">{{ getPositionName(u.position_id) }}</span></td>
                 <td>{{ u.employee_no || '-' }}</td>
-                <td style="font-size:13px">{{ u.phone || '-' }}</td>
+                <td style="font-size:var(--text-sm)">{{ u.phone || '-' }}</td>
                 <td><span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">{{ u.status === 'active' ? '在职' : '停用' }}</span></td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
-                    <span v-if="u.locked_until" class="o-abtn" style="color:#EF4444;cursor:pointer" @click="unlock(u)" title="解锁账户">🔓</span>
+                    <span v-if="u.locked_until" class="o-abtn" style="color:var(--danger);cursor:pointer" @click="unlock(u)" title="解锁账户">🔓</span>
                     <span class="o-abtn o-edit" @click="openEdit(u)" title="编辑">✏️</span>
                     <span class="o-abtn" style="color:var(--warning);cursor:pointer" @click="resetPwd(u)" title="重置密码">🔑</span>
                     <span class="o-abtn o-del" @click="del(u)" title="删除">🗑️</span>
@@ -56,10 +56,10 @@
           </table>
           <div v-else class="empty"><div class="empty-icon">👥</div><div class="empty-text">{{ searchKeyword ? '未找到匹配的员工' : '暂无员工数据' }}</div></div>
         </div>
-        <div v-if="total > pageSize" style="display:flex;justify-content:center;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--border)">
-          <button class="btn btn-sm" :disabled="page<=1" @click="page--;load()" style="background:#E5E7EB">‹ 上一页</button>
-          <span style="font-size:13px;color:#6B7280">第 {{ page }} / {{ Math.ceil(total/pageSize) }} 页（共 {{ total }} 条）</span>
-          <button class="btn btn-sm" :disabled="page>=Math.ceil(total/pageSize)" @click="page++;load()" style="background:#E5E7EB">下一页 ›</button>
+        <div v-if="total > pageSize" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-3) 16px;border-top:1px solid var(--border)">
+          <button class="btn btn-sm" :disabled="page<=1" @click="page--;load()" style="background:var(--border-light)">‹ 上一页</button>
+          <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total/pageSize) }} 页（共 {{ total }} 条）</span>
+          <button class="btn btn-sm" :disabled="page>=Math.ceil(total/pageSize)" @click="page++;load()" style="background:var(--border-light)">下一页 ›</button>
         </div>
       </div>
     </div>

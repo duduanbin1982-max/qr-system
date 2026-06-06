@@ -3,6 +3,7 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.services.shipment_service import ShipmentService
 
 
@@ -50,8 +51,8 @@ def list_shipments():
     """
     keyword = request.args.get('keyword', '')
     status = request.args.get('status', '')
-    page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', get_page_size(), type=int)
+    p = parse_pagination()
+    page, limit = p['page'], p['limit']
     return jsonify(ShipmentService.list_shipments(keyword, status, page, limit))
 
 
@@ -83,7 +84,7 @@ def create_shipment():
     responses: {200: {description: 创建成功}}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     if not data:
         return jsonify({'error': '请求数据为空'}), 400
     try:
@@ -139,7 +140,7 @@ def update_shipment(shipment_id):
     responses: {200: {description: 更新成功}}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         ShipmentService.update_shipment(shipment_id, data)
     except ValueError as e:

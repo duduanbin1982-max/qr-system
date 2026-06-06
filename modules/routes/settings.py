@@ -11,6 +11,7 @@ from flask import request, jsonify, send_file, g
 from modules.app import app
 from modules.db import get_db, get_setting, clear_settings_cache
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.config import PERMISSION_DEFS, generate_product_code
 
 # 允许的设置 key 白名单（模块级常量）
@@ -56,7 +57,7 @@ def get_settings():
 @check_auth
 @check_permission('settings:manage')
 def save_settings():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     if not data:
         return jsonify({'error': '提交数据为空'}), 400
 

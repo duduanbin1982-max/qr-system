@@ -7,6 +7,7 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.customer_service import CustomerService
 
 
@@ -76,7 +77,7 @@ def create_customer():
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         cid = CustomerService.create_customer(data)
     except ValueError as e:
@@ -127,7 +128,7 @@ def update_customer(cid):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         CustomerService.update_customer(cid, data)
     except ValueError as e:

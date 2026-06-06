@@ -16,6 +16,7 @@ from modules.config import PERMISSION_DEFS, generate_product_code
 
 @app.route('/api/orders/<int:order_id>/attachments', methods=['GET'])
 @check_auth
+@check_permission('orders:view')
 def list_order_attachments(order_id):
     """
     获取订单附件列表
@@ -41,6 +42,7 @@ def list_order_attachments(order_id):
 
 @app.route('/api/orders/<int:order_id>/attachments', methods=['POST'])
 @check_auth
+@check_permission('orders:edit')
 def upload_order_attachment(order_id):
     """
     上传订单附件

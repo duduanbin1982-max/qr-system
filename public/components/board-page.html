@@ -14,8 +14,8 @@
     <!-- Overdue Alert -->
     <div v-if="overdueOrders.length > 0" class="overdue-alert">
       <span>🚨</span>
-      <span>有 <strong style="color:#ff6b6b;font-size:18px">{{ overdueOrders.length }}</strong> 个订单已超期！</span>
-      <span style="color:rgba(255,255,255,0.5);font-size:13px">（最迟{{ overdueOrders[0].plan_end }}，已超{{ overdueOrders[0].overdue_days }}天）</span>
+      <span>有 <strong style="color:#ff6b6b;font-size:var(--text-xl)">{{ overdueOrders.length }}</strong> 个订单已超期！</span>
+      <span style="color:rgba(255,255,255,0.5);font-size:var(--text-sm)">（最迟{{ overdueOrders[0].plan_end }}，已超{{ overdueOrders[0].overdue_days }}天）</span>
     </div>
 
     <!-- Stats Bar -->
@@ -35,14 +35,14 @@
         <div class="panel-title">📈 近30天产量趋势</div>
         <div class="panel-body" style="position:relative;min-height:240px">
           <canvas id="trend-chart"></canvas>
-          <div id="trend-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:8px;pointer-events:none">📊<div>暂无趋势数据</div></div>
+          <div id="trend-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:var(--space-2);pointer-events:none">📊<div>暂无趋势数据</div></div>
         </div>
       </div>
       <div class="panel panel-chart">
         <div class="panel-title">🏭 近30天工序效率</div>
         <div class="panel-body" style="position:relative;min-height:240px">
           <canvas id="process-chart"></canvas>
-          <div id="process-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:8px;pointer-events:none">📊<div>暂无工序数据</div></div>
+          <div id="process-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:var(--space-2);pointer-events:none">📊<div>暂无工序数据</div></div>
         </div>
       </div>
     </div>
@@ -62,7 +62,7 @@
                   <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer || '--' }}</div></td>
                   <td><span style="font-weight:600;color:#a855f7">{{ order.completed }}</span><span style="color:rgba(255,255,255,0.3)">/</span><span>{{ order.quantity }}</span></td>
                   <td><div class="progress-bar"><div class="progress-fill" :class="order.status" :style="{ width: (order.progress_percent || 0) + '%' }"></div></div><div class="progress-text">{{ order.progress_percent || 0 }}%</div></td>
-                  <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
+                  <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-1)"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
                 </tr>
               </tbody>
             </table>
@@ -72,12 +72,12 @@
                 <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer || '--' }}</div></td>
                 <td><span style="font-weight:600;color:#a855f7">{{ order.completed }}</span><span style="color:rgba(255,255,255,0.3)">/</span><span>{{ order.quantity }}</span></td>
                 <td><div class="progress-bar"><div class="progress-fill" :class="order.status" :style="{ width: (order.progress_percent || 0) + '%' }"></div></div><div class="progress-text">{{ order.progress_percent || 0 }}%</div></td>
-                <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
+                <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-1)"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
               </tr></tbody>
             </table>
           </div>
         </div>
-        <div v-else class="panel-body"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">📋<div>暂无在产订单</div></div></div>
+        <div v-else class="panel-body"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:var(--space-2)">📋<div>暂无在产订单</div></div></div>
       </div>
 
       <!-- Middle: Worker Ranking -->
@@ -96,7 +96,7 @@
               <div class="worker-output">{{ w.output || 0 }}</div>
             </div>
           </div>
-          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">👷<div>今日暂无报工</div></div>
+          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:var(--space-2)">👷<div>今日暂无报工</div></div>
         </div>
       </div>
 
@@ -108,15 +108,15 @@
             <div class="chart-item" v-for="item in processStats" :key="item.name">
               <div class="chart-label">{{ item.name }}</div>
               <div class="chart-bar-wrap"><div class="chart-bar" :style="{ width: getProcessPercent(item)+'%', background: procBarColor(item.category) }"></div></div>
-              <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+              <div style="display:flex;gap:var(--space-2);align-items:center;flex-shrink:0">
                 <div class="chart-value">{{ item.output || 0 }}</div>
-                <div v-if="item.scrap > 0" class="chart-value scrap" style="font-size:12px">({{ item.scrap }})</div>
+                <div v-if="item.scrap > 0" class="chart-value scrap" style="font-size:var(--text-xs)">({{ item.scrap }})</div>
               </div>
             </div>
           </div>
-          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">🏭<div>今日暂无工序产量</div></div>
+          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:var(--space-2)">🏭<div>今日暂无工序产量</div></div>
 
-          <div style="border-top:1px solid rgba(255,255,255,0.06);margin:12px -20px 0;padding:12px 20px 0">
+          <div style="border-top:1px solid rgba(255,255,255,0.06);margin:12px -20px 0;padding:var(--space-3) 20px 0">
             <div style="font-size:15px;font-weight:bold;margin-bottom:10px;color:rgba(255,255,255,0.7)">📝 最近报工</div>
             <div v-if="recentReports.length > 0" style="max-height:200px;overflow-y:auto">
               <div class="report-item" v-for="report in recentReports" :key="report.id">
@@ -128,7 +128,7 @@
                 <div class="report-qty" :class="report.type">+{{ report.quantity }}</div>
               </div>
             </div>
-            <div v-else style="text-align:center;color:rgba(255,255,255,0.3);padding:20px">暂无报工记录</div>
+            <div v-else style="text-align:center;color:rgba(255,255,255,0.3);padding:var(--space-5)">暂无报工记录</div>
           </div>
         </div>
       </div>

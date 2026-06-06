@@ -7,6 +7,7 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.process_service import ProcessService
 
 
@@ -44,7 +45,7 @@ def create_process():
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         pid = ProcessService.create_process(data)
     except ValueError as e:
@@ -68,7 +69,7 @@ def update_process(pid):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         ProcessService.update_process(pid, data)
     except ValueError as e:

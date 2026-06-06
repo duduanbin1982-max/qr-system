@@ -4,6 +4,7 @@ qr-system — 岗位管理（路由层）
 from flask import request, jsonify
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.position_service import PositionService
 
 
@@ -40,7 +41,7 @@ def create_position():
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         pos_id = PositionService.create_position(data)
     except ValueError as e:
@@ -64,7 +65,7 @@ def update_position(pos_id):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         PositionService.update_position(pos_id, data)
     except ValueError as e:

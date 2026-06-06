@@ -3,6 +3,7 @@ qr-system — 数据库层：连接管理、初始化、设置缓存
 """
 import sqlite3
 import hashlib
+from typing import Any, Optional, Tuple
 import bcrypt
 import json
 import time
@@ -14,7 +15,7 @@ from modules.config import DB_PATH, PREDEFINED_ROLES
 _settings_cache = None
 _settings_cache_time = 0
 
-def get_db():
+def get_db() -> sqlite3.Connection:
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
@@ -22,13 +23,13 @@ def get_db():
         g.db.execute("PRAGMA foreign_keys=ON")
     return g.db
 
-def close_db(exception=None):
+def close_db(exception: Optional[Exception] = None) -> None:
     """关闭数据库连接。作为 app.teardown_appcontext 回调使用。"""
     db = g.pop('db', None)
     if db is not None:
         db.close()
 
-def get_setting(key, default=''):
+def get_setting(key: str, default: str = '') -> str:
     """读取系统设置项，带 10 秒缓存"""
     global _settings_cache, _settings_cache_time
     now = time.time()
@@ -41,12 +42,12 @@ def get_setting(key, default=''):
         _settings_cache_time = now
     return _settings_cache.get(key, default)
 
-def clear_settings_cache():
+def clear_settings_cache() -> None:
     global _settings_cache, _settings_cache_time
     _settings_cache = None
     _settings_cache_time = 0
 
-def get_page_size(default=20):
+def get_page_size(default: int = 20) -> int:
     """从系统设置读取分页条数"""
     try:
         v = get_setting('page_size', '')
@@ -56,7 +57,7 @@ def get_page_size(default=20):
         pass
     return default
 
-def init_db():
+def init_db() -> None:
     """初始化数据库表结构和默认数据"""
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
@@ -76,7 +77,9 @@ def init_db():
     except: pass
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 迁移 work_records 添加 serial_no 列（序列号防重复报工）
     try:
@@ -564,7 +567,9 @@ def init_db():
     except: pass
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 兼容旧数据库：添加 category 列（结构件/机加工）
     try:
@@ -707,7 +712,9 @@ def init_db():
     except: pass
     try:
         db.execute('ALTER TABLE roles ADD COLUMN level INTEGER DEFAULT 1')
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 初始化默认角色组和管理员角色
     db.execute('INSERT OR IGNORE INTO role_groups (id, name, description) VALUES (1, "系统管理组", "系统内置最高权限角色组")')
@@ -775,9 +782,6 @@ def init_db():
                   SELECT id, 2 FROM users WHERE role = 'worker' AND NOT EXISTS
                   (SELECT 1 FROM user_roles WHERE user_id = users.id AND role_id = 2)''')
 
-    # 标记默认密码账户需首次登录修改密码
-    db.execute("UPDATE users SET must_change_password = 1 WHERE username IN ('admin','worker1','worker2','worker3','worker4') AND must_change_password = 0")
-    db.commit()
     # Add last_active column if missing
     try:
         db.execute('ALTER TABLE users ADD COLUMN last_active TEXT DEFAULT ""')
@@ -799,15 +803,21 @@ def init_db():
     try:
         db.execute('ALTER TABLE users ADD COLUMN failed_login_count INTEGER DEFAULT 0')
     except:
+        pass
+    try:
+        db.execute('ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL')
+    except:
+        pass
 
     # 首次登录强制修改密码标记
     try:
         db.execute('ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0')
     except:
         pass
-        pass
+    # 标记默认密码账户需首次登录修改密码
     try:
-        db.execute('ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL')
+        db.execute("UPDATE users SET must_change_password = 1 WHERE username IN ('admin','worker1','worker2','worker3','worker4') AND must_change_password = 0")
+        db.commit()
     except:
         pass
 
@@ -845,12 +855,16 @@ def init_db():
     except: pass
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_ll_created ON login_logs(created_at DESC)')
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 清理 30 天前的登录日志
     try:
         db.execute("DELETE FROM login_logs WHERE created_at < datetime('now','localtime','-30 days')")
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 用户会话表（多设备登录 + 远程踢掉）
     db.execute('''
@@ -871,12 +885,16 @@ def init_db():
     except: pass
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_us_user_id ON user_sessions(user_id)')
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # 清理 7 天前的非活跃会话
     try:
         db.execute("DELETE FROM user_sessions WHERE is_active = 0 AND created_at < datetime('now','localtime','-7 days')")
-    except: pass
+    except sqlite3.OperationalError:
+
+        pass
 
     # Add unique constraint on processes.name
     try:

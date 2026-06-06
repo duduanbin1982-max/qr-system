@@ -1,5 +1,5 @@
 // Service Worker — 扫码报工 PWA
-const CACHE_NAME = 'qr-system-v1';
+const CACHE_NAME = 'qr-system-v2';
 const ASSETS = [
   '/mobile.html',
   '/jsQR.js',

@@ -6,6 +6,8 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.error_handler import handle_unexpected_error
+from modules.middleware.helpers import get_json_body
 
 
 @app.route('/api/materials', methods=['GET'])
@@ -21,14 +23,14 @@ def list_materials():
         ).fetchall()
         return jsonify({'materials': [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/materials', methods=['POST'])
 @check_auth
 @check_permission('materials:manage')
 def create_material():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     name = data.get('name', '').strip()
     if not name:
         return jsonify({'error': '物料名称不能为空'}), 400
@@ -59,7 +61,7 @@ def create_material():
 @check_auth
 @check_permission('materials:manage')
 def update_material(mid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     db = get_db()
     try:
         row = db.execute('SELECT id FROM materials WHERE id = ?', (mid,)).fetchone()
@@ -85,7 +87,7 @@ def update_material(mid):
         db.commit()
         return jsonify({'message': 'updated'})
     except Exception as e:
-        return jsonify({'error': f'更新失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/materials/<int:mid>', methods=['DELETE'])
@@ -99,7 +101,7 @@ def delete_material(mid):
         db.commit()
         return jsonify({'message': 'deleted'})
     except Exception as e:
-        return jsonify({'error': f'删除失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 # Material logs (stock in/out)
@@ -115,14 +117,14 @@ def material_logs(mid):
         ).fetchall()
         return jsonify({'logs': [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/materials/<int:mid>/stock', methods=['POST'])
 @check_auth
 @check_permission('materials:manage')
 def material_stock(mid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     change_type = data.get('type', '').strip()  # 'in' or 'out'
     quantity = float(data.get('quantity', 0))
     remark = data.get('remark', '').strip()
@@ -177,7 +179,7 @@ def material_consumptions(mid):
         ''', (mid,)).fetchall()
         return jsonify({'consumptions': [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/materials/<int:mid>/consumptions', methods=['POST'])
@@ -189,7 +191,7 @@ def material_consumption_create(mid):
     if not mat:
         return jsonify({'error': '物料不存在'}), 404
 
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     order_id = data.get('order_id')
     process_id = data.get('process_id')
     quantity = float(data.get('quantity', 0))
@@ -261,7 +263,7 @@ def list_suppliers():
         rows = db.execute('SELECT * FROM suppliers ORDER BY name').fetchall()
         return jsonify({'suppliers': [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/suppliers', methods=['POST'])
@@ -269,7 +271,7 @@ def list_suppliers():
 @check_permission('materials:manage')
 def create_supplier():
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = get_json_body()
         name = data.get('name', '').strip()
         if not name:
             return jsonify({'error': '供应商名称不能为空'}), 400
@@ -282,7 +284,7 @@ def create_supplier():
         rid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
         return jsonify({'ok': True, 'id': rid, 'message': '供应商已添加'})
     except Exception as e:
-        return jsonify({'error': f'创建失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/suppliers/<int:sid>', methods=['PUT'])
@@ -290,7 +292,7 @@ def create_supplier():
 @check_permission('materials:manage')
 def update_supplier(sid):
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = get_json_body()
         db = get_db()
         row = db.execute('SELECT id FROM suppliers WHERE id=?', (sid,)).fetchone()
         if not row:
@@ -303,7 +305,7 @@ def update_supplier(sid):
         db.commit()
         return jsonify({'ok': True, 'message': '已更新'})
     except Exception as e:
-        return jsonify({'error': f'更新失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
@@ -317,4 +319,4 @@ def delete_supplier(sid):
         db.commit()
         return jsonify({'ok': True, 'message': '已删除'})
     except Exception as e:
-        return jsonify({'error': f'删除失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

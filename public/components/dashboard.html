@@ -1,12 +1,12 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- Loading -->
     <div v-if="loading" style="text-align:center;padding:80px;color:var(--text-placeholder)">
       <p>⏳ 加载中...</p>
     </div>
     
     <!-- Error -->
-    <div v-else-if="error" style="text-align:center;padding:80px;color:#EF4444">
+    <div v-else-if="error" style="text-align:center;padding:80px;color:var(--danger)">
       <p>❌ {{ error }}</p>
       <button class="btn btn-primary btn-sm" @click="load" style="margin-top:12px">重试</button>
     </div>
@@ -20,8 +20,8 @@
         <div class="welcome-time">{{ now }}</div>
       </div>
       
-      <div v-if="companyName" style="text-align:center;margin-bottom:24px">
-        <h2 style="margin:0;font-size:22px;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent">🏭 {{ companyName }}</h2>
+      <div v-if="companyName" style="text-align:center;margin-bottom:var(--space-6)">
+        <h2 style="margin:0;font-size:var(--text-2xl);font-weight:700;background:linear-gradient(135deg,var(--primary),var(--primary-accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent">🏭 {{ companyName }}</h2>
       </div>
       
       <!-- Hero Stats -->
@@ -70,9 +70,9 @@
       <!-- 登录安全卡片 -->
       <div v-if="security" class="section-title" style="margin-top:24px">🛡️ 登录安全</div>
       <div v-if="security" class="sec-stats" style="grid-template-columns:repeat(4,1fr)">
-        <div class="ss-card" @click="navigate('users')" :style="security.locked_users > 0 ? 'border-left:3px solid #EF4444' : ''">
+        <div class="ss-card" @click="navigate('users')" :style="security.locked_users > 0 ? 'border-left:3px solid var(--danger)' : ''">
           <div class="ss-icon">{{ security.locked_users > 0 ? '🔒' : '🟢' }}</div>
-          <div class="ss-val" :style="security.locked_users > 0 ? 'color:#EF4444' : ''">{{ security.locked_users }}</div>
+          <div class="ss-val" :style="security.locked_users > 0 ? 'color:var(--danger)' : ''">{{ security.locked_users }}</div>
           <div class="ss-label">锁定账户</div>
         </div>
         <div class="ss-card" :style="security.today_failed_logins > 10 ? 'border-left:3px solid var(--warning)' : ''">
@@ -85,27 +85,27 @@
           <div class="ss-val">{{ security.today_success_logins }}</div>
           <div class="ss-label">今日成功登录</div>
         </div>
-        <div class="ss-card" :style="security.suspicious_ips > 0 ? 'border-left:3px solid #EF4444' : ''">
+        <div class="ss-card" :style="security.suspicious_ips > 0 ? 'border-left:3px solid var(--danger)' : ''">
           <div class="ss-icon">{{ security.suspicious_ips > 0 ? '🌍' : '🏠' }}</div>
-          <div class="ss-val" :style="security.suspicious_ips > 0 ? 'color:#EF4444' : ''">{{ security.suspicious_ips }}</div>
+          <div class="ss-val" :style="security.suspicious_ips > 0 ? 'color:var(--danger)' : ''">{{ security.suspicious_ips }}</div>
           <div class="ss-label">新IP登录</div>
         </div>
       </div>
 
       <!-- 交期预警 -->
-      <div v-if="deliveryWarnings && (deliveryWarnings.overdue.length || deliveryWarnings.approaching.length)" class="delivery-alerts" style="margin-bottom:16px">
-        <div v-if="deliveryWarnings.overdue.length" class="alert" style="padding:12px 16px;border-radius:10px;background:#FEF2F2;border:1px solid #FECACA">
+      <div v-if="deliveryWarnings && (deliveryWarnings.overdue.length || deliveryWarnings.approaching.length)" class="delivery-alerts" style="margin-bottom:var(--space-4)">
+        <div v-if="deliveryWarnings.overdue.length" class="alert" style="padding:var(--space-3) 16px;border-radius:var(--radius-md);background:var(--danger-light);border:1px solid var(--danger-lighter)">
           <strong>🚨 已逾期订单 ({{ deliveryWarnings.overdue.length }})</strong>
-          <div v-for="o in deliveryWarnings.overdue" :key="o.id" style="margin-top:6px;font-size:13px;display:flex;gap:12px;flex-wrap:wrap">
+          <div v-for="o in deliveryWarnings.overdue" :key="o.id" style="margin-top:6px;font-size:var(--text-sm);display:flex;gap:var(--space-3);flex-wrap:wrap">
             <span style="font-weight:500;min-width:100px">{{ o.order_no }}</span>
             <span>{{ o.product_name }}</span>
             <span style="color:var(--danger);font-weight:600">逾期 {{ o.overdue_days }} 天</span>
             <span style="color:var(--text-placeholder)">计划: {{ o.plan_end }}</span>
           </div>
         </div>
-        <div v-if="deliveryWarnings.approaching.length" class="alert" style="padding:12px 16px;border-radius:10px;background:#FFFBEB;border:1px solid #FDE68A;margin-top:8px">
+        <div v-if="deliveryWarnings.approaching.length" class="alert" style="padding:var(--space-3) 16px;border-radius:var(--radius-md);background:var(--warning-light);border:1px solid var(--warning-lighter);margin-top:8px">
           <strong>⏰ 即将到期 ({{ deliveryWarnings.approaching.length }})，预警天数: {{ deliveryWarnings.warning_days }}天</strong>
-          <div v-for="o in deliveryWarnings.approaching" :key="o.id" style="margin-top:6px;font-size:13px;display:flex;gap:12px;flex-wrap:wrap">
+          <div v-for="o in deliveryWarnings.approaching" :key="o.id" style="margin-top:6px;font-size:var(--text-sm);display:flex;gap:var(--space-3);flex-wrap:wrap">
             <span style="font-weight:500;min-width:100px">{{ o.order_no }}</span>
             <span>{{ o.product_name }}</span>
             <span style="color:var(--warning);font-weight:600">剩余 {{ o.days_left }} 天</span>
@@ -132,12 +132,12 @@
         </thead>
         <tbody>
           <tr v-for="r in records.slice(0,10)" :key="r.id">
-            <td><code style="font-size:12px">{{ r.order_no }}</code></td>
+            <td><code style="font-size:var(--text-xs)">{{ r.order_no }}</code></td>
             <td>{{ r.process_name }}</td>
             <td>{{ r.worker_name }}</td>
             <td style="font-weight:500">{{ r.quantity }}</td>
-            <td style="font-size:12px;color:var(--text-placeholder)">{{ r.created_at }}</td>
-            <td><span class="badge" :style="{background: r.status==='approved'?'#D1FAE5':r.status==='pending'?'#FEF3C7':'#FEE2E2', color: r.status==='approved'?'#065F46':r.status==='pending'?'#92400E':'#991B1B'}">{{ r.status === 'approved' ? '已审批' : r.status === 'pending' ? '待审批' : '已拒绝' }}</span></td>
+            <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ r.created_at }}</td>
+            <td><span class="badge" :style="{background: r.status==='approved'?'var(--success-lighter)':r.status==='pending'?'var(--warning-lighter)':'var(--danger-light)', color: r.status==='approved'?'var(--success-dark)':r.status==='pending'?'var(--warning-dark)':'var(--danger-dark)'}">{{ r.status === 'approved' ? '已审批' : r.status === 'pending' ? '待审批' : '已拒绝' }}</span></td>
           </tr>
         </tbody>
       </table>

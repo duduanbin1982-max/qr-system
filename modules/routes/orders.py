@@ -8,11 +8,14 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.data_scope import get_user_process_ids
 
 
 
-from modules.services.order_service import _generate_order_no as generate_order_no
+from modules.services.order_service import OrderService
+from modules.middleware.error_handler import handle_unexpected_error
+from modules.middleware.helpers import get_json_body
 
 @app.route('/api/orders', methods=['GET'])
 @check_auth
@@ -101,24 +104,25 @@ def list_orders():
 @app.route('/api/orders/next-no', methods=['GET'])
 @check_auth
 def get_next_order_no():
-    order_no = generate_order_no()
+    order_no = OrderService.next_order_no()
     return jsonify({'order_no': order_no})
 
 
 @app.route('/api/orders', methods=['POST'])
 @check_auth
 @check_permission('orders:create')
+@validate_json('create_order')
 def create_order():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     order_no = data.get('order_no', '').strip()
     if not order_no:
-        order_no = generate_order_no()
+        order_no = OrderService.next_order_no()
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     try:
         existing = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
         if existing:
-            order_no = generate_order_no()
+            order_no = OrderService.next_order_no()
             existing2 = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
             if existing2:
                 return jsonify({'error': '订单号冲突，请重试'}), 409
@@ -176,7 +180,7 @@ def create_order():
 @check_auth
 @check_permission('orders:edit')
 def update_order(oid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     existing = db.execute('SELECT id, status FROM orders WHERE id = ? AND deleted_at IS NULL', (oid,)).fetchone()
@@ -402,7 +406,7 @@ def get_order_shipments(oid):
 @app.route('/api/orders/batch', methods=['POST'])
 @check_auth
 def batch_create_orders():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     orders_data = data.get('orders', [])
     if not orders_data:
         return jsonify({'error': '无订单数据'}), 400

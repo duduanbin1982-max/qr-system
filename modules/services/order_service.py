@@ -13,34 +13,30 @@ from modules.services import BaseService
 # ============================================================
 
 def _generate_order_no(db):
-    """自动生成订单号：YYMMDD(日期) + 2位顺序号（带事务锁防竞态）"""
+    """自动生成订单号：YYMMDD(日期) + 2位顺序号。
+    
+    注意：调用方必须在外层管理事务（如通过 BaseService.transaction()）。
+    """
     today = datetime.now()
     prefix = today.strftime('%y%m%d')
-    db.execute('BEGIN IMMEDIATE')
-    try:
-        row = db.execute(
-            "SELECT order_no FROM orders WHERE order_no LIKE ? AND LENGTH(order_no) >= 8 "
-            "ORDER BY id DESC LIMIT 1", (prefix + '%',)
-        ).fetchone()
-        if row:
-            try:
-                seq = int(row['order_no'][6:]) + 1
-            except ValueError:
-                seq = 1
-        else:
+    row = db.execute(
+        "SELECT order_no FROM orders WHERE order_no LIKE ? AND LENGTH(order_no) >= 8 "
+        "ORDER BY id DESC LIMIT 1", (prefix + '%',)
+    ).fetchone()
+    if row:
+        try:
+            seq = int(row['order_no'][6:]) + 1
+        except ValueError:
             seq = 1
-        for _ in range(100):
-            order_no = prefix + str(seq).zfill(2)
-            existing = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
-            if not existing:
-                db.execute('COMMIT')
-                return order_no
-            seq += 1
-        db.execute('COMMIT')
-        return prefix + str(seq).zfill(2)
-    except Exception:
-        db.execute('ROLLBACK')
-        raise
+    else:
+        seq = 1
+    for _ in range(100):
+        order_no = prefix + str(seq).zfill(2)
+        existing = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
+        if not existing:
+            return order_no
+        seq += 1
+    return prefix + str(seq).zfill(2)
 
 
 class OrderService:

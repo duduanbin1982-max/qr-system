@@ -10,6 +10,7 @@ from flask import request, jsonify, send_file
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.price_service import ProcessPriceService, RoutePriceService, WageService
 
 
@@ -30,7 +31,7 @@ def list_process_prices():
 @check_auth
 @check_permission('prices:create')
 def create_process_price():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         pid = ProcessPriceService.create_price(data)
     except ValueError as e:
@@ -43,7 +44,7 @@ def create_process_price():
 @check_auth
 @check_permission('prices:edit')
 def update_process_price(pid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         ProcessPriceService.update_price(pid, data)
     except ValueError as e:
@@ -82,7 +83,7 @@ def get_product_route_pricing(product_id):
 @check_auth
 @check_permission('prices:edit')
 def save_product_route_pricing(product_id):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     prices = data.get('prices', {})
     effective_date = data.get('effective_date', '')
     remark = data.get('remark', '')
@@ -105,7 +106,7 @@ def save_product_route_pricing(product_id):
 @check_auth
 @check_permission('prices:create')
 def copy_process_prices():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     from_id = data.get('from_product_id')
     to_id = data.get('to_product_id')
     if not from_id or not to_id:
@@ -132,7 +133,7 @@ def get_default_prices():
 @check_auth
 @check_permission('prices:edit')
 def save_default_prices():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     prices = data.get('prices', {})
     try:
         updated, created = ProcessPriceService.save_defaults(prices)
@@ -169,7 +170,7 @@ def get_route_prices(route_id):
 @check_auth
 @check_permission('prices:edit')
 def save_route_prices(route_id):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     prices = data.get('prices', {})
     if not isinstance(prices, dict):
         return jsonify({'error': 'prices必须为对象格式'}), 400

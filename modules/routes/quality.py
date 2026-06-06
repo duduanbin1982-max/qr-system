@@ -3,6 +3,7 @@ from flask import request, jsonify
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.error_handler import handle_unexpected_error
 
 
 INSPECTION_TYPES = {
@@ -78,7 +79,7 @@ def quality_list():
         ''', params + [per_page, offset]).fetchall()
         return jsonify({'ok': True, 'items': [dict(r) for r in rows], 'total': total, 'page': page, 'per_page': per_page})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/inspections', methods=['POST'])
@@ -126,7 +127,7 @@ def quality_create():
         audit_log('quality_create', 'quality_inspection', rid, f'order={order_id} process={process_id} type={inspection_type}')
         return jsonify({'ok': True, 'id': rid, 'message': '检验记录已创建'})
     except Exception as e:
-        return jsonify({'error': f'创建失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/inspections/<int:inspection_id>', methods=['PUT'])
@@ -164,7 +165,7 @@ def quality_update(inspection_id):
         audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
         return jsonify({'ok': True, 'message': '已更新'})
     except Exception as e:
-        return jsonify({'error': f'更新失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/inspections/<int:inspection_id>', methods=['DELETE'])
@@ -182,7 +183,7 @@ def quality_delete(inspection_id):
         audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
         return jsonify({'ok': True, 'message': '已删除'})
     except Exception as e:
-        return jsonify({'error': f'删除失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/inspections/stats', methods=['GET'])
@@ -209,7 +210,7 @@ def quality_stats():
             'pass_count': pass_count, 'fail_count': fail_count,
         })
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/defect-pareto', methods=['GET'])
@@ -247,4 +248,4 @@ def quality_defect_pareto():
             i['cum_pct'] = round(cumulative / grand_total * 100, 1) if grand_total else 0
         return jsonify({'ok': True, 'items': items, 'grand_total': grand_total, 'categories': DEFECT_CATEGORIES})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

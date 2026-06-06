@@ -30,3 +30,20 @@ __pycache__/
 .DS_Store
 Thumbs.db
 data/production.db.bak.*
+
+# CA certificates
+ca.crt
+ca.key
+ca.srl
+
+# Vite build output
+dist/
+
+# PM2 logs
+logs/
+
+# Node modules
+node_modules/
+
+# Backup archives
+backups/

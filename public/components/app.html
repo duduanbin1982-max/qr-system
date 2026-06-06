@@ -62,11 +62,11 @@
           <span class="modal-close" @click="showSessions=false">&times;</span>
         </div>
         <div class="modal-body" style="max-height:400px;overflow-y:auto">
-          <div v-if="sessionsLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">⏳ 加载中...</div>
-          <div v-else-if="sessions.length === 0" style="text-align:center;padding:24px;color:var(--text-placeholder)">未找到活跃会话</div>
-          <div v-else v-for="s in sessions" :key="s.id" style="padding:var(--space-3) 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+          <div v-if="sessionsLoading" style="text-align:center;padding:var(--space-6);color:var(--text-placeholder)">⏳ 加载中...</div>
+          <div v-else-if="sessions.length === 0" style="text-align:center;padding:var(--space-6);color:var(--text-placeholder)">未找到活跃会话</div>
+          <div v-else v-for="s in sessions" :key="s.id" style="padding:var(--space-3) 0;border-bottom:1px solid var(--bg-hover);display:flex;justify-content:space-between;align-items:center">
             <div>
-              <div style="font-size:13px;font-weight:500">
+              <div style="font-size:var(--text-sm);font-weight:500">
                 {{ parseUA(s.user_agent) }}
                 <span v-if="s.is_current" style="color:var(--primary);font-size:var(--text-xs-alt)">· 当前设备</span>
               </div>
@@ -74,7 +74,7 @@
                 {{ s.ip_address }} · {{ formatTimeAgo(s.last_active || s.created_at) }}
               </div>
             </div>
-            <button v-if="!s.is_current" class="btn btn-sm" style="background:#FEE2E2;color:var(--danger);font-size:var(--text-xs-alt);padding:4px 10px" @click="kickSession(s.id)">踢出</button>
+            <button v-if="!s.is_current" class="btn btn-sm" style="background:var(--danger-light);color:var(--danger);font-size:var(--text-xs-alt);padding:var(--space-1) 10px" @click="kickSession(s.id)">踢出</button>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🚚</span><div><div class="s-val">{{ total }}</div><div class="s-label">出库单总数</div></div></div>
       <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val" style="color:var(--warning)">{{ pendingCount }}</div><div class="s-label">待出库</div></div></div>
@@ -9,15 +9,15 @@
     <div class="card">
       <div class="card-header">
         <h3>🚚 发货管理</h3>
-        <div style="display:flex;gap:8px;align-items:center">
-          <select class="form-input" v-model="filterStatus" @change="page=1;load()" style="border:1px solid #D1D5DB;border-radius:var(--radius-md);padding:8px 12px;font-size:14px;background:white;cursor:pointer;width:100px">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <select class="form-input" v-model="filterStatus" @change="page=1;load()" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-base);background:white;cursor:pointer;width:100px">
             <option value="">全部</option>
             <option value="pending">待出库</option>
             <option value="completed">已出库</option>
           </select>
-          <div class="search-box" style="background:#f0f0f0;border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
+          <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索单号/客户..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:8px 6px;font-size:14px;width:160px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索单号/客户..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:160px;box-shadow:none">
           </div>
           <button class="btn btn-default btn-sm" @click="load">搜索</button>
                       <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建出库单</button>
@@ -41,10 +41,10 @@
             <tbody>
               <template v-for="s in shipments" :key="s.id">
                 <tr @click="viewDetail(s)" style="cursor:pointer">
-                  <td style="text-align:center;font-size:12px;color:var(--text-placeholder)">▶</td>
-                  <td><code style="font-size:12px;font-weight:600">{{ s.shipment_no }}</code></td>
+                  <td style="text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">▶</td>
+                  <td><code style="font-size:var(--text-xs);font-weight:600">{{ s.shipment_no }}</code></td>
                   <td style="font-weight:500">{{ s.customer || '-' }}</td>
-                  <td style="font-size:13px">{{ s.contact_person || '-' }}</td>
+                  <td style="font-size:var(--text-sm)">{{ s.contact_person || '-' }}</td>
                   <td style="text-align:center">{{ s.item_count || 0 }}</td>
                   <td style="text-align:center;font-weight:600">{{ s.total_quantity }}</td>
                   <td style="text-align:center"><span class="badge" :class="statusMap[s.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[s.status]?.label||s.status }}</span></td>
@@ -61,9 +61,9 @@
           </table>
           <div v-else class="empty"><div class="empty-icon">🚚</div><div class="empty-text">暂无出库单</div></div>
         </div>
-        <div v-if="total > limit" style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px 0">
+        <div v-if="total > limit" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
           <button class="btn btn-default btn-sm" @click="prevPage" :disabled="page <= 1">上一页</button>
-          <span style="font-size:13px;color:#6B7280">第 {{ page }} / {{ Math.ceil(total/limit) }} 页，共 {{ total }} 条</span>
+          <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total/limit) }} 页，共 {{ total }} 条</span>
           <button class="btn btn-default btn-sm" @click="nextPage" :disabled="page * limit >= total">下一页</button>
         </div>
       </div>
@@ -85,22 +85,22 @@
           <div class="form-group"><label>地址</label><input class="form-input" v-model="form.address" placeholder="收货地址"></div>
           <div class="form-group"><label>备注</label><input class="form-input" v-model="form.remark" placeholder="备注"></div>
           <!-- 出库产品 -->
-          <div style="margin-top:16px;border-top:1px solid #E5E7EB;padding-top:12px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <label style="font-weight:600;font-size:14px">出库产品</label>
-              <button class="btn btn-default btn-sm" @click="addItem" style="font-size:12px;padding:4px 12px">+ 添加</button>
+          <div style="margin-top:16px;border-top:1px solid var(--border-light);padding-top:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
+              <label style="font-weight:600;font-size:var(--text-base)">出库产品</label>
+              <button class="btn btn-default btn-sm" @click="addItem" style="font-size:var(--text-xs);padding:var(--space-1) 12px">+ 添加</button>
             </div>
             <div v-if="items.length">
-              <div v-for="(it, idx) in items" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:8px;background:#F9FAFB;border-radius:var(--radius-md);flex-wrap:wrap">
-                <select class="form-input" v-model="it.inventory_id" @change="onInvChange(idx)" style="flex:2;font-size:12px;min-width:120px">
+              <div v-for="(it, idx) in items" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:var(--space-2);background:var(--bg-table-header);border-radius:var(--radius-md);flex-wrap:wrap">
+                <select class="form-input" v-model="it.inventory_id" @change="onInvChange(idx)" style="flex:2;font-size:var(--text-xs);min-width:120px">
                   <option value="">-- 选择库存 --</option>
                   <option v-for="inv in inventory" :key="inv.id" :value="inv.id">{{ inv.product_model }} ({{ inv.quantity }}{{ inv.unit }})</option>
                 </select>
-                <input class="form-input" v-model.number="it.quantity" type="number" min="1" placeholder="数量" style="width:60px;font-size:12px;text-align:center">
-                <span @click="removeItem(idx)" style="color:#EF4444;cursor:pointer;font-size:14px">✕</span>
+                <input class="form-input" v-model.number="it.quantity" type="number" min="1" placeholder="数量" style="width:60px;font-size:var(--text-xs);text-align:center">
+                <span @click="removeItem(idx)" style="color:var(--danger);cursor:pointer;font-size:var(--text-base)">✕</span>
               </div>
             </div>
-            <p v-else style="font-size:12px;color:var(--text-placeholder);text-align:center;padding:12px">暂未添加出库产品</p>
+            <p v-else style="font-size:var(--text-xs);color:var(--text-placeholder);text-align:center;padding:var(--space-3)">暂未添加出库产品</p>
           </div>
         </div>
         <div class="modal-footer">
@@ -140,7 +140,7 @@
       <div class="modal" style="max-width:650px">
         <div class="modal-header"><span>📋 {{ detailShipment?.shipment_no }}</span><span class="modal-close" @click="showDetail=false">&times;</span></div>
         <div class="modal-body">
-          <div v-if="detailShipment" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:14px;margin-bottom:16px">
+          <div v-if="detailShipment" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);font-size:var(--text-base);margin-bottom:var(--space-4)">
             <div><span style="color:var(--text-placeholder)">客户：</span>{{ detailShipment.customer || '-' }}</div>
             <div><span style="color:var(--text-placeholder)">联系人：</span>{{ detailShipment.contact_person || '-' }}</div>
             <div><span style="color:var(--text-placeholder)">电话：</span>{{ detailShipment.contact_phone || '-' }}</div>
@@ -154,13 +154,13 @@
                 <td>{{ it.product_name || '-' }}</td>
                 <td style="text-align:center;font-weight:600">{{ it.quantity }}</td>
                 <td>{{ it.unit }}</td>
-                <td style="font-size:12px;color:var(--text-placeholder)">{{ it.remark || '-' }}</td>
+                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ it.remark || '-' }}</td>
               </tr>
             </tbody>
           </table>
-          <p v-else style="text-align:center;color:var(--text-muted);padding:20px">无出库明细</p>
-          <div v-if="detailShipment" style="text-align:right;margin-top:16px;padding-top:12px;border-top:1px solid #E5E7EB">
-            <button class="btn-primary btn-sm" @click="printDeliveryNote(detailShipment)" style="padding:8px 20px;font-size:13px">🖨️ 打印送货单</button>
+          <p v-else style="text-align:center;color:var(--text-muted);padding:var(--space-5)">无出库明细</p>
+          <div v-if="detailShipment" style="text-align:right;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-light)">
+            <button class="btn-primary btn-sm" @click="printDeliveryNote(detailShipment)" style="padding:var(--space-2) 20px;font-size:var(--text-sm)">🖨️ 打印送货单</button>
           </div>
         </div>
       </div>

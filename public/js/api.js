@@ -7,20 +7,19 @@ export async function request(method, url, data) {
     method,
     headers: {}
   }
-  const token = localStorage.getItem('token')
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token
+  // Token is sent via httpOnly cookie (auto-attached by browser).
+  // No localStorage or Authorization header needed.
   if (data && method !== 'GET') {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(data)
   }
   const r = await fetch(BASE + url, opts)
   if (r.status === 401) {
-    const hadToken = !!localStorage.getItem('token')
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-    localStorage.removeItem('currentPage')
-    if (hadToken) window.location.reload()
-    throw new Error('登录已过期')
+    const err = new Error('登录已过期')
+    err.code = 401
+    // Dispatch event so auth module can redirect if user was logged in
+    window.dispatchEvent(new CustomEvent('auth:expired'))
+    throw err
   }
   const d = await r.json()
   if (r.status === 409) {
@@ -175,12 +174,6 @@ export const api = {
   getSettings:      ()       => request('GET', '/api/settings'),
   saveSettings:     (data)   => request('POST', '/api/settings', data),
   
-  // ========== 角色组 ==========
-  listRoleGroups:   ()       => request('GET', '/api/role-groups'),
-  createRoleGroup:  (data)   => request('POST', '/api/role-groups', data),
-  updateRoleGroup:  (id,data)=> request('PUT',  '/api/role-groups/' + id, data),
-  deleteRoleGroup:  (id)     => request('DELETE', '/api/role-groups/' + id),
-  
   // ========== 岗位 ==========
   listPositions:    ()       => request('GET', '/api/positions'),
   createPosition:   (data)   => request('POST', '/api/positions', data),
@@ -211,16 +204,15 @@ function buildQuery(params) {
 }
 
 async function uploadFile(url, formData) {
+  // Cookie-only auth: httpOnly cookie auto-attached by browser.
+  // No manual Authorization header needed.
   const opts = { method: 'POST', body: formData }
-  const token = localStorage.getItem('token')
-  if (token) opts.headers = { 'Authorization': 'Bearer ' + token }
   const r = await fetch(BASE + url, opts)
   if (r.status === 401) {
-    const hadToken = !!localStorage.getItem('token')
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-    if (hadToken) window.location.reload()
-    throw new Error('登录已过期')
+    const err = new Error('登录已过期')
+    err.code = 401
+    window.dispatchEvent(new CustomEvent('auth:expired'))
+    throw err
   }
   const d = await r.json()
   if (d.error) {

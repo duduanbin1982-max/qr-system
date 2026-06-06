@@ -5,6 +5,7 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.route_service import ProcessRouteService
 
 
@@ -22,7 +23,7 @@ def get_process_routes():
 @check_permission('routes:create')
 def create_process_route():
     """创建工序路线"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         rid = ProcessRouteService.create_route(data)
     except ValueError as e:
@@ -36,7 +37,7 @@ def create_process_route():
 @check_permission('routes:edit')
 def update_process_route(rid):
     """更新工序路线"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     if not data:
         return jsonify({'error': '无更新数据'}), 400
     try:
@@ -65,7 +66,7 @@ def delete_process_route(rid):
 @check_permission('routes:edit')
 def apply_process_route(rid):
     """将工序路线应用到订单"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     order_id = data.get('order_id')
     if not order_id:
         return jsonify({'error': '请指定订单'}), 400

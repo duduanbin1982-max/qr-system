@@ -3,6 +3,7 @@ qr-system — 配置常量、权限定义、预置角色、工具函数
 """
 import os
 import json
+from typing import Any, Dict, List, Optional, Tuple
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -12,7 +13,9 @@ os.makedirs(PUBLIC_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, 'production.db')
 SESSION_TIMEOUT_HOURS = 0  # 登录超时时间（小时），0表示永不过期
-SECRET_KEY = os.environ.get('SECRET_KEY', 'qrsys-...2024')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise RuntimeError('SECRET_KEY 环境变量未设置！请在生产环境通过 ecosystem.config.js 或系统环境变量设置强密钥。')
 
 # ============================================================
 # Permission System — 权限系统
@@ -88,7 +91,7 @@ PREDEFINED_ROLES = {
     },
 }
 
-def expand_permissions(perm_list):
+def expand_permissions(perm_list: List[str]) -> List[str]:
     """展开权限列表，['*'] 返回所有权限，否则展开为 'resource:action'"""
     if '*' in perm_list:
         result = []
@@ -102,7 +105,7 @@ def expand_permissions(perm_list):
 # ============================================================
 # 中文转拼音首字母（用于产品编码自动生成）
 # ============================================================
-def _get_pinyin_initial(char):
+def _get_pinyin_initial(char: str) -> str:
     """单个汉字转拼音首字母，大写。无法识别则返回空字符串。"""
     py_map = {
         # 档位

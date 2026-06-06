@@ -8,6 +8,7 @@ from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.product_service import ProductService
 
 
@@ -98,7 +99,7 @@ def create_product():
         description: 产品编码重复
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         pid, product_code = ProductService.create_product(data)
     except ValueError as e:
@@ -144,7 +145,7 @@ def update_product(pid):
         description: 产品不存在
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         product_code = ProductService.update_product(pid, data)
     except ValueError as e:

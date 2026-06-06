@@ -10,7 +10,7 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: #f5f6f8;
-  color: #374151;
+  color: var(--text-secondary);
   min-height: 100vh;
 }
 .app { max-width: 1600px; margin: 0 auto; padding: 20px 24px; }
@@ -25,13 +25,13 @@ body {
 }
 .report-title {
   font-size: 24px; font-weight: bold;
-  color: #4F46E5;
+  color: var(--primary);
 }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 .btn-board-link {
   padding: 8px 16px; border-radius: 8px;
-  border: 1px solid #059669;
-  background: white; color: #059669;
+  border: 1px solid var(--success);
+  background: white; color: var(--success);
   cursor: pointer; font-size: 13px; text-decoration: none;
   transition: all 0.2s;
 }
@@ -41,13 +41,13 @@ body {
 .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
 .tab-btn {
   padding: 8px 18px; border: 1px solid transparent; border-radius: 8px;
-  background: transparent; color: #6B7280;
+  background: transparent; color: var(--text-placeholder);
   cursor: pointer; font-size: 14px; font-weight: 500;
   transition: all 0.2s;
 }
-.tab-btn:hover { background: #f3f4f6; }
+.tab-btn:hover { background: var(--bg-hover); }
 .tab-btn.active {
-  background: #EEF2FF; color: #4F46E5; border-color: #4F46E5;
+  background: #EEF2FF; color: var(--primary); border-color: var(--primary);
 }
 
 /* Filter Bar */
@@ -55,29 +55,29 @@ body {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 18px; flex-wrap: wrap;
 }
-.filter-bar label { font-size: 13px; color: #6B7280; }
+.filter-bar label { font-size: 13px; color: var(--text-placeholder); }
 .filter-bar input[type="date"], .filter-bar input[type="number"] {
   padding: 7px 12px; border-radius: 8px;
-  border: 1px solid #d1d5db; background: white; color: #374151;
+  border: 1px solid var(--border); background: white; color: var(--text-secondary);
   font-size: 13px; outline: none;
 }
-.filter-bar input:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+.filter-bar input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
 .btn-preset {
   padding: 6px 14px; border-radius: 8px;
-  border: 1px solid #d1d5db; background: white; color: #6B7280;
+  border: 1px solid var(--border); background: white; color: var(--text-placeholder);
   cursor: pointer; font-size: 12px; transition: all 0.2s;
 }
-.btn-preset:hover { border-color: #4F46E5; color: #4F46E5; }
-.btn-preset.active { background: #4F46E5; color: white; border-color: #4F46E5; }
+.btn-preset:hover { border-color: var(--primary); color: var(--primary); }
+.btn-preset.active { background: var(--primary); color: white; border-color: var(--primary); }
 .btn-action {
   padding: 7px 16px; border-radius: 8px;
-  border: 1px solid #4F46E5; background: white; color: #4F46E5;
+  border: 1px solid var(--primary); background: white; color: var(--primary);
   cursor: pointer; font-size: 13px; transition: all 0.2s;
 }
 .btn-action:hover { background: #EEF2FF; }
-.btn-action.green { border-color: #059669; color: #059669; }
+.btn-action.green { border-color: var(--success); color: var(--success); }
 .btn-action.green:hover { background: #ECFDF5; }
-.btn-action.orange { border-color: #D97706; color: #D97706; }
+.btn-action.orange { border-color: var(--warning); color: var(--warning); }
 .btn-action.orange:hover { background: #FFFBEB; }
 
 /* Summary Cards */
@@ -89,16 +89,16 @@ body {
   background: white; border-radius: 12px; padding: 14px 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
-.s-card .label { font-size: 12px; color: #6B7280; margin-bottom: 3px; }
+.s-card .label { font-size: 12px; color: var(--text-placeholder); margin-bottom: 3px; }
 .s-card .value { font-size: 28px; font-weight: bold; }
-.s-card .value.blue { color: #2563EB; }
-.s-card .value.green { color: #059669; }
-.s-card .value.red { color: #DC2626; }
-.s-card .value.orange { color: #D97706; }
-.s-card .value.purple { color: #7C3AED; }
-.s-card .value.yellow { color: #D97706; }
+.s-card .value.blue { color: var(--info); }
+.s-card .value.green { color: var(--success); }
+.s-card .value.red { color: var(--danger); }
+.s-card .value.orange { color: var(--warning); }
+.s-card .value.purple { color: var(--primary-accent); }
+.s-card .value.yellow { color: var(--warning); }
 .s-card .value.pink { color: #EC4899; }
-.s-card .sub { font-size: var(--text-xs-alt); color: #9CA3AF; margin-top: 2px; }
+.s-card .sub { font-size: var(--text-xs-alt); color: var(--text-placeholder); margin-top: 2px; }
 
 /* Chart Panels */
 .chart-panel {
@@ -108,18 +108,18 @@ body {
 .panel-title {
   font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 2px solid #f3f4f6;
+  border-bottom: 2px solid var(--bg-hover);
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .panel-title-left { display: flex; align-items: center; gap: 10px; }
 .panel-title .dot {
   width: 3px; height: 18px; border-radius: 2px; display: inline-block;
 }
-.panel-title .dot.cyan { background: #4F46E5; }
-.panel-title .dot.green { background: #059669; }
-.panel-title .dot.orange { background: #D97706; }
-.panel-title .dot.purple { background: #7C3AED; }
-.panel-title .dot.red { background: #DC2626; }
+.panel-title .dot.cyan { background: var(--primary); }
+.panel-title .dot.green { background: var(--success); }
+.panel-title .dot.orange { background: var(--warning); }
+.panel-title .dot.purple { background: var(--primary-accent); }
+.panel-title .dot.red { background: var(--danger); }
 
 /* Trend Chart */
 .trend-chart {
@@ -129,16 +129,16 @@ body {
 .trend-bar-group { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
 .trend-bars { display: flex; align-items: flex-end; gap: 2px; height: 100%; }
 .trend-bar { width: 8px; border-radius: 3px 3px 0 0; transition: height 0.5s ease; min-height: 2px; cursor: pointer; }
-.trend-bar.output { background: #4F46E5; }
-.trend-bar.scrap { background: #DC2626; }
-.trend-bar.rework { background: #D97706; }
-.trend-date { font-size: 9px; color: #9CA3AF; margin-top: 4px; white-space: nowrap; }
+.trend-bar.output { background: var(--primary); }
+.trend-bar.scrap { background: var(--danger); }
+.trend-bar.rework { background: var(--warning); }
+.trend-date { font-size: 9px; color: var(--text-placeholder); margin-top: 4px; white-space: nowrap; }
 
 /* Horizontal Bar */
 .h-bar-list { margin-top: 6px; }
 .h-bar-item {
   display: flex; align-items: center;
-  padding: 9px 0; border-bottom: 1px solid #f3f4f6;
+  padding: 9px 0; border-bottom: 1px solid var(--bg-hover);
 }
 .h-bar-item:last-child { border-bottom: none; }
 .h-bar-rank {
@@ -150,12 +150,12 @@ body {
 .h-bar-rank.r2 { background: #bdc3c7; color: #fff; }
 .h-bar-rank.r3 { background: #e67e22; color: #fff; }
 .h-bar-name { width: 80px; font-size: 14px; flex-shrink: 0; font-weight: 500; }
-.h-bar-wrap { flex: 1; height: 20px; background: #f3f4f6; border-radius: 10px; overflow: hidden; margin: 0 10px; }
+.h-bar-wrap { flex: 1; height: 20px; background: var(--bg-hover); border-radius: 10px; overflow: hidden; margin: 0 10px; }
 .h-bar-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
-.h-bar-val { width: 65px; text-align: right; font-size: 14px; font-weight: bold; color: #4F46E5; flex-shrink: 0; }
-.h-bar-val.red { color: #DC2626; }
-.h-bar-val.orange { color: #D97706; }
-.h-bar-meta { font-size: var(--text-xs-alt); color: #9CA3AF; margin-left: 6px; }
+.h-bar-val { width: 65px; text-align: right; font-size: 14px; font-weight: bold; color: var(--primary); flex-shrink: 0; }
+.h-bar-val.red { color: var(--danger); }
+.h-bar-val.orange { color: var(--warning); }
+.h-bar-meta { font-size: var(--text-xs-alt); color: var(--text-placeholder); margin-left: 6px; }
 
 /* Two column */
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -165,11 +165,11 @@ body {
 .data-table { width: 100%; border-collapse: collapse; min-width: 650px; }
 .data-table th {
   background: #F9FAFB; padding: 10px 8px; text-align: left;
-  font-size: 12px; font-weight: 600; color: #6B7280;
+  font-size: 12px; font-weight: 600; color: var(--text-placeholder);
   text-transform: uppercase; letter-spacing: 0.5px;
-  border-bottom: 2px solid #E5E7EB; white-space: nowrap;
+  border-bottom: 2px solid var(--border-light); white-space: nowrap;
 }
-.data-table td { padding: 9px 8px; font-size: 13px; color: #374151; border-bottom: 1px solid #F3F4F6; }
+.data-table td { padding: 9px 8px; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--bg-hover); }
 .data-table tr:hover { background: #F9FAFB; }
 
 /* Badge */
@@ -185,29 +185,29 @@ body {
   padding: 12px 16px; background: #F9FAFB; border-radius: 10px; flex: 1; min-width: 180px;
 }
 .donut-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
-.donut-text .d-label { font-size: 12px; color: #6B7280; }
+.donut-text .d-label { font-size: 12px; color: var(--text-placeholder); }
 .donut-text .d-value { font-size: 18px; font-weight: bold; }
-.donut-text .d-pct { font-size: var(--text-xs-alt); color: #9CA3AF; }
+.donut-text .d-pct { font-size: var(--text-xs-alt); color: var(--text-placeholder); }
 
 /* Empty */
-.empty-state { text-align: center; padding: 40px 20px; color: #9CA3AF; }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text-placeholder); }
 .empty-state .icon { font-size: 40px; margin-bottom: 8px; }
 
 /* Scroll */
 .scroll-y { max-height: 420px; overflow-y: auto; }
 .scroll-y::-webkit-scrollbar { width: 5px; }
-.scroll-y::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+.scroll-y::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
 /* Legend */
 .legend { display: flex; gap: 16px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B7280; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-placeholder); }
 .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
 /* Toast */
 .toast {
   position: fixed; top: 20px; right: 20px;
   padding: 12px 20px; border-radius: 10px;
-  background: #059669; color: white; font-size: 14px;
+  background: var(--success); color: white; font-size: 14px;
   z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   animation: slideInRight 0.3s ease;
 }
@@ -238,7 +238,7 @@ body {
                 <div class="report-title">📊 数据分析报表</div>
                 <div class="header-actions">
                     <a class="btn-board-link" href="board.html" target="_blank">📈 生产看板</a>
-                    <span style="font-size:13px;color:rgba(255,255,255,0.4)">{{ updateTime }}</span>
+                    <span style="font-size:var(--text-sm);color:rgba(255,255,255,0.4)">{{ updateTime }}</span>
                     <button class="btn-action" @click="loadData">🔄 刷新</button>
                 </div>
             </div>
@@ -308,9 +308,9 @@ body {
                         </div>
                     </div>
                     <div class="legend">
-                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#00d4ff,#0090ff)"></span>产量</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#ff6b6b,#ee5a24)"></span>报废</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#ff9f43,#ff6b6b)"></span>返工</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,var(--info),#0090ff)"></span>产量</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,var(--danger),#ee5a24)"></span>报废</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,var(--warning),var(--danger))"></span>返工</div>
                     </div>
                 </div>
 
@@ -326,11 +326,11 @@ body {
                                 <tbody>
                                     <tr v-for="item in trendData" :key="item.date">
                                         <td style="color:rgba(255,255,255,0.6)">{{ item.date }}</td>
-                                        <td style="color:#00d4ff;font-weight:600">{{ item.output }}</td>
-                                        <td><span v-if="item.scrap>0" style="color:#ff6b6b">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td :style="{color: (item.scrap/item.output*100||0) > 10 ? '#ff6b6b' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
-                                        <td><span v-if="item.rework>0" style="color:#ff9f43">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td :style="{color: (item.rework/item.output*100||0) > 10 ? '#ff9f43' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td style="color:var(--info);font-weight:600">{{ item.output }}</td>
+                                        <td><span v-if="item.scrap>0" style="color:var(--danger)">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.scrap/item.output*100||0) > 10 ? 'var(--danger)' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td><span v-if="item.rework>0" style="color:var(--warning)">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.rework/item.output*100||0) > 10 ? 'var(--warning)' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
                                         <td style="color:rgba(255,255,255,0.5)">{{ item.report_count }}</td>
                                     </tr>
                                 </tbody>
@@ -357,7 +357,7 @@ body {
                                 <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
                                 <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
                                 <div class="h-bar-wrap">
-                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'output')+'%', background: 'linear-gradient(90deg,#00d4ff,#0090ff)'}"></div>
+                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'output')+'%', background: 'linear-gradient(90deg,var(--info),#0090ff)'}"></div>
                                 </div>
                                 <div class="h-bar-val">{{ w.output }}</div>
                                 <div class="h-bar-meta">{{ w.daily_avg }}/天</div>
@@ -372,7 +372,7 @@ body {
                                 <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
                                 <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
                                 <div class="h-bar-wrap">
-                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'scrap')+'%', background: 'linear-gradient(90deg,#ff6b6b,#ee5a24)'}"></div>
+                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'scrap')+'%', background: 'linear-gradient(90deg,var(--danger),#ee5a24)'}"></div>
                                 </div>
                                 <div class="h-bar-val red">{{ w.scrap }}</div>
                                 <div class="h-bar-meta">报废率 {{ w.scrap_rate }}%</div>
@@ -396,14 +396,14 @@ body {
                                         <td><span class="badge" :class="idx<3?'producing':'pending'">{{ idx+1 }}</span></td>
                                         <td style="font-weight:600">{{ w.name }}</td>
                                         <td style="color:rgba(255,255,255,0.5)">{{ w.employee_no || '--' }}</td>
-                                        <td style="color:#00d4ff;font-weight:600">{{ w.output }}</td>
+                                        <td style="color:var(--info);font-weight:600">{{ w.output }}</td>
                                         <td>{{ w.daily_avg }}</td>
                                         <td style="color:rgba(255,255,255,0.5)">{{ w.work_days }}</td>
                                         <td style="color:rgba(255,255,255,0.5)">{{ w.report_count }}</td>
-                                        <td><span v-if="w.scrap>0" style="color:#ff6b6b">{{ w.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td><span :style="{color: w.scrap_rate > 5 ? '#ff6b6b' : 'rgba(255,255,255,0.5)'}">{{ w.scrap_rate }}%</span></td>
-                                        <td><span v-if="w.rework>0" style="color:#ff9f43">{{ w.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td><span :style="{color: w.rework_rate > 5 ? '#ff9f43' : 'rgba(255,255,255,0.5)'}">{{ w.rework_rate }}%</span></td>
+                                        <td><span v-if="w.scrap>0" style="color:var(--danger)">{{ w.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td><span :style="{color: w.scrap_rate > 5 ? 'var(--danger)' : 'rgba(255,255,255,0.5)'}">{{ w.scrap_rate }}%</span></td>
+                                        <td><span v-if="w.rework>0" style="color:var(--warning)">{{ w.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td><span :style="{color: w.rework_rate > 5 ? 'var(--warning)' : 'rgba(255,255,255,0.5)'}">{{ w.rework_rate }}%</span></td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -432,10 +432,10 @@ body {
                                 <div class="h-bar-wrap">
                                     <div class="h-bar-fill" :style="{width: getQProcessPct(item)+'%', background: 'linear-gradient(90deg,#a855f7,#7c3aed)'}"></div>
                                 </div>
-                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:12px">
-                                    <span style="color:#00d4ff">{{ item.output }}</span>
-                                    <span v-if="item.scrap>0" style="color:#ff6b6b">废{{ item.scrap }}</span>
-                                    <span v-if="item.rework>0" style="color:#ff9f43">返{{ item.rework }}</span>
+                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:var(--text-xs)">
+                                    <span style="color:var(--info)">{{ item.output }}</span>
+                                    <span v-if="item.scrap>0" style="color:var(--danger)">废{{ item.scrap }}</span>
+                                    <span v-if="item.rework>0" style="color:var(--warning)">返{{ item.rework }}</span>
                                 </div>
                             </div>
                         </div>
@@ -448,11 +448,11 @@ body {
                                 <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
                                 <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
                                 <div class="h-bar-wrap">
-                                    <div class="h-bar-fill" :style="{width: getQWorkerPct(w)+'%', background: 'linear-gradient(90deg,#ff6b6b,#ee5a24)'}"></div>
+                                    <div class="h-bar-fill" :style="{width: getQWorkerPct(w)+'%', background: 'linear-gradient(90deg,var(--danger),#ee5a24)'}"></div>
                                 </div>
-                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:12px">
-                                    <span style="color:#ff6b6b">废{{ w.scrap }}</span>
-                                    <span v-if="w.rework>0" style="color:#ff9f43">返{{ w.rework }}</span>
+                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:var(--text-xs)">
+                                    <span style="color:var(--danger)">废{{ w.scrap }}</span>
+                                    <span v-if="w.rework>0" style="color:var(--warning)">返{{ w.rework }}</span>
                                 </div>
                             </div>
                         </div>
@@ -472,11 +472,11 @@ body {
                                     <tr v-for="item in qualityProcess" :key="item.id">
                                         <td style="font-weight:600">{{ item.name }}</td>
                                         <td style="color:rgba(255,255,255,0.5)">{{ item.category }}</td>
-                                        <td style="color:#00d4ff">{{ item.output }}</td>
-                                        <td><span v-if="item.scrap>0" style="color:#ff6b6b">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td :style="{color: (item.scrap/item.output*100||0) > 5 ? '#ff6b6b' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
-                                        <td><span v-if="item.rework>0" style="color:#ff9f43">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
-                                        <td :style="{color: (item.rework/item.output*100||0) > 5 ? '#ff9f43' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td style="color:var(--info)">{{ item.output }}</td>
+                                        <td><span v-if="item.scrap>0" style="color:var(--danger)">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.scrap/item.output*100||0) > 5 ? 'var(--danger)' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td><span v-if="item.rework>0" style="color:var(--warning)">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.rework/item.output*100||0) > 5 ? 'var(--warning)' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
                                         <td style="color:#a855f7;font-weight:600">{{ (item.scrap||0)+(item.rework||0) }}</td>
                                     </tr>
                                 </tbody>
@@ -514,11 +514,11 @@ body {
                             <div class="h-bar-item" v-for="item in orderMonthly" :key="item.month">
                                 <div class="h-bar-name" style="width:65px">{{ item.month }}</div>
                                 <div class="h-bar-wrap">
-                                    <div class="h-bar-fill" :style="{width: getMonthlyPct(item)+'%', background: 'linear-gradient(90deg,#00d4ff,#7b2cbf)'}"></div>
+                                    <div class="h-bar-fill" :style="{width: getMonthlyPct(item)+'%', background: 'linear-gradient(90deg,var(--info),#7b2cbf)'}"></div>
                                 </div>
-                                <div style="display:flex;gap:8px;flex-shrink:0;font-size:12px">
-                                    <span style="color:#00d4ff">{{ item.total_qty }}</span>
-                                    <span style="color:#2ecc71">完成{{ item.total_done }}</span>
+                                <div style="display:flex;gap:var(--space-2);flex-shrink:0;font-size:var(--text-xs)">
+                                    <span style="color:var(--info)">{{ item.total_qty }}</span>
+                                    <span style="color:var(--success)">完成{{ item.total_done }}</span>
                                     <span style="color:rgba(255,255,255,0.3)">{{ item.order_count }}单</span>
                                 </div>
                             </div>
@@ -538,11 +538,11 @@ body {
                             <tbody>
                                 <tr v-for="item in orderStatus" :key="item.status">
                                     <td><span class="badge" :class="item.status">{{ statusLabel(item.status) }}</span></td>
-                                    <td style="color:#00d4ff;font-weight:600">{{ item.count }}</td>
+                                    <td style="color:var(--info);font-weight:600">{{ item.count }}</td>
                                     <td>{{ item.qty || 0 }}</td>
-                                    <td style="color:#2ecc71">{{ item.done || 0 }}</td>
+                                    <td style="color:var(--success)">{{ item.done || 0 }}</td>
                                     <td>{{ ((item.done||0) / Math.max(item.qty||0, 1) * 100).toFixed(1) }}%</td>
-                                    <td :style="{color: ((item.qty||0)-(item.done||0)) > 0 ? '#ff9f43' : '#2ecc71'}">{{ Math.max(0, (item.qty||0)-(item.done||0)) }}</td>
+                                    <td :style="{color: ((item.qty||0)-(item.done||0)) > 0 ? 'var(--warning)' : 'var(--success)'}">{{ Math.max(0, (item.qty||0)-(item.done||0)) }}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -550,7 +550,7 @@ body {
                 </div>
             </template>
 
-            <div style="text-align:right;padding:var(--space-3) 0;font-size:12px;color:rgba(255,255,255,0.12)">
+            <div style="text-align:right;padding:var(--space-3) 0;font-size:var(--text-xs);color:rgba(255,255,255,0.12)">
                 更新于 {{ updateTime }} | 数据来自生产管理系统
             </div>
         </div>
@@ -716,7 +716,7 @@ body {
                     return Math.max((item.total_qty || 0) / this.orderMaxQty * 100, 3);
                 },
                 statusColor(status) {
-                    const map = {pending: '#ff9f43', producing: '#00d4ff', completed: '#2ecc71'};
+                    const map = {pending: 'var(--warning)', producing: 'var(--info)', completed: 'var(--success)'};
                     return map[status] || '#a855f7';
                 },
                 statusLabel(status) {

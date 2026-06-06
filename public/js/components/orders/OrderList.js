@@ -179,9 +179,8 @@ export default {
     }
 
     function downloadAttachment(attachmentId) {
-      const token = localStorage.getItem('token')
-      const url = '/api/attachments/' + attachmentId + '/download' + (token ? '?token=' + encodeURIComponent(token) : '')
-      window.open(url, '_blank')
+      // httpOnly cookie handles auth automatically
+      window.open('/api/attachments/' + attachmentId + '/download', '_blank')
     }
 
     function getFileIcon(fileType) {
@@ -384,10 +383,9 @@ export default {
       qrPrintLoading.value = true
       qrCodes.value = []
       try {
-        const token = localStorage.getItem('token') || ''
         const resp = await fetch('/api/qrcode/batch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             order_ids: [qrPrintOrder.value.id],
             mode: qrMode.value

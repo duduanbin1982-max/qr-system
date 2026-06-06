@@ -7,6 +7,7 @@ from flask import request, jsonify
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.error_handler import handle_unexpected_error
 
 
 @app.route('/api/reports/production-trend', methods=['GET'])
@@ -55,7 +56,7 @@ def reports_production_trend():
             },
         })
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/reports/worker-efficiency', methods=['GET'])
@@ -101,7 +102,7 @@ def reports_worker_efficiency():
 
         return jsonify({'workers': result})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/reports/quality-analysis', methods=['GET'])
@@ -154,7 +155,7 @@ def reports_quality_analysis():
             'by_worker': [dict(r) for r in by_worker],
         })
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/reports/order-analysis', methods=['GET'])
@@ -194,4 +195,4 @@ def reports_order_analysis():
             'monthly_trend': [dict(r) for r in monthly],
         })
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

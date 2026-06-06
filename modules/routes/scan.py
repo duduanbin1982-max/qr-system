@@ -15,6 +15,8 @@ from modules.app import app
 from modules.db import get_db, get_setting, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.data_scope import get_user_process_ids
+from modules.middleware.error_handler import handle_unexpected_error
+from modules.middleware.helpers import get_json_body
 
 
 
@@ -42,7 +44,7 @@ def _check_order_scope(order_id):
 def scan_order():
     """扫码获取订单信息（支持订单号或产品序列号）"""
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = get_json_body()
         code = data.get('code', '').strip()
         if not code:
             return jsonify({'error': '请扫描二维码'}), 400
@@ -62,7 +64,7 @@ def scan_order():
                 if order:
                     try:
                         item_info['qr_data'] = json.loads(item['qr_content'])
-                    except:
+                    except (json.JSONDecodeError, TypeError):
                         item_info['qr_data'] = {}
 
         if not order:
@@ -75,7 +77,7 @@ def scan_order():
 
         try:
             o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
-        except:
+        except (json.JSONDecodeError, TypeError):
             o['extra_fields'] = {}
 
         procs = db.execute('''
@@ -99,7 +101,7 @@ def scan_order():
             return jsonify({'order': o, 'item': item_info})
         return jsonify({'order': o})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 # ============================================================
 # Mobile H5 扫码报工 API
@@ -153,7 +155,7 @@ def mobile_decode(code):
         
         return jsonify({'code': decoded})
     except Exception as e:
-        return jsonify({'error': f'解码失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/mobile/scan', methods=['POST'])
@@ -162,7 +164,7 @@ def mobile_decode(code):
 def mobile_scan():
     """手机H5扫码 - 自动判断当前工序并返回报工确认信息"""
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = get_json_body()
         code = data.get('code', '').strip()
         if not code:
             return jsonify({'error': '请扫描二维码'}), 400
@@ -197,7 +199,7 @@ def mobile_scan():
 
         try:
             o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
-        except:
+        except (json.JSONDecodeError, TypeError):
             o['extra_fields'] = {}
         # 工序列表
         procs = db.execute('''
@@ -234,14 +236,14 @@ def mobile_scan():
 
         return jsonify({'order': o})
     except Exception as e:
-        return jsonify({'error': f'扫码查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 @app.route('/api/mobile/report', methods=['POST'])
 @check_auth
 @check_permission('scan:edit')
 def mobile_report():
     """手机H5扫码报工"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     order_id = int(data.get('order_id', 0))
     process_id = int(data.get('process_id', 0))
     serial_no = data.get('serial_no', '').strip() or None
@@ -397,7 +399,7 @@ def mobile_report():
         db.commit()
     except Exception as e:
         db.execute('ROLLBACK TO mobile_report_sp')
-        return jsonify({'error': f'报工异常: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
     audit_log(f'mobile_{report_type}', 'order', order_id,
              f'process={process_id} serial={serial_no} qty={quantity}  by={user["name"]}')
@@ -408,7 +410,7 @@ def mobile_report():
 @check_permission('scan:edit')
 def work_report():
     """报工"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     order_id = int(data.get('order_id', 0))
     process_id = int(data.get('process_id', 0))
     quantity = int(data.get('quantity', 0))
@@ -561,7 +563,7 @@ def work_report():
         db.commit()
     except Exception as e:
         db.execute('ROLLBACK TO report_sp')
-        return jsonify({'error': f'报工异常: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
     audit_log(f'report_{report_type}', 'order', order_id,
               f'process={process_id} qty={quantity} type={report_type}')
@@ -592,7 +594,7 @@ def get_qrcode(order_no):
         buf.seek(0)
         return send_file(buf, mimetype='image/png')
     except Exception as e:
-        return jsonify({'error': f'生成二维码失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 @app.route('/api/qrcode/batch', methods=['POST'])
 @check_auth
@@ -600,7 +602,7 @@ def get_qrcode(order_no):
 def batch_qrcode():
     """批量生成二维码标签 - 支持订单模式和产品序列号模式"""
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = get_json_body()
         order_ids = data.get('order_ids', [])
         mode = data.get('mode', 'order')  # 'order' 或 'serial'
         
@@ -691,4 +693,4 @@ def batch_qrcode():
 
         return jsonify({'codes': codes})
     except Exception as e:
-        return jsonify({'error': f'批量生成二维码失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

@@ -57,12 +57,22 @@ def index():
 
 @app.route('/<path:filename>')
 def static_files(filename):
-    """Serve all static assets (js/, css/, vendor/, etc.) from PUBLIC_DIR."""
-    resp = app.send_static_file(filename)
-    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    resp.headers['Pragma'] = 'no-cache'
-    resp.headers['Expires'] = '0'
-    return resp
+    """Serve static assets (js/, css/, vendor/, etc.) from PUBLIC_DIR.
+    
+    Safety: reject paths starting with 'api/' to prevent shadowing API routes.
+    """
+    if filename.startswith('api/') or filename.startswith('api'):
+        from flask import abort
+        abort(404)
+    try:
+        resp = app.send_static_file(filename)
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+        return resp
+    except Exception:
+        from flask import abort
+        abort(404)
 
 # ============================================================
 if __name__ == '__main__':

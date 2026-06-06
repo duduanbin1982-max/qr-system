@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- 统计栏 -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🔀</span><div><div class="s-val">{{ totalRouteCount }}</div><div class="s-label">总路线</div></div></div>
@@ -8,48 +8,52 @@
     </div>
 
     <!-- 分类选项卡 -->
-    <div style="display:flex;gap:var(--space-3);margin-bottom:16px;flex-wrap:wrap">
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='all'?'600':'400',background:pricingCategory==='all'?'#EEF2FF':'#F3F4F6',color:pricingCategory==='all'?'var(--primary)':'#6B7280',border:pricingCategory==='all'?'1px solid #C7D2FE':'1px solid transparent'}" @click="switchCat('all')">📋 全部工价路线</span>
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='结构件'?'600':'400',background:pricingCategory==='结构件'?'#EFF6FF':'#F3F4F6',color:pricingCategory==='结构件'?'var(--info)':'#6B7280',border:pricingCategory==='结构件'?'1px solid #BFDBFE':'1px solid transparent'}" @click="switchCat('结构件')">🔩 结构件工价</span>
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='机加工'?'600':'400',background:pricingCategory==='机加工'?'#FEF3C7':'#F3F4F6',color:pricingCategory==='机加工'?'var(--warning)':'#6B7280',border:pricingCategory==='机加工'?'1px solid #FDE68A':'1px solid transparent'}" @click="switchCat('机加工')">⚙️ 机加工工价</span>
+    <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='all'?'600':'400',background:pricingCategory==='all'?'var(--primary-light)':'var(--bg-hover)',color:pricingCategory==='all'?'var(--primary)':'var(--text-placeholder)',border:pricingCategory==='all'?'1px solid var(--primary-light)':'1px solid transparent'}" @click="switchCat('all')">📋 全部工价路线</span>
+      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='结构件'?'600':'400',background:pricingCategory==='结构件'?'var(--info-light)':'var(--bg-hover)',color:pricingCategory==='结构件'?'var(--info)':'var(--text-placeholder)',border:pricingCategory==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}" @click="switchCat('结构件')">🔩 结构件工价</span>
+      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='机加工'?'600':'400',background:pricingCategory==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:pricingCategory==='机加工'?'var(--warning)':'var(--text-placeholder)',border:pricingCategory==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}" @click="switchCat('机加工')">⚙️ 机加工工价</span>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>💰 工价路线</h3>
+        <div style="display:flex;gap:var(--space-2)">
+          <button class="btn btn-primary btn-sm" @click="openAddRoutePricing">+ 添加工价</button>
+          <button class="btn btn-default btn-sm" @click="switchCat(pricingCategory); loadAllRoutes()">🔄 刷新</button>
+        </div>
       </div>
       <div class="card-body">
         <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
 
         <div v-else>
           <div v-if="filteredRoutes.length">
-        <div v-for="r in filteredRoutes" :key="r.id" style="border:1px solid #E5E7EB;border-radius:var(--radius-lg);margin-bottom:12px;background:white;overflow:hidden"
+        <div v-for="r in filteredRoutes" :key="r.id" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);margin-bottom:var(--space-3);background:white;overflow:hidden"
           :style="{borderLeft: expandedRoute===r.id ? '4px solid var(--primary)' : '4px solid transparent'}">
 
           <!-- 卡片头部 -->
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;cursor:pointer"
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) 20px;cursor:pointer"
             @click="toggleRoute(r.id)">
-            <div style="display:flex;align-items:center;gap:12px">
-              <span style="font-size:18px">{{ expandedRoute === r.id ? '▼' : '▶' }}</span>
+            <div style="display:flex;align-items:center;gap:var(--space-3)">
+              <span style="font-size:var(--text-xl)">{{ expandedRoute === r.id ? '▼' : '▶' }}</span>
               <div>
                 <div style="font-weight:600;font-size:15px">{{ r.name }}</div>
-                <div style="font-size:12px;color:var(--text-placeholder);margin-top:2px">
+                <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">
                   点击展开编辑工价
                 </div>
               </div>
             </div>
-            <span style="font-size:13px;color:var(--primary);font-weight:500">
+            <span style="font-size:var(--text-sm);color:var(--primary);font-weight:500">
               {{ expandedRoute === r.id ? '收起' : '编辑工价 →' }}
             </span>
           </div>
 
           <!-- 展开：工序编辑面板 -->
-          <div v-if="expandedRoute === r.id && routeSteps.length" style="border-top:1px solid #F3F4F6;padding:20px">
-            <div style="font-size:13px;color:#6B7280;margin-bottom:12px">
+          <div v-if="expandedRoute === r.id && routeSteps.length" style="border-top:1px solid var(--bg-hover);padding:var(--space-5)">
+            <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-bottom:var(--space-3)">
               💡 所有使用此路线的产品共享以下工价
             </div>
 
-            <table class="data-table" style="font-size:13px;width:100%">
+            <table class="data-table" style="font-size:var(--text-sm);width:100%">
               <thead>
                 <tr>
                   <th style="width:36px;text-align:center">#</th>
@@ -61,12 +65,12 @@
               </thead>
               <tbody>
                 <tr v-for="(s, idx) in routeSteps" :key="s.process_id">
-                  <td style="text-align:center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:#EEF2FF;color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:12px">{{ idx+1 }}</span></td>
+                  <td style="text-align:center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
                   <td><strong>{{ s.process_name }}</strong></td>
-                  <td style="text-align:center"><span class="badge" :style="{background:s.category==='机加工'?'#FEF3C7':'#EFF6FF',color:s.category==='机加工'?'var(--warning)':'var(--info)',fontSize:'var(--text-xs-alt)'}">{{ s.category || '—' }}</span></td>
+                  <td style="text-align:center"><span class="badge" :style="{background:s.category==='机加工'?'var(--warning-lighter)':'var(--info-light)',color:s.category==='机加工'?'var(--warning)':'var(--info)',fontSize:'var(--text-xs-alt)'}">{{ s.category || '—' }}</span></td>
                   <td style="text-align:center">
-                    <span v-if="s.unit_price != null" style="display:inline-block;padding:4px 10px;background:#EEF2FF;border-radius:var(--radius-sm);color:var(--primary);font-weight:600;font-size:13px">¥{{ Number(s.unit_price).toFixed(2) }}</span>
-                    <span v-else style="color:#D1D5DB">—</span>
+                    <span v-if="s.unit_price != null" style="display:inline-block;padding:var(--space-1) 10px;background:var(--primary-light);border-radius:var(--radius-sm);color:var(--primary);font-weight:600;font-size:var(--text-sm)">¥{{ Number(s.unit_price).toFixed(2) }}</span>
+                    <span v-else style="color:var(--border)">—</span>
                   </td>
                   <td style="text-align:center">
                     <input type="number" class="form-input" style="text-align:center;width:120px"
@@ -78,12 +82,12 @@
 
             <!-- 操作栏 -->
             <div style="display:flex;gap:var(--space-3);align-items:center;margin-top:16px;flex-wrap:wrap">
-              <div style="display:flex;gap:8px;align-items:center">
-                <label style="font-size:13px;color:#6B7280;white-space:nowrap">生效日期</label>
+              <div style="display:flex;gap:var(--space-2);align-items:center">
+                <label style="font-size:var(--text-sm);color:var(--text-placeholder);white-space:nowrap">生效日期</label>
                 <input type="date" class="form-input" style="width:150px" v-model="editMeta[expandedRoute].effectiveDate">
               </div>
-              <div style="display:flex;gap:8px;align-items:center;flex:1">
-                <label style="font-size:13px;color:#6B7280;white-space:nowrap">备注</label>
+              <div style="display:flex;gap:var(--space-2);align-items:center;flex:1">
+                <label style="font-size:var(--text-sm);color:var(--text-placeholder);white-space:nowrap">备注</label>
                 <input class="form-input" style="flex:1;max-width:300px" v-model="editMeta[expandedRoute].remark" placeholder="调价备注">
               </div>
               <button class="btn btn-primary" @click="saveRoute" :disabled="saving" style="margin-left:auto;white-space:nowrap">
@@ -96,11 +100,58 @@
 
       <!-- 空状态 -->
       <div v-else style="text-align:center;padding:60px;color:var(--text-placeholder)">
-        <div style="font-size:48px;margin-bottom:12px">💰</div>
+        <div style="font-size:48px;margin-bottom:var(--space-3)">💰</div>
         <div>暂无工价配置</div>
-        <div style="font-size:13px;margin-top:4px">请先创建工序路线，再配置路线工价</div>
+        <div style="font-size:var(--text-sm);margin-top:4px">请先创建工序路线，再配置路线工价</div>
       </div>
     </div>
       </div>
     </div>
+
+    <!-- 添加工价路线 Modal -->
+    <div v-if="showAddRouteModal" class="modal-overlay" @click.self="showAddRouteModal=false">
+      <div class="modal" style="max-width:700px">
+        <div class="modal-header"><span>➕ 添加工价路线</span><span class="modal-close" @click="showAddRouteModal=false">&times;</span></div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>选择工序路线</label>
+            <select class="form-input" v-model="addRouteId" @change="onAddRouteSelected">
+              <option value="">-- 请选择路线 --</option>
+              <option v-for="r in allRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
+            </select>
+          </div>
+          <div v-if="addRouteSteps.length" style="margin-top:var(--space-4)">
+            <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-bottom:var(--space-3)">
+              💡 配置该路线各工序的工价
+            </div>
+            <table class="data-table" style="font-size:var(--text-sm);width:100%">
+              <thead><tr>
+                <th style="width:36px;text-align:center">#</th>
+                <th>工序名称</th>
+                <th style="width:140px;text-align:center">单价 (元)</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="(s, idx) in addRouteSteps" :key="s.process_id">
+                  <td style="text-align:center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
+                  <td><strong>{{ s.process_name }}</strong></td>
+                  <td style="text-align:center">
+                    <input type="number" class="form-input" style="text-align:center;width:130px" v-model.number="addRoutePrices[s.process_id]" placeholder="输入单价" step="0.01" min="0">
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="addRouteId && !addRouteSteps.length" style="text-align:center;padding:var(--space-5);color:var(--text-placeholder)">
+            ⚠️ 该路线没有关联工序，请先在路线管理中配置工序
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showAddRouteModal=false">取消</button>
+          <button class="btn btn-primary" @click="doAddRoutePricing" :disabled="saving || !addRouteId">
+            {{ saving ? '⏳ 保存中...' : '💾 保存工价' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>

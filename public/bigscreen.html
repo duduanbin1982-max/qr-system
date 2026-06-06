@@ -10,11 +10,11 @@
   --bg-deep: #050816;
   --panel-bg: rgba(255,255,255,0.03);
   --border: rgba(255,255,255,0.06);
-  --cyan: #00d4ff;
+  --cyan: var(--info);
   --purple: #a855f7;
-  --green: #2ecc71;
-  --orange: #ff9f43;
-  --red: #ff6b6b;
+  --green: var(--success);
+  --orange: var(--warning);
+  --red: var(--danger);
   --pink: #ff6b9d;
   --yellow: #f1c40f;
 }
@@ -54,7 +54,7 @@ body {
   backdrop-filter: blur(12px);
   flex-shrink: 0;
 }
-.header-left { display:flex; align-items:center; gap:16px; }
+.header-left { display:flex; align-items:center; gap:var(--space-4); }
 .header-icon { font-size: 36px; }
 .header-title {
   font-size: 34px; font-weight: 900; letter-spacing: 4px;
@@ -183,18 +183,18 @@ body {
 .orders-table { width:100%; border-collapse:collapse; table-layout:fixed; }
 .orders-table th {
   text-align:left; padding:var(--space-3) 8px;
-  color:rgba(255,255,255,0.4); font-weight:500; font-size:12px;
+  color:rgba(255,255,255,0.4); font-weight:500; font-size:var(--text-xs);
   border-bottom:1px solid var(--border);
   position:sticky; top:0; background:rgba(10,12,30,0.95); z-index:1;
 }
-.orders-table td { padding:var(--space-3) 8px; border-bottom:1px solid rgba(255,255,255,0.03); font-size:13px; }
+.orders-table td { padding:var(--space-3) 8px; border-bottom:1px solid rgba(255,255,255,0.03); font-size:var(--text-sm); }
 .orders-table tr { transition: background .2s; }
 .orders-table tr:hover { background:rgba(255,255,255,0.03); }
 .orders-table .order-no { font-weight:700; color:var(--cyan); white-space:nowrap; }
 .orders-table .order-meta { font-size:var(--text-xs-alt); color:rgba(255,255,255,0.4); }
 
 /* Progress bar */
-.prog-wrap { display:flex; align-items:center; gap:8px; }
+.prog-wrap { display:flex; align-items:center; gap:var(--space-2); }
 .prog-bar {
   flex:1; height:8px; background:rgba(255,255,255,0.06);
   border-radius:4px; overflow:hidden;
@@ -206,11 +206,11 @@ body {
 .prog-fill.producing { background: linear-gradient(90deg, var(--cyan), var(--purple)); }
 .prog-fill.pending { background: linear-gradient(90deg, var(--orange), var(--red)); }
 .prog-fill.completed { background: linear-gradient(90deg, var(--green), #1dd1a1); }
-.prog-pct { font-size:12px; color:rgba(255,255,255,0.5); width:36px; text-align:right; flex-shrink:0; }
+.prog-pct { font-size:var(--text-xs); color:rgba(255,255,255,0.5); width:36px; text-align:right; flex-shrink:0; }
 
 /* Badges */
 .badge {
-  display:inline-block; padding:3px 10px; border-radius:10px;
+  display:inline-block; padding:3px 10px; border-radius:var(--radius-md);
   font-size:var(--text-xs-alt); font-weight:600;
 }
 .badge.producing { background:rgba(0,212,255,0.12); color:var(--cyan); }
@@ -229,7 +229,7 @@ body {
 .worker-rank {
   width:30px; height:30px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  font-size:13px; font-weight:800; flex-shrink:0;
+  font-size:var(--text-sm); font-weight:800; flex-shrink:0;
 }
 .worker-rank.r1 { background:linear-gradient(135deg,#f1c40f,#f39c12); color:#000; }
 .worker-rank.r2 { background:linear-gradient(135deg,#bdc3c7,#95a5a6); color:#fff; }
@@ -238,10 +238,10 @@ body {
 .worker-avatar {
   width:36px; height:36px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  font-size:14px; font-weight:700; flex-shrink:0;
+  font-size:var(--text-base); font-weight:700; flex-shrink:0;
 }
 .worker-info { flex:1; min-width:0; }
-.worker-name { font-size:14px; font-weight:600; }
+.worker-name { font-size:var(--text-base); font-weight:600; }
 .worker-sub { font-size:var(--text-xs-alt); color:rgba(255,255,255,0.35); margin-top:2px; }
 .worker-output {
   font-size:22px; font-weight:800;
@@ -251,7 +251,7 @@ body {
 
 /* ── Process Stats ── */
 .proc-item { display:flex; align-items:center; padding:var(--space-2) 0; gap:10px; }
-.proc-label { width:70px; font-size:12px; color:rgba(255,255,255,0.55); flex-shrink:0; }
+.proc-label { width:70px; font-size:var(--text-xs); color:rgba(255,255,255,0.55); flex-shrink:0; }
 .proc-bar-wrap {
   flex:1; height:10px; background:rgba(255,255,255,0.05);
   border-radius:5px; overflow:hidden;
@@ -262,7 +262,7 @@ body {
 }
 .proc-bar.machining { background:linear-gradient(90deg, var(--purple), #7c3aed); }
 .proc-bar.structure { background:linear-gradient(90deg, var(--cyan), #0090ff); }
-.proc-val { font-size:16px; font-weight:700; color:var(--cyan); width:45px; text-align:right; flex-shrink:0; }
+.proc-val { font-size:var(--text-lg); font-weight:700; color:var(--cyan); width:45px; text-align:right; flex-shrink:0; }
 .proc-scrap { font-size:var(--text-xs-alt); color:var(--red); flex-shrink:0; }
 
 /* ── Recent Reports ── */
@@ -273,12 +273,12 @@ body {
 .report-avatar {
   width:30px; height:30px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  font-size:12px; font-weight:700; flex-shrink:0;
+  font-size:var(--text-xs); font-weight:700; flex-shrink:0;
 }
 .report-info { flex:1; min-width:0; }
-.report-line1 { font-size:12px; font-weight:600; }
+.report-line1 { font-size:var(--text-xs); font-weight:600; }
 .report-line2 { font-size:var(--text-xs-alt); color:rgba(255,255,255,0.3); }
-.report-qty { font-size:16px; font-weight:700; flex-shrink:0; }
+.report-qty { font-size:var(--text-lg); font-weight:700; flex-shrink:0; }
 .report-qty.normal { color:var(--green); }
 .report-qty.scrap { color:var(--red); }
 .report-qty.rework { color:var(--orange); }
@@ -301,7 +301,7 @@ body {
 .empty {
   display:flex; flex-direction:column; align-items:center;
   justify-content:center; height:100%;
-  color:rgba(255,255,255,0.2); gap:8px;
+  color:rgba(255,255,255,0.2); gap:var(--space-2);
 }
 .empty-icon { font-size:36px; }
 
@@ -348,7 +348,7 @@ body {
     <div v-if="overdue.length" class="alert-bar">
       <span class="alert-icon">🚨</span>
       <span><span class="alert-count">{{ overdue.length }}</span> 个订单已超期！</span>
-      <span style="color:rgba(255,255,255,0.4);font-size:14px">
+      <span style="color:rgba(255,255,255,0.4);font-size:var(--text-base)">
         （最迟 {{ overdue[0].plan_end }}，已超 {{ overdue[0].overdue_days }} 天）
       </span>
     </div>
@@ -534,7 +534,7 @@ body {
 })();
 
 // ═══════════ Vue App ═══════════
-const CP = ['#00d4ff','#a855f7','#2ecc71','#ff9f43','#ff6b6b','#f1c40f','#1dd1a1','#7c3aed','#ff6b9d','#54a0ff'];
+const CP = ['var(--info)','#a855f7','var(--success)','var(--warning)','var(--danger)','#f1c40f','#1dd1a1','#7c3aed','#ff6b9d','#54a0ff'];
 
 const { createApp } = Vue;
 createApp({

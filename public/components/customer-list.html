@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- 统计栏 -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🏢</span><div><div class="s-val">{{ customers.length }}</div><div class="s-label">客户总数</div></div></div>
@@ -10,10 +10,10 @@
     <div class="card">
       <div class="card-header">
         <h3>🏢 客户管理</h3>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div class="search-box" style="background:#f0f0f0;border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/联系人/电话..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:8px 6px;font-size:14px;width:200px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/联系人/电话..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
           <button class="btn btn-default btn-sm" @click="load">搜索</button>
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 添加客户</button>
@@ -40,9 +40,9 @@
                 <td><a style="color:var(--primary);font-weight:600;cursor:pointer" @click="viewDetail(c)">{{ c.name }}</a></td>
                 <td>{{ c.contact || '-' }}</td>
                 <td><a v-if="c.phone" :href="'tel:' + c.phone" style="color:var(--primary);text-decoration:none">{{ c.phone }}</a><span v-else>-</span></td>
-                <td style="color:#6B7280"><a v-if="c.email" :href="'mailto:' + c.email" style="color:var(--primary);text-decoration:none">{{ c.email }}</a><span v-else>-</span></td>
-                <td :title="c.address || ''" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;color:#6B7280;font-size:13px">{{ c.address || '-' }}</td>
-                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder);font-size:12px">{{ c.remark || '-' }}</td>
+                <td style="color:var(--text-placeholder)"><a v-if="c.email" :href="'mailto:' + c.email" style="color:var(--primary);text-decoration:none">{{ c.email }}</a><span v-else>-</span></td>
+                <td :title="c.address || ''" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder);font-size:var(--text-sm)">{{ c.address || '-' }}</td>
+                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder);font-size:var(--text-xs)">{{ c.remark || '-' }}</td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
                     <span class="o-abtn o-edit" @click="openEdit(c)" title="编辑">✏️</span>
@@ -108,7 +108,7 @@
                   <td>{{ o.product_name || '-' }}</td>
                   <td>{{ o.quantity }}</td>
                   <td><span class="badge" :class="'badge-' + o.status">{{ o.status }}</span></td>
-                  <td style="font-size:12px;color:var(--text-placeholder)">{{ o.created_at }}</td>
+                  <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ o.created_at }}</td>
                 </tr>
               </tbody>
             </table>

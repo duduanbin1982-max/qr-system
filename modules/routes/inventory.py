@@ -3,6 +3,7 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.services.inventory_service import InventoryService
 
 
@@ -62,7 +63,7 @@ def create_inventory():
     responses: {200: {description: 创建成功}}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         item_id = InventoryService.create_item(data)
     except ValueError as e:
@@ -102,7 +103,7 @@ def update_inventory(id):
     responses: {200: {description: 更新成功}}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         InventoryService.update_item(id, data)
     except ValueError as e:
@@ -161,7 +162,7 @@ def stock_in():
     responses: {200: {description: 入库成功}}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     inv_id = data.get('inventory_id')
     qty = data.get('quantity', 0)
     if not inv_id or qty <= 0:
@@ -201,7 +202,7 @@ def stock_out():
       400: {description: 库存不足}
     security: [{Bearer: []}]
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     inv_id = data.get('inventory_id')
     qty = data.get('quantity', 0)
     if not inv_id or qty <= 0:
@@ -245,8 +246,8 @@ def inventory_logs():
     """
     inv_id = request.args.get('inventory_id', '')
     type_filter = request.args.get('type', '')
-    page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', get_page_size(), type=int)
+    p = parse_pagination()
+    page, limit = p['page'], p['limit']
     return jsonify(InventoryService.get_logs(inv_id, type_filter, page, limit))
 
 

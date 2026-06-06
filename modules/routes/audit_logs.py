@@ -11,6 +11,7 @@ from flask import request, jsonify, send_file, g
 from modules.app import app
 from modules.db import get_db, get_setting
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.config import PERMISSION_DEFS, generate_product_code
 
 
@@ -125,7 +126,7 @@ def set_user_roles(uid):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     role_ids = data.get('role_ids', [])
     db = get_db()
     # 清空现有关联
@@ -284,7 +285,7 @@ def list_menu_permissions():
 @check_auth
 @check_permission('settings:manage')
 def create_menu_permission():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     page = data.get('page', '').strip()
     permission = data.get('permission', '')
     label = data.get('label', '')
@@ -316,7 +317,7 @@ def create_menu_permission():
 @check_auth
 @check_permission('settings:manage')
 def update_menu_permission(page):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     db = get_db()
     row = db.execute('SELECT id FROM menu_permissions WHERE page = ?', (page,)).fetchone()
     if not row:
@@ -344,7 +345,7 @@ def delete_menu_permission(page):
         return jsonify({'error': 'menu not found'}), 404
     try:
         db.execute('BEGIN IMMEDIATE')
-    except:
+    except (sqlite3.OperationalError, ValueError):
         pass
     db.execute('DELETE FROM menu_permissions WHERE page = ?', (page,))
     db.commit()
@@ -355,14 +356,14 @@ def delete_menu_permission(page):
 @check_auth
 @check_permission('settings:manage')
 def batch_update_menu_permissions():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     items = data.get('items', [])
     if not isinstance(items, list):
         return jsonify({'error': 'items must be array'}), 400
     db = get_db()
     try:
         db.execute('BEGIN IMMEDIATE')
-    except:
+    except (sqlite3.OperationalError, ValueError):
         pass
     try:
         for item in items:
@@ -393,7 +394,7 @@ def batch_update_menu_permissions():
 @check_auth
 @check_permission('users:edit')
 def batch_set_roles():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     user_ids = data.get('user_ids', [])
     role_ids = data.get('role_ids', [])
     action = data.get('action', 'set')
@@ -410,7 +411,7 @@ def batch_set_roles():
         return jsonify({'error': f'无效角色ID: {", ".join(invalid)}'}), 400
     try:
         db.execute('BEGIN IMMEDIATE')
-    except:
+    except (sqlite3.OperationalError, ValueError):
         pass
     try:
         for uid in user_ids:

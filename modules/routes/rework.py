@@ -4,6 +4,7 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.error_handler import handle_unexpected_error
 
 
 @app.route('/api/rework', methods=['GET'])
@@ -60,7 +61,7 @@ def rework_list():
         ''', params + [per_page, offset]).fetchall()
         return jsonify({'ok': True, 'items': [dict(r) for r in rows], 'total': total, 'page': page, 'per_page': per_page})
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/rework/stats', methods=['GET'])
@@ -86,7 +87,7 @@ def rework_stats():
             'today_done': today_done[0], 'today_done_qty': today_done[1] or 0,
         })
     except Exception as e:
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/rework/<int:rework_id>', methods=['PUT'])
@@ -107,7 +108,7 @@ def rework_update(rework_id):
             return jsonify({'ok': True})
         return jsonify({'error': '无更新内容'}), 400
     except Exception as e:
-        return jsonify({'error': f'更新失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/rework/<int:rework_id>/complete', methods=['POST'])
@@ -140,4 +141,4 @@ def rework_complete(rework_id):
         audit_log('rework_complete', 'rework', rework_id, f'order={rw["order_id"]} process={rw["process_id"]}')
         return jsonify({'ok': True, 'message': '返工完成'})
     except Exception as e:
-        return jsonify({'error': f'操作失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

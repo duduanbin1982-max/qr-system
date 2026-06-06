@@ -1,4 +1,4 @@
-<div style="padding:24px">
+<div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🔀</span><div><div class="s-val">{{ routes.length }}</div><div class="s-label">路线总数</div></div></div>
       <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-primary">{{ routes.reduce((s,r)=>s+(r.processes||[]).length,0) }}</div><div class="s-label">工序节点</div></div></div>
@@ -6,31 +6,31 @@
 
     <!-- 分类Tab按钮 -->
     <div style="display:flex;gap:var(--space-3);padding:0 0 16px 0;flex-wrap:wrap">
-      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'#EEF2FF':'#F3F4F6',color:activeCat==='all'?'var(--primary)':'#6B7280',border:activeCat==='all'?'1px solid #C7D2FE':'1px solid transparent'}">📋 全部工序路线</span>
-      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'#EFF6FF':'#F3F4F6',color:activeCat==='结构件'?'var(--info)':'#6B7280',border:activeCat==='结构件'?'1px solid #BFDBFE':'1px solid transparent'}">🔩 结构件路线</span>
-      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'#FEF3C7':'#F3F4F6',color:activeCat==='机加工'?'var(--warning)':'#6B7280',border:activeCat==='机加工'?'1px solid #FDE68A':'1px solid transparent'}">⚙️ 机加工路线</span>
+      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'var(--primary-light)':'var(--bg-hover)',color:activeCat==='all'?'var(--primary)':'var(--text-placeholder)',border:activeCat==='all'?'1px solid var(--primary-light)':'1px solid transparent'}">📋 全部工序路线</span>
+      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'var(--info-light)':'var(--bg-hover)',color:activeCat==='结构件'?'var(--info)':'var(--text-placeholder)',border:activeCat==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}">🔩 结构件路线</span>
+      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:activeCat==='机加工'?'var(--warning)':'var(--text-placeholder)',border:activeCat==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}">⚙️ 机加工路线</span>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>🔀 工序路线</h3>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:var(--space-2)">
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建路线</button>
         </div>
       </div>
       <div class="card-body">
         <div v-if="filteredRoutes.length">
-          <div v-for="r in filteredRoutes" :key="r.id" class="route-card" style="border:1px solid #E5E7EB;border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;background:white">
+          <div v-for="r in filteredRoutes" :key="r.id" class="route-card" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3);background:white">
             <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" @click="toggleExpand(r.id)">
-              <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:18px">{{ expandedId === r.id ? '▼' : '▶' }}</span>
+              <div style="display:flex;align-items:center;gap:var(--space-3)">
+                <span style="font-size:var(--text-xl)">{{ expandedId === r.id ? '▼' : '▶' }}</span>
                 <div>
                   <div style="font-weight:600;font-size:15px">{{ r.name }}</div>
-                  <div v-if="r.description" style="font-size:12px;color:var(--text-placeholder);margin-top:2px">{{ r.description }}</div>
+                  <div v-if="r.description" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">{{ r.description }}</div>
                 </div>
                 <span class="badge" :class="r.status==='active'?'badge-success':'badge-danger'" style="font-size:var(--text-xs-alt)">{{ r.status==='active'?'启用':'停用' }}</span>
               </div>
-              <div style="display:flex;gap:4px" @click.stop>
+              <div style="display:flex;gap:var(--space-1)" @click.stop>
                 <span class="o-abtn o-edit" @click="openEdit(r)" title="编辑">✏️</span>
                 <span class="o-abtn o-del" @click="del(r)" title="删除">🗑️</span>
               </div>
@@ -38,7 +38,7 @@
             <!-- 工序流 -->
             <div v-if="r.processes && r.processes.length" style="display:flex;align-items:center;gap:0;margin-top:8px;flex-wrap:wrap">
               <template v-for="(p, idx) in r.processes" :key="p.id">
-                <span style="display:flex;align-items:center;gap:4px;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:var(--radius-md);padding:4px 10px;font-size:12px;white-space:nowrap">
+                <span style="display:flex;align-items:center;gap:var(--space-1);background:var(--primary-light);border:1px solid var(--primary-light);border-radius:var(--radius-md);padding:var(--space-1) 10px;font-size:var(--text-xs);white-space:nowrap">
                   <span style="color:var(--primary);font-weight:600">{{ idx + 1 }}</span>
                   <span>{{ p.process_name }}</span>
                   <span v-if="p.required_audit" style="color:var(--warning);font-size:var(--text-2xs)" title="需要审批">🔒</span>
@@ -47,8 +47,8 @@
               </template>
             </div>
             <!-- 展开详情 -->
-            <div v-if="expandedId === r.id && r.processes && r.processes.length" style="margin-top:12px;border-top:1px solid #F3F4F6;padding-top:12px">
-              <table class="data-table" style="font-size:12px">
+            <div v-if="expandedId === r.id && r.processes && r.processes.length" style="margin-top:12px;border-top:1px solid var(--bg-hover);padding-top:12px">
+              <table class="data-table" style="font-size:var(--text-xs)">
                 <thead><tr><th style="width:40px">#</th><th>工序名称</th><th style="width:60px;text-align:center">序号</th><th style="width:70px;text-align:center">必须</th><th style="width:70px;text-align:center">审批</th></tr></thead>
                 <tbody>
                   <tr v-for="(p, idx) in r.processes" :key="p.id">
@@ -61,7 +61,7 @@
                 </tbody>
               </table>
             </div>
-            <div v-if="!r.processes || !r.processes.length" style="font-size:12px;color:var(--text-placeholder);margin-top:8px">暂无工序节点</div>
+            <div v-if="!r.processes || !r.processes.length" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:8px">暂无工序节点</div>
           </div>
         </div>
         <div v-else class="empty"><div class="empty-icon">🔀</div><div class="empty-text">{{ routes.length ? '无匹配路线' : '暂无工序路线' }}</div></div>
@@ -88,24 +88,24 @@
 
           <!-- 工序节点编辑器 -->
           <div style="margin-top:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <label style="font-weight:600;font-size:14px">工序节点</label>
-              <button class="btn btn-default btn-sm" @click="addRow" style="font-size:12px;padding:4px 12px">+ 添加工序</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
+              <label style="font-weight:600;font-size:var(--text-base)">工序节点</label>
+              <button class="btn btn-default btn-sm" @click="addRow" style="font-size:var(--text-xs);padding:var(--space-1) 12px">+ 添加工序</button>
             </div>
             <div v-if="routeProcesses.length">
-              <div v-for="(rp, idx) in routeProcesses" :key="idx" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;padding:8px;background:#F9FAFB;border-radius:var(--radius-md)">
-                <span style="color:var(--text-placeholder);font-size:12px;min-width:20px">{{ idx + 1 }}</span>
-                <select class="form-input" v-model="rp.process_id" style="flex:1;font-size:13px">
+              <div v-for="(rp, idx) in routeProcesses" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:var(--space-2);background:var(--bg-table-header);border-radius:var(--radius-md)">
+                <span style="color:var(--text-placeholder);font-size:var(--text-xs);min-width:20px">{{ idx + 1 }}</span>
+                <select class="form-input" v-model="rp.process_id" style="flex:1;font-size:var(--text-sm)">
                   <option value="">-- 选择工序 --</option>
                   <option v-for="p in allProcesses" :key="p.id" :value="p.id">{{ p.seq_order }}. {{ p.process_name }}</option>
                 </select>
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;color:#6B7280">
+                <label style="display:flex;align-items:center;gap:var(--space-1);font-size:var(--text-xs);white-space:nowrap;color:var(--text-placeholder)">
                   <input type="checkbox" v-model="rp.required_audit" :true-value="1" :false-value="0" style="accent-color:var(--primary)"> 需审批
                 </label>
-                <span @click="removeRow(idx)" style="color:#EF4444;cursor:pointer;font-size:14px" title="移除">✕</span>
+                <span @click="removeRow(idx)" style="color:var(--danger);cursor:pointer;font-size:var(--text-base)" title="移除">✕</span>
               </div>
             </div>
-            <p v-else style="font-size:12px;color:var(--text-placeholder);text-align:center;padding:12px">暂未添加工序节点</p>
+            <p v-else style="font-size:var(--text-xs);color:var(--text-placeholder);text-align:center;padding:var(--space-3)">暂未添加工序节点</p>
           </div>
         </div>
         <div class="modal-footer">

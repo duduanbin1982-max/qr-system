@@ -1,44 +1,44 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- Tab Bar -->
-    <div style="display:flex;gap:0;margin-bottom:20px;background:#F3F4F6;border-radius:var(--radius-lg);padding:4px">
+    <div style="display:flex;gap:0;margin-bottom:var(--space-5);background:var(--bg-hover);border-radius:var(--radius-lg);padding:var(--space-1)">
       <div v-for="t in [{k:'daily',l:'📊 日报表'},{k:'worker',l:'👷 员工计件'},{k:'scrap',l:'⚠️ 报废记录'},{k:'progress',l:'📈 订单进度'}]" :key="t.k"
-        @click="switchTab(t.k)" style="flex:1;text-align:center;padding:var(--space-3) 4px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s"
-        :style="{background: tab===t.k?'white':'transparent',color: tab===t.k?'var(--primary)':'#6B7280',boxShadow: tab===t.k?'0 1px 3px rgba(0,0,0,0.1)':'none'}">
+        @click="switchTab(t.k)" style="flex:1;text-align:center;padding:var(--space-3) 4px;border-radius:var(--radius-md);cursor:pointer;font-size:var(--text-sm);font-weight:500;transition:all 0.2s"
+        :style="{background: tab===t.k?'var(--bg-surface)':'transparent',color: tab===t.k?'var(--primary)':'var(--text-placeholder)',boxShadow: tab===t.k?'0 1px 3px rgba(0,0,0,0.1)':'none'}">
         {{ t.l }}
       </div>
     </div>
 
     <!-- ========== Tab: Daily ========== -->
     <div v-if="tab==='daily'">
-      <div class="card" style="margin-bottom:16px">
+      <div class="card" style="margin-bottom:var(--space-4)">
         <div class="card-header">
           <h3>📊 生产日报表</h3>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:var(--space-2);align-items:center">
             <input type="date" class="form-input" v-model="dailyDate" @change="loadDaily" style="width:150px">
             <button class="btn btn-success btn-sm" @click="exportDaily">📥 导出CSV</button>
           </div>
         </div>
       </div>
-      <div class="card" style="margin-bottom:16px" v-if="dailySummary.length">
+      <div class="card" style="margin-bottom:var(--space-4)" v-if="dailySummary.length">
         <div class="card-header"><h3>📊 工序汇总</h3></div>
         <div class="card-body"><div class="table-wrap"><table class="data-table">
           <thead><tr><th style="width:40px">#</th><th>工序</th><th style="text-align:center">报工次数</th><th style="text-align:center">产出</th><th style="text-align:center">报废</th><th style="text-align:center">返修</th></tr></thead>
           <tbody>
             <tr v-for="(s, idx) in dailySummary" :key="s.id">
-              <td><span class="badge" style="background:#EEF2FF;color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
+              <td><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
               <td style="font-weight:500">{{ s.name }}</td>
               <td style="text-align:center">{{ s.record_count }}</td>
-              <td style="text-align:center"><span class="badge" style="background:#F0FDF4;color:#15803D;border:1px solid #BBF7D0">{{ s.total_output }}</span></td>
-              <td style="text-align:center"><span class="badge" style="background:#FEF2F2;color:var(--danger);border:1px solid #FECACA">{{ s.total_scrap }}</span></td>
-              <td style="text-align:center"><span class="badge" style="background:#FFFBEB;color:var(--warning);border:1px solid #FDE68A">{{ s.total_rework }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--success-light);color:var(--success-dark);border:1px solid var(--success-lighter)">{{ s.total_output }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger-lighter)">{{ s.total_scrap }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--warning-light);color:var(--warning);border:1px solid var(--warning-lighter)">{{ s.total_rework }}</span></td>
             </tr>
           </tbody>
         </table></div></div>
       </div>
       <div class="card">
         <div class="card-header"><h3>📝 报工明细 ({{ dailyRecords.length }})</h3></div>
-        <div class="card-body"><div class="table-wrap"><table v-if="dailyRecords.length" class="data-table" style="font-size:12px">
+        <div class="card-body"><div class="table-wrap"><table v-if="dailyRecords.length" class="data-table" style="font-size:var(--text-xs)">
           <thead><tr><th>时间</th><th>订单号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>类型</th></tr></thead>
           <tbody>
             <tr v-for="r in dailyRecords" :key="r.id">
@@ -57,10 +57,10 @@
 
     <!-- ========== Tab: Worker ========== -->
     <div v-if="tab==='worker'">
-      <div class="card" style="margin-bottom:16px">
+      <div class="card" style="margin-bottom:var(--space-4)">
         <div class="card-header">
           <h3>👷 员工计件统计</h3>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:var(--space-2);align-items:center">
             <input type="date" class="form-input" v-model="wStart" style="width:140px">
             <span style="color:var(--text-placeholder)">至</span>
             <input type="date" class="form-input" v-model="wEnd" style="width:140px">
@@ -74,13 +74,13 @@
           <thead><tr><th style="width:40px">#</th><th>员工</th><th>工号</th><th style="text-align:center">出勤天数</th><th style="text-align:center">总产出</th><th style="text-align:center">报废</th><th style="text-align:center">返修</th></tr></thead>
           <tbody>
             <tr v-for="(w, idx) in workers" :key="w.id">
-              <td><span class="badge" style="background:#EEF2FF;color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
+              <td><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
               <td style="font-weight:500">{{ w.name }}</td>
-              <td><code style="font-size:12px">{{ w.employee_no || '-' }}</code></td>
+              <td><code style="font-size:var(--text-xs)">{{ w.employee_no || '-' }}</code></td>
               <td style="text-align:center">{{ w.work_days }}</td>
-              <td style="text-align:center"><span class="badge" style="background:#F0FDF4;color:#15803D;border:1px solid #BBF7D0">{{ w.total_output }}</span></td>
-              <td style="text-align:center"><span class="badge" style="background:#FEF2F2;color:var(--danger);border:1px solid #FECACA">{{ w.total_scrap }}</span></td>
-              <td style="text-align:center"><span class="badge" style="background:#FFFBEB;color:var(--warning);border:1px solid #FDE68A">{{ w.total_rework }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--success-light);color:var(--success-dark);border:1px solid var(--success-lighter)">{{ w.total_output }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger-lighter)">{{ w.total_scrap }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--warning-light);color:var(--warning);border:1px solid var(--warning-lighter)">{{ w.total_rework }}</span></td>
             </tr>
           </tbody>
         </table><p v-else class="empty"><span class="empty-icon">👥</span><span class="empty-text">无统计数据</span></p></div></div>
@@ -90,10 +90,10 @@
 
     <!-- ========== Tab: Scrap ========== -->
     <div v-if="tab==='scrap'">
-      <div class="card" style="margin-bottom:16px">
+      <div class="card" style="margin-bottom:var(--space-4)">
         <div class="card-header">
           <h3>⚠️ 报废记录</h3>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:var(--space-2);align-items:center">
             <input type="date" class="form-input" v-model="sStart" style="width:140px">
             <span style="color:var(--text-placeholder)">至</span>
             <input type="date" class="form-input" v-model="sEnd" style="width:140px">
@@ -103,7 +103,7 @@
       </div>
       <div class="card">
         <div class="card-header"><h3>⚠️ 报废记录 ({{ scrapRecords.length }})</h3></div>
-        <div class="card-body"><div class="table-wrap"><table v-if="scrapRecords.length" class="data-table" style="font-size:12px">
+        <div class="card-body"><div class="table-wrap"><table v-if="scrapRecords.length" class="data-table" style="font-size:var(--text-xs)">
           <thead><tr><th>时间</th><th>订单号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>原因</th></tr></thead>
           <tbody>
             <tr v-for="r in scrapRecords" :key="r.id">
@@ -112,8 +112,8 @@
               <td>{{ r.product_name }}</td>
               <td>{{ r.process_name }}</td>
               <td>{{ r.worker_name }}</td>
-              <td style="text-align:center;font-weight:600;color:#EF4444">{{ r.quantity }}</td>
-              <td style="font-size:12px;color:var(--text-placeholder);max-width:120px;overflow:hidden;text-overflow:ellipsis">{{ r.reason || '-' }}</td>
+              <td style="text-align:center;font-weight:600;color:var(--danger)">{{ r.quantity }}</td>
+              <td style="font-size:var(--text-xs);color:var(--text-placeholder);max-width:120px;overflow:hidden;text-overflow:ellipsis">{{ r.reason || '-' }}</td>
             </tr>
           </tbody>
         </table><p v-else class="empty"><span class="empty-icon">⚠️</span><span class="empty-text">无报废记录</span></p></div></div>
@@ -123,10 +123,10 @@
     <!-- ========== Tab: Progress ========== -->
     <div v-if="tab==='progress'">
       <!-- Summary Bar -->
-      <div class="summary-bar" style="margin-bottom:16px">
+      <div class="summary-bar" style="margin-bottom:var(--space-4)">
         <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ progressStats.count }}</div><div class="s-label">订单总数</div></div></div>
         <div class="summary-item"><span class="s-icon">🔢</span><div><div class="s-val">{{ progressStats.qty }}</div><div class="s-label">总数量</div></div></div>
-        <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val" style="color:#10B981">{{ progressStats.completed }}</div><div class="s-label">已完成</div></div></div>
+        <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val" style="color:var(--success)">{{ progressStats.completed }}</div><div class="s-label">已完成</div></div></div>
         <div class="summary-item"><span class="s-icon">📈</span><div><div class="s-val text-primary">{{ progressStats.near80 }}</div><div class="s-label">进度≥80%</div></div></div>
       </div>
       <div class="card">
@@ -151,7 +151,7 @@
           <tbody>
             <tr v-for="(o, idx) in progressOrders" :key="o.id">
               <td style="text-align:center"><span class="row-num">{{ idx+1 }}</span></td>
-              <td><code style="font-size:13px;color:var(--primary);font-weight:600">{{ o.order_no }}</code></td>
+              <td><code style="font-size:var(--text-sm);color:var(--primary);font-weight:600">{{ o.order_no }}</code></td>
               <td>{{ o.customer }}</td>
               <td style="font-weight:500">{{ o.product_name }}</td>
               <td style="text-align:center;font-weight:bold">{{ o.quantity }}</td>
@@ -162,7 +162,7 @@
                   <span class="o-ptxt">{{ progressPct(o) }}%</span>
                 </div>
               </td>
-              <td style="color:#6B7280;font-size:13px">{{ o.plan_end || '-' }}</td>
+              <td style="color:var(--text-placeholder);font-size:var(--text-sm)">{{ o.plan_end || '-' }}</td>
               <td><span class="badge" :class="o.status==='completed'?'badge-success':o.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ o.status }}</span></td>
             </tr>
           </tbody>

@@ -12,6 +12,8 @@ from modules.app import app
 from modules.db import get_db, get_setting, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.config import PERMISSION_DEFS, generate_product_code
+from modules.middleware.error_handler import handle_unexpected_error
+from modules.middleware.helpers import get_json_body, parse_pagination
 
 
 @app.route('/api/approvals/pending', methods=['GET'])
@@ -60,8 +62,8 @@ def get_approval_history():
       - Bearer: []
     """
     db = get_db()
-    page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', get_page_size(), type=int)
+    p = parse_pagination()
+    page, limit = p['page'], p['limit']
     rows = db.execute('''
         SELECT ar.*, o.order_no, p.name as process_name, u.name as worker_name, wr.quantity
         FROM approval_records ar
@@ -105,7 +107,7 @@ def handle_approval(record_id, action):
         return jsonify({'error': '审批记录不存在'}), 404
     if record['status'] != 'pending':
         return jsonify({'error': '该记录已被处理'}), 409
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     status = 'approved' if action == 'approve' else 'rejected'
 
     db.execute('SAVEPOINT approval_handle')
@@ -154,7 +156,7 @@ def handle_approval(record_id, action):
         db.execute('RELEASE approval_handle')
     except Exception as e:
         db.execute('ROLLBACK TO approval_handle')
-        return jsonify({'error': f'审批异常: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')
 
     db.commit()
     audit_log('approve_' + action, 'approval', record_id,

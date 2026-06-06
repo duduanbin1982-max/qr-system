@@ -11,8 +11,8 @@
       <input class="form-input" v-model="password" type="password" 
         placeholder="请输入密码" @keyup.enter="handleSubmit">
     </div>
-    <div v-if="error" style="color:#EF4444;font-size:13px;margin-top:8px">{{ error }}</div>
-    <button class="btn btn-primary" style="width:100%;margin-top:20px;padding:12px" 
+    <div v-if="error" style="color:var(--danger);font-size:var(--text-sm);margin-top:8px">{{ error }}</div>
+    <button class="btn btn-primary" style="width:100%;margin-top:20px;padding:var(--space-3)" 
       @click="handleSubmit" :disabled="loading">
       <span v-if="!loading">登 录</span>
       <span v-else>登录中...</span>

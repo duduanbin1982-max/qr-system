@@ -8,6 +8,8 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_setting
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
+from modules.middleware.helpers import get_json_body
 from modules.services.user_service import UserService
 
 
@@ -27,8 +29,9 @@ def list_users():
 @app.route('/api/users', methods=['POST'])
 @check_auth
 @check_permission('users:create')
+@validate_json('create_user')
 def create_user():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         uid, password = UserService.create_user(data)
     except ValueError as e:
@@ -42,7 +45,7 @@ def create_user():
 @check_auth
 @check_permission('users:edit')
 def update_user(uid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         UserService.update_user(uid, data)
     except ValueError as e:
@@ -68,7 +71,7 @@ def delete_user(uid):
 @check_auth
 @check_permission('users:edit')
 def reset_password(uid):
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         new_pw = UserService.reset_password(uid, data.get('password'))
     except ValueError as e:

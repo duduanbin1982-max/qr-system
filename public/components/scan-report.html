@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📱</span><div><div class="s-val">{{ order ? '已扫描' : '待扫描' }}</div><div class="s-label">扫码状态</div></div></div>
       <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val text-primary">{{ order?.order_no || '-' }}</div><div class="s-label">当前订单</div></div></div>
@@ -7,13 +7,13 @@
     </div>
 
     <!-- 扫码区 -->
-    <div class="card" style="margin-bottom:20px">
-      <div class="card-body" style="padding:20px">
-        <div style="display:flex;gap:12px;align-items:center">
+    <div class="card" style="margin-bottom:var(--space-5)">
+      <div class="card-body" style="padding:var(--space-5)">
+        <div style="display:flex;gap:var(--space-3);align-items:center">
           <div style="flex:1;position:relative">
             <input class="form-input" v-model="scanCode" placeholder="📷 输入或扫描订单号 / 产品二维码..."
-              @keyup.enter="doScan" style="font-size:16px;padding:var(--space-3) 16px;padding-right:48px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
-            <span v-if="scanCode" @click="scanCode=''" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-placeholder);font-size:16px">✕</span>
+              @keyup.enter="doScan" style="font-size:var(--text-lg);padding:var(--space-3) 16px;padding-right:48px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
+            <span v-if="scanCode" @click="scanCode=''" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-placeholder);font-size:var(--text-lg)">✕</span>
           </div>
           <button class="btn btn-primary" @click="doScan" :disabled="scanning" style="padding:var(--space-3) 32px;font-size:15px;white-space:nowrap">
             <span v-if="scanning">⏳ 查询中...</span>
@@ -29,37 +29,37 @@
       <div class="card">
         <div class="card-header"><h3>📋 {{ order.order_no }}</h3></div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);font-size:var(--text-base)">
             <div><span style="color:var(--text-placeholder)">产品：</span><strong>{{ order.product_name }}</strong></div>
             <div><span style="color:var(--text-placeholder)">客户：</span>{{ order.customer || '-' }}</div>
             <div><span style="color:var(--text-placeholder)">数量：</span><strong>{{ order.quantity }}</strong></div>
             <div><span style="color:var(--text-placeholder)">已完成：</span><strong class="text-success">{{ order.completed || 0 }}</strong></div>
-            <div><span style="color:var(--text-placeholder)">报废：</span><strong style="color:#EF4444">{{ order.scrapped || 0 }}</strong></div>
+            <div><span style="color:var(--text-placeholder)">报废：</span><strong style="color:var(--danger)">{{ order.scrapped || 0 }}</strong></div>
             <div><span style="color:var(--text-placeholder)">返工：</span><strong style="color:var(--warning)">{{ order.rework || 0 }}</strong></div>
             <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="order.status==='completed'?'badge-success':order.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ order.status }}</span></div>
             <div><span style="color:var(--text-placeholder)">交期：</span>{{ order.deadline || '-' }}</div>
           </div>
           <!-- 进度条 -->
           <div style="margin-top:12px">
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-placeholder);margin-bottom:4px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-xs);color:var(--text-placeholder);margin-bottom:var(--space-1)">
               <span>生产进度</span><span>{{ pctDone() }}%</span>
             </div>
-            <div style="height:8px;background:#E5E7EB;border-radius:var(--radius-sm);overflow:hidden">
+            <div style="height:8px;background:var(--border-light);border-radius:var(--radius-sm);overflow:hidden">
               <div :style="{width:pctDone()+'%',height:'100%',background:'var(--primary)',borderRadius:'4px'}"></div>
             </div>
           </div>
           <!-- 工序列表 -->
           <div v-if="order.processes && order.processes.length" style="margin-top:16px">
-            <div style="font-size:13px;color:#6B7280;margin-bottom:8px">工序节点：</div>
+            <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-bottom:var(--space-2)">工序节点：</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-2)">
               <div v-for="p in order.processes" :key="p.id"
-                style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F9FAFB;border-radius:var(--radius-md);font-size:13px"
+                style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) 12px;background:var(--bg-table-header);border-radius:var(--radius-md);font-size:var(--text-sm)"
                 :style="{borderLeft: p.process_id == reportProcess ? '3px solid var(--primary)' : '3px solid transparent'}">
                 <span style="color:var(--text-placeholder);min-width:20px">{{ p.seq_order }}</span>
                 <span style="flex:1;font-weight:500">{{ p.process_name }}</span>
                 <span style="text-align:right">
                   <span v-if="p.completed" style="color:var(--success);font-weight:600">✓ {{ p.completed }}</span>
-                  <span v-else style="color:#D1D5DB">-</span>
+                  <span v-else style="color:var(--border)">-</span>
                 </span>
                 <span style="font-size:var(--text-xs-alt);color:var(--text-placeholder);min-width:50px">/ {{ order.quantity }}</span>
               </div>
@@ -71,7 +71,7 @@
       <!-- 右栏：报工表单 + 记录 -->
       <div v-if="canReport">
         <!-- 报工表单 -->
-        <div class="card" style="margin-bottom:20px">
+        <div class="card" style="margin-bottom:var(--space-5)">
           <div class="card-header"><h3>📝 提交报工</h3></div>
           <div class="card-body">
             <div class="form-group"><label>工序</label>
@@ -88,10 +88,10 @@
               </div>
               <div class="form-col" style="flex:2">
                 <div class="form-group"><label>类型</label>
-                  <div style="display:flex;gap:4px;margin-top:4px">
+                  <div style="display:flex;gap:var(--space-1);margin-top:4px">
                     <label v-for="t in [{v:'normal',l:'正常'},{v:'scrap',l:'报废'},{v:'rework',l:'返工'}]" :key="t.v"
-                      style="flex:1;text-align:center;padding:8px;border-radius:var(--radius-md);border:2px solid;cursor:pointer;font-size:13px"
-                      :style="{borderColor: reportType===t.v?'var(--primary)':'#E5E7EB',background:reportType===t.v?'#EEF2FF':'white',color:reportType===t.v?'var(--primary)':'#6B7280'}">
+                      style="flex:1;text-align:center;padding:var(--space-2);border-radius:var(--radius-md);border:2px solid;cursor:pointer;font-size:var(--text-sm)"
+                      :style="{borderColor: reportType===t.v?'var(--primary)':'var(--border-light)',background:reportType===t.v?'var(--primary-light)':'var(--bg-surface)',color:reportType===t.v?'var(--primary)':'var(--text-placeholder)'}">
                       <input type="radio" v-model="reportType" :value="t.v" style="display:none">{{ t.l }}
                     </label>
                   </div>
@@ -99,7 +99,7 @@
               </div>
             </div>
             <div class="form-group"><label>备注</label><input class="form-input" v-model="reportRemark" placeholder="备注（可选）"></div>
-            <button class="btn btn-primary" @click="doReport" :disabled="reporting" style="width:100%;padding:12px;font-size:15px;margin-top:8px">
+            <button class="btn btn-primary" @click="doReport" :disabled="reporting" style="width:100%;padding:var(--space-3);font-size:15px;margin-top:8px">
               <span v-if="reporting">⏳ 提交中...</span>
               <span v-else>✅ 确认报工</span>
             </button>
@@ -110,7 +110,7 @@
         <div class="card">
           <div class="card-header"><h3>📜 报工记录</h3></div>
           <div class="card-body" style="max-height:400px;overflow-y:auto">
-            <table v-if="(order.records||[]).length" class="data-table" style="font-size:12px">
+            <table v-if="(order.records||[]).length" class="data-table" style="font-size:var(--text-xs)">
               <thead><tr><th>时间</th><th>工序</th><th>工人</th><th>数量</th><th>状态</th></tr></thead>
               <tbody>
                 <tr v-for="r in (order.records||[]).slice(0,30)" :key="r.id">
@@ -122,7 +122,7 @@
                 </tr>
               </tbody>
             </table>
-            <p v-else style="text-align:center;color:var(--text-placeholder);padding:20px">暂无报工记录</p>
+            <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无报工记录</p>
           </div>
         </div>
       </div>
@@ -131,9 +131,9 @@
     <!-- 未扫描提示 -->
     <div v-else class="card">
       <div class="card-body" style="text-align:center;padding:60px">
-        <div style="font-size:48px;margin-bottom:16px">📱</div>
-        <div style="font-size:16px;color:#6B7280">扫描订单二维码或输入订单号开始报工</div>
-        <div style="font-size:13px;color:var(--text-placeholder);margin-top:8px">支持订单号（如 WK2605280001）或产品二维码</div>
+        <div style="font-size:48px;margin-bottom:var(--space-4)">📱</div>
+        <div style="font-size:var(--text-lg);color:var(--text-placeholder)">扫描订单二维码或输入订单号开始报工</div>
+        <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-top:8px">支持订单号（如 WK2605280001）或产品二维码</div>
       </div>
     </div>
   </div>

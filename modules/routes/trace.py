@@ -6,6 +6,7 @@ from flask import jsonify
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.error_handler import handle_unexpected_error
 
 
 @app.route('/api/trace/<code>', methods=['GET'])
@@ -89,4 +90,4 @@ def trace_product(code):
             'shipments': shipments,
         })
     except Exception as e:
-        return jsonify({'error': f'追溯失败: {str(e)}'}), 500
+        return handle_unexpected_error(e, 'database operation')

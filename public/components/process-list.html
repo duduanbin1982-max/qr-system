@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val">{{ processes.length }}</div><div class="s-label">工序总数</div></div></div>
       <div class="summary-item"><span class="s-icon">🏗️</span><div><div class="s-val text-primary">{{ structCount }}</div><div class="s-label">结构件</div></div></div>
@@ -7,16 +7,16 @@
     </div>
 
     <!-- 分类Tab按钮 -->
-    <div style="display:flex;gap:var(--space-3);margin-bottom:16px;flex-wrap:wrap">
-      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'#EEF2FF':'#F3F4F6',color:activeCat==='all'?'var(--primary)':'#6B7280',border:activeCat==='all'?'1px solid #C7D2FE':'1px solid transparent'}">📋 全部工序</span>
-      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'#EFF6FF':'#F3F4F6',color:activeCat==='结构件'?'var(--info)':'#6B7280',border:activeCat==='结构件'?'1px solid #BFDBFE':'1px solid transparent'}">🔩 结构件工序</span>
-      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'#FEF3C7':'#F3F4F6',color:activeCat==='机加工'?'var(--warning)':'#6B7280',border:activeCat==='机加工'?'1px solid #FDE68A':'1px solid transparent'}">⚙️ 机加工工序</span>
+    <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'var(--primary-light)':'var(--bg-hover)',color:activeCat==='all'?'var(--primary)':'var(--text-placeholder)',border:activeCat==='all'?'1px solid var(--primary-light)':'1px solid transparent'}">📋 全部工序</span>
+      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'var(--info-light)':'var(--bg-hover)',color:activeCat==='结构件'?'var(--info)':'var(--text-placeholder)',border:activeCat==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}">🔩 结构件工序</span>
+      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:activeCat==='机加工'?'var(--warning)':'var(--text-placeholder)',border:activeCat==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}">⚙️ 机加工工序</span>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>{{ pageTitle }}</h3>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
           <button class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加工序</button>
         </div>
       </div>
@@ -37,7 +37,7 @@
               <tr v-for="p in processes" :key="p.id">
                 <td style="text-align:center"><span class="row-num">{{ p.seq }}</span></td>
                 <td style="font-weight:600">{{ p.process_name }}</td>
-                <td style="color:#6B7280;font-size:13px">{{ p.description || '-' }}</td>
+                <td style="color:var(--text-placeholder);font-size:var(--text-sm)">{{ p.description || '-' }}</td>
                 <td style="white-space:nowrap"><span class="badge" :class="p.category === '结构件' ? 'badge-info' : 'badge-warning'" style="font-size:var(--text-xs-alt)">{{ p.category }}</span></td>
                 <td style="white-space:nowrap"><span class="badge" :class="p.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">{{ p.status === 'active' ? '启用' : '停用' }}</span></td>
                 <td style="text-align:center">

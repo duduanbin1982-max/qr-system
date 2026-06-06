@@ -112,21 +112,17 @@ export default {
     }
 
     function openAttachment(att) {
-      const token = localStorage.getItem('token')
-      const url = '/api/product-attachments/' + att.id + '/view' + (token ? '?token=' + encodeURIComponent(token) : '')
-      window.open(url, '_blank')
+      // httpOnly cookie handles auth automatically
+      window.open('/api/product-attachments/' + att.id + '/view', '_blank')
     }
 
     function getThumbnailUrl(thumbnailId) {
       if (!thumbnailId) return null
-      const token = localStorage.getItem('token')
-      return '/api/product-attachments/' + thumbnailId + '/thumbnail' + (token ? '?token=' + encodeURIComponent(token) : '')
+      return '/api/product-attachments/' + thumbnailId + '/thumbnail'
     }
 
     function openThumbnail(thumbnailId) {
-      const token = localStorage.getItem('token')
-      const url = '/api/product-attachments/' + thumbnailId + '/view' + (token ? '?token=' + encodeURIComponent(token) : '')
-      window.open(url, '_blank')
+      window.open('/api/product-attachments/' + thumbnailId + '/view', '_blank')
     }
 
     async function loadProductAttachments(productId) {
@@ -145,10 +141,8 @@ export default {
       const formData = new FormData()
       formData.append('file', files[0])
       try {
-        const token = localStorage.getItem('token')
         const resp = await fetch('/api/products/' + currentEditProductId.value + '/attachments', {
           method: 'POST',
-          headers: token ? { 'Authorization': 'Bearer ' + token } : {},
           body: formData
         })
         if (resp.ok) {
@@ -274,10 +268,8 @@ export default {
       const formData = new FormData()
       formData.append('file', files[0])
       try {
-        const token = localStorage.getItem('token')
         const resp = await fetch('/api/products/import', {
           method: 'POST',
-          headers: token ? { 'Authorization': 'Bearer ' + token } : {},
           body: formData
         })
         const d = await resp.json()

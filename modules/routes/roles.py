@@ -4,6 +4,7 @@ qr-system — 角色管理（路由层）
 from flask import request, jsonify
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.helpers import get_json_body
 from modules.services.role_service import RoleGroupService, RoleService
 
 
@@ -43,7 +44,7 @@ def create_role_group():
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         gid = RoleGroupService.create_group(data)
     except ValueError as e:
@@ -67,7 +68,7 @@ def update_role_group(gid):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         RoleGroupService.update_group(gid, data)
     except ValueError as e:
@@ -136,7 +137,7 @@ def create_role():
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         rid = RoleService.create_role(data)
     except ValueError as e:
@@ -160,7 +161,7 @@ def update_role(rid):
     security:
       - Bearer: []
     """
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     try:
         RoleService.update_role(rid, data)
     except ValueError as e:

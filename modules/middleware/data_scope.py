@@ -1,10 +1,11 @@
 """
 qr-system — 数据权限中间件：基于岗位+角色的数据范围控制
 """
+from typing import Any, List, Optional, Tuple, Union
 from modules.db import get_db
 from modules.middleware.auth import get_user_permissions
 
-def get_user_process_ids(user):
+def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
     """返回用户可访问的工序ID列表。None=全部, [] =无权限"""
     if not user:
         return None
@@ -27,7 +28,7 @@ def get_user_process_ids(user):
     return None
 
 
-def process_filter_condition(user, column='process_id'):
+def process_filter_condition(user: Optional[dict], column: str = 'process_id') -> Tuple[str, List[int]]:
     """返回 (where_clause, params) 用于 SQL 过滤。
     - 管理员/全局角色：('1=1', [])
     - 无工序权限：('1=0', [])  
@@ -42,7 +43,7 @@ def process_filter_condition(user, column='process_id'):
     return (f'{column} IN ({placeholders})', pids)
 
 
-def filter_by_process(data_list, process_id_field, user):
+def filter_by_process(data_list: List[dict], process_id_field: str, user: Optional[dict]) -> List[dict]:
 
     """过滤列表数据，仅保留用户有权限的工序"""
     pids = get_user_process_ids(user)

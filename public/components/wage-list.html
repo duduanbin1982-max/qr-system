@@ -1,30 +1,30 @@
 
-  <div style="padding:24px;max-width:1400px">
+  <div style="padding:var(--space-6);max-width:1400px">
     <div class="summary-bar">
       <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--primary);display:flex;align-items:center;gap:var(--space-3)">
         <div style="font-size:28px">👥</div>
-        <div><div style="font-size:22px;font-weight:700;color:var(--primary)">{{ wages.length }}</div><div style="font-size:13px;color:var(--text-muted)">员工数</div></div>
+        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--primary)">{{ wages.length }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">员工数</div></div>
       </div>
       <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--success);display:flex;align-items:center;gap:var(--space-3)">
         <div style="font-size:28px">📦</div>
-        <div><div style="font-size:22px;font-weight:700;color:var(--success)">{{ grandQty() }}</div><div style="font-size:13px;color:var(--text-muted)">总件数</div></div>
+        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--success)">{{ grandQty() }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总件数</div></div>
       </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid #d97706;display:flex;align-items:center;gap:var(--space-3)">
+      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--warning);display:flex;align-items:center;gap:var(--space-3)">
         <div style="font-size:28px">💰</div>
-        <div><div style="font-size:22px;font-weight:700;color:#d97706">¥{{ fmtMoney(grandTotal()) }}</div><div style="font-size:13px;color:var(--text-muted)">总工资</div></div>
+        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--warning)">¥{{ fmtMoney(grandTotal()) }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总工资</div></div>
       </div>
     </div>
 
-    <div class="card" style="border-radius:14px;overflow:hidden;padding:0">
+    <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">
       <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) 20px">
-        <h3 style="font-size:16px;font-weight:700;color:#1f2937;display:flex;align-items:center;gap:8px;margin:0">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,#d97706,#b45309);border-radius:var(--radius-md);font-size:16px;color:white">💰</span>
+        <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2);margin:0">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,var(--warning),var(--warning-dark));border-radius:var(--radius-md);font-size:var(--text-lg);color:white">💰</span>
           工资核算
         </h3>
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
-          <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:12px;padding:var(--space-1) 8px" @change="load">
-          <span style="color:#9ca3af;font-size:12px">至</span>
-          <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:12px;padding:var(--space-1) 8px" @change="load">
+          <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
+          <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
+          <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
           <button class="btn-default btn-sm" @click="load" style="margin-left:4px">查询</button>
           <button class="btn-primary btn-sm" @click="exportCSV" style="margin-left:4px;background:var(--success);border-color:var(--success)">📥 导出CSV</button>
         </div>
@@ -34,7 +34,7 @@
       <div v-else-if="!wages.length" style="text-align:center;padding:60px;color:var(--text-placeholder)"><p style="font-size:48px;margin:0">💰</p><p style="margin-top:12px">暂无工资数据</p></div>
       <div v-else style="padding:0 20px 20px">
         <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="border-bottom:1px solid #e5e7eb;color:#6B7280;font-size:12px">
+          <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder);font-size:var(--text-xs)">
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:30px"></th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:90px">姓名</th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">工号</th>
@@ -44,35 +44,35 @@
           </tr></thead>
           <tbody>
             <template v-for="w in wages">
-            <tr :key="w.employee_no" style="border-bottom:1px solid #f3f4f6;font-size:13px;cursor:pointer" @click="toggle(w.employee_no)" :style="{background:expandedId===w.employee_no?'#f8f9ff':''}">
+            <tr :key="w.employee_no" style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm);cursor:pointer" @click="toggle(w.employee_no)" :style="{background:expandedId===w.employee_no?'var(--primary-light)':''}">
               <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ expandedId===w.employee_no ? '▼' : '▶' }}</td>
-              <td style="padding:var(--space-3) 12px;font-weight:600;color:#1f2937">{{ w.employee_name }}</td>
-              <td style="padding:var(--space-3) 12px;color:#6B7280;font-size:12px">{{ w.employee_no || '-' }}</td>
+              <td style="padding:var(--space-3) 12px;font-weight:600;color:var(--text-primary)">{{ w.employee_name }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs)">{{ w.employee_no || '-' }}</td>
               <td style="padding:var(--space-3) 12px;text-align:center;font-weight:600">{{ w.total_quantity }}</td>
-              <td style="padding:var(--space-3) 12px;text-align:right;font-weight:700;color:#d97706;font-size:14px">¥{{ fmtMoney(w.total_wage) }}</td>
-              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:12px">{{ w.details.length }} 条记录</td>
+              <td style="padding:var(--space-3) 12px;text-align:right;font-weight:700;color:var(--warning);font-size:var(--text-base)">¥{{ fmtMoney(w.total_wage) }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs)">{{ w.details.length }} 条记录</td>
             </tr>
             <!-- 展开明细 -->
-            <tr v-if="expandedId===w.employee_no" style="background:#fafbfc">
+            <tr v-if="expandedId===w.employee_no" style="background:var(--bg-table-stripe)">
               <td colspan="6" style="padding:0">
-                <table style="width:100%;border-collapse:collapse;font-size:12px">
-                  <thead><tr style="border-bottom:1px solid #e5e7eb;color:#9ca3af">
-                    <th style="padding:8px 12px;text-align:left;font-weight:400;width:90px">日期</th>
-                    <th style="padding:8px 12px;text-align:left;font-weight:400;width:110px">订单号</th>
-                    <th style="padding:8px 12px;text-align:left;font-weight:400">产品</th>
-                    <th style="padding:8px 12px;text-align:left;font-weight:400;width:80px">工序</th>
-                    <th style="padding:8px 12px;text-align:center;font-weight:400;width:60px">数量</th>
-                    <th style="padding:8px 12px;text-align:right;font-weight:400;width:70px">单价</th>
-                    <th style="padding:8px 12px;text-align:right;font-weight:400;width:80px">工资</th>
+                <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs)">
+                  <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder)">
+                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:90px">日期</th>
+                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:110px">订单号</th>
+                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400">产品</th>
+                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:80px">工序</th>
+                    <th style="padding:var(--space-2) 12px;text-align:center;font-weight:400;width:60px">数量</th>
+                    <th style="padding:var(--space-2) 12px;text-align:right;font-weight:400;width:70px">单价</th>
+                    <th style="padding:var(--space-2) 12px;text-align:right;font-weight:400;width:80px">工资</th>
                   </tr></thead>
                   <tbody>
-                    <tr v-for="(d, i) in w.details" :key="i" style="border-bottom:1px solid #f3f4f6">
+                    <tr v-for="(d, i) in w.details" :key="i" style="border-bottom:1px solid var(--bg-hover)">
                       <td style="padding:var(--space-2) 12px;color:var(--text-placeholder)">{{ fmtDate(d.date) }}</td>
                       <td style="padding:var(--space-2) 12px;font-weight:500;color:var(--primary)">{{ d.order_no }}</td>
-                      <td style="padding:var(--space-2) 12px;color:#374151">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
+                      <td style="padding:var(--space-2) 12px;color:var(--text-secondary)">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
                       <td style="padding:var(--space-2) 12px;color:var(--primary-accent)">{{ d.process_name }}</td>
                       <td style="padding:var(--space-2) 12px;text-align:center;font-weight:500">{{ d.quantity }}</td>
-                      <td style="padding:var(--space-2) 12px;text-align:right;color:#6B7280">¥{{ fmtMoney(d.unit_price) }}</td>
+                      <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">¥{{ fmtMoney(d.unit_price) }}</td>
                       <td style="padding:var(--space-2) 12px;text-align:right;font-weight:600;color:var(--success)">¥{{ fmtMoney(d.wage) }}</td>
                     </tr>
                   </tbody>

@@ -1,5 +1,5 @@
 
-  <div style="padding:24px">
+  <div style="padding:var(--space-6)">
     <!-- 统计栏 -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ products.length }}</div><div class="s-label">产品总数</div></div></div>
@@ -8,19 +8,19 @@
     </div>
 
     <!-- 分类Tab按钮 -->
-    <div style="display:flex;gap:var(--space-3);margin-bottom:16px;flex-wrap:wrap">
-      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'#EEF2FF':'#F3F4F6',color:activeCat==='all'?'var(--primary)':'#6B7280',border:activeCat==='all'?'1px solid #C7D2FE':'1px solid transparent'}">📋 全部产品</span>
-      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'#EFF6FF':'#F3F4F6',color:activeCat==='结构件'?'var(--info)':'#6B7280',border:activeCat==='结构件'?'1px solid #BFDBFE':'1px solid transparent'}">🔩 结构件产品</span>
-      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'#FEF3C7':'#F3F4F6',color:activeCat==='机加工'?'var(--warning)':'#6B7280',border:activeCat==='机加工'?'1px solid #FDE68A':'1px solid transparent'}">⚙️ 机加工产品</span>
+    <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'var(--primary-light)':'var(--bg-hover)',color:activeCat==='all'?'var(--primary)':'var(--text-placeholder)',border:activeCat==='all'?'1px solid var(--primary-light)':'1px solid transparent'}">📋 全部产品</span>
+      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'var(--info-light)':'var(--bg-hover)',color:activeCat==='结构件'?'var(--info)':'var(--text-placeholder)',border:activeCat==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}">🔩 结构件产品</span>
+      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:activeCat==='机加工'?'var(--warning)':'var(--text-placeholder)',border:activeCat==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}">⚙️ 机加工产品</span>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>{{ pageTitle }}</h3>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div class="search-box" style="background:#f0f0f0;border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/型号/规格..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:8px 6px;font-size:14px;width:200px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/型号/规格..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
           <button class="btn btn-default btn-sm" @click="load" style="white-space:nowrap">搜索</button>
           <button v-if="can('products:create')" class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加产品</button>
@@ -49,18 +49,18 @@
               <tr v-for="(p, idx) in products" :key="p.id">
                 <td style="text-align:center"><span class="row-num">{{ idx + 1 }}</span></td>
                 <td style="font-weight:600">{{ p.product_name }}</td>
-                <td><code style="font-size:13px;font-weight:600;color:var(--primary);background:#EEF2FF;padding:3px 8px;border-radius:var(--radius-sm)">{{ p.product_code }}</code></td>
+                <td><code style="font-size:var(--text-sm);font-weight:600;color:var(--primary);background:var(--primary-light);padding:3px 8px;border-radius:var(--radius-sm)">{{ p.product_code }}</code></td>
                 <td>{{ p.model || '-' }}</td>
-                <td style="font-size:13px;color:#6B7280">{{ p.spec || '-' }}</td>
+                <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ p.spec || '-' }}</td>
                 <td style="white-space:nowrap"><span class="badge" :class="p.category === '结构件' ? 'badge-info' : 'badge-warning'" style="font-size:var(--text-xs-alt)">{{ p.category || '-' }}</span></td>
                 <td style="text-align:center">{{ p.weight || '-' }}</td>
                 <td style="text-align:center;color:var(--success);font-weight:500">{{ p.price ? '¥' + p.price : '-' }}</td>
                 <td style="text-align:center;vertical-align:middle">
                   <div v-if="p.thumbnail_id" style="cursor:pointer;display:inline-block" @click.stop="openThumbnail(p.thumbnail_id)" :title="'点击查看附件'">
-                    <img :src="getThumbnailUrl(p.thumbnail_id)" style="width:48px;height:48px;border-radius:var(--radius-sm);object-fit:cover;border:1px solid #E5E7EB">
+                    <img :src="getThumbnailUrl(p.thumbnail_id)" style="width:48px;height:48px;border-radius:var(--radius-sm);object-fit:cover;border:1px solid var(--border-light)">
                   </div>
-                  <span v-else-if="p.attachment_count" style="font-size:12px;color:var(--text-placeholder)">{{ p.attachment_count }} 个附件</span>
-                  <span v-else style="font-size:12px;color:#D1D5DB">-</span>
+                  <span v-else-if="p.attachment_count" style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ p.attachment_count }} 个附件</span>
+                  <span v-else style="font-size:var(--text-xs);color:var(--border)">-</span>
                 </td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
@@ -87,7 +87,7 @@
           <!-- 产品编码（自动生成，只读） -->
           <div class="form-group">
             <label>产品编码</label>
-            <input class="form-input" :value="form.product_code" readonly placeholder="自动生成（填写型号+规格+上开档+板厚后自动拼接）" style="background:#f5f5f5;color:#888;font-family:monospace;font-size:13px">
+            <input class="form-input" :value="form.product_code" readonly placeholder="自动生成（填写型号+规格+上开档+板厚后自动拼接）" style="background:var(--bg-input);color:#888;font-family:monospace;font-size:var(--text-sm)">
           </div>
 
           <!-- 产品名称 + 分类 -->
@@ -156,20 +156,20 @@
               </div>
               <div v-if="productAttachments.length" style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
                 <div v-for="att in productAttachments" :key="att.id"
-                  style="display:flex;flex-direction:column;align-items:center;width:100px;padding:6px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:var(--radius-md);text-align:center;cursor:pointer"
+                  style="display:flex;flex-direction:column;align-items:center;width:100px;padding:6px;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;cursor:pointer"
                   @click="openAttachment(att)">
-                  <div v-if="att.file_type && att.file_type.includes('image')" style="width:72px;height:72px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:4px">
+                  <div v-if="att.file_type && att.file_type.includes('image')" style="width:72px;height:72px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:var(--space-1)">
                     <img :src="'/api/product-attachments/' + att.id + '/thumbnail?token=' + (auth.token || '')" style="width:100%;height:100%;object-fit:cover">
                   </div>
-                  <div v-else style="font-size:32px;margin-bottom:4px;line-height:1">{{ getAttachmentIcon(att.file_type) }}</div>
-                  <div style="font-size:var(--text-2xs);color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px" :title="att.file_name">{{ att.file_name }}</div>
+                  <div v-else style="font-size:32px;margin-bottom:var(--space-1);line-height:1">{{ getAttachmentIcon(att.file_type) }}</div>
+                  <div style="font-size:var(--text-2xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px" :title="att.file_name">{{ att.file_name }}</div>
                   <div style="font-size:9px;color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }}</div>
-                  <div style="display:flex;gap:4px;margin-top:4px" @click.stop>
-                    <button class="attachment-delete" @click="deleteProductAttachment(att.id)" title="删除" style="font-size:var(--text-xs-alt);padding:var(--space-1) 6px;cursor:pointer;border:none;background:#FEE2E2;color:#EF4444;border-radius:var(--radius-sm)">🗑️</button>
+                  <div style="display:flex;gap:var(--space-1);margin-top:4px" @click.stop>
+                    <button class="attachment-delete" @click="deleteProductAttachment(att.id)" title="删除" style="font-size:var(--text-xs-alt);padding:var(--space-1) 6px;cursor:pointer;border:none;background:var(--danger-light);color:var(--danger);border-radius:var(--radius-sm)">🗑️</button>
                   </div>
                 </div>
               </div>
-              <div v-else style="color:var(--text-muted);font-size:12px">暂无附件</div>
+              <div v-else style="color:var(--text-muted);font-size:var(--text-xs)">暂无附件</div>
             </div>
           </template>
 
@@ -182,9 +182,9 @@
               <div class="form-col">
                 <div class="form-group">
                   <label>价格 (元)</label>
-                  <div style="display:flex;align-items:center;gap:4px">
-                    <span style="font-size:14px;color:#cf1322;font-weight:700">¥</span>
-                    <input class="form-input" type="number" step="0.01" min="0" v-model="form.price" placeholder="0.00" style="flex:1;font-size:16px;font-weight:600;color:#cf1322">
+                  <div style="display:flex;align-items:center;gap:var(--space-1)">
+                    <span style="font-size:var(--text-base);color:var(--danger-dark);font-weight:700">¥</span>
+                    <input class="form-input" type="number" step="0.01" min="0" v-model="form.price" placeholder="0.00" style="flex:1;font-size:var(--text-lg);font-weight:600;color:var(--danger-dark)">
                   </div>
                 </div>
               </div>

@@ -3,6 +3,7 @@ qr-system — Flask 应用实例
 独立模块，解决循环导入问题：所有路由文件和 server.py 都从这里导入 app
 """
 from flask import Flask, request, jsonify
+from modules.middleware.rate_limit import apply_global_rate_limit
 from flasgger import Swagger
 import os
 
@@ -12,8 +13,12 @@ PUBLIC_DIR = os.path.join(_base, 'public')
 app = Flask(__name__, static_folder=PUBLIC_DIR, template_folder=PUBLIC_DIR)
 app.jinja_env.variable_start_string = '{$'
 app.jinja_env.variable_end_string = '$}'
-app.secret_key = os.environ.get('SECRET_KEY', 'qrsys-...2024')
+_secret = os.environ.get('SECRET_KEY')
+if _secret:
+    app.secret_key = _secret
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制请求体最大 16MB
+from modules.middleware.error_handler import register_error_handlers
+register_error_handlers(app)
 
 # ============================================================
 # Swagger / OpenAPI 文档
@@ -80,6 +85,13 @@ swagger_template = {
 
 swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
+
+@app.before_request
+def api_version_prefix():
+    """透明支持 /api/v1/ 前缀 → 内部路由不变，未来版本化准备"""
+    if request.path.startswith('/api/v1/'):
+        request.environ['PATH_INFO'] = request.path.replace('/api/v1/', '/api/', 1)
+
 # ============================================================
 # CORS 白名单 + 安全头中间件
 # ============================================================
@@ -92,7 +104,11 @@ ALLOWED_ORIGINS = {
 
 @app.after_request
 def add_security_headers(response):
-    """统一注入 CORS + 安全头"""
+    """统一注入 CORS + 安全头 + 全局限流"""
+    # 全局限流检查（/api/ 路径，排除 health/login）
+    limit_resp = apply_global_rate_limit()
+    if limit_resp is not None:
+        return limit_resp
     origin = request.headers.get('Origin', '')
     if origin in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = origin
@@ -134,6 +150,8 @@ def add_security_headers(response):
 
 
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
+@app.route('/api/v1/health', methods=['GET', 'OPTIONS'])
+
 def health_check():
     """健康检查端点（负载均衡探测用）"""
     if request.method == 'OPTIONS':

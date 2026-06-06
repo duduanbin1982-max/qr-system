@@ -9,7 +9,9 @@ from flask import request, jsonify, g
 
 from modules.app import app
 from modules.db import get_db
-from modules.middleware.auth import check_auth, get_user_permissions
+from modules.middleware.auth import check_auth, get_user_permissions, audit_log
+from modules.middleware.validate import validate_json
+from modules.middleware.helpers import get_json_body
 
 
 def _lock_minutes(fail_count):
@@ -22,8 +24,9 @@ def _lock_minutes(fail_count):
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@validate_json('login')
 def login():
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
     if not username or not password:
@@ -123,7 +126,11 @@ def login():
     u['token'] = token
     del u['password']
     u['permissions'] = get_user_permissions(u)
-    return jsonify({'user': u, 'must_change_password': bool(user.get('must_change_password', 0))})
+    resp = jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
+    # Set httpOnly secure cookie (SameSite=Lax for CSRF protection)
+    resp.set_cookie('qr_token', token, httponly=True, secure=True,
+                    samesite='Lax', max_age=86400*7, path='/')
+    return resp
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -133,7 +140,10 @@ def logout():
     db.execute('UPDATE users SET token = NULL WHERE id = ?', (g.current_user['id'],))
     db.execute('UPDATE user_sessions SET is_active = 0 WHERE token = ?', (g.token,))
     db.commit()
-    return jsonify({'message': '已退出'})
+    resp = jsonify({'message': '已退出'})
+    resp.set_cookie('qr_token', '', httponly=True, secure=True,
+                    samesite='Lax', max_age=0, path='/')
+    return resp
 
 
 @app.route('/api/auth/sessions', methods=['GET'])
@@ -177,14 +187,15 @@ def auth_info():
     u.pop('password', None)
     u.pop('token', None)
     u['permissions'] = get_user_permissions(g.current_user)
-    return jsonify({'user': u, 'must_change_password': bool(user.get('must_change_password', 0))})
+    return jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
 
 
 @app.route('/api/auth/change-password', methods=['POST'])
 @check_auth
+@validate_json('change_password')
 def change_password():
     """修改当前用户密码（首次登录强制修改或主动修改）"""
-    data = request.get_json(force=True, silent=True) or {}
+    data = get_json_body()
     new_password = data.get('new_password', '').strip()
     if not new_password or len(new_password) < 6:
         return jsonify({'error': '新密码至少需要6位'}), 400
