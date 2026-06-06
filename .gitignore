@@ -1,0 +1,32 @@
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+server.pid
+
+# Certificates
+server.crt
+server.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backups & temp
+*.bak
+*.bak_*
+*.tmp
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+data/production.db.bak.*

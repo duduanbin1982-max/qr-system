@@ -1,0 +1,113 @@
+
+  <div style="padding:24px">
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-body" style="padding:20px">
+        <div style="display:flex;gap:12px;align-items:center">
+          <div style="flex:1;position:relative">
+            <input class="form-input" v-model="traceCode" placeholder="🔍 输入产品序列号进行追溯..."
+              @keyup.enter="doTrace" style="font-size:16px;padding:var(--space-3) 16px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
+          </div>
+          <button class="btn btn-primary" @click="doTrace" :disabled="searching" style="padding:var(--space-3) 32px;font-size:15px;white-space:nowrap">
+            <span v-if="searching">⏳ 查询中...</span>
+            <span v-else>🔍 追溯</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div v-if="result">
+      <!-- Item Info -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>🏷️ 产品信息</h3></div>
+        <div class="card-body">
+          <div v-if="result.item" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px">
+            <div><span style="color:var(--text-placeholder)">序列号：</span><code style="font-weight:600">{{ result.item.serial_no }}</code></div>
+            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="result.item.status==='completed'?'badge-success':result.item.status==='in_progress'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ result.item.status || '-' }}</span></div>
+            <div><span style="color:var(--text-placeholder)">订单号：</span><code style="font-weight:600">{{ result.order?.order_no || '-' }}</code></div>
+            <div><span style="color:var(--text-placeholder)">产品：</span>{{ result.order?.product_name || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">位置序号：</span>{{ result.item.position_no || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">当前工序ID：</span>{{ result.item.current_process_id || '-' }}</div>
+          </div>
+          <p v-else style="text-align:center;color:#EF4444;padding:20px">❌ 未找到该产品</p>
+        </div>
+      </div>
+
+      <!-- Order Info -->
+      <div class="card" style="margin-bottom:20px" v-if="result.order">
+        <div class="card-header"><h3>📋 关联订单</h3></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px">
+            <div><span style="color:var(--text-placeholder)">订单号：</span><code style="font-weight:600">{{ result.order.order_no }}</code></div>
+            <div><span style="color:var(--text-placeholder)">客户：</span>{{ result.order.customer || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">产品名：</span>{{ result.order.product_name }}</div>
+            <div><span style="color:var(--text-placeholder)">数量：</span><strong>{{ result.order.quantity }}</strong></div>
+            <div><span style="color:var(--text-placeholder)">已完成：</span><strong class="text-success">{{ result.order.completed || 0 }}</strong></div>
+            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="result.order.status==='completed'?'badge-success':result.order.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ result.order.status }}</span></div>
+            <div><span style="color:var(--text-placeholder)">创建时间：</span>{{ result.order.created_at }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Work Records Timeline -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>📝 报工记录 ({{ (result.work_records||[]).length }})</h3></div>
+        <div class="card-body">
+          <div v-if="result.work_records && result.work_records.length">
+            <div class="timeline">
+              <div v-for="(r, idx) in result.work_records" :key="r.id" class="tl-item" style="display:flex;gap:16px;padding:12px 0;border-bottom:1px solid #F3F4F6">
+                <div style="min-width:60px;text-align:center">
+                  <div style="width:32px;height:32px;border-radius:50%;background:#EEF2FF;display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:14px">{{ idx + 1 }}</div>
+                  <div v-if="idx < result.work_records.length - 1" style="width:2px;height:calc(100% - 32px);background:#E5E7EB;margin:4px auto 0"></div>
+                </div>
+                <div style="flex:1">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="font-weight:500">{{ r.process_name }}</div>
+                    <span class="badge" :class="r.status==='approved'?'badge-success':r.status==='pending'?'badge-warning':'badge-danger'" style="font-size:var(--text-2xs)">{{ r.status==='approved'?'已审批':r.status==='pending'?'待审批':r.status }}</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-placeholder);margin-top:2px">
+                    <span>{{ r.worker_name }}</span>
+                    <span style="margin:0 8px">·</span>
+                    <span>数量 <strong style="color:#111">{{ r.quantity }}</strong></span>
+                    <span style="margin:0 8px">·</span>
+                    <span>{{ r.created_at }}</span>
+                  </div>
+                  <div v-if="r.remark" style="font-size:12px;color:var(--text-placeholder);margin-top:2px">备注：{{ r.remark }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:20px">暂无报工记录</p>
+        </div>
+      </div>
+
+      <!-- Shipments -->
+      <div class="card">
+        <div class="card-header"><h3>🚚 发货记录 ({{ (result.shipments||[]).length }})</h3></div>
+        <div class="card-body">
+          <table v-if="result.shipments && result.shipments.length" class="data-table" style="font-size:12px">
+            <thead><tr><th>出库单号</th><th>客户</th><th>状态</th><th>总量</th><th>出库时间</th></tr></thead>
+            <tbody>
+              <tr v-for="s in result.shipments" :key="s.id">
+                <td><code style="font-size:var(--text-xs-alt)">{{ s.shipment_no }}</code></td>
+                <td>{{ s.customer || '-' }}</td>
+                <td><span class="badge" :class="s.status==='completed'?'badge-success':'badge-info'" style="font-size:var(--text-2xs)">{{ s.status==='completed'?'已出库':'待出库' }}</span></td>
+                <td style="text-align:center;font-weight:600">{{ s.total_quantity }}</td>
+                <td style="font-size:var(--text-xs-alt)">{{ s.completed_at || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:20px">暂无发货记录</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div v-else class="card">
+      <div class="card-body" style="text-align:center;padding:60px">
+        <div style="font-size:48px;margin-bottom:16px">🔍</div>
+        <div style="font-size:16px;color:#6B7280">输入产品序列号查询完整追溯链</div>
+        <div style="font-size:13px;color:var(--text-placeholder);margin-top:8px">可追踪：产品信息 → 关联订单 → 报工记录 → 发货记录</div>
+      </div>
+    </div>
+  </div>

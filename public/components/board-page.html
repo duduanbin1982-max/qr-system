@@ -1,0 +1,142 @@
+
+  <div class="board-container">
+    <!-- Header -->
+    <div class="board-header-v2">
+      <div class="board-title-v2">📊 生产进度看板</div>
+      <div class="board-cat">
+        <button class="board-cat-btn" :class="{active: boardCategory===''}" @click="switchCategory('')">全部</button>
+        <button class="board-cat-btn" :class="{active: boardCategory==='结构件'}" @click="switchCategory('结构件')">🔩 结构件</button>
+        <button class="board-cat-btn" :class="{active: boardCategory==='机加工'}" @click="switchCategory('机加工')">⚙️ 机加工</button>
+      </div>
+      <div class="board-time-v2">{{ currentTime }}</div>
+    </div>
+
+    <!-- Overdue Alert -->
+    <div v-if="overdueOrders.length > 0" class="overdue-alert">
+      <span>🚨</span>
+      <span>有 <strong style="color:#ff6b6b;font-size:18px">{{ overdueOrders.length }}</strong> 个订单已超期！</span>
+      <span style="color:rgba(255,255,255,0.5);font-size:13px">（最迟{{ overdueOrders[0].plan_end }}，已超{{ overdueOrders[0].overdue_days }}天）</span>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card"><div class="stat-val blue">{{ stats.total_orders || 0 }}</div><div class="stat-label">总订单</div></div>
+      <div class="stat-card"><div class="stat-val orange">{{ stats.producing_orders || 0 }}</div><div class="stat-label">生产中</div></div>
+      <div class="stat-card"><div class="stat-val green">{{ stats.completed_orders || 0 }}</div><div class="stat-label">已完成</div></div>
+      <div class="stat-card"><div class="stat-val purple">{{ today.today_output || 0 }}</div><div class="stat-label">今日产量</div></div>
+      <div class="stat-card"><div class="stat-val yellow">{{ today.today_reports || 0 }}</div><div class="stat-label">今日报工</div></div>
+      <div class="stat-card"><div class="stat-val pink">{{ today.today_rework || 0 }}</div><div class="stat-label">今日返工</div></div>
+      <div class="stat-card"><div class="stat-val red">{{ today.today_scrap || 0 }}</div><div class="stat-label">今日报废</div></div>
+    </div>
+
+    <!-- Chart.js Charts Row -->
+    <div class="board-charts-row">
+      <div class="panel panel-chart">
+        <div class="panel-title">📈 近30天产量趋势</div>
+        <div class="panel-body" style="position:relative;min-height:240px">
+          <canvas id="trend-chart"></canvas>
+          <div id="trend-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:8px;pointer-events:none">📊<div>暂无趋势数据</div></div>
+        </div>
+      </div>
+      <div class="panel panel-chart">
+        <div class="panel-title">🏭 近30天工序效率</div>
+        <div class="panel-body" style="position:relative;min-height:240px">
+          <canvas id="process-chart"></canvas>
+          <div id="process-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;position:absolute;inset:0;color:rgba(255,255,255,0.3);gap:8px;pointer-events:none">📊<div>暂无工序数据</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="board-main">
+      <!-- Left: Orders Progress -->
+      <div class="panel">
+        <div class="panel-title">在产订单进度</div>
+        <div class="panel-body scroll-container" v-if="orders.length > 0">
+          <div :class="{'scroll-content': orders.length > 5}">
+            <table class="board-orders-table">
+              <thead><tr><th>订单号</th><th>产品/客户</th><th>数量</th><th>进度</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr v-for="order in scrollList" :key="order.id">
+                  <td class="order-no">{{ order.order_no }}</td>
+                  <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer || '--' }}</div></td>
+                  <td><span style="font-weight:600;color:#a855f7">{{ order.completed }}</span><span style="color:rgba(255,255,255,0.3)">/</span><span>{{ order.quantity }}</span></td>
+                  <td><div class="progress-bar"><div class="progress-fill" :class="order.status" :style="{ width: (order.progress_percent || 0) + '%' }"></div></div><div class="progress-text">{{ order.progress_percent || 0 }}%</div></td>
+                  <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
+                </tr>
+              </tbody>
+            </table>
+            <table v-if="orders.length > 5" class="board-orders-table" style="margin-top:1px">
+              <tbody><tr v-for="order in scrollList" :key="'dup-'+order.id">
+                <td class="order-no">{{ order.order_no }}</td>
+                <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer || '--' }}</div></td>
+                <td><span style="font-weight:600;color:#a855f7">{{ order.completed }}</span><span style="color:rgba(255,255,255,0.3)">/</span><span>{{ order.quantity }}</span></td>
+                <td><div class="progress-bar"><div class="progress-fill" :class="order.status" :style="{ width: (order.progress_percent || 0) + '%' }"></div></div><div class="progress-text">{{ order.progress_percent || 0 }}%</div></td>
+                <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
+              </tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div v-else class="panel-body"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">📋<div>暂无在产订单</div></div></div>
+      </div>
+
+      <!-- Middle: Worker Ranking -->
+      <div class="panel">
+        <div class="panel-title">今日员工排行</div>
+        <div class="panel-body">
+          <div v-if="workerStats.length > 0">
+            <div class="worker-item" v-for="(w, idx) in workerStats" :key="w.name">
+              <div class="worker-rank" :class="'rank-'+(idx+1)">{{ idx+1 }}</div>
+              <div class="worker-avatar" :style="{background: avatarColor(w.name)}">{{ w.name[0] }}</div>
+              <div class="worker-info">
+                <div class="worker-name">{{ w.name }}</div>
+                <div class="worker-meta">报工{{ w.report_count || 0 }}次<span v-if="w.scrap > 0" style="color:#ff6b6b"> · 报废{{ w.scrap }}</span><span v-if="w.rework > 0" style="color:#ff9f43"> · 返工{{ w.rework }}</span></div>
+                <div class="worker-bar-wrap"><div class="worker-bar" :style="{width: getWorkerPercent(w)+'%', background: workerBarColor(idx)}"></div></div>
+              </div>
+              <div class="worker-output">{{ w.output || 0 }}</div>
+            </div>
+          </div>
+          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">👷<div>今日暂无报工</div></div>
+        </div>
+      </div>
+
+      <!-- Right: Process Stats + Recent Reports -->
+      <div class="panel">
+        <div class="panel-title">今日工序产量</div>
+        <div class="panel-body">
+          <div class="chart-container" v-if="processStats.length > 0">
+            <div class="chart-item" v-for="item in processStats" :key="item.name">
+              <div class="chart-label">{{ item.name }}</div>
+              <div class="chart-bar-wrap"><div class="chart-bar" :style="{ width: getProcessPercent(item)+'%', background: procBarColor(item.category) }"></div></div>
+              <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+                <div class="chart-value">{{ item.output || 0 }}</div>
+                <div v-if="item.scrap > 0" class="chart-value scrap" style="font-size:12px">({{ item.scrap }})</div>
+              </div>
+            </div>
+          </div>
+          <div v-else style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);gap:8px">🏭<div>今日暂无工序产量</div></div>
+
+          <div style="border-top:1px solid rgba(255,255,255,0.06);margin:12px -20px 0;padding:12px 20px 0">
+            <div style="font-size:15px;font-weight:bold;margin-bottom:10px;color:rgba(255,255,255,0.7)">📝 最近报工</div>
+            <div v-if="recentReports.length > 0" style="max-height:200px;overflow-y:auto">
+              <div class="report-item" v-for="report in recentReports" :key="report.id">
+                <div class="report-avatar" :style="{background: avatarColor(report.worker_name)}">{{ report.worker_name?.[0] || '?' }}</div>
+                <div class="report-info">
+                  <div class="report-title">{{ report.worker_name }} - {{ report.process_name }}</div>
+                  <div class="report-meta">{{ report.order_no }} | {{ formatTime(report.created_at) }}</div>
+                </div>
+                <div class="report-qty" :class="report.type">+{{ report.quantity }}</div>
+              </div>
+            </div>
+            <div v-else style="text-align:center;color:rgba(255,255,255,0.3);padding:20px">暂无报工记录</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="board-footer">
+      更新于 {{ updateTime }} | 每30秒自动刷新
+      <span style="margin-left:12px;cursor:pointer;color:#00d4ff" @click="loadData">🔄 刷新</span>
+    </div>
+  </div>

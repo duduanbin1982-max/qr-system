@@ -1,0 +1,14 @@
+# <type>: <short summary>
+
+# type: feat | fix | refactor | chore | docs | perf
+# 
+# feat     - new feature
+# fix      - bug fix
+# refactor - code restructure (no behavior change)
+# chore    - build/tooling (PM2, gitignore, etc.)
+# docs     - documentation
+# perf     - performance improvement
+# 
+# Example:
+#   feat: add worker efficiency dashboard
+#   fix: resolve login 500 when session expires

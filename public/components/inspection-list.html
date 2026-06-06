@@ -1,0 +1,178 @@
+
+  <div style="padding:24px;max-width:1400px">
+    <div class="summary-bar">
+      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid #6B7280;display:flex;align-items:center;gap:var(--space-3)">
+        <div style="font-size:28px">📋</div>
+        <div><div style="font-size:22px;font-weight:700;color:#6B7280">{{ stats.total }}</div><div style="font-size:13px;color:var(--text-muted)">总检验</div></div>
+      </div>
+      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--success);display:flex;align-items:center;gap:var(--space-3)">
+        <div style="font-size:28px">✅</div>
+        <div><div style="font-size:22px;font-weight:700;color:var(--success)">{{ stats.pass_count }}</div><div style="font-size:13px;color:var(--text-muted)">合格</div></div>
+      </div>
+      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid #ef4444;display:flex;align-items:center;gap:var(--space-3)">
+        <div style="font-size:28px">❌</div>
+        <div><div style="font-size:22px;font-weight:700;color:#ef4444">{{ stats.fail_count }}</div><div style="font-size:13px;color:var(--text-muted)">不合格</div></div>
+      </div>
+      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid #2563eb;display:flex;align-items:center;gap:var(--space-3)">
+        <div style="font-size:28px">📅</div>
+        <div><div style="font-size:22px;font-weight:700;color:#2563eb">{{ stats.today_count }}</div><div style="font-size:13px;color:var(--text-muted)">今日检验</div></div>
+      </div>
+    </div>
+
+    <!-- Pareto: 不良品分布 -->
+    <div v-if="pareto.items.length" class="card" style="border-radius:14px;padding:18px 24px;margin-bottom:16px">
+      <h4 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1f2937">📊 不良品帕累托图（共 {{ pareto.grand_total }} 件）</h4>
+      <div v-for="(p, i) in pareto.items" :key="p.category" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;margin-bottom:3px">
+          <span style="font-size:13px;font-weight:500;width:80px;color:#374151">{{ p.category }}</span>
+          <span style="font-size:12px;color:var(--text-placeholder);width:50px;text-align:right;margin-right:8px">{{ p.quantity }}件</span>
+          <div style="flex:1;background:#f3f4f6;border-radius:var(--radius-sm);height:20px;overflow:hidden;position:relative">
+            <div :style="{width:p.pct+'%',background:'linear-gradient(90deg,'+(i===0?'var(--danger)':i===1?'#F97316':'var(--warning)')+',#FBBF24)',height:'100%',borderRadius:'6px',transition:'width .4s'}"></div>
+          </div>
+          <span style="font-size:var(--text-xs-alt);color:#6B7280;width:65px;text-align:right;margin-left:8px">{{ p.pct }}% / {{ p.cum_pct }}%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="border-radius:14px;overflow:hidden;padding:0">
+      <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) 20px">
+        <h3 style="font-size:16px;font-weight:700;color:#1f2937;display:flex;align-items:center;gap:8px;margin:0">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,#0891B2,#0E7490);border-radius:var(--radius-md);font-size:16px;color:white">🔍</span>
+          质量检验
+        </h3>
+        <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
+          <input v-model="search" @keyup.enter="applyFilter" placeholder="搜索订单号/工序..." class="form-input" style="width:160px;font-size:13px;padding:6px 10px">
+          <select v-model="filterType" class="form-input" style="width:110px;font-size:13px;padding:6px 8px" @change="applyFilter">
+            <option value="">全部类型</option>
+            <option value="first_article">首件检验</option>
+            <option value="in_process">过程检验</option>
+            <option value="final">终检</option>
+          </select>
+          <select v-model="filterResult" class="form-input" style="width:100px;font-size:13px;padding:6px 8px" @change="applyFilter">
+            <option value="">全部结果</option>
+            <option value="pass">合格</option>
+            <option value="fail">不合格</option>
+            <option value="partial">部分合格</option>
+          </select>
+          <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:12px;padding:var(--space-1) 8px" @change="applyFilter">
+          <span style="color:#9ca3af;font-size:12px">至</span>
+          <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:12px;padding:var(--space-1) 8px" @change="applyFilter">
+          <button class="btn-add" style="margin-left:4px;padding:var(--space-2) 16px;font-size:13px" @click="openCreate">+ 新建检验</button>
+        </div>
+      </div>
+
+      <div v-if="loading" style="text-align:center;padding:60px;color:var(--text-placeholder)">⏳ 加载中...</div>
+      <div v-else-if="!items.length" style="text-align:center;padding:60px;color:var(--text-placeholder)"><p style="font-size:48px;margin:0">🔍</p><p style="margin-top:12px">暂无检验记录</p></div>
+      <div v-else style="padding:0 20px 20px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid #e5e7eb;color:#6B7280;font-size:12px">
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:120px">订单号</th>
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">工序</th>
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">类型</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:60px">检验数</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:60px">合格</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:60px">不合格</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:70px">结果</th>
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:70px">检验员</th>
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500">备注</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:100px">时间</th>
+            <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:60px">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="it in items" :key="it.id" style="border-bottom:1px solid #f3f4f6;font-size:13px">
+              <td style="padding:var(--space-2) 12px">
+                <div style="font-weight:600;color:var(--primary)">{{ it.order_no }}</div>
+                <div style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ it.product_name }}</div>
+              </td>
+              <td style="padding:var(--space-2) 12px;color:var(--primary-accent);font-weight:500">{{ it.process_name }}</td>
+              <td style="padding:var(--space-2) 12px">
+                <span :style="{background:it.inspection_type==='first_article'?'#DBEAFE':it.inspection_type==='in_process'?'#FEF3C7':'#D1FAE5',color:it.inspection_type==='first_article'?'var(--info)':it.inspection_type==='in_process'?'var(--warning)':'var(--success)',padding:'2px 8px',borderRadius:'4px',fontSize:'12px'}">{{ typeLabel(it.inspection_type) }}</span>
+              </td>
+              <td style="padding:var(--space-2) 12px;text-align:center">{{ it.quantity_checked }}</td>
+              <td style="padding:var(--space-2) 12px;text-align:center;color:var(--success);font-weight:500">{{ it.quantity_passed }}</td>
+              <td style="padding:var(--space-2) 12px;text-align:center;color:#ef4444;font-weight:500">{{ it.quantity_failed }}</td>
+              <td style="padding:var(--space-2) 12px;text-align:center">
+                <span :style="{background:it.result==='pass'?'#D1FAE5':it.result==='fail'?'#FEE2E2':'#FEF3C7',color:it.result==='pass'?'var(--success)':it.result==='fail'?'var(--danger)':'var(--warning)',padding:'2px 8px',borderRadius:'4px',fontSize:'12px',fontWeight:'500'}">{{ resultLabel(it.result) }}</span>
+              </td>
+              <td style="padding:var(--space-2) 12px;color:#374151">{{ it.inspector_name || '-' }}</td>
+              <td style="padding:var(--space-2) 12px;color:#6B7280;font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.notes || '-' }}</td>
+              <td style="padding:var(--space-2) 12px;text-align:center;font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ fmtDate(it.inspected_at) }}</td>
+              <td style="padding:var(--space-2) 12px;text-align:center">
+                <button @click="openEdit(it)" class="btn-icon-edit btn-icon-sm" style="font-size:12px;margin-right:4px" title="编辑">✏️</button>
+                <button @click="doDelete(it)" class="btn-icon-del btn-icon-sm" style="font-size:12px" title="删除">🗑</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="total > perPage" style="display:flex;justify-content:center;align-items:center;gap:12px;padding:16px 0 0">
+          <button class="btn-default btn-sm" @click="load(page-1)" :disabled="page<=1">上一页</button>
+          <span style="font-size:13px;color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total/perPage) }} 页（共 {{ total }} 条）</span>
+          <button class="btn-default btn-sm" @click="load(page+1)" :disabled="page*perPage >= total">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div v-if="showModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000" @click.self="showModal=false">
+      <div style="background:white;border-radius:14px;padding:28px;width:480px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,0.15)">
+        <h3 style="margin:0 0 20px;font-size:17px;color:#1f2937">{{ isEdit ? '编辑检验记录' : '新建检验记录' }}</h3>
+
+        <label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">订单</label>
+        <div class="combobox" style="margin-bottom:14px">
+          <input v-model="orderSearch" @input="searchOrders" @focus="searchOrders" placeholder="搜索订单号..." class="form-input" style="width:100%;box-sizing:border-box;font-size:13px" :disabled="isEdit">
+          <div v-if="orderDropdown && orders.length" class="combobox-dropdown">
+            <div v-for="o in orders" :key="o.id" class="combobox-item" @click="selectOrder(o)">
+              <span style="font-weight:600;color:var(--primary)">{{ o.order_no }}</span>
+              <span style="color:var(--text-placeholder);margin-left:8px;font-size:12px">{{ o.product_name }} · {{ o.customer_name || o.customer }}</span>
+            </div>
+          </div>
+        </div>
+
+        <label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">工序</label>
+        <div class="combobox" style="margin-bottom:14px">
+          <input v-model="processSearch" @input="searchProcesses" @focus="searchProcesses" placeholder="搜索工序名称..." class="form-input" style="width:100%;box-sizing:border-box;font-size:13px" :disabled="isEdit">
+          <div v-if="processDropdown && processes.length" class="combobox-dropdown">
+            <div v-for="p in processes" :key="p.id" class="combobox-item" @click="selectProcess(p)">
+              <span>{{ p.process_name }}</span>
+            </div>
+          </div>
+        </div>
+
+        <label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">检验类型</label>
+        <select v-model="form.inspection_type" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px;margin-bottom:14px">
+          <option value="first_article">首件检验</option>
+          <option value="in_process">过程检验</option>
+          <option value="final">终检</option>
+        </select>
+
+        <div style="display:flex;gap:12px;margin-bottom:14px">
+          <div style="flex:1"><label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">检验数量</label><input v-model.number="form.quantity_checked" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px"></div>
+          <div style="flex:1"><label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">合格</label><input v-model.number="form.quantity_passed" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px" @input="autoCalcQty"></div>
+          <div style="flex:1"><label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">不合格</label><input v-model.number="form.quantity_failed" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px" @input="autoCalcQty"></div>
+        </div>
+
+        <div v-if="form.quantity_failed > 0" style="display:flex;gap:12px;margin-bottom:14px">
+          <div style="flex:1"><label style="font-size:13px;color:var(--danger);display:block;margin-bottom:4px">缺陷类别</label>
+            <select v-model="form.defect_category" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px;border-color:#fca5a5">
+              <option value="">-- 请选择 --</option>
+              <option v-for="c in DEFECT_CATEGORIES" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </div>
+          <div style="flex:1"><label style="font-size:13px;color:var(--danger);display:block;margin-bottom:4px">缺陷数量</label>
+            <input v-model.number="form.defect_quantity" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px;border-color:#fca5a5" min="0">
+          </div>
+        </div>
+
+        <label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">备注</label>
+        <input v-model="form.notes" placeholder="检验备注..." class="form-input" style="width:100%;box-sizing:border-box;font-size:13px;margin-bottom:14px">
+
+        <label style="font-size:13px;color:#6B7280;display:block;margin-bottom:4px">检验日期</label>
+        <input v-model="form.inspected_at" type="date" class="form-input" style="width:100%;box-sizing:border-box;font-size:13px;margin-bottom:20px">
+
+        <div style="display:flex;gap:var(--space-3);justify-content:flex-end">
+          <button @click="showModal=false" class="btn-default btn-sm" style="padding:8px 20px">取消</button>
+          <button @click="doSave" class="btn-success" style="padding:8px 24px;font-size:13px">{{ isEdit ? '保存' : '提交' }}</button>
+        </div>
+      </div>
+    </div>
+  </div>

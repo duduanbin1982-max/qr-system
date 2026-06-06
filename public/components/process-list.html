@@ -1,0 +1,94 @@
+
+  <div style="padding:24px">
+    <div class="summary-bar">
+      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val">{{ processes.length }}</div><div class="s-label">工序总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">🏗️</span><div><div class="s-val text-primary">{{ structCount }}</div><div class="s-label">结构件</div></div></div>
+      <div class="summary-item"><span class="s-icon">🔧</span><div><div class="s-val text-success">{{ machCount }}</div><div class="s-label">机加工</div></div></div>
+    </div>
+
+    <!-- 分类Tab按钮 -->
+    <div style="display:flex;gap:var(--space-3);margin-bottom:16px;flex-wrap:wrap">
+      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'#EEF2FF':'#F3F4F6',color:activeCat==='all'?'var(--primary)':'#6B7280',border:activeCat==='all'?'1px solid #C7D2FE':'1px solid transparent'}">📋 全部工序</span>
+      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'#EFF6FF':'#F3F4F6',color:activeCat==='结构件'?'var(--info)':'#6B7280',border:activeCat==='结构件'?'1px solid #BFDBFE':'1px solid transparent'}">🔩 结构件工序</span>
+      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'#FEF3C7':'#F3F4F6',color:activeCat==='机加工'?'var(--warning)':'#6B7280',border:activeCat==='机加工'?'1px solid #FDE68A':'1px solid transparent'}">⚙️ 机加工工序</span>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>{{ pageTitle }}</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加工序</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table v-if="processes.length" class="data-table">
+            <thead>
+              <tr>
+                <th style="width:50px;text-align:center">序号</th>
+                <th style="min-width:100px">工序名称</th>
+                <th>描述</th>
+                <th style="width:85px;white-space:nowrap">分类</th>
+                <th style="width:75px;white-space:nowrap">状态</th>
+                <th style="width:80px;text-align:center">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in processes" :key="p.id">
+                <td style="text-align:center"><span class="row-num">{{ p.seq }}</span></td>
+                <td style="font-weight:600">{{ p.process_name }}</td>
+                <td style="color:#6B7280;font-size:13px">{{ p.description || '-' }}</td>
+                <td style="white-space:nowrap"><span class="badge" :class="p.category === '结构件' ? 'badge-info' : 'badge-warning'" style="font-size:var(--text-xs-alt)">{{ p.category }}</span></td>
+                <td style="white-space:nowrap"><span class="badge" :class="p.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">{{ p.status === 'active' ? '启用' : '停用' }}</span></td>
+                <td style="text-align:center">
+                  <div class="o-actions" style="justify-content:center">
+                    <span class="o-abtn o-edit" @click="openEdit(p)" title="编辑">✏️</span>
+                    <span class="o-abtn o-del" @click="del(p)" title="删除">🗑️</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty"><div class="empty-icon">⚙️</div><div class="empty-text">暂无工序数据</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增/编辑模态框 -->
+    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+      <div class="modal" style="max-width:500px">
+        <div class="modal-header">
+          <span>{{ modalEdit ? '编辑工序' : '添加工序' }}</span>
+          <span class="modal-close" @click="showModal=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div class="form-group"><label>工序名称 *</label><input class="form-input" v-model="form.name" placeholder="如：切割、焊接、喷涂"></div>
+          <div class="form-row">
+            <div class="form-col">
+              <div class="form-group"><label>分类</label>
+                <select class="form-input" v-model="form.category">
+                  <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-col">
+              <div class="form-group"><label>排序序号</label><input class="form-input" v-model="form.seq_order" type="number" placeholder="自动递增"></div>
+            </div>
+            <div class="form-col" v-if="modalEdit">
+              <div class="form-group"><label>状态</label>
+                <select class="form-input" v-model="form.status">
+                  <option value="active">启用</option>
+                  <option value="inactive">停用</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="form-group"><label>描述</label><textarea class="form-input" v-model="form.description" rows="2" placeholder="工序描述"></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showModal=false">取消</button>
+          <button class="btn btn-primary" @click="save">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>

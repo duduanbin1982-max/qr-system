@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>扫码报工</title>
+<script src="jsQR.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:#f0f2f5;color:#333;font-size:15px;overflow:hidden;height:100%}
+.screen{display:none;height:100%;flex-direction:column}.screen.active{display:flex}
+
+/* Login */
+.login-screen{background:linear-gradient(135deg,#1890ff,#096dd9);justify-content:center;align-items:center;padding:20px}
+.login-box{background:#fff;border-radius:16px;padding:36px 28px;width:100%;max-width:360px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.login-box h1{text-align:center;font-size:22px;margin-bottom:4px}
+.login-box .sub{text-align:center;color:var(--text-muted);font-size:13px;margin-bottom:28px}
+.login-box label{display:block;font-size:13px;color:#666;margin-bottom:6px;font-weight:500}
+.login-box input{width:100%;padding:12px 14px;border:1px solid #d9d9d9;border-radius:var(--radius-md);font-size:15px;outline:none;background:#fafafa}
+.login-box input:focus{border-color:#1890ff;background:#fff;box-shadow:0 0 0 3px rgba(24,144,255,.12)}
+.form-group{margin-bottom:16px}
+.btn-login{width:100%;padding:var(--space-3);background:#1890ff;color:#fff;border:none;border-radius:var(--radius-md);font-size:16px;font-weight:600;cursor:pointer;margin-top:8px}
+.btn-login:disabled{background:#91d5ff;cursor:not-allowed}
+.login-error{color:#ff4d4f;font-size:13px;text-align:center;margin-top:10px;min-height:18px}
+
+/* Top bar */
+.top-bar{background:#1890ff;color:#fff;padding:var(--space-3) 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.top-bar h1{font-size:17px;font-weight:600}
+.top-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer}
+.top-btn:active{background:rgba(255,255,255,.35)}
+
+/* Main */
+.main-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:var(--space-3)}
+.main-body::-webkit-scrollbar{width:0}
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.status-card{background:#fff;border-radius:var(--radius-lg);padding:var(--space-3) 16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.status-card .label{font-size:12px;color:var(--text-muted);margin-bottom:4px}
+.status-card .value{font-size:22px;font-weight:700}
+.scan-btn-area{text-align:center;padding:20px 0 4px}
+.scan-cta{display:inline-flex;align-items:center;gap:var(--space-3);background:#1890ff;color:#fff;border:none;border-radius:50px;padding:16px 40px;font-size:17px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(24,144,255,.4);-webkit-tap-highlight-color:transparent}
+.scan-cta:active{transform:scale(.97)}
+.scan-cta .icon{font-size:22px}
+.divider{text-align:center;font-size:13px;color:var(--text-muted)}
+.manual-row{display:flex;gap:var(--space-3)}
+.manual-row input{flex:1;padding:12px 14px;border:1px solid #d9d9d9;border-radius:var(--radius-md);font-size:15px;background:#fff}
+.manual-row input:focus{border-color:#1890ff;outline:none}
+.manual-row button{padding:12px 18px;background:#1890ff;color:#fff;border:none;border-radius:var(--radius-md);font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap}
+.manual-row button:active{background:#096dd9}
+
+/* Recent records */
+.recent-section{margin-top:4px}
+.recent-title{font-size:13px;font-weight:600;color:#666;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.recent-item{background:#fff;border-radius:10px;padding:var(--space-3) 14px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.recent-item .ri-left{flex:1;min-width:0}
+.recent-item .ri-no{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-item .ri-meta{font-size:var(--text-xs-alt);color:var(--text-muted);margin-top:2px}
+.recent-item .ri-type{font-size:var(--text-xs-alt);padding:var(--space-1) 8px;border-radius:10px;white-space:nowrap;margin-left:8px}
+.ri-type.normal{background:#f6ffed;color:#52c41a}
+.ri-type.scrap{background:#fff2f0;color:#ff4d4f}
+.ri-type.rework{background:#fffbe6;color:#faad14}
+.empty-recent{text-align:center;color:#ccc;font-size:13px;padding:20px 0}
+
+/* Order */
+.order-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:var(--space-3)}
+.order-body::-webkit-scrollbar{width:0}
+.order-header{background:linear-gradient(135deg,#1890ff,#096dd9);color:#fff;border-radius:14px;padding:20px 18px}
+.order-header .no{font-size:20px;font-weight:700;margin-bottom:6px}
+.order-header .row{display:flex;justify-content:space-between;font-size:13px;opacity:.9;margin-top:4px}
+.cur-proc{background:#fff;border-radius:var(--radius-lg);padding:18px 16px;box-shadow:0 2px 8px rgba(0,0,0,.06);border:2px solid #1890ff}
+.cur-proc .badge{background:#1890ff;color:#fff;font-size:12px;padding:3px 10px;border-radius:10px;display:inline-block;margin-bottom:8px}
+.cur-proc .name{font-size:20px;font-weight:700;margin-bottom:4px}
+.cur-proc .sub{font-size:13px;color:var(--text-muted)}
+.serial-card{background:#fff;border-radius:var(--radius-lg);padding:var(--space-3) 16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.serial-card .label{font-size:12px;color:var(--text-muted);margin-bottom:4px}
+.serial-card .val{font-size:15px;font-weight:600;font-family:monospace}
+.proc-card{background:#fff;border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.proc-card .title{padding:12px 16px;font-size:13px;font-weight:600;color:#666;background:#fafafa;border-bottom:1px solid #e8e8e8}
+.proc-item{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #e8e8e8;gap:12px}
+.proc-item:last-child{border-bottom:none}
+.proc-item.done{opacity:.5}
+.pi-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;font-weight:600}
+.proc-item.done .pi-icon{background:#d9f7be;color:#52c41a}
+.proc-item.active .pi-icon{background:#bae7ff;color:#1890ff}
+.proc-item.pending .pi-icon{background:#f0f0f0;color:var(--text-muted)}
+.pi-info{flex:1}
+.pi-name{font-weight:500;font-size:15px}
+.pi-meta{font-size:12px;color:var(--text-muted);margin-top:2px}
+.pi-st{font-size:12px;padding:var(--space-1) 10px;border-radius:10px}
+.proc-item.done .pi-st{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
+.proc-item.active .pi-st{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
+.proc-item.pending .pi-st{background:#fafafa;color:var(--text-muted);border:1px solid #d9d9d9}
+
+/* Report mode */
+.mode-toggle{display:flex;background:#f0f0f0;border-radius:10px;padding:3px;gap:var(--space-1)}
+.mode-btn{flex:1;padding:var(--space-3) 8px;border:none;border-radius:var(--radius-md);font-size:13px;font-weight:500;cursor:pointer;background:transparent;color:#666;transition:all .2s}
+.mode-btn.active{background:#fff;color:#1890ff;box-shadow:0 2px 4px rgba(0,0,0,.08)}
+.report-form{background:#fff;border-radius:var(--radius-lg);padding:var(--space-3) 16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.report-form .rf-row{display:flex;gap:var(--space-3);align-items:flex-end;margin-bottom:10px}
+.report-form .rf-col{flex:1}
+.report-form label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px}
+.report-form input,.report-form select{width:100%;padding:var(--space-3) 12px;border:1px solid #d9d9d9;border-radius:var(--radius-md);font-size:15px;background:#fff;outline:none}
+.report-form input:focus,.report-form select:focus{border-color:#1890ff}
+.report-type-group{display:flex;gap:8px}
+.report-type-opt{flex:1;text-align:center;padding:var(--space-3) 4px;border:2px solid #e8e8e8;border-radius:var(--radius-md);font-size:13px;cursor:pointer;transition:all .2s}
+.report-type-opt.active{border-color:#1890ff;background:#e6f7ff;color:#1890ff;font-weight:600}
+.report-type-opt.scrap.active{border-color:#ff4d4f;background:#fff2f0;color:#ff4d4f}
+.report-type-opt.rework.active{border-color:#faad14;background:#fffbe6;color:#d48806}
+
+/* Action */
+.action-area{padding:var(--space-3) 16px;background:#fff;border-top:1px solid #e8e8e8;flex-shrink:0}
+.btn-report{width:100%;padding:16px;background:#52c41a;color:#fff;border:none;border-radius:10px;font-size:17px;font-weight:700;cursor:pointer}
+.btn-report:active{background:#389e0d}
+.btn-report:disabled{background:#b7eb8f}
+.btn-report.scrap{background:#ff4d4f}
+.btn-report.scrap:active{background:#cf1322}
+.btn-report.rework{background:#faad14;color:#fff}
+.btn-report.rework:active{background:#d48806}
+
+/* Success */
+.success-screen{justify-content:center;align-items:center;padding:20px;background:linear-gradient(135deg,#f6ffed,#e6f7ff)}
+.success-box{background:#fff;border-radius:20px;padding:40px 32px;text-align:center;width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.1)}
+.success-icon{width:80px;height:80px;background:#f6ffed;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:48px;color:#52c41a}
+.success-box h2{font-size:20px;margin-bottom:8px}
+.success-box p{font-size:14px;color:#666;margin-bottom:12px}
+.success-box .detail{background:#fafafa;border-radius:10px;padding:12px;font-size:13px;color:#666;margin-bottom:20px;text-align:left;line-height:1.8}
+.btn-done{width:100%;padding:var(--space-3);background:#1890ff;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer}
+.btn-done:active{background:#096dd9}
+
+/* Scanner */
+.scanner-screen{background:#000;justify-content:center;align-items:center;position:relative}
+.scan-controls{position:absolute;top:16px;left:16px;right:16px;display:flex;justify-content:space-between;z-index:10}
+.close-btn,.flash-btn{background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.close-btn:active,.flash-btn:active{background:rgba(255,255,255,.4)}
+.flash-btn.off{opacity:.4}
+#cam-video{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}
+#cam-canvas{position:absolute;top:0;left:-9999px;visibility:hidden}
+.scan-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2}
+.scan-box{width:240px;height:240px;position:relative;border-radius:20px}
+.scan-box .line{position:absolute;left:10%;width:80%;height:2px;background:linear-gradient(90deg,transparent,#4FC3F7,transparent);border-radius:1px;animation:scanLine 1.8s ease-in-out infinite;box-shadow:0 0 8px rgba(79,195,247,.6)}
+@keyframes scanLine{0%,100%{top:10%}50%{top:85%}}
+.scan-box .c{position:absolute;width:28px;height:28px;border-color:rgba(79,195,247,.9);border-style:solid}
+.c1{top:0;left:0;border-width:3px 0 0 3px;border-radius:12px 0 0 0}
+.c2{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 12px 0 0}
+.c3{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 12px}
+.c4{bottom:0;right:0;border-width:0 3px 3px 0;border-radius:0 0 12px 0}
+.scan-tip{color:rgba(255,255,255,.8);font-size:13px;margin-top:20px;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.scan-engine{font-size:12px;color:#4FC3F7;margin-top:6px;text-shadow:0 1px 4px rgba(0,0,0,.8);min-height:16px}
+
+/* Toast */
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:var(--space-3) 24px;border-radius:24px;font-size:14px;z-index:9999;pointer-events:none;transition:opacity .3s}
+.back-bar{background:#fff;color:#333;border-bottom:1px solid #e8e8e8;padding:var(--space-3) 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="s-login" class="screen login-screen active">
+<div class="login-box">
+<h1>扫码报工</h1><p class="sub">手机端快速报工</p>
+<div class="form-group"><label>用户名</label><input type="text" id="inp-user" placeholder="请输入用户名" autocomplete="off"></div>
+<div class="form-group"><label>密码</label><input type="password" id="inp-pwd" placeholder="请输入密码"></div>
+<button class="btn-login" id="btn-login" onclick="doLogin()">登 录</button>
+<div class="login-error" id="login-err"></div>
+</div>
+</div>
+
+<!-- MAIN -->
+<div id="s-main" class="screen">
+<div class="top-bar"><h1>扫码报工</h1><button class="top-btn" onclick="doLogout()">退出</button></div>
+<div class="main-body">
+<div class="status-grid">
+<div class="status-card"><div class="label">今日报工次数</div><div class="value" id="st-today">0</div></div>
+<div class="status-card"><div class="label">今日产量</div><div class="value" id="st-qty">0</div></div>
+</div>
+<div class="scan-btn-area">
+  <button class="scan-cta" onclick="openCam()"><span class="icon">📷</span>扫码报工</button><br>
+  <button class="scan-cta" style="margin-top:16px" onclick="openPhoto()"><span class="icon">📸</span>拍照解码</button>
+</div>
+<input type="file" id="photo-input" accept="image/*" onchange="handlePhoto(event)" style="display:none">
+<div class="divider">或输入订单号</div>
+<div class="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button onclick="manualSearch()">查询</button></div>
+<div class="recent-section" id="recent-section">
+<div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer" onclick="loadRecent()">刷新</span></div>
+<div id="recent-list"><div class="empty-recent">暂无记录</div></div>
+</div>
+</div>
+</div>
+
+<!-- ORDER -->
+<div id="s-order" class="screen">
+<div class="back-bar">
+<button class="top-btn" style="color:#333;background:#f0f0f0" onclick="goBack()">← 返回</button>
+<h1 style="font-size:16px;color:#333">报工确认</h1><div style="width:60px"></div>
+</div>
+<div class="order-body" id="order-body"></div>
+<div class="action-area">
+<div class="mode-toggle" style="margin-bottom:10px">
+<button class="mode-btn active" id="mode-auto" onclick="switchMode('auto')">⚡ 自动报工</button>
+<button class="mode-btn" id="mode-manual" onclick="switchMode('manual')">✋ 手动报工</button>
+</div>
+<div class="report-form" id="report-form" style="display:none">
+<div class="report-type-group" style="margin-bottom:10px">
+<div class="report-type-opt active" id="rtype-normal" onclick="setReportType('normal')">✅ 正常</div>
+<div class="report-type-opt scrap" id="rtype-scrap" onclick="setReportType('scrap')">❌ 报废</div>
+<div class="report-type-opt rework" id="rtype-rework" onclick="setReportType('rework')">🔧 返修</div>
+</div>
+<div class="rf-row">
+<div class="rf-col"><label>报工数量</label><input type="number" id="rpt-qty" min="1" placeholder="数量"></div>
+</div>
+</div>
+<button class="btn-report" id="btn-report" onclick="doReport()">提交报工</button>
+</div>
+</div>
+
+<!-- SUCCESS -->
+<div id="s-ok" class="screen success-screen">
+<div class="success-box">
+<div class="success-icon">✓</div>
+<h2>报工成功!</h2>
+<p id="ok-msg"></p>
+<div class="detail" id="ok-detail"></div>
+<button class="btn-done" onclick="goMain()">继续扫码</button>
+</div>
+</div>
+
+<!-- SCANNER -->
+<div id="s-scan" class="screen scanner-screen">
+<div class="scan-controls">
+<button class="flash-btn off" id="flash-btn" onclick="toggleFlash()" title="闪光灯">⚡</button>
+<button class="close-btn" onclick="closeCam()">✕</button>
+</div>
+<video id="cam-video" autoplay playsinline muted></video>
+<canvas id="cam-canvas"></canvas>
+<div class="scan-overlay">
+<div class="scan-box">
+<div class="line"></div>
+<div class="c c1"></div><div class="c c2"></div><div class="c c3"></div><div class="c c4"></div>
+</div>
+<div class="scan-tip">将二维码放入框内自动扫描</div>
+<div class="scan-engine" id="scan-engine"></div>
+</div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════
+//  扫码报工系统 — 手机扫码模块 v3
+//  双引擎：BarcodeDetector (硬件加速) + jsQR (纯JS通用降级)
+// ═══════════════════════════════════════════
+
+const API = '/api';
+
+// ── 状态 ──────────────────────────────────
+let curOrder   = null;
+let curProcId  = null;
+let curSerial  = '';
+let camStream  = null;
+let scanTimer  = null;
+let lastCode   = '';
+let lastTime   = 0;
+let reportMode = 'auto';
+let reportType = 'normal';
+let bd         = null;  // BarcodeDetector 实例
+let flashOn    = false;
+
+// ── 工具函数 ──────────────────────────────
+const $ = function(id) { return document.getElementById(id); };
+
+function esc(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function toast(msg, ms) {
+  var old = document.querySelector('.toast');
+  if (old) old.remove();
+  var t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, ms || 2000);
+}
+
+function token()  { return localStorage.getItem('qr_token') || ''; }
+function user()   { try { return JSON.parse(localStorage.getItem('qr_user') || 'null'); } catch(e) { return null; } }
+
+function show(id) {
+  var screens = document.querySelectorAll('.screen');
+  for (var i = 0; i < screens.length; i++) screens[i].classList.remove('active');
+  $('s-' + id).classList.add('active');
+}
+
+// ═══════════════════════════════════════════
+//  双引擎扫码模块
+// ═══════════════════════════════════════════
+
+// ── 引擎检测 ────────────────────────────────
+function initBD() {
+  if (typeof BarcodeDetector !== 'undefined') {
+    try {
+      bd = new BarcodeDetector({ formats: ['qr_code'] });
+      return true;
+    } catch(e) {}
+  }
+  return false;
+}
+
+// ── 打开摄像头 ──────────────────────────────
+function openCam() {
+  show('scan');
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('此浏览器不支持摄像头，请使用拍照解码');
+    show('main');
+    return;
+  }
+
+  var hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
+  $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
+
+  var video = $('cam-video');
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+  })
+  .then(function(stream) {
+    camStream = stream;
+    video.srcObject = stream;
+    video.play().then(function() {
+      if (hasBD) {
+        startBD(video);
+      } else {
+        startJsQR(video);
+      }
+    });
+  })
+  .catch(function(err) {
+    toast('摄像头启动失败: ' + (err.message || '未知错误'));
+    show('main');
+  });
+}
+
+// ── 路径1: BarcodeDetector (Chrome 硬件加速) ──
+function startBD(video) {
+  var busy = false;
+
+  function tick() {
+    if (!camStream) return;
+    if (busy) { requestAnimationFrame(tick); return; }
+    busy = true;
+    bd.detect(video)
+    .then(function(codes) {
+      if (codes && codes.length > 0) {
+        var text = codes[0].rawValue;
+        var now = Date.now();
+        if (text !== lastCode || now - lastTime >= 3000) {
+          lastCode = text; lastTime = now;
+          onScan(text);
+        }
+      }
+    })
+    .catch(function() {})  // 忽略单帧错误
+    .finally(function() { busy = false; requestAnimationFrame(tick); });
+  }
+
+  requestAnimationFrame(tick);
+}
+
+// ── 路径2: jsQR (纯JS通用降级) ─────────────
+// 对齐 .74 scan.html：原始分辨率全图，一次jsQR
+function startJsQR(video) {
+  var canvas = $('cam-canvas');
+  var ctx = canvas.getContext('2d');
+
+  scanTimer = setInterval(function() {
+    if (!camStream) return;
+    if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var code = jsQR(imageData.data, imageData.width, imageData.height);
+    
+    if (code && code.data) {
+      var now = Date.now();
+      if (code.data === lastCode && now - lastTime < 3000) return;
+      lastCode = code.data; lastTime = now;
+      onScan(code.data);
+    }
+  }, 300);
+}
+
+
+// ── 扫码成功回调 ─────────────────────────────
+function onScan(text) {
+  closeCam();
+  setTimeout(function() { processCode(text); }, 200);
+}
+
+// ── 关闭摄像头 ───────────────────────────────
+function closeCam() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (camStream) {
+    camStream.getTracks().forEach(function(t) { t.stop(); });
+    camStream = null;
+  }
+  var v = $('cam-video');
+  if (v) v.srcObject = null;
+  flashOn = false;
+  $('flash-btn').classList.add('off');
+  $('scan-engine').textContent = '';
+  show('main');
+}
+
+// ═══════════════════════════════════════════
+//  拍照解码模块
+// ═══════════════════════════════════════════
+
+function openPhoto() {
+  $('photo-input').click();
+}
+
+function handlePhoto(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  toast('解码中...');
+
+  var img = new Image();
+  img.onload = function() {
+    // 限制最大分辨率以加速解码
+    var maxW = 1200;
+    var w = img.width, h = img.height;
+    if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+
+    var canvas = document.createElement('canvas');
+    canvas.width  = w;
+    canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    try {
+      var imgData = ctx.getImageData(0, 0, w, h);
+      var result = jsQR(imgData.data, w, h);
+      if (result && result.data) {
+        processCode(result.data);
+      } else {
+        // 全图失败 → 尝试中心裁剪
+        var cx = Math.round(w * 0.25);
+        var cy = Math.round(h * 0.25);
+        var cw2 = Math.round(w * 0.5);
+        var ch2 = Math.round(h * 0.5);
+        var cropData = ctx.getImageData(cx, cy, cw2, ch2);
+        var result2 = jsQR(cropData.data, cw2, ch2);
+        if (result2 && result2.data) {
+          processCode(result2.data);
+        } else {
+          toast('未能识别二维码，请确保二维码清晰完整');
+          show('main');
+        }
+      }
+    } catch(err) {
+      toast('解码异常: ' + (err.message || '图片处理失败'));
+      show('main');
+    }
+  };
+  img.onerror = function() {
+    toast('图片加载失败，请重试');
+    show('main');
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+}
+
+// ═══════════════════════════════════════════
+//  二维码内容处理模块
+// ═══════════════════════════════════════════
+
+function processCode(code) {
+  // 数字编码(N前缀) → 通过 decode API 还原为 JSON
+  if (/^N\d{10,}$/.test(code)) {
+    toast('解码中...');
+    fetch(API + '/mobile/decode/' + code, {
+      headers: { 'Authorization': 'Bearer ' + token() }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { toast(d.error); show('main'); return; }
+      doScan(d.code);
+    })
+    .catch(function() { toast('解码失败'); show('main'); });
+    return;
+  }
+  doScan(code);
+}
+
+function doScan(code) {
+  toast('查询中...');
+  fetch(API + '/mobile/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
+    body: JSON.stringify({ code: code })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast(d.error); show('main'); return; }
+    renderOrder(d.order);
+    show('order');
+    var qty = d.order.current_process
+      ? Math.max(1, (d.order.quantity || 0) - (d.order.current_process.completed || 0))
+      : 1;
+    $('rpt-qty').value = qty;
+    if (reportMode === 'auto') {
+      setTimeout(function() { doReport(); }, 1200);
+    } else {
+      updateReportBtn();
+    }
+  })
+  .catch(function() { toast('网络错误，请检查连接'); show('main'); });
+}
+
+// ═══════════════════════════════════════════
+//  订单展示 & 报工
+// ═══════════════════════════════════════════
+
+function renderOrder(o) {
+  curOrder = o; curProcId = null; curSerial = '';
+  var b = $('order-body'), cp = o.current_process, qty = o.quantity || 0;
+  var h = '';
+
+  h += '<div class="order-header"><div class="no">' + esc(o.order_no || '') + '</div>';
+  h += '<div class="row"><span>产品</span><span>' + esc(o.product_name || '') + '</span></div>';
+  h += '<div class="row"><span>客户</span><span>' + esc(o.customer || '') + '</span></div>';
+  h += '<div class="row"><span>数量</span><span>' + qty + ' 件</span></div></div>';
+
+  if (o.item) {
+    curSerial = o.item.serial_no;
+    h += '<div class="serial-card"><div class="label">序列号</div><div class="val">' + esc(o.item.serial_no) + '</div></div>';
+  }
+
+  if (cp) {
+    var dn = cp.completed || 0, rm = Math.max(0, qty - dn);
+    curProcId = cp.process_id;
+    h += '<div class="cur-proc"><span class="badge">当前工序</span>';
+    h += '<div class="name">' + esc(cp.process_name || '') + '</div>';
+    h += '<div class="sub">已完成 ' + dn + '/' + qty + ' · 剩余 ' + rm + ' 件</div></div>';
+  }
+
+  h += '<div class="proc-card"><div class="title">工艺路线（' + (o.processes || []).length + ' 个工序）</div>';
+  (o.processes || []).forEach(function(p) {
+    var d = p.completed || 0;
+    var s = 'pending';
+    if (d >= qty) s = 'done';
+    else if (p.process_id === (cp && cp.process_id)) s = 'active';
+    h += '<div class="proc-item ' + s + '"><div class="pi-icon">' + (p.seq_order || '') + '</div>';
+    h += '<div class="pi-info"><div class="pi-name">' + esc(p.process_name) + '</div>';
+    h += '<div class="pi-meta">已完成 ' + d + '/' + qty + '</div></div>';
+    h += '<div class="pi-st">' + (s === 'done' ? '已完成' : s === 'active' ? '进行中' : '待处理') + '</div></div>';
+  });
+  h += '</div>';
+  b.innerHTML = h;
+}
+
+// ── 报工模式 ─────────────────────────────────
+function switchMode(mode) {
+  reportMode = mode;
+  $('mode-auto').classList.toggle('active', mode === 'auto');
+  $('mode-manual').classList.toggle('active', mode === 'manual');
+  $('report-form').style.display = (mode === 'manual' ? 'block' : 'none');
+  updateReportBtn();
+}
+
+function setReportType(type) {
+  reportType = type;
+  ['normal','scrap','rework'].forEach(function(t) {
+    $('rtype-' + t).classList.toggle('active', t === type);
+  });
+  updateReportBtn();
+}
+
+function updateReportBtn() {
+  var btn = $('btn-report');
+  var qty = parseInt($('rpt-qty').value) || 1;
+  var label = reportType === 'normal' ? '正常' : reportType === 'scrap' ? '报废' : '返修';
+  if (reportMode === 'auto') {
+    btn.textContent = '⚡ 自动报工 ' + qty + ' 件 (' + label + ')';
+    btn.disabled = false;
+  } else {
+    btn.textContent = '✋ 提交报工 ' + qty + ' 件 (' + label + ')';
+    btn.disabled = !curOrder || !curProcId;
+  }
+  btn.className = 'btn-report' + (reportType !== 'normal' ? ' ' + reportType : '');
+}
+
+$('rpt-qty').addEventListener('input', updateReportBtn);
+
+// ── 提交报工 ─────────────────────────────────
+function doReport() {
+  if (!curOrder || !curProcId) { toast('订单信息不完整'); return; }
+  var btn = $('btn-report');
+  btn.disabled = true; btn.textContent = '提交中...';
+
+  var body = {
+    order_id: curOrder.id,
+    process_id: curProcId,
+    quantity: parseInt($('rpt-qty').value) || 1,
+    work_status: reportType
+  };
+  if (curSerial) body.serial_no = curSerial;
+
+  fetch(API + '/mobile/report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
+    body: JSON.stringify(body)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast(d.error); btn.disabled = false; updateReportBtn(); return; }
+    var qty = body.quantity || 1;
+    var label = reportType === 'normal' ? '正常报工' : reportType === 'scrap' ? '报废' : '返修';
+    $('ok-msg').textContent = (curOrder.order_no || '') + ' · ' + (curOrder.current_process && curOrder.current_process.process_name || '');
+    $('ok-detail').innerHTML =
+      '<div>📦 订单: ' + esc(curOrder.order_no || '') + '</div>' +
+      '<div>⚙️ 工序: ' + esc(curOrder.current_process && curOrder.current_process.process_name || '') + '</div>' +
+      '<div>📊 数量: ' + qty + ' 件</div>' +
+      '<div>🏷️ 类型: ' + label + '</div>' +
+      '<div>👤 操作人: ' + esc(d.worker ? d.worker.name : (user() ? user().name : '未知')) + '</div>';
+    show('ok');
+  })
+  .catch(function() { toast('网络错误'); btn.disabled = false; updateReportBtn(); });
+}
+
+// ═══════════════════════════════════════════
+//  登录 / 主页面 / 闪光灯
+// ═══════════════════════════════════════════
+
+function doLogin() {
+  var u = $('inp-user').value.trim(), p = $('inp-pwd').value;
+  if (!u || !p) { toast('请输入用户名和密码'); return; }
+  var btn = $('btn-login');
+  btn.disabled = true; btn.textContent = '登录中...';
+  fetch(API + '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u, password: p })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    btn.disabled = false; btn.textContent = '登 录';
+    if (d.error) { $('login-err').textContent = d.error; return; }
+    localStorage.setItem('qr_token', d.user.token);
+    localStorage.setItem('qr_user', JSON.stringify(d.user));
+    goMain();
+  })
+  .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; });
+}
+
+function doLogout() {
+  localStorage.removeItem('qr_token');
+  localStorage.removeItem('qr_user');
+  show('login');
+}
+
+function goMain() {
+  $('inp-code').value = '';
+  curOrder = null; curProcId = null; curSerial = '';
+  reportMode = 'auto'; reportType = 'normal';
+  switchMode('auto');
+  setReportType('normal');
+  show('main');
+  loadStats();
+  loadRecent();
+}
+
+function goBack() { curOrder = null; show('main'); loadStats(); loadRecent(); }
+
+function loadStats() {
+  fetch(API + '/dashboard', { headers: { 'Authorization': 'Bearer ' + token() } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d && d.stats) {
+        $('st-today').textContent = d.stats.today_records || 0;
+        $('st-qty').textContent = d.stats.today_output || 0;
+      }
+    })
+    .catch(function() {});
+}
+
+function loadRecent() {
+  fetch(API + '/report-logs?limit=10', { headers: { 'Authorization': 'Bearer ' + token() } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var list = d.logs || [];
+      var el = $('recent-list');
+      if (!list.length) { el.innerHTML = '<div class="empty-recent">暂无记录</div>'; return; }
+      el.innerHTML = list.slice(0, 5).map(function(r) {
+        var cls = r.work_status === 'scrap' ? 'scrap' : r.work_status === 'rework' ? 'rework' : 'normal';
+        var lbl = r.work_status === 'scrap' ? '报废' : r.work_status === 'rework' ? '返修' : '正常';
+        var time = (r.created_at || '').replace('T', ' ').substring(5, 16);
+        return '<div class="recent-item">' +
+          '<div class="ri-left"><div class="ri-no">' + esc(r.order_no || '') + ' · ' + esc(r.process_name || '') + '</div>' +
+          '<div class="ri-meta">' + time + ' · ' + (r.quantity || 0) + '件</div></div>' +
+          '<span class="ri-type ' + cls + '">' + lbl + '</span></div>';
+      }).join('');
+    })
+    .catch(function() {});
+}
+
+function manualSearch() {
+  var c = $('inp-code').value.trim();
+  if (!c) { toast('请输入订单号或序列号'); return; }
+  processCode(c);
+}
+
+function toggleFlash() {
+  if (!camStream) return;
+  var track = camStream.getVideoTracks()[0];
+  if (!track || typeof track.applyConstraints !== 'function') {
+    toast('此设备不支持闪光灯');
+    return;
+  }
+  flashOn = !flashOn;
+  track.applyConstraints({ advanced: [{ torch: flashOn }] })
+    .then(function() { $('flash-btn').classList.toggle('off', !flashOn); })
+    .catch(function() { toast('闪光灯不可用'); });
+}
+
+// ═══════════════════════════════════════════
+//  初始化
+// ═══════════════════════════════════════════
+(function() {
+  if (user() && token()) { goMain(); } else { show('login'); }
+  $('inp-pwd').addEventListener('keyup', function(e) { if (e.key === 'Enter') doLogin(); });
+  $('inp-user').addEventListener('keyup', function(e) { if (e.key === 'Enter') $('inp-pwd').focus(); });
+  $('inp-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
+})();
+</script>
+</body>
+</html>

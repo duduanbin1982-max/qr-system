@@ -1,0 +1,194 @@
+
+  <div style="padding:24px">
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:600">📊 数据分析报表</h2>
+    <!-- Tab Bar -->
+    <div style="display:flex;gap:0;margin-bottom:20px;background:#F3F4F6;border-radius:var(--radius-lg);padding:4px">
+      <div v-for="t in [{k:'trend',l:'📈 生产趋势'},{k:'worker',l:'👷 工人效率'},{k:'quality',l:'🔍 品质分析'},{k:'order',l:'📋 订单分析'}]" :key="t.k"
+        @click="switchTab(t.k)" style="flex:1;text-align:center;padding:var(--space-3) 4px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s"
+        :style="{background: tab===t.k?'white':'transparent',color: tab===t.k?'var(--primary)':'#6B7280',boxShadow: tab===t.k?'0 1px 3px rgba(0,0,0,0.1)':'none'}">
+        {{ t.l }}
+      </div>
+    </div>
+
+    <!-- ========== 生产趋势 ========== -->
+    <div v-if="tab==='trend'">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>📈 生产趋势</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="form-input" v-model.number="trendDays" @change="loadTrend" style="width:120px">
+              <option :value="7">最近7天</option><option :value="14">最近14天</option><option :value="30">最近30天</option><option :value="60">最近60天</option><option :value="90">最近90天</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Summary -->
+      <div class="summary-bar" style="margin-bottom:16px" v-if="trendSummary.days">
+        <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ trendSummary.total_output }}</div><div class="s-label">总产出</div></div></div>
+        <div class="summary-item"><span class="s-icon">🗑️</span><div><div class="s-val text-danger">{{ trendSummary.total_scrap }}</div><div class="s-label">总报废</div></div></div>
+        <div class="summary-item"><span class="s-icon">🔧</span><div><div class="s-val text-warning">{{ trendSummary.total_rework }}</div><div class="s-label">总返工</div></div></div>
+        <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-danger">{{ trendSummary.scrap_rate }}%</div><div class="s-label">报废率</div></div></div>
+        <div class="summary-item"><span class="s-icon">📉</span><div><div class="s-val text-warning">{{ trendSummary.rework_rate }}%</div><div class="s-label">返工率</div></div></div>
+      </div>
+      <!-- Bar Chart -->
+      <div class="card">
+        <div class="card-header"><h3>📊 日产量趋势（最近{{ trendDays }}天）</h3></div>
+        <div class="card-body">
+          <div v-if="trendData.length" style="overflow-x:auto">
+            <div style="min-width:600px">
+              <div v-for="d in trendData" :key="d.date" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span style="width:80px;font-size:var(--text-xs-alt);color:var(--text-placeholder);text-align:right;flex-shrink:0">{{ d.date.slice(5) }}</span>
+                <div style="flex:1;display:flex;gap:var(--space-1);height:18px;border-radius:var(--radius-sm);overflow:hidden;background:#F3F4F6">
+                  <div :style="{width:(d.output/trendMaxVal*100).toFixed(1)+'%',background:'linear-gradient(90deg,var(--primary),#818CF8)',minWidth:d.output?'12px':'0',borderRadius:'3px 0 0 3px'}" :title="'产出:'+d.output"></div>
+                  <div :style="{width:(d.scrap/trendMaxVal*100).toFixed(1)+'%',background:'#FCA5A5',minWidth:d.scrap?'8px':'0'}" :title="'报废:'+d.scrap"></div>
+                  <div :style="{width:(d.rework/trendMaxVal*100).toFixed(1)+'%',background:'#FCD34D',minWidth:d.rework?'8px':'0',borderRadius:'0 3px 3px 0'}" :title="'返工:'+d.rework"></div>
+                </div>
+                <span style="width:40px;font-size:12px;font-weight:600;text-align:right;flex-shrink:0">{{ d.output }}</span>
+              </div>
+            </div>
+            <!-- Legend -->
+            <div style="display:flex;gap:16px;margin-top:12px;font-size:12px;color:#6B7280">
+              <span>🟦 产出</span><span>🟥 报废</span><span>🟨 返工</span>
+            </div>
+          </div>
+          <p v-else class="empty"><span class="empty-text">无趋势数据</span></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 工人效率 ========== -->
+    <div v-if="tab==='worker'">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>👷 工人效率报表</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="date" class="form-input" v-model="reportStart" style="width:140px">
+            <span style="color:var(--text-placeholder)">至</span>
+            <input type="date" class="form-input" v-model="reportEnd" style="width:140px">
+            <button class="btn btn-primary btn-sm" @click="loadWorker">查询</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>👷 工人效率 ({{ workerStats.length }})</h3></div>
+        <div class="card-body"><div class="table-wrap"><table v-if="workerStats.length" class="data-table">
+          <thead><tr><th style="width:40px">#</th><th>员工</th><th>工号</th><th style="text-align:center">总产出</th><th style="text-align:center">报废</th><th style="text-align:center">返工</th><th style="text-align:center">报废率</th><th style="text-align:center">返工率</th><th style="text-align:center">出勤天数</th><th style="text-align:center">日均产出</th></tr></thead>
+          <tbody>
+            <tr v-for="(w, idx) in workerStats" :key="w.id">
+              <td><span class="badge" style="background:#EEF2FF;color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
+              <td style="font-weight:500">{{ w.name }}</td>
+              <td><code style="font-size:12px">{{ w.employee_no || '-' }}</code></td>
+              <td style="text-align:center;font-weight:700;color:var(--success)">{{ w.output }}</td>
+              <td style="text-align:center;color:var(--danger)">{{ w.scrap }}</td>
+              <td style="text-align:center;color:var(--warning)">{{ w.rework }}</td>
+              <td style="text-align:center"><span class="badge" :style="{background:w.scrap_rate>5?'#FEF2F2':'#F0FDF4',color:w.scrap_rate>5?'var(--danger)':'#15803D'}">{{ w.scrap_rate }}%</span></td>
+              <td style="text-align:center"><span class="badge" :style="{background:w.rework_rate>5?'#FFFBEB':'#F0FDF4',color:w.rework_rate>5?'var(--warning)':'#15803D'}">{{ w.rework_rate }}%</span></td>
+              <td style="text-align:center">{{ w.work_days }}</td>
+              <td style="text-align:center;font-weight:600;color:var(--primary)">{{ w.daily_avg }}</td>
+            </tr>
+          </tbody>
+        </table><p v-else class="empty"><span class="empty-text">无效率数据</span></p></div></div>
+      </div>
+    </div>
+
+    <!-- ========== 品质分析 ========== -->
+    <div v-if="tab==='quality'">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>🔍 品质分析</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="date" class="form-input" v-model="reportStart" style="width:140px">
+            <span style="color:var(--text-placeholder)">至</span>
+            <input type="date" class="form-input" v-model="reportEnd" style="width:140px">
+            <button class="btn btn-primary btn-sm" @click="loadQuality">查询</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="qualityProcess.length" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- By Process -->
+        <div class="card">
+          <div class="card-header"><h3>⚙️ 按工序分析</h3></div>
+          <div class="card-body"><div class="table-wrap"><table class="data-table" style="font-size:13px">
+            <thead><tr><th>工序</th><th style="text-align:center">产出</th><th style="text-align:center">报废</th><th style="text-align:center">返工</th><th style="text-align:center">不良率</th></tr></thead>
+            <tbody>
+              <tr v-for="p in qualityProcess" :key="p.id">
+                <td style="font-weight:500">{{ p.name }}</td>
+                <td style="text-align:center;color:var(--success);font-weight:600">{{ p.output }}</td>
+                <td style="text-align:center;color:var(--danger)">{{ p.scrap }}</td>
+                <td style="text-align:center;color:var(--warning)">{{ p.rework }}</td>
+                <td style="text-align:center"><span class="badge" :style="{background:(p.scrap+p.rework)/Math.max(p.output,1)*100>10?'#FEF2F2':'#F0FDF4',color:(p.scrap+p.rework)/Math.max(p.output,1)*100>10?'var(--danger)':'#15803D'}">{{ Math.round((p.scrap+p.rework)/Math.max(p.output,1)*1000)/10 }}%</span></td>
+              </tr>
+            </tbody>
+          </table></div></div>
+        </div>
+        <!-- By Worker -->
+        <div class="card">
+          <div class="card-header"><h3>👤 按工人分析 (Top 10)</h3></div>
+          <div class="card-body"><div class="table-wrap"><table class="data-table" style="font-size:13px">
+            <thead><tr><th>工人</th><th style="text-align:center">产出</th><th style="text-align:center">报废</th><th style="text-align:center">返工</th><th style="text-align:center">不良率</th></tr></thead>
+            <tbody>
+              <tr v-for="w in qualityWorker" :key="w.name">
+                <td style="font-weight:500">{{ w.name }}</td>
+                <td style="text-align:center;color:var(--success);font-weight:600">{{ w.output }}</td>
+                <td style="text-align:center;color:var(--danger)">{{ w.scrap }}</td>
+                <td style="text-align:center;color:var(--warning)">{{ w.rework }}</td>
+                <td style="text-align:center"><span class="badge" :style="{background:(w.scrap+w.rework)/Math.max(w.output,1)*100>10?'#FEF2F2':'#F0FDF4',color:(w.scrap+w.rework)/Math.max(w.output,1)*100>10?'var(--danger)':'#15803D'}">{{ Math.round((w.scrap+w.rework)/Math.max(w.output,1)*1000)/10 }}%</span></td>
+              </tr>
+            </tbody>
+          </table></div></div>
+        </div>
+      </div>
+      <p v-else class="empty" style="padding:60px"><span class="empty-text">无品质分析数据</span></p>
+    </div>
+
+    <!-- ========== 订单分析 ========== -->
+    <div v-if="tab==='order'">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>📋 订单分析</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="date" class="form-input" v-model="reportStart" style="width:140px">
+            <span style="color:var(--text-placeholder)">至</span>
+            <input type="date" class="form-input" v-model="reportEnd" style="width:140px">
+            <button class="btn btn-primary btn-sm" @click="loadOrder">查询</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- Status Distribution -->
+        <div class="card">
+          <div class="card-header"><h3>📊 状态分布</h3></div>
+          <div class="card-body">
+            <div v-if="orderStatus.length">
+              <div v-for="s in orderStatus" :key="s.status" style="display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:8px 12px;background:#F9FAFB;border-radius:var(--radius-md)">
+                <span class="badge" style="min-width:70px;text-align:center" :class="s.status==='completed'?'badge-success':s.status==='producing'?'badge-warning':'badge-info'">{{ statusLabel(s.status) }}</span>
+                <span style="font-weight:600;font-size:15px;color:var(--primary)">{{ s.count }} 单</span>
+                <span style="font-size:13px;color:#6B7280">数量 {{ s.qty }}</span>
+                <span style="font-size:13px;color:var(--success)">完成 {{ s.done }}</span>
+                <span style="font-size:13px;color:var(--text-placeholder)">{{ s.qty ? Math.round(s.done/s.qty*100) : 0 }}%</span>
+              </div>
+            </div>
+            <p v-else class="empty"><span class="empty-text">无状态数据</span></p>
+          </div>
+        </div>
+        <!-- Monthly Trend -->
+        <div class="card">
+          <div class="card-header"><h3>📅 月度趋势</h3></div>
+          <div class="card-body"><div class="table-wrap"><table v-if="orderMonthly.length" class="data-table" style="font-size:13px">
+            <thead><tr><th>月份</th><th style="text-align:center">订单数</th><th style="text-align:center">总数量</th><th style="text-align:center">已完成</th><th style="text-align:center">完成率</th></tr></thead>
+            <tbody>
+              <tr v-for="m in orderMonthly" :key="m.month">
+                <td style="font-weight:500">{{ m.month }}</td>
+                <td style="text-align:center;font-weight:600;color:var(--primary)">{{ m.order_count }}</td>
+                <td style="text-align:center">{{ m.total_qty }}</td>
+                <td style="text-align:center;color:var(--success)">{{ m.total_done }}</td>
+                <td style="text-align:center">{{ m.total_qty ? Math.round(m.total_done/m.total_qty*100) : 0 }}%</td>
+              </tr>
+            </tbody>
+          </table><p v-else class="empty"><span class="empty-text">无月度数据</span></p></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
+  </div>

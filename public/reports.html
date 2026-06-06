@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据分析报表</title>
+    <script src="vue3.global.prod.js"></script>
+    <style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #f5f6f8;
+  color: #374151;
+  min-height: 100vh;
+}
+.app { max-width: 1600px; margin: 0 auto; padding: 20px 24px; }
+
+/* Header */
+.report-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 24px;
+  background: white;
+  border-radius: 14px; margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.report-title {
+  font-size: 24px; font-weight: bold;
+  color: #4F46E5;
+}
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.btn-board-link {
+  padding: 8px 16px; border-radius: 8px;
+  border: 1px solid #059669;
+  background: white; color: #059669;
+  cursor: pointer; font-size: 13px; text-decoration: none;
+  transition: all 0.2s;
+}
+.btn-board-link:hover { background: #ECFDF5; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.tab-btn {
+  padding: 8px 18px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: #6B7280;
+  cursor: pointer; font-size: 14px; font-weight: 500;
+  transition: all 0.2s;
+}
+.tab-btn:hover { background: #f3f4f6; }
+.tab-btn.active {
+  background: #EEF2FF; color: #4F46E5; border-color: #4F46E5;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 18px; flex-wrap: wrap;
+}
+.filter-bar label { font-size: 13px; color: #6B7280; }
+.filter-bar input[type="date"], .filter-bar input[type="number"] {
+  padding: 7px 12px; border-radius: 8px;
+  border: 1px solid #d1d5db; background: white; color: #374151;
+  font-size: 13px; outline: none;
+}
+.filter-bar input:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+.btn-preset {
+  padding: 6px 14px; border-radius: 8px;
+  border: 1px solid #d1d5db; background: white; color: #6B7280;
+  cursor: pointer; font-size: 12px; transition: all 0.2s;
+}
+.btn-preset:hover { border-color: #4F46E5; color: #4F46E5; }
+.btn-preset.active { background: #4F46E5; color: white; border-color: #4F46E5; }
+.btn-action {
+  padding: 7px 16px; border-radius: 8px;
+  border: 1px solid #4F46E5; background: white; color: #4F46E5;
+  cursor: pointer; font-size: 13px; transition: all 0.2s;
+}
+.btn-action:hover { background: #EEF2FF; }
+.btn-action.green { border-color: #059669; color: #059669; }
+.btn-action.green:hover { background: #ECFDF5; }
+.btn-action.orange { border-color: #D97706; color: #D97706; }
+.btn-action.orange:hover { background: #FFFBEB; }
+
+/* Summary Cards */
+.summary-bar { display: grid; gap: 12px; margin-bottom: 18px; }
+.summary-bar.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.summary-bar.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.summary-bar.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.s-card {
+  background: white; border-radius: 12px; padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.s-card .label { font-size: 12px; color: #6B7280; margin-bottom: 3px; }
+.s-card .value { font-size: 28px; font-weight: bold; }
+.s-card .value.blue { color: #2563EB; }
+.s-card .value.green { color: #059669; }
+.s-card .value.red { color: #DC2626; }
+.s-card .value.orange { color: #D97706; }
+.s-card .value.purple { color: #7C3AED; }
+.s-card .value.yellow { color: #D97706; }
+.s-card .value.pink { color: #EC4899; }
+.s-card .sub { font-size: var(--text-xs-alt); color: #9CA3AF; margin-top: 2px; }
+
+/* Chart Panels */
+.chart-panel {
+  background: white; border-radius: 14px; padding: 18px 22px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 18px;
+}
+.panel-title {
+  font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #f3f4f6;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.panel-title-left { display: flex; align-items: center; gap: 10px; }
+.panel-title .dot {
+  width: 3px; height: 18px; border-radius: 2px; display: inline-block;
+}
+.panel-title .dot.cyan { background: #4F46E5; }
+.panel-title .dot.green { background: #059669; }
+.panel-title .dot.orange { background: #D97706; }
+.panel-title .dot.purple { background: #7C3AED; }
+.panel-title .dot.red { background: #DC2626; }
+
+/* Trend Chart */
+.trend-chart {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 200px; padding: 5px; overflow-x: auto;
+}
+.trend-bar-group { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.trend-bars { display: flex; align-items: flex-end; gap: 2px; height: 100%; }
+.trend-bar { width: 8px; border-radius: 3px 3px 0 0; transition: height 0.5s ease; min-height: 2px; cursor: pointer; }
+.trend-bar.output { background: #4F46E5; }
+.trend-bar.scrap { background: #DC2626; }
+.trend-bar.rework { background: #D97706; }
+.trend-date { font-size: 9px; color: #9CA3AF; margin-top: 4px; white-space: nowrap; }
+
+/* Horizontal Bar */
+.h-bar-list { margin-top: 6px; }
+.h-bar-item {
+  display: flex; align-items: center;
+  padding: 9px 0; border-bottom: 1px solid #f3f4f6;
+}
+.h-bar-item:last-child { border-bottom: none; }
+.h-bar-rank {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--text-xs-alt); font-weight: bold; margin-right: 10px; flex-shrink: 0;
+}
+.h-bar-rank.r1 { background: #f1c40f; color: #fff; }
+.h-bar-rank.r2 { background: #bdc3c7; color: #fff; }
+.h-bar-rank.r3 { background: #e67e22; color: #fff; }
+.h-bar-name { width: 80px; font-size: 14px; flex-shrink: 0; font-weight: 500; }
+.h-bar-wrap { flex: 1; height: 20px; background: #f3f4f6; border-radius: 10px; overflow: hidden; margin: 0 10px; }
+.h-bar-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
+.h-bar-val { width: 65px; text-align: right; font-size: 14px; font-weight: bold; color: #4F46E5; flex-shrink: 0; }
+.h-bar-val.red { color: #DC2626; }
+.h-bar-val.orange { color: #D97706; }
+.h-bar-meta { font-size: var(--text-xs-alt); color: #9CA3AF; margin-left: 6px; }
+
+/* Two column */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+/* Data Table */
+.table-wrap { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; min-width: 650px; }
+.data-table th {
+  background: #F9FAFB; padding: 10px 8px; text-align: left;
+  font-size: 12px; font-weight: 600; color: #6B7280;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 2px solid #E5E7EB; white-space: nowrap;
+}
+.data-table td { padding: 9px 8px; font-size: 13px; color: #374151; border-bottom: 1px solid #F3F4F6; }
+.data-table tr:hover { background: #F9FAFB; }
+
+/* Badge */
+.badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+.badge.pending { background: #FEF3C7; color: #92400E; }
+.badge.producing { background: #DBEAFE; color: #1E40AF; }
+.badge.completed { background: #D1FAE5; color: #065F46; }
+
+/* Donut */
+.donut-wrapper { display: flex; gap: 16px; flex-wrap: wrap; }
+.donut-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; background: #F9FAFB; border-radius: 10px; flex: 1; min-width: 180px;
+}
+.donut-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.donut-text .d-label { font-size: 12px; color: #6B7280; }
+.donut-text .d-value { font-size: 18px; font-weight: bold; }
+.donut-text .d-pct { font-size: var(--text-xs-alt); color: #9CA3AF; }
+
+/* Empty */
+.empty-state { text-align: center; padding: 40px 20px; color: #9CA3AF; }
+.empty-state .icon { font-size: 40px; margin-bottom: 8px; }
+
+/* Scroll */
+.scroll-y { max-height: 420px; overflow-y: auto; }
+.scroll-y::-webkit-scrollbar { width: 5px; }
+.scroll-y::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+/* Legend */
+.legend { display: flex; gap: 16px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B7280; }
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+/* Toast */
+.toast {
+  position: fixed; top: 20px; right: 20px;
+  padding: 12px 20px; border-radius: 10px;
+  background: #059669; color: white; font-size: 14px;
+  z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  animation: slideInRight 0.3s ease;
+}
+@keyframes slideInRight { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+@keyframes fadeInUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+.chart-panel { animation: fadeInUp 0.5s ease forwards; }
+
+@media (max-width:1200px) {
+  .two-col { grid-template-columns: 1fr; }
+  .summary-bar.cols-4, .summary-bar.cols-5, .summary-bar.cols-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width:768px) {
+  .report-header { flex-direction: column; text-align: center; }
+  .header-actions { justify-content: center; }
+}
+@media print {
+  .report-header, .tabs, .filter-bar, .btn-action { display: none !important; }
+  .chart-panel { break-inside: avoid; border: 1px solid #ddd; }
+}
+</style>
+</head>
+<body>
+    <div id="app">
+        <div class="app">
+            <!-- Header -->
+            <div class="report-header">
+                <div class="report-title">📊 数据分析报表</div>
+                <div class="header-actions">
+                    <a class="btn-board-link" href="board.html" target="_blank">📈 生产看板</a>
+                    <span style="font-size:13px;color:rgba(255,255,255,0.4)">{{ updateTime }}</span>
+                    <button class="btn-action" @click="loadData">🔄 刷新</button>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn" :class="{active: tab==='trend'}" @click="switchTab('trend')">📈 生产趋势</button>
+                <button class="tab-btn" :class="{active: tab==='worker'}" @click="switchTab('worker')">👷 工人效率</button>
+                <button class="tab-btn" :class="{active: tab==='quality'}" @click="switchTab('quality')">🔬 品质分析</button>
+                <button class="tab-btn" :class="{active: tab==='order'}" @click="switchTab('order')">📦 订单分析</button>
+            </div>
+
+            <!-- ====== FILTERS ====== -->
+            <!-- Trend filter -->
+            <div class="filter-bar" v-if="tab==='trend'">
+                <label>时间范围：</label>
+                <button class="btn-preset" :class="{active: trendDays==7}" @click="trendDays=7; loadTrend()">最近7天</button>
+                <button class="btn-preset" :class="{active: trendDays==14}" @click="trendDays=14; loadTrend()">14天</button>
+                <button class="btn-preset" :class="{active: trendDays==30}" @click="trendDays=30; loadTrend()">30天</button>
+                <button class="btn-preset" :class="{active: trendDays==60}" @click="trendDays=60; loadTrend()">60天</button>
+                <button class="btn-preset" :class="{active: trendDays==90}" @click="trendDays=90; loadTrend()">90天</button>
+            </div>
+            <!-- Worker/Quality filter -->
+            <div class="filter-bar" v-if="tab==='worker' || tab==='quality'">
+                <label>时间：</label>
+                <button class="btn-preset" :class="{active: datePreset==='7d'}" @click="setDatePreset('7d')">最近7天</button>
+                <button class="btn-preset" :class="{active: datePreset==='30d'}" @click="setDatePreset('30d')">30天</button>
+                <button class="btn-preset" :class="{active: datePreset==='90d'}" @click="setDatePreset('90d')">90天</button>
+                <button class="btn-preset" :class="{active: datePreset==='custom'}" @click="datePreset='custom'">自定义</button>
+                <template v-if="datePreset==='custom'">
+                    <input type="date" v-model="reportStart" @change="loadData">
+                    <span style="color:rgba(255,255,255,0.3)">~</span>
+                    <input type="date" v-model="reportEnd" @change="loadData">
+                </template>
+                <button class="btn-action orange" @click="loadData" style="margin-left:4px">查询</button>
+            </div>
+
+            <!-- ==================== TAB: TREND ==================== -->
+            <template v-if="tab==='trend'">
+                <div class="summary-bar cols-5">
+                    <div class="s-card"><div class="label">总产量</div><div class="value green">{{ trendSummary.total_output }}</div></div>
+                    <div class="s-card"><div class="label">总报废</div><div class="value red">{{ trendSummary.total_scrap }}</div></div>
+                    <div class="s-card"><div class="label">总返工</div><div class="value orange">{{ trendSummary.total_rework }}</div></div>
+                    <div class="s-card"><div class="label">报废率</div><div class="value pink">{{ trendSummary.scrap_rate }}%</div></div>
+                    <div class="s-card"><div class="label">返工率</div><div class="value yellow">{{ trendSummary.rework_rate }}%</div></div>
+                </div>
+
+                <div class="chart-panel">
+                    <div class="panel-title">
+                        <div class="panel-title-left"><span class="dot cyan"></span>每日生产趋势（最近 {{ trendDays }} 天）</div>
+                        <button class="btn-action green" @click="exportCSV('trend')">📥 导出CSV</button>
+                    </div>
+                    <div class="trend-chart">
+                        <div class="trend-bar-group" v-for="(item, idx) in trendData" :key="idx">
+                            <div class="trend-bars">
+                                <div class="trend-bar output"
+                                     :style="{height: getTrendHeight(item.output)+'px'}"
+                                     :title="item.date + ' 产量: ' + item.output"></div>
+                                <div class="trend-bar scrap"
+                                     :style="{height: getTrendHeight(item.scrap)+'px'}"
+                                     :title="item.date + ' 报废: ' + item.scrap"></div>
+                                <div class="trend-bar rework"
+                                     :style="{height: getTrendHeight(item.rework)+'px'}"
+                                     :title="item.date + ' 返工: ' + item.rework"></div>
+                            </div>
+                            <div class="trend-date">{{ formatDateLabel(item.date) }}</div>
+                        </div>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#00d4ff,#0090ff)"></span>产量</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#ff6b6b,#ee5a24)"></span>报废</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(180deg,#ff9f43,#ff6b6b)"></span>返工</div>
+                    </div>
+                </div>
+
+                <div class="chart-panel">
+                    <div class="panel-title">
+                        <div class="panel-title-left"><span class="dot green"></span>详细数据</div>
+                        <button class="btn-action green" @click="exportCSV('trend-detail')">📥 导出CSV</button>
+                    </div>
+                    <div class="scroll-y">
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead><tr><th>日期</th><th>产量</th><th>报废</th><th>报废率</th><th>返工</th><th>返工率</th><th>报工次数</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="item in trendData" :key="item.date">
+                                        <td style="color:rgba(255,255,255,0.6)">{{ item.date }}</td>
+                                        <td style="color:#00d4ff;font-weight:600">{{ item.output }}</td>
+                                        <td><span v-if="item.scrap>0" style="color:#ff6b6b">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.scrap/item.output*100||0) > 10 ? '#ff6b6b' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td><span v-if="item.rework>0" style="color:#ff9f43">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.rework/item.output*100||0) > 10 ? '#ff9f43' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td style="color:rgba(255,255,255,0.5)">{{ item.report_count }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- ==================== TAB: WORKER ==================== -->
+            <template v-if="tab==='worker'">
+                <div class="summary-bar cols-4">
+                    <div class="s-card"><div class="label">统计人数</div><div class="value blue">{{ workerStats.length }}</div></div>
+                    <div class="s-card"><div class="label">总产出</div><div class="value green">{{ workerTotal('output') }}</div></div>
+                    <div class="s-card"><div class="label">总报废</div><div class="value red">{{ workerTotal('scrap') }}</div></div>
+                    <div class="s-card"><div class="label">总返工</div><div class="value orange">{{ workerTotal('rework') }}</div></div>
+                </div>
+
+                <div class="two-col">
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot cyan"></span>产出排行</div></div>
+                        <div class="h-bar-list">
+                            <div class="h-bar-item" v-for="(w, idx) in workerStats" :key="w.id">
+                                <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
+                                <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
+                                <div class="h-bar-wrap">
+                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'output')+'%', background: 'linear-gradient(90deg,#00d4ff,#0090ff)'}"></div>
+                                </div>
+                                <div class="h-bar-val">{{ w.output }}</div>
+                                <div class="h-bar-meta">{{ w.daily_avg }}/天</div>
+                            </div>
+                            <div v-if="workerStats.length===0" class="empty-state"><div class="icon">👷</div><p>暂无数据</p></div>
+                        </div>
+                    </div>
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot orange"></span>报废排行</div></div>
+                        <div class="h-bar-list">
+                            <div class="h-bar-item" v-for="(w, idx) in scrapRanking" :key="w.id">
+                                <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
+                                <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
+                                <div class="h-bar-wrap">
+                                    <div class="h-bar-fill" :style="{width: getWorkerPct(w,'scrap')+'%', background: 'linear-gradient(90deg,#ff6b6b,#ee5a24)'}"></div>
+                                </div>
+                                <div class="h-bar-val red">{{ w.scrap }}</div>
+                                <div class="h-bar-meta">报废率 {{ w.scrap_rate }}%</div>
+                            </div>
+                            <div v-if="scrapRanking.length===0" class="empty-state"><div class="icon">✅</div><p>无报废记录</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-panel">
+                    <div class="panel-title">
+                        <div class="panel-title-left"><span class="dot purple"></span>工人效率明细</div>
+                        <button class="btn-action green" @click="exportCSV('worker')">📥 导出CSV</button>
+                    </div>
+                    <div class="scroll-y">
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead><tr><th>#</th><th>姓名</th><th>工号</th><th>总产出</th><th>日均</th><th>天数</th><th>报工</th><th>报废</th><th>报废率</th><th>返工</th><th>返工率</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="(w, idx) in workerStats" :key="w.id">
+                                        <td><span class="badge" :class="idx<3?'producing':'pending'">{{ idx+1 }}</span></td>
+                                        <td style="font-weight:600">{{ w.name }}</td>
+                                        <td style="color:rgba(255,255,255,0.5)">{{ w.employee_no || '--' }}</td>
+                                        <td style="color:#00d4ff;font-weight:600">{{ w.output }}</td>
+                                        <td>{{ w.daily_avg }}</td>
+                                        <td style="color:rgba(255,255,255,0.5)">{{ w.work_days }}</td>
+                                        <td style="color:rgba(255,255,255,0.5)">{{ w.report_count }}</td>
+                                        <td><span v-if="w.scrap>0" style="color:#ff6b6b">{{ w.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td><span :style="{color: w.scrap_rate > 5 ? '#ff6b6b' : 'rgba(255,255,255,0.5)'}">{{ w.scrap_rate }}%</span></td>
+                                        <td><span v-if="w.rework>0" style="color:#ff9f43">{{ w.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td><span :style="{color: w.rework_rate > 5 ? '#ff9f43' : 'rgba(255,255,255,0.5)'}">{{ w.rework_rate }}%</span></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- ==================== TAB: QUALITY ==================== -->
+            <template v-if="tab==='quality'">
+                <div class="summary-bar cols-5">
+                    <div class="s-card"><div class="label">工序数</div><div class="value blue">{{ qualityProcess.length }}</div></div>
+                    <div class="s-card"><div class="label">总产出</div><div class="value green">{{ qTotal('output') }}</div></div>
+                    <div class="s-card"><div class="label">总报废</div><div class="value red">{{ qTotal('scrap') }}</div></div>
+                    <div class="s-card"><div class="label">总返工</div><div class="value orange">{{ qTotal('rework') }}</div></div>
+                    <div class="s-card"><div class="label">不良品率</div><div class="value pink">{{ defectRate }}%</div></div>
+                </div>
+
+                <div class="two-col">
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot red"></span>工序不良品分析</div></div>
+                        <div class="h-bar-list">
+                            <div v-if="qualityProcess.length===0" class="empty-state"><div class="icon">🏭</div><p>暂无数据</p></div>
+                            <div class="h-bar-item" v-for="item in qualityProcess" :key="item.id">
+                                <div class="h-bar-name" style="width:100px" :title="item.name">{{ item.name }}</div>
+                                <div class="h-bar-wrap">
+                                    <div class="h-bar-fill" :style="{width: getQProcessPct(item)+'%', background: 'linear-gradient(90deg,#a855f7,#7c3aed)'}"></div>
+                                </div>
+                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:12px">
+                                    <span style="color:#00d4ff">{{ item.output }}</span>
+                                    <span v-if="item.scrap>0" style="color:#ff6b6b">废{{ item.scrap }}</span>
+                                    <span v-if="item.rework>0" style="color:#ff9f43">返{{ item.rework }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot orange"></span>不良工人排行</div></div>
+                        <div class="h-bar-list">
+                            <div v-if="qualityWorker.length===0" class="empty-state"><div class="icon">✅</div><p>无不良记录</p></div>
+                            <div class="h-bar-item" v-for="(w, idx) in qualityWorker" :key="w.name">
+                                <div class="h-bar-rank" :class="'r'+(idx+1)">{{ idx+1 }}</div>
+                                <div class="h-bar-name" :title="w.name">{{ w.name }}</div>
+                                <div class="h-bar-wrap">
+                                    <div class="h-bar-fill" :style="{width: getQWorkerPct(w)+'%', background: 'linear-gradient(90deg,#ff6b6b,#ee5a24)'}"></div>
+                                </div>
+                                <div style="display:flex;gap:6px;flex-shrink:0;font-size:12px">
+                                    <span style="color:#ff6b6b">废{{ w.scrap }}</span>
+                                    <span v-if="w.rework>0" style="color:#ff9f43">返{{ w.rework }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-panel">
+                    <div class="panel-title">
+                        <div class="panel-title-left"><span class="dot cyan"></span>工序不良明细</div>
+                        <button class="btn-action green" @click="exportCSV('quality')">📥 导出CSV</button>
+                    </div>
+                    <div class="scroll-y">
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead><tr><th>工序</th><th>分类</th><th>产出</th><th>报废</th><th>报废率</th><th>返工</th><th>返工率</th><th>不良合计</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="item in qualityProcess" :key="item.id">
+                                        <td style="font-weight:600">{{ item.name }}</td>
+                                        <td style="color:rgba(255,255,255,0.5)">{{ item.category }}</td>
+                                        <td style="color:#00d4ff">{{ item.output }}</td>
+                                        <td><span v-if="item.scrap>0" style="color:#ff6b6b">{{ item.scrap }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.scrap/item.output*100||0) > 5 ? '#ff6b6b' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.scrap/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td><span v-if="item.rework>0" style="color:#ff9f43">{{ item.rework }}</span><span v-else style="color:rgba(255,255,255,0.2)">0</span></td>
+                                        <td :style="{color: (item.rework/item.output*100||0) > 5 ? '#ff9f43' : 'rgba(255,255,255,0.4)'}">{{ item.output>0 ? (item.rework/item.output*100).toFixed(1) : 0 }}%</td>
+                                        <td style="color:#a855f7;font-weight:600">{{ (item.scrap||0)+(item.rework||0) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- ==================== TAB: ORDER ==================== -->
+            <template v-if="tab==='order'">
+                <div class="summary-bar cols-3">
+                    <div class="s-card"><div class="label">订单总数</div><div class="value blue">{{ orderTotal('count') }}</div></div>
+                    <div class="s-card"><div class="label">总数量</div><div class="value green">{{ orderTotal('qty') }}</div></div>
+                    <div class="s-card"><div class="label">已完成</div><div class="value purple">{{ orderTotal('done') }}</div></div>
+                </div>
+
+                <div class="two-col">
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot cyan"></span>订单状态分布</div></div>
+                        <div class="donut-wrapper">
+                            <div class="donut-item" v-for="item in orderStatus" :key="item.status">
+                                <div class="donut-dot" :style="{background: statusColor(item.status)}"></div>
+                                <div class="donut-text">
+                                    <div class="d-label">{{ statusLabel(item.status) }}</div>
+                                    <div class="d-value" :style="{color: statusColor(item.status)}">{{ item.count }} 个</div>
+                                    <div class="d-pct">{{ ((item.qty||0) - (item.done||0)) > 0 ? '剩余' + ((item.qty||0)-(item.done||0)) : '已完成' }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-panel">
+                        <div class="panel-title"><div class="panel-title-left"><span class="dot green"></span>月度订单趋势</div></div>
+                        <div class="h-bar-list">
+                            <div class="h-bar-item" v-for="item in orderMonthly" :key="item.month">
+                                <div class="h-bar-name" style="width:65px">{{ item.month }}</div>
+                                <div class="h-bar-wrap">
+                                    <div class="h-bar-fill" :style="{width: getMonthlyPct(item)+'%', background: 'linear-gradient(90deg,#00d4ff,#7b2cbf)'}"></div>
+                                </div>
+                                <div style="display:flex;gap:8px;flex-shrink:0;font-size:12px">
+                                    <span style="color:#00d4ff">{{ item.total_qty }}</span>
+                                    <span style="color:#2ecc71">完成{{ item.total_done }}</span>
+                                    <span style="color:rgba(255,255,255,0.3)">{{ item.order_count }}单</span>
+                                </div>
+                            </div>
+                            <div v-if="orderMonthly.length===0" class="empty-state"><div class="icon">📦</div><p>暂无订单数据</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-panel">
+                    <div class="panel-title">
+                        <div class="panel-title-left"><span class="dot purple"></span>状态详情</div>
+                        <button class="btn-action green" @click="exportCSV('order')">📥 导出CSV</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead><tr><th>状态</th><th>订单数</th><th>总量</th><th>已完成</th><th>完成率</th><th>剩余</th></tr></thead>
+                            <tbody>
+                                <tr v-for="item in orderStatus" :key="item.status">
+                                    <td><span class="badge" :class="item.status">{{ statusLabel(item.status) }}</span></td>
+                                    <td style="color:#00d4ff;font-weight:600">{{ item.count }}</td>
+                                    <td>{{ item.qty || 0 }}</td>
+                                    <td style="color:#2ecc71">{{ item.done || 0 }}</td>
+                                    <td>{{ ((item.done||0) / Math.max(item.qty||0, 1) * 100).toFixed(1) }}%</td>
+                                    <td :style="{color: ((item.qty||0)-(item.done||0)) > 0 ? '#ff9f43' : '#2ecc71'}">{{ Math.max(0, (item.qty||0)-(item.done||0)) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </template>
+
+            <div style="text-align:right;padding:var(--space-3) 0;font-size:12px;color:rgba(255,255,255,0.12)">
+                更新于 {{ updateTime }} | 数据来自生产管理系统
+            </div>
+        </div>
+        <!-- Toast -->
+        <div v-if="toast" class="toast">{{ toast }}</div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    tab: 'trend',
+                    updateTime: '',
+                    toast: '',
+                    toastTimer: null,
+                    // Trend
+                    trendDays: 30,
+                    trendData: [],
+                    trendSummary: {},
+                    trendMaxVal: 1,
+                    // Worker
+                    datePreset: '30d',
+                    reportStart: '',
+                    reportEnd: '',
+                    workerStats: [],
+                    // Quality
+                    qualityProcess: [],
+                    qualityWorker: [],
+                    qMaxDefect: 1,
+                    qWMaxScrap: 1,
+                    // Order
+                    orderStatus: [],
+                    orderMonthly: [],
+                    orderMaxQty: 1
+                };
+            },
+            computed: {
+                scrapRanking() {
+                    return [...this.workerStats]
+                        .filter(w => w.scrap > 0)
+                        .sort((a, b) => b.scrap - a.scrap);
+                },
+                defectRate() {
+                    const totalOut = this.qTotal('output');
+                    const totalDefect = this.qTotal('scrap') + this.qTotal('rework');
+                    return totalOut > 0 ? (totalDefect / totalOut * 100).toFixed(1) : 0;
+                }
+            },
+            mounted() {
+                this.initDates();
+                this.loadData();
+            },
+            methods: {
+                initDates() {
+                    const now = new Date();
+                    this.reportEnd = this.toDateStr(now);
+                    this.reportStart = this.toDateStr(new Date(now - 30*86400000));
+                    this.updateTime = now.toLocaleString('zh-CN');
+                },
+                toDateStr(d) { return d.toISOString().slice(0,10); },
+                showToast(msg) {
+                    this.toast = msg;
+                    if (this.toastTimer) clearTimeout(this.toastTimer);
+                    this.toastTimer = setTimeout(() => this.toast = '', 2500);
+                },
+
+                switchTab(t) {
+                    this.tab = t;
+                    this.loadData();
+                },
+                setDatePreset(preset) {
+                    this.datePreset = preset;
+                    const now = new Date();
+                    this.reportEnd = this.toDateStr(now);
+                    if (preset === '7d') this.reportStart = this.toDateStr(new Date(now - 7*86400000));
+                    else if (preset === '30d') this.reportStart = this.toDateStr(new Date(now - 30*86400000));
+                    else if (preset === '90d') this.reportStart = this.toDateStr(new Date(now - 90*86400000));
+                    this.loadData();
+                },
+
+                loadData() {
+                    if (this.tab === 'trend') this.loadTrend();
+                    else if (this.tab === 'worker') this.loadWorker();
+                    else if (this.tab === 'quality') this.loadQuality();
+                    else if (this.tab === 'order') this.loadOrder();
+                },
+
+                async loadTrend() {
+                    try {
+                        const r = await fetch(`/api/reports/production-trend?days=${this.trendDays}`);
+                        const d = await r.json();
+                        this.trendData = d.trend || [];
+                        this.trendSummary = d.summary || {};
+                        this.trendMaxVal = Math.max(...this.trendData.map(t => Math.max(t.output, t.scrap, t.rework)), 1);
+                        this.updateTime = new Date().toLocaleString('zh-CN');
+                    } catch(e) { console.error(e); }
+                },
+                async loadWorker() {
+                    try {
+                        const r = await fetch(`/api/reports/worker-efficiency?start=${this.reportStart}&end=${this.reportEnd}`);
+                        const d = await r.json();
+                        this.workerStats = d.workers || [];
+                        this.updateTime = new Date().toLocaleString('zh-CN');
+                    } catch(e) { console.error(e); }
+                },
+                async loadQuality() {
+                    try {
+                        const r = await fetch(`/api/reports/quality-analysis?start=${this.reportStart}&end=${this.reportEnd}`);
+                        const d = await r.json();
+                        this.qualityProcess = d.by_process || [];
+                        this.qualityWorker = d.by_worker || [];
+                        this.qMaxDefect = Math.max(...this.qualityProcess.map(p => (p.scrap||0)+(p.rework||0)), 1);
+                        this.qWMaxScrap = Math.max(...this.qualityWorker.map(w => w.scrap||0), 1);
+                        this.updateTime = new Date().toLocaleString('zh-CN');
+                    } catch(e) { console.error(e); }
+                },
+                async loadOrder() {
+                    try {
+                        const r = await fetch(`/api/reports/order-analysis?start=${this.reportStart}&end=${this.reportEnd}`);
+                        const d = await r.json();
+                        this.orderStatus = d.status_distribution || [];
+                        this.orderMonthly = d.monthly_trend || [];
+                        this.orderMaxQty = Math.max(...this.orderMonthly.map(m => m.total_qty || 0), 1);
+                        this.updateTime = new Date().toLocaleString('zh-CN');
+                    } catch(e) { console.error(e); }
+                },
+
+                // === Chart helpers ===
+                getTrendHeight(val) {
+                    return (val / this.trendMaxVal) * 180;
+                },
+                formatDateLabel(dateStr) {
+                    if (!dateStr) return '';
+                    const parts = dateStr.split('-');
+                    return parts[1] + '/' + parts[2];
+                },
+                getWorkerPct(w, field) {
+                    const max = Math.max(...this.workerStats.map(x => x[field] || 0), 1);
+                    return Math.max((w[field] || 0) / max * 100, 3);
+                },
+                workerTotal(field) {
+                    return this.workerStats.reduce((s, w) => s + (w[field] || 0), 0);
+                },
+                getQProcessPct(item) {
+                    const defect = (item.scrap || 0) + (item.rework || 0);
+                    return Math.max(defect / this.qMaxDefect * 100, 3);
+                },
+                getQWorkerPct(w) {
+                    return Math.max((w.scrap || 0) / this.qWMaxScrap * 100, 3);
+                },
+                qTotal(field) {
+                    return this.qualityProcess.reduce((s, i) => s + (i[field] || 0), 0);
+                },
+                orderTotal(field) {
+                    if (field === 'count') return this.orderStatus.reduce((s, i) => s + (i.count || 0), 0);
+                    if (field === 'qty') return this.orderStatus.reduce((s, i) => s + (i.qty || 0), 0);
+                    if (field === 'done') return this.orderStatus.reduce((s, i) => s + (i.done || 0), 0);
+                    return 0;
+                },
+                getMonthlyPct(item) {
+                    return Math.max((item.total_qty || 0) / this.orderMaxQty * 100, 3);
+                },
+                statusColor(status) {
+                    const map = {pending: '#ff9f43', producing: '#00d4ff', completed: '#2ecc71'};
+                    return map[status] || '#a855f7';
+                },
+                statusLabel(status) {
+                    const map = {pending: '待生产', producing: '生产中', completed: '已完成'};
+                    return map[status] || status;
+                },
+
+                // === Export CSV ===
+                exportCSV(type) {
+                    let csv = '\uFEFF'; // BOM for Excel UTF-8
+                    const sep = ',';
+
+                    if (type === 'trend' || type === 'trend-detail') {
+                        csv += '日期' + sep + '产量' + sep + '报废' + sep + '报废率%' + sep + '返工' + sep + '返工率%' + sep + '报工次数\n';
+                        this.trendData.forEach(d => {
+                            const sr = d.output > 0 ? (d.scrap/d.output*100).toFixed(1) : 0;
+                            const rr = d.output > 0 ? (d.rework/d.output*100).toFixed(1) : 0;
+                            csv += d.date + sep + d.output + sep + d.scrap + sep + sr + sep + d.rework + sep + rr + sep + d.report_count + '\n';
+                        });
+                    } else if (type === 'worker') {
+                        csv += '排名,姓名,工号,总产出,日均,工作天数,报工次数,报废,报废率%,返工,返工率%\n';
+                        this.workerStats.forEach((w, i) => {
+                            csv += (i+1) + sep + w.name + sep + (w.employee_no||'') + sep + w.output + sep + w.daily_avg + sep + w.work_days + sep + w.report_count + sep + w.scrap + sep + w.scrap_rate + sep + w.rework + sep + w.rework_rate + '\n';
+                        });
+                    } else if (type === 'quality') {
+                        csv += '工序,分类,产出,报废,报废率%,返工,返工率%,不良合计\n';
+                        this.qualityProcess.forEach(p => {
+                            const sr = p.output > 0 ? (p.scrap/p.output*100).toFixed(1) : 0;
+                            const rr = p.output > 0 ? (p.rework/p.output*100).toFixed(1) : 0;
+                            csv += p.name + sep + p.category + sep + p.output + sep + (p.scrap||0) + sep + sr + sep + (p.rework||0) + sep + rr + sep + ((p.scrap||0)+(p.rework||0)) + '\n';
+                        });
+                    } else if (type === 'order') {
+                        csv += '状态,订单数,总量,已完成,完成率%,剩余\n';
+                        this.orderStatus.forEach(s => {
+                            const rate = s.qty > 0 ? (s.done/s.qty*100).toFixed(1) : 0;
+                            const remain = Math.max(0, (s.qty||0)-(s.done||0));
+                            csv += this.statusLabel(s.status) + sep + s.count + sep + (s.qty||0) + sep + (s.done||0) + sep + rate + sep + remain + '\n';
+                        });
+                    }
+
+                    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    const label = {trend:'生产趋势', 'trend-detail':'生产趋势明细', worker:'工人效率', quality:'品质分析', order:'订单分析'};
+                    link.download = `报表_${label[type]}_${new Date().toISOString().slice(0,10)}.csv`;
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                    this.showToast('✅ 已导出CSV文件');
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
