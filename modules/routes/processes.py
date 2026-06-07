@@ -33,8 +33,12 @@ def list_processes():
     limit = request.args.get('limit')
     offset = request.args.get('offset', 0)
     if limit:
-        limit = int(limit)
-        offset = int(offset)
+        try:
+            limit = int(limit)
+            offset = int(offset)
+        except (ValueError, TypeError):
+            limit = None
+            offset = 0
     else:
         limit = None
     return jsonify(ProcessService.list_processes(category, search, sort_by, sort_dir, limit, offset))
