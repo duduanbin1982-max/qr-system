@@ -7,6 +7,13 @@ from modules.middleware.error_handler import handle_unexpected_error
 from modules.services.quality_service import QualityService
 
 
+def _safe_int(val, default):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
 @app.route('/api/quality/inspections', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
@@ -20,8 +27,8 @@ def quality_list():
             search=request.args.get('search', ''),
             date_from=request.args.get('from', ''),
             date_to=request.args.get('to', ''),
-            page=int(request.args.get('page', 1)),
-            per_page=int(request.args.get('per_page', 20)),
+            page=_safe_int(request.args.get('page', '1'), 1),
+            per_page=_safe_int(request.args.get('per_page', '20'), 20),
         ))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
