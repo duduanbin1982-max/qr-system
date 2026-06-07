@@ -335,44 +335,31 @@ function openCam() {
     return;
   }
 
-  // 权限预检 — 如果之前被拒，引导用户到设置
-  var preCheck = Promise.resolve();
-  if (navigator.permissions && navigator.permissions.query) {
-    preCheck = navigator.permissions.query({name: 'camera'}).then(function(perm) {
-      if (perm.state === 'denied') {
-        toast('摄像头权限已被拒绝。请在浏览器设置→权限→摄像头中允许访问后重试，或使用拍照解码', 5000);
-        show('main');
-        throw new Error('PERM_DENIED');
-      }
-    });
-  }
+  let hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
+  $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
 
-  preCheck.then(function() {
-    var hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
-    $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
-
-    const video = $('cam-video');
-    console.log('[openCam] calling getUserMedia...');
-    return navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    }).then(function(stream) {
-      console.log('[openCam] getUserMedia success');
-      camStream = stream;
-      video.srcObject = stream;
-      return video.play().then(function() {
-        if (hasBD) { startBD(video); }
-        else { startJsQR(video); }
-      });
+  const video = $('cam-video');
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+  })
+  .then(function(stream) {
+    camStream = stream;
+    video.srcObject = stream;
+    video.play().then(function() {
+      if (hasBD) { startBD(video); }
+      else { startJsQR(video); }
     });
   })
   .catch(function(err) {
-    if (err.message === 'PERM_DENIED') return;  // 已在 preCheck 处理
-    console.error('[openCam] error:', err.name, err.message);
-    var msg = err.name || 'Error';
-    if (err.name === 'NotAllowedError') msg = '摄像头权限被拒绝，请在浏览器设置中允许摄像头，或使用拍照解码';
-    else if (err.name === 'NotFoundError') msg = '未检测到摄像头设备';
-    else if (err.name === 'NotReadableError') msg = '摄像头被其他应用占用';
-    else msg = '摄像头错误: ' + (err.message || err.name || '未知');
+    var msg;
+    if (err.name === 'NotAllowedError')
+      msg = '摄像头权限被拒绝。请在浏览器设置中允许摄像头，或使用拍照解码';
+    else if (err.name === 'NotFoundError')
+      msg = '未检测到摄像头设备';
+    else if (err.name === 'NotReadableError')
+      msg = '摄像头被其他应用占用';
+    else
+      msg = '摄像头错误: ' + (err.message || err.name || '未知');
     toast(msg, 5000);
     show('main');
   });
