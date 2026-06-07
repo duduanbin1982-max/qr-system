@@ -804,7 +804,7 @@ textarea { resize: vertical; min-height: 80px; }
   --success-gradient: linear-gradient(135deg, #10B981, #34D399);
   --warning-gradient: linear-gradient(135deg, #F59E0B, #FBBF24);
   --rose-gradient: linear-gradient(135deg, #EC4899, #F472B6);
-.hs-green  { background: linear-gradient(135deg, #86EFAC, #A7F3D0); }
+.hs-green  { background: linear-gradient(135deg, #A7F3D0, #DCFCE7); }
 .hs-orange { background: var(--warning-gradient); }
 .hs-pink   { background: var(--rose-gradient); }
 
