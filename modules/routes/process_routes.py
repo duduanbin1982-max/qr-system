@@ -19,8 +19,12 @@ def get_process_routes():
     limit = request.args.get('limit')
     offset = request.args.get('offset', 0)
     if limit:
-        limit = int(limit)
-        offset = int(offset)
+        try:
+            limit = int(limit)
+            offset = int(offset)
+        except (ValueError, TypeError):
+            limit = None
+            offset = 0
     else:
         limit = None
     return jsonify(ProcessRouteService.list_routes(category, search, limit, offset))

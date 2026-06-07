@@ -177,6 +177,7 @@ class ProcessRouteService:
         if used['cnt'] > 0:
             raise ValueError(f'该路线已被 {used["cnt"]} 个订单使用，无法删除')
         with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM process_route_items WHERE route_id = ?', (rid,))
             txn.execute('DELETE FROM process_routes WHERE id = ?', (rid,))
         return route['name']
 
