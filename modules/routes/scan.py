@@ -670,13 +670,13 @@ def batch_qrcode():
                         ).fetchall()
                 
                 # 为每个序列号生成二维码（优先使用订单中的 product_code 字段）
-                product_code = (order['product_code'] or '').strip()
+                product_code = (order.get('product_code') or '').strip()
                 if not product_code:
                     product = db.execute('SELECT product_code FROM products WHERE product_name = ? LIMIT 1', (order['product_name'],)).fetchone()
                     product_code = product['product_code'] if product else ''
                 for item in items:
                     qr_data = f"N2{order['id']:06d}{item['position_no']:05d}"
-                    qr = qrcode.QRCode(version=2, box_size=8, border=2)
+                    qr = qrcode.QRCode(version=2, box_size=8, border=1)
                     qr.add_data(qr_data)
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
@@ -695,7 +695,7 @@ def batch_qrcode():
                     })
             else:
                 # 订单模式：每个订单一个二维码
-                qr = qrcode.QRCode(version=2, box_size=8, border=2)
+                qr = qrcode.QRCode(version=2, box_size=8, border=1)
                 qr.add_data(order['order_no'])
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
@@ -703,7 +703,7 @@ def batch_qrcode():
                 img.save(buf, format='PNG')
                 buf.seek(0)
                 b64 = base64.b64encode(buf.read()).decode()
-                product_code = (order['product_code'] or '').strip()
+                product_code = (order.get('product_code') or '').strip()
                 if not product_code:
                     product = db.execute('SELECT product_code FROM products WHERE product_name = ? LIMIT 1', (order['product_name'],)).fetchone()
                     product_code = product['product_code'] if product else ''
