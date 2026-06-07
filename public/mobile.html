@@ -329,6 +329,12 @@ function initBD() {
 function openCam() {
   show('scan');
 
+  if (!window.isSecureContext) {
+    toast('当前连接未加密，无法使用摄像头。请用拍照解码或安装 CA 证书后重试', 5000);
+    show('main');
+    return;
+  }
+
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast('此浏览器不支持摄像头，请使用拍照解码');
     show('main');
@@ -354,7 +360,12 @@ function openCam() {
     });
   })
   .catch(function(err) {
-    toast('摄像头启动失败: ' + (err.message || '未知错误'));
+    var msg = err.name || 'Error';
+    if (err.name === 'NotAllowedError') msg = '摄像头权限被拒绝，请在浏览器设置中允许摄像头' + (window.isSecureContext ? '' : '；或使用拍照解码代替');
+    else if (err.name === 'NotFoundError') msg = '未检测到摄像头设备';
+    else if (err.name === 'NotReadableError') msg = '摄像头被其他应用占用';
+    else msg = '摄像头错误: ' + (err.message || err.name || '未知');
+    toast(msg, 4000);
     show('main');
   });
 }
