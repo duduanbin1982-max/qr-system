@@ -1,8 +1,8 @@
 // ScanReport Component — 扫码报工
-import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
+import { ref, onMounted } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { auth, can } from '../../auth.js?v=56'
+import { auth } from '../../auth.js?v=56'
 
 export default {
   template: '#scan-report-template',
@@ -20,7 +20,6 @@ export default {
     const reporting = ref(false)
 
     // RBAC
-    const canReport = computed(() => can('scan:edit'))
 
     async function doScan() {
       const code = scanCode.value.trim()
@@ -77,21 +76,15 @@ export default {
       }
     }
 
-    function getProcessName(pid) {
-      if (!order.value) return ''
-      const p = (order.value.processes || []).find(x => x.process_id == pid)
-      return p ? p.process_name : ''
-    }
-
     function pctDone() {
       if (!order.value || !order.value.quantity) return 0
       return Math.min(100, Math.round((order.value.completed || 0) / order.value.quantity * 100))
     }
 
     return {
-      scanCode, scanning, order, doScan, canReport,
+      scanCode, scanning, order, doScan,
       reportProcess, reportQty, reportType, reportRemark, serialNo, reporting, doReport,
-      getProcessName, pctDone, auth, can
+      pctDone, auth
     }
   }
 }

@@ -22,6 +22,78 @@ from modules.middleware.helpers import get_json_body
 
 # ============================================================
 
+
+def _execute_report_write(db, report_type, order_id, process_id, user_id, user_name,
+                           quantity, remark, serial_no, need_approval, record_type='normal'):
+    """共享报工写入逻辑 — 由 work_report 和 mobile_report 共用"""
+    work_status = 'pending' if need_approval else 'approved'
+    
+    if report_type == 'normal':
+        cur = db.execute(
+            'INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) VALUES (?,?,?,?,?,?,?,?)',
+            (order_id, process_id, user_id, record_type, quantity, remark, work_status, serial_no))
+        wr_id = cur.lastrowid
+
+        if need_approval:
+            db.execute('INSERT INTO approval_records (work_record_id, status) VALUES (?, "pending")', (wr_id,))
+
+        if work_status == 'approved':
+            op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
+                            (order_id, process_id)).fetchone()
+            if op:
+                new_completed = (op['completed'] or 0) + quantity
+                db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
+                           (new_completed, order_id, process_id))
+
+            db.execute('UPDATE orders SET completed = (SELECT COALESCE(SUM(completed),0) FROM order_processes WHERE order_id = ?), '
+                       'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
+                       (order_id, order_id))
+
+        # 更新产品序列号的当前工序（推进到下一道工序）
+        if serial_no:
+            current_op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
+                                    (order_id, process_id)).fetchone()
+            if current_op:
+                item = db.execute('SELECT * FROM product_items WHERE serial_no = ?', (serial_no,)).fetchone()
+                if item:
+                    current_seq = current_op['seq_order']
+                    next_op = db.execute(
+                        'SELECT op.process_id FROM order_processes op WHERE op.order_id = ? AND op.seq_order > ? ORDER BY op.seq_order LIMIT 1',
+                        (order_id, current_seq)
+                    ).fetchone()
+                    if next_op:
+                        db.execute('UPDATE product_items SET current_process_id = ?, status = "in_progress" WHERE id = ?',
+                                   (next_op['process_id'], item['id']))
+                    else:
+                        db.execute('UPDATE product_items SET current_process_id = NULL, status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
+                                   (item['id'],))
+
+    elif report_type == 'scrap':
+        reason = remark or ''
+        db.execute('INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)',
+                   (order_id, process_id, user_id, quantity, reason))
+        op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
+                        (order_id, process_id)).fetchone()
+        if op:
+            new_scrapped = (op['scrapped'] or 0) + quantity
+            db.execute('UPDATE order_processes SET scrapped = ? WHERE order_id = ? AND process_id = ?',
+                       (new_scrapped, order_id, process_id))
+        db.execute('UPDATE orders SET scrapped = (SELECT COALESCE(SUM(scrapped),0) FROM order_processes WHERE order_id = ?), '
+                   'updated_at = datetime("now","localtime") WHERE id = ?', (order_id, order_id))
+
+    elif report_type == 'rework':
+        reason = remark or ''
+        db.execute('INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)',
+                   (order_id, process_id, user_id, quantity, reason))
+        op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
+                        (order_id, process_id)).fetchone()
+        if op:
+            new_rework = (op['rework'] or 0) + quantity
+            db.execute('UPDATE order_processes SET rework = ? WHERE order_id = ? AND process_id = ?',
+                       (new_rework, order_id, process_id))
+        db.execute('UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), '
+                   'updated_at = datetime("now","localtime") WHERE id = ?', (order_id, order_id))
+
 def _check_order_scope(order_id):
     pids = get_user_process_ids(g.current_user)
     if pids is None:
@@ -114,6 +186,9 @@ def mobile_decode(code):
     """将数字编码的二维码还原为JSON — 透明编解码层，mobile_scan 无需改动"""
     try:
         code = code.strip()
+        # 防止恶意超长输入
+        if len(code) > 2048:
+            return jsonify({'error': '二维码数据过长'}), 400
         # N前缀 → 强制 QR 走 Alphanumeric Mode（解决 jsQR Numeric Mode 兼容性问题），去掉
         if code.startswith('N'):
             code = code[1:]
@@ -248,7 +323,7 @@ def mobile_report():
     process_id = int(data.get('process_id', 0))
     serial_no = data.get('serial_no', '').strip() or None
     remark = data.get('remark', '')
-    report_type = data.get('type', 'normal')  # normal / scrap / rework
+    report_type = data.get('type') or data.get('work_status') or 'normal'  # normal / scrap / rework
     quantity = int(data.get('quantity', 1))
 
     if not order_id or not process_id:
@@ -325,76 +400,12 @@ def mobile_report():
         if approval_config:
             need_approval = True
     
-    work_status = 'pending' if need_approval else 'approved'
-
-    # 记录
+    # 记录（使用共享写入函数）
     db.execute('SAVEPOINT mobile_report_sp')
     try:
-        if report_type == 'normal':
-            cur = db.execute(
-                'INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) VALUES (?,?,?,?,?,?,?,?)',
-                (order_id, process_id, user['id'], 'mobile', quantity, remark, work_status, serial_no))
-            wr_id = cur.lastrowid
-
-            # 写入待审批记录
-            if need_approval:
-                db.execute('INSERT INTO approval_records (work_record_id, status) VALUES (?, "pending")', (wr_id,))
-
-            # Only update counts when approved (mobile)
-            if work_status == 'approved':
-                op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
-                                (order_id, process_id)).fetchone()
-                if op:
-                    new_completed = (op['completed'] or 0) + quantity
-                    db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
-                               (new_completed, order_id, process_id))
-
-                db.execute('UPDATE orders SET completed = (SELECT COALESCE(SUM(completed),0) FROM order_processes WHERE order_id = ?), '
-                           'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
-                           (order_id, order_id))
-
-            # 更新产品序列号的当前工序（推进到下一道工序）
-            if serial_no and current_op:
-                item = db.execute('SELECT * FROM product_items WHERE serial_no = ?', (serial_no,)).fetchone()
-                if item:
-                    current_seq = current_op['seq_order']
-                    next_op = db.execute(
-                        'SELECT op.process_id FROM order_processes op WHERE op.order_id = ? AND op.seq_order > ? ORDER BY op.seq_order LIMIT 1',
-                        (order_id, current_seq)
-                    ).fetchone()
-                    if next_op:
-                        db.execute('UPDATE product_items SET current_process_id = ?, status = "in_progress" WHERE id = ?',
-                                   (next_op['process_id'], item['id']))
-                    else:
-                        db.execute('UPDATE product_items SET current_process_id = NULL, status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
-                                   (item['id'],))
-
-        elif report_type == 'scrap':
-            reason = data.get('reason', '')
-            db.execute('INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)',
-                       (order_id, process_id, user['id'], quantity, reason))
-            op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
-                            (order_id, process_id)).fetchone()
-            if op:
-                new_scrapped = (op['scrapped'] or 0) + quantity
-                db.execute('UPDATE order_processes SET scrapped = ? WHERE order_id = ? AND process_id = ?',
-                           (new_scrapped, order_id, process_id))
-            db.execute('UPDATE orders SET scrapped = (SELECT COALESCE(SUM(scrapped),0) FROM order_processes WHERE order_id = ?), '
-                       'updated_at = datetime("now","localtime") WHERE id = ?', (order_id, order_id))
-
-        elif report_type == 'rework':
-            reason = data.get('reason', '')
-            db.execute('INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)',
-                       (order_id, process_id, user['id'], quantity, reason))
-            op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
-                            (order_id, process_id)).fetchone()
-            if op:
-                new_rework = (op['rework'] or 0) + quantity
-                db.execute('UPDATE order_processes SET rework = ? WHERE order_id = ? AND process_id = ?',
-                           (new_rework, order_id, process_id))
-            db.execute('UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), '
-                       'updated_at = datetime("now","localtime") WHERE id = ?', (order_id, order_id))
-
+        _execute_report_write(db, report_type, order_id, process_id,
+                              user['id'], user['name'], quantity, remark, serial_no,
+                              need_approval, record_type='mobile')
         db.execute('RELEASE mobile_report_sp')
         db.commit()
     except Exception as e:
@@ -574,6 +585,7 @@ def work_report():
 # ============================================================
 @app.route('/api/qrcode/<order_no>', methods=['GET'])
 @check_auth
+@check_permission('scan:view')
 def get_qrcode(order_no):
     try:
         db = get_db()
@@ -625,32 +637,43 @@ def batch_qrcode():
                 ).fetchall()
                 
                 if not items:
-                    # 如果还没生成序列号，自动生成
-                    for i in range(1, order['quantity'] + 1):
-                        serial_no = f"{order['order_no']}-{i:03d}"
-                        qr_content = json.dumps({
-                            't': 'pi',
-                            'sn': serial_no,
-                            'oid': order['id'],
-                            'on': order['order_no']
-                        }, ensure_ascii=False)
+                    # 如果还没生成序列号，自动生成（防止重复生成：检查是否已有记录）
+                    existing_count = db.execute(
+                        'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ?', (oid,)
+                    ).fetchone()['cnt']
+                    if existing_count > 0:
+                        items = db.execute(
+                            'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
+                            (oid,)
+                        ).fetchall()
+                    else:
+                        for i in range(1, order['quantity'] + 1):
+                            serial_no = f"{order['order_no']}-{i:03d}"
+                            qr_content = json.dumps({
+                                't': 'pi',
+                                'sn': serial_no,
+                                'oid': order['id'],
+                                'on': order['order_no']
+                            }, ensure_ascii=False)
+                            
+                            db.execute('''
+                                INSERT INTO product_items 
+                                (serial_no, order_id, position_no, qr_content, status, created_at)
+                                VALUES (?, ?, ?, ?, 'pending', datetime('now', 'localtime'))
+                            ''', (serial_no, oid, i, qr_content))
+                        db.commit()
                         
-                        db.execute('''
-                            INSERT INTO product_items 
-                            (serial_no, order_id, position_no, qr_content, status, created_at)
-                            VALUES (?, ?, ?, ?, 'pending', datetime('now', 'localtime'))
-                        ''', (serial_no, oid, i, qr_content))
-                    db.commit()
-                    
-                    # 重新查询
-                    items = db.execute(
-                        'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
-                        (oid,)
-                    ).fetchall()
+                        # 重新查询
+                        items = db.execute(
+                            'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
+                            (oid,)
+                        ).fetchall()
                 
-                # 为每个序列号生成二维码
-                product = db.execute('SELECT product_code FROM products WHERE product_name = ?', (order['product_name'],)).fetchone()
-                product_code = product['product_code'] if product else ''
+                # 为每个序列号生成二维码（优先使用订单中的 product_code 字段）
+                product_code = (order.get('product_code') or '').strip()
+                if not product_code:
+                    product = db.execute('SELECT product_code FROM products WHERE product_name = ? LIMIT 1', (order['product_name'],)).fetchone()
+                    product_code = product['product_code'] if product else ''
                 for item in items:
                     qr_data = f"N2{order['id']:06d}{item['position_no']:05d}"
                     qr = qrcode.QRCode(version=2, box_size=8, border=2)
@@ -680,8 +703,10 @@ def batch_qrcode():
                 img.save(buf, format='PNG')
                 buf.seek(0)
                 b64 = base64.b64encode(buf.read()).decode()
-                product = db.execute('SELECT product_code FROM products WHERE product_name = ?', (order['product_name'],)).fetchone()
-                product_code = product['product_code'] if product else ''
+                product_code = (order.get('product_code') or '').strip()
+                if not product_code:
+                    product = db.execute('SELECT product_code FROM products WHERE product_name = ? LIMIT 1', (order['product_name'],)).fetchone()
+                    product_code = product['product_code'] if product else ''
                 codes.append({
                     'order_no': order['order_no'],
                     'customer': order['customer'],
