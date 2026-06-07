@@ -222,6 +222,7 @@ class ProductService:
         # 检查编码是否会重复
         key_fields = {'product_name', 'model', 'spec', 'upper_opening',
                       'plate_thickness', 'style'}
+        new_code = None
         if key_fields & set(data.keys()):
             nm = data.get('product_name', prod['product_name'])
             md = data.get('model', prod['model'])
@@ -230,21 +231,24 @@ class ProductService:
             th = data.get('plate_thickness', prod['plate_thickness'])
             st = data.get('style', prod['style'] or '')
             new_code = generate_product_code(nm, md, sp, up, th, st)
-            dup = db.execute(
-                'SELECT id FROM products WHERE product_code = ? AND id != ?',
-                (new_code, pid)
-            ).fetchone()
-            if dup:
-                raise ValueError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
 
         with BaseService.transaction() as txn:
+            # 在事务内检查唯一性，消除 TOCTOU 竞态
+            if new_code:
+                dup = txn.execute(
+                    'SELECT id FROM products WHERE product_code = ? AND id != ?',
+                    (new_code, pid)
+                ).fetchone()
+                if dup:
+                    raise ValueError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
+
             txn.execute(
                 f'UPDATE products SET {", ".join(sets)} WHERE id = ?',
                 params + [pid]
             )
 
             # 如果关键字段变了，重新生成编码
-            if key_fields & set(data.keys()):
+            if new_code:
                 txn.execute(
                     'UPDATE products SET product_code = ? WHERE id = ?',
                     (new_code, pid)
@@ -282,6 +286,8 @@ class ProductService:
             raise ValueError(f'该产品已被 {used} 个订单使用，无法删除')
 
         with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM product_attachments WHERE product_id = ?', (pid,))
+            txn.execute('DELETE FROM process_prices WHERE product_id = ?', (pid,))
             txn.execute('DELETE FROM products WHERE id = ?', (pid,))
 
     # ============================================================
