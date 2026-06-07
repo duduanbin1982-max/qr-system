@@ -245,29 +245,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 <script>
 'use strict';
 
-// ── fetch XHR polyfill (Honor browser SSL workaround) ──
-(function() {
-  var _origFetch = window.fetch;
-  window.fetch = function(url, opts) {
-    opts = opts || {};
-    return new Promise(function(resolve, reject) {
-      var x = new XMLHttpRequest();
-      x.open(opts.method || 'GET', url, true);
-      var hdrs = opts.headers || {};
-      for (var k in hdrs) { if (hdrs.hasOwnProperty(k)) x.setRequestHeader(k, hdrs[k]); }
-      x.onload = function() {
-        resolve({ ok: x.status >= 200 && x.status < 300, status: x.status,
-          json: function() { return Promise.resolve(JSON.parse(x.responseText)); },
-          text: function() { return Promise.resolve(x.responseText); }
-        });
-      };
-      x.onerror = function() { reject(new Error('Network error')); };
-      x.ontimeout = function() { reject(new Error('Timeout')); };
-      x.send(opts.body || null);
-    });
-  };
-})();
-
 // ═══════════════════════════════════════════
 //  扫码报工系统 — 手机扫码模块 v3
 //  双引擎：BarcodeDetector (硬件加速) + jsQR (纯JS通用降级)
