@@ -129,7 +129,7 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Permissions-Policy'] = 'camera=(self), microphone=(), geolocation=()'
 
     # Content-Security-Policy（宽松版 — 1326个内联事件不允许 strict）
     response.headers['Content-Security-Policy'] = (
