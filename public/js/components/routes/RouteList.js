@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { can } from '../../auth.js?v=56'
+import { can, auth } from '../../auth.js'
 
 export default {
   template: '#route-list-template',
@@ -17,9 +17,9 @@ export default {
     const pageSize = ref(20)
     const total = ref(0)
 
-    const canCreate = computed(() => can('routes:create'))
-    const canEdit = computed(() => can('routes:edit'))
-    const canDelete = computed(() => can('routes:delete'))
+    const canCreate = computed(() => !!auth.user && can('routes:create'))
+    const canEdit   = computed(() => !!auth.user && can('routes:edit'))
+    const canDelete = computed(() => !!auth.user && can('routes:delete'))
 
     const categoryFilter = ref('')
     const activeCat = computed(() => {

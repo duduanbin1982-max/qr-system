@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { navigate } from '../../router.js'
-import { auth } from '../../auth.js?v=56'
+import { auth } from '../../auth.js'
 
 export default {
   template: '#dashboard-template',

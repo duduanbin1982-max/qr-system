@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { auth, can } from '../../auth.js?v=56'
+import { auth, can } from '../../auth.js'
 
 export default {
   template: '#shipment-list-template',

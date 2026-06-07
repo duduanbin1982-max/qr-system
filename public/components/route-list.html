@@ -20,7 +20,7 @@
         <span v-if="searchKeyword" @click="searchKeyword='';searchAndLoad()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-placeholder);font-size:14px">✕</span>
       </div>
       <button class="btn btn-default btn-sm" @click="searchAndLoad" style="white-space:nowrap">搜索</button>
-      <button class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 新建路线</button>
+      <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 新建路线</button>
     </div>
 
     <div class="card">
@@ -42,8 +42,8 @@
                 <span class="badge" :class="r.status==='active'?'badge-success':'badge-danger'" style="font-size:var(--text-xs-alt)">{{ r.status==='active'?'启用':'停用' }}</span>
               </div>
               <div style="display:flex;gap:var(--space-1)" @click.stop>
-                <span class="o-abtn o-edit" @click="openEdit(r)" title="编辑">✏️</span>
-                <span class="o-abtn o-del" @click="del(r)" title="删除">🗑️</span>
+                <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(r)" title="编辑">✏️</span>
+                <span v-if="canDelete" class="o-abtn o-del" @click="del(r)" title="删除">🗑️</span>
               </div>
             </div>
             <!-- 工序流 -->

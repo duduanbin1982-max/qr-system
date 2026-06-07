@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed, watch } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { can } from '../../auth.js?v=56'
+import { can } from '../../auth.js'
 import { router } from '../../router.js?v=56'
 
 export default {

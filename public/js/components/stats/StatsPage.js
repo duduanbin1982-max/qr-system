@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { can } from '../../auth.js?v=56'
+import { can } from '../../auth.js'
 
 // CSV export utility
 function exportCSV(data, filename) {
