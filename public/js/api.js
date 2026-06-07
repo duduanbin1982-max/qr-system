@@ -117,7 +117,7 @@ export const api = {
   // 路线级工价（v4）
   getRoutePrices: (params)      => request('GET', '/api/route-prices' + buildQuery(params)),
   getRoutePricingDetail: (routeId) => request('GET', '/api/route-prices/' + routeId),
-  saveRoutePricing: (routeId, data) => request('PUT', '/api/route-prices/' + routeId, data),
+  saveRouteLevelPricing: (routeId, data) => request('PUT', '/api/route-prices/' + routeId, data),
   
   // ========== 工资 ==========
   listWages:        (params) => request('GET', '/api/wages' + buildQuery(params)),

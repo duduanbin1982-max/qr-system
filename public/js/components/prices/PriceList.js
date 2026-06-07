@@ -61,6 +61,11 @@ export default {
       return products.value.filter(p => p.category === pricingCategory.value)
     })
 
+    const filteredRoutes = computed(() => {
+      if (pricingCategory.value === 'all') return allRoutes.value
+      return allRoutes.value.filter(r => r.category === pricingCategory.value)
+    })
+
     // ====== 路线卡片模式 ======
     const expandedRoute = ref(null)
     const editMeta = reactive({})  // { route_id: { effectiveDate, remark } }
@@ -385,7 +390,7 @@ export default {
     return {
       // 状态
       loading, products, processes, pricingCategory, productPrices, pageTitle,
-      selectedProductId, routeSteps, routeId, routeName, allRoutes,
+      selectedProductId, routeSteps, routeId, routeName, allRoutes, filteredRoutes,
       editPrices, effectiveDate, remark, saving, filteredProducts,
       showMatrix, showCopyModal, copyFromId, copyOverwrite,
       showDefaultModal, defaultPrices, defaultCategory,
