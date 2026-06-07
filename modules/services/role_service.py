@@ -24,6 +24,7 @@ class RoleGroupService:
         if parent_id is not None:
             if not db.execute('SELECT id FROM role_groups WHERE id = ?', (parent_id,)).fetchone():
                 raise ValueError('父级角色组不存在')
+            # 新建时不需循环检测（父级已存在，子级尚未创建，不会形成环）
         with BaseService.transaction() as txn:
             cur = txn.execute(
                 'INSERT INTO role_groups (name, description, parent_id, status, permissions) '
@@ -70,6 +71,7 @@ class RoleGroupService:
                 raise ValueError(f'角色组名称【{new_name}】已存在')
             data['name'] = new_name
 
+        # 列名来自硬编码白名单，安全
         sets = []; params = []
         for field in ['name', 'description', 'parent_id', 'status', 'permissions']:
             if field in data:
@@ -88,8 +90,16 @@ class RoleGroupService:
             'SELECT COUNT(*) FROM role_groups WHERE parent_id = ?', (gid,)).fetchone()[0]
         if children > 0:
             raise ValueError('该角色组有下级，无法删除')
+        role_count = db.execute(
+            'SELECT COUNT(*) FROM roles WHERE group_id = ?', (gid,)).fetchone()[0]
+        if role_count > 0:
+            raise ValueError(f'该角色组下有 {role_count} 个角色，无法删除')
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM role_groups WHERE id = ?', (gid,))
+
+
+# Built-in role IDs (cannot be deleted)
+BUILTIN_ROLE_IDS = (1, 2)
 
 
 class RoleService:
@@ -171,7 +181,7 @@ class RoleService:
         role = db.execute('SELECT id, name FROM roles WHERE id = ?', (rid,)).fetchone()
         if not role:
             raise ValueError('角色不存在')
-        if rid in (1, 2):
+        if rid in BUILTIN_ROLE_IDS:
             raise ValueError(f'不能删除内置角色「{role["name"]}」')
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM roles WHERE id = ?', (rid,))

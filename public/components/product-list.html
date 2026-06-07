@@ -64,8 +64,8 @@
                 </td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
-                    <span class="o-abtn o-edit" @click="openEdit(p)" title="编辑">✏️</span>
-                    <span class="o-abtn o-del" @click="del(p)" title="删除">🗑️</span>
+                    <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(p)" title="编辑">✏️</span>
+                    <span v-if="canDelete" class="o-abtn o-del" @click="del(p)" title="删除">🗑️</span>
                   </div>
                 </td>
               </tr>

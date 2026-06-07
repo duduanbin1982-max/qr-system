@@ -1,8 +1,8 @@
 // CustomerList Component — 客户管理
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
-import { api } from '../../api.js'
-import { showToast } from '../../store.js'
-import { auth, can } from '../../auth.js'
+import { api } from '../../api.js?v=56'
+import { showToast } from '../../store.js?v=56'
+import { auth, can } from '../../auth.js?v=56'
 
 export default {
   template: '#customer-list-template',

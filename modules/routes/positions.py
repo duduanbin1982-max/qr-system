@@ -1,5 +1,7 @@
 """
 qr-system — 岗位管理（路由层）
+
+注：Swagger docstring 仅供文档参考。
 """
 from flask import request, jsonify
 from modules.app import app
@@ -46,7 +48,10 @@ def create_position():
         pos_id = PositionService.create_position(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('create_position', 'position', pos_id, data.get('name', ''))
+    try:
+        audit_log('create_position', 'position', pos_id, data.get('name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '创建成功', 'id': pos_id})
 
 
@@ -71,7 +76,10 @@ def update_position(pos_id):
     except ValueError as e:
         code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
         return jsonify({'error': str(e)}), code
-    audit_log('update_position', 'position', pos_id, data.get('name', ''))
+    try:
+        audit_log('update_position', 'position', pos_id, data.get('name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -94,5 +102,8 @@ def delete_position(pos_id):
         name = PositionService.delete_position(pos_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('delete_position', 'position', pos_id, name)
+    try:
+        audit_log('delete_position', 'position', pos_id, name)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})

@@ -1,6 +1,7 @@
 """
 qr-system — 产品追溯路由
-通过序列号查询完整追溯链：产品信息 → 关联订单 → 报工记录 → 发货记录
+
+注：全读端点，Swagger docstring 仅供文档参考。
 """
 from flask import jsonify
 from modules.app import app

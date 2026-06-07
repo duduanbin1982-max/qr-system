@@ -11,16 +11,38 @@ class ProcessService:
     """工序管理业务逻辑。"""
 
     @staticmethod
-    def list_processes(category=''):
-        """工序列表（支持分类筛选）。"""
+    def list_processes(category='', search='', sort_by='seq_order', sort_dir='asc', limit=None, offset=0):
+        """工序列表（支持分类筛选、搜索、排序、分页）。"""
         db = BaseService.db()
+        # 白名单校验排序字段
+        allowed_sort = {'seq_order', 'name', 'category', 'status', 'created_at'}
+        if sort_by not in allowed_sort:
+            sort_by = 'seq_order'
+        sort_dir = 'ASC' if sort_dir.lower() == 'asc' else 'DESC'
+        limit = max(1, min(int(limit), 200)) if limit else None
         sql = ('SELECT id, name AS process_name, description, category, '
-               'seq_order AS seq, status, created_at FROM processes')
+               'seq_order, status, created_at FROM processes')
         params = []
+        conditions = []
         if category:
-            sql += ' WHERE category = ?'
+            conditions.append('category = ?')
             params.append(category)
-        sql += ' ORDER BY seq_order, id'
+        if search:
+            conditions.append('name LIKE ?')
+            params.append(f'%{search}%')
+        if conditions:
+            sql += ' WHERE ' + ' AND '.join(conditions)
+        sql += f' ORDER BY {sort_by} {sort_dir}, id {sort_dir}'
+        if limit:
+            # 分页：先查总数
+            count_sql = sql.replace(
+                'SELECT id, name AS process_name, description, category, seq_order, status, created_at',
+                'SELECT COUNT(*)', 1)
+            total = db.execute(count_sql, params).fetchone()[0]
+            sql += ' LIMIT ? OFFSET ?'
+            params.extend([limit, offset])
+            rows = db.execute(sql, params).fetchall()
+            return {'processes': [dict(r) for r in rows], 'total': total}
         rows = db.execute(sql, params).fetchall()
         return {'processes': [dict(r) for r in rows]}
 
@@ -49,10 +71,11 @@ class ProcessService:
         try:
             with BaseService.transaction() as txn:
                 cur = txn.execute(
-                    'INSERT INTO processes (name, description, category, seq_order) '
-                    'VALUES (?,?,?,?)',
+                    'INSERT INTO processes (name, description, category, seq_order, status) '
+                    'VALUES (?,?,?,?,?)',
                     (name, data.get('description', ''),
-                     data.get('category', '结构件'), seq_order)
+                     data.get('category', '结构件'), seq_order,
+                     data.get('status', 'active'))
                 )
                 return cur.lastrowid
         except sqlite3.IntegrityError:
@@ -74,11 +97,15 @@ class ProcessService:
                 raise ValueError('工序名称不能为空')
             data['name'] = name
 
+        field_map = {
+            'name': 'name', 'description': 'description',
+            'category': 'category', 'seq_order': 'seq_order', 'status': 'status'
+        }
         sets = []
         params = []
         for field in ['name', 'description', 'category', 'seq_order', 'status']:
             if field in data:
-                sets.append(f'{field} = ?')
+                sets.append(f'{field_map[field]} = ?')
                 params.append(data[field])
         if not sets:
             raise ValueError('无更新内容')

@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 export default {
   template: '#material-list-template',
@@ -28,6 +29,11 @@ export default {
     const orderDropdown = ref(false)
 
     const lowStock = computed(() => materials.value.filter(m => m.quantity <= (m.safe_stock || 0)))
+
+    // RBAC
+    const canEdit   = computed(() => can('materials:edit'))
+    const canDelete = computed(() => can('materials:delete'))
+    const canCreate = computed(() => can('materials:create'))
 
     async function load() {
       loading.value = true
@@ -152,6 +158,7 @@ export default {
       consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
       openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
       openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
+      canEdit, canDelete, canCreate,
     }
   }
 }

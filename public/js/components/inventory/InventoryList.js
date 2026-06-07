@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
-import { auth, can } from '../../auth.js'
+import { can } from '../../auth.js'
 
 export default {
   template: '#inventory-list-template',
@@ -30,9 +30,14 @@ export default {
     const moveQty = ref(1)
 
     // 统计
-    const lowCount = computed(() => items.value.filter(i => i.is_low).length)
-    const totalQty = computed(() => items.value.reduce((s, i) => s + (i.quantity || 0), 0))
+    const lowCount = computed(() => stats.value.low_stock || items.value.filter(i => i.is_low).length)
+    const totalQty = computed(() => stats.value.total_quantity || items.value.reduce((s, i) => s + (i.quantity || 0), 0))
     const stats = ref({ total_items: 0, total_quantity: 0, low_stock: 0, today_in: 0, today_out: 0 })
+
+    // RBAC
+    const canEdit   = computed(() => can('inventory:edit'))
+    const canDelete = computed(() => can('inventory:delete'))
+    const canCreate = computed(() => can('inventory:create'))
 
     async function loadStats() {
       try { 
@@ -155,7 +160,7 @@ export default {
       showLogs, logs, logsLoading, loadLogs,
       showModal, modalEdit, form, openAdd, openEdit, save, del,
       showMoveModal, moveType, moveTarget, moveQty, openMove, doMove,
-      auth, can
+      can, canEdit, canDelete, canCreate
     }
   }
 }

@@ -34,8 +34,13 @@ class ShipmentService:
 
         total = db.execute(f'SELECT COUNT(*) FROM shipments WHERE {where}', params).fetchone()[0]
         rows = db.execute(f'''
-            SELECT s.*, (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
-            FROM shipments s WHERE {where}
+            SELECT s.*, COALESCE(si.item_count, 0) as item_count
+            FROM shipments s
+            LEFT JOIN (
+                SELECT shipment_id, COUNT(*) as item_count
+                FROM shipment_items GROUP BY shipment_id
+            ) si ON si.shipment_id = s.id
+            WHERE {where}
             ORDER BY s.created_at DESC LIMIT ? OFFSET ?
         ''', params + [limit, (page - 1) * limit]).fetchall()
         return {'shipments': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}

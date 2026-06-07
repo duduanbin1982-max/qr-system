@@ -73,6 +73,7 @@ export const api = {
   createProduct:    (data)   => request('POST', '/api/products', data),
   updateProduct:    (id,data)=> request('PUT',  '/api/products/' + id, data),
   deleteProduct:    (id)     => request('DELETE', '/api/products/' + id),
+  uploadProductImport:(formData)=> uploadFile('/api/products/import', formData),
   
   // ========== 客户 ==========
   listCustomers:    (params) => request('GET', '/api/customers' + buildQuery(params)),

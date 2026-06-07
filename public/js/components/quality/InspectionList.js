@@ -1,7 +1,8 @@
 // InspectionList — 质量检验
-import { ref, onMounted } from '../../vendor/vue.esm.js'
+import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
+import { can } from '../../auth.js'
 
 const INSPECTION_TYPES = [
   { value: 'first_article', label: '首件检验' },
@@ -26,6 +27,11 @@ export default {
     const total = ref(0)
     const perPage = 20
     const editing = ref(null)
+
+    // RBAC
+    const canEdit   = computed(() => can('quality:edit'))
+    const canDelete = computed(() => can('quality:delete'))
+    const canCreate = computed(() => can('quality:create'))
 
     // Create/Edit modal
     const showModal = ref(false); const isEdit = ref(false)
@@ -144,7 +150,7 @@ export default {
     onMounted(() => { load(); loadStats(); loadPareto() })
 
     return { items, loading, stats, search, filterType, filterResult, dateFrom, dateTo, page, total, perPage, editing,
-      showModal, isEdit, form, orders, processes, orderSearch, processSearch, orderDropdown, processDropdown,
+      canEdit, canDelete, canCreate, showModal, isEdit, form, orders, processes, orderSearch, processSearch, orderDropdown, processDropdown,
       DEFECT_CATEGORIES, pareto,
       fmtDate, fmtDatetime, typeLabel, resultLabel,
       load, loadStats, searchOrders, searchProcesses, selectOrder, selectProcess, autoCalcQty, openCreate, openEdit, doSave, doDelete, applyFilter, loadPareto }

@@ -17,16 +17,16 @@ class ProcessPriceService:
         if category:
             where.append('p.category = ?'); params.append(category)
         where_clause = ('WHERE ' + ' AND '.join(where)) if where else ''
-        rows = db.execute(f'''
-            SELECT pp.*, p.name as process_name, p.seq_order,
-                   pr.product_name as product_name, pr.model as product_model,
-                   pr.product_code as product_code
-            FROM process_prices pp
-            LEFT JOIN processes p ON pp.process_id = p.id
-            LEFT JOIN products pr ON pp.product_id = pr.id
-            {where_clause}
-            ORDER BY pr.product_name, p.seq_order, pp.effective_date DESC
-        ''', params).fetchall()
+        # Safe: where_clause built from hardcoded column names, params parameterized
+        query = ('SELECT pp.*, p.name as process_name, p.seq_order,'
+                 ' pr.product_name as product_name, pr.model as product_model,'
+                 ' pr.product_code as product_code'
+                 ' FROM process_prices pp'
+                 ' LEFT JOIN processes p ON pp.process_id = p.id'
+                 ' LEFT JOIN products pr ON pp.product_id = pr.id'
+                 f' {where_clause}'
+                 ' ORDER BY pr.product_name, p.seq_order, pp.effective_date DESC')
+        rows = db.execute(query, params).fetchall()
         return {'process_prices': [dict(r) for r in rows]}
 
     @staticmethod
@@ -52,10 +52,13 @@ class ProcessPriceService:
             'SELECT id FROM process_prices WHERE id = ?', (pid,)).fetchone()
         if not existing:
             raise ValueError('工价记录不存在')
+        field_map = {'product_id': 'product_id', 'process_id': 'process_id',
+                     'unit_price': 'unit_price', 'effective_date': 'effective_date',
+                     'status': 'status', 'remark': 'remark'}
         sets = []; params = []
         for field in ['product_id', 'process_id', 'unit_price', 'effective_date', 'status', 'remark']:
             if field in data:
-                sets.append(f'{field} = ?')
+                sets.append(f'{field_map[field]} = ?')
                 params.append(data[field] if data[field] is not None else None)
         if not sets:
             raise ValueError('无更新内容')
@@ -98,8 +101,10 @@ class ProcessPriceService:
                          row['effective_date'], row['remark']))
                     copied += 1
                 except Exception as e:
-                    if 'UNIQUE' in str(e): skipped += 1
-                    else: raise
+                    if 'UNIQUE' in str(e) or 'integrity' in str(e).lower():
+                        skipped += 1
+                    else:
+                        raise
         return copied, skipped
 
     @staticmethod
@@ -389,8 +394,8 @@ class WageService:
             where += ' AND wr.created_at >= ?'; params.append(date_from)
         if date_to:
             where += ' AND wr.created_at < ?'; params.append(date_to + ' 23:59:59')
-        rows = db.execute(f'''
-            SELECT wr.*, u.name as employee_name, u.employee_no,
+        # Safe: where clause built from hardcoded fragments, params parameterized
+        query = ('''SELECT wr.*, u.name as employee_name, u.employee_no,
                    p.name as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
                    COALESCE(rp.unit_price, 0) as unit_price
@@ -400,8 +405,8 @@ class WageService:
             LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
-            WHERE {where} ORDER BY wr.created_at DESC
-        ''', params).fetchall()
+            WHERE ''' + where + ''' ORDER BY wr.created_at DESC''')
+        rows = db.execute(query, params).fetchall()
         wages = {}
         for row in rows:
             emp_id = row['user_id']
@@ -461,6 +466,21 @@ class WageService:
               AND o.status IN ('processing', 'pending', 'in_progress')
             ORDER BY o.plan_end, o.created_at DESC
         ''').fetchall()
+        # 批量预取工序，避免 N+1
+        order_ids = [r['id'] for r in rows]
+        proc_by_order = {}
+        if order_ids:
+            placeholders = ",".join("?" for _ in order_ids)
+            proc_rows = db.execute(f'''
+                SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
+                       op.scrapped, op.required_audit
+                FROM order_processes op
+                LEFT JOIN processes p ON op.process_id = p.id
+                WHERE op.order_id IN ({placeholders}) ORDER BY op.seq_order
+            ''', order_ids).fetchall()
+            for pr in proc_rows:
+                proc_by_order.setdefault(pr['order_id'], []).append(pr)
+
         result = []
         for row in rows:
             o = dict(row)
@@ -469,13 +489,7 @@ class WageService:
             progress_pct = min(100, int((done + scrap) / total * 100))
             o['progress'] = progress_pct
             o['remaining'] = total - done - scrap
-            proc_rows = db.execute('''
-                SELECT op.process_id, p.name as process_name, op.completed,
-                       op.scrapped, op.required_audit
-                FROM order_processes op
-                LEFT JOIN processes p ON op.process_id = p.id
-                WHERE op.order_id = ? ORDER BY op.seq_order
-            ''', (row['id'],)).fetchall()
+            proc_rows = proc_by_order.get(row['id'], [])
             processes = []
             for pr in proc_rows:
                 pd = pr['completed'] or 0; ps = pr['scrapped'] or 0

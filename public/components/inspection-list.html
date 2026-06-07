@@ -57,7 +57,7 @@
           <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
           <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
           <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
-          <button class="btn-add" style="margin-left:4px;padding:var(--space-2) 16px;font-size:var(--text-sm)" @click="openCreate">+ 新建检验</button>
+          <button class="btn-add" style="margin-left:4px;padding:var(--space-2) 16px;font-size:var(--text-sm)" @click="openCreate" v-if="canCreate">+ 新建检验</button>
         </div>
       </div>
 
@@ -98,8 +98,8 @@
               <td style="padding:var(--space-2) 12px;color:var(--text-placeholder);font-size:var(--text-xs);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.notes || '-' }}</td>
               <td style="padding:var(--space-2) 12px;text-align:center;font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ fmtDate(it.inspected_at) }}</td>
               <td style="padding:var(--space-2) 12px;text-align:center">
-                <button @click="openEdit(it)" class="btn-icon-edit btn-icon-sm" style="font-size:var(--text-xs);margin-right:4px" title="编辑">✏️</button>
-                <button @click="doDelete(it)" class="btn-icon-del btn-icon-sm" style="font-size:var(--text-xs)" title="删除">🗑</button>
+                <button @click="openEdit(it)" v-if="canEdit" class="btn-icon-edit btn-icon-sm" style="font-size:var(--text-xs);margin-right:4px" title="编辑">✏️</button>
+                <button @click="doDelete(it)" v-if="canDelete" class="btn-icon-del btn-icon-sm" style="font-size:var(--text-xs)" title="删除">🗑</button>
               </td>
             </tr>
           </tbody>

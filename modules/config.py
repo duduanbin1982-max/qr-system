@@ -46,6 +46,7 @@ PERMISSION_DEFS = {
 SYSTEM_MANAGE_PERM = 'settings:manage'
 
 # 预置角色权限配置
+# 注：键类型混用 — 1/2 为整数（内置角色ID），其余为字符串 code
 PREDEFINED_ROLES = {
     1: {  # 系统管理员 — 全部
         'name': '系统管理员', 'code': 'admin',

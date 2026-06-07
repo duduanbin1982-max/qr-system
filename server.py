@@ -17,7 +17,8 @@ app.teardown_appcontext(close_db)
 
 # 加载路由模块（装饰器在 import 时自动注册 @app.route）
 import modules.routes.auth        # login/logout/info
-import modules.routes.dashboard   # dashboard/board
+import modules.routes.dashboard
+import modules.routes.board   # dashboard/board
 import modules.routes.orders      # orders CRUD + batch + work-records
 import modules.routes.customers   # customers CRUD + order history
 import modules.routes.prices      # process-prices + route-prices + wages

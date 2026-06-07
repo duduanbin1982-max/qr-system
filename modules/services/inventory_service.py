@@ -15,13 +15,14 @@ class InventoryService:
     def list_items(keyword='', low_stock=False):
         """库存列表（搜索 + 低库存筛选）。"""
         db = BaseService.db()
-        where = '1=1'
+        clauses = ['1=1']
         params = []
         if keyword:
-            where += ' AND (product_model LIKE ? OR product_name LIKE ?)'
+            clauses.append('(product_model LIKE ? OR product_name LIKE ?)')
             params.extend([f'%{keyword}%', f'%{keyword}%'])
         if low_stock:
-            where += ' AND quantity <= safe_stock AND safe_stock > 0'
+            clauses.append('quantity <= safe_stock AND safe_stock > 0')
+        where = ' AND '.join(clauses)
         rows = db.execute(
             'SELECT *, CASE WHEN quantity <= safe_stock AND safe_stock > 0 '
             'THEN 1 ELSE 0 END as is_low FROM inventory WHERE ' + where
@@ -181,30 +182,26 @@ class InventoryService:
 
     @staticmethod
     def get_stats():
-        """库存统计。"""
+        """库存统计（2次查询替代4次）。"""
         db = BaseService.db()
         today = datetime.now().strftime('%Y-%m-%d')
-        total = db.execute(
-            'SELECT COUNT(*) as count, SUM(quantity) as total_qty FROM inventory'
+        # 合并 inventory 基础统计为1次查询
+        inv_stats = db.execute(
+            "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
+            "COALESCE(SUM(CASE WHEN quantity <= safe_stock AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
+            "FROM inventory"
         ).fetchone()
-        low = db.execute(
-            "SELECT COUNT(*) as count FROM inventory "
-            "WHERE quantity <= safe_stock AND safe_stock > 0"
-        ).fetchone()
-        today_in = db.execute(
-            "SELECT COUNT(*) as count, COALESCE(SUM(quantity), 0) as total_qty "
-            "FROM inventory_logs WHERE type = 'in' AND date(created_at) = ?",
-            (today,)
-        ).fetchone()
-        today_out = db.execute(
-            "SELECT COUNT(*) as count, COALESCE(SUM(quantity), 0) as total_qty "
-            "FROM inventory_logs WHERE type = 'out' AND date(created_at) = ?",
+        # 合并今日出入库统计为1次查询
+        today_stats = db.execute(
+            "SELECT COALESCE(SUM(CASE WHEN type='in' THEN quantity ELSE 0 END),0) as today_in, "
+            "COALESCE(SUM(CASE WHEN type='out' THEN quantity ELSE 0 END),0) as today_out "
+            "FROM inventory_logs WHERE date(created_at) = ?",
             (today,)
         ).fetchone()
         return {
-            'total_items': total['count'] or 0,
-            'total_quantity': total['total_qty'] or 0,
-            'low_stock': low['count'] or 0,
-            'today_in': today_in['total_qty'] or 0,
-            'today_out': today_out['total_qty'] or 0,
+            'total_items': inv_stats['total_items'] or 0,
+            'total_quantity': inv_stats['total_quantity'] or 0,
+            'low_stock': inv_stats['low_stock'] or 0,
+            'today_in': today_stats['today_in'] or 0,
+            'today_out': today_stats['today_out'] or 0,
         }

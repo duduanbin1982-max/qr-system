@@ -4,7 +4,7 @@ from modules.services import BaseService
 
 
 INSPECTION_TYPES = {'first_article': '首件检验', 'in_process': '过程检验', 'final': '终检'}
-DEFECT_CATEGORIES = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他']
+DEFECT_CATEGORIES = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他']  # 注：前端 InspectionList.js 中重复定义，修改需同步
 
 
 class QualityService:
@@ -126,17 +126,21 @@ class QualityService:
 
     @staticmethod
     def get_stats():
+        """统计（2次查询替代4次）。"""
         db = BaseService.db()
         today = datetime.now().strftime('%Y-%m-%d')
-        total = db.execute('SELECT COUNT(*) FROM quality_inspections').fetchone()[0]
+        # 合并总计+通过+失败为1次查询
+        agg = db.execute(
+            "SELECT COUNT(*) as total, "
+            "COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
+            "COALESCE(SUM(CASE WHEN result IN ('fail','partial') THEN 1 ELSE 0 END),0) as fail_count "
+            "FROM quality_inspections"
+        ).fetchone()
         today_count = db.execute(
-            "SELECT COUNT(*) FROM quality_inspections WHERE DATE(inspected_at)=?", (today,)).fetchone()[0]
-        pass_count = db.execute(
-            "SELECT COUNT(*) FROM quality_inspections WHERE result='pass'").fetchone()[0]
-        fail_count = db.execute(
-            "SELECT COUNT(*) FROM quality_inspections WHERE result IN ('fail','partial')").fetchone()[0]
-        return {'ok': True, 'total': total, 'today_count': today_count,
-                'pass_count': pass_count, 'fail_count': fail_count}
+            "SELECT COUNT(*) FROM quality_inspections WHERE DATE(inspected_at)=?", (today,)
+        ).fetchone()[0]
+        return {'ok': True, 'total': agg['total'], 'today_count': today_count,
+                'pass_count': agg['pass_count'], 'fail_count': agg['fail_count']}
 
     @staticmethod
     def defect_pareto(date_from='', date_to=''):

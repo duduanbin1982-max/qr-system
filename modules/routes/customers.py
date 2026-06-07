@@ -2,6 +2,7 @@
 qr-system — 客户管理（路由层）
 
 薄层：HTTP 解析 → 调用 CustomerService → 格式化响应。
+注：Swagger docstring 仅供文档参考。
 """
 from flask import request, jsonify
 
@@ -82,7 +83,10 @@ def create_customer():
         cid = CustomerService.create_customer(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('create_customer', 'customer', cid, data.get('name', ''))
+    try:
+        audit_log('create_customer', 'customer', cid, data.get('name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '创建成功', 'id': cid})
 
 
@@ -133,7 +137,10 @@ def update_customer(cid):
         CustomerService.update_customer(cid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('update_customer', 'customer', cid, str(data))
+    try:
+        audit_log('update_customer', 'customer', cid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -165,7 +172,10 @@ def delete_customer(cid):
         CustomerService.delete_customer(cid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('delete_customer', 'customer', cid)
+    try:
+        audit_log('delete_customer', 'customer', cid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 

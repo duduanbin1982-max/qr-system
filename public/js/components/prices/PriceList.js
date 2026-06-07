@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed, watch } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { auth, can } from '../../auth.js?v=56'
+import { can } from '../../auth.js?v=56'
 import { router } from '../../router.js?v=56'
 
 export default {
@@ -21,6 +21,9 @@ export default {
     const totalRouteCount = ref(0)
     const structRouteCount = ref(0)
     const machRouteCount = ref(0)
+    const pricedRouteCount = computed(() => {
+      return allRoutes.value.filter(r => r.priced_route_count > 0).length
+    })
     const editPrices = reactive({}) // {process_id: unit_price}
     const effectiveDate = ref('')
     const remark = ref('')
@@ -42,17 +45,25 @@ export default {
     const addRouteSteps = ref([])
     const addRoutePrices = reactive({})
 
+    // RBAC 权限
+    const canEdit = computed(() => can('prices:edit'))
+    const canCreate = computed(() => can('prices:create'))
+    const canDelete = computed(() => can('prices:delete'))
+
     // 透视表
     const processPricesRaw = ref([])
     const pricingCategory = ref('all')
     const showMatrix = ref(false)
 
+    // 按分类筛选产品
+    const filteredProducts = computed(() => {
+      if (pricingCategory.value === 'all') return products.value
+      return products.value.filter(p => p.category === pricingCategory.value)
+    })
+
     // ====== 路线卡片模式 ======
     const expandedRoute = ref(null)
     const editMeta = reactive({})  // { route_id: { effectiveDate, remark } }
-
-    // 后端已按 category 筛选，前端直接透传
-    const filteredRoutes = computed(() => allRoutes.value)
 
     async function toggleRoute(routeId) {
       if (expandedRoute.value === routeId) {
@@ -60,9 +71,13 @@ export default {
         return
       }
       expandedRoute.value = routeId
-      // Initialize editMeta for this route
+      // Initialize editMeta for this route (safely via Vue.set-like assignment)
       if (!editMeta[routeId]) {
         editMeta[routeId] = { effectiveDate: '', remark: '' }
+      }
+      // Ensure reactive access doesn't fail on first render
+      if (!editMeta[expandedRoute.value]) {
+        editMeta[expandedRoute.value] = { effectiveDate: '', remark: '' }
       }
       // Load route pricing steps
       try {
@@ -120,11 +135,6 @@ export default {
       if (page === 'machining-prices') return '机加工'
       return 'all'
     }
-
-    const filteredProducts = computed(() => {
-      if (pricingCategory.value === 'all') return products.value
-      return products.value.filter(p => p.category === pricingCategory.value)
-    })
 
     const productPrices = computed(() => {
       const map = {}
@@ -379,10 +389,10 @@ export default {
       editPrices, effectiveDate, remark, saving, filteredProducts,
       showMatrix, showCopyModal, copyFromId, copyOverwrite,
       showDefaultModal, defaultPrices, defaultCategory,
-      totalRouteCount, structRouteCount, machRouteCount,
-      auth, can,
+      totalRouteCount, structRouteCount, machRouteCount, pricedRouteCount,
+      can, canEdit, canCreate, canDelete,
       // 卡片模式
-      filteredRoutes, expandedRoute, toggleRoute, editMeta, saveRoute,
+      expandedRoute, toggleRoute, editMeta, saveRoute,
       // 方法
       selectProduct, saveRoutePricing, changeRoute,
       switchCat, deleteProductPrices,

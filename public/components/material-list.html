@@ -10,7 +10,7 @@
         <span>📦 物料列表</span>
         <div style="display:flex;gap:var(--space-2)">
           <input v-model="searchText" placeholder="搜索物料..." style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
-          <button class="btn btn-primary" @click="openCreate">+ 新增物料</button>
+          <button class="btn btn-primary" @click="openCreate" v-if="canCreate">+ 新增物料</button>
         </div>
       </div>
       <table class="data-table" v-if="materials.length">
@@ -33,11 +33,11 @@
             <td><span style="color:var(--teal);font-size:var(--text-xs)">{{ m.supplier_name || '-' }}</span></td>
             <td>{{ m.location || '-' }}</td>
             <td style="white-space:nowrap">
-              <button class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
-              <button class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:var(--danger);color:white">消耗</button>
+              <button v-if="canEdit" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
+              <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:var(--danger);color:white">消耗</button>
               <button class="btn btn-sm" @click="viewLogs(m)" style="margin-right:4px">记录</button>
-              <button class="btn btn-sm" @click="openEdit(m)" style="margin-right:4px">编辑</button>
-              <button class="btn btn-sm btn-danger" @click="remove(m)">删除</button>
+              <button class="btn btn-sm" @click="openEdit(m)" v-if="canEdit" style="margin-right:4px">编辑</button>
+              <button class="btn btn-sm btn-danger" @click="remove(m)" v-if="canDelete">删除</button>
             </td>
           </tr>
         </tbody>

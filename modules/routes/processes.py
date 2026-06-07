@@ -27,7 +27,17 @@ def list_processes():
       - Bearer: []
     """
     category = request.args.get('category', '').strip()
-    return jsonify(ProcessService.list_processes(category))
+    search = request.args.get('search', '').strip()
+    sort_by = request.args.get('sort_by', 'seq_order')
+    sort_dir = request.args.get('sort_dir', 'asc')
+    limit = request.args.get('limit')
+    offset = request.args.get('offset', 0)
+    if limit:
+        limit = int(limit)
+        offset = int(offset)
+    else:
+        limit = None
+    return jsonify(ProcessService.list_processes(category, search, sort_by, sort_dir, limit, offset))
 
 
 @app.route('/api/processes', methods=['POST'])
@@ -50,7 +60,10 @@ def create_process():
         pid = ProcessService.create_process(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('create_process', 'process', pid, data.get('name', ''))
+    try:
+        audit_log('create_process', 'process', pid, data.get('name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '添加成功', 'id': pid})
 
 
@@ -74,8 +87,10 @@ def update_process(pid):
         ProcessService.update_process(pid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    safe_data = {k: v for k, v in data.items() if k not in ('password', 'token')}
-    audit_log('update_process', 'process', pid, str(safe_data))
+    try:
+        audit_log('update_process', 'process', pid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -98,5 +113,8 @@ def delete_process(pid):
         ProcessService.delete_process(pid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('delete_process', 'process', pid)
+    try:
+        audit_log('delete_process', 'process', pid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})

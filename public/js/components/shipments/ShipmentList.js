@@ -87,10 +87,10 @@ export default {
 
     function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'' }) }
 
-    function removeItem(idx) { items.value.splice(idx, 1); items.value = [...items.value] }
+    function removeItem(idx) { items.value.splice(idx, 1) }
 
     function onInvChange(idx) {
-      const inv = inventory.value.find(i => i.id == items.value[idx].inventory_id)
+      const inv = inventory.value.find(i => i.id === items.value[idx].inventory_id)
       if (inv) {
         items.value[idx].product_model = inv.product_model
         items.value[idx].product_name = inv.product_name

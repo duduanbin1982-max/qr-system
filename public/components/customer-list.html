@@ -16,7 +16,7 @@
             <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/联系人/电话..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
           <button class="btn btn-default btn-sm" @click="load">搜索</button>
-          <button class="btn btn-primary btn-sm" @click="openAdd">+ 添加客户</button>
+          <button class="btn btn-primary btn-sm" @click="openAdd" v-if="canCreate">+ 添加客户</button>
         </div>
       </div>
       <div class="card-body">
@@ -45,8 +45,8 @@
                 <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder);font-size:var(--text-xs)">{{ c.remark || '-' }}</td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
-                    <span class="o-abtn o-edit" @click="openEdit(c)" title="编辑">✏️</span>
-                    <span class="o-abtn o-del" @click="del(c)" title="删除">🗑️</span>
+                    <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(c)" title="编辑">✏️</span>
+                    <span v-if="canDelete" class="o-abtn o-del" @click="del(c)" title="删除">🗑️</span>
                   </div>
                 </td>
               </tr>

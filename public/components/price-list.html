@@ -5,20 +5,21 @@
       <div class="summary-item"><span class="s-icon">🔀</span><div><div class="s-val">{{ totalRouteCount }}</div><div class="s-label">总路线</div></div></div>
       <div class="summary-item"><span class="s-icon">🔩</span><div><div class="s-val text-primary">{{ structRouteCount }}</div><div class="s-label">结构件</div></div></div>
       <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-success">{{ machRouteCount }}</div><div class="s-label">机加工</div></div></div>
+      <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val text-warning">{{ pricedRouteCount || 0 }}</div><div class="s-label">已定价</div></div></div>
     </div>
 
     <!-- 分类选项卡 -->
-    <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='all'?'600':'400',background:pricingCategory==='all'?'var(--primary-light)':'var(--bg-hover)',color:pricingCategory==='all'?'var(--primary)':'var(--text-placeholder)',border:pricingCategory==='all'?'1px solid var(--primary-light)':'1px solid transparent'}" @click="switchCat('all')">📋 全部工价路线</span>
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='结构件'?'600':'400',background:pricingCategory==='结构件'?'var(--info-light)':'var(--bg-hover)',color:pricingCategory==='结构件'?'var(--info)':'var(--text-placeholder)',border:pricingCategory==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}" @click="switchCat('结构件')">🔩 结构件工价</span>
-      <span :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:pricingCategory==='机加工'?'600':'400',background:pricingCategory==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:pricingCategory==='机加工'?'var(--warning)':'var(--text-placeholder)',border:pricingCategory==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}" @click="switchCat('机加工')">⚙️ 机加工工价</span>
+    <div class="cat-tabs">
+      <span class="cat-tab cat-tab-all" :class="{active: pricingCategory==='all'}" @click="switchCat('all')">📋 全部工价路线</span>
+      <span class="cat-tab cat-tab-struct" :class="{active: pricingCategory==='结构件'}" @click="switchCat('结构件')">🔩 结构件工价</span>
+      <span class="cat-tab cat-tab-mach" :class="{active: pricingCategory==='机加工'}" @click="switchCat('机加工')">⚙️ 机加工工价</span>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>💰 工价路线</h3>
         <div style="display:flex;gap:var(--space-2)">
-          <button class="btn btn-primary btn-sm" @click="openAddRoutePricing">+ 添加工价</button>
+          <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAddRoutePricing">+ 添加工价</button>
           <button class="btn btn-default btn-sm" @click="switchCat(pricingCategory); loadAllRoutes()">🔄 刷新</button>
         </div>
       </div>
@@ -26,8 +27,8 @@
         <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
 
         <div v-else>
-          <div v-if="filteredRoutes.length">
-        <div v-for="r in filteredRoutes" :key="r.id" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);margin-bottom:var(--space-3);background:white;overflow:hidden"
+          <div v-if="allRoutes.length">
+        <div v-for="r in allRoutes" :key="r.id" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);margin-bottom:var(--space-3);background:white;overflow:hidden"
           :style="{borderLeft: expandedRoute===r.id ? '4px solid var(--primary)' : '4px solid transparent'}">
 
           <!-- 卡片头部 -->
@@ -56,23 +57,23 @@
             <table class="data-table" style="font-size:var(--text-sm);width:100%">
               <thead>
                 <tr>
-                  <th style="width:36px;text-align:center">#</th>
-                  <th style="min-width:140px">工序名称</th>
-                  <th style="width:80px;text-align:center">分类</th>
-                  <th style="min-width:110px;text-align:center">当前工价</th>
-                  <th style="min-width:130px;text-align:center">新工价 (元)</th>
+                  <th class="col-num">#</th>
+                  <th class="col-min-140">工序名称</th>
+                  <th class="col-cat">分类</th>
+                  <th class="col-min-110 text-center">当前工价</th>
+                  <th class="col-min-130 text-center">新工价 (元)</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(s, idx) in routeSteps" :key="s.process_id">
-                  <td style="text-align:center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
+                  <td class="text-center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
                   <td><strong>{{ s.process_name }}</strong></td>
-                  <td style="text-align:center"><span class="badge" :style="{background:s.category==='机加工'?'var(--warning-lighter)':'var(--info-light)',color:s.category==='机加工'?'var(--warning)':'var(--info)',fontSize:'var(--text-xs-alt)'}">{{ s.category || '—' }}</span></td>
-                  <td style="text-align:center">
+                  <td class="text-center"><span class="badge" :style="{background:s.category==='机加工'?'var(--warning-lighter)':'var(--info-light)',color:s.category==='机加工'?'var(--warning)':'var(--info)',fontSize:'var(--text-xs-alt)'}">{{ s.category || '—' }}</span></td>
+                  <td class="text-center">
                     <span v-if="s.unit_price != null" style="display:inline-block;padding:var(--space-1) 10px;background:var(--primary-light);border-radius:var(--radius-sm);color:var(--primary);font-weight:600;font-size:var(--text-sm)">¥{{ Number(s.unit_price).toFixed(2) }}</span>
                     <span v-else style="color:var(--border)">—</span>
                   </td>
-                  <td style="text-align:center">
+                  <td class="text-center">
                     <input type="number" class="form-input" style="text-align:center;width:120px"
                       v-model.number="editPrices[s.process_id]" placeholder="输入单价" step="0.01" min="0">
                   </td>
@@ -126,15 +127,15 @@
             </div>
             <table class="data-table" style="font-size:var(--text-sm);width:100%">
               <thead><tr>
-                <th style="width:36px;text-align:center">#</th>
+                <th class="col-num">#</th>
                 <th>工序名称</th>
-                <th style="width:140px;text-align:center">单价 (元)</th>
+                <th class="col-140 text-center">单价 (元)</th>
               </tr></thead>
               <tbody>
                 <tr v-for="(s, idx) in addRouteSteps" :key="s.process_id">
-                  <td style="text-align:center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
+                  <td class="text-center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
                   <td><strong>{{ s.process_name }}</strong></td>
-                  <td style="text-align:center">
+                  <td class="text-center">
                     <input type="number" class="form-input" style="text-align:center;width:130px" v-model.number="addRoutePrices[s.process_id]" placeholder="输入单价" step="0.01" min="0">
                   </td>
                 </tr>

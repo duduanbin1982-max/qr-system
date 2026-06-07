@@ -36,7 +36,10 @@ def create_process_price():
         pid = ProcessPriceService.create_price(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('create_process_price', 'process_price', pid, str(data))
+    try:
+        audit_log('create_process_price', 'process_price', pid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '创建成功', 'id': pid})
 
 
@@ -49,7 +52,10 @@ def update_process_price(pid):
         ProcessPriceService.update_price(pid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('update_process_price', 'process_price', pid, str(data))
+    try:
+        audit_log('update_process_price', 'process_price', pid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -61,7 +67,10 @@ def delete_process_price(pid):
         ProcessPriceService.delete_price(pid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('delete_process_price', 'process_price', pid)
+    try:
+        audit_log('delete_process_price', 'process_price', pid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -94,7 +103,10 @@ def save_product_route_pricing(product_id):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     msg = f'保存成功（新增 {created} 条，更新 {updated} 条）'
-    audit_log('batch_save_prices', 'product', product_id, msg)
+    try:
+        audit_log('batch_save_prices', 'product', product_id, msg)
+    except Exception:
+        pass
     return jsonify({'message': msg, 'created': created, 'updated': updated})
 
 
@@ -117,7 +129,10 @@ def copy_process_prices():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     msg = f'成功从源产品复制 {copied} 条工价' + (f'（跳过 {skipped} 条已存在）' if skipped else '')
-    audit_log('copy_prices', 'product', to_id, f'from {from_id}, {copied} copied, {skipped} skipped')
+    try:
+        audit_log('copy_prices', 'product', to_id, f'from {from_id}, {copied} copied, {skipped} skipped')
+    except Exception:
+        pass
     return jsonify({'message': msg, 'copied': copied, 'skipped': skipped})
 
 
@@ -140,7 +155,10 @@ def save_default_prices():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     msg = f'默认工价保存成功（新增 {created}，更新 {updated}）'
-    audit_log('save_default_prices', 'process_price', 0, msg)
+    try:
+        audit_log('save_default_prices', 'process_price', 0, msg)
+    except Exception:
+        pass
     return jsonify({'message': msg})
 
 
@@ -182,7 +200,10 @@ def save_route_prices(route_id):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     msg = f'保存成功（新增 {created} 条，更新 {updated} 条）'
-    audit_log('save_route_prices', 'process_route', route_id, msg)
+    try:
+        audit_log('save_route_prices', 'process_route', route_id, msg)
+    except Exception:
+        pass
     return jsonify({'message': msg, 'created': created, 'updated': updated})
 
 

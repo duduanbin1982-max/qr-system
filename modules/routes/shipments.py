@@ -91,7 +91,10 @@ def create_shipment():
         sid, sno = ShipmentService.create_shipment(data, g.current_user['name'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('create', 'shipment', sid, f'创建出库单 {sno}')
+    try:
+        audit_log('create', 'shipment', sid, f'创建出库单 {sno}')
+    except Exception:
+        pass
     return jsonify({'message': '出库单创建成功', 'id': sid, 'shipment_no': sno})
 
 
@@ -145,7 +148,10 @@ def update_shipment(shipment_id):
         ShipmentService.update_shipment(shipment_id, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('update', 'shipment', shipment_id, '更新出库单')
+    try:
+        audit_log('update', 'shipment', shipment_id, '更新出库单')
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -170,7 +176,10 @@ def delete_shipment(shipment_id):
         sno = ShipmentService.delete_shipment(shipment_id, g.current_user)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('delete', 'shipment', shipment_id, f'删除出库单 {sno}')
+    try:
+        audit_log('delete', 'shipment', shipment_id, f'删除出库单 {sno}')
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -199,5 +208,8 @@ def complete_shipment(shipment_id):
     except ValueError as e:
         msg = str(e)
         return jsonify({'error': msg}), 409 if '已完成' in msg else (400 if '出库失败' in msg else 404)
-    audit_log('complete', 'shipment', shipment_id, '完成出库 ' + sno)
+    try:
+        audit_log('complete', 'shipment', shipment_id, '完成出库 ' + sno)
+    except Exception:
+        pass
     return jsonify({'message': '出库完成'})

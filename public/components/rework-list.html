@@ -68,12 +68,12 @@
                 <div v-else style="display:flex;align-items:center;gap:var(--space-1)">
                   <span v-if="it.reason" style="background:var(--warning-lighter);color:var(--warning);padding:var(--space-1) 8px;border-radius:var(--radius-sm);font-size:var(--text-xs);max-width:120px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.reason }}</span>
                   <span v-else style="color:var(--text-placeholder)">-</span>
-                  <button v-if="editing!==it.id" class="btn-icon-edit btn-icon-sm" style="font-size:var(--text-xs);flex-shrink:0;margin-left:2px" @click="startEdit(it)" title="编辑原因">✏️</button>
+                  <button v-if="editing!==it.id" v-if="canEdit" class="btn-icon-edit btn-icon-sm" style="font-size:var(--text-xs);flex-shrink:0;margin-left:2px" @click="startEdit(it)" title="编辑原因">✏️</button>
                 </div>
               </td>
               <td style="padding:var(--space-3) 12px;text-align:center;font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ fmtDate(it.created_at) }}</td>
               <td style="padding:var(--space-3) 12px;text-align:center">
-                <button @click="complete(it)" class="btn-success btn-sm" style="padding:var(--space-1) 14px">完成返工</button>
+                <button @click="complete(it)" v-if="canEdit" class="btn-success btn-sm" style="padding:var(--space-1) 14px">完成返工</button>
               </td>
             </tr>
           </tbody>

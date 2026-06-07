@@ -1,18 +1,17 @@
 """
 qr-system — 系统设置
-"""
-import json, hashlib, secrets, base64
-from datetime import datetime, timedelta
-from functools import wraps
-from io import BytesIO
 
-from flask import request, jsonify, send_file, g
+注：Swagger docstring 仅供文档参考。
+"""
+import json
+from datetime import datetime
+
+from flask import request, jsonify, g
 
 from modules.app import app
 from modules.db import get_db, get_setting, clear_settings_cache
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body
-from modules.config import PERMISSION_DEFS, generate_product_code
 
 # 允许的设置 key 白名单（模块级常量）
 ALLOWED_KEYS = {
@@ -123,12 +122,18 @@ def save_settings():
         db.execute('ROLLBACK')
         return jsonify({'error': '保存失败，请重试'}), 500
 
-    clear_settings_cache()
+    try:
+        clear_settings_cache()
+    except Exception:
+        pass  # 缓存清理失败不影响主流程
     # 逐 key 记录变更（截断到 1900 字符，避免超 audit_log 2000 限制）
-    parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
-    if deleted_keys:
-        parts.append(f'_deleted={",".join(deleted_keys[:20])}')
-    audit_log('save_settings', detail=', '.join(parts)[:1900])
+    try:
+        parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
+        if deleted_keys:
+            parts.append(f'_deleted={",".join(deleted_keys[:20])}')
+        audit_log('save_settings', detail=', '.join(parts)[:1900])
+    except Exception:
+        pass
     return jsonify({'message': '保存成功'})
 
 # ============================================================

@@ -25,6 +25,11 @@ export default {
     // 统计
     const hasContact = computed(() => customers.value.filter(c => c.contact).length)
     const hasEmail = computed(() => customers.value.filter(c => c.email).length)
+
+    // RBAC
+    const canEdit   = computed(() => can('customers:edit'))
+    const canDelete = computed(() => can('customers:delete'))
+    const canCreate = computed(() => can('customers:create'))
     
     async function load() {
       loading.value = true
@@ -101,7 +106,7 @@ export default {
       customers, loading, searchKeyword, load,
       showModal, modalEdit, form, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
-      hasContact, hasEmail, auth, can
+      hasContact, hasEmail, can, canEdit, canDelete, canCreate
     }
   }
 }

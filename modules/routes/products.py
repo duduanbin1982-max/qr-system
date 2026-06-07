@@ -1,9 +1,13 @@
 """
 qr-system — 产品管理（路由层）
+
+注：docstring 中的 Swagger 标记仅供文档参考，项目未集成 Flask-RESTX。
 """
-import json, os, tempfile
-from io import BytesIO
+import json
 from urllib.parse import quote
+import os        # for import_products temp file cleanup
+import tempfile  # for import_products temp file
+from io import BytesIO  # for attachment download
 from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
 from modules.db import get_page_size
@@ -104,7 +108,10 @@ def create_product():
         pid, product_code = ProductService.create_product(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '重复' in str(e) else 400
-    audit_log('create_product', 'product', pid, data.get('product_name', ''))
+    try:
+        audit_log('create_product', 'product', pid, data.get('product_name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
 
@@ -150,7 +157,10 @@ def update_product(pid):
         product_code = ProductService.update_product(pid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('update_product', 'product', pid, str(data))
+    try:
+        audit_log('update_product', 'product', pid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
 
@@ -177,7 +187,10 @@ def delete_product(pid):
         ProductService.delete_product(pid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    audit_log('delete_product', 'product', pid)
+    try:
+        audit_log('delete_product', 'product', pid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -216,7 +229,10 @@ def import_products():
     finally:
         if os.path.exists(tmp.name):
             os.unlink(tmp.name)
-    audit_log('import_products', 'product', 0, f'imported {result["success"]}')
+    try:
+        audit_log('import_products', 'product', 0, f'imported {result["success"]}')
+    except Exception:
+        pass
     return jsonify(result)
 
 
@@ -276,7 +292,10 @@ def upload_product_attachment(product_id):
         ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('upload_attachment', 'product', product_id, file.filename)
+    try:
+        audit_log('upload_attachment', 'product', product_id, file.filename)
+    except Exception:
+        pass
     return jsonify({'message': '上传成功'})
 
 
@@ -383,5 +402,8 @@ def delete_product_attachment(attachment_id):
         row = ProductService.delete_attachment(attachment_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
+    try:
+        audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})

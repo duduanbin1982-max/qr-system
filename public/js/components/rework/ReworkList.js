@@ -1,7 +1,8 @@
 // ReworkList — 返工管理
-import { ref, onMounted } from '../../vendor/vue.esm.js'
+import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 export default {
   template: '#rework-list-template',
@@ -17,6 +18,11 @@ export default {
     const page = ref(1)
     const total = ref(0)
     const perPage = 20
+
+    // RBAC
+    const canEdit   = computed(() => can('rework:edit'))
+    const canDelete = computed(() => can('rework:delete'))
+    const canCreate = computed(() => can('rework:create'))
 
     function fmtDate(s) {
       if (!s) return ''
@@ -73,6 +79,6 @@ export default {
 
     onMounted(() => { load(); loadStats() })
 
-    return { items, loading, statusFilter, search, stats, editing, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, load, loadStats, complete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter }
+    return { items, loading, statusFilter, search, stats, editing, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, load, loadStats, complete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter, canEdit, canDelete, canCreate }
   }
 }

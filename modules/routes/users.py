@@ -37,7 +37,10 @@ def create_user():
     except ValueError as e:
         code = 409 if '已存在' in str(e) else 400
         return jsonify({'error': str(e)}), code
-    audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
+    try:
+        audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
+    except Exception:
+        pass
     return jsonify({'message': '添加成功', 'id': uid})
 
 
@@ -50,8 +53,16 @@ def update_user(uid):
         UserService.update_user(uid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    safe_data = {k: v for k, v in data.items() if k not in ('password', 'token')}
-    audit_log('update_user', 'user', uid, str(safe_data))
+    # Log update without password (but note if password was changed)
+    audit_data = dict(data)
+    has_pwd = bool(audit_data.get('password'))
+    audit_data.pop('password', None)
+    if has_pwd:
+        audit_data['password_changed'] = True
+    try:
+        audit_log('update_user', 'user', uid, str(audit_data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -63,7 +74,10 @@ def delete_user(uid):
         UserService.delete_user(uid, g.current_user['id'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('delete_user', 'user', uid)
+    try:
+        audit_log('delete_user', 'user', uid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -76,7 +90,10 @@ def reset_password(uid):
         new_pw = UserService.reset_password(uid, data.get('password'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('reset_password', 'user', uid)
+    try:
+        audit_log('reset_password', 'user', uid)
+    except Exception:
+        pass
     return jsonify({'message': '密码已重置'})
 
 
@@ -88,5 +105,8 @@ def unlock_user(uid):
         UserService.unlock_user(uid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('unlock_user', 'user', uid)
+    try:
+        audit_log('unlock_user', 'user', uid)
+    except Exception:
+        pass
     return jsonify({'message': '账户已解锁'})

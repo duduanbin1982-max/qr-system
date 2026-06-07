@@ -2,11 +2,14 @@
 import { ref, reactive, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
+import { can } from '../../auth.js'
 
 export default {
   template: '#settings-page-template',
   setup() {
     // ===== Tab State =====
+    const canManage = computed(() => can('settings:manage'))
+
     const activeTab = ref('company-info')
     const tabs = [
       { key:'company-info', label:'🏢 公司资料' },
@@ -187,6 +190,7 @@ export default {
     })
     const processConfigLoading = ref(false)
     const processConfigSaving = ref(false)
+    // Load process config for admin tab
     async function loadProcesses() {
       processLoading.value = true
       try { const d = await api.get('/api/processes'); processes.value = d.processes||[] }
@@ -385,6 +389,7 @@ export default {
       catch(e) { showToast(e.message,'error') }
       finally { positionLoading.value = false }
     }
+    // Load processes for position-process mapping (positions tab)
     async function loadAllProcesses() {
       try { const d = await api.get('/api/processes'); allProcesses.value = d.processes||[] }
       catch(e) { showToast('加载工序列表失败', 'warn') }
@@ -419,19 +424,36 @@ export default {
     }
 
     // ===== Init =====
-    onMounted(() => {
-      loadSettings()
-      loadAllUsers()
-      loadRoleGroups()
-      loadGroups()
-      loadRoles()
-      loadPermissions()
-      loadProcesses()
-      loadProcessConfig()
-      loadAllProcesses()
-      loadPositions()
-      loadLogs()
+    onMounted(async () => {
+      // Concurrently load independent resources
+      await Promise.all([
+        loadSettings(),
+        loadAllUsers(),
+        loadRoleGroups(),
+        loadPermissions(),
+        loadProcesses(),
+        loadProcessConfig(),
+        loadAllProcesses(),
+      ])
+      // These depend on groups/roles being loaded first
+      await Promise.all([
+        loadGroups(),
+        loadRoles(),
+        loadPositions(),
+        loadLogs(),
+      ])
     })
+
+    // ====== Stub implementations for template compatibility ======
+    const filteredMatrix = ref([])  // TODO: implement permission matrix
+    const matrixExpandUser = ref(null)
+    const selectedUsers = ref([])
+    const menuConfigSaving = ref(false)
+    const userRoleIds = computed(() => [])
+    
+    function getMenuStatus(page) { return '未配置' }
+    function sourceBadge(source) { return source || '未知' }
+
 
     return {
       activeTab, tabs,
@@ -446,6 +468,9 @@ export default {
       roleSearch, roleLoading, roleCountByGroup, rolePerms, filteredRoles, getGroupName, formatPerms, roleAddGroup,
       positions, positionLoading, showPositionModal, positionModalEdit, positionForm, allProcesses,
       loadPositions, loadAllProcesses, openAddPosition, openEditPosition, savePosition, deletePosition, toggleProcessInPosition,
+      canManage,
+      filteredMatrix, matrixExpandUser, selectedUsers, menuConfigSaving, userRoleIds,
+      getMenuStatus, sourceBadge,
     }
   }
 }

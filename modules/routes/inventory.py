@@ -1,4 +1,7 @@
-"""qr-system — 库存管理（路由层）"""
+"""qr-system — 库存管理（路由层）
+
+注：docstring 中的 Swagger 标记仅供文档参考，项目未集成 Flask-RESTX。
+"""
 from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_page_size
@@ -68,7 +71,10 @@ def create_inventory():
         item_id = InventoryService.create_item(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
+    try:
+        audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
+    except Exception:
+        pass
     return jsonify({'message': '创建成功'})
 
 
@@ -108,7 +114,10 @@ def update_inventory(id):
         InventoryService.update_item(id, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('update_inventory', 'inventory', id)
+    try:
+        audit_log('update_inventory', 'inventory', id)
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -133,7 +142,10 @@ def delete_inventory(id):
         InventoryService.delete_item(id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('delete_inventory', 'inventory', id)
+    try:
+        audit_log('delete_inventory', 'inventory', id)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -171,7 +183,10 @@ def stock_in():
         InventoryService.stock_in(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
+    try:
+        audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
+    except Exception:
+        pass
     return jsonify({'message': '入库成功'})
 
 
@@ -212,7 +227,10 @@ def stock_out():
     except ValueError as e:
         code = 400 if '不足' in str(e) else 404
         return jsonify({'error': str(e)}), code
-    audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
+    try:
+        audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
+    except Exception:
+        pass
     return jsonify({'message': '出库成功'})
 
 

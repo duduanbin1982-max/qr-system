@@ -1,5 +1,7 @@
 """
 qr-system — 生产排程路由
+
+注：Swagger docstring 仅供文档参考。
 """
 from flask import request, jsonify
 

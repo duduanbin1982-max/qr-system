@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 export default {
   template: '#gantt-template',
@@ -10,6 +11,10 @@ export default {
     const loading = ref(true)
     const dayWidth = ref(38)
     const statusFilter = ref('all')
+
+    // RBAC
+    const canEdit = computed(() => can('schedule:edit'))
+    const canCreate = computed(() => can('schedule:create'))
 
     const stats = computed(() => {
       const all = orders.value
@@ -84,6 +89,6 @@ export default {
 
     onMounted(load)
 
-    return { orders, stats, loading, dayWidth, statusFilter, filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut }
+    return { orders, stats, loading, dayWidth, statusFilter, filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut, canEdit, canCreate }
   }
 }

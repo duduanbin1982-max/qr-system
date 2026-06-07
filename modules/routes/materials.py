@@ -1,5 +1,8 @@
 """
 qr-system — 物料管理路由
+
+注：当前无 Service 层（架构债务），SQL 直接内联在路由中。
+后续应参照 products.py 模式抽取 MaterialService。
 """
 from flask import request, jsonify, g
 
@@ -28,7 +31,7 @@ def list_materials():
 
 @app.route('/api/materials', methods=['POST'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:manage')  # 物料模块使用 manage 通配权限（非细分 create/edit/delete）
 def create_material():
     data = get_json_body()
     name = data.get('name', '').strip()
@@ -69,6 +72,7 @@ def update_material(mid):
             return jsonify({'error': '物料不存在'}), 404
         fields = []
         values = []
+        # 列名来自硬编码白名单，安全（不可从用户输入派生）
         for k in ['name', 'spec', 'unit', 'location', 'remark']:
             if k in data:
                 fields.append(f'{k} = ?')
@@ -87,6 +91,7 @@ def update_material(mid):
         db.commit()
         return jsonify({'message': 'updated'})
     except Exception as e:
+        db.execute('ROLLBACK')
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -101,6 +106,7 @@ def delete_material(mid):
         db.commit()
         return jsonify({'message': 'deleted'})
     except Exception as e:
+        db.execute('ROLLBACK')
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -211,7 +217,7 @@ def material_consumption_create(mid):
         if order['deleted_at'] is not None:
             return jsonify({'error': '订单已删除，无法记录消耗'}), 400
 
-    user = g.current_user if hasattr(g, 'current_user') else {}
+    user = g.current_user
     op_name = operator_name or user.get('name', user.get('nickname', ''))
 
     db.execute('BEGIN IMMEDIATE')
@@ -253,6 +259,7 @@ def material_consumption_delete(cid):
 
 
 # ===== 供应商管理 =====
+# 注：供应商 API 混入 materials.py（架构债务），后续应拆分到 routes/suppliers.py
 
 @app.route('/api/suppliers', methods=['GET'])
 @check_auth
@@ -284,6 +291,7 @@ def create_supplier():
         rid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
         return jsonify({'ok': True, 'id': rid, 'message': '供应商已添加'})
     except Exception as e:
+        db.execute('ROLLBACK')
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -305,6 +313,7 @@ def update_supplier(sid):
         db.commit()
         return jsonify({'ok': True, 'message': '已更新'})
     except Exception as e:
+        db.execute('ROLLBACK')
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -319,4 +328,5 @@ def delete_supplier(sid):
         db.commit()
         return jsonify({'ok': True, 'message': '已删除'})
     except Exception as e:
+        db.execute('ROLLBACK')
         return handle_unexpected_error(e, 'database operation')

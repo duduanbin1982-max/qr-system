@@ -47,6 +47,7 @@ class UserService:
         rows = db.execute(f'''
             SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no,
                    u.phone, u.process_ids, u.status, u.created_at, u.last_active, u.position_id,
+                   u.locked_until,
                    (SELECT COUNT(*) FROM user_roles ur2 WHERE ur2.user_id = u.id AND ur2.role_id = 1) > 0 as has_admin_role
             FROM users u WHERE {where_sql}
             ORDER BY u.id LIMIT ? OFFSET ?
@@ -178,12 +179,18 @@ class UserService:
                     raise ValueError('部分工序ID不存在')
 
         old_role = existing['role']
+        field_map = {
+            'name': 'name', 'nickname': 'nickname', 'email': 'email',
+            'group_name': 'group_name', 'role': 'role', 'employee_no': 'employee_no',
+            'phone': 'phone', 'process_ids': 'process_ids', 'status': 'status',
+            'position_id': 'position_id'
+        }
         sets = []
         params = []
         for field in ['name', 'nickname', 'email', 'group_name', 'role', 'employee_no',
                        'phone', 'process_ids', 'status', 'position_id']:
             if field in data:
-                sets.append(f'{field} = ?')
+                sets.append(f'{field_map[field]} = ?')
                 params.append(data[field])
         if 'password' in data and data['password']:
             sets.append('password = ?')
@@ -247,7 +254,7 @@ class UserService:
 
         Args:
             uid: 用户 ID
-            password: 新密码（None 则自动生成）
+            password: 新密码（空字符串 / None 则自动生成随机密码）
 
         Returns:
             str: 新密码（明文，用于返回给管理员）
@@ -256,7 +263,7 @@ class UserService:
             ValueError: 用户不存在
             RuntimeError: 数据库错误
         """
-        new_pw = password or secrets.token_urlsafe(8)
+        new_pw = password if password else secrets.token_urlsafe(8)
         hashed = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
 
         db = BaseService.db()

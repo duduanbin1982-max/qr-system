@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { auth, can } from '../../auth.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 export default {
   template: '#user-list-template',
@@ -30,13 +30,24 @@ export default {
       { value: 'worker', label: '员工' }
     ]
 
+    // RBAC 权限控制
+    const canCreate = computed(() => can('users:create'))
+    const canEdit = computed(() => can('users:edit'))
+    const canDelete = computed(() => can('users:delete'))
+
+    // P1-1: 统计口径统一（不含管理员）
     const activeCount = computed(() => users.value.filter(u => u.role !== 'admin' && u.status === 'active').length)
     const inactiveCount = computed(() => users.value.filter(u => u.role !== 'admin' && u.status !== 'active').length)
+    const totalStaff = computed(() => activeCount.value + inactiveCount.value)
 
+    const positionMap = computed(() => {
+      const map = {}
+      for (const p of positions.value) { map[p.id] = p.name }
+      return map
+    })
     function getPositionName(position_id) {
       if (!position_id) return '未分配'
-      const pos = positions.value.find(p => p.id === position_id)
-      return pos ? pos.name : '未知'
+      return positionMap.value[position_id] || '未知'
     }
 
     async function load() {
@@ -59,6 +70,11 @@ export default {
     function searchAndLoad() {
       page.value = 1
       load()
+    }
+
+    function prevPage() { if (page.value > 1) { page.value--; load() } }
+    function nextPage() {
+      if (page.value * pageSize < total.value) { page.value++; load() }
     }
 
     const filteredUsers = computed(() => {
@@ -166,11 +182,12 @@ export default {
 
     return {
       users, positions, loading, searchKeyword, filteredUsers,
-      showModal, modalEdit, form, roles,
-      activeCount, inactiveCount, auth, can,
+      showModal, modalEdit, form, roles, canCreate, canEdit, canDelete,
+      activeCount, inactiveCount, totalStaff,
       page, total, pageSize,
-      getPositionName,
-      openAdd, openEdit, save, del, resetPwd, unlock, load, searchAndLoad
+      getPositionName, positionMap,
+      openAdd, openEdit, save, del, resetPwd, unlock, load, searchAndLoad,
+      prevPage, nextPage
     }
   }
 }

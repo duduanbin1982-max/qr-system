@@ -56,13 +56,18 @@ export default {
     // 统计
     const structCount = computed(() => products.value.filter(p => p.category === '结构件').length)
     const machCount   = computed(() => products.value.filter(p => p.category === '机加工').length)
-    const canDelete   = computed(() => can('products:delete'))
+    const canEdit    = computed(() => can('products:edit'))
+    const canCreate  = computed(() => can('products:create'))
+    const canDelete  = computed(() => can('products:delete'))
 
     // ===== 拼音首字母映射 =====
     const pinyinMap = {
       '三':'S','档':'D','单':'S','双':'S','一':'Y','二':'E','四':'S','五':'W','六':'L','七':'Q','八':'B','九':'J','十':'S',
       '宽':'K','窄':'Z','高':'G','低':'D','短':'D','长':'C','小':'X','大':'D','厚':'H','薄':'B','普':'P','通':'T',
-      '型':'X','开':'K','口':'K','圆':'Y','方':'F','角':'J','上':'S','下':'X','左':'Z','右':'Y'
+      '型':'X','开':'K','口':'K','圆':'Y','方':'F','角':'J','上':'S','下':'X','左':'Z','右':'Y',
+      '中':'Z','重':'Z','新':'X','全':'Q','钢':'G','铁':'T','铜':'T','铝':'L','不':'B','超':'C','特':'T','精':'J',
+      '加':'J','工':'G','冲':'C','压':'Y','焊':'H','切':'Q','折':'Z','卷':'J','车':'C','铣':'X','磨':'M','钻':'Z',
+      '前':'Q','后':'H','内':'N','顶':'D','底':'D','侧':'C','正':'Z','反':'F',
     }
 
     function getPinyinInitial(ch) {
@@ -70,6 +75,8 @@ export default {
     }
 
     // ===== 自动生成产品编码 =====
+    // 注：与后端 modules/config.py generate_product_code() 逻辑重复，
+    // 前端用于实时预览，后端为权威来源。修改时需同步两边。
     function updateProductCode() {
       const m = (form.value.model || '').trim()
       const s = (form.value.spec || '').trim()
@@ -268,18 +275,12 @@ export default {
       const formData = new FormData()
       formData.append('file', files[0])
       try {
-        const resp = await fetch('/api/products/import', {
-          method: 'POST',
-          body: formData
-        })
-        const d = await resp.json()
-        if (resp.ok) {
-          showToast(d.message || '导入成功')
-          await load()
-        } else {
-          showToast(d.error || '导入失败', 'error')
-        }
-      } catch(e) { showToast('导入失败', 'error') }
+        const d = await api.uploadProductImport(formData)
+        showToast(d.message || '导入成功')
+        await load()
+      } catch(e) {
+        showToast(e.message || '导入失败', 'error')
+      }
       event.target.value = ''
     }
 
@@ -297,7 +298,7 @@ export default {
     return {
       products, loading, searchKeyword, filterCategory, pageTitle, load,
       showModal, modalEdit, form, openAdd, openEdit, save, del,
-      structCount, machCount, categories, specOptions, auth, can, canDelete,
+      structCount, machCount, categories, specOptions, can, canEdit, canCreate, canDelete,
       updateProductCode,
       // 附件
       currentEditProductId, productAttachments,

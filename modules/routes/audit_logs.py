@@ -1,7 +1,7 @@
 """
 qr-system — 操作日志+权限+用户角色
 """
-import json, hashlib, secrets, base64
+import json
 from datetime import datetime, timedelta
 from functools import wraps
 from io import BytesIO
@@ -129,13 +129,19 @@ def set_user_roles(uid):
     data = get_json_body()
     role_ids = data.get('role_ids', [])
     db = get_db()
-    # 清空现有关联
-    db.execute('DELETE FROM user_roles WHERE user_id = ?', (uid,))
-    # 重新分配
-    for rid in role_ids:
-        db.execute('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, rid))
-    db.commit()
-    audit_log('set_user_roles', 'user', uid, f'roles={role_ids}')
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        db.execute('DELETE FROM user_roles WHERE user_id = ?', (uid,))
+        for rid in role_ids:
+            db.execute('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, rid))
+        db.commit()
+    except Exception as e:
+        db.execute('ROLLBACK')
+        return jsonify({'error': str(e)}), 400
+    try:
+        audit_log('set_user_roles', 'user', uid, f'roles={role_ids}')
+    except Exception:
+        pass
     return jsonify({'message': '角色分配成功'})
 
 # ============================================================
@@ -310,7 +316,10 @@ def create_menu_permission():
         if 'UNIQUE' in err:
             return jsonify({'error': 'menu already exists'}), 409
         return jsonify({'error': err}), 400
-    audit_log('create_menu_permission', 'menu', 0, '{0}={1}'.format(page, permission))
+    try:
+        audit_log('create_menu_permission', 'menu', 0, '{0}={1}'.format(page, permission))
+    except Exception:
+        pass
     return jsonify({'message': 'created', 'page': page})
 
 @app.route('/api/menu-permissions/<page>', methods=['PUT'])
@@ -330,9 +339,17 @@ def update_menu_permission(page):
         return jsonify({'error': 'no fields to update'}), 400
     set_clause = ', '.join('{0} = ?'.format(k) for k in updates.keys())
     values = list(updates.values()) + [page]
-    db.execute('UPDATE menu_permissions SET {0} WHERE page = ?'.format(set_clause), values)
-    db.commit()
-    audit_log('update_menu_permission', 'menu', 0, '{0} updated'.format(page))
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        db.execute('UPDATE menu_permissions SET {0} WHERE page = ?'.format(set_clause), values)
+        db.commit()
+    except Exception as e:
+        db.execute('ROLLBACK')
+        return jsonify({'error': str(e)}), 400
+    try:
+        audit_log('update_menu_permission', 'menu', 0, '{0} updated'.format(page))
+    except Exception:
+        pass
     return jsonify({'message': 'updated'})
 
 @app.route('/api/menu-permissions/<page>', methods=['DELETE'])
@@ -349,7 +366,10 @@ def delete_menu_permission(page):
         pass
     db.execute('DELETE FROM menu_permissions WHERE page = ?', (page,))
     db.commit()
-    audit_log('delete_menu_permission', 'menu', 0, page)
+    try:
+        audit_log('delete_menu_permission', 'menu', 0, page)
+    except Exception:
+        pass
     return jsonify({'message': 'deleted'})
 
 @app.route('/api/menu-permissions/batch', methods=['PUT'])
@@ -384,7 +404,10 @@ def batch_update_menu_permissions():
     except Exception:
         db.execute('ROLLBACK')
         return jsonify({'error': '保存失败，请重试'}), 400
-    audit_log('batch_update_menu_permissions', 'menu', 0, f'{len(items)} items')
+    try:
+        audit_log('batch_update_menu_permissions', 'menu', 0, f'{len(items)} items')
+    except Exception:
+        pass
     return jsonify({'message': f'已保存 {len(items)} 条菜单配置'})
 
 # ============================================================

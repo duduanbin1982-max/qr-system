@@ -1,5 +1,7 @@
 """
 qr-system — 角色管理（路由层）
+
+注：Swagger docstring 仅供文档参考。
 """
 from flask import request, jsonify
 from modules.app import app
@@ -49,7 +51,10 @@ def create_role_group():
         gid = RoleGroupService.create_group(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('create_role_group', 'role_group', gid, data.get('name', ''))
+    try:
+        audit_log('create_role_group', 'role_group', gid, data.get('name', ''))
+    except Exception:
+        pass
     return jsonify({'message': '添加成功', 'id': gid})
 
 
@@ -74,7 +79,10 @@ def update_role_group(gid):
     except ValueError as e:
         code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
         return jsonify({'error': str(e)}), code
-    audit_log('update_role_group', 'role_group', gid, str(data))
+    try:
+        audit_log('update_role_group', 'role_group', gid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -97,7 +105,10 @@ def delete_role_group(gid):
         RoleGroupService.delete_group(gid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('delete_role_group', 'role_group', gid)
+    try:
+        audit_log('delete_role_group', 'role_group', gid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})
 
 
@@ -142,7 +153,10 @@ def create_role():
         rid = RoleService.create_role(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    audit_log('create_role', 'role', rid, f'{data.get("name","")}/{data.get("code","")}')
+    try:
+        audit_log('create_role', 'role', rid, f'{data.get("name","")}/{data.get("code","")}')
+    except Exception:
+        pass
     return jsonify({'message': '添加成功', 'id': rid})
 
 
@@ -167,7 +181,10 @@ def update_role(rid):
     except ValueError as e:
         code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
         return jsonify({'error': str(e)}), code
-    audit_log('update_role', 'role', rid, str(data))
+    try:
+        audit_log('update_role', 'role', rid, str(data))
+    except Exception:
+        pass
     return jsonify({'message': '更新成功'})
 
 
@@ -190,5 +207,8 @@ def delete_role(rid):
         RoleService.delete_role(rid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    audit_log('delete_role', 'role', rid)
+    try:
+        audit_log('delete_role', 'role', rid)
+    except Exception:
+        pass
     return jsonify({'message': '删除成功'})

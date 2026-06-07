@@ -10,28 +10,46 @@ class ProcessRouteService:
     """工序路线管理业务逻辑。"""
 
     @staticmethod
-    def list_routes(category=''):
-        """获取所有工序路线（含工序明细，批量预取避免 N+1）。支持分类筛选。"""
+    def list_routes(category='', search='', limit=None, offset=0):
+        """获取所有工序路线（含工序明细，批量预取避免 N+1）。
+        支持分类筛选、名称搜索、分页。"""
         db = BaseService.db()
         sql = 'SELECT * FROM process_routes'
         params = []
+        conditions = []
         if category:
-            sql += ' WHERE category = ?'
+            conditions.append('category = ?')
             params.append(category)
+        if search:
+            conditions.append('name LIKE ?')
+            params.append(f'%{search}%')
+        if conditions:
+            sql += ' WHERE ' + ' AND '.join(conditions)
         sql += ' ORDER BY created_at DESC'
-        rows = db.execute(sql, params).fetchall()
+
+        if limit:
+            limit = max(1, min(int(limit), 200))
+            # Count total
+            count_sql = sql.replace('SELECT *', 'SELECT COUNT(*)', 1)
+            total = db.execute(count_sql, params).fetchone()[0]
+            sql += ' LIMIT ? OFFSET ?'
+            params.extend([limit, offset])
+            rows = db.execute(sql, params).fetchall()
+        else:
+            rows = db.execute(sql, params).fetchall()
+            total = None
 
         items_by_route = {}
         if rows:
             route_ids = [r['id'] for r in rows]
             placeholders = ",".join("?" for _ in route_ids)
-            items = db.execute(f'''
-                SELECT pri.*, p.name as process_name, p.category as category
-                FROM process_route_items pri
-                LEFT JOIN processes p ON pri.process_id = p.id
-                WHERE pri.route_id IN ({placeholders})
-                ORDER BY pri.route_id, pri.seq_order
-            ''', route_ids).fetchall()
+            # Safe: placeholders are literal "?" strings, route_ids are integers from DB
+            query = ('SELECT pri.*, p.name as process_name, p.category as category '
+                     'FROM process_route_items pri '
+                     'LEFT JOIN processes p ON pri.process_id = p.id '
+                     'WHERE pri.route_id IN ({}) '
+                     'ORDER BY pri.route_id, pri.seq_order').format(placeholders)
+            items = db.execute(query, route_ids).fetchall()
             for item in items:
                 items_by_route.setdefault(item['route_id'], []).append(dict(item))
 
@@ -40,7 +58,10 @@ class ProcessRouteService:
             route = dict(r)
             route['processes'] = items_by_route.get(r['id'], [])
             result.append(route)
-        return {'routes': result}
+        ret = {'routes': result}
+        if total is not None:
+            ret['total'] = total
+        return ret
 
     @staticmethod
     def create_route(data):
@@ -66,15 +87,20 @@ class ProcessRouteService:
                 (name, data.get('description', ''), data.get('category', '结构件'))
             )
             route_id = cur.lastrowid
+            # 批量预取工序验证（避免 N+1）
+            pids = [p.get('process_id') for p in processes if p.get('process_id')]
+            if pids:
+                placeholders = ",".join("?" for _ in pids)
+                existing_ids = set(r['id'] for r in txn.execute(
+                    f'SELECT id FROM processes WHERE id IN ({placeholders})', pids
+                ).fetchall())
+                for pid in pids:
+                    if pid not in existing_ids:
+                        raise ValueError(f'工序 ID {pid} 不存在')
             for idx, p in enumerate(processes):
                 pid = p.get('process_id')
                 if not pid:
                     continue
-                proc = txn.execute(
-                    'SELECT id FROM processes WHERE id = ?', (pid,)
-                ).fetchone()
-                if not proc:
-                    raise ValueError(f'工序 ID {pid} 不存在')
                 txn.execute(
                     'INSERT INTO process_route_items '
                     '(route_id, process_id, seq_order, required_audit) '
@@ -114,15 +140,20 @@ class ProcessRouteService:
                 (new_name, data.get('description', route['description']), category, rid)
             )
             txn.execute('DELETE FROM process_route_items WHERE route_id = ?', (rid,))
+            # 批量预取工序验证（避免 N+1）
+            pids = [p.get('process_id') for p in processes if p.get('process_id')]
+            if pids:
+                placeholders = ",".join("?" for _ in pids)
+                existing_ids = set(r['id'] for r in txn.execute(
+                    f'SELECT id FROM processes WHERE id IN ({placeholders})', pids
+                ).fetchall())
+                for pid in pids:
+                    if pid not in existing_ids:
+                        raise ValueError(f'工序 ID {pid} 不存在')
             for idx, p in enumerate(processes):
                 pid = p.get('process_id')
                 if not pid:
                     continue
-                proc = txn.execute(
-                    'SELECT id FROM processes WHERE id = ?', (pid,)
-                ).fetchone()
-                if not proc:
-                    raise ValueError(f'工序 ID {pid} 不存在')
                 txn.execute(
                     'INSERT INTO process_route_items '
                     '(route_id, process_id, seq_order, required_audit) '

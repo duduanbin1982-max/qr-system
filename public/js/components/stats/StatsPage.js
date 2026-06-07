@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 // CSV export utility
 function exportCSV(data, filename) {
@@ -22,6 +23,9 @@ export default {
   setup() {
     const tab = ref('daily')
     const loading = ref(false)
+
+    // RBAC
+    const canExport = computed(() => can('stats:export'))
 
     // ===== Daily =====
     const dailyDate = ref(new Date().toISOString().slice(0, 10))
@@ -140,6 +144,7 @@ export default {
 
       sStart, sEnd, scrapRecords, loadScrap,
       progressOrders, progressStats, loadProgress, progressPct, progressClass, exportProgress,
+      canExport,
     }
   }
 }

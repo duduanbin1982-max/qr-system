@@ -18,6 +18,12 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
     """
     if not user:
         return False
+    cached = user.get('_permissions')
+    if cached is not None:
+        if '*' in cached:
+            return True
+        return perm in cached
+    # Fallback: DB query
     db = get_db()
     rows = db.execute('''
         SELECT r.permissions, rg.permissions as group_permissions
@@ -79,6 +85,7 @@ def check_auth(f: Callable) -> Callable:
         if not row:
             return jsonify({'error': '登录已过期'}), 401
         g.current_user = dict(row)
+        g.current_user['_permissions'] = get_user_permissions(g.current_user)
         g.token = token
 
         # Check session timeout (if configured)

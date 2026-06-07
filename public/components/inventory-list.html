@@ -27,7 +27,7 @@
           <div style="display:flex;gap:var(--space-2)">
             <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="load">🔍 搜索</button>
             <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="loadLogs()">📋 流水</button>
-            <button class="btn" style="padding:var(--space-2) 16px;font-size:var(--text-xs);background:linear-gradient(135deg,var(--primary),var(--primary));color:#FFF;border:none;border-radius:var(--radius-md);cursor:pointer;font-weight:600;box-shadow:0 2px 6px rgba(99,102,241,0.35)" @click="openAdd">+ 新增库存</button>
+            <button class="btn" style="padding:var(--space-2) 16px;font-size:var(--text-xs);background:linear-gradient(135deg,var(--primary),var(--primary));color:#FFF;border:none;border-radius:var(--radius-md);cursor:pointer;font-weight:600;box-shadow:0 2px 6px rgba(99,102,241,0.35)" @click="openAdd" v-if="canCreate">+ 新增库存</button>
           </div>
         </div>
       </div>
@@ -70,16 +70,16 @@
                 <td style="text-align:center;font-size:var(--text-xs);font-weight:500;color:var(--text-placeholder)">{{ item.unit }}</td>
                 <td style="text-align:center">
                   <div class="inv-actions">
-                    <button class="inv-btn inv-btn-in" @click="openMove(item, 'in')" title="入库">
+                    <button v-if="canEdit" class="inv-btn inv-btn-in" @click="openMove(item, 'in')" title="入库">
                       <span>📥</span><span>入库</span>
                     </button>
-                    <button class="inv-btn inv-btn-out" @click="openMove(item, 'out')" title="出库">
+                    <button v-if="canEdit" class="inv-btn inv-btn-out" @click="openMove(item, 'out')" title="出库">
                       <span>📤</span><span>出库</span>
                     </button>
-                    <button class="inv-btn inv-btn-edit" @click="openEdit(item)" title="编辑">
+                    <button class="inv-btn inv-btn-edit" @click="openEdit(item)" v-if="canEdit" title="编辑">
                       <span>✏️</span>
                     </button>
-                    <button class="inv-btn inv-btn-del" @click="del(item)" title="删除">
+                    <button class="inv-btn inv-btn-del" @click="del(item)" v-if="canDelete" title="删除">
                       <span>🗑️</span>
                     </button>
                   </div>

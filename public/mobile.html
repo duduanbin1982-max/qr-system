@@ -270,26 +270,28 @@ const $ = function(id) { return document.getElementById(id); };
 
 function esc(s) {
   if (!s) return '';
-  var d = document.createElement('div');
+  const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
 }
 
 function toast(msg, ms) {
-  var old = document.querySelector('.toast');
+  const old = document.querySelector('.toast');
   if (old) old.remove();
-  var t = document.createElement('div');
+  const t = document.createElement('div');
   t.className = 'toast';
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, ms || 2000);
 }
 
-// Token is httpOnly cookie — auto-attached by browser. No localStorage needed.
+// Token is stored in httpOnly cookie (qr_token) — browser auto-attaches it.
+// For endpoints that also accept Authorization header, read from cookie as fallback.
+function token()  { return ''; }  // cookie is auto-sent; header fallback is empty
 function user()   { return window.__qr_user || null; }
 
 function show(id) {
-  var screens = document.querySelectorAll('.screen');
+  const screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) screens[i].classList.remove('active');
   $('s-' + id).classList.add('active');
 }
@@ -319,10 +321,10 @@ function openCam() {
     return;
   }
 
-  var hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
+  let hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
   $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
 
-  var video = $('cam-video');
+  const video = $('cam-video');
   navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
   })
@@ -355,7 +357,7 @@ function startBD(video) {
     .then(function(codes) {
       if (codes && codes.length > 0) {
         var text = codes[0].rawValue;
-        var now = Date.now();
+        const now = Date.now();
         if (text !== lastCode || now - lastTime >= 3000) {
           lastCode = text; lastTime = now;
           onScan(text);
@@ -372,8 +374,8 @@ function startBD(video) {
 // ── 路径2: jsQR (纯JS通用降级) ─────────────
 // 对齐 .74 scan.html：原始分辨率全图，一次jsQR
 function startJsQR(video) {
-  var canvas = $('cam-canvas');
-  var ctx = canvas.getContext('2d');
+  const canvas = $('cam-canvas');
+  const ctx = canvas.getContext('2d');
 
   scanTimer = setInterval(function() {
     if (!camStream) return;
@@ -383,11 +385,11 @@ function startJsQR(video) {
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    var code = jsQR(imageData.data, imageData.width, imageData.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height);
     
     if (code && code.data) {
-      var now = Date.now();
+      const now = Date.now();
       if (code.data === lastCode && now - lastTime < 3000) return;
       lastCode = code.data; lastTime = now;
       onScan(code.data);
@@ -398,7 +400,7 @@ function startJsQR(video) {
 
 // ── 扫码成功回调 ─────────────────────────────
 function onScan(text) {
-  closeCam();
+  stopScanner();  // stop camera only, don't change view
   setTimeout(function() { processCode(text); }, 200);
 }
 
@@ -409,7 +411,7 @@ function closeCam() {
     camStream.getTracks().forEach(function(t) { t.stop(); });
     camStream = null;
   }
-  var v = $('cam-video');
+  const v = $('cam-video');
   if (v) v.srcObject = null;
   flashOn = false;
   $('flash-btn').classList.add('off');
@@ -426,36 +428,36 @@ function openPhoto() {
 }
 
 function handlePhoto(e) {
-  var file = e.target.files[0];
+  const file = e.target.files[0];
   if (!file) return;
   toast('解码中...');
 
-  var img = new Image();
+  const img = new Image();
   img.onload = function() {
     // 限制最大分辨率以加速解码
-    var maxW = 1200;
-    var w = img.width, h = img.height;
+    const maxW = 1200;
+    let w = img.width, h = img.height;
     if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
 
     var canvas = document.createElement('canvas');
     canvas.width  = w;
     canvas.height = h;
-    var ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, w, h);
 
     try {
       var imgData = ctx.getImageData(0, 0, w, h);
-      var result = jsQR(imgData.data, w, h);
+      const result = jsQR(imgData.data, w, h);
       if (result && result.data) {
         processCode(result.data);
       } else {
         // 全图失败 → 尝试中心裁剪
-        var cx = Math.round(w * 0.25);
-        var cy = Math.round(h * 0.25);
-        var cw2 = Math.round(w * 0.5);
-        var ch2 = Math.round(h * 0.5);
-        var cropData = ctx.getImageData(cx, cy, cw2, ch2);
-        var result2 = jsQR(cropData.data, cw2, ch2);
+        const cx = Math.round(w * 0.25);
+        const cy = Math.round(h * 0.25);
+        const cw2 = Math.round(w * 0.5);
+        const ch2 = Math.round(h * 0.5);
+        const cropData = ctx.getImageData(cx, cy, cw2, ch2);
+        const result2 = jsQR(cropData.data, cw2, ch2);
         if (result2 && result2.data) {
           processCode(result2.data);
         } else {
@@ -579,13 +581,14 @@ function setReportType(type) {
   ['normal','scrap','rework'].forEach(function(t) {
     $('rtype-' + t).classList.toggle('active', t === type);
   });
+  $('reason-row').style.display = (type === 'normal') ? 'none' : 'block';
   updateReportBtn();
 }
 
 function updateReportBtn() {
-  var btn = $('btn-report');
+  const btn = $('btn-report');
   var qty = parseInt($('rpt-qty').value) || 1;
-  var label = reportType === 'normal' ? '正常' : reportType === 'scrap' ? '报废' : '返修';
+  const label = reportType === 'normal' ? '正常' : reportType === 'scrap' ? '报废' : '返修';
   if (reportMode === 'auto') {
     btn.textContent = '⚡ 自动报工 ' + qty + ' 件 (' + label + ')';
     btn.disabled = false;
@@ -601,15 +604,18 @@ $('rpt-qty').addEventListener('input', updateReportBtn);
 // ── 提交报工 ─────────────────────────────────
 function doReport() {
   if (!curOrder || !curProcId) { toast('订单信息不完整'); return; }
-  var btn = $('btn-report');
+  const btn = $('btn-report');
   btn.disabled = true; btn.textContent = '提交中...';
 
   var body = {
     order_id: curOrder.id,
     process_id: curProcId,
     quantity: parseInt($('rpt-qty').value) || 1,
-    work_status: reportType
+    type: reportType
   };
+  if (reportType !== 'normal') {
+    body.reason = ($('rpt-reason').value || '').trim() || '未填写';
+  }
   if (curSerial) body.serial_no = curSerial;
 
   fetch(API + '/mobile/report', {
@@ -620,8 +626,8 @@ function doReport() {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.error) { toast(d.error); btn.disabled = false; updateReportBtn(); return; }
-    var qty = body.quantity || 1;
-    var label = reportType === 'normal' ? '正常报工' : reportType === 'scrap' ? '报废' : '返修';
+    const qty = body.quantity || 1;
+    const label = reportType === 'normal' ? '正常报工' : reportType === 'scrap' ? '报废' : '返修';
     $('ok-msg').textContent = (curOrder.order_no || '') + ' · ' + (curOrder.current_process && curOrder.current_process.process_name || '');
     $('ok-detail').innerHTML =
       '<div>📦 订单: ' + esc(curOrder.order_no || '') + '</div>' +
@@ -639,9 +645,9 @@ function doReport() {
 // ═══════════════════════════════════════════
 
 function doLogin() {
-  var u = $('inp-user').value.trim(), p = $('inp-pwd').value;
+  const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
   if (!u || !p) { toast('请输入用户名和密码'); return; }
-  var btn = $('btn-login');
+  const btn = $('btn-login');
   btn.disabled = true; btn.textContent = '登录中...';
   fetch(API + '/auth/login', {
     method: 'POST',
@@ -692,13 +698,13 @@ function loadRecent() {
   fetch(API + '/report-logs?limit=10', { headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      var list = d.logs || [];
-      var el = $('recent-list');
+      const list = d.logs || [];
+      const el = $('recent-list');
       if (!list.length) { el.innerHTML = '<div class="empty-recent">暂无记录</div>'; return; }
       el.innerHTML = list.slice(0, 5).map(function(r) {
-        var cls = r.work_status === 'scrap' ? 'scrap' : r.work_status === 'rework' ? 'rework' : 'normal';
-        var lbl = r.work_status === 'scrap' ? '报废' : r.work_status === 'rework' ? '返修' : '正常';
-        var time = (r.created_at || '').replace('T', ' ').substring(5, 16);
+        const cls = r.work_status === 'scrap' ? 'scrap' : r.work_status === 'rework' ? 'rework' : 'normal';
+        const lbl = r.work_status === 'scrap' ? '报废' : r.work_status === 'rework' ? '返修' : '正常';
+        const time = (r.created_at || '').replace('T', ' ').substring(5, 16);
         return '<div class="recent-item">' +
           '<div class="ri-left"><div class="ri-no">' + esc(r.order_no || '') + ' · ' + esc(r.process_name || '') + '</div>' +
           '<div class="ri-meta">' + time + ' · ' + (r.quantity || 0) + '件</div></div>' +
@@ -709,14 +715,14 @@ function loadRecent() {
 }
 
 function manualSearch() {
-  var c = $('inp-code').value.trim();
+  const c = $('inp-code').value.trim();
   if (!c) { toast('请输入订单号或序列号'); return; }
   processCode(c);
 }
 
 function toggleFlash() {
   if (!camStream) return;
-  var track = camStream.getVideoTracks()[0];
+  const track = camStream.getVideoTracks()[0];
   if (!track || typeof track.applyConstraints !== 'function') {
     toast('此设备不支持闪光灯');
     return;

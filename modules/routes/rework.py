@@ -9,7 +9,7 @@ from modules.middleware.error_handler import handle_unexpected_error
 
 @app.route('/api/rework', methods=['GET'])
 @check_auth
-@check_permission('orders:view')
+@check_permission('rework:view')
 def rework_list():
     try:
         db = get_db()
@@ -66,7 +66,7 @@ def rework_list():
 
 @app.route('/api/rework/stats', methods=['GET'])
 @check_auth
-@check_permission('orders:view')
+@check_permission('rework:view')
 def rework_stats():
     try:
         db = get_db()
@@ -113,7 +113,7 @@ def rework_update(rework_id):
 
 @app.route('/api/rework/<int:rework_id>/complete', methods=['POST'])
 @check_auth
-@check_permission('orders:edit')
+@check_permission('rework:edit')
 def rework_complete(rework_id):
     db = get_db()
     try:

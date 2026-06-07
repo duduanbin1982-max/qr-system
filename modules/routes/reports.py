@@ -1,8 +1,8 @@
 """
 qr-system — 数据分析报表路由
-提供：生产趋势 / 工人效率 / 品质分析 / 订单分析
+
+注：全读端点，Swagger docstring 仅供文档参考。
 """
-from datetime import datetime, timedelta
 from flask import request, jsonify
 from modules.app import app
 from modules.db import get_db

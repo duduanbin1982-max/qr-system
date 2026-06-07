@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
-import { auth, can } from '../../auth.js?v=56'
+import { can } from '../../auth.js?v=56'
 
 export default {
   template: '#route-list-template',
@@ -12,18 +12,35 @@ export default {
     const allProcesses = ref([])
     const expandedId = ref(null)
 
+    const searchKeyword = ref('')
+    const page = ref(1)
+    const pageSize = ref(20)
+    const total = ref(0)
+
+    const canCreate = computed(() => can('routes:create'))
+    const canEdit = computed(() => can('routes:edit'))
+    const canDelete = computed(() => can('routes:delete'))
+
     const categoryFilter = ref('')
     const activeCat = computed(() => {
       if (!categoryFilter.value) return 'all'
       return categoryFilter.value
     })
 
-    // filteredRoutes 从后端筛选后直接返回（不再客户端过滤）
-    const filteredRoutes = computed(() => routes.value)
-
     function switchCat(cat) {
       categoryFilter.value = cat === 'all' ? '' : cat
+      page.value = 1
       load()
+    }
+
+    function searchAndLoad() {
+      page.value = 1
+      load()
+    }
+
+    function prevPage() { if (page.value > 1) { page.value--; load() } }
+    function nextPage() {
+      if (page.value * pageSize.value < total.value) { page.value++; load() }
     }
 
     // 收集路线涉及的所有工序 category (用于前端汇总显示)
@@ -48,8 +65,12 @@ export default {
       try {
         const params = {}
         if (categoryFilter.value) params.category = categoryFilter.value
-        const d = await api.listProcessRoutes(Object.keys(params).length ? params : null)
+        if (searchKeyword.value.trim()) params.search = searchKeyword.value.trim()
+        params.limit = pageSize.value
+        params.offset = (page.value - 1) * pageSize.value
+        const d = await api.listProcessRoutes(params)
         routes.value = d.routes || []
+        total.value = d.total || 0
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
       } finally {
@@ -126,9 +147,11 @@ export default {
 
     return {
       routes, loading, expandedId, toggleExpand, allProcesses,
-      showModal, modalEdit, form, routeProcesses,
-      openAdd, openEdit, addRow, removeRow, getProcessName, save, del, auth,
-      categoryFilter, activeCat, switchCat, filteredRoutes,
+      showModal, modalEdit, form, routeProcesses, canCreate, canEdit, canDelete,
+      openAdd, openEdit, addRow, removeRow, getProcessName, save, del,
+      routeCategories, searchKeyword, searchAndLoad,
+      categoryFilter, activeCat, switchCat,
+      page, pageSize, total, prevPage, nextPage,
     }
   }
 }

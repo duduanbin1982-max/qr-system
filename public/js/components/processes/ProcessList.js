@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
-import { auth, can } from '../../auth.js'
+import { can } from '../../auth.js'
 import { router } from '../../router.js'
 
 export default {
@@ -11,6 +11,7 @@ export default {
     const processes = ref([])
     const loading = ref(true)
     const filterCategory = ref('')
+    const searchKeyword = ref('')
     const activeCat = computed(() => {
       if (!filterCategory.value) return 'all'
       return filterCategory.value
@@ -26,10 +27,20 @@ export default {
     // Tab 切换分类
     function switchCat(cat) {
       filterCategory.value = cat === 'all' ? '' : cat
+      page.value = 1
+      load()
+    }
+
+    function searchAndLoad() {
+      page.value = 1
       load()
     }
 
     // 页面标题
+    const page = ref(1)
+    const pageSize = ref(20)
+    const total = ref(0)
+
     const pageTitle = computed(() => {
       const cat = filterCategory.value
       if (cat === '结构件') return '🔩 结构件工序'
@@ -49,20 +60,30 @@ export default {
 
     // RBAC 权限
     const canEdit   = computed(() => can('processes:edit'))
+    const canCreate = computed(() => can('processes:create'))
     const canDelete = computed(() => can('processes:delete'))
 
     async function load() {
       loading.value = true
       try {
-        const params = {}
+        const params = { sort_by: 'seq_order', sort_dir: 'asc' }
         if (filterCategory.value) params.category = filterCategory.value
-        const d = await api.listProcesses(Object.keys(params).length ? params : null)
+        if (searchKeyword.value.trim()) params.search = searchKeyword.value.trim()
+        params.limit = pageSize.value
+        params.offset = (page.value - 1) * pageSize.value
+        const d = await api.listProcesses(params)
         processes.value = d.processes || []
+        total.value = d.total || 0
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
       } finally {
         loading.value = false
       }
+    }
+
+    function prevPage() { if (page.value > 1) { page.value--; load() } }
+    function nextPage() {
+      if (page.value * pageSize.value < total.value) { page.value++; load() }
     }
 
     function openAdd() {
@@ -78,7 +99,7 @@ export default {
         name: p.process_name || '',
         description: p.description || '',
         category: p.category || '结构件',
-        seq_order: p.seq != null ? String(p.seq) : '',
+        seq_order: p.seq_order != null ? String(p.seq_order) : '',
         status: p.status || 'active'
       }
       modalEdit.value = true
@@ -141,10 +162,11 @@ export default {
     })
 
     return {
-      processes, loading, filterCategory, pageTitle, load,
+      processes, loading, filterCategory, searchKeyword, pageTitle, load,
       showModal, modalEdit, form, categories,
-      structCount, machCount, auth, can, canEdit, canDelete,
-      openAdd, openEdit, save, del, activeCat, switchCat
+      structCount, machCount, can, canCreate, canEdit, canDelete,
+      openAdd, openEdit, save, del, activeCat, switchCat, searchAndLoad,
+      page, pageSize, total, prevPage, nextPage
     }
   }
 }

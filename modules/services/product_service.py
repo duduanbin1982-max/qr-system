@@ -16,8 +16,10 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 
+MAX_IMPORT_ROWS = 5000
+
 def parse_xlsx(filepath):
-    """Parse .xlsx file, return [{col_letter: cell_value}, ...]"""
+    """Parse .xlsx file, return [{col_letter: cell_value}, ...]. Max {MAX_IMPORT_ROWS} rows."""
     rows = []
     with zipfile.ZipFile(filepath, 'r') as z:
         shared_strings = []
@@ -45,6 +47,8 @@ def parse_xlsx(filepath):
                     row_data[col_letter] = value_el.text
             if row_data:
                 rows.append(row_data)
+                if len(rows) >= MAX_IMPORT_ROWS:
+                    break
     return rows
 
 
@@ -74,10 +78,19 @@ class ProductService:
             params.append(category)
         rows = db.execute(
             f'''SELECT p.*,
-                (SELECT COUNT(*) FROM product_attachments pa WHERE pa.product_id = p.id) as attachment_count,
-                (SELECT id FROM product_attachments pa WHERE pa.product_id = p.id
-                 AND pa.file_type LIKE "%image%" LIMIT 1) as thumbnail_id
-            FROM products p WHERE {where} ORDER BY p.id DESC''',
+                COALESCE(pa.attachment_count, 0) as attachment_count,
+                pa_img.id as thumbnail_id
+            FROM products p
+            LEFT JOIN (
+                SELECT product_id, COUNT(*) as attachment_count
+                FROM product_attachments GROUP BY product_id
+            ) pa ON pa.product_id = p.id
+            LEFT JOIN (
+                SELECT product_id, MIN(id) as id
+                FROM product_attachments WHERE file_type LIKE "%image%"
+                GROUP BY product_id
+            ) pa_img ON pa_img.product_id = p.id
+            WHERE {where} ORDER BY p.id DESC''',
             params
         ).fetchall()
         return {'products': [dict(r) for r in rows]}

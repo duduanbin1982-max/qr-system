@@ -16,7 +16,7 @@
           <h3>📊 生产日报表</h3>
           <div style="display:flex;gap:var(--space-2);align-items:center">
             <input type="date" class="form-input" v-model="dailyDate" @change="loadDaily" style="width:150px">
-            <button class="btn btn-success btn-sm" @click="exportDaily">📥 导出CSV</button>
+            <button v-if="canExport" class="btn btn-success btn-sm" @click="exportDaily">📥 导出CSV</button>
           </div>
         </div>
       </div>
@@ -132,7 +132,7 @@
       <div class="card">
         <div class="card-header">
           <h3>📈 订单进度总览 ({{ progressOrders.length }})</h3>
-          <button class="btn btn-success btn-sm" @click="exportProgress">📥 导出CSV</button>
+          <button v-if="canExport" class="btn btn-success btn-sm" @click="exportProgress">📥 导出CSV</button>
         </div>
         <div class="card-body"><div class="table-wrap"><table v-if="progressOrders.length" class="data-table" style="min-width:950px">
           <thead>

@@ -24,13 +24,14 @@ export default {
     const recentReports = ref([])
     const maxProcessOutput = ref(1)
     const maxWorkerOutput = ref(1)
-    const timer = ref(null)
-    const refreshTimer = ref(null)
+    let _timer = null
+    let _refreshTimer = null
     const statusText = { pending: '待生产', producing: '生产中', completed: '已完成' }
 
     // scrolling: if more than 5, duplicate for seamless scroll
+    const SCROLL_THRESHOLD = 8
     const scrollList = computed(() =>
-      orders.value.length > 5 ? [...orders.value, ...orders.value] : orders.value
+      orders.value.length > SCROLL_THRESHOLD ? [...orders.value, ...orders.value] : orders.value
     )
 
     function updateClock() {
@@ -74,8 +75,7 @@ export default {
       return Math.max((w.output / maxWorkerOutput.value) * 100, 5)
     }
     function workerBarColor(idx) {
-      const colors = ['#f1c40f', '#bdc3c7', '#e67e22', '#00d4ff', '#a855f7', '#2ecc71', '#ff9f43', '#ff6b6b', '#1dd1a1', '#7c3aed']
-      return colors[idx] || colors[idx % colors.length]
+      return COLOR_PALETTE[idx % COLOR_PALETTE.length]
     }
     function procBarColor(cat) {
       return cat === '机加工'
@@ -105,12 +105,12 @@ export default {
     onMounted(() => {
       updateClock()
       loadData()
-      timer.value = setInterval(updateClock, 1000)
-      refreshTimer.value = setInterval(loadData, 30000)
+      _timer = setInterval(updateClock, 1000)
+      _refreshTimer = setInterval(loadData, 30000)
     })
     onBeforeUnmount(() => {
-      if (timer.value) clearInterval(timer.value)
-      if (refreshTimer.value) clearInterval(refreshTimer.value)
+      if (_timer) clearInterval(_timer)
+      if (_refreshTimer) clearInterval(_refreshTimer)
     })
 
     return {

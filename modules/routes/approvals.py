@@ -1,18 +1,16 @@
 """
 qr-system — 审批管理
-"""
-import json, hashlib, secrets, base64
-from datetime import datetime, timedelta
-from functools import wraps
-from io import BytesIO
 
-from flask import request, jsonify, send_file, g
+注：无 Service 层（架构债务），Swagger docstring 仅供文档参考。
+"""
+import json
+from datetime import datetime
+
+from flask import request, jsonify, g
 
 from modules.app import app
 from modules.db import get_db, get_setting, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
-from modules.config import PERMISSION_DEFS, generate_product_code
-from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body, parse_pagination
 
 
@@ -154,13 +152,16 @@ def handle_approval(record_id, action):
                 ('rejected', record['work_record_id'])
             )
         db.execute('RELEASE approval_handle')
+        db.commit()
     except Exception as e:
         db.execute('ROLLBACK TO approval_handle')
-        return handle_unexpected_error(e, 'database operation')
+        return jsonify({'error': f'操作失败: {e}'}), 500
 
-    db.commit()
-    audit_log('approve_' + action, 'approval', record_id,
-              f'{g.current_user["name"]} {action} work_record {record["work_record_id"]}')
+    try:
+        audit_log('approve_' + action, 'approval', record_id,
+                  f'{g.current_user["name"]} {action} work_record {record["work_record_id"]}')
+    except Exception:
+        pass
     return jsonify({'message': '操作成功'})
 
 # ============================================================
