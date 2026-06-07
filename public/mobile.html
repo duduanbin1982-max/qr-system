@@ -208,6 +208,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 <div class="rf-row">
 <div class="rf-col"><label>报工数量</label><input type="number" id="rpt-qty" min="1" placeholder="数量"></div>
 </div>
+<div class="rf-row" id="reason-row" style="display:none">
+<div class="rf-col"><label>原因说明</label><input type="text" id="rpt-reason" placeholder="报废/返修原因"></div>
+</div>
 </div>
 <button class="btn-report" id="btn-report" onclick="doReport()">提交报工</button>
 </div>
@@ -285,9 +288,9 @@ function toast(msg, ms) {
   setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, ms || 2000);
 }
 
-// Token is stored in httpOnly cookie (qr_token) — browser auto-attaches it.
-// For endpoints that also accept Authorization header, read from cookie as fallback.
-function token()  { return ''; }  // cookie is auto-sent; header fallback is empty
+// Auth: httpOnly cookie (qr_token) is auto-sent by browser.
+// user() stores in-memory state; cleared on page reload.
+function token()  { return ''; }  // cookie handles auth; header fallback unused
 function user()   { return window.__qr_user || null; }
 
 function show(id) {
@@ -398,7 +401,10 @@ function startJsQR(video) {
 }
 
 
-// ── 扫码成功回调 ─────────────────────────────
+// ── 停止扫描（保留摄像头画面）───────────────
+function stopScanner() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+}
 function onScan(text) {
   stopScanner();  // stop camera only, don't change view
   setTimeout(function() { processCode(text); }, 200);
@@ -475,6 +481,8 @@ function handlePhoto(e) {
     show('main');
   };
   img.src = URL.createObjectURL(file);
+  img.addEventListener('load', function() { URL.revokeObjectURL(img.src); });
+  img.addEventListener('error', function() { URL.revokeObjectURL(img.src); });
   e.target.value = '';
 }
 
@@ -512,10 +520,10 @@ function doScan(code) {
     if (d.error) { toast(d.error); show('main'); return; }
     renderOrder(d.order);
     show('order');
-    var qty = d.order.current_process
-      ? Math.max(1, (d.order.quantity || 0) - (d.order.current_process.completed || 0))
-      : 1;
-    $('rpt-qty').value = qty;
+    var remaining = Math.max(0, d.order.current_process
+      ? (d.order.quantity || 0) - (d.order.current_process.completed || 0)
+      : 1);
+    $('rpt-qty').value = remaining;
     if (reportMode === 'auto') {
       setTimeout(function() { doReport(); }, 1200);
     } else {
@@ -587,7 +595,8 @@ function setReportType(type) {
 
 function updateReportBtn() {
   const btn = $('btn-report');
-  var qty = parseInt($('rpt-qty').value) || 1;
+  var qty = parseInt($('rpt-qty').value) || 0;
+  if (qty <= 0) { btn.disabled = true; btn.textContent = '已完成全部报工'; return; }
   const label = reportType === 'normal' ? '正常' : reportType === 'scrap' ? '报废' : '返修';
   if (reportMode === 'auto') {
     btn.textContent = '⚡ 自动报工 ' + qty + ' 件 (' + label + ')';
@@ -695,7 +704,7 @@ function loadStats() {
 }
 
 function loadRecent() {
-  fetch(API + '/report-logs?limit=10', { headers: { 'Authorization': 'Bearer ' + token() } })
+  fetch(API + '/report-logs?limit=5', { headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       const list = d.logs || [];
@@ -741,6 +750,10 @@ function toggleFlash() {
   $('inp-pwd').addEventListener('keyup', function(e) { if (e.key === 'Enter') doLogin(); });
   $('inp-user').addEventListener('keyup', function(e) { if (e.key === 'Enter') $('inp-pwd').focus(); });
   $('inp-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
+  window.addEventListener('beforeunload', function() {
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (camStream) { camStream.getTracks().forEach(function(t) { t.stop(); }); camStream = null; }
+  });
 })();
 </script>
 </body>
