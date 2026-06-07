@@ -21,7 +21,6 @@ from modules.middleware.helpers import get_json_body
 @check_auth
 @check_permission('orders:view')
 def list_orders():
-    db = get_db()
     page = max(request.args.get('page', 1, type=int), 1)
     limit_raw = request.args.get('limit', get_page_size(), type=int)
     limit = min(max(limit_raw, 1), 200)
@@ -29,80 +28,17 @@ def list_orders():
     keyword = request.args.get('keyword', '')
     customer = request.args.get('customer', '')
 
-    where = ['o.deleted_at IS NULL']
-    params = []
-    if status:
-        where.append('o.status = ?')
-        params.append(status)
-    if keyword:
-        where.append('(o.order_no LIKE ? OR o.product_name LIKE ?)')
-        params.extend([f'%{keyword}%', f'%{keyword}%'])
-    if customer:
-        where.append('c.name LIKE ?')
-        params.append(f'%{customer}%')
-
-    # 数据权限：按用户岗位工序范围过滤订单
     pids = get_user_process_ids(g.current_user)
-    if pids is not None:
-        if not pids:
-            return jsonify({'orders': [], 'total': 0, 'page': page, 'limit': limit})
-        placeholders = ','.join('?' for _ in pids)
-        where.append(f'o.id IN (SELECT order_id FROM order_processes WHERE process_id IN ({placeholders}))')
-        params.extend(pids)
-
-    where_sql = ' AND '.join(where)
-
-    total = db.execute(f'SELECT COUNT(*) FROM orders o WHERE {where_sql}', params).fetchone()[0]
-
-    rows = db.execute(f'''
-        SELECT o.*, pr.name as route_name, c.name as customer_name
-        FROM orders o
-        LEFT JOIN process_routes pr ON o.route_id = pr.id
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE {where_sql}
-        ORDER BY o.updated_at DESC, o.id DESC
-        LIMIT ? OFFSET ?
-    ''', params + [limit, (page - 1) * limit]).fetchall()
-
-    order_ids = [row['id'] for row in rows]
-    all_procs = {}
-    if order_ids:
-        placeholders = ','.join('?' for _ in order_ids)
-        procs = db.execute(f'''
-            SELECT op.*, p.name as process_name
-            FROM order_processes op JOIN processes p ON op.process_id = p.id
-            WHERE op.order_id IN ({placeholders})
-            ORDER BY op.order_id, op.seq_order
-        ''', order_ids).fetchall()
-        for p in procs:
-            oid = p['order_id']
-            if oid not in all_procs:
-                all_procs[oid] = []
-            all_procs[oid].append(dict(p))
-
-    result = []
-    for row in rows:
-        o = dict(row)
-        try:
-            o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
-        except Exception:
-            o['extra_fields'] = {}
-        if not o.get('product_code'):
-            o['product_code'] = o['extra_fields'].get('product_code', '') if isinstance(o['extra_fields'], dict) else ''
-        o['processes'] = all_procs.get(o['id'], [])
-        result.append(o)
-
-    # Status counts (global, not paginated)
-    status_counts = db.execute(f'''SELECT o.status, COUNT(*) as cnt FROM orders o WHERE {where_sql} GROUP BY o.status''', params).fetchall()
-    counts = {r['status']: r['cnt'] for r in status_counts}
-
-    return jsonify({'orders': result, 'total': total, 'page': page, 'limit': limit,
-                    'pending': counts.get('pending', 0), 'producing': counts.get('producing', 0),
-                    'completed': counts.get('completed', 0)})
+    result = OrderService.list_orders(
+        page=page, limit=limit, status=status, keyword=keyword,
+        customer=customer, data_scope_pids=pids
+    )
+    return jsonify(result)
 
 
 @app.route('/api/orders/next-no', methods=['GET'])
 @check_auth
+@check_permission('orders:view')
 def get_next_order_no():
     order_no = OrderService.next_order_no()
     return jsonify({'order_no': order_no})
@@ -148,32 +84,19 @@ def create_order():
         order_id = cur.lastrowid
 
         process_ids = data.get('process_ids', [])
-        if route_id and not process_ids:
-            route_items = db.execute('''
-                SELECT pri.process_id, pri.seq_order, pri.required_audit
-                FROM process_route_items pri
-                WHERE pri.route_id = ?
-                ORDER BY pri.seq_order
-            ''', (route_id,)).fetchall()
-            for item in route_items:
-                db.execute('INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) VALUES (?,?,?,?)',
-                           (order_id, item['process_id'], item['seq_order'], item['required_audit']))
-        else:
-            if not process_ids:
-                procs = db.execute('SELECT id, seq_order FROM processes WHERE status = "active" ORDER BY seq_order').fetchall()
-                process_ids = [p['id'] for p in procs]
-            for pid in process_ids:
-                proc = db.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
-                if proc:
-                    db.execute('INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                               (order_id, pid, proc['seq_order']))
+        OrderService._assign_processes(db, order_id, route_id=route_id, process_ids=process_ids)
 
         db.commit()
-        audit_log('create_order', 'order', order_id, order_no)
         return jsonify({'message': '创建成功', 'id': order_id})
     except Exception as e:
         db.execute('ROLLBACK')
         return jsonify({'error': f'创建失败: {e}'}), 500
+
+    # audit_log after commit (outside try to avoid false rollback)
+    try:
+        audit_log('create_order', 'order', order_id, order_no)
+    except Exception:
+        pass  # 日志失败不影响业务
 
 
 @app.route('/api/orders/<int:oid>', methods=['PUT'])
@@ -203,45 +126,50 @@ def update_order(oid):
             if new_status not in allowed:
                 return jsonify({'error': f'不允许从「{old_status}」切换到「{new_status}」'}), 400
 
-    if 'customer_id' in data and data['customer_id']:
-        if not (data.get('customer') or '').strip():
-            cust = db.execute('SELECT name FROM customers WHERE id = ?', (data['customer_id'],)).fetchone()
-            if cust:
-                data['customer'] = cust['name']
-    sets = []
-    params = []
-    for field in ['order_no', 'customer', 'customer_id', 'product_name', 'product_code', 'quantity', 'plan_start',
-                  'plan_end', 'deadline', 'remark', 'status', 'route_id']:
-        if field in data:
-            sets.append(f'{field} = ?')
-            params.append(data[field] if data[field] is not None else None)
-    if sets:
-        sets.append('updated_at = datetime("now","localtime")')
-        params.append(oid)
-        db.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
-
-    if 'process_ids' in data:
-        new_pids = [int(pid) for pid in data["process_ids"]]
-        existing_procs = db.execute('SELECT process_id, completed, scrapped, rework, status FROM order_processes WHERE order_id = ?', (oid,)).fetchall()
-        existing_map = {r['process_id']: r for r in existing_procs}
-        remove_ids = [pid for pid in existing_map if pid not in new_pids]
-        if remove_ids:
-            db.execute('DELETE FROM order_processes WHERE order_id = ? AND process_id IN (' + ','.join('?' for _ in remove_ids) + ')', remove_ids)
-        for pid in new_pids:
-            if pid in existing_map:
-                continue
-            proc = db.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
-            if proc:
-                db.execute('INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                           (oid, pid, proc['seq_order']))
     try:
+        if 'customer_id' in data and data['customer_id']:
+            if not (data.get('customer') or '').strip():
+                cust = db.execute('SELECT name FROM customers WHERE id = ?', (data['customer_id'],)).fetchone()
+                if cust:
+                    data['customer'] = cust['name']
+        sets = []
+        params = []
+        for field in ['order_no', 'customer', 'customer_id', 'product_name', 'product_code', 'quantity', 'plan_start',
+                      'plan_end', 'deadline', 'remark', 'status', 'route_id']:
+            if field in data:
+                sets.append(f'{field} = ?')
+                params.append(data[field] if data[field] is not None else None)
+        if sets:
+            sets.append('updated_at = datetime("now","localtime")')
+            params.append(oid)
+            db.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
+
+        if 'process_ids' in data:
+            new_pids = [int(pid) for pid in data["process_ids"]]
+            existing_procs = db.execute('SELECT process_id, completed, scrapped, rework, status FROM order_processes WHERE order_id = ?', (oid,)).fetchall()
+            existing_map = {r['process_id']: r for r in existing_procs}
+            remove_ids = [pid for pid in existing_map if pid not in new_pids]
+            if remove_ids:
+                db.execute('DELETE FROM order_processes WHERE order_id = ? AND process_id IN (' + ','.join('?' for _ in remove_ids) + ')', remove_ids)
+            for pid in new_pids:
+                if pid in existing_map:
+                    continue
+                proc = db.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
+                if proc:
+                    db.execute('INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
+                               (oid, pid, proc['seq_order']))
         db.commit()
-        safe_data = {k:v for k,v in data.items() if k not in ('password', 'token', 'process_ids')}
-        audit_log('update_order', 'order', oid, str(safe_data))
         return jsonify({'message': '更新成功'})
     except Exception as e:
         db.execute('ROLLBACK')
         return jsonify({'error': f'更新失败: {e}'}), 500
+
+    # audit_log after commit (outside try to avoid false rollback)
+    try:
+        safe_data = {k:v for k,v in data.items() if k not in ('password', 'token', 'process_ids')}
+        audit_log('update_order', 'order', oid, str(safe_data))
+    except Exception:
+        pass  # 日志失败不影响业务
 
 
 @app.route('/api/orders/<int:oid>', methods=['DELETE'])
@@ -257,11 +185,16 @@ def delete_order(oid):
         db.execute('''UPDATE orders SET deleted_at = datetime("now","localtime"),
                       deleted_by = ? WHERE id = ?''', (g.current_user['id'], oid))
         db.commit()
-        audit_log('delete_order', 'order', oid, existing['order_no'] + ' (soft)')
         return jsonify({'message': '已移至回收站'})
     except Exception as e:
         db.execute('ROLLBACK')
         return jsonify({'error': f'删除失败: {e}'}), 500
+
+    # audit_log after commit (outside try to avoid false rollback)
+    try:
+        audit_log('delete_order', 'order', oid, existing['order_no'] + ' (soft)')
+    except Exception:
+        pass  # 日志失败不影响业务
 
 
 @app.route('/api/orders/<int:oid>/restore', methods=['POST'])
@@ -269,13 +202,23 @@ def delete_order(oid):
 @check_permission('orders:edit')
 def restore_order(oid):
     db = get_db()
-    existing = db.execute('SELECT id, order_no FROM orders WHERE id = ? AND deleted_at IS NOT NULL', (oid,)).fetchone()
-    if not existing:
-        return jsonify({'error': '未找到已删除的订单'}), 404
-    db.execute('UPDATE orders SET deleted_at = NULL, deleted_by = NULL WHERE id = ?', (oid,))
-    db.commit()
-    audit_log('restore_order', 'order', oid, existing['order_no'])
-    return jsonify({'message': '订单已恢复'})
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        existing = db.execute('SELECT id, order_no FROM orders WHERE id = ? AND deleted_at IS NOT NULL', (oid,)).fetchone()
+        if not existing:
+            return jsonify({'error': '未找到已删除的订单'}), 404
+        db.execute('UPDATE orders SET deleted_at = NULL, deleted_by = NULL WHERE id = ?', (oid,))
+        db.commit()
+        return jsonify({'message': '订单已恢复'})
+    except Exception as e:
+        db.execute('ROLLBACK')
+        return jsonify({'error': f'恢复失败: {e}'}), 500
+
+    # audit_log after commit (outside try to avoid false rollback)
+    try:
+        audit_log('restore_order', 'order', oid, existing['order_no'])
+    except Exception:
+        pass  # 日志失败不影响业务
 
 
 @app.route('/api/orders/trash', methods=['GET'])
@@ -320,6 +263,7 @@ def purge_order(oid):
 
 @app.route('/api/orders/<int:oid>/work-records', methods=['GET'])
 @check_auth
+@check_permission('orders:view')
 def get_order_work_records(oid):
     db = get_db()
     order = db.execute('SELECT id, order_no FROM orders WHERE id = ?', (oid,)).fetchone()
@@ -405,6 +349,7 @@ def get_order_shipments(oid):
 
 @app.route('/api/orders/batch', methods=['POST'])
 @check_auth
+@check_permission('orders:create')
 def batch_create_orders():
     data = get_json_body()
     orders_data = data.get('orders', [])

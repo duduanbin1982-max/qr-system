@@ -10,8 +10,8 @@
     <div class="card">
       <div class="card-header">
         <h3>📋 订单管理</h3>
-        <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
-          <select class="form-input" v-model="filterStatus" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-base);background:white;cursor:pointer;width:110px">
+        <div class="filter-bar">
+          <select class="filter-select" v-model="filterStatus">
             <option value="">全部状态</option>
             <option value="pending">待生产</option>
             <option value="producing">生产中</option>
@@ -19,48 +19,48 @@
             <option value="cancelled">已取消</option>
             <option value="paused">已暂停</option>
           </select>
-          <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
+          <div class="search-box">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索订单号/产品名..." @keyup.enter="searchAndLoad" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:180px;box-shadow:none">
+            <input v-model="searchKeyword" placeholder="搜索订单号/产品名..." @keyup.enter="searchAndLoad">
           </div>
           <button class="btn btn-default btn-sm" @click="searchAndLoad">搜索</button>
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
-          <button v-if="canDelete" class="btn btn-sm" style="background:var(--bg-hover);color:var(--text-placeholder)" @click="showTrash=true;loadTrash()">🗑️ 回收站</button>
+          <button class="btn btn-sm trash-btn" @click="showTrash=true;loadTrash()">🗑️ 回收站</button>
         </div>
       </div>
       <div class="card-body">
         <div class="table-wrap">
-          <table v-if="orders.length" class="data-table" style="min-width:1000px">
+          <table v-if="orders.length" class="data-table order-table">
             <thead>
               <tr>
-                <th style="width:30px;text-align:center"></th>
-                <th style="min-width:120px">订单号</th>
-                <th style="min-width:90px">客户</th>
-                <th style="min-width:100px">产品</th>
-                <th style="width:130px">进度</th>
-                <th style="width:75px;text-align:center">数量</th>
-                <th style="width:85px;text-align:center">状态</th>
-                <th style="min-width:90px">交期</th>
-                <th style="width:80px;text-align:center">操作</th>
+                <th class="td-expand"></th>
+                <th class="td-order-no">订单号</th>
+                <th class="td-customer">客户</th>
+                <th class="td-product">产品</th>
+                <th class="td-progress">进度</th>
+                <th class="td-qty">数量</th>
+                <th class="td-status">状态</th>
+                <th class="td-deadline">交期</th>
+                <th class="td-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               <template v-for="o in orders" :key="o.id">
                 <tr @click="toggleExpandAndLoad(o.id)" style="cursor:pointer" :class="{ 'row-expanded': expandedId === o.id }">
-                  <td style="text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">{{ expandedId === o.id ? '▼' : '▶' }}</td>
-                  <td><code style="font-size:var(--text-xs);font-weight:600">{{ o.order_no }}</code></td>
-                  <td style="font-size:var(--text-sm)">{{ o.customer_name || o.customer || '-' }}</td>
-                  <td>{{ o.product_name }}<span v-if="o.product_code" style="font-size:var(--text-xs-alt);color:var(--text-placeholder);margin-left:4px">({{ o.product_code }})</span></td>
-                  <td>
-                    <div style="display:flex;align-items:center;gap:var(--space-2)">
-                      <div class="progress-bar" style="flex:1;height:6px;background:var(--border-light);border-radius:var(--radius-sm);overflow:hidden">
-                        <div :style="{width:pct(o)+'%',height:'100%',background:pct(o)===100?'var(--success)':pct(o)>50?'var(--primary)':'var(--warning)',borderRadius:'3px'}"></div>
+                  <td class="td-expand">{{ expandedId === o.id ? '▼' : '▶' }}</td>
+                  <td class="td-order-no"><code>{{ o.order_no }}</code></td>
+                  <td class="td-customer">{{ o.customer_name || o.customer || '-' }}</td>
+                  <td class="td-product">{{ o.product_name }}<span v-if="o.product_code" class="td-product-code">({{ o.product_code }})</span></td>
+                  <td class="td-progress">
+                    <div class="progress-wrap">
+                      <div class="progress-bar">
+                        <div class="progress-bar-fill" :style="{width:pct(o)+'%',background:pct(o)===100?'var(--success)':pct(o)>50?'var(--primary)':'var(--warning)'}"></div>
                       </div>
-                      <span style="font-size:var(--text-xs-alt);color:var(--text-placeholder);white-space:nowrap">{{ pct(o) }}%</span>
-                      <span v-if="o.scrapped" style="font-size:var(--text-2xs);color:var(--danger);white-space:nowrap;margin-left:2px">废{{ scrapPct(o) }}%</span>
+                      <span class="progress-pct">{{ pct(o) }}%</span>
+                      <span v-if="o.scrapped" class="progress-scrap">废{{ scrapPct(o) }}%</span>
                     </div>
                   </td>
-                  <td style="text-align:center;font-weight:600">{{ o.quantity }}</td>
+                  <td class="td-qty">{{ o.quantity }}</td>
                   <td style="text-align:center;white-space:nowrap"><span class="badge" :class="statusMap[o.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[o.status]?.label||o.status }}</span></td>
                   <td style="font-size:var(--text-xs);white-space:nowrap">{{ o.deadline || '-' }}</td>
                   <td style="text-align:center">
@@ -93,7 +93,7 @@
                         <span style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary)">📎 附件 ({{ getAttachments(o.id).length }})</span>
                         <label style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
                           + 上传
-                          <input type="file" style="display:none" @change="handleAttachmentUpload(o.id, $event)" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.zip,.rar">
+                          <input type="file" ref="uploadInputRef" style="display:none" @change="handleAttachmentUpload(o.id, $event)" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.zip,.rar">
                         </label>
                       </div>
                       <div v-if="isAttachmentsLoading(o.id)" style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">⏳ 加载中...</div>
@@ -360,7 +360,7 @@
                       <span v-else-if="step.status==='current'" style="color:var(--warning)">🔵</span>
                       <span v-else style="color:var(--border)">·</span>
                     </td>
-                    <td style="text-align:center"><span class="badge" :style="wp.status==='in_progress'?{background:'var(--warning-lighter)',color:'var(--warning-dark)'}:{}">{{ wp.status==='completed'?'完成':wp.status==='in_progress'?'进行中':'待产' }}</span></td>
+                    <td style="text-align:center"><span class="badge wp-badge" :class="wp.status==='completed'?'completed':wp.status==='in_progress'?'in-progress':'pending'">{{ wp.status==='completed'?'完成':wp.status==='in_progress'?'进行中':'待产' }}</span></td>
                   </tr>
                 </tbody>
               </table>

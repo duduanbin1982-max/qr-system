@@ -72,6 +72,12 @@ def upload_order_attachment(order_id):
         return jsonify({'error': '文件大小超过10MB限制'}), 400
     
     db = get_db()
+    
+    # 校验订单存在
+    order = db.execute('SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL', (order_id,)).fetchone()
+    if not order:
+        return jsonify({'error': '订单不存在'}), 404
+    
     db.execute("BEGIN IMMEDIATE")
     
     # 保存到数据库
@@ -120,6 +126,7 @@ def download_attachment(attachment_id):
 
 @app.route('/api/attachments/<int:attachment_id>', methods=['DELETE'])
 @check_auth
+@check_permission('orders:edit')
 def delete_attachment(attachment_id):
     """
     删除附件

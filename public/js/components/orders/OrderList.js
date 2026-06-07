@@ -1,8 +1,8 @@
 // OrderList Component — 订单管理（完整产品搜索+工序选择+权限控制）
-import { ref, onMounted, computed, watch, nextTick } from '../../vendor/vue.esm.js'
+import { ref, onMounted, watch, nextTick } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
-import { auth, can } from '../../auth.js'
+import { auth } from '../../auth.js'
 
 export default {
   template: '#order-list-template',
@@ -99,7 +99,7 @@ export default {
     }
 
     const statusMap = {
-      'pending':   { label:'待生产', cls:'badge-info' },
+      'pending':   { label:'待生产', cls:'badge-pending' },
       'producing': { label:'生产中', cls:'badge-warning' },
       'completed': { label:'已完成', cls:'badge-success' },
       'cancelled': { label:'已取消', cls:'badge-danger' },
@@ -112,8 +112,6 @@ export default {
     const completedCount = ref(0)
 
     // 权限
-    const canEdit   = computed(() => can('orders:edit'))
-    const canDelete = computed(() => can('orders:delete'))
 
     // 进度百分比
     function pct(o) {
@@ -124,6 +122,12 @@ export default {
     function scrapPct(o) {
       if (!o.quantity || !o.scrapped) return 0
       return Math.round(o.scrapped / o.quantity * 100)
+    }
+    function isOverdue(o) {
+      if (!o.plan_end) return false;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const planEnd = new Date(o.plan_end);
+      return planEnd < today && o.status !== 'completed';
     }
 
     // ===== 附件管理 =====
@@ -456,7 +460,7 @@ export default {
 
     return {
       orders, loading, total, page, limit, filterStatus, searchKeyword, filterCustomer,
-      expandedId, toggleExpand, toggleExpandAndLoad, pct, scrapPct, statusMap, canEdit, canDelete,
+      expandedId, toggleExpand, toggleExpandAndLoad, pct, scrapPct, isOverdue, statusMap,
       pendingCount, producingCount, completedCount,
       // 下拉数据
       customers, products, processRoutes, allProcesses,
