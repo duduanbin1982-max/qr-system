@@ -289,9 +289,13 @@ function toast(msg, ms) {
 }
 
 // Auth: httpOnly cookie (qr_token) is auto-sent by browser.
-// user() stores in-memory state; cleared on page reload.
+// user() reads from sessionStorage (survives page reload), memory as fallback.
 function token()  { return ''; }  // cookie handles auth; header fallback unused
-function user()   { return window.__qr_user || null; }
+function user()   {
+  if (window.__qr_user) return window.__qr_user;
+  try { var u = JSON.parse(sessionStorage.getItem('qr_user')); if (u) { window.__qr_user = u; return u; } } catch(e) {}
+  return null;
+}
 
 function show(id) {
   const screens = document.querySelectorAll('.screen');
@@ -667,7 +671,8 @@ function doLogin() {
   .then(function(d) {
     btn.disabled = false; btn.textContent = '登 录';
     if (d.error) { $('login-err').textContent = d.error; return; }
-    window.__qr_user = d.user;  // in-memory only
+    window.__qr_user = d.user;
+    try { sessionStorage.setItem('qr_user', JSON.stringify(d.user)); } catch(e) {}
     goMain();
   })
   .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; });
@@ -675,6 +680,7 @@ function doLogin() {
 
 function doLogout() {
   window.__qr_user = null;
+  try { sessionStorage.removeItem('qr_user'); } catch(e) {}
   show('login');
 }
 
@@ -746,7 +752,19 @@ function toggleFlash() {
 //  初始化
 // ═══════════════════════════════════════════
 (function() {
-  if (user() && token()) { goMain(); } else { show('login'); }
+  // Restore session if user was previously logged in (sessionStorage + valid cookie)
+  if (user()) {
+    // Verify cookie is still valid with a lightweight API call
+    fetch(API + '/auth/info')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.user) { goMain(); }
+        else { doLogout(); }
+      })
+      .catch(function() { doLogout(); });
+  } else {
+    show('login');
+  }
   $('inp-pwd').addEventListener('keyup', function(e) { if (e.key === 'Enter') doLogin(); });
   $('inp-user').addEventListener('keyup', function(e) { if (e.key === 'Enter') $('inp-pwd').focus(); });
   $('inp-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
