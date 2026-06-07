@@ -801,9 +801,6 @@ textarea { resize: vertical; min-height: 80px; }
 .hs-card .hs-val { font-size: var(--space-8); font-weight: bold; position: relative; z-index: 1; }
 .hs-card .hs-label { font-size: var(--text-sm); opacity: 0.9; position: relative; z-index: 1; margin-top: var(--space-1); }
 .hs-blue { background: var(--primary-gradient); }
-  --success-gradient: linear-gradient(135deg, #10B981, #34D399);
-  --warning-gradient: linear-gradient(135deg, #F59E0B, #FBBF24);
-  --rose-gradient: linear-gradient(135deg, #EC4899, #F472B6);
 .hs-green  { background: linear-gradient(135deg, #10B981, #34D399); }
 .hs-orange { background: var(--warning-gradient); }
 .hs-pink   { background: var(--rose-gradient); }
