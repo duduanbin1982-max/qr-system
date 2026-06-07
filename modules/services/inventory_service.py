@@ -63,13 +63,13 @@ class InventoryService:
         if not model:
             raise ValueError('产品型号不能为空')
         db = BaseService.db()
-        dup = db.execute(
-            'SELECT id FROM inventory WHERE product_model = ? AND id != ?',
-            (model, item_id)
-        ).fetchone()
-        if dup:
-            raise ValueError('产品型号已存在')
         with BaseService.transaction() as txn:
+            dup = txn.execute(
+                'SELECT id FROM inventory WHERE product_model = ? AND id != ?',
+                (model, item_id)
+            ).fetchone()
+            if dup:
+                raise ValueError('产品型号已存在')
             txn.execute('''
                 UPDATE inventory SET
                     product_model = ?, product_name = ?, specification = ?,
@@ -97,6 +97,7 @@ class InventoryService:
         if not exists:
             raise ValueError('库存不存在')
         with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM inventory_logs WHERE inventory_id = ?', (item_id,))
             txn.execute('DELETE FROM inventory WHERE id = ?', (item_id,))
 
     @staticmethod
