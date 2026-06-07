@@ -944,7 +944,7 @@ textarea { resize: vertical; min-height: 80px; }
     text-align: left !important;
     box-sizing: border-box !important;
     overflow: hidden !important;
-    transform: translate(1.5mm, -1mm) !important;
+    transform: translate(1.5mm, -0.5mm) !important;
   }
   
   .qr-print-grid .qr-card img { 
