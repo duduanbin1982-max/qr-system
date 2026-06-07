@@ -984,8 +984,6 @@ textarea { resize: vertical; min-height: 80px; }
     text-align: center !important;
     max-width: 100% !important;
   }
-  
-  @page { size: 83mm 32mm; margin: 0 !important; }
 }
 
 /* ===== 可访问性：焦点样式 ===== */
