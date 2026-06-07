@@ -970,14 +970,14 @@ textarea { resize: vertical; min-height: 80px; }
     font-size: 8pt !important;
     font-weight: bold !important;
     color: var(--text-primary) !important;
-    line-height: 1.2 !important;
+    line-height: 1 !important;
     white-space: nowrap !important;
     text-align: center !important;
   }
   .qr-print-grid .qr-label-code {
     font-size: 7pt !important;
     color: var(--text-muted) !important;
-    line-height: 1.2 !important;
+    line-height: 1 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
