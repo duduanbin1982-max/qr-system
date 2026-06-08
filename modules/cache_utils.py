@@ -4,6 +4,14 @@ from functools import wraps
 from flask import jsonify, g
 
 _cache_store = {}
+MAX_CACHE_SIZE = 100
+
+def _evict_oldest():
+    """Remove oldest entries when cache exceeds max size."""
+    if len(_cache_store) > MAX_CACHE_SIZE:
+        sorted_keys = sorted(_cache_store.keys(), key=lambda k: _cache_store[k][1])
+        for key in sorted_keys[:len(_cache_store) - MAX_CACHE_SIZE]:
+            del _cache_store[key]
 
 def _get_user_key():
     """Get a user-specific cache key suffix (0 for unauthenticated)."""
@@ -37,6 +45,7 @@ def ttl_cache(ttl_seconds=30):
             # No status code = default 200
             data = result.json if hasattr(result, "json") else result
             _cache_store[cache_key] = (data, now)
+            _evict_oldest()
             return result
         return wrapper
     return decorator

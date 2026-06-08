@@ -37,7 +37,7 @@ def dashboard():
           COALESCE(SUM(CASE WHEN t.source='work_records' AND t.is_normal=1 THEN t.qty ELSE 0 END),0) as today_output
         FROM (
           SELECT 'work_records' as source, quantity as qty, (type='normal') as is_normal FROM work_records wr
-            WHERE DATE(wr.created_at)=? AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
+            WHERE DATE(wr.created_at)=? AND wr.status='approved' AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
           UNION ALL
           SELECT 'scrap_records', quantity, 0 FROM scrap_records sr
             WHERE DATE(sr.created_at)=? AND sr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)

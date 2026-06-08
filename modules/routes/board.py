@@ -51,12 +51,12 @@ def dashboard_board():
     today_output = db.execute('''
         SELECT COALESCE(SUM(wr.quantity),0) FROM work_records wr
         JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(wr.created_at) = ? AND wr.type = 'normal'
+        WHERE DATE(wr.created_at) = ? AND wr.type = 'normal' AND wr.status = 'approved'
     ''', (today,)).fetchone()[0]
     today_reports = db.execute('''
         SELECT COUNT(*) FROM work_records wr
         JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(wr.created_at) = ?
+        WHERE DATE(wr.created_at) = ? AND wr.status = 'approved'
     ''', (today,)).fetchone()[0]
     today_rework = db.execute('''
         SELECT COALESCE(SUM(rr.quantity),0) FROM rework_records rr
@@ -99,6 +99,7 @@ def dashboard_board():
         FROM processes pr
         LEFT JOIN work_records wr ON pr.id = wr.process_id
             AND DATE(wr.created_at) = ?
+            AND wr.status = 'approved'
             AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
         GROUP BY pr.id, pr.name, pr.category
         HAVING output > 0
@@ -131,12 +132,13 @@ def dashboard_board():
         FROM users u
         LEFT JOIN work_records wr ON u.id = wr.user_id
             AND DATE(wr.created_at) = ?
+            AND wr.status = 'approved'
             AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
         WHERE u.status = 'active'
         GROUP BY u.id, u.name, u.employee_no
         HAVING report_count > 0
         ORDER BY output DESC
-        LIMIT 8
+        LIMIT 20
     ''', (today,)).fetchall()
 
     recent_rows = db.execute('''
