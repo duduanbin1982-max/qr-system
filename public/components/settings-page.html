@@ -360,7 +360,14 @@
           <div v-else>
             <div v-if="positions.length" class="table-wrap">
               <table class="data-table">
-<th style="width:80px">状态</th><th style="width:100px;text-align:center;white-space:nowrap">操作</th></tr></thead>
+<thead><tr>
+  <th style="width:50px">#</th>
+  <th>岗位名称</th>
+  <th>描述</th>
+  <th>关联工序</th>
+  <th style="width:80px">状态</th>
+  <th style="width:100px;text-align:center;white-space:nowrap">操作</th>
+</tr></thead>
                 <tbody>
                   <tr v-for="(p, idx) in positions" :key="p.id">
                     <td style="text-align:center"><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
