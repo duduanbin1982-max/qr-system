@@ -7,8 +7,8 @@ class ProcessPriceService:
     """工序级别工价管理（按产品+工序）。"""
 
     @staticmethod
-    def list_prices(product_id='', category=''):
-        """工序单价列表（含产品/工序信息）。"""
+    def list_prices(product_id='', category='', page=1, limit=100):
+        """工序单价列表（含产品/工序信息 + 分页）。"""
         db = BaseService.db()
         where = []
         params = []
@@ -18,6 +18,12 @@ class ProcessPriceService:
             where.append('p.category = ?'); params.append(category)
         where_clause = ('WHERE ' + ' AND '.join(where)) if where else ''
         # Safe: where_clause built from hardcoded column names, params parameterized
+        count_sql = ('SELECT COUNT(*) FROM process_prices pp'
+                     ' LEFT JOIN processes p ON pp.process_id = p.id'
+                     ' LEFT JOIN products pr ON pp.product_id = pr.id'
+                     f' {where_clause}')
+        total = db.execute(count_sql, params).fetchone()[0]
+        offset = (page - 1) * limit
         query = ('SELECT pp.*, p.name as process_name, p.seq_order,'
                  ' pr.product_name as product_name, pr.model as product_model,'
                  ' pr.product_code as product_code'
@@ -25,9 +31,10 @@ class ProcessPriceService:
                  ' LEFT JOIN processes p ON pp.process_id = p.id'
                  ' LEFT JOIN products pr ON pp.product_id = pr.id'
                  f' {where_clause}'
-                 ' ORDER BY pr.product_name, p.seq_order, pp.effective_date DESC')
-        rows = db.execute(query, params).fetchall()
-        return {'process_prices': [dict(r) for r in rows]}
+                 ' ORDER BY pr.product_name, p.seq_order, pp.effective_date DESC'
+                 ' LIMIT ? OFFSET ?')
+        rows = db.execute(query, params + [limit, offset]).fetchall()
+        return {'process_prices': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
     def create_price(data):
