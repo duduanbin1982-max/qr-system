@@ -55,8 +55,8 @@ export default {
 
     const categories = ['结构件', '机加工']
 
-    const structCount = computed(() => processes.value.filter(p => p.category === '结构件').length)
-    const machCount   = computed(() => processes.value.filter(p => p.category === '机加工').length)
+    const structCount = ref(0)
+    const machCount = ref(0)
 
     // RBAC 权限
     const canEdit   = computed(() => can('processes:edit'))
@@ -75,8 +75,8 @@ export default {
         processes.value = d.processes || []
         total.value = d.total || 0
         if (d.category_counts) {
-          structCount.value = d.category_counts['???'] || 0
-          machCount.value = d.category_counts['???'] || 0
+          structCount.value = d.category_counts['结构件'] || 0
+          machCount.value = d.category_counts['机加工'] || 0
         }
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
