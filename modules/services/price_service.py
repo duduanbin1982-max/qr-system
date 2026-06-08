@@ -416,7 +416,7 @@ class WageService:
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
-            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
@@ -470,7 +470,7 @@ class WageService:
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
-            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
@@ -578,7 +578,7 @@ class WageService:
                    SUM(wr.quantity * COALESCE(pp_dedup.unit_price, rp.unit_price, 0)) as total_wage
             FROM work_records wr
             JOIN users u ON wr.user_id = u.id
-            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
@@ -630,7 +630,7 @@ class WageService:
                    COUNT(DISTINCT wr.user_id) as worker_count
             FROM work_records wr
             JOIN processes p ON wr.process_id = p.id
-            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
