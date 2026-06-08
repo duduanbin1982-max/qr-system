@@ -42,7 +42,11 @@ def list_processes():
             offset = 0
     else:
         limit = None
-    return jsonify(ProcessService.list_processes(category, search, sort_by, sort_dir, limit, offset))
+    try:
+        result = ProcessService.list_processes(category, search, sort_by, sort_dir, limit, offset)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify(result)
 
 
 @app.route('/api/processes', methods=['POST'])
