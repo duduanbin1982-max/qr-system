@@ -60,12 +60,12 @@ class ProductService:
     # ============================================================
 
     @staticmethod
-    def list_products(keyword='', category=''):
+    def list_products(keyword='', category='', page=1, limit=100):
         """
-        产品列表（支持搜索和分类筛选）。
+        产品列表（支持搜索、分类筛选、分页）。
 
         Returns:
-            dict: {products: [...]}
+            dict: {products: [...], total, page, limit}
         """
         db = BaseService.db()
         where = '1=1'
@@ -76,24 +76,28 @@ class ProductService:
         if category and category in ('结构件', '机加工'):
             where += ' AND category = ?'
             params.append(category)
+        total = db.execute(
+            f'SELECT COUNT(*) FROM products WHERE {where}', params
+        ).fetchone()[0]
+        offset = (page - 1) * limit
         rows = db.execute(
-            f'''SELECT p.*,
-                COALESCE(pa.attachment_count, 0) as attachment_count,
-                pa_img.id as thumbnail_id
-            FROM products p
-            LEFT JOIN (
-                SELECT product_id, COUNT(*) as attachment_count
-                FROM product_attachments GROUP BY product_id
-            ) pa ON pa.product_id = p.id
-            LEFT JOIN (
-                SELECT product_id, MIN(id) as id
-                FROM product_attachments WHERE file_type LIKE "%image%"
-                GROUP BY product_id
-            ) pa_img ON pa_img.product_id = p.id
-            WHERE {where} ORDER BY p.id DESC''',
-            params
+            f'SELECT p.*,'
+            f' COALESCE(pa.attachment_count, 0) as attachment_count,'
+            f' pa_img.id as thumbnail_id'
+            f' FROM products p'
+            f' LEFT JOIN ('
+            f'  SELECT product_id, COUNT(*) as attachment_count'
+            f'  FROM product_attachments GROUP BY product_id'
+            f' ) pa ON pa.product_id = p.id'
+            f' LEFT JOIN ('
+            f'  SELECT product_id, MIN(id) as id'
+            f'  FROM product_attachments WHERE file_type LIKE "%image%"'
+            f'  GROUP BY product_id'
+            f' ) pa_img ON pa_img.product_id = p.id'
+            f' WHERE {where} ORDER BY p.id DESC LIMIT ? OFFSET ?',
+            params + [limit, offset]
         ).fetchall()
-        return {'products': [dict(r) for r in rows]}
+        return {'products': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
 
     # ============================================================
     # 查询 — 快速搜索（combobox 用）

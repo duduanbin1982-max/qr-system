@@ -15,6 +15,7 @@ from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
 from werkzeug.utils import secure_filename
 from modules.middleware.helpers import get_json_body
+from modules.middleware.validate import validate_json
 from modules.services.product_service import ProductService
 
 
@@ -41,7 +42,9 @@ def list_products():
     """
     keyword = request.args.get('keyword', '').strip()
     category = request.args.get('category', '').strip()
-    return jsonify(ProductService.list_products(keyword, category))
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    return jsonify(ProductService.list_products(keyword, category, page, limit))
 
 
 @app.route('/api/products/search', methods=['GET'])
@@ -74,6 +77,7 @@ def search_products():
 @app.route('/api/products', methods=['POST'])
 @check_auth
 @check_permission('products:create')
+@validate_json('create_product')
 def create_product():
     """
     创建产品
@@ -112,14 +116,15 @@ def create_product():
         return jsonify({'error': str(e)}), 409 if '重复' in str(e) else 400
     try:
         audit_log('create_product', 'product', pid, data.get('product_name', ''))
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 @check_auth
 @check_permission('products:edit')
+@validate_json('update_product')
 def update_product(pid):
     """
     更新产品
@@ -161,8 +166,8 @@ def update_product(pid):
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
     try:
         audit_log('update_product', 'product', pid, str(data))
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
 
@@ -191,8 +196,8 @@ def delete_product(pid):
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
     try:
         audit_log('delete_product', 'product', pid)
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '删除成功'})
 
 
@@ -221,6 +226,11 @@ def import_products():
     file = request.files['file']
     if not file.filename or not file.filename.lower().endswith('.xlsx'):
         return jsonify({'error': '仅支持.xlsx格式'}), 400
+    if file.content_type and file.content_type not in (
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/octet-stream'
+    ):
+        return jsonify({'error': '文件类型不符，请上传.xlsx文件'}), 400
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     try:
         file.save(tmp.name)
@@ -233,8 +243,8 @@ def import_products():
             os.unlink(tmp.name)
     try:
         audit_log('import_products', 'product', 0, f'imported {result["success"]}')
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify(result)
 
 
@@ -300,8 +310,8 @@ def upload_product_attachment(product_id):
         return jsonify({'error': str(e)}), 400
     try:
         audit_log('upload_attachment', 'product', product_id, file.filename)
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '上传成功'})
 
 
@@ -410,6 +420,6 @@ def delete_product_attachment(attachment_id):
         return jsonify({'error': str(e)}), 404
     try:
         audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '删除成功'})
