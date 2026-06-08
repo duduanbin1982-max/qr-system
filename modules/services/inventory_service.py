@@ -12,8 +12,8 @@ class InventoryService:
     """库存管理业务逻辑。"""
 
     @staticmethod
-    def list_items(keyword='', low_stock=False):
-        """库存列表（搜索 + 低库存筛选）。"""
+    def list_items(keyword='', low_stock=False, page=1, limit=100):
+        """库存列表（搜索 + 低库存筛选 + 分页）。"""
         db = BaseService.db()
         clauses = ['1=1']
         params = []
@@ -23,12 +23,17 @@ class InventoryService:
         if low_stock:
             clauses.append('quantity <= safe_stock AND safe_stock > 0')
         where = ' AND '.join(clauses)
+        total = db.execute(
+            'SELECT COUNT(*) FROM inventory WHERE ' + where, params
+        ).fetchone()[0]
+        offset = (page - 1) * limit
         rows = db.execute(
             'SELECT *, CASE WHEN quantity <= safe_stock AND safe_stock > 0 '
             'THEN 1 ELSE 0 END as is_low FROM inventory WHERE ' + where
-            + ' ORDER BY updated_at DESC', params
+            + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+            params + [limit, offset]
         ).fetchall()
-        return {'items': [dict(r) for r in rows]}
+        return {'items': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
     def create_item(data):

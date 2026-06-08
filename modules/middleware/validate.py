@@ -87,6 +87,48 @@ SCHEMAS = {
         },
         'additionalProperties': True,
     },
+    'create_inventory': {
+        'type': 'object',
+        'required': ['product_model'],
+        'properties': {
+            'product_model': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'product_name': {'type': 'string', 'maxLength': 128},
+            'specification': {'type': 'string', 'maxLength': 256},
+            'quantity': {'type': 'number', 'minimum': 0},
+            'safe_stock': {'type': 'number', 'minimum': 0},
+            'location': {'type': 'string', 'maxLength': 128},
+            'unit': {'type': 'string', 'maxLength': 16},
+            'remark': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+    'update_inventory': {
+        'type': 'object',
+        'properties': {
+            'product_model': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'product_name': {'type': 'string', 'maxLength': 128},
+            'specification': {'type': 'string', 'maxLength': 256},
+            'quantity': {'type': 'number', 'minimum': 0},
+            'safe_stock': {'type': 'number', 'minimum': 0},
+            'location': {'type': 'string', 'maxLength': 128},
+            'unit': {'type': 'string', 'maxLength': 16},
+            'remark': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+    'stock_movement': {
+        'type': 'object',
+        'required': ['inventory_id', 'quantity'],
+        'properties': {
+            'inventory_id': {'type': 'integer', 'minimum': 1},
+            'quantity': {'type': 'number', 'minimum': 0.001},
+            'order_id': {'type': ['integer', 'null']},
+            'order_no': {'type': 'string', 'maxLength': 64},
+            'remark': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+
     'quality_inspection': {
         'type': 'object',
         'required': ['order_id', 'process_id'],

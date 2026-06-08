@@ -7,6 +7,7 @@ from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body, parse_pagination
+from modules.middleware.validate import validate_json
 from modules.services.inventory_service import InventoryService
 
 
@@ -32,12 +33,15 @@ def list_inventory():
     """
     keyword = request.args.get('keyword', '')
     low_stock = request.args.get('low_stock', '0') == '1'
-    return jsonify(InventoryService.list_items(keyword, low_stock))
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    return jsonify(InventoryService.list_items(keyword, low_stock, page, limit))
 
 
 @app.route('/api/inventory', methods=['POST'])
 @check_auth
 @check_permission('inventory:create')
+@validate_json('create_inventory')
 def create_inventory():
     """
     创建库存项
@@ -73,14 +77,15 @@ def create_inventory():
         return jsonify({'error': str(e)}), 400
     try:
         audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '创建成功'})
 
 
 @app.route('/api/inventory/<int:id>', methods=['PUT'])
 @check_auth
 @check_permission('inventory:edit')
+@validate_json('update_inventory')
 def update_inventory(id):
     """
     更新库存
@@ -116,8 +121,8 @@ def update_inventory(id):
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
     try:
         audit_log('update_inventory', 'inventory', id)
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '更新成功'})
 
 
@@ -144,14 +149,15 @@ def delete_inventory(id):
         return jsonify({'error': str(e)}), 404
     try:
         audit_log('delete_inventory', 'inventory', id)
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '删除成功'})
 
 
 @app.route('/api/inventory/stock-in', methods=['POST'])
 @check_auth
 @check_permission('inventory:edit')
+@validate_json('stock_movement')
 def stock_in():
     """
     入库
@@ -176,7 +182,10 @@ def stock_in():
     """
     data = get_json_body()
     inv_id = data.get('inventory_id')
-    qty = data.get('quantity', 0)
+    try:
+        qty = float(data.get('quantity', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': '数量必须为数字'}), 400
     if not inv_id or qty <= 0:
         return jsonify({'error': '参数错误'}), 400
     try:
@@ -185,14 +194,15 @@ def stock_in():
         return jsonify({'error': str(e)}), 404
     try:
         audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '入库成功'})
 
 
 @app.route('/api/inventory/stock-out', methods=['POST'])
 @check_auth
 @check_permission('inventory:edit')
+@validate_json('stock_movement')
 def stock_out():
     """
     出库
@@ -219,7 +229,10 @@ def stock_out():
     """
     data = get_json_body()
     inv_id = data.get('inventory_id')
-    qty = data.get('quantity', 0)
+    try:
+        qty = float(data.get('quantity', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': '数量必须为数字'}), 400
     if not inv_id or qty <= 0:
         return jsonify({'error': '参数错误'}), 400
     try:
@@ -229,8 +242,8 @@ def stock_out():
         return jsonify({'error': str(e)}), code
     try:
         audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '出库成功'})
 
 
