@@ -7,6 +7,7 @@ from flask import request, jsonify
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body
+from modules.middleware.validate import validate_json
 from modules.services.position_service import PositionService
 
 
@@ -25,12 +26,15 @@ def list_positions():
     security:
       - Bearer: []
     """
-    return jsonify(PositionService.list_positions())
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    return jsonify(PositionService.list_positions(page, limit))
 
 
 @app.route('/api/positions', methods=['POST'])
 @check_auth
 @check_permission('positions:create')
+@validate_json('create_position')
 def create_position():
     """
     ---
@@ -50,14 +54,15 @@ def create_position():
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
     try:
         audit_log('create_position', 'position', pos_id, data.get('name', ''))
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '创建成功', 'id': pos_id})
 
 
 @app.route('/api/positions/<int:pos_id>', methods=['PUT'])
 @check_auth
 @check_permission('positions:edit')
+@validate_json('update_position')
 def update_position(pos_id):
     """
     ---
@@ -78,8 +83,8 @@ def update_position(pos_id):
         return jsonify({'error': str(e)}), code
     try:
         audit_log('update_position', 'position', pos_id, data.get('name', ''))
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '更新成功'})
 
 
@@ -104,6 +109,6 @@ def delete_position(pos_id):
         return jsonify({'error': str(e)}), 404
     try:
         audit_log('delete_position', 'position', pos_id, name)
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '删除成功'})

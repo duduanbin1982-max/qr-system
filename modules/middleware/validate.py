@@ -87,6 +87,31 @@ SCHEMAS = {
         },
         'additionalProperties': True,
     },
+    'create_position': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'description': {'type': 'string', 'maxLength': 256},
+            'process_ids': {
+                'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50
+            },
+        },
+        'additionalProperties': False,
+    },
+    'update_position': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'description': {'type': 'string', 'maxLength': 256},
+            'status': {'type': 'string', 'enum': ['active', 'inactive']},
+            'process_ids': {
+                'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50
+            },
+        },
+        'additionalProperties': False,
+    },
+
     'work_report': {
         'type': 'object',
         'required': ['order_id', 'process_id'],

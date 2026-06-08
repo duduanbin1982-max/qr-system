@@ -752,6 +752,8 @@ def init_db() -> None:
 
     # Prevent duplicate processes by enforcing UNIQUE on name
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')
+    # Prevent duplicate positions by enforcing UNIQUE on name
+    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_name ON positions(name)')
 
     # Default processes
     default_processes = [
@@ -908,6 +910,12 @@ def init_db() -> None:
     # Add unique constraint on processes.name
     try:
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')
+    except:
+        pass
+
+    # Add unique constraint on positions.name
+    try:
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_name ON positions(name)')
     except:
         pass
 

@@ -7,18 +7,25 @@ from modules.services import BaseService
 class PositionService:
 
     @staticmethod
-    def list_positions():
+    def list_positions(page=1, limit=100):
         db = BaseService.db()
-        rows = db.execute('SELECT * FROM positions ORDER BY id').fetchall()
+        total = db.execute('SELECT COUNT(*) FROM positions').fetchone()[0]
+        offset = (page - 1) * limit
+        rows = db.execute(
+            'SELECT * FROM positions ORDER BY id LIMIT ? OFFSET ?',
+            (limit, offset)
+        ).fetchall()
         pos_ids = [r['id'] for r in rows]
         proc_map = {}
         if pos_ids:
-            procs = db.execute(f'''
-                SELECT pp.position_id, pp.process_id, p.name as process_name
-                FROM position_processes pp
-                JOIN processes p ON pp.process_id = p.id
-                WHERE pp.position_id IN ({",".join("?" for _ in pos_ids)})
-            ''', pos_ids).fetchall()
+            # placeholders are all '?' chars from trusted integer list
+            procs = db.execute(
+                f'SELECT pp.position_id, pp.process_id, p.name as process_name'
+                f' FROM position_processes pp'
+                f' JOIN processes p ON pp.process_id = p.id'
+                f' WHERE pp.position_id IN ({",".join("?" for _ in pos_ids)})',
+                pos_ids
+            ).fetchall()
             for p in procs:
                 proc_map.setdefault(p['position_id'], []).append(dict(p))
         result = []
@@ -26,18 +33,16 @@ class PositionService:
             pos = dict(r)
             pos['processes'] = proc_map.get(pos['id'], [])
             result.append(pos)
-        return {'positions': result}
+        return {'positions': result, 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
     def create_position(data):
         name = data.get('name', '').strip()
         if not name:
             raise ValueError('岗位名称不能为空')
-        db = BaseService.db()
-        if db.execute('SELECT id FROM positions WHERE name = ?', (name,)).fetchone():
-            raise ValueError(f'岗位名称【{name}】已存在')
         process_ids = data.get('process_ids', [])
         if process_ids:
+            db = BaseService.db()
             placeholders = ','.join('?' for _ in process_ids)
             valid = {r[0] for r in db.execute(
                 f'SELECT id FROM processes WHERE id IN ({placeholders})', process_ids
@@ -45,10 +50,18 @@ class PositionService:
             invalid = [str(pid) for pid in process_ids if pid not in valid]
             if invalid:
                 raise ValueError(f'无效工序ID: {", ".join(invalid)}')
+        import sqlite3
         with BaseService.transaction() as txn:
-            cur = txn.execute(
-                'INSERT INTO positions (name, description) VALUES (?, ?)',
-                (name, data.get('description', '')))
+            if txn.execute(
+                'SELECT id FROM positions WHERE name = ?', (name,)
+            ).fetchone():
+                raise ValueError(f'岗位名称【{name}】已存在')
+            try:
+                cur = txn.execute(
+                    'INSERT INTO positions (name, description) VALUES (?, ?)',
+                    (name, data.get('description', '')))
+            except sqlite3.IntegrityError:
+                raise ValueError(f'岗位名称【{name}】已存在')
             pos_id = cur.lastrowid
             for pid in process_ids:
                 txn.execute(
@@ -65,13 +78,7 @@ class PositionService:
         if 'name' in data and not data['name'].strip():
             raise ValueError('岗位名称不能为空')
         if 'name' in data and data['name'].strip():
-            new_name = data['name'].strip()
-            dup = db.execute(
-                'SELECT id FROM positions WHERE name = ? AND id != ?',
-                (new_name, pos_id)).fetchone()
-            if dup:
-                raise ValueError(f'岗位名称【{new_name}】已存在')
-            data['name'] = new_name
+            data['name'] = data['name'].strip()
         if 'process_ids' in data:
             pids = data['process_ids']
             if pids:
@@ -97,6 +104,12 @@ class PositionService:
             raise ValueError('无更新内容')
 
         with BaseService.transaction() as txn:
+            if 'name' in data:
+                dup = txn.execute(
+                    'SELECT id FROM positions WHERE name = ? AND id != ?',
+                    (data['name'], pos_id)).fetchone()
+                if dup:
+                    raise ValueError(f'岗位名称【{data["name"]}】已存在')
             if sets:
                 txn.execute(
                     f'UPDATE positions SET {", ".join(sets)} WHERE id = ?',
