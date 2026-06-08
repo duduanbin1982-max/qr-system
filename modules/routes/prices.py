@@ -225,12 +225,13 @@ def calculate_wages():
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')
     include_pending = request.args.get('include_pending', '0') == '1'
+    include_rework = request.args.get('include_rework', '0') == '1'
     if export:
-        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999, include_pending)
+        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999, include_pending, include_rework)
     else:
         page = max(request.args.get('page', 1, type=int), 1)
         limit = min(max(request.args.get('limit', 200, type=int), 1), 1000)
-        result = WageService.calculate_wages(employee_id, date_from, date_to, page, limit, include_pending)
+        result = WageService.calculate_wages(employee_id, date_from, date_to, page, limit, include_pending, include_rework)
     wages = result['wages']
 
     if export in ('xlsx', 'csv'):
@@ -296,5 +297,15 @@ def production_progress():
 @check_permission('prices:view')
 def monthly_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
-    return jsonify(WageService.monthly_summary(year_month))
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    return jsonify(WageService.monthly_summary(year_month, page, limit))
+
+@app.route('/api/wages/process-summary', methods=['GET'])
+@check_auth
+@check_permission('prices:view')
+def process_wage_summary():
+    year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
+    return jsonify(WageService.process_wage_summary(year_month))
+
 

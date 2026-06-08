@@ -391,12 +391,12 @@ class WageService:
     """计件工资 + 日报 + 生产进度。"""
 
     @staticmethod
-    def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False):
-        """计件工资统计（仅统计已审批通过的正常报工）。"""
+    def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False):
+        """计件工资统计（默认仅统计已审批通过的正常报工，可选含 pending 和返工）。"""
         db = BaseService.db()
         status_filter = "wr.status = 'approved'" if not include_pending else "wr.status IN ('approved','pending')"
-        where = f"{status_filter} AND wr.type = 'normal'"
-        count_where = where
+        type_filter = "wr.type IN ('normal','rework')" if include_rework else "wr.type = 'normal'"
+        where = f"{status_filter} AND {type_filter}"
         params = []
         if employee_id:
             where += ' AND wr.user_id = ?'; params.append(employee_id)
@@ -404,23 +404,22 @@ class WageService:
             where += ' AND wr.created_at >= ?'; params.append(date_from)
         if date_to:
             where += ' AND wr.created_at <= ?'; params.append(date_to + ' 23:59:59')
-        # Count before pagination
-        count_sql = ("SELECT COUNT(*) FROM work_records wr"
-                     " LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL"
-                     " WHERE " + where)
+        # Count before pagination (no JOIN needed — only counting work_records)
+        count_sql = "SELECT COUNT(*) FROM work_records wr WHERE " + where
         total = db.execute(count_sql, params).fetchone()[0]
         offset = (page - 1) * limit
         # process_prices subquery: deduplicate by (product_code, process_id) using latest effective_date
         query = ('''SELECT wr.*, u.name as employee_name, u.employee_no,
                    p.name as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
-                   COALESCE(rp.unit_price, pp_dedup.unit_price, 0) as unit_price
+                   COALESCE(pp_dedup.unit_price, rp.unit_price, 0) as unit_price
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
             LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
+                AND rp.effective_date <= date('now','localtime')
             LEFT JOIN (
                 SELECT pr.product_code, pp2.process_id, pp2.unit_price
                 FROM process_prices pp2
@@ -463,13 +462,34 @@ class WageService:
 
     @staticmethod
     def daily_report(date):
-        """员工生产日报表（仅统计已审批通过的正常报工）。"""
+        """员工生产日报表（含工序工价和工资，仅统计已审批通过的正常报工）。"""
         db = BaseService.db()
         rows = db.execute('''
-            SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name
+            SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name,
+                   COALESCE(pp_dedup.unit_price, rp.unit_price, 0) as unit_price
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
+            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN route_prices rp ON o.route_id = rp.route_id
+                AND wr.process_id = rp.process_id AND rp.status = 'active'
+                AND rp.effective_date <= date('now','localtime')
+            LEFT JOIN (
+                SELECT pr.product_code, pp2.process_id, pp2.unit_price
+                FROM process_prices pp2
+                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
+                AND pp2.effective_date = (
+                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
+                    JOIN products pr3 ON pp3.product_id = pr3.id
+                    WHERE pr3.product_code = pr.product_code
+                    AND pp3.process_id = pp2.process_id
+                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.effective_date <= date('now','localtime')
+                )
+                GROUP BY pr.product_code, pp2.process_id
+            ) pp_dedup ON o.product_code = pp_dedup.product_code
+                AND wr.process_id = pp_dedup.process_id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
             AND wr.created_at >= ? AND wr.created_at < ?
             ORDER BY wr.user_id, wr.process_id
@@ -479,12 +499,16 @@ class WageService:
             emp_id = row['user_id']; proc_id = row['process_id']
             emp_name = row['employee_name'] or '未知'
             proc_name = row['process_name'] or '未知'
+            up = row['unit_price'] or 0
+            qty = row['quantity'] or 0
             if emp_id not in report:
                 report[emp_id] = {'employee_name': emp_name, 'employee_no': row['employee_no'],
-                                  'processes': {}}
+                                  'processes': {}, 'total_wage': 0}
             if proc_id not in report[emp_id]['processes']:
-                report[emp_id]['processes'][proc_id] = {'process_name': proc_name, 'quantity': 0}
-            report[emp_id]['processes'][proc_id]['quantity'] += row['quantity'] or 0
+                report[emp_id]['processes'][proc_id] = {'process_name': proc_name, 'quantity': 0, 'unit_price': up, 'wage': 0}
+            report[emp_id]['processes'][proc_id]['quantity'] += qty
+            report[emp_id]['processes'][proc_id]['wage'] += qty * up
+            report[emp_id]['total_wage'] += qty * up
         return {'date': date, 'report': list(report.values())}
 
     @staticmethod
@@ -545,37 +569,96 @@ class WageService:
         return {'orders': result, 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
-    def monthly_summary(year_month):
-        """月度工资汇总（按员工聚合）。"""
+    def monthly_summary(year_month, page=1, limit=100):
+        """月度工资汇总（按员工聚合，JOIN 优化取价）。"""
         db = BaseService.db()
         rows = db.execute('''
             SELECT wr.user_id, u.name as employee_name, u.employee_no,
                    SUM(wr.quantity) as total_quantity,
-                   SUM(wr.quantity * COALESCE(
-                       (SELECT rp.unit_price FROM route_prices rp
-                        JOIN orders o2 ON o2.route_id = rp.route_id
-                        WHERE o2.id = wr.order_id AND rp.process_id = wr.process_id
-                        AND rp.status = 'active' LIMIT 1),
-                       (SELECT pp.unit_price FROM process_prices pp
-                        JOIN products pr ON pp.product_id = pr.id
-                        JOIN orders o2 ON o2.product_code = pr.product_code
-                        WHERE o2.id = wr.order_id AND pp.process_id = wr.process_id
-                        AND pp.status = 'active' AND pp.effective_date <= date('now','localtime')
-                        AND pr.deleted_at IS NULL
-                        ORDER BY pp.effective_date DESC LIMIT 1),
-                       0
-                   )) as total_wage
+                   SUM(wr.quantity * COALESCE(pp_dedup.unit_price, rp.unit_price, 0)) as total_wage
             FROM work_records wr
             JOIN users u ON wr.user_id = u.id
+            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN route_prices rp ON o.route_id = rp.route_id
+                AND wr.process_id = rp.process_id AND rp.status = 'active'
+                AND rp.effective_date <= date('now','localtime')
+            LEFT JOIN (
+                SELECT pr.product_code, pp2.process_id, pp2.unit_price
+                FROM process_prices pp2
+                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
+                AND pp2.effective_date = (
+                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
+                    JOIN products pr3 ON pp3.product_id = pr3.id
+                    WHERE pr3.product_code = pr.product_code
+                    AND pp3.process_id = pp2.process_id
+                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.effective_date <= date('now','localtime')
+                )
+                GROUP BY pr.product_code, pp2.process_id
+            ) pp_dedup ON o.product_code = pp_dedup.product_code
+                AND wr.process_id = pp_dedup.process_id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < ?
             GROUP BY wr.user_id
             ORDER BY total_wage DESC
-        ''', (year_month + '-01', year_month + '-32')).fetchall()
+            LIMIT ? OFFSET ?
+        ''', (year_month + '-01', year_month + '-32', limit, (page - 1) * limit)).fetchall()
+
+        total_count = db.execute('''
+            SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr
+            WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND wr.created_at >= ? AND wr.created_at < ?
+        ''', (year_month + '-01', year_month + '-32')).fetchone()[0]
+
         return {
             'year_month': year_month,
             'summary': [dict(r) for r in rows],
             'grand_total_wage': sum(r['total_wage'] or 0 for r in rows),
             'grand_total_quantity': sum(r['total_quantity'] or 0 for r in rows),
+            'total': total_count, 'page': page, 'limit': limit,
+        }
+
+    @staticmethod
+    def process_wage_summary(year_month):
+        """按工序维度的工资汇总（用于分析各工序工资支出）。"""
+        db = BaseService.db()
+        rows = db.execute('''
+            SELECT wr.process_id, p.name as process_name, p.category,
+                   SUM(wr.quantity) as total_quantity,
+                   SUM(wr.quantity * COALESCE(pp_dedup.unit_price, rp.unit_price, 0)) as total_wage,
+                   COUNT(DISTINCT wr.user_id) as worker_count
+            FROM work_records wr
+            JOIN processes p ON wr.process_id = p.id
+            LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN route_prices rp ON o.route_id = rp.route_id
+                AND wr.process_id = rp.process_id AND rp.status = 'active'
+                AND rp.effective_date <= date('now','localtime')
+            LEFT JOIN (
+                SELECT pr.product_code, pp2.process_id, pp2.unit_price
+                FROM process_prices pp2
+                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
+                AND pp2.effective_date = (
+                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
+                    JOIN products pr3 ON pp3.product_id = pr3.id
+                    WHERE pr3.product_code = pr.product_code
+                    AND pp3.process_id = pp2.process_id
+                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.effective_date <= date('now','localtime')
+                )
+                GROUP BY pr.product_code, pp2.process_id
+            ) pp_dedup ON o.product_code = pp_dedup.product_code
+                AND wr.process_id = pp_dedup.process_id
+            WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND wr.created_at >= ? AND wr.created_at < ?
+            GROUP BY wr.process_id
+            ORDER BY total_wage DESC
+        ''', (year_month + '-01', year_month + '-32')).fetchall()
+        grand_total = sum(r['total_wage'] or 0 for r in rows)
+        return {
+            'year_month': year_month,
+            'summary': [dict(r) for r in rows],
+            'grand_total_wage': grand_total,
         }
 
