@@ -30,9 +30,10 @@
       </div>
       <div class="card-body">
         <div v-if="routes.length">
-          <div v-for="r in routes" :key="r.id" class="route-card" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3);background:white">
+          <div v-for="(r, idx) in routes" :key="r.id" class="route-card" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3);background:white">
             <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" @click="toggleExpand(r.id)">
               <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+                <span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:13px;flex-shrink:0">{{ idx + 1 }}</span>
                 <span style="font-size:var(--text-xl)">{{ expandedId === r.id ? '▼' : '▶' }}</span>
                 <div>
                   <div style="font-weight:600;font-size:15px">{{ r.name }}</div>
