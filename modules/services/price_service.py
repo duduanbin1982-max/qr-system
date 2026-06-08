@@ -392,29 +392,38 @@ class WageService:
 
     @staticmethod
     def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False):
-        """计件工资统计（默认仅统计已审批通过的正常报工，可选含 pending 和返工）。"""
+        """计件工资统计（包含所有在职员工，未报工者显示0）。"""
         db = BaseService.db()
         status_filter = "wr.status = 'approved'" if not include_pending else "wr.status IN ('approved','pending')"
         type_filter = "wr.type IN ('normal','rework')" if include_rework else "wr.type = 'normal'"
-        where = f"{status_filter} AND {type_filter}"
-        params = []
+        wr_where_parts = [status_filter, type_filter]
+        wr_params = []
         if employee_id:
-            where += ' AND wr.user_id = ?'; params.append(employee_id)
+            wr_where_parts.append('wr.user_id = ?'); wr_params.append(employee_id)
         if date_from:
-            where += ' AND wr.created_at >= ?'; params.append(date_from)
+            wr_where_parts.append('wr.created_at >= ?'); wr_params.append(date_from)
         if date_to:
-            where += ' AND wr.created_at <= ?'; params.append(date_to + ' 23:59:59')
-        # Count before pagination (no JOIN needed — only counting work_records)
-        count_sql = "SELECT COUNT(*) FROM work_records wr WHERE " + where
-        total = db.execute(count_sql, params).fetchone()[0]
+            wr_where_parts.append('wr.created_at <= ?'); wr_params.append(date_to + ' 23:59:59')
+        wr_where = ' AND '.join(wr_where_parts)
+
+        # Count: all active workers (users as driving table)
+        user_where = "u.status = 'active' AND u.role = 'worker'"
+        user_params = []
+        if employee_id:
+            user_where += ' AND u.id = ?'; user_params.append(employee_id)
+        total = db.execute(
+            "SELECT COUNT(*) FROM users u WHERE " + user_where, user_params
+        ).fetchone()[0]
         offset = (page - 1) * limit
-        # process_prices subquery: deduplicate by (product_code, process_id) using latest effective_date
-        query = ('''SELECT wr.*, u.name as employee_name, u.employee_no,
+
+        # Main query: users LEFT JOIN work_records so all workers appear
+        query = ('''SELECT u.id as user_id, u.name as employee_name, u.employee_no,
+                   wr.quantity, wr.created_at, wr.id as wr_id,
                    p.name as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
                    COALESCE(pp_dedup.unit_price, rp.unit_price, 0) as unit_price
-            FROM work_records wr
-            LEFT JOIN users u ON wr.user_id = u.id
+            FROM users u
+            LEFT JOIN work_records wr ON u.id = wr.user_id AND ''' + wr_where + '''
             LEFT JOIN processes p ON wr.process_id = p.id
             LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
@@ -423,20 +432,24 @@ class WageService:
             LEFT JOIN (
                 SELECT pr.product_code, pp2.process_id, pp2.unit_price
                 FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                JOIN products pr ON pp2.product_id = pr.id
                 WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
                 AND pp2.effective_date = (
                     SELECT MAX(pp3.effective_date) FROM process_prices pp3
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL AND pp3.effective_date <= date('now','localtime')
+                    AND pp3.status = 'active' AND 1=1
+                    AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
             ) pp_dedup ON o.product_code = pp_dedup.product_code
                 AND wr.process_id = pp_dedup.process_id
-            WHERE ''' + where + ''' ORDER BY wr.created_at DESC LIMIT ? OFFSET ?''')
-        rows = db.execute(query, params + [limit, offset]).fetchall()
+            WHERE ''' + user_where + '''
+            ORDER BY u.id
+            LIMIT ? OFFSET ?''')
+        all_params = wr_params + user_params + [limit, offset]
+        rows = db.execute(query, all_params).fetchall()
         wages = {}
         for row in rows:
             emp_id = row['user_id']
@@ -445,19 +458,20 @@ class WageService:
             if emp_id not in wages:
                 wages[emp_id] = {'employee_name': emp_name, 'employee_no': emp_no,
                                  'total_quantity': 0, 'total_wage': 0, 'details': []}
-            qty = row['quantity'] or 0
-            up = row['unit_price'] or 0
-            wage = qty * up
-            wages[emp_id]['total_quantity'] += qty
-            wages[emp_id]['total_wage'] += wage
-            wages[emp_id]['details'].append({
-                'date': row['created_at'],
-                'order_no': row['order_no'] or '',
-                'product_name': row['product_name'] or '',
-                'product_code': row['order_product_code'] or '',
-                'process_name': row['process_name'],
-                'quantity': qty, 'unit_price': up, 'wage': wage
-            })
+            if row['wr_id'] is not None:
+                qty = row['quantity'] or 0
+                up = row['unit_price'] or 0
+                wage = qty * up
+                wages[emp_id]['total_quantity'] += qty
+                wages[emp_id]['total_wage'] += wage
+                wages[emp_id]['details'].append({
+                    'date': row['created_at'],
+                    'order_no': row['order_no'] or '',
+                    'product_name': row['product_name'] or '',
+                    'product_code': row['order_product_code'] or '',
+                    'process_name': row['process_name'],
+                    'quantity': qty, 'unit_price': up, 'wage': wage
+                })
         return {'wages': list(wages.values()), 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
@@ -477,14 +491,14 @@ class WageService:
             LEFT JOIN (
                 SELECT pr.product_code, pp2.process_id, pp2.unit_price
                 FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                JOIN products pr ON pp2.product_id = pr.id
                 WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
                 AND pp2.effective_date = (
                     SELECT MAX(pp3.effective_date) FROM process_prices pp3
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.status = 'active' AND 1=1
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
@@ -585,14 +599,14 @@ class WageService:
             LEFT JOIN (
                 SELECT pr.product_code, pp2.process_id, pp2.unit_price
                 FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                JOIN products pr ON pp2.product_id = pr.id
                 WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
                 AND pp2.effective_date = (
                     SELECT MAX(pp3.effective_date) FROM process_prices pp3
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.status = 'active' AND 1=1
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
@@ -637,14 +651,14 @@ class WageService:
             LEFT JOIN (
                 SELECT pr.product_code, pp2.process_id, pp2.unit_price
                 FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                JOIN products pr ON pp2.product_id = pr.id
                 WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
                 AND pp2.effective_date = (
                     SELECT MAX(pp3.effective_date) FROM process_prices pp3
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                    AND pp3.status = 'active' AND 1=1
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id

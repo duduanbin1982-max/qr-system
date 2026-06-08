@@ -254,7 +254,7 @@ def calculate_wages():
                          as_attachment=True,
                          download_name=f'wages_{date_from}_{date_to}.csv')
 
-    return jsonify({'wages': wages})
+    return jsonify({'wages': wages, 'total': result.get('total', 0), 'page': result.get('page', 1), 'limit': result.get('limit', 200)})
 
 
 @app.route('/api/daily-report', methods=['GET'])
