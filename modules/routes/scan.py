@@ -17,10 +17,46 @@ from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.data_scope import get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
+from modules.services.inventory_service import InventoryService
 
 
 
 # ============================================================
+
+
+def auto_stock_in(db, order_id, user_id, user_name):
+    """Order completion auto-inventory: match inventory.product_model = orders.product_code"""
+    try:
+        order_row = db.execute(
+            'SELECT id, order_no, product_code, product_name, quantity FROM orders WHERE id = ?',
+            (order_id,)
+        ).fetchone()
+        if not order_row or not order_row['product_code']:
+            return
+        inv = db.execute(
+            'SELECT id, product_model, product_name, quantity FROM inventory WHERE product_model = ?',
+            (order_row['product_code'],)
+        ).fetchone()
+        if not inv:
+            return
+        dup = db.execute(
+            'SELECT id FROM inventory_logs WHERE order_id = ? AND type = "in"',
+            (order_id,)
+        ).fetchone()
+        if dup:
+            return
+        db.execute(
+            'UPDATE inventory SET quantity = quantity + ?, updated_at = datetime("now","localtime") WHERE id = ?',
+            (order_row['quantity'], inv['id'])
+        )
+        db.execute(
+            'INSERT INTO inventory_logs (inventory_id, type, quantity, order_id, order_no, remark, operator_id, operator_name) '
+            'VALUES (?, "in", ?, ?, ?, ?, ?, ?)',
+            (inv['id'], order_row['quantity'], order_id, order_row['order_no'],
+             '订单完成自动入库', user_id, user_name)
+        )
+    except Exception:
+        pass
 
 
 def _execute_report_write(db, report_type, order_id, process_id, user_id, user_name,
@@ -59,6 +95,8 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
                 if completed_cnt >= order_info['quantity']:
                     db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
                                (order_id,))
+                    # 自动入库：匹配 inventory.product_model = orders.product_code
+                    auto_stock_in(db, order_id, user_id, user_name)
 
         # 更新产品序列号的当前工序（推进到下一道工序）
         if serial_no:
@@ -549,6 +587,7 @@ def work_report():
                     if completed_cnt >= order_info['quantity']:
                         db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
                                    (order_id,))
+                        auto_stock_in(db, order_id, user['id'], user['name'])
 
             # 推进工件当前工序
             if serial_no and current_op:
