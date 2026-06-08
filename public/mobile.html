@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover,target-densitydpi=device-dpi">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1890ff">
@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/style.css?v=71">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-html,body{height:100%;min-height:100dvh}
-body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg-page);color:var(--text-primary);font-size:15px;overflow:hidden;height:100%;min-height:100dvh;-webkit-user-select:none;user-select:none}
-.screen{display:none;height:100%;min-height:100dvh;flex-direction:column;transition:opacity .2s ease}.screen.active{display:flex}
+html,body{height:100%;min-height:100vh;min-height:calc(var(--vh,1vh)*100)}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg-page);color:var(--text-primary);font-size:15px;overflow:hidden;height:100%;min-height:100vh;min-height:calc(var(--vh,1vh)*100);-webkit-user-select:none;user-select:none}
+.screen{display:none;height:100%;min-height:100vh;min-height:calc(var(--vh,1vh)*100);flex-direction:column;transition:opacity .2s ease}.screen.active{display:flex}
 input,textarea,select{font-size:16px !important}
 
 /* Login */
@@ -31,7 +31,7 @@ input,textarea,select{font-size:16px !important}
 .login-error{color:var(--danger);font-size:var(--text-sm);text-align:center;margin-top:10px;min-height:18px}
 
 /* Top bar (compact) */
-.top-bar{background:var(--primary);color:#fff;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top, 0px));display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.top-bar{background:var(--primary);color:#fff;padding:10px 16px;padding-top:10px;padding-top:calc(10px + constant(safe-area-inset-top));padding-top:calc(10px + env(safe-area-inset-top));display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .top-bar .top-user{font-size:14px;opacity:.9}
 
 /* Hero scan */
@@ -48,7 +48,7 @@ input,textarea,select{font-size:16px !important}
 .sub-btn{background:none;border:none;color:var(--primary);font-size:14px;cursor:pointer;padding:8px 12px;border-radius:20px;transition:background .15s}
 .sub-btn:active{background:var(--info-light)}
 /* Bottom bar */
-.bottom-bar{display:flex;justify-content:center;padding:12px 16px;padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px));border-top:1px solid var(--border-light);flex-shrink:0}
+.bottom-bar{display:flex;justify-content:center;padding:12px 16px;padding-bottom:12px;padding-bottom:calc(12px + constant(safe-area-inset-bottom));padding-bottom:calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--border-light);flex-shrink:0}
 .bottom-link{font-size:13px;color:var(--text-muted);cursor:pointer;padding:6px 16px}
 /* Main body */
 .main-body{flex:1;overflow-y:auto;display:flex;flex-direction:column}
@@ -120,7 +120,7 @@ input,textarea,select{font-size:16px !important}
 .report-type-opt.rework.active{border-color:var(--warning);background:var(--warning-light);color:var(--warning-dark)}
 
 /* Action */
-.action-area{padding:var(--space-3) 16px;padding-bottom:calc(var(--space-3) + env(safe-area-inset-bottom, 0px));background:#fff;border-top:1px solid var(--border-light);flex-shrink:0}
+.action-area{padding:var(--space-3) 16px;padding-bottom:var(--space-3);padding-bottom:calc(var(--space-3) + constant(safe-area-inset-bottom));padding-bottom:calc(var(--space-3) + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--border-light);flex-shrink:0}
 .btn-report{width:100%;padding:14px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-md);font-size:17px;font-weight:700;cursor:pointer}
 .btn-report:active{background:var(--success-dark)}
 .btn-report:disabled{background:var(--success-lighter);opacity:.55;cursor:not-allowed}
@@ -141,14 +141,14 @@ input,textarea,select{font-size:16px !important}
 
 /* Scanner */
 .scanner-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;justify-content:center;align-items:center;z-index:100}
-.scan-controls{position:absolute;top:calc(16px + env(safe-area-inset-top, 0px));left:clamp(12px, 3vw, 24px);right:clamp(12px, 3vw, 24px);display:flex;justify-content:space-between;z-index:10}
-.close-btn,.flash-btn{background:rgba(255,255,255,.2);border:none;color:#fff;width:clamp(36px, 10vw, 48px);height:clamp(36px, 10vw, 48px);border-radius:50%;font-size:clamp(18px, 6vw, 24px);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.scan-controls{position:absolute;top:16px;top:calc(16px + constant(safe-area-inset-top));top:calc(16px + env(safe-area-inset-top));left:16px;left:clamp(12px, 3vw, 24px);right:16px;right:clamp(12px, 3vw, 24px);display:flex;justify-content:space-between;z-index:10}
+.close-btn,.flash-btn{background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;width:clamp(36px, 10vw, 48px);height:40px;height:clamp(36px, 10vw, 48px);border-radius:50%;font-size:20px;font-size:clamp(18px, 6vw, 24px);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .close-btn:active,.flash-btn:active{background:rgba(255,255,255,.4)}
 .flash-btn.off{opacity:.4}
 #cam-video{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}
 #cam-canvas{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none}
 .scan-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2}
-.scan-box{width:min(70vw, 280px);height:min(70vw, 280px);position:relative;border-radius:clamp(16px, 6%, 24px)}
+.scan-box{width:240px;width:min(70vw, 280px);height:240px;height:min(70vw, 280px);position:relative;border-radius:18px;border-radius:clamp(16px, 6%, 24px)}
 .scan-box .line{position:absolute;left:10%;width:80%;height:2px;background:linear-gradient(90deg,transparent,var(--primary),transparent);border-radius:1px;animation:scanLine 1.8s ease-in-out infinite;box-shadow:0 0 10px rgba(24,144,255,.5)}
 @keyframes scanLine{0%,100%{top:10%}50%{top:85%}}
 .scan-box .c{position:absolute;width:12%;height:12%;border-color:var(--primary);border-style:solid}
@@ -156,8 +156,8 @@ input,textarea,select{font-size:16px !important}
 .c2{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 40% 0 0}
 .c3{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 40%}
 .c4{bottom:0;right:0;border-width:0 3px 3px 0;border-radius:0 0 40% 0}
-.scan-tip{color:rgba(255,255,255,.8);font-size:clamp(12px, 3.5vw, 14px);margin-top:clamp(12px, 5vw, 24px);text-shadow:0 1px 4px rgba(0,0,0,.8)}
-.scan-engine{font-size:clamp(10px, 3vw, 12px);color:var(--primary);margin-top:clamp(4px, 1.5vw, 8px);text-shadow:0 1px 4px rgba(0,0,0,.8);min-height:16px}
+.scan-tip{color:rgba(255,255,255,.8);font-size:13px;font-size:clamp(12px, 3.5vw, 14px);margin-top:16px;margin-top:clamp(12px, 5vw, 24px);text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.scan-engine{font-size:11px;font-size:clamp(10px, 3vw, 12px);color:var(--primary);margin-top:6px;margin-top:clamp(4px, 1.5vw, 8px);text-shadow:0 1px 4px rgba(0,0,0,.8);min-height:16px}
 
 /* ── Retina: thicker scan line & corner borders ── */
 @media (min-resolution: 2dppx) {
@@ -170,9 +170,9 @@ input,textarea,select{font-size:16px !important}
 
 /* ── Landscape: vh-based box, hide tip ── */
 @media (orientation: landscape) and (max-height: 500px) {
-  .scan-box{width:min(50vh, 240px);height:min(50vh, 240px)}
+  .scan-box{width:200px;width:min(50vh, 240px);height:200px;height:min(50vh, 240px)}
   .scan-tip{display:none}
-  .scan-controls{top:clamp(4px, 2vw, 12px)}
+  .scan-controls{top:8px;top:clamp(4px, 2vw, 12px)}
 }
 
 /* ── Tablet: larger scan box ── */
@@ -844,6 +844,11 @@ function toggleFlash() {
     if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
     if (camStream) { camStream.getTracks().forEach(function(t) { t.stop(); }); camStream = null; }
   });
+  // Responsive viewport height (Honor/Huawei virtual nav bar fix)
+  function setVH() { document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px'); }
+  window.addEventListener('resize', setVH);
+  window.addEventListener('orientationchange', function() { setTimeout(setVH, 100); });
+  setVH();
 })();
 </script>
 </body>
