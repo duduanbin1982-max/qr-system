@@ -133,7 +133,7 @@ class ProcessRouteService:
             raise ValueError('工序列表不能为空')
 
         with BaseService.transaction() as txn:
-            category = data.get('category', route.get('category', '结构件'))
+            category = data.get('category', route['category'] if route['category'] else '结构件')
             txn.execute(
                 'UPDATE process_routes SET name = ?, description = ?, category = ?, '
                 'updated_at = datetime("now","localtime") WHERE id = ?',
