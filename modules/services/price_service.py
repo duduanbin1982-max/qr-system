@@ -398,13 +398,16 @@ class WageService:
         query = ('''SELECT wr.*, u.name as employee_name, u.employee_no,
                    p.name as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
-                   COALESCE(rp.unit_price, 0) as unit_price
+                   COALESCE(rp.unit_price, pp.unit_price, 0) as unit_price
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
             LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
+            LEFT JOIN products pr ON o.product_code = pr.product_code AND pr.deleted_at IS NULL
+            LEFT JOIN process_prices pp ON pr.id = pp.product_id
+                AND wr.process_id = pp.process_id AND pp.status = 'active'
             WHERE ''' + where + ''' ORDER BY wr.created_at DESC''')
         rows = db.execute(query, params).fetchall()
         wages = {}
