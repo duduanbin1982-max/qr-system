@@ -279,12 +279,12 @@
 
     <!-- 回收站模态框 -->
     <div v-if="showTrash" class="modal-overlay" @click.self="showTrash=false">
-      <div class="modal" style="max-width:700px">
+      <div class="modal" style="max-width:900px;width:95%">
         <div class="modal-header">
           <span>🗑️ 回收站（{{ trashTotal }} 个已删除订单）</span>
           <span class="modal-close" @click="showTrash=false">&times;</span>
         </div>
-        <div class="modal-body" style="max-height:450px;overflow-y:auto">
+        <div class="modal-body" style="max-height:60vh;overflow-y:auto">
           <table v-if="trashOrders.length" class="data-table">
             <thead>
               <tr><th>订单号</th><th>产品</th><th>客户</th><th>删除时间</th><th>操作人</th><th style="text-align:center">操作</th></tr>
@@ -303,7 +303,7 @@
               </tr>
             </tbody>
           </table>
-          <div v-else style="text-align:center;padding:40px;color:var(--text-placeholder)">回收站为空</div>
+          <div v-else style="text-align:center;padding:24px 16px;color:var(--text-placeholder);font-size:var(--text-sm)">回收站为空</div>
         </div>
       </div>
     </div>
