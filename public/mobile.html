@@ -30,28 +30,34 @@ input,textarea,select{font-size:16px !important}
 .btn-login:disabled{background:var(--info-lighter);opacity:.55;cursor:not-allowed}
 .login-error{color:var(--danger);font-size:var(--text-sm);text-align:center;margin-top:10px;min-height:18px}
 
-/* Top bar */
-.top-bar{background:var(--primary);color:#fff;padding:var(--space-3) 16px;padding-top:calc(var(--space-3) + env(safe-area-inset-top, 0px));display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.top-bar h1{font-size:17px;font-weight:600}
-.top-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:20px;font-size:14px;cursor:pointer}
-.top-btn:active{background:rgba(255,255,255,.35)}
+/* Top bar (compact) */
+.top-bar{background:var(--primary);color:#fff;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top, 0px));display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.top-bar .top-user{font-size:14px;opacity:.9}
 
-/* Main */
-.main-body{flex:1;overflow-y:auto;padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)}
+/* Hero scan */
+.hero-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 0}
+.hero-scan{width:130px;height:130px;border-radius:50%;background:var(--primary);color:#fff;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;box-shadow:0 8px 32px rgba(24,144,255,.35);-webkit-tap-highlight-color:transparent;transition:transform .15s ease}
+.hero-scan:active{transform:scale(.94)}
+.hero-scan .hero-icon{font-size:40px;line-height:1}
+.hero-scan .hero-label{font-size:15px;font-weight:600}
+.hero-stats{margin-top:20px;font-size:var(--text-sm);color:var(--text-muted);display:flex;gap:4px;align-items:center}
+.hero-stats strong{color:var(--text-primary);font-size:16px}
+.hero-stats .stat-sep{margin:0 4px;color:var(--border-light)}
+/* Sub actions */
+.sub-actions{display:flex;justify-content:center;gap:24px;padding:8px 0 16px}
+.sub-btn{background:none;border:none;color:var(--primary);font-size:14px;cursor:pointer;padding:8px 12px;border-radius:20px;transition:background .15s}
+.sub-btn:active{background:var(--info-light)}
+/* Bottom bar */
+.bottom-bar{display:flex;justify-content:center;padding:12px 16px;padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px));border-top:1px solid var(--border-light);flex-shrink:0}
+.bottom-link{font-size:13px;color:var(--text-muted);cursor:pointer;padding:6px 16px}
+/* Main body */
+.main-body{flex:1;overflow-y:auto;display:flex;flex-direction:column}
 .main-body::-webkit-scrollbar{width:0}
-.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
-.status-card{background:#fff;border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:0 2px 8px rgba(0,0,0,.06)}
-.status-card .label{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-1)}
-.status-card .value{font-size:26px;font-weight:700}
-.scan-btn-area{text-align:center;padding:var(--space-4) 0 0}
-.scan-cta-row{display:flex;gap:12px}.scan-cta{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--primary);color:#fff;border:none;border-radius:50px;padding:14px 12px;font-size:17px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(24,144,255,.4);-webkit-tap-highlight-color:transparent}
-.scan-cta:active{transform:scale(.97)}
-.scan-cta .icon{font-size:22px}
-.divider{display:flex;align-items:center;gap:10px;font-size:var(--text-sm);color:var(--text-muted)}.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border-light)}
-.manual-row{display:flex;gap:var(--space-3)}
-.manual-row input{flex:1;padding:var(--space-3) 14px;border:1px solid var(--border-input);border-radius:var(--radius-md);font-size:15px;background:#fff}
-.manual-row input:focus{border-color:var(--primary);outline:none}
-.manual-row button{padding:10px 16px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-md);font-size:var(--text-base);font-weight:500;cursor:pointer;white-space:nowrap}
+/* Manual input (hidden by default) */
+.manual-row{display:none;gap:var(--space-3);padding:8px 16px}
+.manual-row input{flex:1;padding:10px 14px;border:1px solid var(--border-input);border-radius:20px;font-size:15px;background:var(--bg-input);outline:none}
+.manual-row input:focus{border-color:var(--primary)}
+.manual-row button{padding:10px 18px;background:var(--primary);color:#fff;border:none;border-radius:20px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap}
 .manual-row button:active{background:var(--primary-dark)}
 
 /* Recent records */
@@ -181,25 +187,23 @@ input,textarea,select{font-size:16px !important}
 
 <!-- MAIN -->
 <div id="s-main" class="screen">
-<div class="top-bar"><h1>扫码报工</h1><button class="top-btn" onclick="doLogout()">退出</button></div>
+<div class="top-bar"><span class="top-user" id="top-user">扫码报工</span></div>
 <div class="main-body">
-<div class="status-grid">
-<div class="status-card"><div class="label">今日报工次数</div><div class="value" id="st-today">0</div></div>
-<div class="status-card"><div class="label">今日产量</div><div class="value" id="st-qty">0</div></div>
+<div class="hero-area">
+<button class="hero-scan" onclick="openCam()"><span class="hero-icon">📷</span><span class="hero-label">扫码报工</span></button>
+<div class="hero-stats"><span>今日 <strong id="st-today">0</strong> 次</span><span class="stat-sep">·</span><span><strong id="st-qty">0</strong> 件</span></div>
 </div>
-<div class="scan-btn-area">
-  <div class="scan-cta-row">
-    <button class="scan-cta" onclick="openCam()"><span class="icon">📷</span>扫码</button>
-    <button class="scan-cta" onclick="openPhoto()"><span class="icon">📸</span>拍照</button>
-  </div>
+<div class="sub-actions">
+<button class="sub-btn" onclick="openPhoto()">📸 拍照识别</button>
+<button class="sub-btn" onclick="toggleManual()">✏️ 手动输入</button>
 </div>
+<div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button onclick="manualSearch()">查询</button></div>
 <input type="file" id="photo-input" accept="image/*" onchange="handlePhoto(event)" style="display:none">
-<div class="divider">或输入订单号</div>
-<div class="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button onclick="manualSearch()">查询</button></div>
 <div class="recent-section" id="recent-section">
 <div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer" onclick="loadRecent()">刷新</span></div>
 <div id="recent-list"><div class="empty-recent"><span class="icon">📋</span>暂无记录</div></div>
 </div>
+<div class="bottom-bar"><span class="bottom-link" onclick="doLogout()">退出登录</span></div>
 </div>
 </div>
 
@@ -721,12 +725,21 @@ function goMain() {
   reportMode = 'auto'; reportType = 'normal';
   switchMode('auto');
   setReportType('normal');
+  var u = user();
+  $('top-user').textContent = (u ? (u.name || u.username) : '扫码报工');
+  $('manual-row').style.display = 'none';
   show('main');
   loadStats();
   loadRecent();
 }
 
 function goBack() { curOrder = null; show('main'); loadStats(); loadRecent(); }
+
+function toggleManual() {
+  var row = $('manual-row');
+  row.style.display = row.style.display === 'flex' ? 'none' : 'flex';
+  if (row.style.display === 'flex') setTimeout(function(){ $('inp-code').focus(); }, 100);
+}
 
 function loadStats() {
   fetch(API + '/dashboard', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
