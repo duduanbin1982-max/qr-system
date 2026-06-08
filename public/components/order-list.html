@@ -211,17 +211,6 @@
             </select>
           </div>
 
-          <div class="form-group"><label>关联工序</label>
-            <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:6px">
-              <label v-for="proc in allProcesses" :key="proc.id"
-                :style="{display:'flex',alignItems:'center',gap:'6px',padding:'6px 10px',borderRadius:'6px',cursor:'pointer',fontSize:'12px',border:'1px solid '+(selectedProcesses.includes(proc.id)?'var(--primary)':'var(--border-light)'),background:selectedProcesses.includes(proc.id)?'var(--primary-light)':'var(--bg-surface)',color:selectedProcesses.includes(proc.id)?'var(--primary-dark)':'var(--text-secondary)'}">
-                <input type="checkbox" :checked="selectedProcesses.includes(proc.id)" @change="toggleProcess(proc.id)" style="accent-color:var(--primary)">
-                {{ proc.process_name || proc.name }}
-                <span v-if="proc.category" style="font-size:var(--text-2xs);color:var(--text-placeholder)">({{ proc.category }})</span>
-              </label>
-            </div>
-          </div>
-
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
         </div>
         <div class="modal-footer">

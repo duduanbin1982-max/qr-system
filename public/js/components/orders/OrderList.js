@@ -48,9 +48,7 @@ export default {
       quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', remark:'', status:'pending'
     })
 
-    // 全部工序列表（新增时选工序用）
-    const allProcesses = ref([])
-    const selectedProcesses = ref([])
+
 
     // ===== 产品搜索 Combobox (修复：原模板引用但组件未定义) =====
     const productSearch = ref('')
@@ -237,16 +235,14 @@ export default {
 
     async function loadDropdownData() {
       try {
-        const [custData, prodData, routeData, procData] = await Promise.all([
+        const [custData, prodData, routeData] = await Promise.all([
           api.listCustomers(),
           api.listProducts(),
-          api.listProcessRoutes(),
-          api.listProcesses()
+          api.listProcessRoutes()
         ])
         customers.value = custData.customers || []
         products.value = prodData.products || []
         processRoutes.value = routeData.routes || []
-        allProcesses.value = procData.processes || []
       } catch(e) { /* silent */ }
     }
 
@@ -265,7 +261,6 @@ export default {
         order_no:'', customer:'', customer_id:null, product_name:'', product_code:'',
         quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', remark:'', status:'pending'
       }
-      selectedProcesses.value = []
       productSearch.value = ''
       showProductDropdown.value = false
       productSearchResults.value = []
@@ -291,7 +286,6 @@ export default {
         status: o.status || 'pending'
       }
       productSearch.value = o.product_code || ''
-      selectedProcesses.value = (o.processes || []).map(p => p.process_id)
       modalEdit.value = true; modalId.value = o.id
       loadDropdownData()
       showModal.value = true
@@ -309,11 +303,9 @@ export default {
         if (data.customer_id) data.customer_id = parseInt(data.customer_id)
 
         if (modalEdit.value) {
-          if (selectedProcesses.value.length) data.process_ids = selectedProcesses.value
           await api.updateOrder(modalId.value, data)
           showToast('更新成功')
         } else {
-          if (selectedProcesses.value.length) data.process_ids = selectedProcesses.value
           await api.createOrder(data)
           showToast('创建成功')
         }
@@ -444,12 +436,6 @@ export default {
     function prevPage() { if (page.value > 1) { page.value--; load() } }
     function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
 
-    function toggleProcess(pid) {
-      const idx = selectedProcesses.value.indexOf(pid)
-      if (idx >= 0) selectedProcesses.value.splice(idx, 1)
-      else selectedProcesses.value.push(pid)
-    }
-
     watch(filterStatus, () => { page.value = 1; load() })
 
     // 搜索输入变更时重置页码
@@ -463,11 +449,11 @@ export default {
       expandedId, toggleExpand, toggleExpandAndLoad, pct, scrapPct, isOverdue, statusMap,
       pendingCount, producingCount, completedCount,
       // 下拉数据
-      customers, products, processRoutes, allProcesses,
+      customers, products, processRoutes,
       // 联动
       onCustomerChange,
       // 模态框
-      showModal, modalEdit, form, selectedProcesses, toggleProcess,
+      showModal, modalEdit, form,
       openAdd, openEdit, save, del, prevPage, nextPage, load, searchAndLoad, customerChange, auth,
       // 产品搜索 Combobox (修复)
       productSearch, showProductDropdown, productSearchResults, recentProducts, productCursor,
