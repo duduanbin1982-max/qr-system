@@ -146,18 +146,13 @@ export default {
           order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
         var keys = Object.keys(impact)
         if (keys.length > 0) {
-          impactMsg = '
-
-将级联删除以下数据：
-'
+          impactMsg = '\n\n将级联删除以下数据：\n'
           for (var i = 0; i < keys.length; i++) {
-            impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条
-'
+            impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条\n'
           }
         }
       } catch(e) {}
-      if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '
-此操作不可恢复！')) return
+      if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
       try {
         await api.deleteProcess(p.id)
         showToast('删除成功')
