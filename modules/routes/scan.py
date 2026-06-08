@@ -143,13 +143,14 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
         db.execute('UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), '
                    'updated_at = datetime("now","localtime") WHERE id = ?', (order_id, order_id))
 
-def _check_order_scope(order_id):
+def _check_order_scope(order_id, db=None):
     pids = get_user_process_ids(g.current_user)
     if pids is None:
         return True
     if not pids:
         return False
-    db = get_db()
+    if db is None:
+        db = get_db()
     placeholders = ",".join("?" for _ in pids)
     row = db.execute(
         f"SELECT 1 FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})",
@@ -193,7 +194,7 @@ def scan_order():
 
         o = dict(order)
 
-        if not _check_order_scope(o["id"]):
+        if not _check_order_scope(o["id"], db):
             return jsonify({"error": "您无权查看此订单"}), 403
 
         try:
@@ -324,7 +325,7 @@ def mobile_scan():
         o = dict(order)
 
         # 数据权限检查
-        if not _check_order_scope(o["id"]):
+        if not _check_order_scope(o["id"], db):
             return jsonify({"error": "您无权查看此订单"}), 403
 
         try:
@@ -380,12 +381,15 @@ def mobile_scan():
 def mobile_report():
     """手机H5扫码报工"""
     data = get_json_body()
-    order_id = int(data.get('order_id', 0))
-    process_id = int(data.get('process_id', 0))
+    try:
+        order_id = int(data.get('order_id', 0))
+        process_id = int(data.get('process_id', 0))
+        quantity = int(data.get('quantity', 1))
+    except (ValueError, TypeError):
+        return jsonify({'error': '参数格式错误：order_id/process_id/quantity 必须为数字'}), 400
     serial_no = data.get('serial_no', '').strip() or None
     remark = data.get('remark', '')
     report_type = data.get('type') or data.get('work_status') or 'normal'  # normal / scrap / rework
-    quantity = int(data.get('quantity', 1))
 
     if not order_id or not process_id:
         return jsonify({'error': '参数不完整'}), 400
@@ -399,8 +403,15 @@ def mobile_report():
 
 
     # 数据权限检查
-    if not _check_order_scope(order_id):
+    if not _check_order_scope(order_id, db):
         return jsonify({"error": "您无权对此订单报工"}), 403
+
+    # ===== 工序存在性校验（所有报工类型）=====
+    op_check = db.execute(
+        'SELECT id FROM order_processes WHERE order_id = ? AND process_id = ?',
+        (order_id, process_id)).fetchone()
+    if not op_check:
+        return jsonify({'error': '该工序不在订单工艺路线中'}), 400
 
     # ===== 序列号防重复报工 =====
     if serial_no and report_type == 'normal':
@@ -473,8 +484,11 @@ def mobile_report():
         db.execute('ROLLBACK TO mobile_report_sp')
         return handle_unexpected_error(e, 'database operation')
 
-    audit_log(f'mobile_{report_type}', 'order', order_id,
-             f'process={process_id} serial={serial_no} qty={quantity}  by={user["name"]}')
+    try:
+        audit_log(f'mobile_{report_type}', 'order', order_id,
+                 f'process={process_id} serial={serial_no} qty={quantity}  by={user["name"]}')
+    except Exception:
+        pass
     return jsonify({'message': '报工成功', 'worker': dict(user)})
 
 @app.route('/api/report', methods=['POST'])
@@ -483,9 +497,12 @@ def mobile_report():
 def work_report():
     """报工"""
     data = get_json_body()
-    order_id = int(data.get('order_id', 0))
-    process_id = int(data.get('process_id', 0))
-    quantity = int(data.get('quantity', 0))
+    try:
+        order_id = int(data.get('order_id', 0))
+        process_id = int(data.get('process_id', 0))
+        quantity = int(data.get('quantity', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': '参数格式错误：order_id/process_id/quantity 必须为数字'}), 400
     serial_no = data.get('serial_no', '').strip() or None
     report_type = data.get('type', 'normal')
     remark = data.get('remark', '')
@@ -502,8 +519,15 @@ def work_report():
         return jsonify({'error': '订单不存在'}), 404
 
     # 数据权限检查
-    if not _check_order_scope(order_id):
+    if not _check_order_scope(order_id, db):
         return jsonify({"error": "您无权对此订单报工"}), 403
+
+    # ===== 工序存在性校验（所有报工类型）=====
+    op_check = db.execute(
+        'SELECT id FROM order_processes WHERE order_id = ? AND process_id = ?',
+        (order_id, process_id)).fetchone()
+    if not op_check:
+        return jsonify({'error': '该工序不在订单工艺路线中'}), 400
 
     # ===== 序列号防重复报工 =====
     if serial_no and report_type == 'normal':
@@ -514,55 +538,53 @@ def work_report():
         if existing:
             return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
 
-    current_op = None
-    if order['route_id']:
-        current_op = db.execute(
-            'SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
-            (order_id, process_id)).fetchone()
-        if not current_op:
-            return jsonify({'error': '该工序不在订单工艺路线中'}), 400
-        current_seq = current_op['seq_order']
+    current_op = db.execute(
+        'SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
+        (order_id, process_id)).fetchone()
+    if order['route_id'] and not current_op:
+        return jsonify({'error': '该工序不在订单工艺路线中'}), 400
+    current_seq = current_op['seq_order'] if current_op else 0
 
-        # 顺序报工检查（process_order_mode != out_of_order）
-        process_order_mode = get_setting('process_order_mode', 'sequential')
-        if process_order_mode != 'out_of_order':
-            prev_incomplete = db.execute('''
-                SELECT op.seq_order, p.name as process_name
-                FROM order_processes op
-                JOIN processes p ON op.process_id = p.id
-                WHERE op.order_id = ? AND op.seq_order < ? AND (op.completed IS NULL OR op.completed = 0)
-                ORDER BY op.seq_order
-            ''', (order_id, current_seq)).fetchall()
-            if prev_incomplete:
-                names = '、'.join([p['process_name'] for p in prev_incomplete])
-                return jsonify({'error': f'请先完成前置工序：{names}'}), 400
+    # 顺序报工检查（process_order_mode != out_of_order）
+    process_order_mode = get_setting('process_order_mode', 'sequential')
+    if process_order_mode != 'out_of_order':
+        prev_incomplete = db.execute('''
+            SELECT op.seq_order, p.name as process_name
+            FROM order_processes op
+            JOIN processes p ON op.process_id = p.id
+            WHERE op.order_id = ? AND op.seq_order < ? AND (op.completed IS NULL OR op.completed = 0)
+            ORDER BY op.seq_order
+        ''', (order_id, current_seq)).fetchall()
+        if prev_incomplete:
+            names = '、'.join([p['process_name'] for p in prev_incomplete])
+            return jsonify({'error': f'请先完成前置工序：{names}'}), 400
 
-        # 上道工序累计数量限制
-        if get_setting('limit_by_prev_process', '1') == '1' and current_seq > 1:
-            prev_op = db.execute('''
-                SELECT op.*, p.name as process_name
-                FROM order_processes op
-                JOIN processes p ON op.process_id = p.id
-                WHERE op.order_id = ? AND op.seq_order = ?
-            ''', (order_id, current_seq - 1)).fetchone()
-            if prev_op:
-                new_completed = (current_op['completed'] or 0) + quantity
-                prev_completed = prev_op['completed'] or 0
-                if new_completed > prev_completed:
-                    return jsonify({'error': f'报工数量不能超过上道工序({prev_op["process_name"]})的累计数量 {prev_completed}'}), 400
-
-        # 订单数量上限限制
-        if get_setting('limit_by_order_qty', '1') == '1':
+    # 上道工序累计数量限制
+    if get_setting('limit_by_prev_process', '1') == '1' and current_seq > 1:
+        prev_op = db.execute('''
+            SELECT op.*, p.name as process_name
+            FROM order_processes op
+            JOIN processes p ON op.process_id = p.id
+            WHERE op.order_id = ? AND op.seq_order = ?
+        ''', (order_id, current_seq - 1)).fetchone()
+        if prev_op:
             new_completed = (current_op['completed'] or 0) + quantity
-            if new_completed > order['quantity']:
-                return jsonify({'error': f'报工累计({new_completed})不能超过订单数量({order["quantity"]})'}), 400
+            prev_completed = prev_op['completed'] or 0
+            if new_completed > prev_completed:
+                return jsonify({'error': f'报工数量不能超过上道工序({prev_op["process_name"]})的累计数量 {prev_completed}'}), 400
 
-    # ===== 审核状态检查 =====
+    # 订单数量上限限制
+    if get_setting('limit_by_order_qty', '1') == '1':
+        new_completed = (current_op['completed'] or 0) + quantity
+        if new_completed > order['quantity']:
+            return jsonify({'error': f'报工累计({new_completed})不能超过订单数量({order["quantity"]})'}), 400
+
+    # ===== 审批检查 =====
     need_approval = False
-    approval_check = db.execute(
-        'SELECT require_approval FROM approval_config WHERE process_id = ? OR process_id IS NULL ORDER BY process_id DESC LIMIT 1',
+    approval_config = db.execute(
+        'SELECT * FROM approval_config WHERE process_id = ? AND require_approval = 1',
         (process_id,)).fetchone()
-    if approval_check and approval_check['require_approval']:
+    if approval_config:
         need_approval = True
 
     work_status = 'pending' if need_approval else 'approved'
@@ -649,8 +671,11 @@ def work_report():
         db.execute('ROLLBACK TO report_sp')
         return handle_unexpected_error(e, 'database operation')
 
-    audit_log(f'report_{report_type}', 'order', order_id,
-              f'process={process_id} qty={quantity} type={report_type}')
+    try:
+        audit_log(f'report_{report_type}', 'order', order_id,
+                  f'process={process_id} qty={quantity} type={report_type}')
+    except Exception:
+        pass
     return jsonify({'message': '报工成功'})
 
 # ============================================================
@@ -710,16 +735,9 @@ def batch_qrcode():
                 ).fetchall()
                 
                 if not items:
-                    # 如果还没生成序列号，自动生成（防止重复生成：检查是否已有记录）
-                    existing_count = db.execute(
-                        'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ?', (oid,)
-                    ).fetchone()['cnt']
-                    if existing_count > 0:
-                        items = db.execute(
-                            'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
-                            (oid,)
-                        ).fetchall()
-                    else:
+                    # 如果还没生成序列号，自动生成
+                    db.execute('BEGIN IMMEDIATE')
+                    try:
                         for i in range(1, order['quantity'] + 1):
                             serial_no = f"{order['order_no']}-{i:03d}"
                             qr_content = json.dumps({
@@ -735,12 +753,14 @@ def batch_qrcode():
                                 VALUES (?, ?, ?, ?, 'pending', datetime('now', 'localtime'))
                             ''', (serial_no, oid, i, qr_content))
                         db.commit()
-                        
-                        # 重新查询
-                        items = db.execute(
-                            'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
-                            (oid,)
-                        ).fetchall()
+                    except Exception:
+                        db.execute('ROLLBACK')
+                        raise
+                    
+                    items = db.execute(
+                        'SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no',
+                        (oid,)
+                    ).fetchall()
                 
                 # 为每个序列号生成二维码（优先使用订单中的 product_code 字段）
                 product_code = (order['product_code'] or '').strip()
