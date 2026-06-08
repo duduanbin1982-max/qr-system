@@ -45,9 +45,20 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
                 db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
                            (new_completed, order_id, process_id))
 
-            db.execute('UPDATE orders SET completed = (SELECT COALESCE(SUM(completed),0) FROM order_processes WHERE order_id = ?), '
+            # 更新订单完成数：统计已完成的工件数量（而非工序累计总和）
+            db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
                        'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
                        (order_id, order_id))
+            # 检查订单是否全部完成
+            order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
+            if order_info:
+                completed_cnt = db.execute(
+                    'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
+                    (order_id,)
+                ).fetchone()['cnt']
+                if completed_cnt >= order_info['quantity']:
+                    db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
+                               (order_id,))
 
         # 更新产品序列号的当前工序（推进到下一道工序）
         if serial_no:
@@ -524,9 +535,20 @@ def work_report():
                     new_completed = (op['completed'] or 0) + quantity
                     db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
                                (new_completed, order_id, process_id))
-                db.execute('UPDATE orders SET completed = (SELECT COALESCE(SUM(completed),0) FROM order_processes WHERE order_id = ?), '
+                # 更新订单完成数：统计已完成的工件数量（而非工序累计总和）
+                db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
                            'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
                            (order_id, order_id))
+                # 检查订单是否全部完成
+                order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
+                if order_info:
+                    completed_cnt = db.execute(
+                        'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
+                        (order_id,)
+                    ).fetchone()['cnt']
+                    if completed_cnt >= order_info['quantity']:
+                        db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
+                                   (order_id,))
 
             # 推进工件当前工序
             if serial_no and current_op:
