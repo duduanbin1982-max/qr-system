@@ -128,7 +128,7 @@ def login():
     u['permissions'] = get_user_permissions(u)
     resp = jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
     # Set httpOnly secure cookie (SameSite=Lax for CSRF protection)
-    resp.set_cookie('qr_token', token, httponly=True, secure=True,
+    resp.set_cookie('qr_token', token, httponly=True,
                     samesite='Lax', max_age=86400*7, path='/')
     return resp
 

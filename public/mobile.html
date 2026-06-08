@@ -593,7 +593,7 @@ function doScan(code) {
       updateReportBtn();
     }
   })
-  .catch(function() { toast('网络错误，请检查连接'); show('main'); });
+  .catch(function(e) { console.log('scan auth fail — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast('网络错误，请检查连接'); show('main'); });
 }
 
 // ═══════════════════════════════════════════
@@ -778,7 +778,7 @@ function loadStats() {
         $('st-qty').textContent = d.stats.today_output || 0;
       }
     })
-    .catch(function() {});
+    .catch(function() { console.log('stats auth fail — token:' + (token() ? 'yes' : 'no')); });
 }
 
 function loadRecent() {
@@ -798,7 +798,7 @@ function loadRecent() {
           '<span class="ri-type ' + cls + '">' + lbl + '</span></div>';
       }).join('');
     })
-    .catch(function() {});
+    .catch(function() { console.log('stats auth fail — token:' + (token() ? 'yes' : 'no')); });
 }
 
 function manualSearch() {
@@ -827,7 +827,7 @@ function toggleFlash() {
   // Restore session if user was previously logged in (sessionStorage + valid cookie)
   if (user()) {
     // Verify cookie is still valid with a lightweight API call
-    fetch(API + '/auth/info', { credentials: 'same-origin' })
+    fetch(API + '/auth/info', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d && d.user) { goMain(); }
