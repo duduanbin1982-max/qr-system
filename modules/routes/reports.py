@@ -154,16 +154,22 @@ def reports_quality_analysis():
         ''', params).fetchall()
 
         # Compute defect rates server-side for consistency
+        process_list = []
         for r in by_process:
-            total = (r['output'] or 0) + (r['scrap'] or 0) + (r['rework'] or 0)
-            r['defect_rate'] = round((r['scrap'] + r['rework']) / total * 100, 1) if total else 0
+            d = dict(r)
+            total = (d['output'] or 0) + (d['scrap'] or 0) + (d['rework'] or 0)
+            d['defect_rate'] = round((d['scrap'] + d['rework']) / total * 100, 1) if total else 0
+            process_list.append(d)
+        worker_list = []
         for r in by_worker:
-            total = (r['output'] or 0) + (r['scrap'] or 0) + (r['rework'] or 0)
-            r['defect_rate'] = round((r['scrap'] + r['rework']) / total * 100, 1) if total else 0
+            d = dict(r)
+            total = (d['output'] or 0) + (d['scrap'] or 0) + (d['rework'] or 0)
+            d['defect_rate'] = round((d['scrap'] + d['rework']) / total * 100, 1) if total else 0
+            worker_list.append(d)
 
         return jsonify({
-            'by_process': [dict(r) for r in by_process],
-            'by_worker': [dict(r) for r in by_worker],
+            'by_process': process_list,
+            'by_worker': worker_list,
         })
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
