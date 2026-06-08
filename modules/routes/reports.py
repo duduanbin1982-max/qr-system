@@ -17,6 +17,8 @@ from modules.middleware.error_handler import handle_unexpected_error
 def reports_production_trend():
     """生产趋势：最近 N 天每日产出/报废/返工"""
     days = request.args.get('days', 30, type=int)
+    if days <= 0:
+        return jsonify({'trend': [], 'summary': {'total_output': 0, 'total_scrap': 0, 'total_rework': 0, 'scrap_rate': 0, 'rework_rate': 0, 'days': days}})
     try:
         db = get_db()
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -87,8 +89,8 @@ def reports_worker_efficiency():
                    COUNT(DISTINCT DATE(wr.created_at)) as work_days,
                    COUNT(wr.id) as report_count
             FROM users u
-            JOIN work_records wr ON wr.user_id = u.id
-            WHERE {where_clause}
+            LEFT JOIN work_records wr ON wr.user_id = u.id AND {where_clause}
+            WHERE u.role = 'worker' AND u.status = 'active'
             GROUP BY u.id
             ORDER BY output DESC
         ''', params).fetchall()
@@ -144,12 +146,20 @@ def reports_quality_analysis():
                    COALESCE(SUM(CASE WHEN wr.type = 'scrap' THEN wr.quantity ELSE 0 END), 0) as scrap,
                    COALESCE(SUM(CASE WHEN wr.type = 'rework' THEN wr.quantity ELSE 0 END), 0) as rework
             FROM users u
-            JOIN work_records wr ON wr.user_id = u.id
-            WHERE {where_clause}
+            LEFT JOIN work_records wr ON wr.user_id = u.id AND {where_clause}
+            WHERE u.role = 'worker' AND u.status = 'active'
             GROUP BY u.id
             ORDER BY output DESC
             LIMIT 20
         ''', params).fetchall()
+
+        # Compute defect rates server-side for consistency
+        for r in by_process:
+            total = (r['output'] or 0) + (r['scrap'] or 0) + (r['rework'] or 0)
+            r['defect_rate'] = round((r['scrap'] + r['rework']) / total * 100, 1) if total else 0
+        for r in by_worker:
+            total = (r['output'] or 0) + (r['scrap'] or 0) + (r['rework'] or 0)
+            r['defect_rate'] = round((r['scrap'] + r['rework']) / total * 100, 1) if total else 0
 
         return jsonify({
             'by_process': [dict(r) for r in by_process],

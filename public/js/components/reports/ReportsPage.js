@@ -109,9 +109,9 @@ export default {
       if (!qualityProcess.value.length) { showToast('没有数据可导出', 'warning'); return }
       const data = [['工序', '分类', '产出', '报废', '报废率%', '返工', '返工率%', '不良合计']]
       qualityProcess.value.forEach(p => {
-        const sr = p.output > 0 ? (p.scrap / p.output * 100).toFixed(1) : 0
-        const rr = p.output > 0 ? (p.rework / p.output * 100).toFixed(1) : 0
-        data.push([p.name, p.category || '', p.output, p.scrap || 0, sr, p.rework || 0, rr, (p.scrap || 0) + (p.rework || 0)])
+        const sr = (p.defect_rate || 0).toFixed(1)
+        // defect_rate already includes scrap+rework from backend
+        data.push([p.name, p.category || '', p.output, p.scrap || 0, sr, p.rework || 0, sr, (p.scrap || 0) + (p.rework || 0)])
       })
       exportCSV(data, '品质分析_' + new Date().toISOString().slice(0, 10))
     }

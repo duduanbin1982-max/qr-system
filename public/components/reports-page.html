@@ -132,7 +132,7 @@
                 <td style="text-align:center;color:var(--success);font-weight:600">{{ w.output }}</td>
                 <td style="text-align:center;color:var(--danger)">{{ w.scrap }}</td>
                 <td style="text-align:center;color:var(--warning)">{{ w.rework }}</td>
-                <td style="text-align:center"><span class="badge" :style="{background:(w.scrap+w.rework)/Math.max(w.output,1)*100>10?'var(--danger-light)':'var(--success-light)',color:(w.scrap+w.rework)/Math.max(w.output,1)*100>10?'var(--danger)':'var(--success-dark)'}">{{ Math.round((w.scrap+w.rework)/Math.max(w.output,1)*1000)/10 }}%</span></td>
+                <td style="text-align:center"><span class="badge" :style="{background:w.defect_rate>10?'var(--danger-light)':'var(--success-light)',color:w.defect_rate>10?'var(--danger)':'var(--success-dark)'}">{{ w.defect_rate }}%</span></td>
               </tr>
             </tbody>
           </table></div></div>
