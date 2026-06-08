@@ -19,7 +19,6 @@
       <div class="card-header">
         <h3>💰 工价路线</h3>
         <div style="display:flex;gap:var(--space-2)">
-          <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAddRoutePricing">+ 添加工价</button>
           <button class="btn btn-default btn-sm" @click="switchCat(pricingCategory); loadAllRoutes()">🔄 刷新</button>
         </div>
       </div>
@@ -27,14 +26,15 @@
         <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
 
         <div v-else>
-          <div v-if="allRoutes.length">
-        <div v-for="r in allRoutes" :key="r.id" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);margin-bottom:var(--space-3);background:white;overflow:hidden"
+          <div v-if="filteredRoutes.length">
+        <div v-for="(r, idx) in filteredRoutes" :key="r.id" style="border:1px solid var(--border-light);border-radius:var(--radius-lg);margin-bottom:var(--space-3);background:white;overflow:hidden"
           :style="{borderLeft: expandedRoute===r.id ? '4px solid var(--primary)' : '4px solid transparent'}">
 
           <!-- 卡片头部 -->
           <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) 20px;cursor:pointer"
             @click="toggleRoute(r.id)">
             <div style="display:flex;align-items:center;gap:var(--space-3)">
+              <span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:13px;flex-shrink:0">{{ idx + 1 }}</span>
               <span style="font-size:var(--text-xl)">{{ expandedRoute === r.id ? '▼' : '▶' }}</span>
               <div>
                 <div style="font-weight:600;font-size:15px">{{ r.name }}</div>
@@ -109,50 +109,5 @@
       </div>
     </div>
 
-    <!-- 添加工价路线 Modal -->
-    <div v-if="showAddRouteModal" class="modal-overlay" @click.self="showAddRouteModal=false">
-      <div class="modal" style="max-width:700px">
-        <div class="modal-header"><span>➕ 添加工价路线</span><span class="modal-close" @click="showAddRouteModal=false">&times;</span></div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>选择工序路线</label>
-            <select class="form-input" v-model="addRouteId" @change="onAddRouteSelected">
-              <option value="">-- 请选择路线 --</option>
-              <option v-for="r in allRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
-            </select>
-          </div>
-          <div v-if="addRouteSteps.length" style="margin-top:var(--space-4)">
-            <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-bottom:var(--space-3)">
-              💡 配置该路线各工序的工价
-            </div>
-            <table class="data-table" style="font-size:var(--text-sm);width:100%">
-              <thead><tr>
-                <th class="col-num">#</th>
-                <th>工序名称</th>
-                <th class="col-140 text-center">单价 (元)</th>
-              </tr></thead>
-              <tbody>
-                <tr v-for="(s, idx) in addRouteSteps" :key="s.process_id">
-                  <td class="text-center"><span style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary-light);color:var(--primary);align-items:center;justify-content:center;font-weight:bold;font-size:var(--text-xs)">{{ idx+1 }}</span></td>
-                  <td><strong>{{ s.process_name }}</strong></td>
-                  <td class="text-center">
-                    <input type="number" class="form-input" style="text-align:center;width:130px" v-model.number="addRoutePrices[s.process_id]" placeholder="输入单价" step="0.01" min="0">
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-if="addRouteId && !addRouteSteps.length" style="text-align:center;padding:var(--space-5);color:var(--text-placeholder)">
-            ⚠️ 该路线没有关联工序，请先在路线管理中配置工序
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-default" @click="showAddRouteModal=false">取消</button>
-          <button class="btn btn-primary" @click="doAddRoutePricing" :disabled="saving || !addRouteId">
-            {{ saving ? '⏳ 保存中...' : '💾 保存工价' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
   </div>
+

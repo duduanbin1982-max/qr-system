@@ -39,12 +39,6 @@ export default {
     const defaultPrices = reactive({}) // {process_id: unit_price}
     const defaultCategory = ref('')
 
-    // 添加工价路线 Modal
-    const showAddRouteModal = ref(false)
-    const addRouteId = ref('')
-    const addRouteSteps = ref([])
-    const addRoutePrices = reactive({})
-
     // RBAC 权限
     const canEdit = computed(() => can('prices:edit'))
     const canCreate = computed(() => can('prices:create'))
@@ -329,53 +323,6 @@ export default {
       loadMatrix()
     }
 
-    // ====== 添加工价路线 ======
-    function openAddRoutePricing() {
-      showAddRouteModal.value = true
-      addRouteId.value = ''
-      addRouteSteps.value = []
-      Object.keys(addRoutePrices).forEach(k => delete addRoutePrices[k])
-    }
-
-    async function onAddRouteSelected() {
-      const rid = addRouteId.value
-      if (!rid) { addRouteSteps.value = []; return }
-      try {
-        const d = await api.get('/api/route-prices/' + rid)
-        addRouteSteps.value = d.steps || []
-        // Init prices
-        Object.keys(addRoutePrices).forEach(k => delete addRoutePrices[k])
-        d.steps.forEach(s => {
-          if (s.unit_price != null) addRoutePrices[s.process_id] = s.unit_price
-        })
-      } catch (e) {
-        showToast('加载路线工序失败', 'error')
-        addRouteSteps.value = []
-      }
-    }
-
-    async function doAddRoutePricing() {
-      const rid = addRouteId.value
-      if (!rid) return
-      saving.value = true
-      try {
-        const prices = {}
-        let hasAny = false
-        Object.entries(addRoutePrices).forEach(([pid, val]) => {
-          if (val !== '' && val != null && val !== undefined) {
-            prices[pid] = parseFloat(val)
-            hasAny = true
-          }
-        })
-        if (!hasAny) { showToast('请至少填写一个工序的单价', 'error'); saving.value = false; return }
-        const res = await api.put('/api/route-prices/' + rid, { prices, effective_date: '', remark: '' })
-        showToast(res.message || '工价添加成功')
-        showAddRouteModal.value = false
-        await loadAllRoutes(pricingCategory.value === 'all' ? null : pricingCategory.value)
-      } catch (e) { showToast(e.message || '保存失败', 'error') }
-      finally { saving.value = false }
-    }
-
     onMounted(async () => {
       const cat = categoryFromPage(router.page)
       pricingCategory.value = cat
@@ -401,8 +348,6 @@ export default {
       // 方法
       selectProduct, saveRoutePricing, changeRoute,
       switchCat, deleteProductPrices,
-      showAddRouteModal, addRouteId, addRouteSteps, addRoutePrices,
-      openAddRoutePricing, onAddRouteSelected, doAddRoutePricing,
       openCopy, doCopy, openDefaults, saveDefaults
     }
   }
