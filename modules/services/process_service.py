@@ -18,7 +18,9 @@ class ProcessService:
         allowed_sort = {'seq_order', 'name', 'category', 'status', 'created_at'}
         if sort_by not in allowed_sort:
             sort_by = 'seq_order'
-        sort_dir = 'ASC' if sort_dir.lower() == 'asc' else 'DESC'
+        if sort_dir.lower() not in ('asc', 'desc'):
+            raise ValueError('sort_dir must be asc or desc')
+        sort_dir = sort_dir.upper()
         limit = max(1, min(int(limit), 200)) if limit else None
         sql = ('SELECT id, name AS process_name, description, category, '
                'seq_order, status, created_at FROM processes')
@@ -130,7 +132,7 @@ class ProcessService:
             'SELECT id, name FROM processes WHERE id = ?', (pid,)
         ).fetchone()
         if not existing:
-            raise ValueError('process not found')
+            raise ValueError('?????')
 
         # Count affected records
         impact = {}

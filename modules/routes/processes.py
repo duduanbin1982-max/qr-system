@@ -111,13 +111,15 @@ def process_impact(pid):
     existing = db.execute('SELECT id, name FROM processes WHERE id = ?', (pid,)).fetchone()
     if not existing:
         return jsonify({'error': '工序不存在'}), 404
-    impact = {}
+    # Single UNION ALL query instead of 9 separate SELECT COUNT(*)
+    union_parts = []
     for tbl in ['work_records','scrap_records','rework_records',
                 'quality_inspections','process_prices','process_route_items',
                 'order_processes','position_processes','material_consumptions']:
-        cnt = db.execute(f'SELECT COUNT(*) FROM {tbl} WHERE process_id = ?', (pid,)).fetchone()[0]
-        if cnt > 0:
-            impact[tbl] = cnt
+        union_parts.append(f"SELECT '{tbl}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
+    union_sql = ' UNION ALL '.join(union_parts)
+    rows = db.execute(union_sql, [pid] * 9).fetchall()
+    impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}
     return jsonify({'process_id': pid, 'name': existing['name'], 'impact': impact})
 
 
@@ -139,7 +141,7 @@ def delete_process(pid):
     try:
         result = ProcessService.delete_process(pid)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if 'not found' in str(e).lower() else 400
+        return jsonify({'error': str(e)}), 404 if '???' in str(e) else 400
     try:
         audit_log('delete_process', 'process', pid,
                   f'name={result.get("name","")} impact={result.get("impact",{})}')
