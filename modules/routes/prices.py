@@ -220,16 +220,17 @@ def save_route_prices(route_id):
 @check_auth
 @check_permission('prices:view')
 def calculate_wages():
-    employee_id = request.args.get('employee_id', type=int)
+    employee_id = request.args.get('employee_id')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')
+    include_pending = request.args.get('include_pending', '0') == '1'
     if export:
-        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999)
+        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999, include_pending)
     else:
         page = max(request.args.get('page', 1, type=int), 1)
         limit = min(max(request.args.get('limit', 200, type=int), 1), 1000)
-        result = WageService.calculate_wages(employee_id, date_from, date_to, page, limit)
+        result = WageService.calculate_wages(employee_id, date_from, date_to, page, limit, include_pending)
     wages = result['wages']
 
     if export in ('xlsx', 'csv'):
@@ -286,4 +287,14 @@ def daily_report():
 @check_auth
 @check_permission('prices:view')
 def production_progress():
-    return jsonify(WageService.production_progress())
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 50, type=int), 1), 200)
+    return jsonify(WageService.production_progress(page, limit))
+
+@app.route('/api/wages/monthly-summary', methods=['GET'])
+@check_auth
+@check_permission('prices:view')
+def monthly_summary():
+    year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
+    return jsonify(WageService.monthly_summary(year_month))
+
