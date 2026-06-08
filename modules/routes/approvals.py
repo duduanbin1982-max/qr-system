@@ -12,6 +12,7 @@ from modules.app import app
 from modules.db import get_db, get_setting, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body, parse_pagination
+from modules.middleware.validate import validate_json
 
 
 @app.route('/api/approvals/pending', methods=['GET'])
@@ -31,6 +32,14 @@ def get_pending_approvals():
       - Bearer: []
     """
     db = get_db()
+    p = parse_pagination()
+    page, limit = p['page'], p['limit']
+    total = db.execute('''
+        SELECT COUNT(*) FROM approval_records ar
+        LEFT JOIN work_records wr ON ar.work_record_id = wr.id
+        LEFT JOIN orders o ON wr.order_id = o.id
+        WHERE ar.status = "pending" AND (o.deleted_at IS NULL OR o.id IS NULL)
+    ''').fetchone()[0]
     rows = db.execute('''
         SELECT ar.*, o.order_no, p.name as process_name, u.name as worker_name, wr.quantity
         FROM approval_records ar
@@ -40,8 +49,9 @@ def get_pending_approvals():
         LEFT JOIN users u ON wr.user_id = u.id
         WHERE ar.status = 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL)
         ORDER BY ar.created_at DESC
-    ''').fetchall()
-    return jsonify({'approvals': [dict(r) for r in rows]})
+        LIMIT ? OFFSET ?
+    ''', (limit, (page - 1) * limit)).fetchall()
+    return jsonify({'approvals': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit})
 
 @app.route('/api/approvals/history', methods=['GET'])
 @check_auth
@@ -84,6 +94,7 @@ def get_approval_history():
 @app.route('/api/approvals/<int:record_id>/<action>', methods=['POST'])
 @check_auth
 @check_permission('approvals:edit')
+@validate_json('approval_action')
 def handle_approval(record_id, action):
     """
     审批通过或拒绝（SAVEPOINT 原子操作）
@@ -160,8 +171,8 @@ def handle_approval(record_id, action):
     try:
         audit_log('approve_' + action, 'approval', record_id,
                   f'{g.current_user["name"]} {action} work_record {record["work_record_id"]}')
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '操作成功'})
 
 # ============================================================

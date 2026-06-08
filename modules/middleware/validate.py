@@ -116,6 +116,14 @@ SCHEMAS = {
         },
         'additionalProperties': False,
     },
+    'approval_action': {
+        'type': 'object',
+        'properties': {
+            'comment': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+
     'stock_movement': {
         'type': 'object',
         'required': ['inventory_id', 'quantity'],
