@@ -17,6 +17,7 @@ import StatsPage   from './components/stats/StatsPage.js'
 import TracePage   from './components/trace/TracePage.js'
 import ApprovalPage from './components/approvals/ApprovalPage.js'
 import SettingsPage from './components/settings/SettingsPage.js'
+import BasicSettingsPage from './components/settings/BasicSettings.js'
 import ReportsPage from './components/reports/ReportsPage.js'
 import BoardPage   from './components/board/BoardPage.js'
 import CustomerList from './components/customers/CustomerList.js'
@@ -58,6 +59,7 @@ const app = createApp({
     TracePage,
     ApprovalPage,
     SettingsPage,
+    BasicSettingsPage,
     ReportsPage,
     BoardPage,
   },
@@ -121,6 +123,7 @@ const app = createApp({
         'trace': 'TracePage',
         'approvals': 'ApprovalPage',
         'settings': 'SettingsPage',
+        'basic-settings': 'BasicSettingsPage',
         'reports': 'ReportsPage',
         'board': 'BoardPage',
       }
@@ -132,11 +135,7 @@ const app = createApp({
       { page: 'dashboard', icon: '📊', label: '工作台',       required: null },
       { page: 'orders',    icon: '📋', label: '订单管理',     required: 'orders:view' },
       { page: 'scan',      icon: '📱', label: '扫码报工',     required: 'scan:view' },
-      { page: 'processes', icon: '⚙️', label: '工序管理',     required: 'processes:view' },
-      { page: 'routes',    icon: '🔀', label: '工序路线',     required: 'routes:view' },
-      { page: 'users',     icon: '👥', label: '员工管理',     required: 'users:view' },
-      { page: 'prices',    icon: '💰', label: '工价管理',     required: 'prices:view' },
-      { page: 'products',  icon: '🏭', label: '产品管理',     required: 'products:view' },
+      { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: null },
       { page: 'customers', icon: '🏢', label: '客户管理',     required: 'customers:view' },
       { page: 'inventory', icon: '🏗️', label: '库存管理',     required: 'inventory:view' },
       { page: 'materials', icon: '📦', label: '物料管理',     required: 'materials:view' },
