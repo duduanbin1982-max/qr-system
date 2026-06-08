@@ -14,7 +14,7 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 html,body{height:100%;min-height:100dvh}
 body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg-page);color:var(--text-primary);font-size:15px;overflow:hidden;height:100%;min-height:100dvh;-webkit-user-select:none;user-select:none}
-.screen{display:none;height:100%;min-height:100dvh;flex-direction:column}.screen.active{display:flex}
+.screen{display:none;height:100%;min-height:100dvh;flex-direction:column;transition:opacity .2s ease}.screen.active{display:flex}
 input,textarea,select{font-size:16px !important}
 
 /* Login */
@@ -27,7 +27,7 @@ input,textarea,select{font-size:16px !important}
 .login-box input:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(24,144,255,.12)}
 .form-group{margin-bottom:var(--space-4)}
 .btn-login{width:100%;padding:14px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-md);font-size:var(--text-lg);font-weight:600;cursor:pointer;margin-top:8px}
-.btn-login:disabled{background:var(--info-lighter);cursor:not-allowed}
+.btn-login:disabled{background:var(--info-lighter);opacity:.55;cursor:not-allowed}
 .login-error{color:var(--danger);font-size:var(--text-sm);text-align:center;margin-top:10px;min-height:18px}
 
 /* Top bar */
@@ -47,7 +47,7 @@ input,textarea,select{font-size:16px !important}
 .scan-cta-row{display:flex;gap:12px}.scan-cta{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--primary);color:#fff;border:none;border-radius:50px;padding:14px 12px;font-size:17px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(24,144,255,.4);-webkit-tap-highlight-color:transparent}
 .scan-cta:active{transform:scale(.97)}
 .scan-cta .icon{font-size:22px}
-.divider{text-align:center;font-size:var(--text-sm);color:var(--text-muted)}
+.divider{display:flex;align-items:center;gap:10px;font-size:var(--text-sm);color:var(--text-muted)}.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border-light)}
 .manual-row{display:flex;gap:var(--space-3)}
 .manual-row input{flex:1;padding:var(--space-3) 14px;border:1px solid var(--border-input);border-radius:var(--radius-md);font-size:15px;background:#fff}
 .manual-row input:focus{border-color:var(--primary);outline:none}
@@ -65,7 +65,7 @@ input,textarea,select{font-size:16px !important}
 .ri-type.normal{background:var(--success-light);color:var(--success)}
 .ri-type.scrap{background:var(--danger-light);color:var(--danger)}
 .ri-type.rework{background:var(--warning-light);color:var(--warning)}
-.empty-recent{text-align:center;color:#ccc;font-size:var(--text-sm);padding:var(--space-5) 0}
+.empty-recent{text-align:center;color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-6) 0}
 
 /* Order */
 .order-body{flex:1;overflow-y:auto;padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)}
@@ -117,7 +117,7 @@ input,textarea,select{font-size:16px !important}
 .action-area{padding:var(--space-3) 16px;padding-bottom:calc(var(--space-3) + env(safe-area-inset-bottom, 0px));background:#fff;border-top:1px solid var(--border-light);flex-shrink:0}
 .btn-report{width:100%;padding:14px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-md);font-size:17px;font-weight:700;cursor:pointer}
 .btn-report:active{background:var(--success-dark)}
-.btn-report:disabled{background:var(--success-lighter)}
+.btn-report:disabled{background:var(--success-lighter);opacity:.55;cursor:not-allowed}
 .btn-report.scrap{background:var(--danger)}
 .btn-report.scrap:active{background:var(--danger-dark)}
 .btn-report.rework{background:var(--warning);color:#fff}
@@ -143,9 +143,9 @@ input,textarea,select{font-size:16px !important}
 #cam-canvas{position:absolute;top:0;left:-9999px;visibility:hidden}
 .scan-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2}
 .scan-box{width:240px;height:240px;position:relative;border-radius:20px}
-.scan-box .line{position:absolute;left:10%;width:80%;height:2px;background:linear-gradient(90deg,transparent,var(--primary),transparent);border-radius:1px;animation:scanLine 1.8s ease-in-out infinite;box-shadow:0 0 8px rgba(79,195,247,.6)}
+.scan-box .line{position:absolute;left:10%;width:80%;height:2px;background:linear-gradient(90deg,transparent,var(--primary),transparent);border-radius:1px;animation:scanLine 1.8s ease-in-out infinite;box-shadow:0 0 10px rgba(24,144,255,.5)}
 @keyframes scanLine{0%,100%{top:10%}50%{top:85%}}
-.scan-box .c{position:absolute;width:28px;height:28px;border-color:rgba(79,195,247,.9);border-style:solid}
+.scan-box .c{position:absolute;width:28px;height:28px;border-color:var(--primary);border-style:solid}
 .c1{top:0;left:0;border-width:3px 0 0 3px;border-radius:12px 0 0 0}
 .c2{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 12px 0 0}
 .c3{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 12px}
@@ -154,8 +154,16 @@ input,textarea,select{font-size:16px !important}
 .scan-engine{font-size:var(--text-xs);color:var(--primary);margin-top:6px;text-shadow:0 1px 4px rgba(0,0,0,.8);min-height:16px}
 
 /* Toast */
-.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:var(--space-3) 24px;border-radius:24px;font-size:var(--text-base);z-index:9999;pointer-events:none;transition:opacity .3s}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:12px 28px;border-radius:24px;font-size:var(--text-base);z-index:9999;pointer-events:none;transition:opacity .25s ease;backdrop-filter:blur(4px)}
 .back-bar{background:#fff;color:var(--text-primary);border-bottom:1px solid var(--border-light);padding:var(--space-3) 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+
+/* Spinner */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+/* Scan flash */
+.scan-flash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(82,196,26,.25);z-index:200;pointer-events:none;transition:opacity .4s ease}
+/* Empty state */
+.empty-recent .icon{font-size:32px;margin-bottom:8px;display:block;opacity:.4}
 </style>
 </head>
 <body>
@@ -190,7 +198,7 @@ input,textarea,select{font-size:16px !important}
 <div class="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button onclick="manualSearch()">查询</button></div>
 <div class="recent-section" id="recent-section">
 <div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer" onclick="loadRecent()">刷新</span></div>
-<div id="recent-list"><div class="empty-recent">暂无记录</div></div>
+<div id="recent-list"><div class="empty-recent"><span class="icon">📋</span>暂无记录</div></div>
 </div>
 </div>
 </div>
@@ -424,7 +432,10 @@ function stopScanner() {
   if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
 }
 function onScan(text) {
-  stopScanner();  // stop camera only, don't change view
+  stopScanner();
+  var f = document.createElement('div'); f.className = 'scan-flash';
+  document.body.appendChild(f);
+  setTimeout(function(){ f.style.opacity='0'; setTimeout(function(){ f.remove(); },400); },50);
   setTimeout(function() { processCode(text); }, 200);
 }
 
@@ -634,7 +645,7 @@ $('rpt-qty').addEventListener('input', updateReportBtn);
 function doReport() {
   if (!curOrder || !curProcId) { toast('订单信息不完整'); return; }
   const btn = $('btn-report');
-  btn.disabled = true; btn.textContent = '提交中...';
+  btn.disabled = true; btn.innerHTML = '<span class=\"spin\"></span>提交中...';
 
   var body = {
     order_id: curOrder.id,
@@ -678,7 +689,7 @@ function doLogin() {
   const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
   if (!u || !p) { toast('请输入用户名和密码'); return; }
   const btn = $('btn-login');
-  btn.disabled = true; btn.textContent = '登录中...';
+  btn.disabled = true; btn.innerHTML = '<span class=\"spin\"></span>登录中...';
   fetch(API + '/auth/login', {
     credentials: 'same-origin',
     method: 'POST',
@@ -735,7 +746,7 @@ function loadRecent() {
     .then(function(d) {
       const list = d.logs || [];
       const el = $('recent-list');
-      if (!list.length) { el.innerHTML = '<div class="empty-recent">暂无记录</div>'; return; }
+      if (!list.length) { el.innerHTML = '<div class="empty-recent"><span class="icon">📋</span>暂无记录</div>'; return; }
       el.innerHTML = list.slice(0, 5).map(function(r) {
         const cls = r.work_status === 'scrap' ? 'scrap' : r.work_status === 'rework' ? 'rework' : 'normal';
         const lbl = r.work_status === 'scrap' ? '报废' : r.work_status === 'rework' ? '返修' : '正常';
