@@ -736,6 +736,10 @@ textarea { resize: vertical; min-height: 80px; }
 .qr-card { text-align:center; border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--space-3) }
 .qr-card img { width:140px; height:140px; margin:0 auto 8px }
 .qr-card .order-no { font-weight:600; font-size:var(--text-sm) }
+.qr-control-bar { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: nowrap; margin-bottom: 16px; }
+.qr-control-group { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; color: var(--text-placeholder); }
+.qr-control-group select, .qr-control-group input { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; background: white; }
+
 
 /* ===== 时间线 ===== */
 .timeline { position: relative; padding-left: var(--space-6); }
