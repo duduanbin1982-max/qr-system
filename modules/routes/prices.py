@@ -220,12 +220,16 @@ def save_route_prices(route_id):
 @check_auth
 @check_permission('prices:view')
 def calculate_wages():
-    employee_id = request.args.get('employee_id')
+    employee_id = request.args.get('employee_id', type=int)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')
-
-    result = WageService.calculate_wages(employee_id, date_from, date_to)
+    if export:
+        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999)
+    else:
+        page = max(request.args.get('page', 1, type=int), 1)
+        limit = min(max(request.args.get('limit', 200, type=int), 1), 1000)
+        result = WageService.calculate_wages(employee_id, date_from, date_to, page, limit)
     wages = result['wages']
 
     if export in ('xlsx', 'csv'):

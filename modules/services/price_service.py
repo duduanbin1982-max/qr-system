@@ -391,32 +391,51 @@ class WageService:
     """计件工资 + 日报 + 生产进度。"""
 
     @staticmethod
-    def calculate_wages(employee_id='', date_from='', date_to=''):
-        """计件工资统计。"""
+    def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200):
+        """计件工资统计（仅统计已审批通过的正常报工）。"""
         db = BaseService.db()
-        where = '1=1'; params = []
+        where = "wr.status = 'approved' AND wr.type = 'normal'"
+        params = []
         if employee_id:
             where += ' AND wr.user_id = ?'; params.append(employee_id)
         if date_from:
             where += ' AND wr.created_at >= ?'; params.append(date_from)
         if date_to:
             where += ' AND wr.created_at < ?'; params.append(date_to + ' 23:59:59')
-        # Safe: where clause built from hardcoded fragments, params parameterized
+        # Count before pagination
+        count_sql = ("SELECT COUNT(*) FROM work_records wr"
+                     " LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL"
+                     " WHERE " + where)
+        total = db.execute(count_sql, params).fetchone()[0]
+        offset = (page - 1) * limit
+        # process_prices subquery: deduplicate by (product_code, process_id) using latest effective_date
         query = ('''SELECT wr.*, u.name as employee_name, u.employee_no,
                    p.name as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
-                   COALESCE(rp.unit_price, pp.unit_price, 0) as unit_price
+                   COALESCE(rp.unit_price, pp_dedup.unit_price, 0) as unit_price
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
             LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
-            LEFT JOIN products pr ON o.product_code = pr.product_code AND pr.deleted_at IS NULL
-            LEFT JOIN process_prices pp ON pr.id = pp.product_id
-                AND wr.process_id = pp.process_id AND pp.status = 'active'
-            WHERE ''' + where + ''' ORDER BY wr.created_at DESC''')
-        rows = db.execute(query, params).fetchall()
+            LEFT JOIN (
+                SELECT pr.product_code, pp2.process_id, pp2.unit_price
+                FROM process_prices pp2
+                JOIN products pr ON pp2.product_id = pr.id AND pr.deleted_at IS NULL
+                WHERE pp2.status = 'active'
+                AND pp2.effective_date = (
+                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
+                    JOIN products pr3 ON pp3.product_id = pr3.id
+                    WHERE pr3.product_code = pr.product_code
+                    AND pp3.process_id = pp2.process_id
+                    AND pp3.status = 'active' AND pr3.deleted_at IS NULL
+                )
+                GROUP BY pr.product_code, pp2.process_id
+            ) pp_dedup ON o.product_code = pp_dedup.product_code
+                AND wr.process_id = pp_dedup.process_id
+            WHERE ''' + where + ''' ORDER BY wr.created_at DESC LIMIT ? OFFSET ?''')
+        rows = db.execute(query, params + [limit, offset]).fetchall()
         wages = {}
         for row in rows:
             emp_id = row['user_id']
@@ -438,19 +457,21 @@ class WageService:
                 'process_name': row['process_name'],
                 'quantity': qty, 'unit_price': up, 'wage': wage
             })
-        return {'wages': list(wages.values())}
+        return {'wages': list(wages.values()), 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
     def daily_report(date):
-        """员工生产日报表。"""
+        """员工生产日报表（仅统计已审批通过的正常报工）。"""
         db = BaseService.db()
         rows = db.execute('''
             SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
-            WHERE wr.created_at LIKE ? ORDER BY wr.user_id, wr.process_id
-        ''', (date + '%',)).fetchall()
+            WHERE wr.status = 'approved' AND wr.type = 'normal'
+            AND wr.created_at >= ? AND wr.created_at < ?
+            ORDER BY wr.user_id, wr.process_id
+        ''', (date, date + ' 23:59:59')).fetchall()
         report = {}
         for row in rows:
             emp_id = row['user_id']; proc_id = row['process_id']
@@ -480,6 +501,7 @@ class WageService:
         order_ids = [r['id'] for r in rows]
         proc_by_order = {}
         if order_ids:
+            # placeholders are all '?' chars from trusted integer list — safe for f-string
             placeholders = ",".join("?" for _ in order_ids)
             proc_rows = db.execute(f'''
                 SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
