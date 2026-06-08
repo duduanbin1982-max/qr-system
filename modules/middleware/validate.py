@@ -87,6 +87,38 @@ SCHEMAS = {
         },
         'additionalProperties': True,
     },
+    'quality_inspection': {
+        'type': 'object',
+        'required': ['order_id', 'process_id'],
+        'properties': {
+            'order_id': {'type': 'integer', 'minimum': 1},
+            'process_id': {'type': 'integer', 'minimum': 1},
+            'inspection_type': {'type': 'string', 'enum': ['first_article', 'in_process', 'final']},
+            'quantity_checked': {'type': 'integer', 'minimum': 0},
+            'quantity_passed': {'type': 'integer', 'minimum': 0},
+            'quantity_failed': {'type': 'integer', 'minimum': 0},
+            'defect_category': {'type': 'string', 'maxLength': 64},
+            'defect_quantity': {'type': 'integer', 'minimum': 0},
+            'notes': {'type': 'string', 'maxLength': 512},
+            'inspected_at': {'type': 'string', 'maxLength': 32},
+        },
+        'additionalProperties': False,
+    },
+    'quality_update': {
+        'type': 'object',
+        'properties': {
+            'inspection_type': {'type': 'string', 'enum': ['first_article', 'in_process', 'final']},
+            'quantity_checked': {'type': 'integer', 'minimum': 0},
+            'quantity_passed': {'type': 'integer', 'minimum': 0},
+            'quantity_failed': {'type': 'integer', 'minimum': 0},
+            'defect_category': {'type': 'string', 'maxLength': 64},
+            'defect_quantity': {'type': 'integer', 'minimum': 0},
+            'notes': {'type': 'string', 'maxLength': 512},
+            'inspected_at': {'type': 'string', 'maxLength': 32},
+        },
+        'additionalProperties': False,
+    },
+
     'create_product': {
         'type': 'object',
         'required': ['product_name'],
