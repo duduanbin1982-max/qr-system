@@ -298,6 +298,7 @@
                 <td style="font-size:var(--text-xs)">{{ o.deleted_by_name || '-' }}</td>
                 <td style="text-align:center">
                   <button class="btn btn-sm" style="background:var(--success-lighter);color:var(--success);font-size:var(--text-xs-alt);padding:var(--space-1) 10px" @click="restoreOrder(o.id)">恢复</button>
+                  <button class="btn btn-sm" style="background:var(--danger-lighter, #fff0f0);color:var(--danger,#e74c3c);font-size:var(--text-xs-alt);padding:var(--space-1) 10px;margin-left:6px" @click="permanentDelete(o.id)">彻底删除</button>
                 </td>
               </tr>
             </tbody>
