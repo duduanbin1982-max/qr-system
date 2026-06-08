@@ -8,8 +8,8 @@ import logging
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
-from modules.config import SESSION_TIMEOUT_HOURS
-from modules.db import get_db
+from modules.config import SESSION_TIMEOUT_HOURS, SESSION_IDLE_MINUTES
+from modules.db import get_db, get_setting
 
 def has_permission(user: Optional[dict], perm: str) -> bool:
     """检查用户是否拥有指定权限（含角色组权限继承）
@@ -88,23 +88,61 @@ def check_auth(f: Callable) -> Callable:
         g.current_user['_permissions'] = get_user_permissions(g.current_user)
         g.token = token
 
-        # Check session timeout (if configured)
-        if SESSION_TIMEOUT_HOURS > 0:
-            last_active = g.current_user.get('last_active', '')
+        # Check session timeout (if configured, override from settings)
+        timeout_hours = SESSION_TIMEOUT_HOURS
+        idle_minutes = SESSION_IDLE_MINUTES
+        try:
+            st = get_setting('session_timeout_hours', '')
+            if st and st.isdigit():
+                timeout_hours = int(st)
+            si = get_setting('session_idle_minutes', '')
+            if si and si.isdigit():
+                idle_minutes = int(si)
+        except Exception:
+            pass
 
+        now = datetime.now()
+        expired = False
+        idle_expired = False
+
+        # Check absolute session timeout
+        if timeout_hours > 0:
+            last_active = g.current_user.get('last_active', '')
             if last_active:
                 try:
                     last_dt = datetime.strptime(last_active, '%Y-%m-%d %H:%M:%S')
-                    if datetime.now() - last_dt > timedelta(hours=SESSION_TIMEOUT_HOURS):
-                        db.execute('UPDATE users SET token = "" WHERE id = ?', (g.current_user['id'],))
-                        db.commit()
-                        return jsonify({'error': '登录已过期'}), 401
-                except (json.JSONDecodeError, TypeError):
+                    if now - last_dt > timedelta(hours=timeout_hours):
+                        expired = True
+                except Exception:
                     pass
-            # Update last_active
-            db.execute('UPDATE users SET last_active = datetime("now","localtime") WHERE id = ?',
-                       (g.current_user['id'],))
+            elif g.current_user.get('created_at'):
+                try:
+                    created_dt = datetime.strptime(g.current_user['created_at'], '%Y-%m-%d %H:%M:%S')
+                    if now - created_dt > timedelta(hours=timeout_hours):
+                        expired = True
+                except Exception:
+                    pass
+
+        # Check idle timeout (shorter, only if user has last_active)
+        if not expired and idle_minutes > 0:
+            last_active = g.current_user.get('last_active', '')
+            if last_active:
+                try:
+                    last_dt = datetime.strptime(last_active, '%Y-%m-%d %H:%M:%S')
+                    if now - last_dt > timedelta(minutes=idle_minutes):
+                        idle_expired = True
+                except Exception:
+                    pass
+
+        if expired or idle_expired:
+            db.execute('UPDATE users SET token = "" WHERE id = ?', (g.current_user['id'],))
             db.commit()
+            return jsonify({'error': 'Login expired due to inactivity'}), 401
+
+        # Update last_active
+        db.execute('UPDATE users SET last_active = datetime("now","localtime") WHERE id = ?',
+                   (g.current_user['id'],))
+        db.commit()
 
         return f(*args, **kwargs)
     return decorated

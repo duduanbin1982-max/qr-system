@@ -102,11 +102,12 @@ def create_order():
 @app.route('/api/orders/<int:oid>', methods=['PUT'])
 @check_auth
 @check_permission('orders:edit')
+@validate_json('update_order')
 def update_order(oid):
     data = get_json_body()
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
-    existing = db.execute('SELECT id, status FROM orders WHERE id = ? AND deleted_at IS NULL', (oid,)).fetchone()
+    existing = db.execute('SELECT id, status, remark FROM orders WHERE id = ? AND deleted_at IS NULL', (oid,)).fetchone()
     if not existing:
         return jsonify({'error': '订单不存在'}), 404
 
@@ -126,6 +127,7 @@ def update_order(oid):
             if new_status not in allowed:
                 return jsonify({'error': f'不允许从「{old_status}」切换到「{new_status}」'}), 400
 
+    old_remark = existing['remark'] if existing and 'remark' in existing.keys() else ''
     try:
         if 'customer_id' in data and data['customer_id']:
             if not (data.get('customer') or '').strip():
@@ -159,6 +161,14 @@ def update_order(oid):
                     db.execute('INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
                                (oid, pid, proc['seq_order']))
         db.commit()
+        # Track remark change in history
+        if 'remark' in data and str(data.get('remark','')) != str(old_remark):
+            try:
+                uname = g.current_user.get('name', g.current_user.get('username', ''))
+                db.execute('INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) VALUES (?,?,?,?,?)', (oid, old_remark or '', data.get('remark','') or '', g.current_user['id'], uname))
+                db.commit()
+            except Exception:
+                pass
         return jsonify({'message': '更新成功'})
     except Exception as e:
         db.execute('ROLLBACK')

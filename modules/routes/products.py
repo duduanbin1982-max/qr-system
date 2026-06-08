@@ -12,6 +12,8 @@ from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.config import ALLOWED_UPLOAD_EXTENSIONS
+from werkzeug.utils import secure_filename
 from modules.middleware.helpers import get_json_body
 from modules.services.product_service import ProductService
 
@@ -286,7 +288,11 @@ def upload_product_attachment(product_id):
         return jsonify({'error': '没有文件'}), 400
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'error': '文件名不能为空'}), 400
+        return jsonify({'error': 'Filename cannot be empty'}), 400
+    safe_name = secure_filename(file.filename)
+    ext = '.' + safe_name.rsplit('.', 1)[-1].lower() if '.' in safe_name else ''
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        return jsonify({'error': f'File type {ext} not allowed'}), 400
     file_data = file.read()
     try:
         ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])

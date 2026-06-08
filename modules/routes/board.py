@@ -7,11 +7,20 @@ from datetime import datetime
 from flask import request, jsonify
 
 from modules.app import app
+from modules.cache_utils import ttl_cache
 from modules.db import get_db, get_setting
 
 # Board endpoint (production overview dashboard) — 公开端点，供车间大屏无需认证拉取数据
 @app.route('/api/dashboard/board', methods=['GET'])
+@ttl_cache(30)
 def dashboard_board():
+    # P7-3: Optional board token authentication
+    board_token = get_setting('board_token', '')
+    if board_token:
+        provided = request.args.get('token', '')
+        if provided != board_token:
+            return jsonify({'error': 'Unauthorized'}), 401
+
     db = get_db()
     today = datetime.now().strftime('%Y-%m-%d')
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -96,7 +105,6 @@ def dashboard_board():
         ORDER BY output DESC
         LIMIT 15
     ''', (today,)).fetchall()
-    # Scrap/rework totals by process (pre-fetch to avoid N+1)
     _scrap_rows = db.execute(
         'SELECT sr.process_id, SUM(sr.quantity) as s FROM scrap_records sr '
         'JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL '
@@ -116,63 +124,48 @@ def dashboard_board():
 
     worker_rows = db.execute('''
         SELECT u.id, u.name, u.employee_no,
-               COALESCE(SUM(wr.quantity), 0) as output,
-               COUNT(wr.id) as report_count
+               COUNT(wr.id) as report_count,
+               COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output,
+               COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap,
+               COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework
         FROM users u
-        LEFT JOIN work_records wr ON u.id = wr.user_id AND DATE(wr.created_at) = ?
+        LEFT JOIN work_records wr ON u.id = wr.user_id
+            AND DATE(wr.created_at) = ?
             AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
         WHERE u.status = 'active'
         GROUP BY u.id, u.name, u.employee_no
-        HAVING output > 0
+        HAVING report_count > 0
         ORDER BY output DESC
-        LIMIT 10
+        LIMIT 8
     ''', (today,)).fetchall()
-    _scrap_user_rows = db.execute(
-        'SELECT sr.user_id, SUM(sr.quantity) as s FROM scrap_records sr '
-        'JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL '
-        'WHERE DATE(sr.created_at)=? GROUP BY sr.user_id', (today,)
-    ).fetchall()
-    scrap_by_user = {r['user_id']: r['s'] for r in _scrap_user_rows}
-    _rework_user_rows = db.execute(
-        'SELECT rr.user_id, SUM(rr.quantity) as r FROM rework_records rr '
-        'JOIN orders o ON rr.order_id = o.id AND o.deleted_at IS NULL '
-        'WHERE DATE(rr.created_at)=? GROUP BY rr.user_id', (today,)
-    ).fetchall()
-    rework_by_user = {r['user_id']: r['r'] for r in _rework_user_rows}
-    worker_rows = [dict(r) for r in worker_rows]
-    for w in worker_rows:
-        w['scrap'] = scrap_by_user.get(w['id'], 0)
-        w['rework'] = rework_by_user.get(w['id'], 0)
 
     recent_rows = db.execute('''
-        SELECT wr.id, wr.type, wr.quantity, wr.created_at,
-               u.name as worker_name,
-               pr.name as process_name,
-               o.order_no
+        SELECT wr.id, wr.quantity, wr.type, wr.created_at,
+               u.name as worker_name, p.name as process_name, o.order_no
         FROM work_records wr
         LEFT JOIN users u ON wr.user_id = u.id
-        LEFT JOIN processes pr ON wr.process_id = pr.id
-        LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        ORDER BY wr.created_at DESC
-        LIMIT 20
-    ''').fetchall()
+        LEFT JOIN processes p ON wr.process_id = p.id
+        LEFT JOIN orders o ON wr.order_id = o.id
+        ORDER BY wr.id DESC
+        LIMIT 10
+    ''',).fetchall()
 
     return jsonify({
         'stats': {
             'total_orders': total_orders,
             'producing_orders': producing_orders,
-            'completed_orders': completed_orders,
+            'completed_orders': completed_orders
         },
         'today': {
             'today_output': today_output,
             'today_reports': today_reports,
             'today_rework': today_rework,
-            'today_scrap': today_scrap,
+            'today_scrap': today_scrap
         },
         'orders': [dict(r) for r in order_rows],
         'overdue_orders': [dict(r) for r in overdue_rows],
-        'process_stats': [dict(r) for r in process_rows],
+        'process_stats': process_rows,
         'worker_stats': [dict(r) for r in worker_rows],
         'recent_reports': [dict(r) for r in recent_rows],
-        'update_time': now_str,
+        'update_time': now_str
     })

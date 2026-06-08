@@ -20,6 +20,7 @@ def get_db() -> sqlite3.Connection:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA journal_mode=WAL")
+        g.db.execute("PRAGMA busy_timeout=5000")
         g.db.execute("PRAGMA foreign_keys=ON")
     return g.db
 
@@ -62,6 +63,14 @@ def init_db() -> None:
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+
+    # P3: Add version column for optimistic locking
+    try:
+        db.execute("ALTER TABLE product_items ADD COLUMN version INTEGER DEFAULT 1")
+        db.commit()
+    except:
+        pass
+
     db.execute("PRAGMA foreign_keys=OFF")  # OFF to avoid FK conflicts on existing data during CREATE TABLE IF NOT EXISTS
 
     # 迁移 orders 表添加 product_code 列（如果不存在）

@@ -6,19 +6,43 @@ from flask import Flask, request, jsonify
 from modules.middleware.rate_limit import apply_global_rate_limit
 from flasgger import Swagger
 import os
+from dotenv import load_dotenv
+
+# Load .env file (production secrets)
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
+if os.path.exists(_env_file):
+    load_dotenv(_env_file)
 
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(_base, 'public')
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, template_folder=PUBLIC_DIR)
+app.config["START_TIME"] = 1780931489.9495177  # for uptime tracking
 app.jinja_env.variable_start_string = '{$'
 app.jinja_env.variable_end_string = '$}'
 _secret = os.environ.get('SECRET_KEY')
 if _secret:
     app.secret_key = _secret
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制请求体最大 16MB
+
+# ============================================================
+# Security Headers (P0 hardening)
+# ============================================================
+@app.after_request
+def add_hardening_headers(response):
+    """注入安全响应头"""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # HSTS only if served over HTTPS (gunicorn with SSL)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 from modules.middleware.error_handler import register_error_handlers
 register_error_handlers(app)
+from modules.middleware.request_tracker import RequestTracker
+RequestTracker(app)
 
 # ============================================================
 # Swagger / OpenAPI 文档
@@ -83,7 +107,10 @@ swagger_template = {
     ],
 }
 
-swagger = Swagger(app, config=swagger_config, template=swagger_template)
+# Swagger UI - controlled by ENABLE_SWAGGER env var (disabled in production)
+ENABLE_SWAGGER = os.environ.get('ENABLE_SWAGGER', '').lower() == 'true'
+if ENABLE_SWAGGER:
+    swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
 
 @app.before_request
@@ -96,10 +123,14 @@ def api_version_prefix():
 # CORS 白名单 + 安全头中间件
 # ============================================================
 ALLOWED_ORIGINS = {
+    # 内网客户端（桌面浏览器）
     'https://192.168.1.75:3000',
     'http://192.168.1.75:3000',
     'http://localhost:3000',
-    # 公网域名/端口在此添加
+    # Nginx 反代后的访问地址
+    'https://192.168.1.8',
+    'http://192.168.1.8',
+    # 在此添加更多白名单域名
 }
 
 @app.after_request
@@ -113,11 +144,8 @@ def add_security_headers(response):
     if origin in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Vary'] = 'Origin'
-    elif not origin:
-        response.headers['Access-Control-Allow-Origin'] = '*'
-    else:
-        # 非白名单来源：返回默认 origin（不暴露 '*'）
-        response.headers['Access-Control-Allow-Origin'] = 'https://192.168.1.75:3000'
+    # Strict: no CORS header for non-whitelisted origins (browser will reject)
+    # Same-origin requests (no Origin header) are allowed by browser default
 
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type'
@@ -153,7 +181,20 @@ def add_security_headers(response):
 @app.route('/api/v1/health', methods=['GET', 'OPTIONS'])
 
 def health_check():
-    """健康检查端点（负载均衡探测用）"""
+    """Health check endpoint with DB connectivity status"""
     if request.method == 'OPTIONS':
         return '', 204
-    return jsonify({'status': 'ok', 'version': '2.0'})
+    from datetime import datetime
+    from modules.db import get_db
+    status = {'status': 'ok', 'version': '2.0', 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    try:
+        db = get_db()
+        db.execute('SELECT 1')
+        status['db'] = 'connected'
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'production.db')
+        if os.path.exists(db_path):
+            status['db_size_mb'] = round(os.path.getsize(db_path) / (1024 * 1024), 2)
+    except Exception as e:
+        status['status'] = 'degraded'
+        status['db'] = str(e)[:200]
+    return jsonify(status), 200 if status['status'] == 'ok' else 503

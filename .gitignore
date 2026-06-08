@@ -1,49 +1,33 @@
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-*.log
-server.pid
-
-# Certificates
-server.crt
-server.key
-
-# Python
 __pycache__/
-*.pyc
-*.pyo
-
-# Backups & temp
-*.bak
-*.bak_*
-*.tmp
-*~
-
-# IDE
+*.compiled
+production.db
+.env
+data/backups/
 .vscode/
 .idea/
-
-# OS
-.DS_Store
-Thumbs.db
-data/production.db.bak.*
-
-# CA certificates
-ca.crt
-ca.key
-ca.srl
-
-# Vite build output
-dist/
-
-# PM2 logs
+*.bak
+*.bak2
+*.bak3
 logs/
-
-# Node modules
+.mypy~cache/
+*.coverage
+*.pyo
+*.pyc
+*.s{n,e}
+*.pem-debug.log
+.DS_Store
+venv/
+NODEMODULES/
+lastmodified.txt
+*.mac
+*.log
+*.pid
+*.crt
+*.key
+*.srl
+ca.*
 node_modules/
-
-# Backup archives
-backups/
+dist/
+server.log
+data.db
+ssl_backup/

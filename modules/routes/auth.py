@@ -186,6 +186,9 @@ def auth_info():
     u = dict(g.current_user)
     u.pop('password', None)
     u.pop('token', None)
+    u.pop('failed_login_count', None)
+    u.pop('locked_until', None)
+    u.pop('password_version', None)
     u['permissions'] = get_user_permissions(g.current_user)
     return jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
 

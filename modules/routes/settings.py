@@ -22,6 +22,9 @@ ALLOWED_KEYS = {
     'delivery_warning_days', # 交期预警天数（0=不预警）
     'limit_by_prev_process', # 报工不超上道累计（1/0）
     'limit_by_order_qty',    # 报工累计不超订单数（1/0）
+    # session security
+    'session_timeout_hours',   # 会话超时（小时），0=不过期
+    'session_idle_minutes',    # 闲置登出（分钟），0=不禁用
 }
 
 

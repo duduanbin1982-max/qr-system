@@ -47,10 +47,11 @@ def create_user():
 @app.route('/api/users/<int:uid>', methods=['PUT'])
 @check_auth
 @check_permission('users:edit')
+@validate_json('update_user')
 def update_user(uid):
     data = get_json_body()
     try:
-        UserService.update_user(uid, data)
+        UserService.update_user(uid, data, g.current_user.get("id"))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
     # Log update without password (but note if password was changed)

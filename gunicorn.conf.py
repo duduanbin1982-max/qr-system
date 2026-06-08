@@ -1,3 +1,9 @@
+import os
+from dotenv import load_dotenv
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+
 # gunicorn config for qr-system
 import os
 import gunicorn
@@ -6,16 +12,16 @@ import gunicorn
 gunicorn.SERVER = 'webserver'
 
 chdir = '/home/dubin/qr-system'
-bind = '0.0.0.0:3000'
+bind = '127.0.0.1:3000'
 certfile = 'server.crt'
 keyfile = 'server.key'
-workers = 1        # SQLite — 单 worker 避免写锁竞争 + 迁移竞态
+workers = 2        # SQLite WAL mode supports concurrent reads, BEGIN IMMEDIATE handles write conflicts
 timeout = 120
 accesslog = 'logs/gunicorn_access.log'
 errorlog = 'logs/gunicorn_error.log'
 loglevel = 'info'
 raw_env = [
-    'SECRET_KEY=1d0cf9fe2aa958d4300e53fc02e09243c1d4d324b13c1fff18507aa3badea773'
+    'SECRET_KEY=' + os.environ.get('SECRET_KEY', 'change-me')
 ]
 
 def on_starting(server):

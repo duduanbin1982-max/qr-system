@@ -1,51 +1,72 @@
-// Service Worker — 扫码报工 PWA
-const CACHE_NAME = 'qr-system-v2';
+// Service Worker - QR System PWA v2 (enhanced)
+const CACHE_NAME = "qr-system-v2.1";
 const ASSETS = [
-  '/mobile.html',
-  '/jsQR.js',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
+  "/mobile.html",
+  "/offline.html",
+  "/jsQR.js",
+  "/style.css",
+  "/manifest.json",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
 ];
 
-// Install: cache all static assets
-self.addEventListener('install', event => {
+self.addEventListener("install", function(event) {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then(function(cache) {
+      return cache.addAll(ASSETS);
+    }).then(function() {
+      return self.skipWaiting();
+    })
   );
-  self.skipWaiting();
 });
 
-// Activate: clean old caches
-self.addEventListener('activate', event => {
+self.addEventListener("activate", function(event) {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+    caches.keys().then(function(keys) {
+      return Promise.all(
+        keys.filter(function(k) { return k !== CACHE_NAME; })
+            .map(function(k) { return caches.delete(k); })
+      );
+    }).then(function() {
+      return self.clients.claim();
+    })
   );
-  self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for assets
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+self.addEventListener("fetch", function(event) {
+  var url = new URL(event.request.url);
 
-  // API requests: network only (no offline caching for dynamic data)
-  if (url.pathname.startsWith('/api/')) {
-    return; // Let browser handle normally
+  // API: network-first with offline queue
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(
+      fetch(event.request).catch(function() {
+        return new Response(JSON.stringify({error: "offline", offline: true}), {
+          status: 503,
+          headers: {"Content-Type": "application/json"}
+        });
+      })
+    );
+    return;
   }
 
-  // Static assets: cache-first
+  // Static: cache-first, fallback to offline page
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      const fetched = fetch(event.request).then(response => {
+    caches.match(event.request).then(function(cached) {
+      if (cached) return cached;
+      return fetch(event.request).then(function(response) {
         if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          var clone = response.clone();
+          caches.open(CACHE_NAME).then(function(cache) {
+            cache.put(event.request, clone);
+          });
         }
         return response;
-      }).catch(() => cached);
-      return cached || fetched;
+      }).catch(function() {
+        if (event.request.mode === "navigate") {
+          return caches.match("/offline.html");
+        }
+        return new Response("Offline", {status: 503});
+      });
     })
   );
 });

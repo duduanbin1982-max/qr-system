@@ -12,7 +12,20 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(PUBLIC_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, 'production.db')
-SESSION_TIMEOUT_HOURS = 0  # 登录超时时间（小时），0表示永不过期
+SESSION_TIMEOUT_HOURS = 8  # 登录超时时间（小时），0表示永不过期
+SESSION_IDLE_MINUTES = 30  # idle timeout
+
+# File upload whitelist (lowercase extensions with dot)
+ALLOWED_UPLOAD_EXTENSIONS = {
+    # Documents
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt",
+    # Images
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
+    # Archives
+    ".zip", ".rar", ".7z",
+    # CAD/Drawings
+    ".dwg", ".dxf", ".step", ".stp", ".igs", ".iges",
+}
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError('SECRET_KEY 环境变量未设置！请在生产环境通过 ecosystem.config.js 或系统环境变量设置强密钥。')

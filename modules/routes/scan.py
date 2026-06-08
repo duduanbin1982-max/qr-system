@@ -14,6 +14,7 @@ from flask import request, jsonify, g, send_file
 from modules.app import app
 from modules.db import get_db, get_setting, get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.data_scope import get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
@@ -110,12 +111,19 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
                         'SELECT op.process_id FROM order_processes op WHERE op.order_id = ? AND op.seq_order > ? ORDER BY op.seq_order LIMIT 1',
                         (order_id, current_seq)
                     ).fetchone()
+                    item_version = item['version'] or 1
                     if next_op:
-                        db.execute('UPDATE product_items SET current_process_id = ?, status = "in_progress" WHERE id = ?',
-                                   (next_op['process_id'], item['id']))
+                        cur = db.execute(
+                            'UPDATE product_items SET current_process_id = ?, status = "in_progress", version = version + 1 WHERE id = ? AND version = ?',
+                            (next_op['process_id'], item['id'], item_version))
+                        if cur.rowcount == 0:
+                            raise ValueError(f'序列号 {serial_no} 已被其他操作修改，请刷新后重试')
                     else:
-                        db.execute('UPDATE product_items SET current_process_id = NULL, status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
-                                   (item['id'],))
+                        cur = db.execute(
+                            'UPDATE product_items SET current_process_id = NULL, status = "completed", completed_at = datetime("now","localtime"), version = version + 1 WHERE id = ? AND version = ?',
+                            (item['id'], item_version))
+                        if cur.rowcount == 0:
+                            raise ValueError(f'序列号 {serial_no} 已被其他操作修改，请刷新后重试')
 
     elif report_type == 'scrap':
         reason = remark or ''
@@ -429,14 +437,13 @@ def mobile_report():
             if existing:
                 return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
         else:
-            # 订单号模式：同用户同工序 30 秒内不可重复（防误触）
+            # 订单号模式：同用户同工序永久不可重复
             existing = db.execute(
-                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
-                'AND created_at > datetime("now","localtime","-30 seconds")',
+                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ?',
                 (order_id, process_id, user['id'])
             ).fetchone()
             if existing:
-                return jsonify({'error': '请勿短时间重复报工同一工序（30秒内）'}), 409
+                return jsonify({'error': '此工序您已报工，不可重复扫码'}), 409
     elif report_type in ('scrap', 'rework'):
         # 报废/返工：同订单同工序同用户 30 秒内不可重复
         existing = db.execute(
@@ -519,6 +526,7 @@ def mobile_report():
 @app.route('/api/report', methods=['POST'])
 @check_auth
 @check_permission('scan:edit')
+@validate_json('work_report')
 def work_report():
     """报工"""
     data = get_json_body()
@@ -861,4 +869,53 @@ def batch_qrcode():
 
         return jsonify({'codes': codes})
     except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+        return handle_unexpected_error(e, 'database operation')@app.route('/api/scan/qr/<int:order_id>', methods=['GET'])
+@check_auth
+def generate_order_qr(order_id):
+    """Generate QR code for an order (returns base64 PNG data URL)."""
+    import qrcode
+    import io
+    import base64
+    
+    db = get_db()
+    order = db.execute(
+        'SELECT order_no, product_name, product_code, quantity FROM orders WHERE id = ? AND deleted_at IS NULL',
+        (order_id,)
+    ).fetchone()
+    
+    if not order:
+        return jsonify({'error': '订单不存在'}), 404
+    
+    # Build QR content: compact JSON with order info
+    import json
+    qr_content = json.dumps({
+        't': 'order',
+        'id': order_id,
+        'no': order['order_no'],
+        'pn': order['product_name'][:30] if order['product_name'] else '',
+    }, ensure_ascii=False)
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=2,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=2,
+    )
+    qr.add_data(qr_content)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color='black', back_color='white')
+    
+    # Convert to base64 PNG
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    data_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+    
+    return jsonify({
+        'order_id': order_id,
+        'order_no': order['order_no'],
+        'qr_data_url': data_url,
+        'product_name': order['product_name'],
+    })

@@ -1,37 +1,25 @@
 """
-qr-system — 工作台路由（Dashboard），数据看板已拆分至 board.py
+qr-system - Dashboard route (workbench)
+Security stats split to /api/dashboard/security
 """
 from datetime import datetime
 from flask import request, jsonify, g
 
 from modules.app import app
+from modules.cache_utils import ttl_cache
 from modules.db import get_db, get_setting
 from modules.middleware.auth import check_auth, check_permission
-import time
-
-# Simple in-memory settings cache (TTL 60s)
-_settings_cache = {}
-_settings_cache_time = 0
-
-def get_setting_cached(key, default=''):
-    global _settings_cache, _settings_cache_time
-    now = time.time()
-    if now - _settings_cache_time > 60:
-        _settings_cache = {}
-        _settings_cache_time = now
-    if key not in _settings_cache:
-        _settings_cache[key] = get_setting(key, default)
-    return _settings_cache[key]
 
 
 @app.route('/api/dashboard', methods=['GET'])
+@ttl_cache(30)
 @check_auth
 @check_permission('dashboard:view')
 def dashboard():
     db = get_db()
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # 合并订单统计 (1次查询替代4次)
+    # Combined order stats (1 query for 4 counts)
     order_stats = db.execute('''
         SELECT COUNT(*) as total,
                SUM(CASE WHEN status="pending" THEN 1 ELSE 0 END) as pending,
@@ -39,12 +27,8 @@ def dashboard():
                SUM(CASE WHEN status="completed" THEN 1 ELSE 0 END) as completed
         FROM orders WHERE deleted_at IS NULL
     ''').fetchone()
-    total_orders = order_stats['total']
-    pending = order_stats['pending']
-    producing = order_stats['producing']
-    completed = order_stats['completed']
 
-    # 合并今日统计 (JOIN优化，单次扫描各表)
+    # Combined today stats (UNION ALL single scan)
     today_stats = db.execute('''
         SELECT
           COALESCE(SUM(CASE WHEN t.source='work_records' THEN 1 ELSE 0 END),0) as today_records,
@@ -62,31 +46,6 @@ def dashboard():
             WHERE DATE(rr.created_at)=? AND rr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
         ) t
     ''', (today, today, today)).fetchone()
-    today_records = today_stats['today_records']
-    today_scrap = today_stats['today_scrap']
-    today_rework = today_stats['today_rework']
-    today_output = today_stats['today_output']
-
-    # --- Security stats ---
-    locked_users = db.execute(
-        "SELECT COUNT(*) FROM users WHERE locked_until IS NOT NULL AND locked_until > datetime('now','localtime')"
-    ).fetchone()[0]
-    today_failed_logins = db.execute(
-        'SELECT COUNT(*) FROM login_logs WHERE DATE(created_at) = ? AND success = 0', (today,)
-    ).fetchone()[0]
-    today_success_logins = db.execute(
-        'SELECT COUNT(*) FROM login_logs WHERE DATE(created_at) = ? AND success = 1', (today,)
-    ).fetchone()[0]
-    # 异常IP：SQL层面计算今日新出现的IP（不同于最近7天常用IP）
-    suspicious_ips = db.execute('''
-        SELECT COUNT(*) FROM (
-          SELECT DISTINCT ip_address FROM login_logs
-          WHERE success = 1 AND DATE(created_at) = ?
-          EXCEPT
-          SELECT DISTINCT ip_address FROM login_logs
-          WHERE success = 1 AND DATE(created_at) < ? AND created_at > datetime('now','-7 days')
-        )
-    ''', (today, today)).fetchone()[0]
 
     # Recent records
     recent = db.execute('''
@@ -99,7 +58,7 @@ def dashboard():
     ''').fetchall()
 
     # Delivery warnings
-    warning_days_str = get_setting_cached('delivery_warning_days', '3')
+    warning_days_str = get_setting('delivery_warning_days', '3')
     try:
         warning_days = int(warning_days_str) if warning_days_str else 0
     except (ValueError, TypeError):
@@ -125,37 +84,65 @@ def dashboard():
         ''', (today, today, today, warning_days)).fetchall()
 
     return jsonify({
-        'company_name': get_setting_cached('company_name', ''),
+        'company_name': get_setting('company_name', ''),
         'stats': {
-            'total_orders': total_orders,
-            'pending': pending,
-            'producing': producing,
-            'completed': completed,
-            'today_records': today_records,
-            'today_scrap': today_scrap,
-            'today_rework': today_rework,
-            'today_output': today_output,
-        },
-        'security': {
-            'locked_users': locked_users,
-            'today_failed_logins': today_failed_logins,
-            'today_success_logins': today_success_logins,
-            'suspicious_ips': suspicious_ips,
+            'total_orders': order_stats['total'],
+            'pending': order_stats['pending'],
+            'producing': order_stats['producing'],
+            'completed': order_stats['completed'],
+            'today_records': today_stats['today_records'],
+            'today_scrap': today_stats['today_scrap'],
+            'today_rework': today_stats['today_rework'],
+            'today_output': today_stats['today_output'],
         },
         'recent_records': [dict(r) for r in recent],
         'quick_actions': [
-            {'page': 'orders',    'icon': '📋', 'label': '订单管理',   'desc': '创建和管理生产订单'},
-            {'page': 'scan',      'icon': '📱', 'label': '扫码报工',   'desc': '扫码记录工序产量'},
-            {'page': 'products',  'icon': '🏭', 'label': '产品管理',   'desc': '维护产品信息和BOM'},
-            {'page': 'prices',    'icon': '💰', 'label': '工价管理',   'desc': '管理工序工价路线'},
-            {'page': 'users',     'icon': '👥', 'label': '员工管理',   'desc': '管理用户和权限'},
-            {'page': 'stats',     'icon': '📈', 'label': '统计报表',   'desc': '查看生产和质量报表'},
-            {'page': 'board',     'icon': '📺', 'label': '数据看板',   'desc': '车间实时生产大屏'},
-            {'page': 'settings',  'icon': '⚙️', 'label': '系统设置',   'desc': '系统配置与权限管理'},
+            {'page': 'orders',    'icon': '\U0001f4cb', 'label': '订单管理',   'desc': '创建和管理生产订单'},
+            {'page': 'scan',      'icon': '\U0001f4f1', 'label': '扫码报工',   'desc': '扫码记录工序产量'},
+            {'page': 'products',  'icon': '\U0001f3ed', 'label': '产品管理',   'desc': '维护产品信息和BOM'},
+            {'page': 'prices',    'icon': '\U0001f4b0', 'label': '工价管理',   'desc': '管理工序工价路线'},
+            {'page': 'users',     'icon': '\U0001f465', 'label': '员工管理',   'desc': '管理用户和权限'},
+            {'page': 'stats',     'icon': '\U0001f4c8', 'label': '统计报表',   'desc': '查看生产和质量报表'},
+            {'page': 'board',     'icon': '\U0001f4fa', 'label': '数据看板',   'desc': '车间实时生产大屏'},
+            {'page': 'settings',  'icon': '\u2699\ufe0f', 'label': '系统设置',   'desc': '系统配置与权限管理'},
         ],
         'delivery_warnings': {
             'overdue': [dict(r) for r in overdue_rows],
             'approaching': [dict(r) for r in approaching_rows],
             'warning_days': warning_days,
         },
+    })
+
+
+@app.route('/api/dashboard/security', methods=['GET'])
+@check_auth
+@check_permission('settings:manage')
+def dashboard_security():
+    """Security stats - admin only."""
+    db = get_db()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # Combined security stats (single query)
+    sec_stats = db.execute('''
+        SELECT
+          (SELECT COUNT(*) FROM users WHERE locked_until IS NOT NULL AND locked_until > datetime('now','localtime')) as locked_users,
+          (SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=0) as today_failed_logins,
+          (SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=1) as today_success_logins
+    ''', (today, today)).fetchone()
+
+    suspicious_ips = db.execute('''
+        SELECT COUNT(*) FROM (
+          SELECT DISTINCT ip_address FROM login_logs
+          WHERE success = 1 AND DATE(created_at) = ?
+          EXCEPT
+          SELECT DISTINCT ip_address FROM login_logs
+          WHERE success = 1 AND DATE(created_at) < ? AND created_at > datetime('now','-7 days')
+        )
+    ''', (today, today)).fetchone()[0]
+
+    return jsonify({
+        'locked_users': sec_stats['locked_users'],
+        'today_failed_logins': sec_stats['today_failed_logins'],
+        'today_success_logins': sec_stats['today_success_logins'],
+        'suspicious_ips': suspicious_ips,
     })

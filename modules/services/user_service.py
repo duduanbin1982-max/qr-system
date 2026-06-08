@@ -142,7 +142,7 @@ class UserService:
     # ============================================================
 
     @staticmethod
-    def update_user(uid, data):
+    def update_user(uid, data, current_user_id=None):
         """
         更新用户信息。
 
@@ -179,24 +179,31 @@ class UserService:
                     raise ValueError('部分工序ID不存在')
 
         old_role = existing['role']
-        field_map = {
-            'name': 'name', 'nickname': 'nickname', 'email': 'email',
-            'group_name': 'group_name', 'role': 'role', 'employee_no': 'employee_no',
-            'phone': 'phone', 'process_ids': 'process_ids', 'status': 'status',
-            'position_id': 'position_id'
-        }
+
+        # C1: Only admins can change roles, and you cannot change your own
+        if 'role' in data and data['role'] != old_role:
+            if current_user_id is None:
+                raise ValueError('Only administrators can change roles')
+            if current_user_id == uid:
+                raise ValueError('Cannot change your own role')
+            admin_check = db.execute(
+                'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (current_user_id,)
+            ).fetchone()
+            if not admin_check:
+                raise ValueError('Only administrators can change roles')
+
         sets = []
         params = []
         for field in ['name', 'nickname', 'email', 'group_name', 'role', 'employee_no',
                        'phone', 'process_ids', 'status', 'position_id']:
             if field in data:
-                sets.append(f'{field_map[field]} = ?')
+                sets.append(f'{field} = ?')
                 params.append(data[field])
         if 'password' in data and data['password']:
             sets.append('password = ?')
             params.append(bcrypt.hashpw(data['password'].encode(), bcrypt.gensalt(rounds=12)).decode())
         if not sets:
-            raise ValueError('无更新内容')
+            raise ValueError('No update fields provided')
 
         with BaseService.transaction() as txn:
             params.append(uid)
@@ -235,7 +242,17 @@ class UserService:
         if not user:
             raise ValueError('用户不存在')
         if user['username'] == 'admin':
-            raise ValueError('不能删除系统内置管理员')
+            raise ValueError('Cannot delete the built-in admin account')
+
+        # C2 FIX: Don't delete the last admin
+        admin_count = db.execute(
+            'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
+        ).fetchone()[0]
+        is_admin = db.execute(
+            'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (uid,)
+        ).fetchone()
+        if is_admin and admin_count <= 1:
+            raise ValueError('Cannot delete the last administrator')
 
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM user_roles WHERE user_id = ?', (uid,))

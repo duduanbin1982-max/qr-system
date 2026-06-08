@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    container_name: qr-system
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+      - ./server.crt:/app/server.crt:ro
+      - ./server.key:/app/server.key:ro
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-sk", "https://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Optional: Nginx reverse proxy (use if you want port 80/443)
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: qr-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-docker.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./server.crt:/etc/nginx/ssl/server.crt:ro
+      - ./server.key:/etc/nginx/ssl/server.key:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    profiles:
+      - with-nginx
+er
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('https://127.0.0.1:3000/api/health')" || exit 1
+
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "server:app"]

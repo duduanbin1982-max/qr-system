@@ -43,6 +43,15 @@ import modules.routes.rework     # 返工管理
 import modules.routes.quality   # 质量检验
 import modules.routes.stats     # 统计报表
 
+import modules.routes.exports      # Excel export
+import modules.routes.notifications  # 通百中心
+import modules.routes.password_security  # 密码安全Bpassword policy
+import modules.routes.imports         # CSV/Excel bulk import
+import modules.routes.order_notes    # order remark history
+import modules.routes.personal_stats # personal mobile stats
+import modules.routes.email_reports  # email reports
+import modules.routes.progress       # process progress + delivery alerts
+import modules.routes.system         # health, backup, integrity checks
 # CORS + OPTIONS 统一在 app.py 的 @app.after_request 中处理
 
 # ============================================================
