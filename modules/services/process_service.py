@@ -33,6 +33,10 @@ class ProcessService:
         if conditions:
             sql += ' WHERE ' + ' AND '.join(conditions)
         sql += f' ORDER BY {sort_by} {sort_dir}, id {sort_dir}'
+        category_counts = {}
+        for r in db.execute("SELECT category, COUNT(*) as cnt FROM processes GROUP BY category").fetchall():
+            category_counts[r['category']] = r['cnt']
+
         if limit:
             # 分页：先查总数
             count_sql = 'SELECT COUNT(*) FROM processes'
@@ -42,9 +46,9 @@ class ProcessService:
             sql += ' LIMIT ? OFFSET ?'
             params.extend([limit, offset])
             rows = db.execute(sql, params).fetchall()
-            return {'processes': [dict(r) for r in rows], 'total': total}
+            return {'processes': [dict(r) for r in rows], 'total': total, 'category_counts': category_counts}
         rows = db.execute(sql, params).fetchall()
-        return {'processes': [dict(r) for r in rows]}
+        return {'processes': [dict(r) for r in rows], 'total': len(rows), 'category_counts': category_counts}
 
     @staticmethod
     def create_process(data):
@@ -110,10 +114,13 @@ class ProcessService:
             raise ValueError('无更新内容')
 
         with BaseService.transaction() as txn:
-            txn.execute(
-                f'UPDATE processes SET {", ".join(sets)} WHERE id = ?',
-                params + [pid]
-            )
+            try:
+                txn.execute(
+                    f'UPDATE processes SET {", ".join(sets)} WHERE id = ?',
+                    params + [pid]
+                )
+            except sqlite3.IntegrityError:
+                raise ValueError(f'工序名称已存在，不能重复')
 
     @staticmethod
     def delete_process(pid):

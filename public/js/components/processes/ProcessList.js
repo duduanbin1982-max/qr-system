@@ -74,6 +74,10 @@ export default {
         const d = await api.listProcesses(params)
         processes.value = d.processes || []
         total.value = d.total || 0
+        if (d.category_counts) {
+          structCount.value = d.category_counts['???'] || 0
+          machCount.value = d.category_counts['???'] || 0
+        }
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
       } finally {
