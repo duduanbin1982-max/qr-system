@@ -1,0 +1,19 @@
+<div style="padding:var(--space-6)">
+    <h2 style="margin:0 0 16px 0;font-size:var(--text-2xl);font-weight:600">🏭 生产管理</h2>
+    <div style="display:flex;gap:var(--space-1);margin-bottom:var(--space-5);border-bottom:2px solid var(--border-light);padding-bottom:0;overflow-x:auto">
+      <button v-for="t in tabs" :key="t.key"
+        @click="switchTab(t.key)"
+        :style="{padding:'10px 18px',border:'none',background:'transparent',cursor:'pointer',fontSize:'14px',fontWeight:activeTab===t.key?'600':'400',color:activeTab===t.key?'var(--primary)':'var(--text-placeholder)',borderBottom:activeTab===t.key?'2px solid var(--primary)':'2px solid transparent',marginBottom:'-2px',whiteSpace:'nowrap',transition:'all .15s'}">
+        {{ t.label }}
+      </button>
+    </div>
+
+    <div v-show="activeTab==='orders'"     style="margin:-16px -24px"><OrderList      v-if="loaded.orders" /></div>
+    <div v-show="activeTab==='customers'"  style="margin:-16px -24px"><CustomerList   v-if="loaded.customers" /></div>
+    <div v-show="activeTab==='materials'"  style="margin:-16px -24px"><MaterialList   v-if="loaded.materials" /></div>
+    <div v-show="activeTab==='trace'"      style="margin:-16px -24px"><TracePage      v-if="loaded.trace" /></div>
+    <div v-show="activeTab==='approvals'"  style="margin:-16px -24px"><ApprovalPage   v-if="loaded.approvals" /></div>
+    <div v-show="activeTab==='schedule'"   style="margin:-16px -24px"><GanttChart     v-if="loaded.schedule" /></div>
+    <div v-show="activeTab==='rework'"     style="margin:-16px -24px"><ReworkList     v-if="loaded.rework" /></div>
+    <div v-show="activeTab==='quality'"    style="margin:-16px -24px"><InspectionList v-if="loaded.quality" /></div>
+  </div>

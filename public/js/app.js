@@ -18,6 +18,7 @@ import TracePage   from './components/trace/TracePage.js'
 import ApprovalPage from './components/approvals/ApprovalPage.js'
 import SettingsPage from './components/settings/SettingsPage.js'
 import BasicSettingsPage from './components/settings/BasicSettings.js'
+import ProductionSettings from './components/settings/ProductionSettings.js'
 import ReportsPage from './components/reports/ReportsPage.js'
 import BoardPage   from './components/board/BoardPage.js'
 import CustomerList from './components/customers/CustomerList.js'
@@ -60,6 +61,7 @@ const app = createApp({
     ApprovalPage,
     SettingsPage,
     BasicSettingsPage,
+    ProductionSettings,
     ReportsPage,
     BoardPage,
   },
@@ -124,6 +126,7 @@ const app = createApp({
         'approvals': 'ApprovalPage',
         'settings': 'SettingsPage',
         'basic-settings': 'BasicSettingsPage',
+        'production': 'ProductionSettings',
         'reports': 'ReportsPage',
         'board': 'BoardPage',
       }
@@ -133,21 +136,14 @@ const app = createApp({
     // 侧边栏菜单（支持二级子菜单 + 权限控制）
     const sidebarItems = [
       { page: 'dashboard', icon: '📊', label: '工作台',       required: null },
-      { page: 'orders',    icon: '📋', label: '订单管理',     required: 'orders:view' },
-      { page: 'scan',      icon: '📱', label: '扫码报工',     required: 'scan:view' },
       { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: null },
-      { page: 'customers', icon: '🏢', label: '客户管理',     required: 'customers:view' },
+      { page: 'production', icon: '🏭', label: '生产管理',     required: null },
+      { page: 'scan',      icon: '📱', label: '扫码报工',     required: 'scan:view' },
       { page: 'inventory', icon: '🏗️', label: '库存管理',     required: 'inventory:view' },
-      { page: 'materials', icon: '📦', label: '物料管理',     required: 'materials:view' },
       { page: 'shipments', icon: '🚚', label: '发货管理',     required: 'shipments:view' },
       { page: 'stats',     icon: '📈', label: '统计报表',     required: 'stats:view' },
-      { page: 'trace',     icon: '🔍', label: '产品追溯',     required: 'trace:view' },
-      { page: 'approvals', icon: '✅', label: '审批管理',     required: 'approvals:view' },
       { page: 'board',     icon: '📺', label: '数据看板',     required: 'board:view' },
       { page: 'reports',   icon: '📊', label: '数据分析',     required: 'reports:view' },
-      { page: 'schedule',  icon: '📅', label: '生产排程',     required: 'schedule:view' },
-      { page: 'rework',    icon: '🔧', label: '返工管理',     required: 'orders:view' },
-      { page: 'quality',   icon: '🔍', label: '质量检验',     required: 'orders:view' },
       { page: 'wages',     icon: '💰', label: '工资核算',     required: 'orders:view' },
       { page: 'settings',  icon: '⚙️', label: '系统设置',     required: 'settings:manage' },
     ]
