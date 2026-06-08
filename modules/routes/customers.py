@@ -8,6 +8,7 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 from modules.services.customer_service import CustomerService
 
@@ -33,13 +34,16 @@ def list_customers():
     security:
       - Bearer: []
     """
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     keyword = request.args.get('keyword', '').strip()
-    return jsonify(CustomerService.list_customers(keyword))
+    return jsonify(CustomerService.list_customers(keyword, page, limit))
 
 
 @app.route('/api/customers', methods=['POST'])
 @check_auth
 @check_permission('customers:create')
+@validate_json('create_customer')
 def create_customer():
     """
     创建客户
@@ -93,6 +97,7 @@ def create_customer():
 @app.route('/api/customers/<int:cid>', methods=['PUT'])
 @check_auth
 @check_permission('customers:edit')
+@validate_json('update_customer')
 def update_customer(cid):
     """
     更新客户
@@ -201,4 +206,6 @@ def customer_orders(cid):
     security:
       - Bearer: []
     """
-    return jsonify(CustomerService.get_customer_orders(cid))
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 50, type=int), 1), 200)
+    return jsonify(CustomerService.get_customer_orders(cid, page, limit))

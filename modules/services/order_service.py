@@ -470,10 +470,11 @@ class OrderService:
         if not existing['deleted_at']:
             raise ValueError('订单不在回收站中')
 
+        old_status = existing['status'] if 'status' in existing.keys() else 'pending'
         with BaseService.transaction() as txn:
             txn.execute(
-                "UPDATE orders SET deleted_at = NULL, deleted_by = NULL, status = 'pending' WHERE id = ?",
-                (oid,)
+                "UPDATE orders SET deleted_at = NULL, deleted_by = NULL, status = ? WHERE id = ?",
+                (old_status, oid)
             )
         return existing['order_no']
 
@@ -532,6 +533,7 @@ class OrderService:
 
             for i, o in enumerate(orders_data):
                 order_no = str(o.get('order_no', '')).strip()
+                route_id = o.get('route_id')
                 if not order_no:
                     errors.append(f'第{i+1}行: 订单号为空')
                     continue
@@ -560,13 +562,25 @@ class OrderService:
                         o.get('route_id')
                     ))
                     oid = cur.lastrowid
-                    for pid in proc_ids:
-                        proc = txn.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
-                        if proc:
+                    # Assign processes: use route_id if specified, else all active
+                    if route_id:
+                        route_items = txn.execute(
+                            'SELECT process_id, seq_order FROM process_route_items WHERE route_id = ? ORDER BY seq_order',
+                            (route_id,)
+                        ).fetchall()
+                        for item in route_items:
                             txn.execute(
                                 'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                                (oid, pid, proc['seq_order'])
+                                (oid, item['process_id'], item['seq_order'])
                             )
+                    else:
+                        for pid in proc_ids:
+                            proc = txn.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
+                            if proc:
+                                txn.execute(
+                                    'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
+                                    (oid, pid, proc['seq_order'])
+                                )
                     created += 1
                 except Exception as e:
                     errors.append(f'第{i+1}行: {str(e)}')

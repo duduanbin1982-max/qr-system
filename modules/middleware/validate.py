@@ -139,7 +139,116 @@ SCHEMAS = {
         },
         'additionalProperties': False,
     },
-    'update_user': {
+
+    'create_material': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'spec': {'type': 'string', 'maxLength': 128},
+            'unit': {'type': 'string', 'maxLength': 32},
+            'stock': {'type': 'number', 'minimum': 0},
+            'min_stock': {'type': 'number', 'minimum': 0},
+            'price': {'type': 'number', 'minimum': 0},
+        },
+        'additionalProperties': False,
+    },
+    'create_supplier': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'contact': {'type': 'string', 'maxLength': 64},
+            'phone': {'type': 'string', 'maxLength': 32},
+            'address': {'type': 'string', 'maxLength': 256},
+        },
+        'additionalProperties': False,
+    },
+    'create_customer': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'contact': {'type': 'string', 'maxLength': 64},
+            'phone': {'type': 'string', 'maxLength': 32},
+            'email': {'type': 'string', 'maxLength': 128},
+            'address': {'type': 'string', 'maxLength': 256},
+            'remark': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+    'update_customer': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'contact': {'type': 'string', 'maxLength': 64},
+            'phone': {'type': 'string', 'maxLength': 32},
+            'email': {'type': 'string', 'maxLength': 128},
+            'address': {'type': 'string', 'maxLength': 256},
+            'remark': {'type': 'string', 'maxLength': 512},
+        },
+        'additionalProperties': False,
+    },
+    'process_price': {
+        'type': 'object',
+        'required': ['process_id', 'unit_price'],
+        'properties': {
+            'process_id': {'type': 'integer', 'minimum': 1},
+            'unit_price': {'type': 'number', 'minimum': 0},
+            'description': {'type': 'string', 'maxLength': 256},
+        },
+        'additionalProperties': False,
+    },
+    'route_price': {
+        'type': 'object',
+        'required': ['route_id', 'process_id', 'unit_price'],
+        'properties': {
+            'route_id': {'type': 'integer', 'minimum': 1},
+            'process_id': {'type': 'integer', 'minimum': 1},
+            'unit_price': {'type': 'number', 'minimum': 0},
+        },
+        'additionalProperties': False,
+    },
+    'process_route': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'description': {'type': 'string', 'maxLength': 512},
+            'process_ids': {
+                'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50
+            },
+        },
+        'additionalProperties': False,
+    },
+    'batch_orders': {
+        'type': 'object',
+        'required': ['orders'],
+        'properties': {
+            'orders': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['order_no'],
+                    'properties': {
+                        'order_no': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+                        'customer': {'type': 'string', 'maxLength': 128},
+                        'product_name': {'type': 'string', 'maxLength': 128},
+                        'quantity': {'type': 'integer', 'minimum': 1, 'maximum': 99999},
+                        'plan_start': {'type': 'string', 'maxLength': 32},
+                        'plan_end': {'type': 'string', 'maxLength': 32},
+                        'deadline': {'type': 'string', 'maxLength': 32},
+                        'remark': {'type': 'string', 'maxLength': 1024},
+                    },
+                    'additionalProperties': True,
+                },
+                'maxItems': 200,
+            },
+        },
+        'additionalProperties': False,
+    },
+
+'update_user': {
         'type': 'object',
         'properties': {
             'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},

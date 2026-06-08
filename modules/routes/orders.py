@@ -87,16 +87,14 @@ def create_order():
         OrderService._assign_processes(db, order_id, route_id=route_id, process_ids=process_ids)
 
         db.commit()
+        try:
+            audit_log('create_order', 'order', order_id, order_no)
+        except Exception:
+            pass
         return jsonify({'message': '创建成功', 'id': order_id})
     except Exception as e:
         db.execute('ROLLBACK')
         return jsonify({'error': f'创建失败: {e}'}), 500
-
-    # audit_log after commit (outside try to avoid false rollback)
-    try:
-        audit_log('create_order', 'order', order_id, order_no)
-    except Exception:
-        pass  # 日志失败不影响业务
 
 
 @app.route('/api/orders/<int:oid>', methods=['PUT'])
@@ -169,17 +167,15 @@ def update_order(oid):
                 db.commit()
             except Exception:
                 pass
+        try:
+            safe_data = {k:v for k,v in data.items() if k not in ('password', 'token', 'process_ids')}
+            audit_log('update_order', 'order', oid, str(safe_data))
+        except Exception:
+            pass
         return jsonify({'message': '更新成功'})
     except Exception as e:
         db.execute('ROLLBACK')
-        return jsonify({'error': f'更新失败: {e}'}), 500
-
-    # audit_log after commit (outside try to avoid false rollback)
-    try:
-        safe_data = {k:v for k,v in data.items() if k not in ('password', 'token', 'process_ids')}
-        audit_log('update_order', 'order', oid, str(safe_data))
-    except Exception:
-        pass  # 日志失败不影响业务
+        return jsonify({'error': f'更新失败: {e}'}), 500  # 日志失败不影响业务
 
 
 @app.route('/api/orders/<int:oid>', methods=['DELETE'])
@@ -360,6 +356,7 @@ def get_order_shipments(oid):
 @app.route('/api/orders/batch', methods=['POST'])
 @check_auth
 @check_permission('orders:create')
+@validate_json('batch_orders')
 def batch_create_orders():
     data = get_json_body()
     orders_data = data.get('orders', [])

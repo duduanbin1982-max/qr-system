@@ -5,6 +5,7 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 from modules.services.route_service import ProcessRouteService
 
@@ -33,6 +34,7 @@ def get_process_routes():
 @app.route('/api/process-routes', methods=['POST'])
 @check_auth
 @check_permission('routes:create')
+@validate_json('process_route')
 def create_process_route():
     """创建工序路线"""
     data = get_json_body()
@@ -50,6 +52,7 @@ def create_process_route():
 @app.route('/api/process-routes/<int:rid>', methods=['PUT'])
 @check_auth
 @check_permission('routes:edit')
+@validate_json('process_route')
 def update_process_route(rid):
     """更新工序路线"""
     data = get_json_body()

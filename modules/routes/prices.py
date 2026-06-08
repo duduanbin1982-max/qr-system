@@ -10,6 +10,7 @@ from flask import request, jsonify, send_file
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 from modules.services.price_service import ProcessPriceService, RoutePriceService, WageService
 
@@ -30,6 +31,7 @@ def list_process_prices():
 @app.route('/api/process-prices', methods=['POST'])
 @check_auth
 @check_permission('prices:create')
+@validate_json('process_price')
 def create_process_price():
     data = get_json_body()
     try:
@@ -46,6 +48,7 @@ def create_process_price():
 @app.route('/api/process-prices/<int:pid>', methods=['PUT'])
 @check_auth
 @check_permission('prices:edit')
+@validate_json('process_price')
 def update_process_price(pid):
     data = get_json_body()
     try:

@@ -9,6 +9,7 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.validate import validate_json
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
 
@@ -63,6 +64,7 @@ def create_material():
 @app.route('/api/materials/<int:mid>', methods=['PUT'])
 @check_auth
 @check_permission('materials:manage')
+@validate_json('create_material')
 def update_material(mid):
     data = get_json_body()
     db = get_db()
@@ -129,6 +131,7 @@ def material_logs(mid):
 @app.route('/api/materials/<int:mid>/stock', methods=['POST'])
 @check_auth
 @check_permission('materials:manage')
+@validate_json('create_material')
 def material_stock(mid):
     data = get_json_body()
     change_type = data.get('type', '').strip()  # 'in' or 'out'
@@ -276,6 +279,7 @@ def list_suppliers():
 @app.route('/api/suppliers', methods=['POST'])
 @check_auth
 @check_permission('materials:manage')
+@validate_json('create_supplier')
 def create_supplier():
     try:
         data = get_json_body()
@@ -298,6 +302,7 @@ def create_supplier():
 @app.route('/api/suppliers/<int:sid>', methods=['PUT'])
 @check_auth
 @check_permission('materials:manage')
+@validate_json('create_supplier')
 def update_supplier(sid):
     try:
         data = get_json_body()

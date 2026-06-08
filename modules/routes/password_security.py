@@ -4,6 +4,7 @@ from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 import bcrypt
 
@@ -24,6 +25,7 @@ def validate_password_strength(password):
 @app.route('/api/auth/reset-password/<int:user_id>', methods=['POST'])
 @check_auth
 @check_permission('users:edit')
+@validate_json('change_password')
 def admin_reset_password(user_id):
     """Admin resets a user password."""
     data = get_json_body()

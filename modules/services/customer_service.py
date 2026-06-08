@@ -10,7 +10,7 @@ class CustomerService:
     """客户管理业务逻辑。"""
 
     @staticmethod
-    def list_customers(keyword=''):
+    def list_customers(keyword=None, page=1, limit=100):
         """客户列表（支持搜索）。"""
         db = BaseService.db()
         where = '1=1'
@@ -18,10 +18,15 @@ class CustomerService:
         if keyword:
             where += ' AND (name LIKE ? OR contact LIKE ? OR phone LIKE ?)'
             params.extend([f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'])
+        total = db.execute(
+            f'SELECT COUNT(*) FROM customers WHERE {where}', params
+        ).fetchone()[0]
+        offset = (page - 1) * limit
         rows = db.execute(
-            f'SELECT * FROM customers WHERE {where} ORDER BY id DESC', params
+            f'SELECT * FROM customers WHERE {where} ORDER BY id DESC LIMIT ? OFFSET ?',
+            params + [limit, offset]
         ).fetchall()
-        return {'customers': [dict(r) for r in rows]}
+        return {'customers': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
     def create_customer(data):
@@ -77,21 +82,33 @@ class CustomerService:
     @staticmethod
     def delete_customer(cid):
         """删除客户。FK RESTRICT 保证有订单的客户无法删除。"""
+        db = BaseService.db()
+        cust = db.execute('SELECT id FROM customers WHERE id = ?', (cid,)).fetchone()
+        if not cust:
+            raise ValueError('客户不存在')
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM customers WHERE id = ?', (cid,))
 
     @staticmethod
-    def get_customer_orders(cid):
+    def get_customer_orders(cid, page=1, limit=50):
         """获取客户的订单历史（含工序详情和 extra_fields 解析）。"""
         import json
         db = BaseService.db()
-        rows = db.execute('''
-            SELECT o.*, pr.name as route_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            WHERE o.customer_id = ? AND o.deleted_at IS NULL
-            ORDER BY o.created_at DESC
-        ''', (cid,)).fetchall()
+        cust = db.execute('SELECT id FROM customers WHERE id = ?', (cid,)).fetchone()
+        if not cust:
+            raise ValueError('客户不存在')
+        total = db.execute(
+            'SELECT COUNT(*) FROM orders WHERE customer_id = ? AND deleted_at IS NULL',
+            (cid,)
+        ).fetchone()[0]
+        offset = (page - 1) * limit
+        rows = db.execute(
+            'SELECT o.*, pr.name as route_name FROM orders o'
+            ' LEFT JOIN process_routes pr ON o.route_id = pr.id'
+            ' WHERE o.customer_id = ? AND o.deleted_at IS NULL'
+            ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?',
+            (cid, limit, offset)
+        ).fetchall()
 
         result = []
         for row in rows:
@@ -100,11 +117,12 @@ class CustomerService:
                 o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
             except Exception:
                 o['extra_fields'] = {}
-            procs = db.execute('''
-                SELECT op.*, p.name as process_name
-                FROM order_processes op JOIN processes p ON op.process_id = p.id
-                WHERE op.order_id = ? ORDER BY op.seq_order
-            ''', (o['id'],)).fetchall()
+            procs = db.execute(
+                'SELECT op.*, p.name as process_name'
+                ' FROM order_processes op JOIN processes p ON op.process_id = p.id'
+                ' WHERE op.order_id = ? ORDER BY op.seq_order',
+                (o['id'],)
+            ).fetchall()
             o['processes'] = [dict(p) for p in procs]
             result.append(o)
-        return {'orders': result}
+        return {'orders': result, 'total': total, 'page': page, 'limit': limit}
