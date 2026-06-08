@@ -136,7 +136,6 @@ const app = createApp({
     // 侧边栏菜单（支持二级子菜单 + 权限控制）
     const sidebarItems = [
       { page: 'dashboard', icon: '📊', label: '工作台',       required: null },
-      { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: null },
       { page: 'production', icon: '🏭', label: '生产管理',     required: null },
       { page: 'scan',      icon: '📱', label: '扫码报工',     required: 'scan:view' },
       { page: 'inventory', icon: '🏗️', label: '库存管理',     required: 'inventory:view' },
@@ -145,6 +144,7 @@ const app = createApp({
       { page: 'board',     icon: '📺', label: '数据看板',     required: 'board:view' },
       { page: 'reports',   icon: '📊', label: '数据分析',     required: 'reports:view' },
       { page: 'wages',     icon: '💰', label: '工资核算',     required: 'orders:view' },
+      { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: null },
       { page: 'settings',  icon: '⚙️', label: '系统设置',     required: 'settings:manage' },
     ]
 
