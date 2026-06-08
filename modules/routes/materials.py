@@ -20,12 +20,17 @@ from modules.middleware.helpers import get_json_body
 def list_materials():
     try:
         db = get_db()
+        page = max(request.args.get('page', 1, type=int), 1)
+        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+        total = db.execute('SELECT COUNT(*) FROM materials').fetchone()[0]
+        offset = (page - 1) * limit
         rows = db.execute(
-            '''SELECT m.*, s.name as supplier_name
-               FROM materials m LEFT JOIN suppliers s ON m.supplier_id = s.id
-               ORDER BY m.id DESC'''
+            'SELECT m.*, s.name as supplier_name'
+            ' FROM materials m LEFT JOIN suppliers s ON m.supplier_id = s.id'
+            ' ORDER BY m.id DESC LIMIT ? OFFSET ?',
+            (limit, offset)
         ).fetchall()
-        return jsonify({'materials': [dict(r) for r in rows]})
+        return jsonify({'materials': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -39,6 +44,9 @@ def create_material():
     if not name:
         return jsonify({'error': '物料名称不能为空'}), 400
     db = get_db()
+    existing = db.execute('SELECT id FROM materials WHERE name = ?', (name,)).fetchone()
+    if existing:
+        return jsonify({'error': f'物料名称【{name}】已存在'}), 409
     db.execute('BEGIN IMMEDIATE')
     try:
         db.execute(
@@ -102,8 +110,15 @@ def update_material(mid):
 @check_permission('materials:manage')
 def delete_material(mid):
     db = get_db()
+    mat = db.execute('SELECT id, name FROM materials WHERE id = ?', (mid,)).fetchone()
+    if not mat:
+        return jsonify({'error': '物料不存在'}), 404
+    refs = db.execute('SELECT COUNT(*) as cnt FROM material_consumptions WHERE material_id = ?', (mid,)).fetchone()
+    if refs and refs['cnt'] > 0:
+        return jsonify({'error': f'物料【{mat["name"]}】已被 {refs["cnt"]} 条消耗记录引用，无法删除'}), 409
     try:
         db.execute("BEGIN IMMEDIATE")
+        db.execute('DELETE FROM material_logs WHERE material_id = ?', (mid,))
         db.execute('DELETE FROM materials WHERE id = ?', (mid,))
         db.commit()
         return jsonify({'message': 'deleted'})
@@ -119,11 +134,17 @@ def delete_material(mid):
 def material_logs(mid):
     try:
         db = get_db()
+        page = max(request.args.get('page', 1, type=int), 1)
+        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+        total = db.execute(
+            'SELECT COUNT(*) FROM material_logs WHERE material_id = ?', (mid,)
+        ).fetchone()[0]
+        offset = (page - 1) * limit
         rows = db.execute(
-            'SELECT * FROM material_logs WHERE material_id = ? ORDER BY created_at DESC LIMIT 100',
-            (mid,)
+            'SELECT * FROM material_logs WHERE material_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            (mid, limit, offset)
         ).fetchall()
-        return jsonify({'logs': [dict(r) for r in rows]})
+        return jsonify({'logs': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -270,8 +291,15 @@ def material_consumption_delete(cid):
 def list_suppliers():
     try:
         db = get_db()
-        rows = db.execute('SELECT * FROM suppliers ORDER BY name').fetchall()
-        return jsonify({'suppliers': [dict(r) for r in rows]})
+        page = max(request.args.get('page', 1, type=int), 1)
+        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+        total = db.execute('SELECT COUNT(*) FROM suppliers').fetchone()[0]
+        offset = (page - 1) * limit
+        rows = db.execute(
+            'SELECT * FROM suppliers ORDER BY name LIMIT ? OFFSET ?',
+            (limit, offset)
+        ).fetchall()
+        return jsonify({'suppliers': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -326,8 +354,14 @@ def update_supplier(sid):
 @check_auth
 @check_permission('materials:manage')
 def delete_supplier(sid):
+    db = get_db()
+    sup = db.execute('SELECT id, name FROM suppliers WHERE id=?', (sid,)).fetchone()
+    if not sup:
+        return jsonify({'error': '供应商不存在'}), 404
+    refs = db.execute('SELECT COUNT(*) as cnt FROM materials WHERE supplier_id = ?', (sid,)).fetchone()
+    if refs and refs['cnt'] > 0:
+        return jsonify({'error': f'供应商【{sup["name"]}】被 {refs["cnt"]} 个物料引用，无法删除'}), 409
     try:
-        db = get_db()
         db.execute("BEGIN IMMEDIATE")
         db.execute('DELETE FROM suppliers WHERE id=?', (sid,))
         db.commit()
