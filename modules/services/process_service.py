@@ -117,23 +117,25 @@ class ProcessService:
 
     @staticmethod
     def delete_process(pid):
-        """
-        删除工序（级联清理关联数据）。
-
-        注意：material_consumptions 的 FK 无 ON DELETE CASCADE，
-        需显式清理。其余子表（order_processes/work_records/scrap/
-        quality/rework/prices/route_items/positions）有 CASCADE 自动处理。
-
-        Raises ValueError on not found or already used in production.
-        """
+        """Delete process with impact audit."""
         db = BaseService.db()
         existing = db.execute(
             'SELECT id, name FROM processes WHERE id = ?', (pid,)
         ).fetchone()
         if not existing:
-            raise ValueError('工序不存在')
+            raise ValueError('process not found')
+
+        # Count affected records
+        impact = {}
+        for tbl in ['work_records','scrap_records','rework_records',
+                     'quality_inspections','process_prices','process_route_items',
+                     'order_processes','position_processes','material_consumptions']:
+            cnt = db.execute(f'SELECT COUNT(*) FROM {tbl} WHERE process_id = ?', (pid,)).fetchone()[0]
+            if cnt > 0:
+                impact[tbl] = cnt
 
         with BaseService.transaction() as txn:
-            # 清理无 CASCADE 的物料消耗引用
             txn.execute('DELETE FROM material_consumptions WHERE process_id = ?', (pid,))
             txn.execute('DELETE FROM processes WHERE id = ?', (pid,))
+
+        return {'name': existing['name'], 'impact': impact}

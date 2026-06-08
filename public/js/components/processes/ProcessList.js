@@ -136,8 +136,28 @@ export default {
       }
     }
 
-    async function del(p) {
-      if (!confirm('确定删除工序 "' + p.process_name + '" 吗？\n关联的路线明细、工价、报工记录、物料消耗等数据也将一并清除。')) return
+        async function del(p) {
+      var impactMsg = ''
+      try {
+        var impactRes = await api.get('/api/processes/' + p.id + '/impact')
+        var impact = impactRes.impact || {}
+        var labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
+          quality_inspections:'质检记录', process_prices:'工价记录', process_route_items:'路线工序关联',
+          order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
+        var keys = Object.keys(impact)
+        if (keys.length > 0) {
+          impactMsg = '
+
+将级联删除以下数据：
+'
+          for (var i = 0; i < keys.length; i++) {
+            impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条
+'
+          }
+        }
+      } catch(e) {}
+      if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '
+此操作不可恢复！')) return
       try {
         await api.deleteProcess(p.id)
         showToast('删除成功')
@@ -146,11 +166,6 @@ export default {
         showToast(e.message || '删除失败', 'error')
       }
     }
-
-    onMounted(() => {
-      filterCategory.value = categoryFromPage(router.page)
-      load()
-    })
 
     // 监听路由变化，切换分类并重新加载
     watch(() => router.page, (page) => {

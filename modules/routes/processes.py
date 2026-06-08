@@ -101,6 +101,26 @@ def update_process(pid):
     return jsonify({'message': '更新成功'})
 
 
+@app.route('/api/processes/<int:pid>/impact', methods=['GET'])
+@check_auth
+@check_permission('processes:view')
+def process_impact(pid):
+    """查询删除工序的影响范围（不实际删除）。"""
+    from modules.db import get_db
+    db = get_db()
+    existing = db.execute('SELECT id, name FROM processes WHERE id = ?', (pid,)).fetchone()
+    if not existing:
+        return jsonify({'error': '工序不存在'}), 404
+    impact = {}
+    for tbl in ['work_records','scrap_records','rework_records',
+                'quality_inspections','process_prices','process_route_items',
+                'order_processes','position_processes','material_consumptions']:
+        cnt = db.execute(f'SELECT COUNT(*) FROM {tbl} WHERE process_id = ?', (pid,)).fetchone()[0]
+        if cnt > 0:
+            impact[tbl] = cnt
+    return jsonify({'process_id': pid, 'name': existing['name'], 'impact': impact})
+
+
 @app.route('/api/processes/<int:pid>', methods=['DELETE'])
 @check_auth
 @check_permission('processes:delete')
@@ -117,11 +137,12 @@ def delete_process(pid):
       - Bearer: []
     """
     try:
-        ProcessService.delete_process(pid)
+        result = ProcessService.delete_process(pid)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+        return jsonify({'error': str(e)}), 404 if 'not found' in str(e).lower() else 400
     try:
-        audit_log('delete_process', 'process', pid)
+        audit_log('delete_process', 'process', pid,
+                  f'name={result.get("name","")} impact={result.get("impact",{})}')
     except Exception as e:
         app.logger.warning('audit_log failed: %s', e)
-    return jsonify({'message': '删除成功'})
+    return jsonify({'message': '删除成功', 'impact': result.get('impact', {})})

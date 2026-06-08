@@ -358,8 +358,19 @@ SCHEMAS = {
         'properties': {
             'name': {'type': 'string', 'minLength': 1, 'maxLength': 128},
             'description': {'type': 'string', 'maxLength': 512},
-            'process_ids': {
-                'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50
+            'category': {'type': 'string', 'maxLength': 64},
+            'processes': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['process_id'],
+                    'properties': {
+                        'process_id': {'type': 'integer', 'minimum': 1},
+                        'required_audit': {'type': 'integer', 'minimum': 0, 'maximum': 1},
+                    },
+                    'additionalProperties': False,
+                },
+                'maxItems': 50,
             },
         },
         'additionalProperties': False,
