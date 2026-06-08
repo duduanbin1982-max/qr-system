@@ -132,7 +132,7 @@
 .qr-mode-tabs { display: flex; gap: 0; background: var(--bg-hover); border-radius: 10px; padding: 4px; margin-bottom: 12px; }
 .qr-mode-tab { flex: 1; text-align: center; padding: 10px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; border: none; background: transparent; color: var(--text-placeholder); }
 .qr-mode-tab.active { background: white; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.qr-control-bar { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+.qr-control-bar { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: nowrap; margin-bottom: 16px; }
 .qr-control-group { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; color: var(--text-placeholder); }
 .qr-control-group select, .qr-control-group input { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; background: white; }
 .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; justify-items: center; }
@@ -149,7 +149,7 @@
 .qr-card .qr-label-code { font-size: var(--text-2xs); color: var(--text-placeholder); }
 .qr-card-actions { display: flex; gap: var(--space-2); justify-content: center; width: 100%; }
 .qr-print-order-info { 
-  display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; 
+  display: flex; gap: 16px; flex-wrap: nowrap; margin-bottom: 12px; 
   padding: 12px 16px; background: linear-gradient(135deg, #EEF2FF, #F5F3FF); 
   border-radius: 10px; font-size: 13px; color: var(--text-secondary); border: 1px solid var(--primary-light);
 }
@@ -346,7 +346,7 @@
   .inv-stat-card { padding: 10px 12px; gap: var(--space-3); }
   .inv-stat-icon { width: 36px; height: 36px; font-size: 16px; }
   .inv-stat-val { font-size: 18px; }
-  .inv-actions { flex-wrap: wrap; }
+  .inv-actions { flex-wrap: nowrap; }
 }
 .btn-perm-active { background: var(--primary-accent) !important; color: #fff !important; border-color: var(--primary-accent) !important; }
 .badge-perm-role { background:var(--info-light);color:#1E40AF;font-size:9px;padding:1px 5px;border-radius:var(--radius-sm);margin-left:4px }
