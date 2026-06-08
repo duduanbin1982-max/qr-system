@@ -3,6 +3,7 @@ qr-system — 数据分析报表路由
 
 注：全读端点，Swagger docstring 仅供文档参考。
 """
+from datetime import datetime, timedelta
 from flask import request, jsonify
 from modules.app import app
 from modules.db import get_db
@@ -182,7 +183,8 @@ def reports_order_analysis():
         monthly = db.execute('''
             SELECT substr(o.created_at, 1, 7) as month,
                    COUNT(*) as count,
-                   COALESCE(SUM(o.quantity), 0) as total_qty
+                   COALESCE(SUM(o.quantity), 0) as total_qty,
+                   COALESCE(SUM(o.completed), 0) as total_done
             FROM orders o
             WHERE o.deleted_at IS NULL
               AND o.created_at >= date('now', '-12 months')

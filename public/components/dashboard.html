@@ -137,7 +137,7 @@
             <td>{{ r.worker_name }}</td>
             <td class="td-qty">{{ r.quantity }}</td>
             <td class="td-time">{{ r.created_at }}</td>
-            <td><span class="badge" :class="r.status">{{ r.status === 'approved' ? '已审批' : r.status === 'pending' ? '待审批' : '已拒绝' }}</span></td>
+            <td><span class="badge" :class="r.status==='approved'?'badge-success':r.status==='pending'?'badge-warning':'badge-danger'">{{ r.status === 'approved' ? '已审批' : r.status === 'pending' ? '待审批' : '已拒绝' }}</span></td>
           </tr>
         </tbody>
       </table>

@@ -179,7 +179,7 @@
             <tbody>
               <tr v-for="m in orderMonthly" :key="m.month">
                 <td style="font-weight:500">{{ m.month }}</td>
-                <td style="text-align:center;font-weight:600;color:var(--primary)">{{ m.order_count }}</td>
+                <td style="text-align:center;font-weight:600;color:var(--primary)">{{ m.count }}</td>
                 <td style="text-align:center">{{ m.total_qty }}</td>
                 <td style="text-align:center;color:var(--success)">{{ m.total_done }}</td>
                 <td style="text-align:center">{{ m.total_qty ? Math.round(m.total_done/m.total_qty*100) : 0 }}%</td>
