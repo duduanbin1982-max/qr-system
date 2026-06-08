@@ -206,7 +206,13 @@ def scan_order():
             FROM order_processes op JOIN processes p ON op.process_id = p.id
             WHERE op.order_id = ? ORDER BY op.seq_order
         ''', (o['id'],)).fetchall()
-        o['processes'] = [dict(p) for p in procs]
+        all_procs = [dict(p) for p in procs]
+        # 按岗位过滤工序
+        user_pids = get_user_process_ids(g.current_user)
+        if user_pids is not None:
+            o['processes'] = [p for p in all_procs if p['process_id'] in user_pids]
+        else:
+            o['processes'] = all_procs
 
         records = db.execute('''
             SELECT wr.*, u.name as worker_name, p.name as process_name
@@ -325,13 +331,19 @@ def mobile_scan():
             o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
         except (json.JSONDecodeError, TypeError):
             o['extra_fields'] = {}
-        # 工序列表
+        # 工序列表（按岗位过滤）
         procs = db.execute('''
             SELECT op.*, p.name as process_name
             FROM order_processes op JOIN processes p ON op.process_id = p.id
             WHERE op.order_id = ? ORDER BY op.seq_order
         ''', (o['id'],)).fetchall()
-        o['processes'] = [dict(p) for p in procs]
+        all_procs = [dict(p) for p in procs]
+        # 按岗位过滤工序
+        user_pids = get_user_process_ids(g.current_user)
+        if user_pids is not None:
+            o['processes'] = [p for p in all_procs if p['process_id'] in user_pids]
+        else:
+            o['processes'] = all_procs
 
         # 产品序列号信息（如果有）
         if item_info:
