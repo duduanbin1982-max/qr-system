@@ -413,14 +413,39 @@ def mobile_report():
     if not op_check:
         return jsonify({'error': '该工序不在订单工艺路线中'}), 400
 
-    # ===== 序列号防重复报工 =====
-    if serial_no and report_type == 'normal':
+    # ===== 工序级权限校验 =====
+    user_pids = get_user_process_ids(g.current_user)
+    if user_pids is not None and process_id not in user_pids:
+        return jsonify({'error': '您无权对此工序报工'}), 403
+
+    # ===== 防重复报工 =====
+    if report_type == 'normal':
+        if serial_no:
+            # 序列号模式：同序列号同工序不可重复
+            existing = db.execute(
+                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
+                (order_id, process_id, serial_no)
+            ).fetchone()
+            if existing:
+                return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
+        else:
+            # 订单号模式：同用户同工序 30 秒内不可重复（防误触）
+            existing = db.execute(
+                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
+                'AND created_at > datetime("now","localtime","-30 seconds")',
+                (order_id, process_id, user['id'])
+            ).fetchone()
+            if existing:
+                return jsonify({'error': '请勿短时间重复报工同一工序（30秒内）'}), 409
+    elif report_type in ('scrap', 'rework'):
+        # 报废/返工：同订单同工序同用户 30 秒内不可重复
         existing = db.execute(
-            'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
-            (order_id, process_id, serial_no)
+            'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
+            'AND type = ? AND created_at > datetime("now","localtime","-30 seconds")',
+            (order_id, process_id, user['id'], report_type)
         ).fetchone()
         if existing:
-            return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
+            return jsonify({'error': '请勿短时间重复提交'}), 409
 
     # ===== 工艺路线防错校验（仅正常报工需要）=====
     if report_type == 'normal' and order['route_id']:
@@ -529,14 +554,10 @@ def work_report():
     if not op_check:
         return jsonify({'error': '该工序不在订单工艺路线中'}), 400
 
-    # ===== 序列号防重复报工 =====
-    if serial_no and report_type == 'normal':
-        existing = db.execute(
-            'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
-            (order_id, process_id, serial_no)
-        ).fetchone()
-        if existing:
-            return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
+    # ===== 工序级权限校验 =====
+    user_pids = get_user_process_ids(g.current_user)
+    if user_pids is not None and process_id not in user_pids:
+        return jsonify({'error': '您无权对此工序报工'}), 403
 
     current_op = db.execute(
         'SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
@@ -592,6 +613,35 @@ def work_report():
     # ===== 正常报工 =====
     db.execute('SAVEPOINT report_sp')
     try:
+        # ===== 事务内防重复报工 =====
+        if report_type == 'normal':
+            if serial_no:
+                dup = db.execute(
+                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
+                    (order_id, process_id, serial_no)
+                ).fetchone()
+                if dup:
+                    db.execute('ROLLBACK TO report_sp')
+                    return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
+            else:
+                dup = db.execute(
+                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
+                    'AND created_at > datetime("now","localtime","-30 seconds")',
+                    (order_id, process_id, user['id'])
+                ).fetchone()
+                if dup:
+                    db.execute('ROLLBACK TO report_sp')
+                    return jsonify({'error': '请勿短时间重复报工同一工序（30秒内）'}), 409
+        elif report_type in ('scrap', 'rework'):
+            dup = db.execute(
+                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
+                'AND type = ? AND created_at > datetime("now","localtime","-30 seconds")',
+                (order_id, process_id, user['id'], report_type)
+            ).fetchone()
+            if dup:
+                db.execute('ROLLBACK TO report_sp')
+                return jsonify({'error': '请勿短时间重复提交'}), 409
+
         if report_type == 'normal':
             cur = db.execute('INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) VALUES (?,?,?,?,?,?,?,?)',
                        (order_id, process_id, user['id'], 'normal', quantity, remark, work_status, serial_no))
