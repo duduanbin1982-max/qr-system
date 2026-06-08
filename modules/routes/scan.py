@@ -62,13 +62,13 @@ def auto_stock_in(db, order_id, user_id, user_name):
 
 def _execute_report_write(db, report_type, order_id, process_id, user_id, user_name,
                            quantity, remark, serial_no, need_approval, record_type='normal'):
-    """共享报工写入逻辑 — 由 work_report 和 mobile_report 共用"""
+    """共享报工写入逻辑 — work_records.type 使用 report_type (normal/scrap/rework)。"""
     work_status = 'pending' if need_approval else 'approved'
     
     if report_type == 'normal':
         cur = db.execute(
             'INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) VALUES (?,?,?,?,?,?,?,?)',
-            (order_id, process_id, user_id, record_type, quantity, remark, work_status, serial_no))
+            (order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no))
         wr_id = cur.lastrowid
 
         if need_approval:
