@@ -56,8 +56,8 @@ def auto_stock_in(db, order_id, user_id, user_name):
             (inv['id'], order_row['quantity'], order_id, order_row['order_no'],
              '订单完成自动入库', user_id, user_name)
         )
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning('auto_stock_in failed: %s', e)
 
 
 def _execute_report_write(db, report_type, order_id, process_id, user_id, user_name,
@@ -159,6 +159,7 @@ def _check_order_scope(order_id, db=None):
         return False
     if db is None:
         db = get_db()
+    # placeholders are all '?' chars from trusted integer list — safe for f-string
     placeholders = ",".join("?" for _ in pids)
     row = db.execute(
         f"SELECT 1 FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})",
@@ -386,6 +387,7 @@ def mobile_scan():
 @app.route('/api/mobile/report', methods=['POST'])
 @check_auth
 @check_permission('scan:edit')
+@validate_json('work_report')
 def mobile_report():
     """手机H5扫码报工"""
     data = get_json_body()
@@ -425,34 +427,6 @@ def mobile_report():
     user_pids = get_user_process_ids(g.current_user)
     if user_pids is not None and process_id not in user_pids:
         return jsonify({'error': '您无权对此工序报工'}), 403
-
-    # ===== 防重复报工 =====
-    if report_type == 'normal':
-        if serial_no:
-            # 序列号模式：同序列号同工序不可重复
-            existing = db.execute(
-                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
-                (order_id, process_id, serial_no)
-            ).fetchone()
-            if existing:
-                return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
-        else:
-            # 订单号模式：同用户同工序永久不可重复
-            existing = db.execute(
-                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ?',
-                (order_id, process_id, user['id'])
-            ).fetchone()
-            if existing:
-                return jsonify({'error': '此工序您已报工，不可重复扫码'}), 409
-    elif report_type in ('scrap', 'rework'):
-        # 报废/返工：同订单同工序同用户 30 秒内不可重复
-        existing = db.execute(
-            'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
-            'AND type = ? AND created_at > datetime("now","localtime","-30 seconds")',
-            (order_id, process_id, user['id'], report_type)
-        ).fetchone()
-        if existing:
-            return jsonify({'error': '请勿短时间重复提交'}), 409
 
     # ===== 工艺路线防错校验（仅正常报工需要）=====
     if report_type == 'normal' and order['route_id']:
@@ -504,9 +478,37 @@ def mobile_report():
         if approval_config:
             need_approval = True
     
-    # 记录（使用共享写入函数）
+    # 记录（使用共享写入函数，事务内防重复）
     db.execute('SAVEPOINT mobile_report_sp')
     try:
+        # ===== 事务内防重复报工 =====
+        if report_type == 'normal':
+            if serial_no:
+                dup = db.execute(
+                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND serial_no = ?',
+                    (order_id, process_id, serial_no)
+                ).fetchone()
+                if dup:
+                    db.execute('ROLLBACK TO mobile_report_sp')
+                    return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
+            else:
+                dup = db.execute(
+                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ?',
+                    (order_id, process_id, user['id'])
+                ).fetchone()
+                if dup:
+                    db.execute('ROLLBACK TO mobile_report_sp')
+                    return jsonify({'error': '此工序您已报工，不可重复扫码'}), 409
+        elif report_type in ('scrap', 'rework'):
+            dup = db.execute(
+                'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
+                'AND type = ? AND created_at > datetime("now","localtime","-30 seconds")',
+                (order_id, process_id, user['id'], report_type)
+            ).fetchone()
+            if dup:
+                db.execute('ROLLBACK TO mobile_report_sp')
+                return jsonify({'error': '请勿短时间重复提交'}), 409
+
         _execute_report_write(db, report_type, order_id, process_id,
                               user['id'], user['name'], quantity, remark, serial_no,
                               need_approval, record_type='mobile')
@@ -633,13 +635,12 @@ def work_report():
                     return jsonify({'error': f'序列号 {serial_no} 在此工序已报工，不可重复扫码！'}), 409
             else:
                 dup = db.execute(
-                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
-                    'AND created_at > datetime("now","localtime","-30 seconds")',
+                    'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ?',
                     (order_id, process_id, user['id'])
                 ).fetchone()
                 if dup:
                     db.execute('ROLLBACK TO report_sp')
-                    return jsonify({'error': '请勿短时间重复报工同一工序（30秒内）'}), 409
+                    return jsonify({'error': '此工序您已报工，不可重复扫码'}), 409
         elif report_type in ('scrap', 'rework'):
             dup = db.execute(
                 'SELECT id FROM work_records WHERE order_id = ? AND process_id = ? AND user_id = ? '
@@ -766,7 +767,7 @@ def get_qrcode(order_no):
 
 @app.route('/api/qrcode/batch', methods=['POST'])
 @check_auth
-@check_permission('orders:create')
+@check_permission('scan:view')
 def batch_qrcode():
     """批量生成二维码标签 - 支持订单模式和产品序列号模式"""
     try:
@@ -873,10 +874,6 @@ def batch_qrcode():
 @check_auth
 def generate_order_qr(order_id):
     """Generate QR code for an order (returns base64 PNG data URL)."""
-    import qrcode
-    import io
-    import base64
-    
     db = get_db()
     order = db.execute(
         'SELECT order_no, product_name, product_code, quantity FROM orders WHERE id = ? AND deleted_at IS NULL',
@@ -887,7 +884,6 @@ def generate_order_qr(order_id):
         return jsonify({'error': '订单不存在'}), 404
     
     # Build QR content: compact JSON with order info
-    import json
     qr_content = json.dumps({
         't': 'order',
         'id': order_id,
