@@ -296,9 +296,9 @@ function toast(msg, ms) {
   setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, ms || 2000);
 }
 
-// Auth: httpOnly cookie (qr_token) is auto-sent by browser.
-// user() reads from sessionStorage (survives page reload), memory as fallback.
-function token()  { return ''; }  // cookie handles auth; header fallback unused
+// Auth: dual channel — httpOnly cookie (primary) + Bearer token (fallback).
+// phone browsers may drop non-Secure cookies on HTTPS; Bearer is backup.
+function token()  { try { return sessionStorage.getItem('qr_token') || ''; } catch(e) { return ''; } }
 function user()   {
   if (window.__qr_user) return window.__qr_user;
   try { var u = JSON.parse(sessionStorage.getItem('qr_user')); if (u) { window.__qr_user = u; return u; } } catch(e) {}
@@ -513,6 +513,7 @@ function processCode(code) {
   if (/^N\d{10,}$/.test(code)) {
     toast('解码中...');
     fetch(API + '/mobile/decode/' + code, {
+      credentials: 'same-origin',
       headers: { 'Authorization': 'Bearer ' + token() }
     })
     .then(function(r) { return r.json(); })
@@ -529,6 +530,7 @@ function processCode(code) {
 function doScan(code) {
   toast('查询中...');
   fetch(API + '/mobile/scan', {
+    credentials: 'same-origin',
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
     body: JSON.stringify({ code: code })
@@ -646,6 +648,7 @@ function doReport() {
   if (curSerial) body.serial_no = curSerial;
 
   fetch(API + '/mobile/report', {
+    credentials: 'same-origin',
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
     body: JSON.stringify(body)
@@ -677,6 +680,7 @@ function doLogin() {
   const btn = $('btn-login');
   btn.disabled = true; btn.textContent = '登录中...';
   fetch(API + '/auth/login', {
+    credentials: 'same-origin',
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: u, password: p })
@@ -687,6 +691,7 @@ function doLogin() {
     if (d.error) { $('login-err').textContent = d.error; return; }
     window.__qr_user = d.user;
     try { sessionStorage.setItem('qr_user', JSON.stringify(d.user)); } catch(e) {}
+    try { sessionStorage.setItem('qr_token', d.user.token); } catch(e) {}
     goMain();
   })
   .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; });
@@ -695,6 +700,7 @@ function doLogin() {
 function doLogout() {
   window.__qr_user = null;
   try { sessionStorage.removeItem('qr_user'); } catch(e) {}
+  try { sessionStorage.removeItem('qr_token'); } catch(e) {}
   show('login');
 }
 
@@ -712,7 +718,7 @@ function goMain() {
 function goBack() { curOrder = null; show('main'); loadStats(); loadRecent(); }
 
 function loadStats() {
-  fetch(API + '/dashboard', { headers: { 'Authorization': 'Bearer ' + token() } })
+  fetch(API + '/dashboard', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d && d.stats) {
@@ -724,7 +730,7 @@ function loadStats() {
 }
 
 function loadRecent() {
-  fetch(API + '/report-logs?limit=5', { headers: { 'Authorization': 'Bearer ' + token() } })
+  fetch(API + '/report-logs?limit=5', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       const list = d.logs || [];
@@ -769,7 +775,7 @@ function toggleFlash() {
   // Restore session if user was previously logged in (sessionStorage + valid cookie)
   if (user()) {
     // Verify cookie is still valid with a lightweight API call
-    fetch(API + '/auth/info')
+    fetch(API + '/auth/info', { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d && d.user) { goMain(); }
