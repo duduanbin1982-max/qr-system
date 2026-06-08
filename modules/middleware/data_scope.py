@@ -6,25 +6,26 @@ from modules.db import get_db
 from modules.middleware.auth import get_user_permissions
 
 def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
-    """返回用户可访问的工序ID列表。None=全部, [] =无权限"""
+    """返回用户可访问的工序ID列表。None=全部, [] =无权限。岗位工序绑定优先级高于全局权限。"""
     if not user:
         return None
-    perms = get_user_permissions(user)
-    # 拥有全局权限则返回 None（全部数据）
-    global_perms = {'orders:view', 'stats:view', 'inventory:view', '*',
-                    'shipments:view', 'reports:view', 'dashboard:view'}
-    if perms and (set(perms) & global_perms or '*' in perms):
-        return None
-    # 从岗位获取工序范围（通过 position_processes 关联表）
+
+    # 岗位工序绑定（最高优先级）
     pid = user.get('position_id')
     if pid:
         db = get_db()
         rows = db.execute('SELECT process_id FROM position_processes WHERE position_id = ?', (pid,)).fetchall()
         if rows:
             return [r['process_id'] for r in rows]
-    # 有 position_id 但无工序关联 → 全无
-    if pid is not None:
+        # 有 position_id 但无工序关联 → 全无
         return []
+
+    # 无岗位 → 检查全局权限
+    perms = get_user_permissions(user)
+    global_perms = {'orders:view', 'stats:view', 'inventory:view', '*',
+                    'shipments:view', 'reports:view', 'dashboard:view'}
+    if perms and (set(perms) & global_perms or '*' in perms):
+        return None  # 全局权限 → 全部工序可见
     return None
 
 
