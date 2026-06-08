@@ -35,9 +35,9 @@ class ProcessService:
         sql += f' ORDER BY {sort_by} {sort_dir}, id {sort_dir}'
         if limit:
             # 分页：先查总数
-            count_sql = sql.replace(
-                'SELECT id, name AS process_name, description, category, seq_order, status, created_at',
-                'SELECT COUNT(*)', 1)
+            count_sql = 'SELECT COUNT(*) FROM processes'
+            if conditions:
+                count_sql += ' WHERE ' + ' AND '.join(conditions)
             total = db.execute(count_sql, params).fetchone()[0]
             sql += ' LIMIT ? OFFSET ?'
             params.extend([limit, offset])
@@ -62,14 +62,13 @@ class ProcessService:
                 seq_order = int(seq_order)
             except (ValueError, TypeError):
                 seq_order = None
-        if seq_order is None:
-            max_seq = db.execute(
-                'SELECT COALESCE(MAX(seq_order),0) FROM processes'
-            ).fetchone()[0]
-            seq_order = max_seq + 1
-
         try:
             with BaseService.transaction() as txn:
+                if seq_order is None:
+                    max_seq = txn.execute(
+                        'SELECT COALESCE(MAX(seq_order),0) FROM processes'
+                    ).fetchone()[0]
+                    seq_order = max_seq + 1
                 cur = txn.execute(
                     'INSERT INTO processes (name, description, category, seq_order, status) '
                     'VALUES (?,?,?,?,?)',

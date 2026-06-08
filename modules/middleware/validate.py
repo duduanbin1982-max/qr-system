@@ -248,6 +248,30 @@ SCHEMAS = {
         'additionalProperties': False,
     },
 
+    'create_process': {
+        'type': 'object',
+        'required': ['name'],
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'description': {'type': 'string', 'maxLength': 512},
+            'category': {'type': 'string', 'maxLength': 64},
+            'seq_order': {'type': 'integer', 'minimum': 0},
+            'status': {'type': 'string', 'enum': ['active', 'inactive']},
+        },
+        'additionalProperties': False,
+    },
+    'update_process': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'description': {'type': 'string', 'maxLength': 512},
+            'category': {'type': 'string', 'maxLength': 64},
+            'seq_order': {'type': 'integer', 'minimum': 0},
+            'status': {'type': 'string', 'enum': ['active', 'inactive']},
+        },
+        'additionalProperties': False,
+    },
+
 'update_user': {
         'type': 'object',
         'properties': {
