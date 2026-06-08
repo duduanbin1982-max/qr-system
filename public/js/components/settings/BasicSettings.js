@@ -1,5 +1,5 @@
 // BasicSettingsPage — 基础设置（5个子模块：员工/工序/路线/工价/产品）
-import { ref, onMounted, computed } from '../vendor/vue.esm.js'
+import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
 
 import UserList     from '../users/UserList.js'
 import ProcessList  from '../processes/ProcessList.js'
