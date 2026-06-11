@@ -2,8 +2,9 @@
 qr-system — Flask 应用实例
 独立模块，解决循环导入问题：所有路由文件和 server.py 都从这里导入 app
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from modules.middleware.rate_limit import apply_global_rate_limit
+import secrets
 from flasgger import Swagger
 import os
 from dotenv import load_dotenv
@@ -113,6 +114,14 @@ if ENABLE_SWAGGER:
     swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
 
+# ============================================================
+# CSP nonce generation (per-request)
+# ============================================================
+@app.before_request
+def generate_csp_nonce():
+    """Generate a unique nonce for each request, used in CSP script-src."""
+    g.csp_nonce = secrets.token_hex(16)
+
 @app.before_request
 def api_version_prefix():
     """透明支持 /api/v1/ 前缀 → 内部路由不变，未来版本化准备"""
@@ -159,11 +168,12 @@ def add_security_headers(response):
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'camera=(self), microphone=(), geolocation=()'
 
-    # Content-Security-Policy（宽松版 — 1326个内联事件不允许 strict）
+    # Content-Security-Policy（strict mode — nonce-based script execution）
+    csp_nonce = getattr(g, 'csp_nonce', 'fallback')
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline'; "
+        f"script-src 'self' 'unsafe-eval' cdn.jsdelivr.net unpkg.com 'nonce-{csp_nonce}'; "
+        "style-src 'self' 'unsafe-inline' unpkg.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' https:; "
         "frame-ancestors 'self'"

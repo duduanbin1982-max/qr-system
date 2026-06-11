@@ -12,6 +12,21 @@ from modules.services import BaseService
 class UserService:
     """用户管理业务逻辑。所有方法为静态方法，接受纯数据参数。"""
 
+    @staticmethod
+    def _validate_process_ids(data):
+        """共享工序校验 — 自动过滤不存在的工序ID（自愈）"""
+        if 'process_ids' in data and data['process_ids']:
+            id_list = [int(x.strip()) for x in data['process_ids'].split(',') if x.strip()]
+            if id_list:
+                placeholders = ','.join(['?'] * len(id_list))
+                db = BaseService.db()
+                rows = db.execute(
+                    f'SELECT id FROM processes WHERE id IN ({placeholders})', id_list
+                ).fetchall()
+                valid_ids = set(row['id'] for row in rows)
+                filtered = [str(x) for x in id_list if x in valid_ids]
+                data['process_ids'] = ','.join(filtered) if filtered else ''
+
     # ============================================================
     # 查询
     # ============================================================
@@ -46,8 +61,10 @@ class UserService:
 
         rows = db.execute(f'''
             SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no,
-                   u.phone, u.process_ids, u.status, u.created_at, u.last_active, u.position_id,
+                   u.phone, u.process_ids, u.status, u.created_at,
+                   (SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, u.last_active, u.position_id,
                    u.locked_until,
+                   (SELECT r.code FROM user_roles ur2 JOIN roles r ON ur2.role_id = r.id WHERE ur2.user_id = u.id ORDER BY r.level LIMIT 1) as role_code,
                    (SELECT COUNT(*) FROM user_roles ur2 WHERE ur2.user_id = u.id AND ur2.role_id = 1) > 0 as has_admin_role
             FROM users u WHERE {where_sql}
             ORDER BY u.id LIMIT ? OFFSET ?
@@ -82,11 +99,16 @@ class UserService:
         username = data.get('username', '').strip()
         name = data.get('name', '').strip()
         if not name and data.get('role') == 'admin':
-            name = data.get('nickname', '').strip()
+            name = username
         if not username or not name:
             raise ValueError('用户名和姓名不能为空')
+        if len(username) < 2 or len(username) > 32:
+            raise ValueError('用户名长度须在2-32个字符之间')
+        if not all(c.isalnum() or c in '_-.' for c in username):
+            raise ValueError('用户名只能包含字母、数字、下划线、连字符和点号')
 
         role = data.get('role', 'worker')
+        role_id = data.get('role_id')
         if role not in ('admin', 'worker'):
             raise ValueError('角色值无效，仅允许 admin/worker')
 
@@ -104,23 +126,32 @@ class UserService:
             if not pos:
                 raise ValueError('指定岗位不存在')
 
-        # 工序校验
-        process_ids_str = data.get('process_ids', '')
-        if process_ids_str:
-            id_list = [int(x.strip()) for x in process_ids_str.split(',') if x.strip()]
-            if id_list:
-                placeholders = ','.join(['?'] * len(id_list))
-                cnt = db.execute(
-                    f'SELECT COUNT(*) as n FROM processes WHERE id IN ({placeholders})', id_list
-                ).fetchone()['n']
-                if cnt < len(id_list):
-                    raise ValueError('部分工序ID不存在')
+        # 工序校验 — 自动过滤不存在的工序ID（自愈）
+        UserService._validate_process_ids(data)
+
+        # 工号 — 未提供则自动生成4位顺序号
+        employee_no = (data.get('employee_no') or '').strip()
+        if not employee_no:
+            last = db.execute(
+                "SELECT MAX(CAST(employee_no AS INTEGER)) as max_no FROM users WHERE employee_no GLOB '[0-9]*'"
+            ).fetchone()
+            next_no = (last['max_no'] or 0) + 1
+            employee_no = str(next_no).zfill(4)
+            # 防碰撞：若已存在则递增
+            while db.execute("SELECT 1 FROM users WHERE employee_no = ?", (employee_no,)).fetchone():
+                next_no += 1
+                employee_no = str(next_no).zfill(4)
+        data['employee_no'] = employee_no
 
         # 密码
-        raw_pw = data.get('password') or secrets.token_urlsafe(8)
+        raw_pw = (data.get('password') or '').strip() or secrets.token_urlsafe(8)
+        if data.get('password') and len(raw_pw) < 6:
+            raise ValueError('密码长度不能少于6位')
         pw = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
 
-        role_id = 1 if role == 'admin' else 2
+        if not role_id:
+            role_id = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (role,)).fetchone()
+            role_id = role_id[0] if role_id else 2
 
         with BaseService.transaction() as txn:
             cur = txn.execute(
@@ -128,12 +159,16 @@ class UserService:
                 'role, employee_no, phone, process_ids, position_id, status) '
                 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (username, pw, name, data.get('nickname', ''), data.get('email', ''),
-                 data.get('group_name', '超级管理组'), role, data.get('employee_no', ''),
+                 data.get('group_name', '员工组'), role, data.get('employee_no', ''),
                  data.get('phone', ''), data.get('process_ids', ''), position_id or None,
                  data.get('status', 'active'))
             )
             uid = cur.lastrowid
             txn.execute('INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, role_id))
+            # P1: Sync process assignments to user_processes
+            valid_pids = data.get('_valid_process_ids', [])
+            for pid in valid_pids:
+                txn.execute('INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?,?)', (uid, pid))
 
         return uid, raw_pw
 
@@ -167,18 +202,25 @@ class UserService:
                 if not pos:
                     raise ValueError('指定岗位不存在')
 
-        # 工序校验
-        if 'process_ids' in data and data['process_ids']:
-            id_list = [int(x.strip()) for x in data['process_ids'].split(',') if x.strip()]
-            if id_list:
-                placeholders = ','.join(['?'] * len(id_list))
-                cnt = db.execute(
-                    f'SELECT COUNT(*) as n FROM processes WHERE id IN ({placeholders})', id_list
-                ).fetchone()['n']
-                if cnt < len(id_list):
-                    raise ValueError('部分工序ID不存在')
+        # 工序校验 — 自动过滤不存在的工序ID（自愈）
+        UserService._validate_process_ids(data)
 
         old_role = existing['role']
+
+        # P0: Sync group_name from actual role if role/role_id changed
+        if ('role' in data and data['role'] != old_role) or ('role_id' in data):
+            new_role_id = data.get('role_id', db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (data.get('role', 'worker'),)).fetchone()[0])
+            gn_row = db.execute('SELECT rg.name FROM roles r JOIN role_groups rg ON r.group_id = rg.id WHERE r.id = ?', (new_role_id,)).fetchone()
+            if gn_row:
+                data['group_name'] = gn_row[0]
+
+        # P1-2: Only admins can promote users to admin role
+        if 'role' in data and data['role'] == 'admin' and old_role != 'admin':
+            is_admin = db.execute(
+                'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (current_user_id,)
+            ).fetchone()
+            if not is_admin:
+                raise ValueError('only administrators can promote users to admin role')
 
         # C1: Only admins can change roles, and you cannot change your own
         if 'role' in data and data['role'] != old_role:
@@ -206,12 +248,22 @@ class UserService:
             raise ValueError('No update fields provided')
 
         with BaseService.transaction() as txn:
+            # P1: Sync process assignments to user_processes
+            if 'process_ids' in data or '_valid_process_ids' in data:
+                txn.execute('DELETE FROM user_processes WHERE user_id = ?', (uid,))
+                valid_pids = data.get('_valid_process_ids', [])
+                if not valid_pids and data.get('process_ids'):
+                    valid_pids = [int(x.strip()) for x in data['process_ids'].split(',') if x.strip()]
+                for pid in valid_pids:
+                    txn.execute('INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?,?)', (uid, pid))
+
             params.append(uid)
             txn.execute(f'UPDATE users SET {", ".join(sets)} WHERE id = ?', params)
 
-            if 'role' in data and data['role'] != old_role:
-                new_role_id = 1 if data['role'] == 'admin' else 2
-                old_role_id = 1 if old_role == 'admin' else 2
+            if ('role' in data and data['role'] != old_role) or ('role_id' in data):
+                new_role_id = data.get('role_id', db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (data.get('role', 'worker'),)).fetchone()[0])
+                old_role_id = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (old_role,)).fetchone()
+                old_role_id = old_role_id[0] if old_role_id else 2
                 txn.execute('DELETE FROM user_roles WHERE user_id = ? AND role_id = ?', (uid, old_role_id))
                 txn.execute('INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, new_role_id))
 
@@ -245,12 +297,20 @@ class UserService:
             raise ValueError('Cannot delete the built-in admin account')
 
         # C2 FIX: Don't delete the last admin
-        admin_count = db.execute(
+        role_admin_count = db.execute(
             'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
         ).fetchone()[0]
+        table_admin_count = db.execute(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+        ).fetchone()[0]
+        admin_count = max(role_admin_count, table_admin_count)
         is_admin = db.execute(
             'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (uid,)
         ).fetchone()
+        if not is_admin:
+            is_admin = db.execute(
+                "SELECT 1 FROM users WHERE id = ? AND role = 'admin'", (uid,)
+            ).fetchone()
         if is_admin and admin_count <= 1:
             raise ValueError('Cannot delete the last administrator')
 

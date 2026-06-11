@@ -33,6 +33,8 @@ def list_users():
 def create_user():
     data = get_json_body()
     try:
+        # P1-2: Pass caller for admin-creation permission check
+        data['_caller_user_id'] = g.current_user.get('id') if hasattr(g, 'current_user') else None
         uid, password = UserService.create_user(data)
     except ValueError as e:
         code = 409 if '已存在' in str(e) else 400
@@ -72,7 +74,7 @@ def update_user(uid):
 @check_permission('users:delete')
 def delete_user(uid):
     try:
-        UserService.delete_user(uid, g.current_user['id'])
+        UserService.delete_user(uid, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     try:
@@ -84,7 +86,7 @@ def delete_user(uid):
 
 @app.route('/api/users/<int:uid>/reset-password', methods=['POST'])
 @check_auth
-@check_permission('users:edit')
+@check_permission('users:admin')
 def reset_password(uid):
     data = get_json_body()
     try:
@@ -100,7 +102,7 @@ def reset_password(uid):
 
 @app.route('/api/users/<int:uid>/unlock', methods=['POST'])
 @check_auth
-@check_permission('users:edit')
+@check_permission('users:admin')
 def unlock_user(uid):
     try:
         UserService.unlock_user(uid)

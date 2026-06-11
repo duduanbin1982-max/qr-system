@@ -90,7 +90,7 @@ def reports_worker_efficiency():
                    COUNT(wr.id) as report_count
             FROM users u
             LEFT JOIN work_records wr ON wr.user_id = u.id AND {where_clause}
-            WHERE u.role = 'worker' AND u.status = 'active'
+            WHERE u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'worker') AND u.status = 'active'
             GROUP BY u.id
             ORDER BY output DESC
         ''', params).fetchall()
@@ -147,7 +147,7 @@ def reports_quality_analysis():
                    COALESCE(SUM(CASE WHEN wr.type = 'rework' THEN wr.quantity ELSE 0 END), 0) as rework
             FROM users u
             LEFT JOIN work_records wr ON wr.user_id = u.id AND {where_clause}
-            WHERE u.role = 'worker' AND u.status = 'active'
+            WHERE u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'worker') AND u.status = 'active'
             GROUP BY u.id
             ORDER BY output DESC
             LIMIT 20

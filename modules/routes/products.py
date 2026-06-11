@@ -232,9 +232,13 @@ def import_products():
     ):
         return jsonify({'error': '文件类型不符，请上传.xlsx文件'}), 400
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    debug_path = os.path.join(os.path.dirname(tmp.name), 'last_product_import.xlsx')
     try:
         file.save(tmp.name)
         tmp.close()
+        # Save a copy for debugging
+        import shutil
+        shutil.copy2(tmp.name, debug_path)
         result = ProductService.import_products(tmp.name)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -242,7 +246,7 @@ def import_products():
         if os.path.exists(tmp.name):
             os.unlink(tmp.name)
     try:
-        audit_log('import_products', 'product', 0, f'imported {result["success"]}')
+        audit_log('import_products', 'product', 0, f'imported success={result["success"]} skipped={result.get("skipped",0)} errors={result.get("error_summary","")}')
     except Exception as e:
         app.logger.warning('audit_log failed: %s', e)
     return jsonify(result)

@@ -92,7 +92,7 @@ def rework_stats():
 
 @app.route('/api/rework/<int:rework_id>', methods=['PUT'])
 @check_auth
-@check_permission('orders:edit')
+@check_permission('rework:edit')
 def rework_update(rework_id):
     db = get_db()
     try:

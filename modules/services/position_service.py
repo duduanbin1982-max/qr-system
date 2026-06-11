@@ -103,6 +103,7 @@ class PositionService:
         if not changed:
             raise ValueError('无更新内容')
 
+        sets.append('updated_at = datetime("now","localtime")')
         with BaseService.transaction() as txn:
             if 'name' in data:
                 dup = txn.execute(

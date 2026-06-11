@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js'
 import { showToast } from '../../store.js'
+import { handleApiError } from '../../api.js'
 import { can } from '../../auth.js'
 
 export default {
@@ -27,6 +28,9 @@ export default {
     const loading = ref(true)
     const saving = ref(false)
     const deletedKeys = ref(new Set())
+    const companyInfoDirty = computed(() => JSON.stringify(edits.value) !== JSON.stringify(settings.value))
+    const showAddKeyModal = ref(false)
+    const newSettingKey = ref('')
     const templates = {
       company_name:'公司名称', contact:'联系人', phone:'联系电话',
       address:'公司地址', description:'公司简介',
@@ -35,6 +39,7 @@ export default {
       auto_order_no:'自动生成订单号前缀', page_size:'列表每页条数',
     }
 
+    const ALLOWED_SETTING_KEYS = new Set(['company_name','contact','phone','address','description','default_password','approval_enabled','auto_order_no','page_size','process_order_mode','delivery_warning_days','limit_by_prev_process','limit_by_order_qty','session_timeout_hours','session_idle_minutes','board_token','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from','smtp_tls','report_recipients','slow_request_threshold_ms'])
     async function loadSettings() {
       loading.value = true
       try { const d = await api.getSettings(); settings.value = d.settings||{}; edits.value = {...settings.value}; deletedKeys.value = new Set() }
@@ -55,10 +60,16 @@ export default {
       finally { saving.value = false }
     }
     function addSetting() {
-      const key = (prompt('设置项名称（英文）：') || '').trim()
+      newSettingKey.value = ''
+      showAddKeyModal.value = true
+    }
+    function confirmAddSetting() {
+      const key = newSettingKey.value.trim()
       if (!key) { showToast('设置项名称不能为空', 'warn'); return }
       if (key in edits.value) { showToast(`设置项 "${key}" 已存在`, 'warn'); return }
+      if (!ALLOWED_SETTING_KEYS.has(key)) { showToast(`设置项 "${key}" 不在允许列表中`, 'error'); return }
       edits.value = {...edits.value, [key]: ''}
+      showAddKeyModal.value = false
     }
     function removeSetting(key) {
       if(!confirm('确定删除 ' + labelOf(key) + ' 吗？')) return
@@ -90,7 +101,7 @@ export default {
 
     async function loadAllUsers() {
       adminLoading.value = true
-      try { const d = await api.get('/api/users'); allUsers.value = d.users||[] }
+      try { const d = await api.get('/api/users?role=admin'); allUsers.value = d.users||[] }
       catch(e) { showToast(e.message,'error') }
       finally { adminLoading.value = false }
     }
@@ -103,21 +114,35 @@ export default {
       else selectedAdmins.value = []
     }
     function openAddAdmin() {
-      Object.assign(adminForm, { username:'', name:'', nickname:'', password:'', role:'admin', email:'', phone:'', employee_no:'', group_name:'超级管理组' })
+      Object.assign(adminForm, { username:'', name:'', nickname:'', password:'', role:'admin', email:'', phone:'', employee_no:'', group_name:'超级管理组', status:'active' }); userRoleIds.value = []
       adminModalEdit.value = false; showAdminModal.value = true
     }
     function openEditAdmin(u) {
-      Object.assign(adminForm, { _id:u.id, username:u.username, name:u.name||'', nickname:u.nickname||'', role:u.role||'admin', email:u.email||'', phone:u.phone||'', employee_no:u.employee_no||'', group_name:u.group_name||'超级管理组', password:'' })
+      Object.assign(adminForm, { _id:u.id, username:u.username, name:u.name||'', nickname:u.nickname||'', role:u.role||'admin', email:u.email||'', phone:u.phone||'', employee_no:u.employee_no||'', group_name:u.group_name||'超级管理组', status:u.status||'active', password:'' })
       adminModalEdit.value = true; showAdminModal.value = true
+      loadUserRoles(u.id)
+    }
+    async function loadUserRoles(uid) {
+      try { const d = await api.get('/api/users/' + uid + '/roles'); userRoleIds.value = (d.roles||[]).map(r=>r.id) }
+      catch(e) { userRoleIds.value = [] }
+    }
+    function toggleUserRole(rid) {
+      const idx = userRoleIds.value.indexOf(rid)
+      if (idx >= 0) userRoleIds.value.splice(idx, 1)
+      else userRoleIds.value.push(rid)
     }
     async function saveAdmin() {
       if (!adminForm.username || !adminForm.name) { showToast('用户名和姓名为必填','error'); return }
-      const body = { username:adminForm.username, name:adminForm.name, nickname:adminForm.nickname, role:adminForm.role, email:adminForm.email, phone:adminForm.phone, employee_no:adminForm.employee_no, group_name:adminForm.group_name }
+      const body = { username:adminForm.username, name:adminForm.name, nickname:adminForm.nickname, role:adminForm.role, email:adminForm.email, phone:adminForm.phone, employee_no:adminForm.employee_no, group_name:adminForm.group_name, status:adminForm.status }
       if (adminForm.password) body.password = adminForm.password
       try {
         if (adminModalEdit.value) await api.updateUser(adminForm._id, body)
         else await api.createUser(body)
         showToast(adminModalEdit.value?'更新成功':'创建成功')
+        if (adminModalEdit.value && userRoleIds.value.length) {
+          try { await api.put('/api/users/' + adminForm._id + '/roles', {role_ids: userRoleIds.value}) }
+          catch(e) { showToast('角色保存失败: ' + (e.message||''), 'warn') }
+        }
         showAdminModal.value = false; loadAllUsers()
       } catch(e) { showToast(e.message,'error') }
     }
@@ -137,7 +162,7 @@ export default {
         return true
       })
       if (!safe.length) return
-      if (!confirm('确定删除选中的 '+safe.length+' 个管理员？')) return
+      if (!confirm('确定删除选中的 ' + safe.length + ' 个管理员？此操作不可恢复')) return
       let success = 0, failed = 0
       for (const uid of safe) {
         try { await api.deleteUser(uid); success++ }
@@ -158,6 +183,7 @@ export default {
     const logFilterKeyword = ref('')
     const logFilterDateFrom = ref('')
     const logFilterDateTo = ref('')
+    const logFilterCategory = ref('')
     const expandedLogId = ref(null)
 
     async function loadLogs() {
@@ -168,6 +194,7 @@ export default {
         if (logFilterKeyword.value) params.keyword = logFilterKeyword.value
         if (logFilterDateFrom.value) params.date_from = logFilterDateFrom.value
         if (logFilterDateTo.value) params.date_to = logFilterDateTo.value
+        if (logFilterCategory.value) params.category = logFilterCategory.value
         const d = await api.listLogs(params)
         logs.value = d.logs||[]; logsTotal.value = d.total||0
       } catch(e) { showToast(e.message,'error') }
@@ -182,8 +209,8 @@ export default {
     const processConfig = reactive({
       process_order_mode: 'sequential',
       delivery_warning_days: 3,
-      limit_by_prev_process: 0,
-      limit_by_order_qty: 0,
+      limit_by_prev_process: 1,
+      limit_by_order_qty: 1,
       approval_enabled: 0,
       auto_order_no: '',
       page_size: 20,
@@ -204,8 +231,8 @@ export default {
         const s = d.settings || {}
         if (s.process_order_mode) processConfig.process_order_mode = s.process_order_mode
         if (s.delivery_warning_days) processConfig.delivery_warning_days = parseInt(s.delivery_warning_days) || 3
-        if (s.limit_by_prev_process !== undefined) processConfig.limit_by_prev_process = parseInt(s.limit_by_prev_process) || 0
-        if (s.limit_by_order_qty !== undefined) processConfig.limit_by_order_qty = parseInt(s.limit_by_order_qty) || 0
+        if (s.limit_by_prev_process !== undefined) processConfig.limit_by_prev_process = parseInt(s.limit_by_prev_process) || 1
+        if (s.limit_by_order_qty !== undefined) processConfig.limit_by_order_qty = parseInt(s.limit_by_order_qty) || 1
         if (s.approval_enabled !== undefined) processConfig.approval_enabled = parseInt(s.approval_enabled) || 0
         processConfig.auto_order_no = s.auto_order_no || ''
         if (s.page_size) processConfig.page_size = parseInt(s.page_size) || 20
@@ -449,7 +476,7 @@ export default {
     const matrixExpandUser = ref(null)
     const selectedUsers = ref([])
     const menuConfigSaving = ref(false)
-    const userRoleIds = computed(() => [])
+    const userRoleIds = ref([])
     
     function getMenuStatus(page) { return '未配置' }
     function sourceBadge(source) { return source || '未知' }
@@ -457,10 +484,10 @@ export default {
 
     return {
       activeTab, tabs,
-      settings, edits, loading, saving, templates, loadSettings, saveSettings, addSetting, removeSetting, labelOf,
+      settings, edits, loading, saving, templates, loadSettings, saveSettings, addSetting, removeSetting, labelOf, companyInfoDirty, showAddKeyModal, newSettingKey, confirmAddSetting,
       adminUsers, allUsers, adminSearch, adminLoading, selectedAdmins, adminSelectAll, showAdminModal, adminModalEdit, adminForm, roleGroups,
       filteredAdminList, loadAllUsers, toggleSelectAllAdmins, openAddAdmin, openEditAdmin, saveAdmin, deleteAdminUser, batchDeleteAdmins,
-      logs, logsTotal, logsPage, logsLoading, logsLimit, logFilterAction, logFilterKeyword, logFilterDateFrom, logFilterDateTo, expandedLogId, loadLogs, logsPrevPage, logsNextPage,
+      logs, logsTotal, logsPage, logsLoading, logsLimit, logFilterAction, logFilterKeyword, logFilterDateFrom, logFilterDateTo, logFilterCategory, expandedLogId, loadLogs, logsPrevPage, logsNextPage,
       processes, processLoading, processConfig, processConfigLoading, processConfigSaving, loadProcesses, loadProcessConfig, saveProcessConfig,
       groups, roles, groupLoading, showGroupModal, groupModalEdit, groupForm, showRoleModal, roleModalEdit, roleForm, expandedGroup, groupRoles,
       loadGroups, loadRoles, toggleGroup, openAddGroup, openEditGroup, saveGroup, deleteGroup, openAddRole, openEditRole, saveRole, deleteRole,
@@ -469,7 +496,7 @@ export default {
       positions, positionLoading, showPositionModal, positionModalEdit, positionForm, allProcesses,
       loadPositions, loadAllProcesses, openAddPosition, openEditPosition, savePosition, deletePosition, toggleProcessInPosition,
       canManage,
-      filteredMatrix, matrixExpandUser, selectedUsers, menuConfigSaving, userRoleIds,
+      filteredMatrix, matrixExpandUser, selectedUsers, menuConfigSaving, userRoleIds, loadUserRoles, toggleUserRole,
       getMenuStatus, sourceBadge,
     }
   }

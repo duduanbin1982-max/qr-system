@@ -36,6 +36,13 @@ def quality_list():
         return handle_unexpected_error(e, 'database operation')
 
 
+@app.route('/api/quality', methods=['GET'])
+@check_auth
+@check_permission('quality:view')
+def quality_list_alias():
+    """Alias for /api/quality/inspections"""
+    return quality_list()
+
 @app.route('/api/quality/inspections', methods=['POST'])
 @check_auth
 @check_permission('quality:edit')
@@ -55,7 +62,7 @@ def quality_create():
         return jsonify({'error': '订单已删除，无法添加检验记录'}), 400
 
     try:
-        inspection_id = QualityService.create_inspection(data, g.current_user['id'])
+        inspection_id = QualityService.create_inspection(data, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -86,7 +93,7 @@ def quality_update(inspection_id):
 
 @app.route('/api/quality/inspections/<int:inspection_id>', methods=['DELETE'])
 @check_auth
-@check_permission('quality:edit')
+@check_permission('quality:delete')
 def quality_delete(inspection_id):
     try:
         QualityService.delete_inspection(inspection_id)

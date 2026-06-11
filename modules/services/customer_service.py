@@ -73,20 +73,39 @@ class CustomerService:
             raise ValueError('无更新内容')
 
         sets.append('updated_at = datetime("now","localtime")')
+        name_changed = 'name' in data
         with BaseService.transaction() as txn:
             txn.execute(
                 f'UPDATE customers SET {", ".join(sets)} WHERE id = ?',
                 params + [cid]
             )
+            # P0: Cascade customer name update to orders.customer
+            if name_changed:
+                new_name = data['name']
+                txn.execute(
+                    'UPDATE orders SET customer = ? WHERE customer_id = ?',
+                    (new_name, cid)
+                )
 
     @staticmethod
     def delete_customer(cid):
-        """删除客户。FK RESTRICT 保证有订单的客户无法删除。"""
+        """删除客户。活跃订单关联的客户受 FK 保护无法删除；软删除订单自动解除关联。"""
         db = BaseService.db()
         cust = db.execute('SELECT id FROM customers WHERE id = ?', (cid,)).fetchone()
         if not cust:
             raise ValueError('客户不存在')
+        # 检查是否有活跃（未软删除）订单
+        active = db.execute(
+            'SELECT COUNT(*) FROM orders WHERE customer_id = ? AND deleted_at IS NULL', (cid,)
+        ).fetchone()[0]
+        if active > 0:
+            raise ValueError(f'无法删除：该客户有 {active} 个活跃订单（非软删除），请先处理订单')
         with BaseService.transaction() as txn:
+            # 解除软删除订单的 customer_id 关联（保留 customer 字段以供审计）
+            txn.execute(
+                'UPDATE orders SET customer_id = NULL WHERE customer_id = ? AND deleted_at IS NOT NULL',
+                (cid,)
+            )
             txn.execute('DELETE FROM customers WHERE id = ?', (cid,))
 
     @staticmethod

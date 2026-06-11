@@ -40,7 +40,7 @@ def _generate_order_no(db):
         if not existing:
             return order_no
         seq += 1
-    return prefix + str(seq).zfill(2)
+    raise RuntimeError(f'订单号生成失败：日期{prefix}下所有序号已用尽')
 
 
 class OrderService:
@@ -97,10 +97,10 @@ class OrderService:
             where.append('o.status = ?')
             params.append(status)
         if keyword:
-            where.append('(o.order_no LIKE ? OR o.product_name LIKE ?)')
-            params.extend([f'%{keyword}%', f'%{keyword}%'])
+            where.append('(o.order_no LIKE ? OR o.product_name LIKE ? OR o.product_code LIKE ? OR o.customer LIKE ?)')
+            params.extend([f'%{keyword}%'] * 4)
         if customer:
-            where.append('c.name LIKE ?')
+            where.append('o.customer LIKE ?')
             params.append(f'%{customer}%')
 
         # 数据权限
@@ -151,7 +151,7 @@ class OrderService:
                 o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
             except Exception:
                 o['extra_fields'] = {}
-            if not o.get('product_code'):
+            if not (o.get('product_code') or '').strip():
                 o['product_code'] = o['extra_fields'].get('product_code', '') \
                     if isinstance(o['extra_fields'], dict) else ''
             o['processes'] = all_procs.get(o['id'], [])
@@ -558,7 +558,7 @@ class OrderService:
                             route_id, status)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
                     ''', (
-                        order_no, str(o.get('customer', '')), o.get('customer_id'),
+                        order_no, (db.execute('SELECT name FROM customers WHERE id = ?', (o.get('customer_id'),)).fetchone() or {}).get('name', o.get('customer', '')), o.get('customer_id'),
                         str(o.get('product_name', '')), str(o.get('product_code', '')),
                         int(o.get('quantity', 0) or 0),
                         str(o.get('plan_start', '')), str(o.get('plan_end', '')),

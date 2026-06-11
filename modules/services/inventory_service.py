@@ -1,4 +1,5 @@
 """
+[DEPRECATED] Use MaterialService instead.
 qr-system — 库存管理 Service 层
 
 从 routes/inventory.py 提取全部业务逻辑。
@@ -52,7 +53,8 @@ class InventoryService:
                     data.get('product_name', ''),
                     data.get('specification', ''),
                     data.get('quantity', 0),
-                    data.get('safe_stock', 0),
+                    data.get('quantity', 0),
+                data.get('safe_stock', 0),
                     data.get('location', ''),
                     data.get('unit', '件'),
                     data.get('remark', '')
@@ -78,13 +80,14 @@ class InventoryService:
             txn.execute('''
                 UPDATE inventory SET
                     product_model = ?, product_name = ?, specification = ?,
-                    safe_stock = ?, location = ?, unit = ?, remark = ?,
+                    quantity = ?, safe_stock = ?, location = ?, unit = ?, remark = ?,
                     updated_at = datetime('now','localtime')
                 WHERE id = ?
             ''', (
                 data.get('product_model', ''),
                 data.get('product_name', ''),
                 data.get('specification', ''),
+                data.get('quantity', 0),
                 data.get('safe_stock', 0),
                 data.get('location', ''),
                 data.get('unit', '件'),

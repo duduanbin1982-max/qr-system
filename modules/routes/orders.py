@@ -536,7 +536,7 @@ def workpiece_progress(order_id):
                 'seq_order': proc['seq_order'],
                 'completed': sum(1 for p in progress
                     for s in p['steps']
-                    if s['process_id'] == proc['process_id'] and s['status'] in ('completed',)
+                    if s['process_id'] == proc['process_id'] and s['status'] == 'completed'
                 ),
                 'total': total_items,
             }

@@ -8,10 +8,10 @@
     </div>
 
     <!-- 分类Tab按钮 -->
-    <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
-      <span @click="switchCat('all')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='all'?'600':'400',background:activeCat==='all'?'var(--primary-light)':'var(--bg-hover)',color:activeCat==='all'?'var(--primary)':'var(--text-placeholder)',border:activeCat==='all'?'1px solid var(--primary-light)':'1px solid transparent'}">📋 全部产品</span>
-      <span @click="switchCat('结构件')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='结构件'?'600':'400',background:activeCat==='结构件'?'var(--info-light)':'var(--bg-hover)',color:activeCat==='结构件'?'var(--info)':'var(--text-placeholder)',border:activeCat==='结构件'?'1px solid var(--info-lighter)':'1px solid transparent'}">🔩 结构件产品</span>
-      <span @click="switchCat('机加工')" :style="{padding:'8px 16px',borderRadius:'8px',cursor:'pointer',fontSize:'14px',fontWeight:activeCat==='机加工'?'600':'400',background:activeCat==='机加工'?'var(--warning-lighter)':'var(--bg-hover)',color:activeCat==='机加工'?'var(--warning)':'var(--text-placeholder)',border:activeCat==='机加工'?'1px solid var(--warning-lighter)':'1px solid transparent'}">⚙️ 机加工产品</span>
+    <div class="cat-tabs">
+      <span class="cat-tab cat-tab-all" :class="{active: activeCat==='all'}" @click="switchCat('all')">📋 全部产品</span>
+      <span class="cat-tab cat-tab-struct" :class="{active: activeCat==='结构件'}" @click="switchCat('结构件')">🔩 结构件产品</span>
+      <span class="cat-tab cat-tab-mach" :class="{active: activeCat==='机加工'}" @click="switchCat('机加工')">⚙️ 机加工产品</span>
     </div>
 
     <div class="card">
@@ -150,8 +150,8 @@
             <div v-if="modalEdit" class="form-group">
               <label>附件 <span style="color:var(--text-muted);font-weight:normal">(图片/图纸/文档)</span></label>
               <div class="attachment-upload" style="margin-bottom:10px">
-                <input type="file" id="product-attachment-input" style="display:none" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple @change="handleAttachmentUpload">
-                <button type="button" class="btn btn-sm btn-default" onclick="document.getElementById('product-attachment-input').click()">+ 上传附件</button>
+                <input type="file" id="product-attachment-input" style="display:none" accept=image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx,.zip,.rar,.step,.stp,.igs,.iges multiple @change="handleAttachmentUpload">
+                <button type="button" class="btn btn-sm btn-default" id="btn-upload-attachment">+ 上传附件</button>
                 <span style="color:var(--text-muted);font-size:var(--text-xs-alt);margin-left:8px">支持图片/PDF/CAD/Office，≤10MB</span>
               </div>
               <div v-if="productAttachments.length" style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
@@ -198,3 +198,5 @@
       </div>
     </div>
   </div>
+
+<script nonce="{$ nonce $}">document.getElementById("btn-upload-attachment")&&document.getElementById("btn-upload-attachment").addEventListener("click",function(){document.getElementById("product-attachment-input").click()});</script>

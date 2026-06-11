@@ -1,7 +1,7 @@
 // MaterialList Component — 物料管理
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
-import { api } from '../../api.js?v=56'
-import { showToast } from '../../store.js?v=56'
+import { api } from '../../api.js?v=61'
+import { showToast } from '../../store.js?v=61'
 import { can } from '../../auth.js'
 
 export default {
@@ -17,6 +17,8 @@ export default {
     const editing = ref(null)
     const selectedMaterial = ref(null)
     const searchText = ref('')
+    const showSupplierForm = ref(false)
+    const supplierForm = ref({ name: '', contact: '', phone: '' })
 
     const form = ref({ name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', remark: '' })
     const stockForm = ref({ type: 'in', quantity: 0, remark: '', operator_name: '' })
@@ -150,6 +152,27 @@ export default {
       try { const d = await api.get('/api/suppliers'); suppliers.value = d.suppliers || [] } catch (e) {}
     }
 
+    function openSupplierAdd() {
+      supplierForm.value = { name: '', contact: '', phone: '' }
+      showSupplierForm.value = true
+    }
+
+    async function addSupplier() {
+      if (!supplierForm.value.name.trim()) { showToast('供应商名称必填', 'error'); return }
+      try {
+        const r = await api.post('/api/suppliers', supplierForm.value)
+        showSupplierForm.value = false
+        await loadSuppliers()
+        // 自动选中新创建的供应商
+        if (r.id) {
+          form.value.supplier_id = r.id
+        } else if (suppliers.value.length > 0) {
+          form.value.supplier_id = suppliers.value[suppliers.value.length - 1].id
+        }
+        showToast('供应商已添加')
+      } catch (e) { showToast(e.message || '添加失败', 'error') }
+    }
+
     onMounted(() => { load(); loadSuppliers() })
 
     return {
@@ -158,6 +181,7 @@ export default {
       consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
       openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
       openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
+      showSupplierForm, supplierForm, openSupplierAdd, addSupplier,
       canEdit, canDelete, canCreate,
     }
   }

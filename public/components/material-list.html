@@ -7,7 +7,7 @@
 
     <div class="card">
       <div class="card-header">
-        <span>📦 物料列表</span>
+        <h3>📦 物料管理</h3>
         <div style="display:flex;gap:var(--space-2)">
           <input v-model="searchText" placeholder="搜索物料..." style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
           <button class="btn btn-primary" @click="openCreate" v-if="canCreate">+ 新增物料</button>
@@ -62,16 +62,35 @@
           <div class="form-group"><label>单价</label><input v-model.number="form.unit_price" type="number" class="form-input" step="0.01" placeholder="0.00"></div>
           <div class="form-group"><label>库位</label><input v-model="form.location" class="form-input" placeholder="仓库/货架"></div>
           <div class="form-group"><label>供应商</label>
-            <select v-model.number="form.supplier_id" class="form-input" style="width:100%">
-              <option :value="null">-- 无 --</option>
-              <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+            <div style="display:flex;gap:8px">
+              <select v-model.number="form.supplier_id" class="form-input" style="flex:1">
+                <option :value="null">-- 无 --</option>
+                <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+              <button type="button" class="btn btn-sm" style="white-space:nowrap;padding:8px 12px;background:var(--success);color:#fff;border:none" @click="openSupplierAdd">➕ 新增</button>
+            </div>
           </div>
           <div class="form-group"><label>备注</label><textarea v-model="form.remark" class="form-input" rows="2" placeholder="备注信息"></textarea></div>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showForm=false">取消</button>
           <button class="btn btn-primary" @click="save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增供应商小弹窗 -->
+    <div class="modal-overlay" v-if="showSupplierForm" @click.self="showSupplierForm=false">
+      <div class="modal" style="max-width:400px">
+        <div class="modal-header">➕ 新增供应商</div>
+        <div class="modal-body">
+          <div class="form-group"><label>名称 *</label><input v-model="supplierForm.name" class="form-input" placeholder="供应商名称"></div>
+          <div class="form-group"><label>联系人</label><input v-model="supplierForm.contact" class="form-input" placeholder="联系人姓名"></div>
+          <div class="form-group"><label>电话</label><input v-model="supplierForm.phone" class="form-input" placeholder="联系电话"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showSupplierForm=false">取消</button>
+          <button class="btn btn-primary" @click="addSupplier">保存</button>
         </div>
       </div>
     </div>

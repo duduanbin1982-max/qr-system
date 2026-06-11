@@ -6,27 +6,54 @@ from modules.db import get_db
 from modules.middleware.auth import get_user_permissions
 
 def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
-    """返回用户可访问的工序ID列表。None=全部, [] =无权限。岗位工序绑定优先级高于全局权限。"""
     if not user:
         return None
 
-    # 岗位工序绑定（最高优先级）
-    pid = user.get('position_id')
+    db = get_db()
+    allowed = set()
+
+    # 1. Collect position processes
+    pid = user.get("position_id")
     if pid:
-        db = get_db()
-        rows = db.execute('SELECT process_id FROM position_processes WHERE position_id = ?', (pid,)).fetchall()
-        if rows:
-            return [r['process_id'] for r in rows]
-        # 有 position_id 但无工序关联 → 全无
+        rows = db.execute(
+            "SELECT process_id FROM position_processes WHERE position_id = ?", (pid,)
+        ).fetchall()
+        for r in rows:
+            allowed.add(r["process_id"])
+
+    # 2. Collect employee processes (supplement / fill-in)
+    pids_str = (user.get("process_ids") or "").strip()
+    if pids_str:
+        try:
+            pids = [int(x.strip()) for x in pids_str.split(",") if x.strip()]
+            if pids:
+                ph = ",".join("?" for _ in pids)
+                existing = db.execute(
+                    f"SELECT id FROM processes WHERE id IN ({ph})", pids
+                ).fetchall()
+                for r in existing:
+                    allowed.add(r["id"])
+        except (ValueError, TypeError):
+            pass
+
+    # 3. Return merged result (position U employee)
+    if allowed:
+        return sorted(list(allowed))
+
+    # 4. Has position or process_ids but merge empty => zero permission
+    if pid or pids_str:
         return []
 
-    # 无岗位 → 检查全局权限
+    # 5. Check global permissions (admin etc.)
     perms = get_user_permissions(user)
-    global_perms = {'orders:view', 'stats:view', 'inventory:view', '*',
-                    'shipments:view', 'reports:view', 'dashboard:view'}
-    if perms and (set(perms) & global_perms or '*' in perms):
-        return None  # 全局权限 → 全部工序可见
-    return None
+    global_perms = {"orders:view", "stats:view", "inventory:view", "*",
+                    "shipments:view", "reports:view", "dashboard:view"}
+    if perms and (set(perms) & global_perms or "*" in perms):
+        return None
+
+    # 6. No position, no employee processes, no global perms => zero
+    return []
+
 
 
 def process_filter_condition(user: Optional[dict], column: str = 'process_id') -> Tuple[str, List[int]]:

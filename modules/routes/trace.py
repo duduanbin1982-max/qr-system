@@ -52,7 +52,7 @@ def trace_product(code):
                 item_dict.pop(k, None)
 
         # 过滤 item_dict，只保留 product_items 表字段
-        item_fields = ['id', 'serial_no', 'order_id', 'order_no', 'position_no',
+        item_fields = ['id', 'serial_no', 'order_id', 'position_no',
                        'qr_content', 'status', 'current_process_id', 'created_at']
         clean_item = {k: item_dict.get(k) for k in item_fields if k in item_dict}
 

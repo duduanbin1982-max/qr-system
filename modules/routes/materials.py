@@ -8,7 +8,7 @@ from flask import request, jsonify, g
 
 from modules.app import app
 from modules.db import get_db
-from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.validate import validate_json
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
@@ -55,16 +55,19 @@ def create_material():
             (name,
              data.get('spec', '').strip(),
              data.get('unit', '件').strip(),
-             float(data.get('quantity', 0)),
-             float(data.get('unit_price', 0)),
-             float(data.get('safe_stock', 0)),
+             float(data.get('quantity') or 0),
+             float(data.get('unit_price') or 0),
+             float(data.get('safe_stock') or 0),
              data.get('location', '').strip(),
              data.get('supplier_id') or None,
              data.get('remark', '').strip())
         )
         db.commit()
+        try: audit_log('create', 'material', db.execute('SELECT last_insert_rowid()').fetchone()[0], f'material: {name}')
+        except Exception: pass
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return jsonify({'error': str(e)}), 400
     return jsonify({'message': 'created'})
 
@@ -72,7 +75,7 @@ def create_material():
 @app.route('/api/materials/<int:mid>', methods=['PUT'])
 @check_auth
 @check_permission('materials:manage')
-@validate_json('create_material')
+@validate_json('update_material')
 def update_material(mid):
     data = get_json_body()
     db = get_db()
@@ -89,8 +92,11 @@ def update_material(mid):
                 values.append(str(data[k]).strip())
         for k in ['quantity', 'unit_price', 'safe_stock', 'supplier_id']:
             if k in data:
-                fields.append(f'{k} = ?')
-                values.append(float(data[k]))
+                if data[k] is None and k == 'supplier_id':
+                    fields.append(f'{k} = NULL')
+                else:
+                    fields.append(f'{k} = ?')
+                    values.append(float(data[k] or 0))
         if not fields:
             return jsonify({'error': 'no fields to update'}), 400
         fields.append("updated_at = datetime('now','localtime')")
@@ -99,9 +105,12 @@ def update_material(mid):
         db.execute("BEGIN IMMEDIATE")
         db.execute(f'UPDATE materials SET {set_clause} WHERE id = ?', values)
         db.commit()
+        try: audit_log('update', 'material', mid, 'material updated')
+        except Exception: pass
         return jsonify({'message': 'updated'})
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -121,9 +130,12 @@ def delete_material(mid):
         db.execute('DELETE FROM material_logs WHERE material_id = ?', (mid,))
         db.execute('DELETE FROM materials WHERE id = ?', (mid,))
         db.commit()
+        try: audit_log('delete', 'material', mid, f'deleted: {mat["name"]}')
+        except Exception: pass
         return jsonify({'message': 'deleted'})
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -184,8 +196,11 @@ def material_stock(mid):
             (mid, change_type, quantity, remark, operator_name)
         )
         db.commit()
+        try: audit_log('stock_' + change_type, 'material', mid, f'stock {change_type}: {quantity}')
+        except Exception: pass
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return jsonify({'error': str(e)}), 400
 
     return jsonify({'message': 'ok', 'new_quantity': new_qty})
@@ -255,8 +270,11 @@ def material_consumption_create(mid):
         db.execute('INSERT INTO material_logs (material_id, type, quantity, remark, operator_name) VALUES (?,?,?,?,?)',
                    (mid, 'out', quantity, f'消耗: {notes}' if notes else '消耗', op_name))
         db.commit()
+        try: audit_log('consume', 'material', mid, f'consumed {quantity} for order {order_id}')
+        except Exception: pass
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return jsonify({'error': str(e)}), 400
 
     return jsonify({'ok': True, 'message': '消耗已记录', 'new_quantity': new_qty})
@@ -276,8 +294,11 @@ def material_consumption_delete(cid):
                    (mc['quantity'], mc['material_id']))
         db.execute('DELETE FROM material_consumptions WHERE id=?', (cid,))
         db.commit()
+        try: audit_log('unconsume', 'material', mc['material_id'], f'undone consumption {cid}')
+        except Exception: pass
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return jsonify({'error': str(e)}), 400
     return jsonify({'ok': True, 'message': '已撤销消耗'})
 
@@ -321,9 +342,12 @@ def create_supplier():
                     data.get('address', '').strip(), data.get('remark', '').strip()))
         db.commit()
         rid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+        try: audit_log('create', 'supplier', rid, f'supplier: {name}')
+        except Exception: pass
         return jsonify({'ok': True, 'id': rid, 'message': '供应商已添加'})
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -344,9 +368,12 @@ def update_supplier(sid):
                     data.get('phone', '').strip(), data.get('address', '').strip(),
                     data.get('remark', '').strip(), sid))
         db.commit()
+        try: audit_log('update', 'supplier', sid, 'supplier updated')
+        except Exception: pass
         return jsonify({'ok': True, 'message': '已更新'})
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return handle_unexpected_error(e, 'database operation')
 
 
@@ -365,7 +392,10 @@ def delete_supplier(sid):
         db.execute("BEGIN IMMEDIATE")
         db.execute('DELETE FROM suppliers WHERE id=?', (sid,))
         db.commit()
+        try: audit_log('delete', 'supplier', sid, f'deleted: {sup["name"]}')
+        except Exception: pass
         return jsonify({'ok': True, 'message': '已删除'})
     except Exception as e:
-        db.execute('ROLLBACK')
+        try: db.execute('ROLLBACK')
+        except Exception: pass
         return handle_unexpected_error(e, 'database operation')

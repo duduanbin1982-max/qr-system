@@ -19,9 +19,13 @@
             <option value="cancelled">已取消</option>
             <option value="paused">已暂停</option>
           </select>
+          <select class="filter-select" v-model="filterCustomer" @change="customerChange">
+            <option value="">全部客户</option>
+            <option v-for="cust in customers" :key="cust.id" :value="cust.name">{{ cust.name }}</option>
+          </select>
           <div class="search-box">
             <span>🔍</span>
-            <input v-model="searchKeyword" placeholder="搜索订单号/产品名..." @keyup.enter="searchAndLoad">
+            <input v-model="searchKeyword" placeholder="搜索订单号/产品/客户..." @input="debouncedSearch" @keyup.enter="searchAndLoad">
           </div>
           <button class="btn btn-default btn-sm" @click="searchAndLoad">搜索</button>
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
@@ -128,7 +132,7 @@
 
     <!-- 新增/编辑模态框 -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
-      <div class="modal" style="max-width:650px">
+      <div class="modal" style="max-width:780px">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑订单' : '新建订单' }}</span>
           <span class="modal-close" @click="showModal=false">&times;</span>
@@ -159,58 +163,71 @@
               </div></div>
             <div class="form-col"><div class="form-group"><label>产品名称 *</label><input class="form-input" v-model="form.product_name" placeholder="如：底壳"></div></div>
           </div>
-          <div class="form-row">
-            <div class="form-col"><div class="form-group"><label>产品编码</label>
-                <div class="combobox" ref="cbContainer">
-                  <input class="form-input combobox-input" v-model="productSearch" 
-                    placeholder="输入编码或产品名搜索..."
-                    @focus="onProductSearchFocus"
-                    @input="onProductSearchInput"
-                    @keydown.escape="showProductDropdown=false"
-                    @keydown.enter.prevent="selectProductByEnter"
-                    @keydown.down.prevent="moveProductCursor(1)"
-                    @keydown.up.prevent="moveProductCursor(-1)"
-                    autocomplete="off">
-                  <span v-if="productSearch" class="combobox-clear" @click="clearProductSearch">✕</span>
-                  <div class="combobox-dropdown" v-if="showProductDropdown && productSearchResults.length" 
-                    @mousedown.prevent>
-                    <div v-for="(p, i) in productSearchResults" :key="p.id"
-                      class="combobox-item"
-                      :class="{ active: productCursor === i }"
-                      @click="selectProduct(p)"
-                      @mouseenter="productCursor = i">
-                      <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
-                      <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }}</span>
-                      <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
-                    </div>
-                  </div>
-                  <div class="combobox-dropdown" v-if="showProductDropdown && !productSearch && recentProducts.length" 
-                    @mousedown.prevent>
-                    <div class="combobox-group-label">📌 最近使用</div>
-                    <div v-for="(p, i) in recentProducts" :key="'r'+p.id"
-                      class="combobox-item" :class="{ active: productCursor === i }"
-                      @click="selectProduct(p)" @mouseenter="productCursor = i">
-                      <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
-                      <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }}</span>
-                      <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
-                    </div>
-                  </div>
+          <!-- 产品编码搜索 — 独占整行 -->
+          <div class="form-group" style="margin-bottom:12px"><label>产品编码搜索</label>
+            <div class="combobox" ref="cbContainer" style="width:100%">
+              <input class="form-input combobox-input" v-model="productSearch" 
+                placeholder="🔍 输入编码或产品名搜索，支持键盘 ↑↓ 选择，Enter 确认..."
+                style="font-size:15px;padding:12px 14px"
+                @focus="onProductSearchFocus"
+                @input="onProductSearchInput"
+                @keydown.escape="showProductDropdown=false"
+                @keydown.enter.prevent="selectProductByEnter"
+                @keydown.down.prevent="moveProductCursor(1)"
+                @keydown.up.prevent="moveProductCursor(-1)"
+                autocomplete="off">
+              <span v-if="productSearch" class="combobox-clear" @click="clearProductSearch">✕</span>
+              <div class="combobox-dropdown" v-if="showProductDropdown && productSearchResults.length" 
+                @mousedown.prevent>
+                <div v-for="(p, i) in productSearchResults" :key="p.id"
+                  class="combobox-item"
+                  :class="{ active: productCursor === i }"
+                  @click="selectProduct(p)"
+                  @mouseenter="productCursor = i">
+                  <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
+                  <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }} <span style="color:var(--text-placeholder);font-size:var(--text-2xs)">{{ p.model||'' }} {{ p.spec||'' }}</span></span>
+                  <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
                 </div>
-              </div></div>
-            <div class="form-col"><div class="form-group"><label>数量 *</label><input class="form-input" v-model.number="form.quantity" type="number" min="1" placeholder="生产数量"></div></div>
+              </div>
+              <div class="combobox-dropdown" v-if="showProductDropdown && !productSearch && recentProducts.length" 
+                @mousedown.prevent>
+                <div class="combobox-group-label">📌 最近使用</div>
+                <div v-for="(p, i) in recentProducts" :key="'r'+p.id"
+                  class="combobox-item" :class="{ active: productCursor === i }"
+                  @click="selectProduct(p)" @mouseenter="productCursor = i">
+                  <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
+                  <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }} <span style="color:var(--text-placeholder);font-size:var(--text-2xs)">{{ p.model||'' }} {{ p.spec||'' }}</span></span>
+                  <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 产品确认卡片 -->
+          <div v-if="form.product_code" style="background:#ECFDF5;border:1px solid #6EE7B7;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px">
+            <span style="font-weight:700;color:#059669;font-size:15px">✅ 已选择：<code style="background:#D1FAE5;padding:2px 8px;border-radius:4px;font-size:14px">{{ form.product_code }}</code></span>
+            <span v-if="form.model" style="font-size:13px;color:#374151"><b>型号</b> {{ form.model }}</span>
+            <span v-if="form.spec" style="font-size:13px;color:#374151"><b>规格</b> {{ form.spec }}</span>
+            <span v-if="form.style" style="font-size:13px;color:#374151"><b>类型</b> {{ form.style }}</span>
+            <span v-if="form.upper_opening" style="font-size:13px;color:#374151"><b>上开</b> {{ form.upper_opening }}</span>
+            <span v-if="form.plate_thickness" style="font-size:13px;color:#374151"><b>板厚</b> {{ form.plate_thickness }}mm</span>
+            <span v-if="form.category" class="badge" style="font-size:11px" :class="form.category==='结构件'?'badge-info':'badge-warning'">{{ form.category }}</span>
+            <span v-if="form.price" style="font-size:13px;color:#374151"><b>工价</b> ¥{{ form.price }}</span>
+            <span v-if="form.weight" style="font-size:13px;color:#374151"><b>重量</b> {{ form.weight }}kg</span>
           </div>
           <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>数量 *</label><input class="form-input" v-model.number="form.quantity" type="number" min="1" placeholder="生产数量"></div></div>
             <div class="form-col"><div class="form-group"><label>计划开始</label><input class="form-input" v-model="form.plan_start" type="date"></div></div>
             <div class="form-col"><div class="form-group"><label>计划结束</label><input class="form-input" v-model="form.plan_end" type="date"></div></div>
+          </div>
+          <div class="form-row">
             <div class="form-col"><div class="form-group"><label>交期</label><input class="form-input" v-model="form.deadline" type="date"></div></div>
+            <div class="form-col"><div class="form-group"><label>工序路线</label>
+              <select class="form-input" v-model="form.route_id">
+                <option value="">-- 请选择工序路线 --</option>
+                <option v-for="r in processRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
+              </select>
+            </div></div>
           </div>
-          <div class="form-group"><label>工序路线</label>
-            <select class="form-input" v-model="form.route_id">
-              <option value="">-- 请选择工序路线 --</option>
-              <option v-for="r in processRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
-            </select>
-          </div>
-
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
         </div>
         <div class="modal-footer">

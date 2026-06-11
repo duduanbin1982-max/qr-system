@@ -8,12 +8,10 @@
 
     <!-- Tab 切换 -->
     <div style="display:flex;gap:var(--space-1);margin-bottom:var(--space-5);border-bottom:2px solid var(--border-light)">
-      <button @click="setTab('pending')"
-        :style="{padding:'10px 18px',border:'none',background:'transparent',cursor:'pointer',fontSize:'14px',fontWeight:activeTab==='pending'?'600':'400',color:activeTab==='pending'?'var(--primary)':'var(--text-placeholder)',borderBottom:activeTab==='pending'?'2px solid var(--primary)':'2px solid transparent',marginBottom:'-2px'}">
+      <button class="tab-btn" :class="{active: activeTab==='pending'}" @click="setTab('pending')">
         ⏳ 待审批
       </button>
-      <button @click="setTab('history')"
-        :style="{padding:'10px 18px',border:'none',background:'transparent',cursor:'pointer',fontSize:'14px',fontWeight:activeTab==='history'?'600':'400',color:activeTab==='history'?'var(--primary)':'var(--text-placeholder)',borderBottom:activeTab==='history'?'2px solid var(--primary)':'2px solid transparent',marginBottom:'-2px'}">
+      <button class="tab-btn" :class="{active: activeTab==='history'}" @click="setTab('history')">
         📋 审批历史
       </button>
     </div>

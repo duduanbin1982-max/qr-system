@@ -3,6 +3,7 @@ qr-system — 工序管理 Service 层
 
 从 routes/processes.py 提取全部业务逻辑。
 """
+import re
 import sqlite3
 from modules.services import BaseService
 
@@ -30,8 +31,9 @@ class ProcessService:
             conditions.append('category = ?')
             params.append(category)
         if search:
-            conditions.append('name LIKE ?')
-            params.append(f'%{search}%')
+            conditions.append('name LIKE ? ESCAPE "\\"')
+            safe_search = search.replace('%', '\\%').replace('_', '\\_')
+            params.append(f'%{safe_search}%')
         if conditions:
             sql += ' WHERE ' + ' AND '.join(conditions)
         sql += f' ORDER BY {sort_by} {sort_dir}, id {sort_dir}'
@@ -60,6 +62,8 @@ class ProcessService:
         name = data.get('name', '').strip()
         if not name:
             raise ValueError('工序名称不能为空')
+        if re.search(r"[';<>]", name):
+            raise ValueError('工序名称不能包含特殊字符')
 
         db = BaseService.db()
         seq_order = data.get('seq_order')
@@ -68,11 +72,17 @@ class ProcessService:
                 seq_order = int(seq_order)
             except (ValueError, TypeError):
                 seq_order = None
+        # Pre-check duplicate name (friendly error, before transaction)
+        existing = db.execute('SELECT id FROM processes WHERE name = ?', (name,)).fetchone()
+        if existing:
+            raise ValueError(f'工序【{name}】已存在，不能重复添加')
         try:
             with BaseService.transaction() as txn:
                 if seq_order is None:
+                    category = data.get('category', '结构件')
                     max_seq = txn.execute(
-                        'SELECT COALESCE(MAX(seq_order),0) FROM processes'
+                        'SELECT COALESCE(MAX(seq_order),0) FROM processes WHERE category = ?',
+                        (category,)
                     ).fetchone()[0]
                     seq_order = max_seq + 1
                 cur = txn.execute(
@@ -100,6 +110,8 @@ class ProcessService:
             name = (data.get('name') or '').strip()
             if not name:
                 raise ValueError('工序名称不能为空')
+            if re.search(r"[';<>]", name):
+                raise ValueError('工序名称不能包含特殊字符')
             data['name'] = name
 
         field_map = {
@@ -115,6 +127,15 @@ class ProcessService:
         if not sets:
             raise ValueError('无更新内容')
 
+        # Pre-check duplicate name if name is being changed
+        if 'name' in data:
+            dup = db.execute('SELECT id FROM processes WHERE name = ? AND id != ?', (data['name'], pid)).fetchone()
+            if dup:
+                raise ValueError(f'工序名称【{data["name"]}】已存在，不能重复')
+
+        # Always set updated_at
+        sets.append('updated_at = datetime("now","localtime")')
+
         with BaseService.transaction() as txn:
             try:
                 txn.execute(
@@ -126,25 +147,27 @@ class ProcessService:
 
     @staticmethod
     def delete_process(pid):
-        """Delete process with impact audit."""
+        """Delete process with impact audit and full cascade cleanup."""
         db = BaseService.db()
         existing = db.execute(
             'SELECT id, name FROM processes WHERE id = ?', (pid,)
         ).fetchone()
         if not existing:
-            raise ValueError('?????')
+            raise ValueError('不存在')
 
-        # Count affected records
-        impact = {}
-        for tbl in ['work_records','scrap_records','rework_records',
-                     'quality_inspections','process_prices','process_route_items',
-                     'order_processes','position_processes','material_consumptions']:
-            cnt = db.execute(f'SELECT COUNT(*) FROM {tbl} WHERE process_id = ?', (pid,)).fetchone()[0]
-            if cnt > 0:
-                impact[tbl] = cnt
+        related_tables = ['work_records','scrap_records','rework_records',
+                          'quality_inspections','process_prices','process_route_items',
+                          'order_processes','position_processes','material_consumptions']
+        union_parts = []
+        for tbl in related_tables:
+            union_parts.append(f"SELECT '{tbl}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
+        union_sql = ' UNION ALL '.join(union_parts)
+        rows = db.execute(union_sql, [pid] * len(related_tables)).fetchall()
+        impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}
 
         with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM material_consumptions WHERE process_id = ?', (pid,))
+            for tbl in related_tables:
+                txn.execute(f'DELETE FROM {tbl} WHERE process_id = ?', (pid,))
             txn.execute('DELETE FROM processes WHERE id = ?', (pid,))
 
         return {'name': existing['name'], 'impact': impact}

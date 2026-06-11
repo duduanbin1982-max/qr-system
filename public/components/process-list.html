@@ -30,7 +30,11 @@
       </div>
       <div class="card-body">
         <div class="table-wrap">
-          <table v-if="processes.length" class="data-table">
+          <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">
+          <div style="font-size:32px;margin-bottom:8px">⏳</div>
+          <div>加载中...</div>
+        </div>
+        <table v-else-if="processes.length" class="data-table">
             <thead>
               <tr>
                 <th class="col-seq">序号</th>
@@ -42,8 +46,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="p in processes" :key="p.id">
-                <td class="col-seq text-center"><span class="row-num">{{ p.seq_order }}</span></td>
+              <tr v-for="(p, idx) in processes" :key="p.id">
+                <td class="col-seq text-center"><span class="row-num">{{ (page - 1) * pageSize + idx + 1 }}</span></td>
                 <td class="col-name fw-600">{{ p.process_name }}</td>
                 <td class="text-muted text-sm">{{ p.description || '-' }}</td>
                 <td class="col-cat nowrap"><span class="badge" :class="p.category === '结构件' ? 'badge-info' : 'badge-warning'" style="font-size:var(--text-xs-alt)">{{ p.category }}</span></td>
@@ -57,7 +61,7 @@
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty"><div class="empty-icon">⚙️</div><div class="empty-text">暂无工序数据</div></div>
+          <div v-else-if="!loading" class="empty"><div class="empty-icon">⚙️</div><div class="empty-text">暂无工序数据</div></div>
         </div>
         <!-- 分页 -->
         <div v-if="total > pageSize" class="pagination-bar">

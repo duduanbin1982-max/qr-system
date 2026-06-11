@@ -64,7 +64,8 @@ export default {
     const pinyinMap = {
       '三':'S','档':'D','单':'S','双':'S','一':'Y','二':'E','四':'S','五':'W','六':'L','七':'Q','八':'B','九':'J','十':'S',
       '宽':'K','窄':'Z','高':'G','低':'D','短':'D','长':'C','小':'X','大':'D','厚':'H','薄':'B','普':'P','通':'T',
-      '型':'X','开':'K','口':'K','圆':'Y','方':'F','角':'J','上':'S','下':'X','左':'Z','右':'Y',
+      '型':'X','开':'K','口':'K','圆':'Y','方':'F','角':'J',
+      '静':'J', '音':'Y', '分':'F', '体':'T','上':'S','下':'X','左':'Z','右':'Y',
       '中':'Z','重':'Z','新':'X','全':'Q','钢':'G','铁':'T','铜':'T','铝':'L','不':'B','超':'C','特':'T','精':'J',
       '加':'J','工':'G','冲':'C','压':'Y','焊':'H','切':'Q','折':'Z','卷':'J','车':'C','铣':'X','磨':'M','钻':'Z',
       '前':'Q','后':'H','内':'N','顶':'D','底':'D','侧':'C','正':'Z','反':'F',
@@ -142,11 +143,13 @@ export default {
     async function handleAttachmentUpload(event) {
       const files = event.target.files
       if (!files.length) return
+      const file = files[0]
+      if (file.size > 10 * 1024 * 1024) { showToast("文件大小超过10MB限制", "error"); event.target.value = ""; return }
       if (!currentEditProductId.value) {
         showToast('请先保存产品后再上传附件', 'error'); event.target.value = ''; return
       }
       const formData = new FormData()
-      formData.append('file', files[0])
+      formData.append('file', file)
       try {
         const resp = await fetch('/api/products/' + currentEditProductId.value + '/attachments', {
           method: 'POST',
@@ -159,7 +162,7 @@ export default {
           const d = await resp.json()
           showToast(d.error || '上传失败', 'error')
         }
-      } catch(e) { showToast('上传失败', 'error') }
+      } catch(e) { showToast(e.message || '上传失败', 'error') }
       event.target.value = ''
     }
 
@@ -264,6 +267,7 @@ export default {
     }
 
     const importFile = ref(null)
+    const importLoading = ref(false)
 
     function triggerImport() {
       importFile.value.click()
@@ -272,14 +276,29 @@ export default {
     async function handleImport(event) {
       const files = event.target.files
       if (!files.length) return
+      const file = files[0]
+      if (file.size > 10 * 1024 * 1024) { showToast('文件大小超过10MB限制', 'error'); event.target.value = ''; return }
       const formData = new FormData()
-      formData.append('file', files[0])
+      formData.append('file', file)
+      importLoading.value = true
+      showToast('正在导入 ' + file.name + ' ...')
       try {
         const d = await api.uploadProductImport(formData)
-        showToast(d.message || '导入成功')
+        let parts = [d.message || '导入完成']
+        if (d.error_summary) parts.push(d.error_summary)
+        if (d.columns_found && d.columns_found.length) parts.push('识别列: ' + d.columns_found.join(','))
+        showToast(parts.join(' | '))
+        if (d.errors && d.errors.length > 0) {
+          console.log('Import errors:', d.errors)
+        }
+        if (d.header_row) {
+          console.log('Header row:', d.header_row)
+        }
         await load()
       } catch(e) {
         showToast(e.message || '导入失败', 'error')
+      } finally {
+        importLoading.value = false
       }
       event.target.value = ''
     }
@@ -305,7 +324,7 @@ export default {
       getAttachmentIcon, formatFileSize, openAttachment, getThumbnailUrl, openThumbnail,
       handleAttachmentUpload, deleteProductAttachment,
       // 导入 + Tab
-      importFile, triggerImport, handleImport, activeCat, switchCat,
+      importFile, triggerImport, handleImport, importLoading, activeCat, switchCat, auth,
     }
   }
 }

@@ -3,8 +3,8 @@
     <!-- Tab bar -->
     <div style="display:flex;gap:var(--space-1);margin-bottom:var(--space-5);border-bottom:2px solid var(--border-light);padding-bottom:0;overflow-x:auto">
       <button v-for="t in tabs" :key="t.key"
-        @click="switchTab(t.key)"
-        :style="{padding:'10px 18px',border:'none',background:'transparent',cursor:'pointer',fontSize:'14px',fontWeight:activeTab===t.key?'600':'400',color:activeTab===t.key?'var(--primary)':'var(--text-placeholder)',borderBottom:activeTab===t.key?'2px solid var(--primary)':'2px solid transparent',marginBottom:'-2px',whiteSpace:'nowrap',transition:'all .15s'}">
+        class="tab-btn" :class="{active: activeTab===t.key}"
+        @click="switchTab(t.key)">
         {{ t.label }}
       </button>
     </div>

@@ -1,8 +1,9 @@
 // OrderList Component — 订单管理（完整产品搜索+工序选择+权限控制）
-import { ref, onMounted, watch, nextTick } from '../../vendor/vue.esm.js'
-import { api } from '../../api.js'
-import { showToast } from '../../store.js'
-import { auth } from '../../auth.js'
+import { ref, onMounted, watch, nextTick, computed } from '../../vendor/vue.esm.js'
+import { api } from '../../api.js?v=60'
+import { showToast } from '../../store.js?v=60'
+import { handleApiError } from '../../api.js'
+import { auth, can } from '../../auth.js'
 
 export default {
   template: '#order-list-template',
@@ -58,14 +59,18 @@ export default {
     const productCursor = ref(-1)
 
     function onProductSearchFocus() { showProductDropdown.value = true; productCursor.value = -1 }
+        let _searchTimer = null
     function onProductSearchInput() {
       const q = (productSearch.value || '').trim().toLowerCase()
       if (!q) { productSearchResults.value = []; productCursor.value = -1; return }
-      productSearchResults.value = products.value.filter(p =>
-        (p.product_code || '').toLowerCase().includes(q) ||
-        (p.product_name || '').toLowerCase().includes(q)
-      ).slice(0, 8)
-      productCursor.value = -1
+      clearTimeout(_searchTimer)
+      _searchTimer = setTimeout(() => {
+        productSearchResults.value = products.value.filter(p =>
+          (p.product_code || '').toLowerCase().includes(q) ||
+          (p.product_name || '').toLowerCase().includes(q)
+        )
+        productCursor.value = productSearchResults.value.length ? 0 : -1
+      }, 250)
     }
     function moveProductCursor(dir) {
       const list = productSearch.value ? productSearchResults.value : recentProducts.value
@@ -86,6 +91,15 @@ export default {
     function selectProduct(p) {
       form.value.product_code = p.product_code || ''
       form.value.product_name = p.product_name || ''
+      form.value.model = p.model || ''
+      form.value.spec = p.spec || ''
+      form.value.style = p.style || ''
+      form.value.upper_opening = p.upper_opening || ''
+      form.value.plate_thickness = p.plate_thickness || ''
+      form.value.category = p.category || ''
+      form.value.route_id = p.route_id || ''
+      if (p.price) form.value.price = p.price
+      if (p.weight) form.value.weight = p.weight
       productSearch.value = p.product_code || ''
       showProductDropdown.value = false
       productCursor.value = -1
@@ -110,6 +124,10 @@ export default {
     const completedCount = ref(0)
 
     // 权限
+    const canCreate = computed(() => can('orders:create'))
+    const canEdit   = computed(() => can('orders:edit'))
+    const canDelete = computed(() => can('orders:delete'))
+    const canView   = computed(() => can('orders:view'))
 
     // 进度百分比
     function pct(o) {
@@ -259,6 +277,7 @@ export default {
     async function openAdd() {
       form.value = {
         order_no:'', customer:'', customer_id:null, product_name:'', product_code:'',
+        model:'', spec:'', style:'', upper_opening:'', plate_thickness:'', category:'',
         quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', remark:'', status:'pending'
       }
       productSearch.value = ''
@@ -379,19 +398,10 @@ export default {
       qrPrintLoading.value = true
       qrCodes.value = []
       try {
-        const resp = await fetch('/api/qrcode/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            order_ids: [qrPrintOrder.value.id],
-            mode: qrMode.value
-          })
+        const d = await api.post('/api/qrcode/batch', {
+          order_ids: [qrPrintOrder.value.id],
+          mode: qrMode.value
         })
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}))
-          throw new Error(err.error || '生成失败')
-        }
-        const d = await resp.json()
         qrCodes.value = d.codes || []
         if (!qrCodes.value.length) {
           showToast('未生成二维码', 'warn')
@@ -411,6 +421,13 @@ export default {
       qrCodes.value = []
     }
 
+    function escapeHtml(text) {
+      if (!text) return ''
+      const div = document.createElement('div')
+      div.appendChild(document.createTextNode(text))
+      return div.innerHTML
+    }
+
     function printQrCodes() {
       if (!qrCodes.value.length) { showToast('请先生成二维码', 'warn'); return }
       const root = document.getElementById('qr-print-root')
@@ -421,9 +438,9 @@ export default {
           html += '<div class="qr-card">'
           html += '<img src="' + code.qrcode + '" alt="' + (code.serial_no || code.order_no) + '">'
           html += '<div class="qr-label-info">'
-          html += '<div class="qr-label-no">' + (code.serial_no || code.order_no) + '</div>'
+          html += '<div class="qr-label-no">' + escapeHtml(code.serial_no || code.order_no) + '</div>'
           if (code.product_code) {
-            html += '<div class="qr-label-code">' + code.product_code + '</div>'
+            html += '<div class="qr-label-code">' + escapeHtml(code.product_code) + '</div>'
           }
           html += '</div></div>'
         }
@@ -439,7 +456,12 @@ export default {
     watch(filterStatus, () => { page.value = 1; load() })
 
     // 搜索输入变更时重置页码
-    function searchAndLoad() { page.value = 1; load() }
+    let searchTimer = null
+    function debouncedSearch() {
+      clearTimeout(searchTimer)
+      searchTimer = setTimeout(() => { page.value = 1; load() }, 300)
+    }
+    function searchAndLoad() { clearTimeout(searchTimer); page.value = 1; load() }
     function customerChange() { page.value = 1; load() }
 
     onMounted(async () => { await loadDropdownData(); load() })
@@ -454,7 +476,7 @@ export default {
       onCustomerChange,
       // 模态框
       showModal, modalEdit, form,
-      openAdd, openEdit, save, del, prevPage, nextPage, load, searchAndLoad, customerChange, auth,
+      openAdd, openEdit, save, del, prevPage, nextPage, load, searchAndLoad, debouncedSearch, customerChange, auth,
       // 产品搜索 Combobox (修复)
       productSearch, showProductDropdown, productSearchResults, recentProducts, productCursor,
       onProductSearchFocus, onProductSearchInput, moveProductCursor, selectProductByEnter,
@@ -466,6 +488,7 @@ export default {
       // 附件管理
       getAttachments, isAttachmentsLoading, handleAttachmentUpload, delAttachment, downloadAttachment, getFileIcon, formatFileSize,
       // 回收站
+      canCreate, canEdit, canDelete, canView,
       showTrash, trashOrders, trashTotal, trashPage, trashPageSize, loadTrash, restoreOrder, permanentDelete,
       // 工件进度看板
       progressOrder, progressLoading, progressData, openProgress

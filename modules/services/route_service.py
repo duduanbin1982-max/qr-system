@@ -21,23 +21,26 @@ class ProcessRouteService:
             conditions.append('category = ?')
             params.append(category)
         if search:
-            conditions.append('name LIKE ?')
-            params.append(f'%{search}%')
+            conditions.append('name LIKE ? ESCAPE "\\"')
+            safe_search = search.replace('%', '\\%').replace('_', '\\_')
+            params.append(f'%{safe_search}%')
         if conditions:
             sql += ' WHERE ' + ' AND '.join(conditions)
         sql += ' ORDER BY created_at DESC'
 
         if limit:
             limit = max(1, min(int(limit), 200))
-            # Count total
-            count_sql = sql.replace('SELECT *', 'SELECT COUNT(*)', 1)
+            # Count total (explicit WHERE clause, avoids fragile replace)
+            count_sql = f'SELECT COUNT(*) FROM process_routes'
+            if conditions:
+                count_sql += ' WHERE ' + ' AND '.join(conditions)
             total = db.execute(count_sql, params).fetchone()[0]
             sql += ' LIMIT ? OFFSET ?'
             params.extend([limit, offset])
             rows = db.execute(sql, params).fetchall()
         else:
             rows = db.execute(sql, params).fetchall()
-            total = None
+            total = len(rows)
 
         items_by_route = {}
         if rows:
@@ -58,10 +61,7 @@ class ProcessRouteService:
             route = dict(r)
             route['processes'] = items_by_route.get(r['id'], [])
             result.append(route)
-        ret = {'routes': result}
-        if total is not None:
-            ret['total'] = total
-        return ret
+        return {'routes': result, 'total': total}
 
     @staticmethod
     def create_route(data):

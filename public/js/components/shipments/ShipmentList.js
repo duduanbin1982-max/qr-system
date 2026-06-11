@@ -144,6 +144,11 @@ export default {
     function prevPage() { if (page.value > 1) { page.value--; load() } }
     function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
 
+    function escapeHtml(str) {
+      if (!str) return ''
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
+    }
+
     function printDeliveryNote(s) {
       const now = new Date().toLocaleString('zh-CN')
       const items = s.items || []
@@ -157,11 +162,11 @@ th{background:#f5f5f5}td{text-align:center}.right{text-align:right}.total-row{fo
 .footer{margin-top:40px;display:flex;justify-content:space-between;font-size:14px}
 @media print{body{padding:20px}@page{margin:15mm}}</style></head><body>
 <h2>送 货 单</h2><h4>${now} | 单号: ${s.shipment_no}</h4>
-<div class="row"><span><strong>客户:</strong> ${s.customer || '-'}</span><span><strong>联系人:</strong> ${s.contact_person || '-'}</span></div>
-<div class="row"><span><strong>电话:</strong> ${s.contact_phone || '-'}</span><span><strong>地址:</strong> ${s.address || '-'}</span></div>
-${s.remark ? '<p style="font-size:13px;color:#666"><strong>备注:</strong> ' + s.remark + '</p>' : ''}
+<div class="row"><span><strong>客户:</strong> ${escapeHtml(s.customer) || '-'}</span><span><strong>联系人:</strong> ${escapeHtml(s.contact_person) || '-'}</span></div>
+<div class="row"><span><strong>电话:</strong> ${escapeHtml(s.contact_phone) || '-'}</span><span><strong>地址:</strong> ${escapeHtml(s.address) || '-'}</span></div>
+${s.remark ? '<p style="font-size:13px;color:#666"><strong>备注:</strong> ' + escapeHtml(s.remark) + '</p>' : ''}
 <table><thead><tr><th>#</th><th>型号</th><th>产品名称</th><th>数量</th><th>单位</th><th>备注</th></tr></thead><tbody>
-${items.map((it, i) => '<tr><td>' + (i+1) + '</td><td>' + (it.product_model || '-') + '</td><td>' + (it.product_name || '-') + '</td><td>' + it.quantity + '</td><td>' + (it.unit || '件') + '</td><td>' + (it.remark || '') + '</td></tr>').join('')}
+${items.map((it, i) => '<tr><td>' + (i+1) + '</td><td>' + (escapeHtml(it.product_model) || '-') + '</td><td>' + (escapeHtml(it.product_name) || '-') + '</td><td>' + it.quantity + '</td><td>' + (it.unit || '件') + '</td><td>' + (escapeHtml(it.remark) || '') + '</td></tr>').join('')}
 <tr class="total-row"><td colspan="3" class="right">合计</td><td>${totalQty}</td><td colspan="2"></td></tr></tbody></table>
 <div class="footer"><span>发货人签字: ___________</span><span>收货人签字: ___________</span></div>
 <script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}</` + `script></body></html>`

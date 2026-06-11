@@ -194,7 +194,7 @@ body {
 .menu-group.open .arrow { transform: rotate(90deg); }
 .sub-menu { overflow: hidden; max-height: 0; transition: max-height 0.3s; }
 .menu-group.open .sub-menu { max-height: 500px; }
-.sub-menu .menu-item { padding-left: 48px; font-size: 14px; }
+.sub-menu .menu-item { padding-left: 48px; font-size: 16px; line-height: 1.5; }
 
 .sidebar-footer {
   padding: var(--space-4) var(--space-5);
@@ -440,8 +440,7 @@ textarea { resize: vertical; min-height: 80px; }
   transition: background 0.15s, padding-left 0.15s;
 }
 .data-table tbody tr { transition: transform 0.15s, box-shadow 0.15s; }
-.data-table tbody tr:hover { transform: translateX(3px); }
-.data-table tbody tr:hover td { background: var(--bg-table-hover); padding-left: 19px; }
+.data-table tbody tr:hover td { background: var(--bg-table-hover); }
 .table-striped tbody tr:nth-child(even) { background: var(--bg-table-stripe); }
 
 /* ===== 状态标签 ===== */
@@ -484,7 +483,7 @@ textarea { resize: vertical; min-height: 80px; }
   padding: var(--space-2) 18px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: var(--text-base);
+  font-size: 16px; line-height: 1.5;
   font-weight: 600;
   color: var(--text-muted);
   background: transparent;
@@ -1284,7 +1283,7 @@ textarea:focus-visible {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: var(--text-base);
+  font-size: 16px; line-height: 1.5;
   font-weight: 400;
   color: var(--text-placeholder);
   border-bottom: 2px solid transparent;
@@ -1398,7 +1397,7 @@ textarea:focus-visible {
   background: rgba(255,255,255,0.05);
   color: rgba(255,255,255,0.6);
   cursor: pointer;
-  font-size: var(--text-base);
+  font-size: 16px; line-height: 1.5;
   transition: all 0.3s;
 }
 .board-cat-btn:hover { background: rgba(255,255,255,0.1); }
@@ -1461,7 +1460,7 @@ textarea:focus-visible {
 .board-main {
   flex: 1;
   display: grid;
-  grid-template-columns: 1.6fr 0.8fr 0.8fr;
+  grid-template-columns: 1fr 0.9fr 0.9fr;
   gap: 14px;
   min-height: 0;
 }
@@ -1474,6 +1473,11 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(8px);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.board-container .panel:hover {
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
 }
 .board-container .panel-title {
   font-size: var(--text-xl);
@@ -1485,6 +1489,7 @@ textarea:focus-visible {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  letter-spacing: 0.3px;
 }
 .board-container .panel-body {
   flex: 1;
@@ -1726,7 +1731,7 @@ textarea:focus-visible {
 
 /* ===== Process Management Utilities ===== */
 .cat-tabs { display: flex; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
-.cat-tab { padding: 8px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 14px;
+.cat-tab { padding: 8px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 16px; line-height: 1.5;
            font-weight: 400; background: var(--bg-hover); color: var(--text-placeholder);
            border: 1px solid transparent; transition: all .2s; user-select: none; }
 .cat-tab.active { font-weight: 600; }

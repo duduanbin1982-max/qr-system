@@ -43,6 +43,17 @@ def parse_xlsx(filepath):
                 elif cell_type == 's':
                     idx = int(value_el.text)
                     row_data[col_letter] = shared_strings[idx] if idx < len(shared_strings) else ''
+                elif cell_type == 'inlineStr':
+                    # Handle inline strings (WPS, LibreOffice exports)
+                    is_el = cell.find('s:is', ns)
+                    if is_el is not None:
+                        t_el = is_el.find('s:t', ns)
+                        row_data[col_letter] = t_el.text if t_el is not None and t_el.text else ''
+                    else:
+                        row_data[col_letter] = ''
+                elif cell_type == 'str':
+                    # Handle formula-result strings
+                    row_data[col_letter] = value_el.text
                 else:
                     row_data[col_letter] = value_el.text
             if row_data:
@@ -68,7 +79,7 @@ class ProductService:
             dict: {products: [...], total, page, limit}
         """
         db = BaseService.db()
-        where = '1=1'
+        where = 'deleted_at IS NULL'
         params = []
         if keyword:
             where += ' AND (product_name LIKE ? OR model LIKE ? OR spec LIKE ?)'
@@ -109,15 +120,17 @@ class ProductService:
         db = BaseService.db()
         if q:
             rows = db.execute(
-                "SELECT id, product_name, product_code, category FROM products "
-                "WHERE product_name LIKE ? OR product_code LIKE ? "
+                "SELECT id, product_name, product_code, category, model, spec, style, "
+                "upper_opening, plate_thickness, weight, price, route_id FROM products "
+                "WHERE deleted_at IS NULL AND (product_name LIKE ? OR product_code LIKE ?) "
                 "ORDER BY product_code LIMIT ?",
                 (f'%{q}%', f'%{q}%', limit)
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT id, product_name, product_code, category FROM products "
-                "ORDER BY product_code LIMIT ?",
+                "SELECT id, product_name, product_code, category, model, spec, style, "
+                "upper_opening, plate_thickness, weight, price, route_id FROM products "
+                "WHERE deleted_at IS NULL ORDER BY product_code LIMIT ?",
                 (limit,)
             ).fetchall()
         return {'products': [dict(r) for r in rows]}
@@ -151,12 +164,17 @@ class ProductService:
         thickness = data.get('plate_thickness', '')
         style = data.get('style', '')
         product_code = generate_product_code(name, model, spec, upper, thickness, style)
+        # Auto-generate model from product_code when not provided
+        if not model:
+            model = product_code
 
         with BaseService.transaction() as db:
             existing = db.execute(
-                'SELECT id FROM products WHERE product_code = ?', (product_code,)
+                'SELECT id, deleted_at FROM products WHERE product_code = ?', (product_code,)
             ).fetchone()
             if existing:
+                if existing['deleted_at']:
+                    raise ValueError(f'产品编码重复：{product_code}，该产品已被删除，请先联系管理员恢复')
                 raise ValueError(f'产品编码重复：{product_code}，已有产品 ID={existing["id"]}')
 
             cur = db.execute('''
@@ -240,7 +258,7 @@ class ProductService:
             # 在事务内检查唯一性，消除 TOCTOU 竞态
             if new_code:
                 dup = txn.execute(
-                    'SELECT id FROM products WHERE product_code = ? AND id != ?',
+                    'SELECT id FROM products WHERE product_code = ? AND id != ? AND deleted_at IS NULL',
                     (new_code, pid)
                 ).fetchone()
                 if dup:
@@ -290,9 +308,7 @@ class ProductService:
             raise ValueError(f'该产品已被 {used} 个订单使用，无法删除')
 
         with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM product_attachments WHERE product_id = ?', (pid,))
-            txn.execute('DELETE FROM process_prices WHERE product_id = ?', (pid,))
-            txn.execute('DELETE FROM products WHERE id = ?', (pid,))
+            txn.execute("UPDATE products SET deleted_at = datetime('now','localtime') WHERE id = ?", (pid,))
 
     # ============================================================
     # Excel 批量导入
@@ -361,12 +377,15 @@ class ProductService:
                     errors.append(f'第{i}行：产品名称为空，跳过')
                     continue
 
-                model = product_data.get('model', '')
+                model = product_data.get('model', '').strip()
                 spec = product_data.get('spec', '')
                 upper = product_data.get('upper_opening', '')
                 thickness = product_data.get('plate_thickness', '')
                 style = product_data.get('style', '')
                 product_code = generate_product_code(name, model, spec, upper, thickness, style)
+                # Auto-generate model from product_code when not provided
+                if not model:
+                    model = product_code
 
                 existing = txn.execute(
                     'SELECT id FROM products WHERE product_code = ?', (product_code,)
@@ -392,11 +411,23 @@ class ProductService:
                     skipped += 1
                     errors.append(f'第{i}行：入库失败 - {e}')
 
+        # Categorize errors for better diagnostics
+        empty_name = sum(1 for e in errors if '产品名称为空' in e)
+        duplicate = sum(1 for e in errors if '已存在' in e)
+        db_error = len(errors) - empty_name - duplicate
+        
+        summary = f'空名称:{empty_name} 重复:{duplicate} 其他:{db_error}'
+        # Include first 3 actual error details
+        sample_errors = [e for e in errors if '入库失败' in e or '空名称' not in e and '已存在' not in e][:3]
+        error_detail = ' | '.join(sample_errors) if sample_errors else ''
         return {
             'success': success,
             'skipped': skipped,
-            'errors': errors[:20],
-            'message': f'导入完成：成功{success}条，跳过{skipped}条'
+            'errors': errors,
+            'error_summary': summary,
+            'columns_found': list(col_map.values()),
+            'message': f'导入完成：成功{success}条，跳过{skipped}条 | {summary}'
+            + (f' | 详情: {error_detail}' if error_detail else '')
         }
 
     # ============================================================

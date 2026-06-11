@@ -7,7 +7,7 @@ Flask + SQLite，内网部署。路由通过模块化装饰器注册。
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import render_template, make_response
+from flask import render_template, make_response, g
 from modules.app import app
 from modules.config import PUBLIC_DIR
 from modules.db import close_db
@@ -59,7 +59,7 @@ import modules.routes.system         # health, backup, integrity checks
 # ============================================================
 @app.route('/')
 def index():
-    resp = make_response(render_template('index-v2.html'))
+    resp = make_response(render_template('index-v2.html', nonce=getattr(g, 'csp_nonce', '')))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -70,12 +70,16 @@ def static_files(filename):
     """Serve static assets (js/, css/, vendor/, etc.) from PUBLIC_DIR.
     
     Safety: reject paths starting with 'api/' to prevent shadowing API routes.
+    HTML files are rendered as Jinja2 templates for CSP nonce injection.
     """
     if filename.startswith('api/') or filename.startswith('api'):
         from flask import abort
         abort(404)
     try:
-        resp = app.send_static_file(filename)
+        if filename.endswith('.html'):
+            resp = make_response(render_template(filename, nonce=getattr(g, 'csp_nonce', '')))
+        else:
+            resp = app.send_static_file(filename)
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'

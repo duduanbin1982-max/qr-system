@@ -50,9 +50,10 @@ export const api = {
   delete: (url)         => request('DELETE', url),
   
   // ========== 认证 ==========
-  login:    (data)      => request('POST', '/api/auth/login', data),
-  logout:   ()          => request('POST', '/api/auth/logout'),
-  authInfo: ()          => request('GET', '/api/auth/info'),
+  login:         (data) => request('POST', '/api/auth/login', data),
+  logout:        ()    => request('POST', '/api/auth/logout'),
+  authInfo:      ()    => request('GET', '/api/auth/info'),
+  changePassword:(data) => request('POST', '/api/auth/change-password', data),
   
   // ========== 仪表盘 ==========
   dashboard: ()         => request('GET', '/api/dashboard'),

@@ -8,7 +8,7 @@ import { api } from './api.js'
 // 页面组件（逐页添加）
 import LoginPage    from './components/Login.js'
 import Dashboard    from './components/dashboard/Dashboard.js?v=1'
-import OrderList   from './components/orders/OrderList.js?v=1'
+import OrderList   from './components/orders/OrderList.js?v=60'
 import PriceList   from './components/prices/PriceList.js'
 import RouteList   from './components/routes/RouteList.js'
 import ScanReport  from './components/scan/ScanReport.js?v=1'
@@ -22,7 +22,7 @@ import ProductionSettings from './components/settings/ProductionSettings.js'
 import ReportsPage from './components/reports/ReportsPage.js'
 import BoardPage   from './components/board/BoardPage.js'
 import CustomerList from './components/customers/CustomerList.js'
-import ProductList from './components/products/ProductList.js'
+import ProductList from './components/products/ProductList.js?v=58'
 import UserList    from './components/users/UserList.js'
 import ProcessList from './components/processes/ProcessList.js'
 import InventoryList from './components/inventory/InventoryList.js'
@@ -243,7 +243,7 @@ const app = createApp({
     })
     
     onMounted(async () => {
-      if (restoreSession()) {
+      if (await restoreSession()) {
         await loadMenuPermissionMap()
         restoreNavState()
         const saved = localStorage.getItem('currentPage')

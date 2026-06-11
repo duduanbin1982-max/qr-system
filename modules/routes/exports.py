@@ -40,6 +40,12 @@ def export_orders():
     )
 
 
+@app.route('/api/exports/orders', methods=['GET'])
+@check_auth
+def export_orders_alias():
+    """Alias for /api/export/orders"""
+    return export_orders()
+
 @app.route('/api/export/work-records', methods=['GET'])
 @check_auth
 def export_work_records():

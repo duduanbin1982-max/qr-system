@@ -1,22 +1,10 @@
 
-  <div style="padding:var(--space-6);max-width:1400px">
+  <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--text-placeholder);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">📋</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--text-placeholder)">{{ stats.total }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总检验</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--success);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">✅</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--success)">{{ stats.pass_count }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">合格</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--danger);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">❌</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--danger)">{{ stats.fail_count }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">不合格</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--info);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">📅</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--info)">{{ stats.today_count }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">今日检验</div></div>
-      </div>
+      <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ stats.total }}</div><div class="s-label">总检验</div></div></div>
+      <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ stats.pass_count }}</div><div class="s-label">合格</div></div></div>
+      <div class="summary-item"><span class="s-icon">❌</span><div><div class="s-val text-danger">{{ stats.fail_count }}</div><div class="s-label">不合格</div></div></div>
+      <div class="summary-item"><span class="s-icon">📅</span><div><div class="s-val text-info">{{ stats.today_count }}</div><div class="s-label">今日检验</div></div></div>
     </div>
 
     <!-- Pareto: 不良品分布 -->

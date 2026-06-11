@@ -21,6 +21,9 @@ export default {
     const detail = ref(null)
     const detailOrders = ref([])
     const showDetail = ref(false)
+    const deleteCheck = ref(null)       // 正在检查删除的客户
+    const deleteCheckOrders = ref([])   // 该客户的活跃订单
+    const showDeleteBlock = ref(false)  // 删除被阻止的弹窗
     
     // 统计
     const hasContact = computed(() => customers.value.filter(c => c.contact).length)
@@ -79,7 +82,22 @@ export default {
     }
     
     async function del(c) {
-      if (!confirm('确定删除客户 "' + c.name + '" 吗？')) return
+      // 先查询客户关联的活跃订单
+      deleteCheck.value = c
+      deleteCheckOrders.value = []
+      try {
+        const d = await api.get('/api/customers/' + c.id + '/orders')
+        const active = (d.orders || []).filter(o => o.deleted_at === null || o.deleted_at === undefined)
+        if (active.length > 0) {
+          deleteCheckOrders.value = active
+          showDeleteBlock.value = true
+          return
+        }
+      } catch(e) {
+        // 查询失败，降级为直接确认删除
+      }
+      // 无活跃订单，确认后删除
+      if (!confirm('确定删除客户 "' + c.name + '" 吗？\n\n该操作不可撤销。')) return
       try {
         await api.deleteCustomer(c.id)
         showToast('删除成功')
@@ -106,6 +124,7 @@ export default {
       customers, loading, searchKeyword, load,
       showModal, modalEdit, form, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
+      deleteCheck, deleteCheckOrders, showDeleteBlock,
       hasContact, hasEmail, can, canEdit, canDelete, canCreate
     }
   }

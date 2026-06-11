@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed, watch } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
+import { handleApiError } from '../../api.js'
 import { can } from '../../auth.js'
 import { router } from '../../router.js?v=56'
 
@@ -9,30 +10,26 @@ export default {
   template: '#price-list-template',
   setup() {
     const loading = ref(true)
-    const products = ref([])
     const processes = ref([])
 
-    // 产品编辑器
-    const selectedProductId = ref('')
-    const routeSteps = ref([])
-    const routeId = ref(null)
-    const routeName = ref('')
+       const routeSteps = ref([])
     const allRoutes = ref([])
-    const totalRouteCount = ref(0)
-    const structRouteCount = ref(0)
-    const machRouteCount = ref(0)
+    const totalRouteCount = computed(() => filteredRoutes.value.length)
+    const structRouteCount = computed(() => {
+      const pool = pricingCategory.value === 'all' ? allRoutes.value : filteredRoutes.value
+      return pool.filter(r => r.category === '结构件').length
+    })
+    const machRouteCount = computed(() => {
+      const pool = pricingCategory.value === 'all' ? allRoutes.value : filteredRoutes.value
+      return pool.filter(r => r.category === '机加工').length
+    })
     const pricedRouteCount = computed(() => {
-      return allRoutes.value.filter(r => r.priced_route_count > 0).length
+      return filteredRoutes.value.filter(r => r.priced_route_count > 0).length
     })
     const editPrices = reactive({}) // {process_id: unit_price}
-    const effectiveDate = ref('')
-    const remark = ref('')
     const saving = ref(false)
 
     // 复制
-    const showCopyModal = ref(false)
-    const copyFromId = ref('')
-    const copyOverwrite = ref(true)
 
     // 默认工价
     const showDefaultModal = ref(false)
@@ -50,11 +47,6 @@ export default {
     const showMatrix = ref(false)
 
     // 按分类筛选产品
-    const filteredProducts = computed(() => {
-      if (pricingCategory.value === 'all') return products.value
-      return products.value.filter(p => p.category === pricingCategory.value)
-    })
-
     const filteredRoutes = computed(() => {
       if (pricingCategory.value === 'all') return allRoutes.value
       return allRoutes.value.filter(r => r.category === pricingCategory.value)
@@ -123,9 +115,10 @@ export default {
 
     const pageTitle = computed(() => {
       const cat = pricingCategory.value
-      if (cat === '结构件') return '🔩 结构件工价'
-      if (cat === '机加工') return '⚙️ 机加工工价'
-      return '📋 全部工价路线'
+      const cnt = filteredRoutes.value.length
+      if (cat === '结构件') return '🔩 结构件工价 (' + cnt + ')'
+      if (cat === '机加工') return '⚙️ 机加工工价 (' + cnt + ')'
+      return '📋 全部工价路线 (' + cnt + ')'
     })
 
     // 分类筛选
@@ -156,22 +149,7 @@ export default {
     })
 
     // ====== 数据加载 ======
-    async function loadProducts() {
-      try {
-        const d = await api.listProducts()
-        products.value = d.products || []
-      } catch (e) { showToast('加载产品失败', 'warn') }
-    }
-
-    async function loadStats() {
-      try {
-        const d = await api.listProcessRoutes()
-        const all = d.routes || []
-        totalRouteCount.value = all.length
-        structRouteCount.value = all.filter(r => r.category === '结构件').length
-        machRouteCount.value = all.filter(r => r.category === '机加工').length
-      } catch (e) { /* silent */ }
-    }
+    async function loadStats() { /* counts now computed reactively */ }
 
     async function loadAllRoutes(category) {
       try {
@@ -179,13 +157,13 @@ export default {
         if (category && category !== 'all') params.category = category
         const d = await api.listProcessRoutes(Object.keys(params).length ? params : null)
         allRoutes.value = d.routes || []
-      } catch (e) { /* silent */ }
+      } catch (e) { showToast('加载路线失败: ' + (e.message || '网络错误'), 'error') }
     }
 
     async function loadMatrix() {
       try {
         let procUrl = '/api/processes'
-        if (pricingCategory.value !== 'all')
+        if (pricingCategory.value && pricingCategory.value !== 'all')
           procUrl += '?category=' + encodeURIComponent(pricingCategory.value)
         const [procData, priceData] = await Promise.all([
           api.get(procUrl),
@@ -193,7 +171,7 @@ export default {
         ])
         processes.value = procData.processes || []
         let allPrices = priceData.process_prices || []
-        if (pricingCategory.value !== 'all') {
+        if (pricingCategory.value && pricingCategory.value !== 'all') {
           allPrices = allPrices.filter(r =>
             processes.value.some(p => p.id === r.process_id)
           )
@@ -203,80 +181,6 @@ export default {
       finally { loading.value = false }
     }
 
-    // ====== 产品路线工价编辑器 ======
-    async function selectProduct() {
-      const pid = selectedProductId.value
-      if (!pid) { routeSteps.value = []; routeId.value = null; routeName.value = ''; return }
-      try {
-        const d = await api.getRoutePricing(pid)
-        routeSteps.value = d.steps || []
-        routeId.value = d.route_id
-        routeName.value = d.route_name
-        allRoutes.value = d.all_routes || []
-        // 初始化编辑字段
-        const prices = {}
-        routeSteps.value.forEach(s => {
-          if (s.unit_price != null) prices[s.process_id] = s.unit_price
-        })
-        Object.keys(editPrices).forEach(k => delete editPrices[k])
-        Object.assign(editPrices, prices)
-      } catch (e) { showToast(e.message || '加载路线工价失败', 'error') }
-    }
-
-    async function saveRoutePricing() {
-      saving.value = true
-      try {
-        const prices = {}
-        let hasAny = false
-        Object.entries(editPrices).forEach(([processId, val]) => {
-          if (val !== '' && val != null && val !== undefined) {
-            prices[processId] = parseFloat(val)
-            hasAny = true
-          }
-        })
-        if (!hasAny) { showToast('请至少填写一个工序的单价', 'error'); saving.value = false; return }
-
-        const data = { prices, effective_date: effectiveDate.value, remark: remark.value, route_id: routeId.value }
-        const res = await api.saveRoutePricing(selectedProductId.value, data)
-        showToast(res.message || '保存成功')
-        await selectProduct() // 刷新
-        await loadMatrix()    // 刷新透视表
-      } catch (e) { showToast(e.message || '保存失败', 'error') }
-      finally { saving.value = false }
-    }
-
-    async function changeRoute(newRouteId) {
-      routeId.value = newRouteId
-      // 立即保存路线关联
-      try {
-        await api.saveRoutePricing(selectedProductId.value, { prices: {}, route_id: newRouteId || null })
-        await selectProduct()
-      } catch (e) { showToast('路线切换失败: ' + e.message, 'error') }
-    }
-
-    // ====== 复制工价 ======
-    function openCopy() {
-      if (!selectedProductId.value) { showToast('请先选择目标产品', 'error'); return }
-      copyFromId.value = ''
-      showCopyModal.value = true
-    }
-
-    async function doCopy() {
-      if (!copyFromId.value) { showToast('请选择源产品', 'error'); return }
-      try {
-        const res = await api.copyPrices({
-          from_product_id: parseInt(copyFromId.value),
-          to_product_id: parseInt(selectedProductId.value),
-          overwrite: copyOverwrite.value
-        })
-        showToast(res.message || '复制成功')
-        showCopyModal.value = false
-        await selectProduct()
-        await loadMatrix()
-      } catch (e) { showToast('复制失败: ' + e.message, 'error') }
-    }
-
-    // ====== 默认工价管理 ======
     async function openDefaults(cat) {
       defaultCategory.value = cat
       try {
@@ -316,17 +220,24 @@ export default {
       } catch (e) { showToast(e.message || '删除失败', 'error') }
     }
 
-    function switchCat(cat) {
+    async function switchCat(cat) {
+      if (pricingCategory.value === cat && allRoutes.value.length > 0) return
       pricingCategory.value = cat
       loading.value = true
-      loadAllRoutes(cat === 'all' ? null : cat)
-      loadMatrix()
+      await Promise.all([
+        loadAllRoutes(cat === 'all' ? null : cat),
+        loadMatrix()
+      ])
     }
 
     onMounted(async () => {
-      const cat = categoryFromPage(router.page)
-      pricingCategory.value = cat
-      await Promise.all([loadProducts(), loadStats(), loadAllRoutes(cat === 'all' ? null : cat), loadMatrix()])
+      try {
+        const cat = categoryFromPage(router.page)
+        pricingCategory.value = cat
+        await Promise.all([loadStats(), loadAllRoutes(cat === 'all' ? null : cat), loadMatrix()])
+      } catch (e) {
+        showToast('????????: ' + (e.message || '????'), 'error')
+      }
     })
 
     watch(() => router.page, (page) => {
@@ -336,19 +247,17 @@ export default {
 
     return {
       // 状态
-      loading, products, processes, pricingCategory, productPrices, pageTitle,
-      selectedProductId, routeSteps, routeId, routeName, allRoutes, filteredRoutes,
-      editPrices, effectiveDate, remark, saving, filteredProducts,
-      showMatrix, showCopyModal, copyFromId, copyOverwrite,
-      showDefaultModal, defaultPrices, defaultCategory,
+      loading, processes, pricingCategory, productPrices, pageTitle,
+      routeSteps, allRoutes, filteredRoutes,
+      editPrices, saving,
+      showMatrix, showDefaultModal, defaultPrices, defaultCategory,
       totalRouteCount, structRouteCount, machRouteCount, pricedRouteCount,
       can, canEdit, canCreate, canDelete,
       // 卡片模式
       expandedRoute, toggleRoute, editMeta, saveRoute,
       // 方法
-      selectProduct, saveRoutePricing, changeRoute,
-      switchCat, deleteProductPrices,
-      openCopy, doCopy, openDefaults, saveDefaults
+      switchCat, loadAllRoutes, loadMatrix, deleteProductPrices,
+      openDefaults, saveDefaults
     }
   }
 }

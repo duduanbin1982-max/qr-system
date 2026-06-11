@@ -18,6 +18,7 @@ button:hover{background:#4338CA}
 <div class="icon">📱</div>
 <h1>当前处于离线模式</h1>
 <p>请检查网络连接后重试</p>
-<button onclick="location.reload()">重新加载</button>
+<button id="btn-reload">重新加载</button>
+<script nonce="{$ nonce $}">document.getElementById("btn-reload").addEventListener("click",function(){location.reload()});</script>
 </body>
 </html>

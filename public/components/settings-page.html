@@ -1,11 +1,11 @@
 
   <div style="padding:var(--space-6)">
-    <h2 style="margin:0 0 16px 0;font-size:var(--text-2xl);font-weight:600">⚙️ 系统设置</h2>
+    <div class="card"><div class="card-header"><h3>⚙️ 系统设置</h3></div></div>
     <!-- Tab bar -->
     <div style="display:flex;gap:var(--space-1);margin-bottom:var(--space-5);border-bottom:2px solid var(--border-light);padding-bottom:0;overflow-x:auto">
       <button v-for="t in tabs" :key="t.key"
-        @click="activeTab=t.key"
-        :style="{padding:'10px 18px',border:'none',background:'transparent',cursor:'pointer',fontSize:'14px',fontWeight:activeTab===t.key?'600':'400',color:activeTab===t.key?'var(--primary)':'var(--text-placeholder)',borderBottom:activeTab===t.key?'2px solid var(--primary)':'2px solid transparent',marginBottom:'-2px',whiteSpace:'nowrap',transition:'all .15s'}">
+        class="tab-btn" :class="{active: activeTab===t.key}"
+        @click="activeTab=t.key">
         {{ t.label }}
       </button>
     </div>
@@ -50,6 +50,21 @@
       </div>
     </div>
 
+    <!-- 添加设置项弹窗 -->
+    <div v-if="showAddKeyModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showAddKeyModal=false">
+      <div style="background:white;border-radius:12px;padding:24px;width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+        <h4 style="margin:0 0 16px 0">添加设置项</h4>
+        <div style="margin-bottom:12px">
+          <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px">设置项名称（英文 key）</label>
+          <input class="form-input" v-model="newSettingKey" placeholder="例如：company_name" @keyup.enter="confirmAddSetting" style="width:100%">
+        </div>
+        <div style="font-size:12px;color:var(--text-placeholder);margin-bottom:16px">可用设置项：company_name, contact, phone, address, description, default_password, approval_enabled, auto_order_no, page_size, process_order_mode, delivery_warning_days, limit_by_prev_process, limit_by_order_qty, session_timeout_hours, session_idle_minutes</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-default" @click="showAddKeyModal=false">取消</button>
+          <button class="btn btn-primary" @click="confirmAddSetting">添加</button>
+        </div>
+      </div>
+    </div>
     <!-- ========== 管理员管理 ========== -->
     <div v-if="activeTab==='admin-users'">
       <div class="summary-bar" style="margin-bottom:var(--space-4)">

@@ -1,18 +1,9 @@
 
-  <div style="padding:var(--space-6);max-width:1400px">
+  <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--primary);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">👥</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--primary)">{{ wages.length }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">员工数</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--success);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">📦</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--success)">{{ grandQty() }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总件数</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--warning);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">💰</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--warning)">¥{{ fmtMoney(grandTotal()) }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总工资</div></div>
-      </div>
+      <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val text-primary">{{ wages.length }}</div><div class="s-label">员工数</div></div></div>
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val text-success">{{ grandQty() }}</div><div class="s-label">总件数</div></div></div>
+      <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val" style="color:var(--warning)">¥{{ fmtMoney(grandTotal()) }}</div><div class="s-label">总工资</div></div></div>
     </div>
 
     <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">

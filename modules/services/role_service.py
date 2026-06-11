@@ -80,6 +80,7 @@ class RoleGroupService:
         if not sets:
             raise ValueError('无更新内容')
 
+        sets.append('updated_at = datetime("now","localtime")')
         with BaseService.transaction() as txn:
             txn.execute(f'UPDATE role_groups SET {", ".join(sets)} WHERE id = ?', params + [gid])
 
@@ -172,6 +173,7 @@ class RoleService:
         if not sets:
             raise ValueError('无更新内容')
 
+        sets.append('updated_at = datetime("now","localtime")')
         with BaseService.transaction() as txn:
             txn.execute(f'UPDATE roles SET {", ".join(sets)} WHERE id = ?', params + [rid])
 

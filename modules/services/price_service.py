@@ -407,7 +407,7 @@ class WageService:
         wr_where = ' AND '.join(wr_where_parts)
 
         # Count: all active workers (users as driving table)
-        user_where = "u.status = 'active' AND u.role = 'worker'"
+        user_where = "u.status = 'active' AND u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'worker')"
         user_params = []
         if employee_id:
             user_where += ' AND u.id = ?'; user_params.append(employee_id)
@@ -439,7 +439,7 @@ class WageService:
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND 1=1
+                    AND pp3.status = 'active'
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
@@ -498,7 +498,7 @@ class WageService:
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND 1=1
+                    AND pp3.status = 'active'
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
@@ -606,7 +606,7 @@ class WageService:
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND 1=1
+                    AND pp3.status = 'active'
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id
@@ -658,7 +658,7 @@ class WageService:
                     JOIN products pr3 ON pp3.product_id = pr3.id
                     WHERE pr3.product_code = pr.product_code
                     AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active' AND 1=1
+                    AND pp3.status = 'active'
                     AND pp3.effective_date <= date('now','localtime')
                 )
                 GROUP BY pr.product_code, pp2.process_id

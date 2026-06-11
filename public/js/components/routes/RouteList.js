@@ -17,9 +17,9 @@ export default {
     const pageSize = ref(20)
     const total = ref(0)
 
-    const canCreate = computed(() => !!auth.user && can('routes:create'))
-    const canEdit   = computed(() => !!auth.user && can('routes:edit'))
-    const canDelete = computed(() => !!auth.user && can('routes:delete'))
+    const canCreate = computed(() => can('routes:create'))
+    const canEdit   = computed(() => can('routes:edit'))
+    const canDelete = computed(() => can('routes:delete'))
 
     const categoryFilter = ref('')
     const activeCat = computed(() => {
@@ -121,7 +121,7 @@ export default {
           name: form.value.name.trim(),
           description: form.value.description,
           category: form.value.category,
-          processes: routeProcesses.value.filter(p => p.process_id)
+          processes: routeProcesses.value.filter(p => p.process_id !== '')
         }
         if (modalEdit.value) {
           await api.updateProcessRoute(modalId.value, data)

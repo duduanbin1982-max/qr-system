@@ -85,8 +85,9 @@ class MaterialService:
         """物料库存日志。"""
         db = BaseService.db()
         rows = db.execute(
-            'SELECT * FROM material_logs WHERE material_id = ? '
-            'ORDER BY created_at DESC LIMIT 100', (mid,)
+            'SELECT ml.*, u.name as operator_name_from_fk FROM material_logs ml'
+            ' LEFT JOIN users u ON ml.operator_id = u.id WHERE ml.material_id = ? '
+            'ORDER BY ml.created_at DESC LIMIT 100', (mid,)
         ).fetchall()
         return {'logs': [dict(r) for r in rows]}
 
@@ -129,10 +130,12 @@ class MaterialService:
         """物料消耗记录（含订单/工序信息）。"""
         db = BaseService.db()
         rows = db.execute('''
-            SELECT mc.*, o.order_no, o.product_name, p.name as process_name
+            SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
+                   u.name as operator_name_from_fk
             FROM material_consumptions mc
             LEFT JOIN orders o ON mc.order_id = o.id
             LEFT JOIN processes p ON mc.process_id = p.id
+            LEFT JOIN users u ON mc.operator_id = u.id
             WHERE mc.material_id = ?
             ORDER BY mc.created_at DESC LIMIT 100
         ''', (mid,)).fetchall()

@@ -1,6 +1,6 @@
 // ProcessList Component — 工序管理
 import { ref, onMounted, computed, watch } from '../../vendor/vue.esm.js'
-import { api } from '../../api.js'
+import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js'
 import { can } from '../../auth.js'
 import { router } from '../../router.js'
@@ -26,7 +26,9 @@ export default {
 
     // Tab 切换分类
     function switchCat(cat) {
-      filterCategory.value = cat === 'all' ? '' : cat
+      const newCat = cat === 'all' ? '' : cat
+      if (filterCategory.value === newCat) return
+      filterCategory.value = newCat
       page.value = 1
       load()
     }
@@ -72,8 +74,9 @@ export default {
         params.limit = pageSize.value
         params.offset = (page.value - 1) * pageSize.value
         const d = await api.listProcesses(params)
-        processes.value = d.processes || []
-        total.value = d.total || 0
+        const data = d.processes || []
+        processes.value = data
+        total.value = d.total != null ? d.total : data.length
         if (d.category_counts) {
           structCount.value = d.category_counts['结构件'] || 0
           machCount.value = d.category_counts['机加工'] || 0
@@ -121,7 +124,7 @@ export default {
           name: form.value.name.trim(),
           description: form.value.description,
           category: form.value.category,
-          seq_order: form.value.seq_order ? parseInt(form.value.seq_order) : undefined,
+          seq_order: form.value.seq_order != null && form.value.seq_order !== "" ? parseInt(form.value.seq_order) : undefined,
           status: form.value.status
         }
         if (data.seq_order === undefined) delete data.seq_order
@@ -140,35 +143,59 @@ export default {
       }
     }
 
-        async function del(p) {
-      var impactMsg = ''
-      try {
-        var impactRes = await api.get('/api/processes/' + p.id + '/impact')
-        var impact = impactRes.impact || {}
-        var labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
-          quality_inspections:'质检记录', process_prices:'工价记录', process_route_items:'路线工序关联',
-          order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
-        var keys = Object.keys(impact)
-        if (keys.length > 0) {
-          impactMsg = '\n\n将级联删除以下数据：\n'
-          for (var i = 0; i < keys.length; i++) {
-            impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条\n'
-          }
+    async function del(p) {
+    let impactMsg = ''
+    try {
+      const impactRes = await api.get('/api/processes/' + p.id + '/impact')
+      const impact = impactRes.impact || {}
+      const labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
+        quality_inspections:'质检记录', process_prices:'工价记录', process_route_items:'路线工序关联',
+        order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
+      const keys = Object.keys(impact)
+      if (keys.length > 0) {
+        impactMsg = '\n\n将级联删除以下数据：\n'
+        for (let i = 0; i < keys.length; i++) {
+          impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条\n'
         }
-      } catch(e) {}
-      if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
-      try {
-        await api.deleteProcess(p.id)
-        showToast('删除成功')
-        await load()
-      } catch(e) {
-        showToast(e.message || '删除失败', 'error')
       }
+    } catch(e) {}
+    if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
+    try {
+      await api.deleteProcess(p.id)
+      showToast('删除成功')
+      await load()
+    } catch(e) {
+      showToast(e.message || '删除失败', 'error')
     }
+  }
 
-    // 监听路由变化，切换分类并重新加载
+    let _loadedOnce = false
+    let _loadPromise = null
+
+    // Initial load on mount
+    onMounted(async () => {
+      const cat = categoryFromPage(router.page)
+      filterCategory.value = cat
+      _loadedOnce = true
+      // Retry up to 3 times if initial load fails
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          await load()
+          break
+        } catch(e) {
+          if (retry === 2) showToast('加载工序数据失败，请刷新重试', 'error')
+          await new Promise(r => setTimeout(r, 1000 * (retry + 1)))
+        }
+      }
+    })
+
+    // 监听路由变化（跳过首次已加载的挂载）
     watch(() => router.page, (page) => {
       const cat = categoryFromPage(page)
+      if (!_loadedOnce) {
+        _loadedOnce = true
+        return
+      }
       if (filterCategory.value !== cat) {
         filterCategory.value = cat
         load()

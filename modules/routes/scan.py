@@ -82,24 +82,7 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
                 db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
                            (new_completed, order_id, process_id))
 
-            # 更新订单完成数：统计已完成的工件数量（而非工序累计总和）
-            db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
-                       'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
-                       (order_id, order_id))
-            # 检查订单是否全部完成
-            order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
-            if order_info:
-                completed_cnt = db.execute(
-                    'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
-                    (order_id,)
-                ).fetchone()['cnt']
-                if completed_cnt >= order_info['quantity']:
-                    db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
-                               (order_id,))
-                    # 自动入库：匹配 inventory.product_model = orders.product_code
-                    auto_stock_in(db, order_id, user_id, user_name)
-
-        # 更新产品序列号的当前工序（推进到下一道工序）
+        # 更新产品序列号的当前工序（必须在 orders.completed 更新之前）
         if serial_no:
             current_op = db.execute('SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?',
                                     (order_id, process_id)).fetchone()
@@ -124,6 +107,23 @@ def _execute_report_write(db, report_type, order_id, process_id, user_id, user_n
                             (item['id'], item_version))
                         if cur.rowcount == 0:
                             raise ValueError(f'序列号 {serial_no} 已被其他操作修改，请刷新后重试')
+
+            # 更新订单完成数：必须在 product_items.status 更新之后
+            db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
+                       'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
+                       (order_id, order_id))
+            # 检查订单是否全部完成
+            order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
+            if order_info:
+                completed_cnt = db.execute(
+                    'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
+                    (order_id,)
+                ).fetchone()['cnt']
+                if completed_cnt >= order_info['quantity']:
+                    db.execute('UPDATE orders SET status = "completed" WHERE id = ?',
+                               (order_id,))
+                    # 自动入库：匹配 inventory.product_model = orders.product_code
+                    auto_stock_in(db, order_id, user_id, user_name)
 
     elif report_type == 'scrap':
         reason = remark or ''
@@ -529,21 +529,27 @@ def mobile_report():
 @check_auth
 @check_permission('scan:edit')
 @validate_json('work_report')
-def work_report():
-    """报工"""
-    data = get_json_body()
+def _parse_report_params(data):
+    """Brooks R1 refactor: Extract report parameter parsing."""
     try:
         order_id = int(data.get('order_id', 0))
         process_id = int(data.get('process_id', 0))
         quantity = int(data.get('quantity', 0))
     except (ValueError, TypeError):
-        return jsonify({'error': '参数格式错误：order_id/process_id/quantity 必须为数字'}), 400
-    serial_no = data.get('serial_no', '').strip() or None
-    report_type = data.get('type', 'normal')
-    remark = data.get('remark', '')
-
+        return None, jsonify({'error': '参数格式错误：order_id/process_id/quantity 必须为数字'}), 400
     if not order_id or not process_id or quantity <= 0:
-        return jsonify({'error': '参数不完整'}), 400
+        return None, jsonify({'error': '参数不完整'}), 400
+    serial_no = data.get('serial_no', '').strip() or None
+    return (order_id, process_id, quantity, serial_no, data.get('type', 'normal'), data.get('remark', '')), None, None
+
+
+def work_report():
+    """报工"""
+    data = get_json_body()
+    params, err_response, status = _parse_report_params(data)
+    if err_response:
+        return err_response, status
+    order_id, process_id, quantity, serial_no, report_type, remark = params
 
     db = get_db()
     user = g.current_user
@@ -666,23 +672,7 @@ def work_report():
                     new_completed = (op['completed'] or 0) + quantity
                     db.execute('UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?',
                                (new_completed, order_id, process_id))
-                # 更新订单完成数：统计已完成的工件数量（而非工序累计总和）
-                db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
-                           'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
-                           (order_id, order_id))
-                # 检查订单是否全部完成
-                order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
-                if order_info:
-                    completed_cnt = db.execute(
-                        'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
-                        (order_id,)
-                    ).fetchone()['cnt']
-                    if completed_cnt >= order_info['quantity']:
-                        db.execute('UPDATE orders SET status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
-                                   (order_id,))
-                        auto_stock_in(db, order_id, user['id'], user['name'])
-
-            # 推进工件当前工序
+            # 推进工件当前工序（必须在 orders.completed 更新之前）
             if serial_no and current_op:
                 item = db.execute('SELECT * FROM product_items WHERE serial_no = ?', (serial_no,)).fetchone()
                 if item:
@@ -697,6 +687,22 @@ def work_report():
                     else:
                         db.execute('UPDATE product_items SET current_process_id = NULL, status = "completed", completed_at = datetime("now","localtime") WHERE id = ?',
                                    (item['id'],))
+
+                # 更新订单完成数：必须在 product_items.status 更新之后
+                db.execute('UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = "completed"), '
+                           'updated_at = datetime("now","localtime"), status = "producing" WHERE id = ?',
+                           (order_id, order_id))
+                # 检查订单是否全部完成
+                order_info = db.execute('SELECT quantity FROM orders WHERE id = ?', (order_id,)).fetchone()
+                if order_info:
+                    completed_cnt = db.execute(
+                        'SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = "completed"',
+                        (order_id,)
+                    ).fetchone()['cnt']
+                    if completed_cnt >= order_info['quantity']:
+                        db.execute('UPDATE orders SET status = "completed" WHERE id = ?',
+                                   (order_id,))
+                        auto_stock_in(db, order_id, user['id'], user['name'])
 
         elif report_type == 'scrap':
             reason = data.get('reason', '')

@@ -129,6 +129,13 @@ def login():
     u = dict(user)
     u['token'] = token
     del u['password']
+    # P0: Override role from user_roles (single source of truth)
+    try:
+        ur_row = db.execute('SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ? ORDER BY r.level LIMIT 1', (u['id'],)).fetchone()
+        if ur_row:
+            u['role'] = ur_row['code']
+    except:
+        pass
     u['permissions'] = get_user_permissions(u)
     resp = jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
     # Set httpOnly secure cookie (SameSite=Lax for CSRF protection)
@@ -164,6 +171,12 @@ def list_sessions():
     ''', (g.token, g.current_user['id'])).fetchall()
     return jsonify({'sessions': [dict(r) for r in rows]})
 
+
+@app.route('/api/sessions', methods=['GET'])
+@check_auth
+def sessions_alias():
+    """Alias for /api/auth/sessions"""
+    return list_sessions()
 
 @app.route('/api/auth/sessions/<int:sid>', methods=['DELETE'])
 @check_auth
@@ -212,5 +225,8 @@ def change_password():
     db.execute('UPDATE users SET password = ?, password_version = 2, must_change_password = 0 WHERE id = ?',
                (pw_hash, g.current_user['id']))
     db.commit()
+    # P0: Update cached user to prevent must_change_password re-triggering on refresh
+    if isinstance(g.current_user, dict):
+        g.current_user['must_change_password'] = 0
     audit_log('change_password', 'user', g.current_user['id'])
     return jsonify({'message': '密码修改成功'})

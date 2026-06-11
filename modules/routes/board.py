@@ -48,26 +48,30 @@ def dashboard_board():
         WHERE o.status = 'completed' AND o.deleted_at IS NULL{cat_filter}
     ''', cat_params).fetchone()[0]
 
-    today_output = db.execute('''
+    today_output = db.execute(f'''
         SELECT COALESCE(SUM(wr.quantity),0) FROM work_records wr
         JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(wr.created_at) = ? AND wr.type = 'normal' AND wr.status = 'approved'
-    ''', (today,)).fetchone()[0]
-    today_reports = db.execute('''
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE DATE(wr.created_at) = ? AND wr.type = 'normal' AND wr.status = 'approved'{cat_filter}
+    ''', [today] + cat_params).fetchone()[0]
+    today_reports = db.execute(f'''
         SELECT COUNT(*) FROM work_records wr
         JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(wr.created_at) = ? AND wr.status = 'approved'
-    ''', (today,)).fetchone()[0]
-    today_rework = db.execute('''
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE DATE(wr.created_at) = ? AND wr.status = 'approved'{cat_filter}
+    ''', [today] + cat_params).fetchone()[0]
+    today_rework = db.execute(f'''
         SELECT COALESCE(SUM(rr.quantity),0) FROM rework_records rr
         JOIN orders o ON rr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(rr.created_at) = ?
-    ''', (today,)).fetchone()[0]
-    today_scrap = db.execute('''
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE DATE(rr.created_at) = ?{cat_filter}
+    ''', [today] + cat_params).fetchone()[0]
+    today_scrap = db.execute(f'''
         SELECT COALESCE(SUM(sr.quantity),0) FROM scrap_records sr
         JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL
-        WHERE DATE(sr.created_at) = ?
-    ''', (today,)).fetchone()[0]
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE DATE(sr.created_at) = ?{cat_filter}
+    ''', [today] + cat_params).fetchone()[0]
 
     order_rows = db.execute(f'''
         SELECT o.id, o.order_no, o.product_name, o.product_code,
@@ -93,7 +97,9 @@ def dashboard_board():
         LIMIT 20
     ''', [today] + [today] + cat_params).fetchall()
 
-    process_rows = db.execute('''
+    proc_cat_filter = ' AND pr.category = ?' if category else ''
+    proc_cat_params = [category] if category else []
+    process_rows = db.execute(f'''
         SELECT pr.id, pr.name, pr.category,
                COALESCE(SUM(wr.quantity), 0) as output
         FROM processes pr
@@ -101,11 +107,12 @@ def dashboard_board():
             AND DATE(wr.created_at) = ?
             AND wr.status = 'approved'
             AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
+        WHERE 1=1{proc_cat_filter}
         GROUP BY pr.id, pr.name, pr.category
         HAVING output > 0
         ORDER BY output DESC
         LIMIT 15
-    ''', (today,)).fetchall()
+    ''', [today] + proc_cat_params).fetchall()
     _scrap_rows = db.execute(
         'SELECT sr.process_id, SUM(sr.quantity) as s FROM scrap_records sr '
         'JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL '
@@ -123,7 +130,7 @@ def dashboard_board():
         p['scrap'] = scrap_by_proc.get(p['id'], 0)
         p['rework'] = rework_by_proc.get(p['id'], 0)
 
-    worker_rows = db.execute('''
+    worker_rows = db.execute(f'''
         SELECT u.id, u.name, u.employee_no,
                COUNT(wr.id) as report_count,
                COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output,
@@ -134,23 +141,27 @@ def dashboard_board():
             AND DATE(wr.created_at) = ?
             AND wr.status = 'approved'
             AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
-        WHERE u.status = 'active'
+        LEFT JOIN orders o ON wr.order_id = o.id
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE u.status = 'active'{cat_filter}
         GROUP BY u.id, u.name, u.employee_no
         HAVING report_count > 0
         ORDER BY output DESC
         LIMIT 20
-    ''', (today,)).fetchall()
+    ''', [today] + cat_params).fetchall()
 
-    recent_rows = db.execute('''
+    recent_rows = db.execute(f'''
         SELECT wr.id, wr.quantity, wr.type, wr.created_at,
-               u.name as worker_name, p.name as process_name, o.order_no
+               u.name as worker_name, pr.name as process_name, o.order_no
         FROM work_records wr
         LEFT JOIN users u ON wr.user_id = u.id
-        LEFT JOIN processes p ON wr.process_id = p.id
-        LEFT JOIN orders o ON wr.order_id = o.id
+        LEFT JOIN processes pr ON wr.process_id = pr.id
+        LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
+        LEFT JOIN products p ON o.product_code = p.product_code
+        WHERE 1=1{cat_filter}
         ORDER BY wr.id DESC
         LIMIT 10
-    ''',).fetchall()
+    ''', cat_params).fetchall()
 
     return jsonify({
         'stats': {

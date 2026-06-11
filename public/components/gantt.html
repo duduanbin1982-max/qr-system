@@ -1,22 +1,10 @@
 
   <div style="padding:var(--space-6);max-width:100%;overflow-x:auto">
     <div class="summary-bar">
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--text-placeholder);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">📅</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--text-placeholder)">{{ stats.total }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">总订单</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--info);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">⚙️</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--info)">{{ stats.producing }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">生产中</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--text-placeholder);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">⏳</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--text-placeholder)">{{ stats.pending }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">待生产</div></div>
-      </div>
-      <div class="card" style="flex:1;padding:var(--space-3) 20px;border-left:3px solid var(--success);display:flex;align-items:center;gap:var(--space-3)">
-        <div style="font-size:28px">✅</div>
-        <div><div style="font-size:var(--text-2xl);font-weight:700;color:var(--success)">{{ stats.completed }}</div><div style="font-size:var(--text-sm);color:var(--text-muted)">已完成</div></div>
-      </div>
+      <div class="summary-item"><span class="s-icon">📅</span><div><div class="s-val">{{ stats.total }}</div><div class="s-label">总订单</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-info">{{ stats.producing }}</div><div class="s-label">生产中</div></div></div>
+      <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val">{{ stats.pending }}</div><div class="s-label">待生产</div></div></div>
+      <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ stats.completed }}</div><div class="s-label">已完成</div></div></div>
     </div>
 
     <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">

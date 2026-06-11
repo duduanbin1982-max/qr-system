@@ -131,28 +131,28 @@ class ShipmentService:
             txn.execute(f'UPDATE shipments SET {", ".join(updates)} WHERE id = ?', params + [shipment_id])
 
     @staticmethod
+    @staticmethod
     def delete_shipment(shipment_id, current_user):
         db = BaseService.db()
         row = db.execute('SELECT * FROM shipments WHERE id = ?', (shipment_id,)).fetchone()
         if not row:
             raise ValueError('出库单不存在')
-        if row['status'] == 'completed':
-            items = db.execute('SELECT * FROM shipment_items WHERE shipment_id = ?', (shipment_id,)).fetchall()
-            for item in items:
-                db.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?',
-                           (item['quantity'], item['inventory_id']))
-                remark = f'删除出库单 {row["shipment_no"]} — 归还库存'
-                db.execute('''
-                    INSERT INTO inventory_logs (inventory_id, type, quantity, order_no,
-                        remark, operator_id, operator_name)
-                    VALUES (?, 'in', ?, ?, ?, ?, ?)
-                ''', (item['inventory_id'], item['quantity'], row['shipment_no'], remark,
-                      current_user['id'], current_user['name']))
-        db.execute('DELETE FROM shipments WHERE id = ?', (shipment_id,))
-        db.commit()
+        with BaseService.transaction() as txn:
+            if row['status'] == 'completed':
+                items = txn.execute('SELECT * FROM shipment_items WHERE shipment_id = ?', (shipment_id,)).fetchall()
+                for item in items:
+                    txn.execute('UPDATE inventory SET quantity = quantity + ? WHERE id = ?',
+                               (item['quantity'], item['inventory_id']))
+                    remark = f'删除出库单 {row["shipment_no"]} - 归还库存'
+                    txn.execute('''
+                        INSERT INTO inventory_logs (inventory_id, type, quantity, order_no,
+                            remark, operator_id, operator_name)
+                        VALUES (?, 'in', ?, ?, ?, ?, ?)
+                    ''', (item['inventory_id'], item['quantity'], row['shipment_no'], remark,
+                          current_user['id'], current_user['name']))
+            txn.execute('DELETE FROM shipment_items WHERE shipment_id = ?', (shipment_id,))
+            txn.execute('DELETE FROM shipments WHERE id = ?', (shipment_id,))
         return row['shipment_no']
-
-    @staticmethod
     def complete_shipment(shipment_id, current_user):
         db = BaseService.db()
         row = db.execute('SELECT * FROM shipments WHERE id = ?', (shipment_id,)).fetchone()

@@ -25,6 +25,13 @@ ALLOWED_KEYS = {
     # session security
     'session_timeout_hours',   # 会话超时（小时），0=不过期
     'session_idle_minutes',    # 闲置登出（分钟），0=不禁用
+    # 看板
+    'board_token',             # 数据看板访问令牌
+    # 邮件
+    'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password',
+    'smtp_from', 'smtp_tls', 'report_recipients',
+    # 性能
+    'slow_request_threshold_ms', # 慢请求阈值（毫秒）
 }
 
 
@@ -116,7 +123,7 @@ def save_settings():
     try:
         db.execute('BEGIN IMMEDIATE')
         for k, v in data.items():
-            db.execute('INSERT OR REPLACE INTO system_settings (key, value) VALUES (?,?)', (k, v))
+            db.execute('INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?,?,datetime("now","localtime"))', (k, v))
         for k in deleted_keys:
             if k in ALLOWED_KEYS:
                 db.execute('DELETE FROM system_settings WHERE key = ?', (k,))

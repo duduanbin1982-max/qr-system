@@ -210,7 +210,7 @@ input,textarea,select{font-size:16px !important}
 <h1>扫码报工</h1><p class="sub">手机端快速报工</p>
 <div class="form-group"><label>用户名</label><input type="text" id="inp-user" placeholder="请输入用户名" autocomplete="off"></div>
 <div class="form-group"><label>密码</label><input type="password" id="inp-pwd" placeholder="请输入密码"></div>
-<button class="btn-login" id="btn-login" onclick="doLogin()">登 录</button>
+<button class="btn-login" id="btn-login">登 录</button>
 <div class="login-error" id="login-err"></div>
 </div>
 </div>
@@ -220,40 +220,40 @@ input,textarea,select{font-size:16px !important}
 <div class="top-bar"><span class="top-user" id="top-user">扫码报工</span></div>
 <div class="main-body">
 <div class="hero-area">
-<button class="hero-scan" onclick="openCam()"><span class="hero-icon">📷</span><span class="hero-label">扫码报工</span></button>
+<button class="hero-scan"><span class="hero-icon">📷</span><span class="hero-label">扫码报工</span></button>
 <div class="hero-stats"><span>今日 <strong id="st-today">0</strong> 次</span><span class="stat-sep">·</span><span><strong id="st-qty">0</strong> 件</span></div>
 </div>
 <div class="sub-actions">
-<button class="sub-btn" onclick="openPhoto()">📸 拍照识别</button>
-<button class="sub-btn" onclick="toggleManual()">✏️ 手动输入</button>
+<button class="sub-btn">📸 拍照识别</button>
+<button class="sub-btn">✏️ 手动输入</button>
 </div>
-<div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button onclick="manualSearch()">查询</button></div>
-<input type="file" id="photo-input" accept="image/*" onchange="handlePhoto(event)" style="display:none">
+<div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button>查询</button></div>
+<input type="file" id="photo-input" accept="image/*" style="display:none">
 <div class="recent-section" id="recent-section">
-<div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer" onclick="loadRecent()">刷新</span></div>
+<div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer">刷新</span></div>
 <div id="recent-list"><div class="empty-recent"><span class="icon">📋</span>暂无记录</div></div>
 </div>
-<div class="bottom-bar"><span class="bottom-link" onclick="doLogout()">退出登录</span></div>
+<div class="bottom-bar"><span class="bottom-link">退出登录</span></div>
 </div>
 </div>
 
 <!-- ORDER -->
 <div id="s-order" class="screen">
 <div class="back-bar">
-<button class="top-btn" style="color:var(--text-primary);background:var(--bg-hover)" onclick="goBack()">← 返回</button>
+<button class="top-btn" style="color:var(--text-primary);background:var(--bg-hover)">← 返回</button>
 <h1 style="font-size:var(--text-lg);color:#333">报工确认</h1><div style="width:60px"></div>
 </div>
 <div class="order-body" id="order-body"></div>
 <div class="action-area">
 <div class="mode-toggle" style="margin-bottom:10px">
-<button class="mode-btn active" id="mode-auto" onclick="switchMode('auto')">⚡ 自动报工</button>
-<button class="mode-btn" id="mode-manual" onclick="switchMode('manual')">✋ 手动报工</button>
+<button class="mode-btn active" id="mode-auto">⚡ 自动报工</button>
+<button class="mode-btn" id="mode-manual">✋ 手动报工</button>
 </div>
 <div class="report-form" id="report-form" style="display:none">
 <div class="report-type-group" style="margin-bottom:10px">
-<div class="report-type-opt active" id="rtype-normal" onclick="setReportType('normal')">✅ 正常</div>
-<div class="report-type-opt scrap" id="rtype-scrap" onclick="setReportType('scrap')">❌ 报废</div>
-<div class="report-type-opt rework" id="rtype-rework" onclick="setReportType('rework')">🔧 返修</div>
+<div class="report-type-opt active" id="rtype-normal">✅ 正常</div>
+<div class="report-type-opt scrap" id="rtype-scrap">❌ 报废</div>
+<div class="report-type-opt rework" id="rtype-rework">🔧 返修</div>
 </div>
 <div class="rf-row">
 <div class="rf-col"><label>报工数量</label><input type="number" id="rpt-qty" min="1" placeholder="数量"></div>
@@ -262,7 +262,7 @@ input,textarea,select{font-size:16px !important}
 <div class="rf-col"><label>原因说明</label><input type="text" id="rpt-reason" placeholder="报废/返修原因"></div>
 </div>
 </div>
-<button class="btn-report" id="btn-report" onclick="doReport()">提交报工</button>
+<button class="btn-report" id="btn-report">提交报工</button>
 </div>
 </div>
 
@@ -273,15 +273,15 @@ input,textarea,select{font-size:16px !important}
 <h2>报工成功!</h2>
 <p id="ok-msg"></p>
 <div class="detail" id="ok-detail"></div>
-<button class="btn-done" onclick="goMain()">继续扫码</button>
+<button class="btn-done">继续扫码</button>
 </div>
 </div>
 
 <!-- SCANNER -->
 <div id="s-scan" class="screen scanner-screen">
 <div class="scan-controls">
-<button class="flash-btn off" id="flash-btn" onclick="toggleFlash()" title="闪光灯">⚡</button>
-<button class="close-btn" onclick="closeCam()">✕</button>
+<button class="flash-btn off" id="flash-btn" title="闪光灯">⚡</button>
+<button class="close-btn">✕</button>
 </div>
 <video id="cam-video" autoplay playsinline muted></video>
 <canvas id="cam-canvas"></canvas>
@@ -295,7 +295,7 @@ input,textarea,select{font-size:16px !important}
 </div>
 </div>
 
-<script>
+<script nonce="{$ nonce $}">
 'use strict';
 
 // ═══════════════════════════════════════════
@@ -842,6 +842,62 @@ function toggleFlash() {
   } else {
     show('login');
   }
+
+  // === Event listeners (migrated from inline handlers for CSP strict mode) ===
+  var _el = document.getElementById('btn-login');
+  if (_el) _el.addEventListener('click', doLogin);
+  
+  _el = document.querySelector('.hero-scan');
+  if (_el) _el.addEventListener('click', openCam);
+  
+  var _subBtns = document.querySelectorAll('.sub-btn');
+  if (_subBtns[0]) _subBtns[0].addEventListener('click', openPhoto);
+  if (_subBtns[1]) _subBtns[1].addEventListener('click', toggleManual);
+  
+  _el = document.querySelector('#manual-row button');
+  if (_el) _el.addEventListener('click', manualSearch);
+  
+  _el = document.getElementById('photo-input');
+  if (_el) _el.addEventListener('change', handlePhoto);
+  
+  _el = document.querySelector('#manual-row input');
+  if (_el) _el.addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
+  
+  _el = document.querySelector('.recent-title span[style*="cursor:pointer"]');
+  if (_el) _el.addEventListener('click', loadRecent);
+  
+  _el = document.querySelector('.bottom-link');
+  if (_el) _el.addEventListener('click', doLogout);
+  
+  _el = document.querySelector('.top-btn');
+  if (_el) _el.addEventListener('click', goBack);
+  
+  _el = document.getElementById('mode-auto');
+  if (_el) _el.addEventListener('click', function() { switchMode('auto'); });
+  
+  _el = document.getElementById('mode-manual');
+  if (_el) _el.addEventListener('click', function() { switchMode('manual'); });
+  
+  _el = document.getElementById('rtype-normal');
+  if (_el) _el.addEventListener('click', function() { setReportType('normal'); });
+  
+  _el = document.getElementById('rtype-scrap');
+  if (_el) _el.addEventListener('click', function() { setReportType('scrap'); });
+  
+  _el = document.getElementById('rtype-rework');
+  if (_el) _el.addEventListener('click', function() { setReportType('rework'); });
+  
+  _el = document.getElementById('btn-report');
+  if (_el) _el.addEventListener('click', doReport);
+  
+  _el = document.querySelector('.btn-done');
+  if (_el) _el.addEventListener('click', goMain);
+  
+  _el = document.getElementById('flash-btn');
+  if (_el) _el.addEventListener('click', toggleFlash);
+  
+  _el = document.querySelector('.close-btn');
+  if (_el) _el.addEventListener('click', closeCam);
   $('inp-pwd').addEventListener('keyup', function(e) { if (e.key === 'Enter') doLogin(); });
   $('inp-user').addEventListener('keyup', function(e) { if (e.key === 'Enter') $('inp-pwd').focus(); });
   $('inp-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
@@ -857,7 +913,7 @@ function toggleFlash() {
 })();
 </script>
 
-<script>
+<script nonce="{$ nonce $}">
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").then(function(reg) {
     console.log("SW registered:", reg.scope);
@@ -868,7 +924,7 @@ if ("serviceWorker" in navigator) {
           var toast = document.createElement("div");
           toast.style.cssText = "position:fixed;top:0;left:0;right:0;background:#4F46E5;color:#fff;text-align:center;padding:8px;z-index:9999;cursor:pointer";
           toast.textContent = "有新版本，点击刷新";
-          toast.onclick = function() { location.reload(); };
+          toast.addEventListener("click", function() { location.reload(); });
           document.body.appendChild(toast);
           setTimeout(function() { toast.remove(); }, 5000);
         }

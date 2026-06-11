@@ -136,7 +136,7 @@ def dashboard_security():
           WHERE success = 1 AND DATE(created_at) = ?
           EXCEPT
           SELECT DISTINCT ip_address FROM login_logs
-          WHERE success = 1 AND DATE(created_at) < ? AND created_at > datetime('now','-7 days')
+          WHERE success = 1 AND DATE(created_at) < ? AND created_at > datetime('now','localtime','-7 days')
         )
     ''', (today, today)).fetchone()[0]
 
