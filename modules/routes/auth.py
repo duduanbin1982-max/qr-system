@@ -12,6 +12,10 @@ from modules.db import get_db
 from modules.middleware.auth import check_auth, get_user_permissions, audit_log
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
+from modules.constants import SECONDS_PER_DAY, SECONDS_PER_WEEK
+
+# Extracted constant — Brooks R1 fix
+
 
 
 def _lock_minutes(fail_count):
@@ -129,7 +133,7 @@ def login():
     resp = jsonify({'user': u, 'must_change_password': bool(u.get('must_change_password', 0))})
     # Set httpOnly secure cookie (SameSite=Lax for CSRF protection)
     resp.set_cookie('qr_token', token, httponly=True,
-                    samesite='Lax', max_age=86400*7, path='/')
+                    samesite='Lax', max_age=SECONDS_PER_DAY*7, path='/')
     return resp
 
 

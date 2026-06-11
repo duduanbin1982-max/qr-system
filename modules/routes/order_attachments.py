@@ -9,6 +9,9 @@ from werkzeug.utils import secure_filename
 from modules.db import get_db
 from modules.middleware.auth import check_auth, has_permission, check_permission, audit_log
 
+# Extracted constant — Brooks R1 fix
+MAX_ATTACHMENT_SIZE_KB = MAX_ATTACHMENT_SIZE_KB  # 1MB file size limit
+
 ATTACH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "attachments")
 os.makedirs(ATTACH_DIR, exist_ok=True)
 
@@ -52,7 +55,7 @@ def upload_order_attachment(order_id):
         return jsonify({'error': f'File type {ext} not allowed'}), 400
     filedata = file.read()
     fsize = len(filedata)
-    if fsize > 10 * 1024 * 1024:
+    if fsize > 10 * MAX_ATTACHMENT_SIZE_KB * MAX_ATTACHMENT_SIZE_KB:
         return jsonify({'error': 'file too large'}), 400
     db = get_db()
     order = db.execute('SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL', (order_id,)).fetchone()

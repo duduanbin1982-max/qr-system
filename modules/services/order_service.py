@@ -1,3 +1,4 @@
+from modules.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_LIMIT
 """
 qr-system — 订单管理 Service 层
 
@@ -6,6 +7,9 @@ qr-system — 订单管理 Service 层
 import json
 from datetime import datetime
 from modules.services import BaseService
+
+# Extracted constants — Brooks R4 fix
+
 
 
 # ============================================================
@@ -80,7 +84,7 @@ class OrderService:
     # ============================================================
 
     @staticmethod
-    def list_orders(page=1, limit=20, status='', keyword='', customer='',
+    def list_orders(page=1, limit=DEFAULT_PAGE_SIZE, status='', keyword='', customer='',
                     data_scope_pids=None):
         """分页查询订单列表（含数据权限过滤）。"""
         db = BaseService.db()
@@ -432,7 +436,7 @@ class OrderService:
     # ============================================================
 
     @staticmethod
-    def trash_orders(page=1, limit=20):
+    def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE):
         """分页查询回收站订单。"""
         db = BaseService.db()
         page = max(page, 1)

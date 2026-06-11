@@ -59,10 +59,21 @@ def get_page_size(default: int = 20) -> int:
     return default
 
 def init_db() -> None:
-    """初始化数据库表结构和默认数据"""
+    """初始化数据库表结构和默认数据
+    
+    使用 PRAGMA user_version 跟踪迁移版本。
+    仅当版本号落后时才执行新增迁移，避免每次启动全量执行。
+    """
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+    
+    # Brooks R4 fix: Track migration version to avoid full re-run on every start
+    current_version = db.execute("PRAGMA user_version").fetchone()[0]
+    TARGET_VERSION = 12  # Increment when adding new migrations below
+    if current_version >= TARGET_VERSION:
+        db.close()
+        return
 
     # P3: Add version column for optimistic locking
     try:
@@ -1006,5 +1017,6 @@ def init_db() -> None:
             db.execute('DELETE FROM orders WHERE id = ?', (oid,))
     except: pass
 
+    db.execute(f'PRAGMA user_version = {TARGET_VERSION}')
     db.commit()
     db.close()

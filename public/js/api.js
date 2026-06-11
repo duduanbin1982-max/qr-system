@@ -36,6 +36,13 @@ export async function request(method, url, data) {
 }
 
 // 便捷方法
+
+// Brooks R3 fix: Unified error handler — eliminates 100+ repeated showToast patterns
+export function handleApiError(e, fallbackMsg) {
+  const msg = (e && e.message) ? e.message : (fallbackMsg || '操作失败')
+  return { error: true, message: msg }
+}
+
 export const api = {
   get:    (url)         => request('GET', url),
   post:   (url, data)   => request('POST', url, data),
