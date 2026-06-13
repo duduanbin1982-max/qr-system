@@ -249,9 +249,53 @@
             .stat-value { font-size:32px; }
             .stats-bar { grid-template-columns: repeat(7, 1fr); }
         }
+    
+        /* Board Auth Login Overlay */
+        .auth-overlay {
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(15,12,41,0.95);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .auth-box {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 16px; padding: 40px;
+            text-align: center; min-width: 360px;
+            backdrop-filter: blur(20px);
+        }
+        .auth-box h2 { font-size: 24px; margin-bottom: 8px; color: #fff; }
+        .auth-box p { font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 24px; }
+        .auth-box input {
+            width: 100%; padding: 12px 16px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.06); color: #fff;
+            font-size: 16px; text-align: center; outline: none;
+            margin-bottom: 16px;
+        }
+        .auth-box input:focus { border-color: #4fc3f7; }
+        .auth-box .btn-auth {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            background: linear-gradient(135deg, #4fc3f7, #0288d1);
+            color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
+        }
+        .auth-box .btn-auth:hover { opacity: 0.9; }
+        .auth-error { color: #ff6b6b; font-size: 13px; margin-top: 8px; }
+    
     </style>
 </head>
 <body>
+
+    <!-- Auth Overlay -->
+    <div class="auth-overlay" v-if="!authenticated">
+        <div class="auth-box">
+            <h2>🔐 生产看板</h2>
+            <p>请输入看板访问令牌</p>
+            <input type="password" v-model="boardTokenInput" placeholder="看板令牌" @keyup.enter="doBoardLogin">
+            <button class="btn-auth" @click="doBoardLogin">登 录</button>
+            <div class="auth-error" v-if="authError">{{ authError }}</div>
+        </div>
+    </div>
+
     <div id="app">
         <div class="board-container">
             <!-- Header -->
@@ -417,6 +461,9 @@
         createApp({
             data() {
                 return {
+                    authenticated: false,
+                    boardTokenInput: '',
+                    authError: '',
                     currentTime: '',
                     updateTime: '',
                     stats: {},
@@ -443,6 +490,7 @@
                 }
             },
             mounted() {
+                if (BoardAuth.isAuthenticated()) { this.authenticated = true; }
                 this.updateTime = BoardUtils.tickFull();
                 this.updateClock();
                 this.loadData();
@@ -453,6 +501,21 @@
                 if (this.timer) clearInterval(this.timer);
             },
             methods: {
+                async doBoardLogin() {
+                    this.authError = '';
+                    try {
+                        await BoardAuth.login(this.boardTokenInput);
+                        this.authenticated = true;
+                        this.loadData();
+                    } catch (e) {
+                        this.authError = e.message || '令牌无效';
+                    }
+                },
+                doBoardLogout() {
+                    BoardAuth.clearToken();
+                    this.authenticated = false;
+                    this.boardTokenInput = '';
+                },
                 updateClock() {
                     this.currentTime = BoardUtils.tickFull();
                 },
@@ -475,7 +538,7 @@
                         this.maxProcessOutput = Math.max(...this.processStats.map(p => p.output || 0), 1);
                         this.maxWorkerOutput = Math.max(...this.workerStats.map(w => w.output || 0), 1);
                     } catch (err) {
-                        console.error('Failed to load board data:', err);
+                        if (err.message === 'SESSION_EXPIRED') { this.authenticated = false; BoardAuth.clearToken(); } else { console.error('Failed to load board data:', err); }
                     }
                 },
                 getProcessPercent(item) {

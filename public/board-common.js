@@ -1,5 +1,6 @@
 // ============================================================
 // board-common.js — Shared logic for board.html & bigscreen.html
+// Secure: uses sessionStorage + Authorization header (no URL token)
 // ============================================================
 
 const COLOR_PALETTE = [
@@ -7,19 +8,63 @@ const COLOR_PALETTE = [
     '#f1c40f', '#1dd1a1', '#7c3aed', '#ff6b9d', '#54a0ff'
 ];
 
+const BOARD_SESSION_KEY = 'board_session_token';
+
+// ===================== BoardAuth =====================
+const BoardAuth = {
+    getToken() {
+        return sessionStorage.getItem(BOARD_SESSION_KEY);
+    },
+    setToken(token) {
+        sessionStorage.setItem(BOARD_SESSION_KEY, token);
+    },
+    clearToken() {
+        sessionStorage.removeItem(BOARD_SESSION_KEY);
+    },
+    isAuthenticated() {
+        return !!this.getToken();
+    },
+    async login(boardToken) {
+        const res = await fetch('/api/board/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ board_token: boardToken })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Auth failed');
+        }
+        const data = await res.json();
+        this.setToken(data.token);
+        return data;
+    }
+};
+
 // ===================== BoardAPI =====================
 const BoardAPI = {
     buildUrl(category) {
         const params = new URLSearchParams();
-        const tok = new URLSearchParams(window.location.search).get('token');
-        if (tok) params.set('token', tok);
         if (category) params.set('category', category);
         const qs = params.toString();
         return '/api/dashboard/board' + (qs ? '?' + qs : '');
     },
+    getHeaders() {
+        const headers = {};
+        const token = BoardAuth.getToken();
+        if (token) {
+            headers['Authorization'] = 'Bearer ' + token;
+        }
+        return headers;
+    },
     async fetchData(category) {
-        const res = await fetch(this.buildUrl(category));
-        if (!res.ok) throw new Error('API ' + res.status);
+        const res = await fetch(this.buildUrl(category), { headers: this.getHeaders() });
+        if (!res.ok) {
+            if (res.status === 401) {
+                BoardAuth.clearToken();
+                throw new Error('SESSION_EXPIRED');
+            }
+            throw new Error('API ' + res.status);
+        }
         const d = await res.json();
         return {
             stats: d.stats || {},
