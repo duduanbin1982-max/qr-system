@@ -48,6 +48,19 @@ def _ensure_test_user(db):
             (TEST_HASH, TEST_USER)
         )
         user_id = existing["id"]
+    # Ensure test user has admin role in user_roles table (needed by has_permission)
+    admin_role = db.execute("SELECT id FROM roles WHERE code = 'admin' AND status = 'active'").fetchone()
+    if admin_role:
+        existing_role = db.execute(
+            "SELECT id FROM user_roles WHERE user_id = ? AND role_id = ?",
+            (user_id, admin_role["id"])
+        ).fetchone()
+        if not existing_role:
+            db.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+                (user_id, admin_role["id"])
+            )
+
     db.execute("DELETE FROM login_attempts")
     db.execute("DELETE FROM login_logs")
     db.commit()

@@ -42,7 +42,7 @@ def get_next_order_no():
 def create_order():
     data = get_json_body()
     try:
-        order_id = OrderService.create_order(data)
+        order_id, _order_no = OrderService.create_order(data)
         try:
             audit_log('create_order', 'order', order_id, data.get('order_no', ''))
         except Exception:
