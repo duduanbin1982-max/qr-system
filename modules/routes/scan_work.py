@@ -9,7 +9,7 @@ from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.data_scope import get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService
-from modules.routes.scan_helpers import auto_stock_in, _execute_report_write, _check_order_scope
+# (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.db import get_setting
 import qrcode as qrcode_lib
 from io import BytesIO
@@ -44,7 +44,7 @@ def scan_order():
             return jsonify({"error": f"未找到订单或产品: {code}"}), 404
 
         o = dict(order)
-        if not _check_order_scope(o["id"]):
+        if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权查看此订单"}), 403
 
         try:
@@ -175,7 +175,7 @@ def mobile_scan():
             return jsonify({"error": f"未找到订单或产品: {code}"}), 404
 
         o = dict(order)
-        if not _check_order_scope(o["id"]):
+        if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权查看此订单"}), 403
 
         o["processes"] = [dict(p) for p in ScanHelperService.get_order_processes(o["id"])]
@@ -242,7 +242,7 @@ def mobile_report():
         order = ScanHelperService.get_order(order_id)
         if not order:
             return jsonify({"error": "订单不存在"}), 404
-        if not _check_order_scope(order_id):
+        if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权对此订单报工"}), 403
 
         op_check = ScanHelperService.check_process_in_order(order_id, process_id)
@@ -301,7 +301,7 @@ def mobile_report():
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
 
         # 使用共享报工写入逻辑
-        _execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
+        ScanHelperService.execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
                               quantity, remark, serial_no, need_approval, report_type)
 
         try:
@@ -346,7 +346,7 @@ def work_report():
         order = ScanHelperService.get_order(order_id)
         if not order:
             return jsonify({"error": "订单不存在"}), 404
-        if not _check_order_scope(order_id):
+        if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权对此订单报工"}), 403
 
         # ===== 工序存在性校验 =====
@@ -412,7 +412,7 @@ def work_report():
                 return jsonify({"error": f"序列号 {serial_no} 当前不在该工序，请刷新后重试"}), 400
 
         # ===== 共享报工写入 =====
-        _execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
+        ScanHelperService.execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
                               quantity, remark, serial_no, need_approval, report_type)
 
         try:
