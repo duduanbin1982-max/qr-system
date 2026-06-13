@@ -17,6 +17,9 @@ import modules.routes.orders
 import modules.routes.products
 import modules.routes.processes
 import modules.routes.scan
+import modules.routes.scan_helpers
+import modules.routes.scan_work
+import modules.routes.scan_qr
 import modules.routes.customers
 import modules.routes.users
 import modules.routes.settings
@@ -34,11 +37,11 @@ def _ensure_test_user(db):
         "SELECT id FROM users WHERE username = ?", (TEST_USER,)
     ).fetchone()
     if not existing:
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO users (username, password, name, role, status, password_version) VALUES (?, ?, ?, ?, ?, 2)",
             (TEST_USER, TEST_HASH, "Test Runner", "admin", "active")
         )
-        user_id = db.lastrowid
+        user_id = cursor.lastrowid
     else:
         db.execute(
             "UPDATE users SET password = ?, status = 'active', role = 'admin', locked_until = NULL, failed_login_count = 0, password_version = 2 WHERE username = ?",
