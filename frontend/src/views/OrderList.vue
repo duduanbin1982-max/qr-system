@@ -272,7 +272,7 @@
           </div>
 
           <!-- 预览区 -->
-          <div class="qr-print-area">
+          <div id="qr-print-root" class="qr-print-area">
             <div v-if="qrPrintLoading" class="qr-empty-state">⏳ 正在生成二维码...</div>
             <div v-else-if="qrCodes.length" class="qr-grid">
               <template v-for="copy in qrPrintCopies" :key="'copy'+copy">
