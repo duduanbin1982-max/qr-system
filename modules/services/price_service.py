@@ -414,7 +414,6 @@ class WageService:
 
     @staticmethod
     def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False):
-        """计件工资统计（包含所有在职员工，未报工者显示0）。"""
         db = BaseService.db()
         status_filter = "wr.status = 'approved'" if not include_pending else "wr.status IN ('approved','pending')"
         type_filter = "wr.type IN ('normal','rework')" if include_rework else "wr.type = 'normal'"
@@ -427,18 +426,20 @@ class WageService:
         if date_to:
             wr_where_parts.append('wr.created_at <= ?'); wr_params.append(date_to + ' 23:59:59')
         wr_where = ' AND '.join(wr_where_parts)
-
-        # Count: all active workers (users as driving table)
         user_where = "u.status = 'active' AND u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'worker')"
         user_params = []
         if employee_id:
             user_where += ' AND u.id = ?'; user_params.append(employee_id)
-        total = db.execute(
-            "SELECT COUNT(*) FROM users u WHERE " + user_where, user_params
-        ).fetchone()[0]
+        total = db.execute("SELECT COUNT(*) FROM users u WHERE " + user_where, user_params).fetchone()[0]
         offset = (page - 1) * limit
-
-        # Main query: users LEFT JOIN work_records so all workers appear
+        p1_params = user_params + [limit, offset]
+        user_rows = db.execute("SELECT u.id, u.name, u.employee_no FROM users u WHERE " + user_where + " ORDER BY u.id LIMIT ? OFFSET ?", p1_params).fetchall()
+        user_map = {row['id']: {'employee_name': row['name'] or 'unknown', 'employee_no': row['employee_no'] or ''} for row in user_rows}
+        user_ids = list(user_map.keys())
+        if not user_ids:
+            return {'wages': [], 'total': total, 'page': page, 'limit': limit}
+        placeholders = ','.join(['?' for _ in user_ids])
+        p2_params = wr_params + user_ids
         query = ('''SELECT u.id as user_id, u.name as employee_name, u.employee_no,
                    wr.quantity, wr.created_at, wr.id as wr_id,
                    p.name as process_name,
@@ -452,33 +453,23 @@ class WageService:
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
             ''' + WageService._PP_DEDUP_JOIN + '''
-            WHERE ''' + user_where + '''
-            ORDER BY u.id
-            LIMIT ? OFFSET ?''')
-        all_params = wr_params + user_params + [limit, offset]
-        rows = db.execute(query, all_params).fetchall()
+            WHERE u.id IN (''' + placeholders + ''')
+            ORDER BY u.id''')
+        rows = db.execute(query, p2_params).fetchall()
         wages = {}
+        for uid, info in user_map.items():
+            wages[uid] = {'employee_name': info['employee_name'], 'employee_no': info['employee_no'], 'total_quantity': 0, 'total_wage': 0, 'details': []}
         for row in rows:
             emp_id = row['user_id']
-            emp_name = row['employee_name'] or '未知'
-            emp_no = row['employee_no'] or ''
-            if emp_id not in wages:
-                wages[emp_id] = {'employee_name': emp_name, 'employee_no': emp_no,
-                                 'total_quantity': 0, 'total_wage': 0, 'details': []}
             if row['wr_id'] is not None:
                 qty = row['quantity'] or 0
                 up = row['unit_price'] or 0
                 wage = qty * up
+                if emp_id not in wages:
+                    wages[emp_id] = {'employee_name': row['employee_name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'total_quantity': 0, 'total_wage': 0, 'details': []}
                 wages[emp_id]['total_quantity'] += qty
                 wages[emp_id]['total_wage'] += wage
-                wages[emp_id]['details'].append({
-                    'date': row['created_at'],
-                    'order_no': row['order_no'] or '',
-                    'product_name': row['product_name'] or '',
-                    'product_code': row['order_product_code'] or '',
-                    'process_name': row['process_name'],
-                    'quantity': qty, 'unit_price': up, 'wage': wage
-                })
+                wages[emp_id]['details'].append({'date': row['created_at'], 'order_no': row['order_no'] or '', 'product_name': row['product_name'] or '', 'product_code': row['order_product_code'] or '', 'process_name': row['process_name'], 'quantity': qty, 'unit_price': up, 'wage': wage})
         return {'wages': list(wages.values()), 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
