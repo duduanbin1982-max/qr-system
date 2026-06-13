@@ -1885,6 +1885,7 @@ textarea:focus-visible {
   font-size: 15px; color: #1a1a2e; background: #f8f9fc;
   outline: none; transition: all 0.25s ease;
   box-sizing: border-box;
+  text-align: center;
 }
 .login-input:focus {
   border-color: #667eea; background: #fff;
@@ -1991,6 +1992,7 @@ textarea:focus-visible {
   font-size: 15px; color: #1a1a2e; background: #f8f9fc;
   outline: none; transition: all 0.25s ease;
   box-sizing: border-box;
+  text-align: center;
 }
 .login-input:focus {
   border-color: #667eea; background: #fff;
