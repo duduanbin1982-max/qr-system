@@ -339,6 +339,63 @@
 </template>
 
 <script>
+function statusLabel(s) {
+  const map = { pending: "\u5F85\u751F\u4EA7", producing: "\u751F\u4EA7\u4E2D", completed: "\u5DF2\u5B8C\u6210", paused: "\u5DF2\u6682\u505C", cancelled: "\u5DF2\u53D6\u6D88" }
+  return map[s] || s
+}
+
+function createLoader(ctx, fetchFn) {
+  return async function() {
+    ctx.loading.value = true
+    try {
+      await fetchFn()
+      ctx.updateTime.value = new Date().toLocaleString("zh-CN")
+    } catch (e) { showToast(e.message, "error") }
+    finally { ctx.loading.value = false }
+  }
+}
+
+function createExporter(dataRef, headers, rowMapper, filePrefix) {
+  return function() {
+    const arr = dataRef.value
+    if (!arr || !arr.length) { showToast("\u6CA1\u6709\u6570\u636E\u53EF\u5BFC\u51FA", "warning"); return }
+    const data = [headers]
+    arr.forEach((item, i) => data.push(rowMapper(item, i)))
+    exportCSV(data, filePrefix + "_" + new Date().toISOString().slice(0, 10))
+  }
+}
+
+function buildParams(start, end) {
+  return { start_date: start, end_date: end }
+}
+
+
+// Module-level utilities
+function exportCSV(data, filename) {
+  const BOM = "\uFEFF"
+  const csv = BOM + data.map(row => row.map(c => {
+    const s = String(c == null ? "" : c)
+    return /[\",\n]/.test(s) ? "\"" + s.replace(/"/g, "\"\"") + "\"" : s
+  }).join(",")).join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url; a.download = filename + ".csv"
+  a.click(); URL.revokeObjectURL(url)
+}
+
+const TABS = [
+  { k: "dashboard", l: "\uD83D\uDCCA \u7EFC\u5408\u770B\u677F" },
+  { k: "trend", l: "\uD83D\uDCC8 \u751F\u4EA7\u8D8B\u52BF" },
+  { k: "worker", l: "\uD83D\uDC77 \u5DE5\u4EBA\u6548\u7387" },
+  { k: "quality", l: "\uD83D\uDD0D \u54C1\u8D28\u5206\u6790" },
+  { k: "order", l: "\uD83D\uDCCB \u8BA2\u5355\u5206\u6790" },
+  { k: "product", l: "\uD83C\uDFF7\uFE0F \u4EA7\u54C1\u7EDF\u8BA1" },
+  { k: "material", l: "\uD83D\uDCE6 \u7269\u6599\u6D88\u8017" },
+  { k: "shipment", l: "\uD83D\uDE9A \u53D1\u8D27\u7EDF\u8BA1" },
+]
+
+
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
