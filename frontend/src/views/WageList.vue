@@ -31,6 +31,7 @@
           <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder);font-size:var(--text-xs)">
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:30px"></th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:90px">姓名</th>
+            <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">岗位</th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">工号</th>
             <th style="padding:var(--space-3) 12px;text-align:center;font-weight:500;width:80px">总件数</th>
             <th style="padding:var(--space-3) 12px;text-align:right;font-weight:500;width:100px">总工资</th>
@@ -41,6 +42,7 @@
             <tr style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm);cursor:pointer" @click="toggle(w.employee_no)" :style="{background:expandedId===w.employee_no?'var(--primary-light)':''}">
               <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ expandedId===w.employee_no ? '▼' : '▶' }}</td>
               <td style="padding:var(--space-3) 12px;font-weight:600;color:var(--text-primary)">{{ w.employee_name }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-secondary);font-size:var(--text-xs)">{{ w.position_name || '-' }}</td>
               <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs)">{{ w.employee_no || '-' }}</td>
               <td style="padding:var(--space-3) 12px;text-align:center;font-weight:600">{{ w.total_quantity }}</td>
               <td style="padding:var(--space-3) 12px;text-align:right;font-weight:700;color:var(--warning);font-size:var(--text-base)">¥{{ fmtMoney(w.total_wage) }}</td>
@@ -144,14 +146,14 @@ export default {
     }
 
     function exportCSV() {
-      const rows = [['姓名', '工号', '日期', '订单号', '产品', '工序', '数量', '单价', '工资']]
+      const rows = [['姓名', '岗位', '工号', '日期', '订单号', '产品', '工序', '数量', '单价', '工资']]
       for (const w of filteredWages.value) {
         for (const d of (w.details || [])) {
-          rows.push([w.employee_name, w.employee_no, fmtDate(d.date), d.order_no, d.product_name, d.process_name, d.quantity, fmtMoney(d.unit_price), fmtMoney(d.wage)])
+          rows.push([w.employee_name, w.position_name || '', w.employee_no, fmtDate(d.date), d.order_no, d.product_name, d.process_name, d.quantity, fmtMoney(d.unit_price), fmtMoney(d.wage)])
         }
-        rows.push([w.employee_name, w.employee_no, '', '', '', '小计', w.total_quantity, '', fmtMoney(w.total_wage)])
+        rows.push([w.employee_name, w.position_name || '', w.employee_no, '', '', '', '小计', w.total_quantity, '', fmtMoney(w.total_wage)])
       }
-      rows.push(['', '', '', '', '', '合计', grandQty(), '', fmtMoney(grandTotal())])
+      rows.push(['', '', '', '', '', '', '合计', grandQty(), '', fmtMoney(grandTotal())])
       const csv = '\uFEFF' + rows.map(r => r.map(c => {
         const s = String(c == null ? '' : c)
         return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s

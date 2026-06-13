@@ -433,8 +433,8 @@ class WageService:
         total = db.execute("SELECT COUNT(*) FROM users u WHERE " + user_where, user_params).fetchone()[0]
         offset = (page - 1) * limit
         p1_params = user_params + [limit, offset]
-        user_rows = db.execute("SELECT u.id, u.name, u.employee_no FROM users u WHERE " + user_where + " ORDER BY u.id LIMIT ? OFFSET ?", p1_params).fetchall()
-        user_map = {row['id']: {'employee_name': row['name'] or 'unknown', 'employee_no': row['employee_no'] or ''} for row in user_rows}
+        user_rows = db.execute("SELECT u.id, u.name, u.employee_no, COALESCE(pos.name, '') as position_name FROM users u LEFT JOIN positions pos ON u.position_id = pos.id WHERE " + user_where + " ORDER BY u.id LIMIT ? OFFSET ?", p1_params).fetchall()
+        user_map = {row['id']: {'employee_name': row['name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': row['position_name'] or ''} for row in user_rows}
         user_ids = list(user_map.keys())
         if not user_ids:
             return {'wages': [], 'total': total, 'page': page, 'limit': limit}
@@ -458,7 +458,7 @@ class WageService:
         rows = db.execute(query, p2_params).fetchall()
         wages = {}
         for uid, info in user_map.items():
-            wages[uid] = {'employee_name': info['employee_name'], 'employee_no': info['employee_no'], 'total_quantity': 0, 'total_wage': 0, 'details': []}
+            wages[uid] = {'employee_name': info['employee_name'], 'employee_no': info['employee_no'], 'position_name': info['position_name'], 'total_quantity': 0, 'total_wage': 0, 'details': []}
         for row in rows:
             emp_id = row['user_id']
             if row['wr_id'] is not None:
@@ -466,7 +466,7 @@ class WageService:
                 up = row['unit_price'] or 0
                 wage = qty * up
                 if emp_id not in wages:
-                    wages[emp_id] = {'employee_name': row['employee_name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'total_quantity': 0, 'total_wage': 0, 'details': []}
+                    wages[emp_id] = {'employee_name': row['employee_name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': '', 'total_quantity': 0, 'total_wage': 0, 'details': []}
                 wages[emp_id]['total_quantity'] += qty
                 wages[emp_id]['total_wage'] += wage
                 wages[emp_id]['details'].append({'date': row['created_at'], 'order_no': row['order_no'] or '', 'product_name': row['product_name'] or '', 'product_code': row['order_product_code'] or '', 'process_name': row['process_name'], 'quantity': qty, 'unit_price': up, 'wage': wage})
