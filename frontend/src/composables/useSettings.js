@@ -16,6 +16,7 @@ export function useSettings() {
     { key:'role-groups', label:'👔 角色组' },
     { key:'role-manage', label:'👥 角色管理' },
     { key:'positions', label:'💼 岗位管理' },
+    { key:'approval-config', label:'✅ 审批配置' },
   ]
 
   // ===== 公司资料 =====
@@ -299,14 +300,57 @@ export function useSettings() {
   async function deletePosition(pid) { if (!confirm('确定删除该岗位？')) return; try { await api.deletePosition(pid); showToast('删除成功'); loadPositions() } catch(e) { showToast(e.message,'error') } }
   function toggleProcessInPosition(pid) { const idx = positionForm.process_ids.indexOf(pid); if (idx >= 0) positionForm.process_ids.splice(idx, 1); else positionForm.process_ids.push(pid) }
 
-  // ===== Stubs =====
+  // ===== 审批配置 =====
+  const approvalConfigs = ref([])
+  const approvalConfigLoading = ref(false)
+  const approvalConfigSaving = ref(false)
+  const approvalProcesses = ref([])
+
+  async function loadApprovalConfig() {
+    approvalConfigLoading.value = true
+    try {
+      const d = await api.get('/api/approvals/config')
+      approvalConfigs.value = d.configs || []
+    } catch(e) { showToast('加载审批配置失败', 'error') }
+    finally { approvalConfigLoading.value = false }
+  }
+
+  async function loadApprovalProcesses() {
+    try {
+      const d = await api.get('/api/processes?limit=500')
+      approvalProcesses.value = d.processes || []
+    } catch(e) { /* ignore */ }
+  }
+
+  function isApprovalRequired(processId) {
+    const cfg = approvalConfigs.value.find(c => c.process_id === processId)
+    return cfg ? cfg.require_approval === 1 : false
+  }
+
+  async function toggleApproval(processId) {
+    const current = isApprovalRequired(processId)
+    approvalConfigSaving.value = true
+    try {
+      await api.post('/api/approvals/config', {
+        process_id: processId,
+        require_approval: current ? 0 : 1,
+        approver_role: 'admin',
+        approval_level: 1
+      })
+      await loadApprovalConfig()
+      showToast(current ? '已关闭审批' : '已开启审批')
+    } catch(e) { showToast(e.message, 'error') }
+    finally { approvalConfigSaving.value = false }
+  }
+
+  // ===== Stubs ====
   const filteredMatrix = ref([]); const matrixExpandUser = ref(null); const selectedUsers = ref([]); const menuConfigSaving = ref(false)
   function getMenuStatus(page) { return '未配置' }
   function sourceBadge(source) { return source || '未知' }
 
   // ===== Init =====
   onMounted(async () => {
-    await Promise.all([ loadSettings(), loadAllUsers(), loadRoleGroups(), loadPermissions(), loadProcesses(), loadProcessConfig(), loadAllProcesses() ])
+    await Promise.all([ loadSettings(), loadAllUsers(), loadRoleGroups(), loadPermissions(), loadProcesses(), loadProcessConfig(), loadAllProcesses(), loadApprovalConfig(), loadApprovalProcesses() ])
     await Promise.all([ loadGroups(), loadRoles(), loadPositions(), loadLogs() ])
   })
 
@@ -327,5 +371,7 @@ export function useSettings() {
     loadPositions, loadAllProcesses, openAddPosition, openEditPosition, savePosition, deletePosition, toggleProcessInPosition,
     filteredMatrix, matrixExpandUser, selectedUsers, menuConfigSaving,
     getMenuStatus, sourceBadge,
+    approvalConfigs, approvalConfigLoading, approvalConfigSaving, approvalProcesses,
+    loadApprovalConfig, loadApprovalProcesses, isApprovalRequired, toggleApproval,
   }
 }
