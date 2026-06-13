@@ -445,7 +445,18 @@ const orders = ref([])
       }
       html += '</div>'
       root.innerHTML = html
-      setTimeout(() => { window.print() }, 100)
+      var oldParent = root.parentNode
+      var oldNext = root.nextSibling
+      document.body.appendChild(root)
+      setTimeout(function() {
+        window.print()
+        setTimeout(function() {
+          if (oldParent) {
+            if (oldNext) oldParent.insertBefore(root, oldNext)
+            else oldParent.appendChild(root)
+          }
+        }, 500)
+      }, 100)
     }
 
     function prevPage() { if (page.value > 1) { page.value--; load() } }
