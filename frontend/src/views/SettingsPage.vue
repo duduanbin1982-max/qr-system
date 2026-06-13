@@ -441,11 +441,10 @@
                 <tr v-for="(proc, idx) in approvalProcesses" :key="proc.id">
                   <td>{{ idx + 1 }}</td>
                   <td>
-                    <span style="font-weight:600">{{ proc.name }}</span>
-                    <span v-if="proc.code" style="color:var(--text-placeholder);font-size:var(--text-xs);margin-left:8px">{{ proc.code }}</span>
+                    <span style="font-weight:600">{{ proc.process_name || proc.name }}</span>
                   </td>
                   <td>
-                    <span :class="proc.category==='结构件'?'badge badge-info':'badge badge-warning'" style="font-size:var(--text-xs)">
+                    <span style="font-size:var(--text-xs);color:var(--text-placeholder)">
                       {{ proc.category || '通用' }}
                     </span>
                   </td>
