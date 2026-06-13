@@ -1,0 +1,322 @@
+<!-- StatsPage.vue -->
+<template>
+<div style="padding:var(--space-6)">
+    <!-- Tab Bar -->
+    <div style="display:flex;gap:0;margin-bottom:var(--space-5);background:var(--bg-hover);border-radius:var(--radius-lg);padding:var(--space-1)">
+      <div v-for="t in [{k:'daily',l:'📊 日报表'},{k:'worker',l:'👷 员工计件'},{k:'scrap',l:'⚠️ 报废记录'},{k:'progress',l:'📈 订单进度'}]" :key="t.k"
+        @click="switchTab(t.k)" style="flex:1;text-align:center;padding:var(--space-3) 4px;border-radius:var(--radius-md);cursor:pointer;font-size:var(--text-sm);font-weight:500;transition:all 0.2s"
+        :style="{background: tab===t.k?'var(--bg-surface)':'transparent',color: tab===t.k?'var(--primary)':'var(--text-placeholder)',boxShadow: tab===t.k?'0 1px 3px rgba(0,0,0,0.1)':'none'}">
+        {{ t.l }}
+      </div>
+    </div>
+
+    <!-- ========== Tab: Daily ========== -->
+    <div v-if="tab==='daily'">
+      <div class="card" style="margin-bottom:var(--space-4)">
+        <div class="card-header">
+          <h3>📊 生产日报表</h3>
+          <div style="display:flex;gap:var(--space-2);align-items:center">
+            <input type="date" class="form-input" v-model="dailyDate" @change="loadDaily" style="width:150px">
+            <button v-if="canExport" class="btn btn-success btn-sm" @click="exportDaily">📥 导出CSV</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:var(--space-4)" v-if="dailySummary.length">
+        <div class="card-header"><h3>📊 工序汇总</h3></div>
+        <div class="card-body"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th style="width:40px">#</th><th>工序</th><th style="text-align:center">报工次数</th><th style="text-align:center">产出</th><th style="text-align:center">报废</th><th style="text-align:center">返修</th></tr></thead>
+          <tbody>
+            <tr v-for="(s, idx) in dailySummary" :key="s.id">
+              <td><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
+              <td style="font-weight:500">{{ s.name }}</td>
+              <td style="text-align:center">{{ s.record_count }}</td>
+              <td style="text-align:center"><span class="badge" style="background:var(--success-light);color:var(--success-dark);border:1px solid var(--success-lighter)">{{ s.total_output }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger-lighter)">{{ s.total_scrap }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--warning-light);color:var(--warning);border:1px solid var(--warning-lighter)">{{ s.total_rework }}</span></td>
+            </tr>
+          </tbody>
+        </table></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>📝 报工明细 ({{ dailyRecords.length }})</h3></div>
+        <div class="card-body"><div class="table-wrap"><table v-if="dailyRecords.length" class="data-table" style="font-size:var(--text-xs)">
+          <thead><tr><th>时间</th><th>订单号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>类型</th></tr></thead>
+          <tbody>
+            <tr v-for="r in dailyRecords" :key="r.id">
+              <td style="font-size:var(--text-xs-alt);white-space:nowrap">{{ r.created_at }}</td>
+              <td><code style="font-size:var(--text-xs-alt)">{{ r.order_no }}</code></td>
+              <td>{{ r.product_name }}</td>
+              <td>{{ r.process_name }}</td>
+              <td>{{ r.worker_name }}</td>
+              <td style="text-align:center;font-weight:600">{{ r.quantity }}</td>
+              <td><span class="badge" :class="r.type==='normal'?'badge-success':r.type==='scrap'?'badge-danger':'badge-warning'" style="font-size:var(--text-2xs)">{{ r.type==='normal'?'正常':r.type==='scrap'?'报废':'返工' }}</span></td>
+            </tr>
+          </tbody>
+        </table><p v-else class="empty"><span class="empty-icon">📭</span><span class="empty-text">该日期无报工记录</span></p></div></div>
+      </div>
+    </div>
+
+    <!-- ========== Tab: Worker ========== -->
+    <div v-if="tab==='worker'">
+      <div class="card" style="margin-bottom:var(--space-4)">
+        <div class="card-header">
+          <h3>👷 员工计件统计</h3>
+          <div style="display:flex;gap:var(--space-2);align-items:center">
+            <input type="date" class="form-input" v-model="wStart" style="width:140px">
+            <span style="color:var(--text-placeholder)">至</span>
+            <input type="date" class="form-input" v-model="wEnd" style="width:140px">
+            <button class="btn btn-primary btn-sm" @click="loadWorker">查询</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>👥 员工统计 ({{ workers.length }})</h3></div>
+        <div class="card-body"><div class="table-wrap"><table v-if="workers.length" class="data-table">
+          <thead><tr><th style="width:40px">#</th><th>员工</th><th>工号</th><th style="text-align:center">出勤天数</th><th style="text-align:center">总产出</th><th style="text-align:center">报废</th><th style="text-align:center">返修</th></tr></thead>
+          <tbody>
+            <tr v-for="(w, idx) in workers" :key="w.id">
+              <td><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
+              <td style="font-weight:500">{{ w.name }}</td>
+              <td><code style="font-size:var(--text-xs)">{{ w.employee_no || '-' }}</code></td>
+              <td style="text-align:center">{{ w.work_days }}</td>
+              <td style="text-align:center"><span class="badge" style="background:var(--success-light);color:var(--success-dark);border:1px solid var(--success-lighter)">{{ w.total_output }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger-lighter)">{{ w.total_scrap }}</span></td>
+              <td style="text-align:center"><span class="badge" style="background:var(--warning-light);color:var(--warning);border:1px solid var(--warning-lighter)">{{ w.total_rework }}</span></td>
+            </tr>
+          </tbody>
+        </table><p v-else class="empty"><span class="empty-icon">👥</span><span class="empty-text">无统计数据</span></p></div></div>
+      </div>
+    </div>
+
+
+    <!-- ========== Tab: Scrap ========== -->
+    <div v-if="tab==='scrap'">
+      <div class="card" style="margin-bottom:var(--space-4)">
+        <div class="card-header">
+          <h3>⚠️ 报废记录</h3>
+          <div style="display:flex;gap:var(--space-2);align-items:center">
+            <input type="date" class="form-input" v-model="sStart" style="width:140px">
+            <span style="color:var(--text-placeholder)">至</span>
+            <input type="date" class="form-input" v-model="sEnd" style="width:140px">
+            <button class="btn btn-primary btn-sm" @click="loadScrap">查询</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>⚠️ 报废记录 ({{ scrapRecords.length }})</h3></div>
+        <div class="card-body"><div class="table-wrap"><table v-if="scrapRecords.length" class="data-table" style="font-size:var(--text-xs)">
+          <thead><tr><th>时间</th><th>订单号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr v-for="r in scrapRecords" :key="r.id">
+              <td style="font-size:var(--text-xs-alt);white-space:nowrap">{{ r.created_at }}</td>
+              <td><code style="font-size:var(--text-xs-alt)">{{ r.order_no }}</code></td>
+              <td>{{ r.product_name }}</td>
+              <td>{{ r.process_name }}</td>
+              <td>{{ r.worker_name }}</td>
+              <td style="text-align:center;font-weight:600;color:var(--danger)">{{ r.quantity }}</td>
+              <td style="font-size:var(--text-xs);color:var(--text-placeholder);max-width:120px;overflow:hidden;text-overflow:ellipsis">{{ r.reason || '-' }}</td>
+            </tr>
+          </tbody>
+        </table><p v-else class="empty"><span class="empty-icon">⚠️</span><span class="empty-text">无报废记录</span></p></div></div>
+      </div>
+    </div>
+
+    <!-- ========== Tab: Progress ========== -->
+    <div v-if="tab==='progress'">
+      <!-- Summary Bar -->
+      <div class="summary-bar" style="margin-bottom:var(--space-4)">
+        <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ progressStats.count }}</div><div class="s-label">订单总数</div></div></div>
+        <div class="summary-item"><span class="s-icon">🔢</span><div><div class="s-val">{{ progressStats.qty }}</div><div class="s-label">总数量</div></div></div>
+        <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val" style="color:var(--success)">{{ progressStats.completed }}</div><div class="s-label">已完成</div></div></div>
+        <div class="summary-item"><span class="s-icon">📈</span><div><div class="s-val text-primary">{{ progressStats.near80 }}</div><div class="s-label">进度≥80%</div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>📈 订单进度总览 ({{ progressOrders.length }})</h3>
+          <button v-if="canExport" class="btn btn-success btn-sm" @click="exportProgress">📥 导出CSV</button>
+        </div>
+        <div class="card-body"><div class="table-wrap"><table v-if="progressOrders.length" class="data-table" style="min-width:950px">
+          <thead>
+            <tr>
+              <th style="width:40px;text-align:center">#</th>
+              <th style="min-width:120px">订单号</th>
+              <th>客户</th>
+              <th>产品</th>
+              <th style="text-align:center;width:70px">数量</th>
+              <th style="text-align:center;width:80px">已完成</th>
+              <th style="min-width:140px">进度</th>
+              <th style="width:100px">计划完成</th>
+              <th style="width:80px">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(o, idx) in progressOrders" :key="o.id">
+              <td style="text-align:center"><span class="row-num">{{ idx+1 }}</span></td>
+              <td><code style="font-size:var(--text-sm);color:var(--primary);font-weight:600">{{ o.order_no }}</code></td>
+              <td>{{ o.customer }}</td>
+              <td style="font-weight:500">{{ o.product_name }}</td>
+              <td style="text-align:center;font-weight:bold">{{ o.quantity }}</td>
+              <td style="text-align:center;color:var(--success);font-weight:bold">{{ o.completed || 0 }}</td>
+              <td>
+                <div class="o-pcell">
+                  <div class="o-pbar"><div class="o-pfill" :class="progressClass(o)" :style="{width: progressPct(o)+'%'}"></div></div>
+                  <span class="o-ptxt">{{ progressPct(o) }}%</span>
+                </div>
+              </td>
+              <td style="color:var(--text-placeholder);font-size:var(--text-sm)">{{ o.plan_end || '-' }}</td>
+              <td><span class="badge" :class="o.status==='completed'?'badge-success':o.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ o.status }}</span></td>
+            </tr>
+          </tbody>
+        </table><p v-else class="empty"><span class="empty-icon">📈</span><span class="empty-text">暂无订单</span></p></div></div>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
+  </div>
+</template>
+
+<script>
+import { ref, computed, onMounted } from 'vue'
+import { api } from '@/lib/api.js'
+import { showToast } from '@/lib/store.js'
+import { can } from '@/lib/auth.js'
+
+export default {
+  setup() {
+    const tab = ref('daily')
+    const loading = ref(false)
+
+    // RBAC
+    const canExport = computed(() => can('stats:export'))
+
+    // ===== Daily =====
+    const dailyDate = ref(new Date().toISOString().slice(0, 10))
+    const dailyRecords = ref([])
+    const dailySummary = ref([])
+
+    async function loadDaily() {
+      loading.value = true
+      try {
+        const d = await api.dailyStats({ date: dailyDate.value })
+        dailyRecords.value = d.records || []
+        dailySummary.value = d.summary || []
+      } catch (e) { showToast(e.message, 'error') }
+      finally { loading.value = false }
+    }
+    function exportDaily() {
+      if (!dailySummary.value.length) { showToast('没有数据可导出', 'warning'); return }
+      const data = [['工序', '报工次数', '产出', '报废', '返修']]
+      dailySummary.value.forEach(s => data.push([s.name, s.record_count, s.total_output, s.total_scrap, s.total_rework]))
+      exportCSV(data, '生产日报表_' + dailyDate.value)
+    }
+
+    // ===== Worker =====
+    const wStart = ref('')
+    const wEnd = ref('')
+    const workers = ref([])
+
+    async function loadWorker() {
+      loading.value = true
+      try {
+        const params = {}
+        if (wStart.value) params.start = wStart.value
+        if (wEnd.value) params.end = wEnd.value
+        const d = await api.workerStats(params)
+        workers.value = d.workers || []
+      } catch (e) { showToast(e.message, 'error') }
+      finally { loading.value = false }
+    }
+
+
+    // ===== Scrap =====
+    const sStart = ref('')
+    const sEnd = ref('')
+    const scrapRecords = ref([])
+
+    async function loadScrap() {
+      loading.value = true
+      try {
+        const params = {}
+        if (sStart.value) params.start = sStart.value
+        if (sEnd.value) params.end = sEnd.value
+        const d = await api.scrapStats(params)
+        scrapRecords.value = d.records || []
+      } catch (e) { showToast(e.message, 'error') }
+      finally { loading.value = false }
+    }
+
+    // ===== Progress =====
+    const progressOrders = ref([])
+
+    const progressStats = computed(() => {
+      const data = progressOrders.value
+      return {
+        count: data.length,
+        qty: data.reduce((s, o) => s + (o.quantity || 0), 0),
+        completed: data.reduce((s, o) => s + (o.completed || 0), 0),
+        near80: data.filter(o => {
+          const pct = o.quantity > 0 ? Math.round((o.completed || 0) / o.quantity * 100) : 0
+          return pct >= 80
+        }).length,
+      }
+    })
+
+    async function loadProgress() {
+      loading.value = true
+      try {
+        const d = await api.orderProgress()
+        progressOrders.value = d.orders || []
+      } catch (e) { showToast(e.message, 'error') }
+      finally { loading.value = false }
+    }
+
+    function progressPct(o) {
+      return o.quantity > 0 ? Math.min(Math.round((o.completed || 0) / o.quantity * 100), 100) : 0
+    }
+    function progressClass(o) {
+      const pct = progressPct(o)
+      if (pct >= 100) return 'full'
+      if (pct >= 50) return 'mid'
+      return 'low'
+    }
+    function exportProgress() {
+      if (!progressOrders.value.length) { showToast('没有数据可导出', 'warning'); return }
+      const data = [['#', '订单号', '客户', '产品', '数量', '已完成', '进度', '计划完成', '状态']]
+      progressOrders.value.forEach((o, i) => {
+        data.push([i + 1, o.order_no, o.customer, o.product_name, o.quantity, o.completed, progressPct(o) + '%', o.plan_end || '', o.status])
+      })
+      exportCSV(data, '订单进度表')
+    }
+
+    function initDates() {
+      const now = new Date()
+      const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+      wStart.value = fmt(new Date(now - 30 * 86400000))
+      wEnd.value = fmt(now)
+      sStart.value = wStart.value
+      sEnd.value = wEnd.value
+    }
+
+    function switchTab(t) {
+      tab.value = t
+      if (t === 'daily') loadDaily()
+      else if (t === 'worker') loadWorker()
+      else if (t === 'scrap') loadScrap()
+      else if (t === 'progress') loadProgress()
+    }
+
+    onMounted(() => { initDates(); loadDaily() })
+
+    return {
+      tab, switchTab, loading,
+      dailyDate, dailyRecords, dailySummary, loadDaily, exportDaily,
+      wStart, wEnd, workers, loadWorker,
+
+      sStart, sEnd, scrapRecords, loadScrap,
+      progressOrders, progressStats, loadProgress, progressPct, progressClass, exportProgress,
+      canExport,
+    }
+  }
+}
+</script>

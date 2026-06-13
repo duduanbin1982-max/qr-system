@@ -1,0 +1,391 @@
+<!-- OrderList.vue -->
+<template>
+<div style="padding:var(--space-6)">
+    <div class="summary-bar">
+      <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ total }}</div><div class="s-label">订单总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val" style="color:var(--warning)">{{ pendingCount }}</div><div class="s-label">待生产</div></div></div>
+      <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val text-primary">{{ producingCount }}</div><div class="s-label">生产中</div></div></div>
+      <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ completedCount }}</div><div class="s-label">已完成</div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>📋 订单管理</h3>
+        <div class="filter-bar">
+          <select class="filter-select" v-model="filterStatus">
+            <option value="">全部状态</option>
+            <option value="pending">待生产</option>
+            <option value="producing">生产中</option>
+            <option value="completed">已完成</option>
+            <option value="cancelled">已取消</option>
+            <option value="paused">已暂停</option>
+          </select>
+          <select class="filter-select" v-model="filterCustomer" @change="customerChange">
+            <option value="">全部客户</option>
+            <option v-for="cust in customers" :key="cust.id" :value="cust.name">{{ cust.name }}</option>
+          </select>
+          <div class="search-box">
+            <span>🔍</span>
+            <input v-model="searchKeyword" placeholder="搜索订单号/产品/客户..." @input="debouncedSearch" @keyup.enter="searchAndLoad">
+          </div>
+          <button class="btn btn-default btn-sm" @click="searchAndLoad">搜索</button>
+          <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
+          <button class="btn btn-sm trash-btn" @click="showTrash=true;loadTrash()">🗑️ 回收站</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table v-if="orders.length" class="data-table order-table">
+            <thead>
+              <tr>
+                <th class="td-expand"></th>
+                <th class="td-order-no">订单号</th>
+                <th class="td-customer">客户</th>
+                <th class="td-product">产品</th>
+                <th class="td-progress">进度</th>
+                <th class="td-qty">数量</th>
+                <th class="td-status">状态</th>
+                <th class="td-deadline">交期</th>
+                <th class="td-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="o in orders" :key="o.id">
+                <tr @click="toggleExpandAndLoad(o.id)" style="cursor:pointer" :class="{ 'row-expanded': expandedId === o.id }">
+                  <td class="td-expand">{{ expandedId === o.id ? '▼' : '▶' }}</td>
+                  <td class="td-order-no"><code>{{ o.order_no }}</code></td>
+                  <td class="td-customer">{{ o.customer_name || o.customer || '-' }}</td>
+                  <td class="td-product">{{ o.product_name }}<span v-if="o.product_code" class="td-product-code">({{ o.product_code }})</span></td>
+                  <td class="td-progress">
+                    <div class="progress-wrap">
+                      <div class="progress-bar">
+                        <div class="progress-bar-fill" :style="{width:pct(o)+'%',background:pct(o)===100?'var(--success)':pct(o)>50?'var(--primary)':'var(--warning)'}"></div>
+                      </div>
+                      <span class="progress-pct">{{ pct(o) }}%</span>
+                      <span v-if="o.scrapped" class="progress-scrap">废{{ scrapPct(o) }}%</span>
+                    </div>
+                  </td>
+                  <td class="td-qty">{{ o.quantity }}</td>
+                  <td style="text-align:center;white-space:nowrap"><span class="badge" :class="statusMap[o.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[o.status]?.label||o.status }}</span></td>
+                  <td style="font-size:var(--text-xs);white-space:nowrap">{{ o.deadline || '-' }}</td>
+                  <td style="text-align:center">
+                    <div class="o-actions" style="justify-content:center" @click.stop>
+                      <span class="o-abtn" style="color:var(--primary-accent)" @click="openProgress(o)" title="工件进度">📊</span>
+                      <span class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
+                      <span class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
+                      <span class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
+                    </div>
+                  </td>
+                </tr>
+                <!-- 展开详情 -->
+                <tr v-if="expandedId === o.id" style="background:var(--bg-table-header)">
+                  <td colspan="9" style="padding:var(--space-3) 16px">
+                    <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center">
+                      <span v-if="o.processes && o.processes.length" style="font-size:var(--text-sm);color:var(--text-placeholder)">工序:</span>
+                      <span v-for="p in (o.processes||[])" :key="p.id" class="badge" style="font-size:var(--text-xs-alt)"
+                        :class="p.status==='completed'?'badge-success':p.status==='producing'?'badge-warning':'badge-secondary'">
+                        {{ p.seq_order }}.{{ p.process_name }}
+                        <template v-if="p.completed"> ✓{{ p.completed }}</template>
+                      </span>
+                      <span v-if="!o.processes || !o.processes.length" style="font-size:var(--text-sm);color:var(--text-placeholder)">暂无工序</span>
+                    </div>
+                    <div v-if="o.route_name" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:4px">路线：{{ o.route_name }}</div>
+                    <div v-if="o.remark" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">备注：{{ o.remark }}</div>
+                    
+                    <!-- 附件区 -->
+                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-light)">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)">
+                        <span style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary)">📎 附件 ({{ getAttachments(o.id).length }})</span>
+                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
+                          + 上传
+                          <input type="file" ref="uploadInputRef" style="display:none" @change="handleAttachmentUpload(o.id, $event)" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.zip,.rar">
+                        </label>
+                      </div>
+                      <div v-if="isAttachmentsLoading(o.id)" style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">⏳ 加载中...</div>
+                      <div v-else-if="getAttachments(o.id).length" style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
+                        <div v-for="att in getAttachments(o.id)" :key="att.id"
+                          style="display:flex;align-items:center;gap:var(--space-2);padding:6px 10px;background:white;border:1px solid var(--border-light);border-radius:var(--radius-md);font-size:var(--text-xs);white-space:nowrap">
+                          <span style="font-size:var(--text-lg)">{{ getFileIcon(att.file_type) }}</span>
+                          <div style="min-width:0">
+                            <span @click.stop="downloadAttachment(att.id)" style="color:var(--primary);cursor:pointer;font-weight:500;display:block;overflow:hidden;text-overflow:ellipsis;max-width:200px" :title="att.file_name">{{ att.file_name }}</span>
+                            <span style="font-size:var(--text-2xs);color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }} · {{ att.created_at?.slice(0,16) }}</span>
+                          </div>
+                          <span @click.stop="delAttachment(att.id, o.id)" title="删除" style="cursor:pointer;opacity:0.5;font-size:var(--text-base);flex-shrink:0">🗑️</span>
+                        </div>
+                      </div>
+                      <div v-else style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">暂无附件</div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div v-else class="empty"><div class="empty-icon">📋</div><div class="empty-text">暂无订单数据</div></div>
+        </div>
+        <!-- 分页 -->
+        <div v-if="total > limit" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
+          <button class="btn btn-default btn-sm" @click="prevPage" :disabled="page <= 1">上一页</button>
+          <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total/limit) }} 页，共 {{ total }} 条</span>
+          <button class="btn btn-default btn-sm" @click="nextPage" :disabled="page * limit >= total">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增/编辑模态框 -->
+    <div v-if="showModal" class="modal-overlay" >
+      <div class="modal" style="max-width:780px">
+        <div class="modal-header">
+          <span>{{ modalEdit ? '编辑订单' : '新建订单' }}</span>
+          <span class="modal-close" @click="showModal=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-col" style="flex:2">
+              <div class="form-group"><label>订单号</label><input class="form-input" v-model="form.order_no" placeholder="自动生成" :disabled="!modalEdit"></div>
+            </div>
+            <div class="form-col" style="flex:1" v-if="modalEdit">
+              <div class="form-group"><label>状态</label>
+                <select class="form-input" v-model="form.status">
+                  <option value="pending">待生产</option>
+                  <option value="producing">生产中</option>
+                  <option value="completed">已完成</option>
+                  <option value="cancelled">已取消</option>
+                  <option value="paused">已暂停</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>客户</label>
+                <select class="form-input" v-model="form.customer_id" @change="onCustomerChange">
+                  <option value="">-- 请选择客户 --</option>
+                  <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+              </div></div>
+            <div class="form-col"><div class="form-group"><label>产品名称 *</label><input class="form-input" v-model="form.product_name" placeholder="如：底壳"></div></div>
+          </div>
+          <!-- 产品编码搜索 — 独占整行 -->
+          <div class="form-group" style="margin-bottom:12px"><label>产品编码搜索</label>
+            <div class="combobox" ref="cbContainer" style="width:100%">
+              <input class="form-input combobox-input" v-model="productSearch" 
+                placeholder="🔍 输入编码或产品名搜索，支持键盘 ↑↓ 选择，Enter 确认..."
+                style="font-size:15px;padding:12px 14px"
+                @focus="onProductSearchFocus"
+                @input="onProductSearchInput"
+                @keydown.escape="showProductDropdown=false"
+                @keydown.enter.prevent="selectProductByEnter"
+                @keydown.down.prevent="moveProductCursor(1)"
+                @keydown.up.prevent="moveProductCursor(-1)"
+                autocomplete="off">
+              <span v-if="productSearch" class="combobox-clear" @click="clearProductSearch">✕</span>
+              <div class="combobox-dropdown" v-if="showProductDropdown && productSearchResults.length" 
+                @mousedown.prevent>
+                <div v-for="(p, i) in productSearchResults" :key="p.id"
+                  class="combobox-item"
+                  :class="{ active: productCursor === i }"
+                  @click="selectProduct(p)"
+                  @mouseenter="productCursor = i">
+                  <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
+                  <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }} <span style="color:var(--text-placeholder);font-size:var(--text-2xs)">{{ p.model||'' }} {{ p.spec||'' }}</span></span>
+                  <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
+                </div>
+              </div>
+              <div class="combobox-dropdown" v-if="showProductDropdown && !productSearch && recentProducts.length" 
+                @mousedown.prevent>
+                <div class="combobox-group-label">📌 最近使用</div>
+                <div v-for="(p, i) in recentProducts" :key="'r'+p.id"
+                  class="combobox-item" :class="{ active: productCursor === i }"
+                  @click="selectProduct(p)" @mouseenter="productCursor = i">
+                  <code style="font-size:var(--text-xs);font-weight:600;color:var(--primary);min-width:130px">{{ p.product_code }}</code>
+                  <span style="flex:1;font-size:var(--text-sm)">{{ p.product_name }} <span style="color:var(--text-placeholder);font-size:var(--text-2xs)">{{ p.model||'' }} {{ p.spec||'' }}</span></span>
+                  <span class="badge" style="font-size:var(--text-2xs)" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 产品确认卡片 -->
+          <div v-if="form.product_code" style="background:#ECFDF5;border:1px solid #6EE7B7;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px">
+            <span style="font-weight:700;color:#059669;font-size:15px">✅ 已选择：<code style="background:#D1FAE5;padding:2px 8px;border-radius:4px;font-size:14px">{{ form.product_code }}</code></span>
+            <span v-if="form.model" style="font-size:13px;color:#374151"><b>型号</b> {{ form.model }}</span>
+            <span v-if="form.spec" style="font-size:13px;color:#374151"><b>规格</b> {{ form.spec }}</span>
+            <span v-if="form.style" style="font-size:13px;color:#374151"><b>类型</b> {{ form.style }}</span>
+            <span v-if="form.upper_opening" style="font-size:13px;color:#374151"><b>上开</b> {{ form.upper_opening }}</span>
+            <span v-if="form.plate_thickness" style="font-size:13px;color:#374151"><b>板厚</b> {{ form.plate_thickness }}mm</span>
+            <span v-if="form.category" class="badge" style="font-size:11px" :class="form.category==='结构件'?'badge-info':'badge-warning'">{{ form.category }}</span>
+            <span v-if="form.price" style="font-size:13px;color:#374151"><b>工价</b> ¥{{ form.price }}</span>
+            <span v-if="form.weight" style="font-size:13px;color:#374151"><b>重量</b> {{ form.weight }}kg</span>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>数量 *</label><input class="form-input" v-model.number="form.quantity" type="number" min="1" placeholder="生产数量"></div></div>
+            <div class="form-col"><div class="form-group"><label>计划开始</label><input class="form-input" v-model="form.plan_start" type="date"></div></div>
+            <div class="form-col"><div class="form-group"><label>计划结束</label><input class="form-input" v-model="form.plan_end" type="date"></div></div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>交期</label><input class="form-input" v-model="form.deadline" type="date"></div></div>
+            <div class="form-col"><div class="form-group"><label>工序路线</label>
+              <select class="form-input" v-model="form.route_id">
+                <option value="">-- 请选择工序路线 --</option>
+                <option v-for="r in processRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
+              </select>
+            </div></div>
+          </div>
+          <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showModal=false">取消</button>
+          <button class="btn btn-primary" @click="save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 二维码打印弹窗 -->
+    <div v-if="showQrPrint" class="modal-overlay" >
+      <div class="modal qr-modal-lg">
+        <div class="modal-header">
+          <span>🖨️ 二维码标签打印 — {{ qrPrintOrder?.order_no || '' }}</span>
+          <span class="modal-close" @click="showQrPrint=false">&times;</span>
+        </div>
+        <div class="modal-body" style="padding:var(--space-5)">
+          <!-- 订单信息 -->
+          <div v-if="qrPrintOrder" class="qr-print-order-info">
+            <span>📋 <strong>{{ qrPrintOrder.order_no }}</strong></span>
+            <span>🔢 数量: <strong>{{ qrPrintOrder.quantity }}</strong></span>
+            <span v-if="qrPrintOrder.product_code" style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">编码: {{ qrPrintOrder.product_code }}</span>
+          </div>
+
+          <!-- 模式选择 -->
+          <div class="qr-mode-tabs no-print">
+            <button class="qr-mode-tab" :class="{active:qrMode==='order'}" @click="switchQrMode('order')">📋 订单模式 <small style="opacity:0.6">(1个/订单)</small></button>
+            <button class="qr-mode-tab" :class="{active:qrMode==='serial'}" @click="switchQrMode('serial')">🔢 序列号模式 <small style="opacity:0.6" v-if="qrPrintOrder">(共 {{ qrPrintOrder.quantity }} 件)</small></button>
+          </div>
+
+          <!-- 控制面板 -->
+          <div class="qr-control-bar no-print">
+            <button class="btn btn-primary" @click="generateQrCodes" :disabled="qrPrintLoading" style="padding:var(--space-3) 28px;font-size:15px">
+              {{ qrPrintLoading ? '⏳ 生成中...' : '🎯 生成二维码' }}
+            </button>
+            <div class="qr-control-group" v-if="qrCodes.length">
+              <span>📄 份数</span>
+              <input type="number" v-model.number="qrPrintCopies" min="1" max="10" style="width:55px;text-align:center">
+            </div>
+            <button v-if="qrCodes.length" class="btn btn-success" @click="printQrCodes" style="padding:var(--space-3) 20px;font-size:15px">🖨️ 打印</button>
+          </div>
+
+          <!-- 预览区 -->
+          <div class="qr-print-area">
+            <div v-if="qrPrintLoading" class="qr-empty-state">⏳ 正在生成二维码...</div>
+            <div v-else-if="qrCodes.length" class="qr-grid">
+              <template v-for="copy in qrPrintCopies" :key="'copy'+copy">
+                <div v-for="(code, idx) in qrCodes" :key="idx+'_'+copy" class="qr-card">
+                  <img :src="code.qrcode" :alt="code.serial_no || code.order_no">
+                  <div class="qr-label-info">
+                    <div class="qr-label-no">{{ code.serial_no || code.order_no }}</div>
+                    <div class="qr-label-code" v-if="code.product_code">{{ code.product_code }}</div>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div v-else class="qr-empty-state">
+              <div style="font-size:56px;margin-bottom:var(--space-3)">🏷️</div>
+              <div style="font-size:15px;font-weight:500;color:var(--text-placeholder);margin-bottom:var(--space-1)">选择模式后点击「生成二维码」</div>
+              <div style="font-size:var(--text-xs);color:var(--text-placeholder)">支持订单模式（1个/订单）和序列号模式（1个/件）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 回收站模态框 -->
+    <div v-if="showTrash" class="modal-overlay" >
+      <div class="modal" style="max-width:900px;width:95%">
+        <div class="modal-header">
+          <span>🗑️ 回收站（{{ trashTotal }} 个已删除订单）</span>
+          <span class="modal-close" @click="showTrash=false">&times;</span>
+        </div>
+        <div class="modal-body" style="max-height:60vh;overflow-y:auto">
+          <table v-if="trashOrders.length" class="data-table">
+            <thead>
+              <tr><th>订单号</th><th>产品</th><th>客户</th><th>删除时间</th><th>操作人</th><th style="text-align:center">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="o in trashOrders" :key="o.id">
+                <td><code>{{ o.order_no }}</code></td>
+                <td>{{ o.product_name }}</td>
+                <td>{{ o.customer }}</td>
+                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ o.deleted_at }}</td>
+                <td style="font-size:var(--text-xs)">{{ o.deleted_by_name || '-' }}</td>
+                <td style="text-align:center">
+                  <button class="btn btn-sm" style="background:var(--success-lighter);color:var(--success);font-size:var(--text-xs-alt);padding:var(--space-1) 10px" @click="restoreOrder(o.id)">恢复</button>
+                  <button class="btn btn-sm" style="background:var(--danger-lighter, #fff0f0);color:var(--danger,#e74c3c);font-size:var(--text-xs-alt);padding:var(--space-1) 10px;margin-left:6px" @click="permanentDelete(o.id)">彻底删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else style="text-align:center;padding:24px 16px;color:var(--text-placeholder);font-size:var(--text-sm)">回收站为空</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工件进度弹窗 -->
+    <div v-if="progressOrder" class="modal-overlay" >
+      <div class="modal" style="max-width:900px;width:95%">
+        <div class="modal-header">
+          <span>📊 工件进度 — {{ progressOrder.order_no }} {{ progressOrder.product_name }}</span>
+          <span class="modal-close" @click="progressOrder=null">&times;</span>
+        </div>
+        <div class="modal-body" style="max-height:70vh;overflow:auto">
+          <div v-if="progressLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
+          <div v-else-if="progressData">
+            <div class="summary-bar" style="margin-bottom:var(--space-4);flex-wrap:wrap">
+              <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ progressData.summary.total_workpieces }}</div><div class="s-label">工件总数</div></div></div>
+              <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ progressData.summary.completed_workpieces }}</div><div class="s-label">已完成</div></div></div>
+              <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val" style="color:var(--warning)">{{ progressData.summary.in_progress_workpieces }}</div><div class="s-label">进行中</div></div></div>
+              <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val text-muted">{{ progressData.summary.pending_workpieces }}</div><div class="s-label">待产</div></div></div>
+              <div class="summary-item"><span class="s-icon">📈</span><div><div class="s-val" style="color:var(--primary-accent)">{{ progressData.summary.overall_progress_pct }}%</div><div class="s-label">总进度</div></div></div>
+            </div>
+            <div style="margin-bottom:var(--space-4)">
+              <div style="font-weight:600;font-size:var(--text-sm);margin-bottom:var(--space-2)">各工序完成情况</div>
+              <div v-for="ps in progressData.summary.process_stats" :key="ps.process_id" style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1)">
+                <span style="width:50px;font-size:var(--text-xs);text-align:right;color:var(--text-placeholder)">{{ ps.process_name }}</span>
+                <div style="flex:1;height:20px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+                  <div :style="{width:(ps.completed/ps.total*100)+'%',height:'100%',background:ps.completed===ps.total?'var(--success)':'var(--primary-accent)',borderRadius:'4px'}"></div>
+                </div>
+                <span style="width:40px;font-size:var(--text-xs);text-align:right">{{ ps.completed }}/{{ ps.total }}</span>
+              </div>
+            </div>
+            <div class="table-wrap" style="max-height:400px;overflow:auto">
+              <table class="data-table" style="font-size:var(--text-xs);min-width:600px">
+                <thead><tr>
+                  <th style="position:sticky;left:0;background:white;z-index:1;min-width:70px">工件</th>
+                  <th v-for="proc in progressData.processes" :key="proc.process_id" style="min-width:55px;text-align:center;white-space:nowrap;font-size:var(--text-xs-alt)">{{ proc.name }}</th>
+                  <th style="min-width:55px;text-align:center">状态</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="wp in progressData.progress" :key="wp.serial_no">
+                    <td style="position:sticky;left:0;background:white;font-weight:500">{{ wp.serial_no ? wp.serial_no.split('-').pop() : '#'+wp.position_no }}</td>
+                    <td v-for="step in wp.steps" :key="step.process_id" style="text-align:center;padding:2px">
+                      <span v-if="step.status==='completed'" style="color:var(--success)">✅</span>
+                      <span v-else-if="step.status==='current'" style="color:var(--warning)">🔵</span>
+                      <span v-else style="color:var(--border)">·</span>
+                    </td>
+                    <td style="text-align:center"><span class="badge wp-badge" :class="wp.status==='completed'?'completed':wp.status==='in_progress'?'in-progress':'pending'">{{ wp.status==='completed'?'完成':wp.status==='in_progress'?'进行中':'待产' }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { useOrder } from '@/composables/useOrder.js'
+
+export default {
+  setup() {
+    return useOrder()
+  }
+}
+</script>

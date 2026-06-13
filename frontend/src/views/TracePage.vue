@@ -1,0 +1,146 @@
+<!-- TracePage.vue -->
+<template>
+<div style="padding:var(--space-6)">
+    <div class="card" style="margin-bottom:var(--space-5)">
+      <div class="card-body" style="padding:var(--space-5)">
+        <div style="display:flex;gap:var(--space-3);align-items:center">
+          <div style="flex:1;position:relative">
+            <input class="form-input" v-model="traceCode" placeholder="🔍 输入产品序列号进行追溯..."
+              @keyup.enter="doTrace" style="font-size:var(--text-lg);padding:var(--space-3) 16px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
+          </div>
+          <button class="btn btn-primary" @click="doTrace" :disabled="searching" style="padding:var(--space-3) 32px;font-size:15px;white-space:nowrap">
+            <span v-if="searching">⏳ 查询中...</span>
+            <span v-else>🔍 追溯</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div v-if="result">
+      <!-- Item Info -->
+      <div class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>🏷️ 产品信息</h3></div>
+        <div class="card-body">
+          <div v-if="result.item" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);font-size:var(--text-base)">
+            <div><span style="color:var(--text-placeholder)">序列号：</span><code style="font-weight:600">{{ result.item.serial_no }}</code></div>
+            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="result.item.status==='completed'?'badge-success':result.item.status==='in_progress'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ result.item.status || '-' }}</span></div>
+            <div><span style="color:var(--text-placeholder)">订单号：</span><code style="font-weight:600">{{ result.order?.order_no || '-' }}</code></div>
+            <div><span style="color:var(--text-placeholder)">产品：</span>{{ result.order?.product_name || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">位置序号：</span>{{ result.item.position_no || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">当前工序ID：</span>{{ result.item.current_process_id || '-' }}</div>
+          </div>
+          <p v-else style="text-align:center;color:var(--danger);padding:var(--space-5)">❌ 未找到该产品</p>
+        </div>
+      </div>
+
+      <!-- Order Info -->
+      <div class="card" style="margin-bottom:var(--space-5)" v-if="result.order">
+        <div class="card-header"><h3>📋 关联订单</h3></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);font-size:var(--text-base)">
+            <div><span style="color:var(--text-placeholder)">订单号：</span><code style="font-weight:600">{{ result.order.order_no }}</code></div>
+            <div><span style="color:var(--text-placeholder)">客户：</span>{{ result.order.customer || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">产品名：</span>{{ result.order.product_name }}</div>
+            <div><span style="color:var(--text-placeholder)">数量：</span><strong>{{ result.order.quantity }}</strong></div>
+            <div><span style="color:var(--text-placeholder)">已完成：</span><strong class="text-success">{{ result.order.completed || 0 }}</strong></div>
+            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="result.order.status==='completed'?'badge-success':result.order.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ result.order.status }}</span></div>
+            <div><span style="color:var(--text-placeholder)">创建时间：</span>{{ result.order.created_at }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Work Records Timeline -->
+      <div class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>📝 报工记录 ({{ (result.work_records||[]).length }})</h3></div>
+        <div class="card-body">
+          <div v-if="result.work_records && result.work_records.length">
+            <div class="timeline">
+              <div v-for="(r, idx) in result.work_records" :key="r.id" class="tl-item" style="display:flex;gap:var(--space-4);padding:var(--space-3) 0;border-bottom:1px solid var(--bg-hover)">
+                <div style="min-width:60px;text-align:center">
+                  <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-light);display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:var(--text-base)">{{ idx + 1 }}</div>
+                  <div v-if="idx < result.work_records.length - 1" style="width:2px;height:calc(100% - 32px);background:var(--border-light);margin:4px auto 0"></div>
+                </div>
+                <div style="flex:1">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="font-weight:500">{{ r.process_name }}</div>
+                    <span class="badge" :class="r.status==='approved'?'badge-success':r.status==='pending'?'badge-warning':'badge-danger'" style="font-size:var(--text-2xs)">{{ r.status==='approved'?'已审批':r.status==='pending'?'待审批':r.status }}</span>
+                  </div>
+                  <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">
+                    <span>{{ r.worker_name }}</span>
+                    <span style="margin:0 8px">·</span>
+                    <span>数量 <strong style="color:#111">{{ r.quantity }}</strong></span>
+                    <span style="margin:0 8px">·</span>
+                    <span>{{ r.created_at }}</span>
+                  </div>
+                  <div v-if="r.remark" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">备注：{{ r.remark }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无报工记录</p>
+        </div>
+      </div>
+
+      <!-- Shipments -->
+      <div class="card">
+        <div class="card-header"><h3>🚚 发货记录 ({{ (result.shipments||[]).length }})</h3></div>
+        <div class="card-body">
+          <table v-if="result.shipments && result.shipments.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>出库单号</th><th>客户</th><th>状态</th><th>总量</th><th>出库时间</th></tr></thead>
+            <tbody>
+              <tr v-for="s in result.shipments" :key="s.id">
+                <td><code style="font-size:var(--text-xs-alt)">{{ s.shipment_no }}</code></td>
+                <td>{{ s.customer || '-' }}</td>
+                <td><span class="badge" :class="s.status==='completed'?'badge-success':'badge-info'" style="font-size:var(--text-2xs)">{{ s.status==='completed'?'已出库':'待出库' }}</span></td>
+                <td style="text-align:center;font-weight:600">{{ s.total_quantity }}</td>
+                <td style="font-size:var(--text-xs-alt)">{{ s.completed_at || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无发货记录</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div v-else class="card">
+      <div class="card-body" style="text-align:center;padding:60px">
+        <div style="font-size:48px;margin-bottom:var(--space-4)">🔍</div>
+        <div style="font-size:var(--text-lg);color:var(--text-placeholder)">输入产品序列号查询完整追溯链</div>
+        <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-top:8px">可追踪：产品信息 → 关联订单 → 报工记录 → 发货记录</div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue'
+import { api } from '@/lib/api.js'
+import { showToast } from '@/lib/store.js'
+
+export default {
+  setup() {
+    const traceCode = ref('')
+    const searching = ref(false)
+    const result = ref(null)
+
+    async function doTrace() {
+      const code = traceCode.value.trim()
+      if (!code) { showToast('请输入产品序列号','error'); return }
+      searching.value = true
+      try {
+        const d = await api.trace(code)
+        result.value = d
+      } catch(e) {
+        showToast(e.message || '查询失败','error')
+        result.value = null
+      } finally {
+        searching.value = false
+      }
+    }
+
+    return { traceCode, searching, result, doTrace }
+  }
+}
+</script>
