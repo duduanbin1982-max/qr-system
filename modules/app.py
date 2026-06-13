@@ -18,6 +18,7 @@ _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(_base, 'public')
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, template_folder=PUBLIC_DIR)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config["START_TIME"] = 1780931489.9495177  # for uptime tracking
 app.jinja_env.variable_start_string = '{$'
 app.jinja_env.variable_end_string = '$}'
