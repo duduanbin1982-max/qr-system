@@ -131,7 +131,6 @@ class ShipmentService:
             txn.execute(f'UPDATE shipments SET {", ".join(updates)} WHERE id = ?', params + [shipment_id])
 
     @staticmethod
-    @staticmethod
     def delete_shipment(shipment_id, current_user):
         db = BaseService.db()
         row = db.execute('SELECT * FROM shipments WHERE id = ?', (shipment_id,)).fetchone()
@@ -153,6 +152,7 @@ class ShipmentService:
             txn.execute('DELETE FROM shipment_items WHERE shipment_id = ?', (shipment_id,))
             txn.execute('DELETE FROM shipments WHERE id = ?', (shipment_id,))
         return row['shipment_no']
+    @staticmethod
     def complete_shipment(shipment_id, current_user):
         db = BaseService.db()
         row = db.execute('SELECT * FROM shipments WHERE id = ?', (shipment_id,)).fetchone()
@@ -165,37 +165,26 @@ class ShipmentService:
             raise ValueError('出库单无明细')
 
         sn = row['shipment_no']
-        errors = []
-        db.execute('SAVEPOINT shipment_complete')
-        try:
+        with BaseService.transaction() as txn:
             for item in items:
-                res = db.execute(
+                cur = txn.execute(
                     'UPDATE inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?',
                     (item['quantity'], item['inventory_id'], item['quantity']))
-                if res.rowcount == 0:
-                    inv = db.execute(
+                if cur.rowcount == 0:
+                    inv = txn.execute(
                         'SELECT quantity, product_model, product_name FROM inventory WHERE id = ?',
                         (item['inventory_id'],)).fetchone()
                     current = inv['quantity'] if inv else 0
                     model = inv['product_model'] if inv else item['product_model'] or '?'
-                    errors.append(f'{model} {item["product_name"] or ""}: 库存不足 (库存{current}，需{item["quantity"]})')
-                    db.execute('ROLLBACK TO shipment_complete')
-                    raise ValueError('出库失败')
+                    raise ValueError(f'{model} {item["product_name"] or ""}: 库存不足 (库存{current}，需{item["quantity"]})')
                 remark = f'出库单 {sn} 出库 {item["quantity"]} {item["unit"] or "件"}'
-                db.execute('''
+                txn.execute('''
                     INSERT INTO inventory_logs (inventory_id, type, quantity, order_no,
                         remark, operator_id, operator_name)
                     VALUES (?, 'out', ?, ?, ?, ?, ?)
                 ''', (item['inventory_id'], item['quantity'], sn, remark,
                       current_user['id'], current_user['name']))
-            db.execute('RELEASE shipment_complete')
-        except ValueError:
-            raise
-        except Exception as e:
-            db.execute('ROLLBACK TO shipment_complete')
-            raise ValueError(f'出库异常: {e}')
-
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db.execute("UPDATE shipments SET status = 'completed', completed_at = ? WHERE id = ?", (now, shipment_id))
-        db.commit()
+            txn.execute(
+                "UPDATE shipments SET status = 'completed', completed_at = ? WHERE id = ?",
+                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), shipment_id))
         return sn

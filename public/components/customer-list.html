@@ -58,7 +58,7 @@
     </div>
     
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal" class="modal-overlay" >
       <div class="modal">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑客户' : '添加客户' }}</span>
@@ -92,7 +92,7 @@
     </div>
     
     <!-- 客户详情模态框 -->
-    <div v-if="showDetail" class="modal-overlay" @click.self="showDetail=false">
+    <div v-if="showDetail" class="modal-overlay" >
       <div class="modal" style="max-width:700px">
         <div class="modal-header">
           <span>📋 {{ detail?.name }} - 订单列表</span>
@@ -119,7 +119,7 @@
     </div>
 
     <!-- 删除阻止弹窗（客户有关联订单） -->
-    <div v-if="showDeleteBlock" class="modal-overlay" @click.self="showDeleteBlock=false">
+    <div v-if="showDeleteBlock" class="modal-overlay" >
       <div class="modal" style="max-width:560px">
         <div class="modal-header" style="background:#FFF7ED;border-bottom:2px solid #FDBA74">
           <span>⚠️ 无法删除客户</span>

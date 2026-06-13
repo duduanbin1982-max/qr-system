@@ -12,9 +12,7 @@ export default {
     const dayWidth = ref(38)
     const statusFilter = ref('all')
 
-    // RBAC
-    const canEdit = computed(() => can('schedule:edit'))
-    const canCreate = computed(() => can('schedule:create'))
+    // RBAC — reserved for future edit/create features
 
     const stats = computed(() => {
       const all = orders.value
@@ -35,13 +33,9 @@ export default {
       const list = filteredOrders.value
       if (!list.length) return { minDate: '', maxDate: '', totalDays: 0, days: [] }
 
-      let min = list[0]?.plan_start || ''
-      let max = ''
-      list.forEach(o => {
-        if (o.plan_end > max) max = o.plan_end
-        if (!min || o.plan_start < min) min = o.plan_start
-      })
-      if (!max) max = min
+      const min = dateRange.value.minDate
+      const max = dateRange.value.maxDate
+      if (!min || !max) return { minDate: '', maxDate: '', totalDays: 0, days: [] }
 
       const d1 = new Date(min), d2 = new Date(max)
       const totalDays = Math.max(Math.ceil((d2 - d1) / 86400000) + 1, 1)
@@ -75,11 +69,16 @@ export default {
       return { producing:'生产中', pending:'待生产', completed:'已完成' }[s] || s
     }
 
+    const dateRange = ref({ minDate: '', maxDate: '' })
+
     async function load() {
       loading.value = true
       try {
         const r = await api.get('/api/schedule/gantt')
-        if (r.ok) orders.value = r.orders
+        if (r.ok) {
+          orders.value = r.orders
+          dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' }
+        }
       } catch (e) { showToast('加载排程失败', 'error') }
       finally { loading.value = false }
     }
@@ -89,6 +88,6 @@ export default {
 
     onMounted(load)
 
-    return { orders, stats, loading, dayWidth, statusFilter, filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut, canEdit, canCreate }
+    return { orders, stats, loading, dayWidth, statusFilter, filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut }
   }
 }

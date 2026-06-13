@@ -167,6 +167,8 @@ class UserService:
             txn.execute('INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, role_id))
             # P1: Sync process assignments to user_processes
             valid_pids = data.get('_valid_process_ids', [])
+            if not valid_pids and data.get('process_ids'):
+                valid_pids = [int(x.strip()) for x in data['process_ids'].split(',') if x.strip()]
             for pid in valid_pids:
                 txn.execute('INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?,?)', (uid, pid))
 
@@ -207,10 +209,19 @@ class UserService:
 
         old_role = existing['role']
 
-        # P0: Sync group_name from actual role if role/role_id changed
+        # Compute new_role_id once for reuse
+        new_role_id = None
         if ('role' in data and data['role'] != old_role) or ('role_id' in data):
-            new_role_id = data.get('role_id', db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (data.get('role', 'worker'),)).fetchone()[0])
-            gn_row = db.execute('SELECT rg.name FROM roles r JOIN role_groups rg ON r.group_id = rg.id WHERE r.id = ?', (new_role_id,)).fetchone()
+            new_role_id = data.get('role_id')
+            if not new_role_id:
+                new_role_id = db.execute(
+                    'SELECT id FROM roles WHERE code = ? LIMIT 1',
+                    (data.get('role', 'worker'),)
+                ).fetchone()[0]
+            gn_row = db.execute(
+                'SELECT rg.name FROM roles r JOIN role_groups rg ON r.group_id = rg.id WHERE r.id = ?',
+                (new_role_id,)
+            ).fetchone()
             if gn_row:
                 data['group_name'] = gn_row[0]
 
@@ -260,8 +271,18 @@ class UserService:
             params.append(uid)
             txn.execute(f'UPDATE users SET {", ".join(sets)} WHERE id = ?', params)
 
-            if ('role' in data and data['role'] != old_role) or ('role_id' in data):
-                new_role_id = data.get('role_id', db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (data.get('role', 'worker'),)).fetchone()[0])
+            if new_role_id is not None:
+                # Prevent downgrading the last admin
+                if new_role_id != 1:  # changing away from admin
+                    remaining = txn.execute(
+                        'SELECT COUNT(*) FROM user_roles WHERE role_id = 1 AND user_id != ?', (uid,)
+                    ).fetchone()[0]
+                    if remaining == 0:
+                        remaining2 = txn.execute(
+                            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?", (uid,)
+                        ).fetchone()[0]
+                        if remaining2 == 0:
+                            raise ValueError('不能移除最后一个管理员')
                 old_role_id = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (old_role,)).fetchone()
                 old_role_id = old_role_id[0] if old_role_id else 2
                 txn.execute('DELETE FROM user_roles WHERE user_id = ? AND role_id = ?', (uid, old_role_id))
@@ -296,14 +317,14 @@ class UserService:
         if user['username'] == 'admin':
             raise ValueError('Cannot delete the built-in admin account')
 
-        # C2 FIX: Don't delete the last admin
-        role_admin_count = db.execute(
+        # C2 FIX: Don't delete the last admin (check both user_roles and users.role)
+        admin_count_roles = db.execute(
             'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
         ).fetchone()[0]
-        table_admin_count = db.execute(
+        admin_count_users = db.execute(
             "SELECT COUNT(*) FROM users WHERE role = 'admin'"
         ).fetchone()[0]
-        admin_count = max(role_admin_count, table_admin_count)
+        admin_count = max(admin_count_roles, admin_count_users)
         is_admin = db.execute(
             'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (uid,)
         ).fetchone()
@@ -359,7 +380,7 @@ class UserService:
         db = BaseService.db()
         row = db.execute('SELECT id, username FROM users WHERE id = ?', (uid,)).fetchone()
         if not row:
-            raise ValueError('User not found')
+            raise ValueError('用户不存在')
         with BaseService.transaction() as txn:
             txn.execute('UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?', (uid,))
         return row['username']

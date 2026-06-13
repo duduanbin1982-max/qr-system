@@ -131,7 +131,7 @@
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal" class="modal-overlay" >
       <div class="modal" style="max-width:780px">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑订单' : '新建订单' }}</span>
@@ -238,7 +238,7 @@
     </div>
 
     <!-- 二维码打印弹窗 -->
-    <div v-if="showQrPrint" class="modal-overlay" @click.self="showQrPrint=false">
+    <div v-if="showQrPrint" class="modal-overlay" >
       <div class="modal qr-modal-lg">
         <div class="modal-header">
           <span>🖨️ 二维码标签打印 — {{ qrPrintOrder?.order_no || '' }}</span>
@@ -255,7 +255,7 @@
           <!-- 模式选择 -->
           <div class="qr-mode-tabs no-print">
             <button class="qr-mode-tab" :class="{active:qrMode==='order'}" @click="switchQrMode('order')">📋 订单模式 <small style="opacity:0.6">(1个/订单)</small></button>
-            <button class="qr-mode-tab" :class="{active:qrMode==='serial'}" @click="switchQrMode('serial')">🔢 序列号模式 <small style="opacity:0.6">(1个/件)</small></button>
+            <button class="qr-mode-tab" :class="{active:qrMode==='serial'}" @click="switchQrMode('serial')">🔢 序列号模式 <small style="opacity:0.6" v-if="qrPrintOrder">(共 {{ qrPrintOrder.quantity }} 件)</small></button>
           </div>
 
           <!-- 控制面板 -->
@@ -295,7 +295,7 @@
     </div>
 
     <!-- 回收站模态框 -->
-    <div v-if="showTrash" class="modal-overlay" @click.self="showTrash=false">
+    <div v-if="showTrash" class="modal-overlay" >
       <div class="modal" style="max-width:900px;width:95%">
         <div class="modal-header">
           <span>🗑️ 回收站（{{ trashTotal }} 个已删除订单）</span>
@@ -326,7 +326,7 @@
     </div>
 
     <!-- 工件进度弹窗 -->
-    <div v-if="progressOrder" class="modal-overlay" @click.self="progressOrder=null">
+    <div v-if="progressOrder" class="modal-overlay" >
       <div class="modal" style="max-width:900px;width:95%">
         <div class="modal-header">
           <span>📊 工件进度 — {{ progressOrder.order_no }} {{ progressOrder.product_name }}</span>

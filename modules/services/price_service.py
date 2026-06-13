@@ -131,6 +131,8 @@ class ProcessPriceService:
     @staticmethod
     def save_defaults(prices):
         """批量保存分类默认工价。{process_id: unit_price}"""
+        if not isinstance(prices, dict):
+            raise ValueError('prices必须为对象格式')
         if not prices:
             raise ValueError('请提供工价数据')
         db = BaseService.db()
@@ -370,10 +372,10 @@ class RoutePriceService:
                 process_id = int(process_id_str)
                 price_val = float(unit_price)
                 existing = txn.execute(
-                    'SELECT id FROM route_prices WHERE route_id = ? AND process_id = ?',
+                    'SELECT id, effective_date, remark FROM route_prices WHERE route_id = ? AND process_id = ?',
                     (route_id, process_id)).fetchone()
                 if existing:
-                    e_date = effective_date if effective_date is not None else existing['effective_date']
+                    e_date = effective_date if effective_date is not None else (existing['effective_date'] or '')
                     e_remark = remark if remark is not None else (existing['remark'] or '')
                     txn.execute('''UPDATE route_prices SET unit_price = ?, effective_date = ?, remark = ?,
                         updated_at = datetime("now","localtime") WHERE id = ?''',
@@ -389,6 +391,26 @@ class RoutePriceService:
 
 class WageService:
     """计件工资 + 日报 + 生产进度。"""
+
+    
+    _PP_DEDUP_JOIN = (
+        "LEFT JOIN ("
+        "SELECT pr.product_code, pp2.process_id, MAX(pp2.unit_price) as unit_price "
+        "FROM process_prices pp2 "
+        "JOIN products pr ON pp2.product_id = pr.id "
+        "WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime') "
+        "AND pp2.effective_date = ("
+        "SELECT MAX(pp3.effective_date) FROM process_prices pp3 "
+        "JOIN products pr3 ON pp3.product_id = pr3.id "
+        "WHERE pr3.product_code = pr.product_code "
+        "AND pp3.process_id = pp2.process_id "
+        "AND pp3.status = 'active' "
+        "AND pp3.effective_date <= date('now','localtime')"
+        ") "
+        "GROUP BY pr.product_code, pp2.process_id"
+        ") pp_dedup ON o.product_code = pp_dedup.product_code "
+        "AND wr.process_id = pp_dedup.process_id"
+    )
 
     @staticmethod
     def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False):
@@ -429,22 +451,7 @@ class WageService:
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
-            LEFT JOIN (
-                SELECT pr.product_code, pp2.process_id, pp2.unit_price
-                FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id
-                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
-                AND pp2.effective_date = (
-                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
-                    JOIN products pr3 ON pp3.product_id = pr3.id
-                    WHERE pr3.product_code = pr.product_code
-                    AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active'
-                    AND pp3.effective_date <= date('now','localtime')
-                )
-                GROUP BY pr.product_code, pp2.process_id
-            ) pp_dedup ON o.product_code = pp_dedup.product_code
-                AND wr.process_id = pp_dedup.process_id
+            ''' + WageService._PP_DEDUP_JOIN + '''
             WHERE ''' + user_where + '''
             ORDER BY u.id
             LIMIT ? OFFSET ?''')
@@ -488,22 +495,7 @@ class WageService:
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
-            LEFT JOIN (
-                SELECT pr.product_code, pp2.process_id, pp2.unit_price
-                FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id
-                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
-                AND pp2.effective_date = (
-                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
-                    JOIN products pr3 ON pp3.product_id = pr3.id
-                    WHERE pr3.product_code = pr.product_code
-                    AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active'
-                    AND pp3.effective_date <= date('now','localtime')
-                )
-                GROUP BY pr.product_code, pp2.process_id
-            ) pp_dedup ON o.product_code = pp_dedup.product_code
-                AND wr.process_id = pp_dedup.process_id
+            ''' + WageService._PP_DEDUP_JOIN + '''
             WHERE wr.status = 'approved' AND wr.type = 'normal'
             AND wr.created_at >= ? AND wr.created_at < ?
             ORDER BY wr.user_id, wr.process_id
@@ -596,34 +588,19 @@ class WageService:
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
-            LEFT JOIN (
-                SELECT pr.product_code, pp2.process_id, pp2.unit_price
-                FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id
-                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
-                AND pp2.effective_date = (
-                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
-                    JOIN products pr3 ON pp3.product_id = pr3.id
-                    WHERE pr3.product_code = pr.product_code
-                    AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active'
-                    AND pp3.effective_date <= date('now','localtime')
-                )
-                GROUP BY pr.product_code, pp2.process_id
-            ) pp_dedup ON o.product_code = pp_dedup.product_code
-                AND wr.process_id = pp_dedup.process_id
+            ''' + WageService._PP_DEDUP_JOIN + '''
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < ?
+              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
             GROUP BY wr.user_id
             ORDER BY total_wage DESC
             LIMIT ? OFFSET ?
-        ''', (year_month + '-01', year_month + '-32', limit, (page - 1) * limit)).fetchall()
+        ''', (year_month + '-01', year_month + '-01', limit, (page - 1) * limit)).fetchall()
 
         total_count = db.execute('''
             SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < ?
-        ''', (year_month + '-01', year_month + '-32')).fetchone()[0]
+              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+        ''', (year_month + '-01', year_month + '-01')).fetchone()[0]
 
         return {
             'year_month': year_month,
@@ -648,27 +625,12 @@ class WageService:
             LEFT JOIN route_prices rp ON o.route_id = rp.route_id
                 AND wr.process_id = rp.process_id AND rp.status = 'active'
                 AND rp.effective_date <= date('now','localtime')
-            LEFT JOIN (
-                SELECT pr.product_code, pp2.process_id, pp2.unit_price
-                FROM process_prices pp2
-                JOIN products pr ON pp2.product_id = pr.id
-                WHERE pp2.status = 'active' AND pp2.effective_date <= date('now','localtime')
-                AND pp2.effective_date = (
-                    SELECT MAX(pp3.effective_date) FROM process_prices pp3
-                    JOIN products pr3 ON pp3.product_id = pr3.id
-                    WHERE pr3.product_code = pr.product_code
-                    AND pp3.process_id = pp2.process_id
-                    AND pp3.status = 'active'
-                    AND pp3.effective_date <= date('now','localtime')
-                )
-                GROUP BY pr.product_code, pp2.process_id
-            ) pp_dedup ON o.product_code = pp_dedup.product_code
-                AND wr.process_id = pp_dedup.process_id
+            ''' + WageService._PP_DEDUP_JOIN + '''
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < ?
+              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
             GROUP BY wr.process_id
             ORDER BY total_wage DESC
-        ''', (year_month + '-01', year_month + '-32')).fetchall()
+        ''', (year_month + '-01', year_month + '-01')).fetchall()
         grand_total = sum(r['total_wage'] or 0 for r in rows)
         return {
             'year_month': year_month,

@@ -58,8 +58,8 @@ class PositionService:
                 raise ValueError(f'岗位名称【{name}】已存在')
             try:
                 cur = txn.execute(
-                    'INSERT INTO positions (name, description) VALUES (?, ?)',
-                    (name, data.get('description', '')))
+                    'INSERT INTO positions (name, description, status) VALUES (?, ?, ?)',
+                    (name, data.get('description', ''), data.get('status', 'active')))
             except sqlite3.IntegrityError:
                 raise ValueError(f'岗位名称【{name}】已存在')
             pos_id = cur.lastrowid
@@ -75,10 +75,10 @@ class PositionService:
         pos = db.execute('SELECT * FROM positions WHERE id = ?', (pos_id,)).fetchone()
         if not pos:
             raise ValueError('岗位不存在')
-        if 'name' in data and not data['name'].strip():
-            raise ValueError('岗位名称不能为空')
-        if 'name' in data and data['name'].strip():
+        if 'name' in data:
             data['name'] = data['name'].strip()
+            if not data['name']:
+                raise ValueError('岗位名称不能为空')
         if 'process_ids' in data:
             pids = data['process_ids']
             if pids:
@@ -129,6 +129,11 @@ class PositionService:
         pos = db.execute('SELECT * FROM positions WHERE id = ?', (pos_id,)).fetchone()
         if not pos:
             raise ValueError('岗位不存在')
+        user_count = db.execute(
+            'SELECT COUNT(*) FROM users WHERE position_id = ?', (pos_id,)
+        ).fetchone()[0]
+        if user_count > 0:
+            raise ValueError("该岗位下有 " + str(user_count) + " 个用户，请先将用户调岗后再删除")
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM positions WHERE id = ?', (pos_id,))
         return pos['name']

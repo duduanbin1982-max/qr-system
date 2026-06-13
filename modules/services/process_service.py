@@ -10,6 +10,12 @@ from modules.services import BaseService
 
 class ProcessService:
     """工序管理业务逻辑。"""
+    RELATED_TABLES = [
+        'work_records', 'scrap_records', 'rework_records',
+        'quality_inspections', 'process_prices', 'process_route_items',
+        'order_processes', 'position_processes', 'material_consumptions'
+    ]
+
 
     @staticmethod
     def list_processes(category='', search='', sort_by='seq_order', sort_dir='asc', limit=None, offset=0):
@@ -20,7 +26,7 @@ class ProcessService:
         if sort_by not in allowed_sort:
             sort_by = 'seq_order'
         if sort_dir.lower() not in ('asc', 'desc'):
-            raise ValueError('sort_dir must be asc or desc')
+            raise ValueError('Invalid sort_dir')
         sort_dir = sort_dir.upper()
         limit = max(1, min(int(limit), 200)) if limit else None
         sql = ('SELECT id, name AS process_name, description, category, '
@@ -145,6 +151,23 @@ class ProcessService:
             except sqlite3.IntegrityError:
                 raise ValueError(f'工序名称已存在，不能重复')
 
+
+    @staticmethod
+    def check_impact(pid):
+        """查询删除工序的影响范围。Raises ValueError if not found."""
+        db = BaseService.db()
+        existing = db.execute(
+            "SELECT id, name FROM processes WHERE id = ?", (pid,)
+        ).fetchone()
+        if not existing:
+            raise ValueError("工序不存在")
+        tables = ProcessService.RELATED_TABLES
+        parts = [f"SELECT '{t}' as tbl, COUNT(*) as cnt FROM {t} WHERE process_id = ?" for t in tables]
+        union_sql = " UNION ALL ".join(parts)
+        rows = db.execute(union_sql, [pid] * len(tables)).fetchall()
+        impact = {r["tbl"]: r["cnt"] for r in rows if r["cnt"] > 0}
+        return {"process_id": pid, "name": existing["name"], "impact": impact}
+
     @staticmethod
     def delete_process(pid):
         """Delete process with impact audit and full cascade cleanup."""
@@ -155,9 +178,7 @@ class ProcessService:
         if not existing:
             raise ValueError('不存在')
 
-        related_tables = ['work_records','scrap_records','rework_records',
-                          'quality_inspections','process_prices','process_route_items',
-                          'order_processes','position_processes','material_consumptions']
+        related_tables = ProcessService.RELATED_TABLES
         union_parts = []
         for tbl in related_tables:
             union_parts.append(f"SELECT '{tbl}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")

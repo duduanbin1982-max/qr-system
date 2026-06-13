@@ -1,7 +1,7 @@
 
   <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val text-primary">{{ wages.length }}</div><div class="s-label">员工数</div></div></div>
+      <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val text-primary">{{ filteredWages.length }}</div><div class="s-label">员工数</div></div></div>
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val text-success">{{ grandQty() }}</div><div class="s-label">总件数</div></div></div>
       <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val" style="color:var(--warning)">¥{{ fmtMoney(grandTotal()) }}</div><div class="s-label">总工资</div></div></div>
     </div>
@@ -13,10 +13,12 @@
           工资核算
         </h3>
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="includeRework" @change="load"> 含返工</label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="hideZero" @change="load"> 隐藏未报工</label>
           <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
           <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
           <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
-          <button class="btn-default btn-sm" @click="load" style="margin-left:4px">查询</button>
+          <button class="btn-default btn-sm" @click="load()" style="margin-left:4px">查询</button>
           <button class="btn-primary btn-sm" @click="exportCSV" style="margin-left:4px;background:var(--success);border-color:var(--success)">📥 导出CSV</button>
         </div>
       </div>
@@ -34,7 +36,7 @@
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500">明细</th>
           </tr></thead>
           <tbody>
-            <template v-for="w in wages">
+            <template v-for="w in filteredWages">
             <tr :key="w.employee_no" style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm);cursor:pointer" @click="toggle(w.employee_no)" :style="{background:expandedId===w.employee_no?'var(--primary-light)':''}">
               <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ expandedId===w.employee_no ? '▼' : '▶' }}</td>
               <td style="padding:var(--space-3) 12px;font-weight:600;color:var(--text-primary)">{{ w.employee_name }}</td>
@@ -73,6 +75,12 @@
             </template>
           </tbody>
         </table>
+      </div>
+      <!-- 分页 -->
+      <div v-if="totalPages > 1" style="display:flex;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-3) 20px;border-top:1px solid var(--border-light)">
+        <button class="btn-default btn-sm" @click="prevPage" :disabled="page<=1">◀ 上一页</button>
+        <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 人</span>
+        <button class="btn-default btn-sm" @click="nextPage" :disabled="page>=totalPages">下一页 ▶</button>
       </div>
     </div>
   </div>

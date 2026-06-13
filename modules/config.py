@@ -13,7 +13,7 @@ os.makedirs(PUBLIC_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, 'production.db')
 SESSION_TIMEOUT_HOURS = 8  # 登录超时时间（小时），0表示永不过期
-SESSION_IDLE_MINUTES = 30  # idle timeout
+SESSION_IDLE_MINUTES = 480  # idle timeout (8 hours)
 
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
@@ -54,7 +54,7 @@ PERMISSION_DEFS = {
     'dashboard':   ('工作台', ['view']),
     'board':       ('看板', ['view']),
     'settings':    ('系统设置', ['manage']),
-    'logs':        ('操作日志', ['view']),
+    'logs':        ('操作日志', ['view','delete']),
 }
 SYSTEM_MANAGE_PERM = 'settings:manage'
 
@@ -138,7 +138,7 @@ def _get_pinyin_initial(char: str) -> str:
     }
     return py_map.get(char, '')
 
-def generate_product_code(product_name, model, spec, upper_opening, plate_thickness, style=''):
+def generate_product_code(product_name, model, spec, upper_opening, plate_thickness, style='', lower_opening='', category='结构件'):
     """
     根据产品名称、型号、规格、上开档尺寸、板厚、款式自动生成产品编码。
     格式：产品名称-型号(全大写)-规格前2字拼音首大写字母-上开档-板厚-款式(汉字)
@@ -170,10 +170,14 @@ def generate_product_code(product_name, model, spec, upper_opening, plate_thickn
         px = spec_pinyin(spec)
         if px:
             parts.append(px)
-    # 上开档（纯数字）
-    opening = clean_num(upper_opening)
-    if opening:
-        parts.append(opening)
+    # 口尺寸（结构件专用）
+    if category == '结构件':
+        opening = clean_num(upper_opening)
+        if opening:
+            parts.append(opening)
+        lo = clean_num(lower_opening)
+        if lo:
+            parts.append(lo)
     # 板厚（纯数字）
     thickness = clean_num(plate_thickness)
     if thickness:

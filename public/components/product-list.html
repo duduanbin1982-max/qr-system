@@ -1,13 +1,10 @@
-
-  <div style="padding:var(--space-6)">
-    <!-- 统计栏 -->
+<div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ products.length }}</div><div class="s-label">产品总数</div></div></div>
       <div class="summary-item"><span class="s-icon">🏗️</span><div><div class="s-val text-primary">{{ structCount }}</div><div class="s-label">结构件</div></div></div>
       <div class="summary-item"><span class="s-icon">🔧</span><div><div class="s-val text-success">{{ machCount }}</div><div class="s-label">机加工</div></div></div>
     </div>
 
-    <!-- 分类Tab按钮 -->
     <div class="cat-tabs">
       <span class="cat-tab cat-tab-all" :class="{active: activeCat==='all'}" @click="switchCat('all')">📋 全部产品</span>
       <span class="cat-tab cat-tab-struct" :class="{active: activeCat==='结构件'}" @click="switchCat('结构件')">🔩 结构件产品</span>
@@ -64,117 +61,121 @@
                 </td>
                 <td style="text-align:center">
                   <div class="o-actions" style="justify-content:center">
-                    <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(p)" title="编辑">✏️</span>
-                    <span v-if="canDelete" class="o-abtn o-del" @click="del(p)" title="删除">🗑️</span>
+                    <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(p)">✏️</span>
+                    <span v-if="canDelete" class="o-abtn o-del" @click="del(p)">🗑️</span>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty"><div class="empty-icon">📦</div><div class="empty-text">暂无产品数据</div></div>
+          <div v-else class="empty-state">
+            <div class="empty-icon">📦</div>
+            <div class="empty-text">暂无产品数据</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
-      <div class="modal" :style="{maxWidth: form.category==='机加工'?'480px':'760px'}">
+    <!-- ====== 模态框 ====== -->
+    <div class="modal-overlay" v-if="showModal" @click.self="showModal=false">
+      <div class="modal" style="max-width:800px;max-height:90vh;overflow-y:auto">
         <div class="modal-header">
-          <span>{{ form.category === '机加工' ? '⚙️' : '🔩' }} {{ modalEdit ? '编辑产品' : '添加产品' }}{{ form.category === '机加工' ? '（机加工）' : '（结构件）' }}</span>
+          <h3>{{ modalEdit ? '✏️ 编辑产品' : '➕ 新建产品' }}</h3>
           <span class="modal-close" @click="showModal=false">&times;</span>
         </div>
         <div class="modal-body">
-          <!-- 产品编码（自动生成，只读） -->
-          <div class="form-group">
-            <label>产品编码</label>
-            <input class="form-input" :value="form.product_code" readonly placeholder="自动生成（填写型号+规格+上开档+板厚后自动拼接）" style="background:var(--bg-input);color:#888;font-family:monospace;font-size:var(--text-sm)">
-          </div>
-
-          <!-- 产品名称 + 分类 -->
           <div class="form-row">
-            <div class="form-col" style="flex:2">
-              <div class="form-group"><label>产品名称 *</label><input class="form-input" v-model="form.product_name" placeholder="如：底壳、面板"></div>
+            <div class="form-col">
+              <div class="form-group"><label>产品名称 <span style="color:var(--danger)">*</span></label><input class="form-input" v-model="form.product_name" placeholder="例：外壳"></div>
             </div>
-            <div class="form-col" style="flex:1">
-              <div class="form-group"><label>分类</label>
-                <select class="form-input" v-model="form.category">
-                  <option value="结构件">🔩 结构件产品</option>
-                  <option value="机加工">⚙️ 机加工产品</option>
-                </select>
+            <div class="form-col">
+              <div class="form-group">
+                <label>产品分类</label>
+                <div style="display:flex;gap:var(--space-2)">
+                  <label v-for="c in categories" :key="c" style="cursor:pointer;display:flex;align-items:center;gap:var(--space-1)">
+                    <input type="radio" :value="c" v-model="form.category">{{ c }}
+                  </label>
+                </div>
               </div>
             </div>
           </div>
-
-          <!-- 型号 + 形状/规格（下拉选择） -->
           <div class="form-row">
             <div class="form-col">
-              <div class="form-group"><label>型号</label><input class="form-input" v-model="form.model" placeholder="如：DH-200" @input="updateProductCode"></div>
+              <div class="form-group"><label>型号 <span style="color:var(--danger)">*</span></label><input class="form-input" v-model="form.model" placeholder="例：SB81" @input="updateProductCode"></div>
             </div>
             <div class="form-col">
-              <div class="form-group"><label>形状/规格</label>
-                <select class="form-input" v-model="form.spec" @change="updateProductCode">
-                  <option value="">请选择</option>
-                  <option v-for="s in specOptions" :key="s" :value="s">{{ s }}</option>
-                </select>
-              </div>
+              <div class="form-group"><label>产品编码</label><input class="form-input" v-model="form.product_code" placeholder="自动生成" readonly style="background:var(--bg-hover);color:var(--text-placeholder)"></div>
             </div>
           </div>
 
           <!-- ===== 结构件特有字段 ===== -->
-          <template v-if="form.category !== '机加工'">
+          <template v-if="form.category === '结构件'">
             <div class="form-row">
               <div class="form-col">
-                <div class="form-group"><label>款式</label><input class="form-input" v-model="form.style" placeholder="款式"></div>
+                <div class="form-group">
+                  <label>形状/规格 <span style="color:var(--danger)">*</span></label>
+                  <select class="form-input" v-model="form.spec" @change="updateProductCode">
+                    <option value="">请选择规格</option>
+                    <option v-for="s in specOptions" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                </div>
               </div>
               <div class="form-col">
-                <div class="form-group"><label>上开档尺寸</label><input class="form-input" v-model="form.upper_opening" placeholder="如：Φ80" @input="updateProductCode"></div>
+                <div class="form-group"><label>板厚 (mm)</label><input class="form-input" type="text" v-model="form.plate_thickness" placeholder="例：18" @input="updateProductCode"></div>
               </div>
             </div>
             <div class="form-row">
               <div class="form-col">
-                <div class="form-group"><label>板厚</label><input class="form-input" v-model="form.plate_thickness" placeholder="如：2.0mm" @input="updateProductCode"></div>
+                <div class="form-group"><label>上口尺寸 (mm)</label><input class="form-input" type="text" v-model="form.upper_opening" placeholder="例：360" @input="updateProductCode"></div>
               </div>
               <div class="form-col">
-                <div class="form-group"><label>单件重量 (kg)</label><input class="form-input" type="number" step="0.01" v-model="form.weight" placeholder="如：5.2"></div>
+                <div class="form-group"><label>下口尺寸 (mm)</label><input class="form-input" type="text" v-model="form.lower_opening" placeholder="例：340" @input="updateProductCode"></div>
               </div>
             </div>
             <div class="form-row">
               <div class="form-col">
-                <div class="form-group"><label>价格 (元)</label><input class="form-input" type="number" step="0.01" min="0" v-model="form.price" placeholder="如：28.00"></div>
+                <div class="form-group"><label>派生类型</label><input class="form-input" v-model="form.style" placeholder="例：经济自用"></div>
               </div>
               <div class="form-col"></div>
             </div>
-            <div class="form-group"><label>描述</label><textarea class="form-input" v-model="form.description" rows="2" placeholder="产品描述或备注"></textarea></div>
-
-            <!-- 附件管理（仅编辑模式） -->
-            <div v-if="modalEdit" class="form-group">
-              <label>附件 <span style="color:var(--text-muted);font-weight:normal">(图片/图纸/文档)</span></label>
-              <div class="attachment-upload" style="margin-bottom:10px">
-                <input type="file" id="product-attachment-input" style="display:none" accept=image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx,.zip,.rar,.step,.stp,.igs,.iges multiple @change="handleAttachmentUpload">
-                <button type="button" class="btn btn-sm btn-default" id="btn-upload-attachment">+ 上传附件</button>
-                <span style="color:var(--text-muted);font-size:var(--text-xs-alt);margin-left:8px">支持图片/PDF/CAD/Office，≤10MB</span>
+            <div class="form-row">
+              <div class="form-col">
+                <div class="form-group"><label>单件重量 (kg)</label><input class="form-input" type="number" step="0.01" v-model="form.weight" placeholder="如：5.2"></div>
               </div>
-              <div v-if="productAttachments.length" style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
-                <div v-for="att in productAttachments" :key="att.id"
-                  style="display:flex;flex-direction:column;align-items:center;width:100px;padding:6px;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;cursor:pointer"
-                  @click="openAttachment(att)">
-                  <div v-if="att.file_type && att.file_type.includes('image')" style="width:72px;height:72px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:var(--space-1)">
-                    <img :src="'/api/product-attachments/' + att.id + '/thumbnail?token=' + (auth.token || '')" style="width:100%;height:100%;object-fit:cover">
-                  </div>
-                  <div v-else style="font-size:32px;margin-bottom:var(--space-1);line-height:1">{{ getAttachmentIcon(att.file_type) }}</div>
-                  <div style="font-size:var(--text-2xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px" :title="att.file_name">{{ att.file_name }}</div>
-                  <div style="font-size:9px;color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }}</div>
-                  <div style="display:flex;gap:var(--space-1);margin-top:4px" @click.stop>
-                    <button class="attachment-delete" @click="deleteProductAttachment(att.id)" title="删除" style="font-size:var(--text-xs-alt);padding:var(--space-1) 6px;cursor:pointer;border:none;background:var(--danger-light);color:var(--danger);border-radius:var(--radius-sm)">🗑️</button>
+              <div class="form-col">
+                <div class="form-group">
+                  <label>价格 (元)</label>
+                  <div style="display:flex;align-items:center;gap:var(--space-1)">
+                    <span style="font-size:var(--text-base);color:var(--danger-dark);font-weight:700">¥</span>
+                    <input class="form-input" type="number" step="0.01" min="0" v-model="form.price" placeholder="0.00" style="flex:1;font-size:var(--text-lg);font-weight:600;color:var(--danger-dark)">
                   </div>
                 </div>
               </div>
-              <div v-else style="color:var(--text-muted);font-size:var(--text-xs)">暂无附件</div>
             </div>
           </template>
 
           <!-- ===== 机加工核心字段 ===== -->
           <template v-if="form.category === '机加工'">
+            <div class="form-row">
+              <div class="form-col">
+                <div class="form-group">
+                  <label>形状/规格 <span style="color:var(--danger);font-weight:normal">*</span></label>
+                  <select class="form-input" v-model="form.spec">
+                    <option value="">请选择规格</option>
+                    <option v-for="s in specOptions" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-col">
+                <div class="form-group"><label>板厚 (mm)</label><input class="form-input" type="text" v-model="form.plate_thickness" placeholder="如：10" @input="updateProductCode"></div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <div class="form-group"><label>派生类型</label><input class="form-input" v-model="form.style" placeholder="例：经济自用"></div>
+              </div>
+              <div class="form-col"></div>
+            </div>
             <div class="form-row">
               <div class="form-col">
                 <div class="form-group"><label>单件重量 (kg)</label><input class="form-input" type="number" step="0.01" v-model="form.weight" placeholder="0"></div>
@@ -190,6 +191,33 @@
               </div>
             </div>
           </template>
+
+          <div class="form-group"><label>描述</label><textarea class="form-input" v-model="form.description" rows="2" placeholder="产品描述或备注"></textarea></div>
+
+          <div v-if="modalEdit" class="form-group">
+            <label>附件 <span style="color:var(--text-muted);font-weight:normal">(图片/图纸/文档)</span></label>
+            <div class="attachment-upload" style="margin-bottom:10px">
+              <input type="file" ref="attachmentInput" id="product-attachment-input" style="display:none" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx,.zip,.rar,.step,.stp,.igs,.iges" multiple @change="handleAttachmentUpload">
+              <button type="button" class="btn btn-sm btn-default" @click="triggerAttachmentInput">+ 上传附件</button>
+              <span style="color:var(--text-muted);font-size:var(--text-xs-alt);margin-left:8px">支持图片/PDF/CAD/Office，≤10MB</span>
+            </div>
+            <div v-if="productAttachments.length" style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
+              <div v-for="att in productAttachments" :key="att.id"
+                style="display:flex;flex-direction:column;align-items:center;width:100px;padding:6px;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;cursor:pointer"
+                @click="openAttachment(att)">
+                <div v-if="att.file_type && att.file_type.includes('image')" style="width:72px;height:72px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:var(--space-1)">
+                  <img :src="'/api/product-attachments/' + att.id + '/thumbnail?token=' + (auth.token || '')" style="width:100%;height:100%;object-fit:cover">
+                </div>
+                <div v-else style="font-size:32px;margin-bottom:var(--space-1);line-height:1">{{ getAttachmentIcon(att.file_type) }}</div>
+                <div style="font-size:var(--text-2xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px" :title="att.file_name">{{ att.file_name }}</div>
+                <div style="font-size:9px;color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }}</div>
+                <div style="display:flex;gap:var(--space-1);margin-top:4px" @click.stop>
+                  <button class="attachment-delete" @click="deleteProductAttachment(att.id)" title="删除" style="font-size:var(--text-xs-alt);padding:var(--space-1) 6px;cursor:pointer;border:none;background:var(--danger-light);color:var(--danger);border-radius:var(--radius-sm)">🗑️</button>
+                </div>
+              </div>
+            </div>
+            <div v-else style="color:var(--text-muted);font-size:var(--text-xs)">暂无附件</div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="showModal=false">取消</button>
@@ -198,5 +226,3 @@
       </div>
     </div>
   </div>
-
-<script nonce="{$ nonce $}">document.getElementById("btn-upload-attachment")&&document.getElementById("btn-upload-attachment").addEventListener("click",function(){document.getElementById("product-attachment-input").click()});</script>

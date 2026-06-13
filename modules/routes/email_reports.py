@@ -8,8 +8,10 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
+from modules.db import get_db
 from modules.app import app
 from modules.db import get_db, get_setting
+from modules.services.email_reports_service import EmailReportsService
 from modules.middleware.auth import check_auth, check_permission, audit_log
 
 def _get_smtp_config():
@@ -66,35 +68,14 @@ def _build_daily_report():
     db = get_db()
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # Today's summary
-    total_orders = db.execute("SELECT COUNT(*) FROM orders WHERE date(created_at)=? AND deleted_at IS NULL", (today,)).fetchone()[0]
-    new_orders = db.execute("SELECT COUNT(*) FROM orders WHERE date(created_at)=? AND status='pending' AND deleted_at IS NULL", (today,)).fetchone()[0]
-    completed_orders = db.execute("SELECT COUNT(*) FROM orders WHERE date(updated_at)=? AND status='completed'", (today,)).fetchone()[0]
-
-    # Work records today
-    wr_sum = db.execute('''
-        SELECT COUNT(*) as records, COALESCE(SUM(quantity),0) as qty, COUNT(DISTINCT user_id) as workers
-        FROM work_records WHERE date(created_at)=?
-    ''', (today,)).fetchone()
-
-    # Top workers
-    top_workers = db.execute('''
-        SELECT u.name, COALESCE(SUM(wr.quantity),0) as qty, COUNT(*) as records
-        FROM work_records wr
-        LEFT JOIN users u ON wr.user_id = u.id
-        WHERE date(wr.created_at)=?
-        GROUP BY wr.user_id
-        ORDER BY qty DESC LIMIT 5
-    ''', (today,)).fetchall()
-
-    # Process breakdown
-    proc_breakdown = db.execute('''
-        SELECT p.name, COALESCE(SUM(wr.quantity),0) as qty, COUNT(*) as records
-        FROM work_records wr
-        LEFT JOIN processes p ON wr.process_id = p.id
-        WHERE date(wr.created_at)=?
-        GROUP BY wr.process_id ORDER BY qty DESC LIMIT 10
-    ''', (today,)).fetchall()
+    # Today's summary (via service)
+    stats = EmailReportsService.daily_stats(today)
+    total_orders = stats['total_orders']
+    new_orders = stats['new_orders']
+    completed_orders = stats['completed_orders']
+    wr_sum = stats['wr_sum']
+    top_workers = stats['top_workers']
+    proc_breakdown = stats['proc_breakdown']
 
     html = f'<p>Report Date: {today}</p>'
     html += '<h3>Summary</h3>'
@@ -160,20 +141,11 @@ def send_weekly_report():
     week_start = (now - timedelta(days=now.weekday())).strftime('%Y-%m-%d')
     week_end = now.strftime('%Y-%m-%d')
 
-    total_orders = db.execute("SELECT COUNT(*) FROM orders WHERE date(created_at) BETWEEN ? AND ? AND deleted_at IS NULL", (week_start, week_end)).fetchone()[0]
-    completed = db.execute("SELECT COUNT(*) FROM orders WHERE date(updated_at) BETWEEN ? AND ? AND status='completed'", (week_start, week_end)).fetchone()[0]
-
-    wr_sum = db.execute('''
-        SELECT COUNT(*) as records, COALESCE(SUM(quantity),0) as qty, COUNT(DISTINCT user_id) as workers
-        FROM work_records WHERE date(created_at) BETWEEN ? AND ?
-    ''', (week_start, week_end)).fetchone()
-
-    top_workers = db.execute('''
-        SELECT u.name, COALESCE(SUM(wr.quantity),0) as qty
-        FROM work_records wr LEFT JOIN users u ON wr.user_id = u.id
-        WHERE date(wr.created_at) BETWEEN ? AND ?
-        GROUP BY wr.user_id ORDER BY qty DESC LIMIT 5
-    ''', (week_start, week_end)).fetchall()
+    wstats = EmailReportsService.weekly_stats(week_start, week_end)
+    total_orders = wstats['total_orders']
+    completed = wstats['completed']
+    wr_sum = wstats['wr_sum']
+    top_workers = wstats['top_workers']
 
     html = f'<p>Period: {week_start} to {week_end}</p>'
     html += '<h3>Weekly Summary</h3>'

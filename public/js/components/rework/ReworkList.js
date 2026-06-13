@@ -21,8 +21,6 @@ export default {
 
     // RBAC
     const canEdit   = computed(() => can('rework:edit'))
-    const canDelete = computed(() => can('rework:delete'))
-    const canCreate = computed(() => can('rework:create'))
 
     function fmtDate(s) {
       if (!s) return ''
@@ -79,6 +77,6 @@ export default {
 
     onMounted(() => { load(); loadStats() })
 
-    return { items, loading, statusFilter, search, stats, editing, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, load, loadStats, complete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter, canEdit, canDelete, canCreate }
+    return { items, loading, statusFilter, search, stats, editing, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, load, loadStats, complete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter, canEdit }
   }
 }

@@ -153,6 +153,20 @@ class RoleService:
                 raise ValueError('不能将自身设为父级')
             if not db.execute('SELECT id FROM roles WHERE id = ?', (data['parent_id'],)).fetchone():
                 raise ValueError('父级角色不存在')
+            # Check for circular reference in parent chain
+            to_check = [data['parent_id']]; visited = {rid}
+            while to_check:
+                cur = to_check.pop()
+                if cur in visited:
+                    raise ValueError("不能建立循环引用的父子关系")
+                visited.add(cur)
+                parent_rows = db.execute(
+                    'SELECT parent_id FROM roles WHERE id = ? AND parent_id IS NOT NULL',
+                    (cur,)
+                ).fetchall()
+                for pr in parent_rows:
+                    if pr['parent_id'] not in visited:
+                        to_check.append(pr['parent_id'])
         if 'code' in data:
             new_code = data['code'].strip()
             if not new_code:
@@ -185,5 +199,10 @@ class RoleService:
             raise ValueError('角色不存在')
         if rid in BUILTIN_ROLE_IDS:
             raise ValueError(f'不能删除内置角色「{role["name"]}」')
+        user_count = db.execute(
+            'SELECT COUNT(*) FROM user_roles WHERE role_id = ?', (rid,)
+        ).fetchone()[0]
+        if user_count > 0:
+            raise ValueError("该角色已分配给 " + str(user_count) + " 个用户，请先取消分配后再删除")
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM roles WHERE id = ?', (rid,))

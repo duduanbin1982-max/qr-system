@@ -9,9 +9,10 @@ from datetime import datetime
 from flask import request, jsonify, g
 
 from modules.app import app
-from modules.db import get_db, get_setting, clear_settings_cache
+from modules.db import get_setting, clear_settings_cache
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body
+from modules.services.setting_service import SettingsService
 
 # 允许的设置 key 白名单（模块级常量）
 ALLOWED_KEYS = {
@@ -57,10 +58,7 @@ def get_public_settings():
 @check_auth
 @check_permission('settings:manage')
 def get_settings():
-    db = get_db()
-    rows = db.execute('SELECT * FROM system_settings').fetchall()
-    settings = {r['key']: r['value'] for r in rows}
-    return jsonify({'settings': settings})
+    return jsonify({'settings': SettingsService.get_all()})
 
 @app.route('/api/settings', methods=['POST'])
 @check_auth
@@ -110,6 +108,11 @@ def save_settings():
             v = str(v).strip()
             if v not in ('0', '1', ''):
                 return jsonify({'error': f'{k_stripped} 只能为 0 或 1'}), 400
+        # auto_order_no 校验
+        if k_stripped == 'auto_order_no':
+            v = str(v).strip()
+            if len(v) > 32:
+                return jsonify({'error': '订单号前缀不能超过32个字符'}), 400
         # 布尔类型校验
         if k_stripped == 'approval_enabled':
             v = str(v).strip()
@@ -119,17 +122,11 @@ def save_settings():
         del data[k]
         data[k_stripped] = str(v)
 
-    db = get_db()
     try:
-        db.execute('BEGIN IMMEDIATE')
-        for k, v in data.items():
-            db.execute('INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?,?,datetime("now","localtime"))', (k, v))
-        for k in deleted_keys:
-            if k in ALLOWED_KEYS:
-                db.execute('DELETE FROM system_settings WHERE key = ?', (k,))
-        db.commit()
+        # Filter to ALLOWED_KEYS for deletion
+        valid_deletes = [k for k in deleted_keys if k in ALLOWED_KEYS]
+        SettingsService.save(data, valid_deletes)
     except Exception:
-        db.execute('ROLLBACK')
         return jsonify({'error': '保存失败，请重试'}), 500
 
     try:

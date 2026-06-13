@@ -23,7 +23,10 @@ import modules.routes.orders      # orders CRUD + batch + work-records
 import modules.routes.customers   # customers CRUD + order history
 import modules.routes.prices      # process-prices + route-prices + wages
 import modules.routes.products    # products CRUD + import + attachments
-import modules.routes.scan        # desktop scan + mobile H5 + QR codes
+import modules.routes.scan        # re-exports from scan_helpers/scan_work/scan_qr
+import modules.routes.scan_helpers
+import modules.routes.scan_work
+import modules.routes.scan_qr
 import modules.routes.reports     # stats + production trends + efficiency
 import modules.routes.processes   # 工序管理
 import modules.routes.users       # 用户管理
@@ -59,7 +62,7 @@ import modules.routes.system         # health, backup, integrity checks
 # ============================================================
 @app.route('/')
 def index():
-    resp = make_response(render_template('index-v2.html', nonce=getattr(g, 'csp_nonce', '')))
+    resp = make_response(render_template('index-v3.html', nonce=getattr(g, 'csp_nonce', '')))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'

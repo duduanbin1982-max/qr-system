@@ -39,7 +39,7 @@ export default {
         records.value = d.recent_records || []
         companyName.value = d.company_name || ''
         deliveryWarnings.value = d.delivery_warnings || null
-        quickActions.value = (d.quick_actions || []).filter(q => q && q.page).map(q => ({ page: q.page, icon: q.icon || '📋', text: q.label || q.page, desc: q.desc || '' }))
+        quickActions.value = (d.quick_actions || []).filter(q => q && q.page).map(q => ({ page: q.page, icon: q.icon || '📋', text: q.label || q.page, desc: q.desc || '', external: q.external || null }))
       } catch(e) {
         error.value = e.message || '加载失败'
       } finally {
@@ -63,6 +63,7 @@ export default {
       if (_clock) clearInterval(_clock)
     })
     
-    return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth }
+    function goAction(q) { if (q.external) { const tok = new URLSearchParams(window.location.search).get('token') || ''; window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
+    return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }

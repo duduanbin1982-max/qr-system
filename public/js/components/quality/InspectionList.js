@@ -9,7 +9,7 @@ const INSPECTION_TYPES = [
   { value: 'in_process', label: '过程检验' },
   { value: 'final', label: '终检' },
 ]
-const DEFECT_CATEGORIES = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他']
+// DEFECT_CATEGORIES now fetched from API (single source of truth)
 const RESULT_LABELS = { pass: '合格', fail: '不合格', partial: '部分合格', pending: '待检' }
 
 export default {
@@ -27,6 +27,7 @@ export default {
     const total = ref(0)
     const perPage = 20
     const editing = ref(null)
+    const defectCategories = ref(['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他'])
 
     // RBAC
     const canEdit   = computed(() => can('quality:edit'))
@@ -73,26 +74,41 @@ export default {
       } catch (e) {}
     }
 
-    async function searchProcesses() {
-      if (!processSearch.value) { processes.value = []; processDropdown.value = false; return }
+    let allProcessesCache = null
+
+    async function loadProcessesCache() {
       try {
         const r = await api.get('/api/processes')
-        if (r.ok) {
-          const q = processSearch.value.toLowerCase()
-          processes.value = (r.processes || []).filter(p => p.status === 'active' && (!q || (p.process_name || '').toLowerCase().includes(q)))
-          processDropdown.value = processes.value.length > 0
-        }
+        if (r.ok) allProcessesCache = (r.processes || []).filter(p => p.status === 'active')
       } catch (e) {}
+    }
+
+    function searchProcesses() {
+      if (!allProcessesCache) return
+      const q = (processSearch.value || '').toLowerCase()
+      processes.value = q
+        ? allProcessesCache.filter(p => (p.process_name || '').toLowerCase().includes(q))
+        : allProcessesCache
+      processDropdown.value = processes.value.length > 0
     }
 
     function selectOrder(o) { form.value.order_id = o.id; orderSearch.value = o.order_no + ' ' + (o.product_name || ''); orderDropdown.value = false }
     function selectProcess(p) { form.value.process_id = p.id; processSearch.value = p.process_name; processDropdown.value = false }
 
+    let userSetCheckedQty = false
+
     function autoCalcQty() {
-      form.value.quantity_checked = (form.value.quantity_passed || 0) + (form.value.quantity_failed || 0)
+      if (!userSetCheckedQty) {
+        form.value.quantity_checked = (form.value.quantity_passed || 0) + (form.value.quantity_failed || 0)
+      }
+    }
+
+    function onCheckedQtyManual() {
+      userSetCheckedQty = form.value.quantity_checked > 0
     }
 
     function openCreate() {
+      userSetCheckedQty = false
       isEdit.value = false
       form.value = { order_id: null, process_id: null, inspection_type: 'first_article', quantity_checked: 0, quantity_passed: 0, quantity_failed: 0, defect_category: '', defect_quantity: 0, notes: '', inspected_at: '' }
       orderSearch.value = ''; processSearch.value = ''; orders.value = []; processes.value = []
@@ -137,6 +153,13 @@ export default {
     // Pareto
     const pareto = ref({ items: [], grand_total: 0 })
 
+    async function loadDefectCategories() {
+      try {
+        const r = await api.get('/api/quality/defect-categories')
+        if (r.ok && r.categories) defectCategories.value = r.categories
+      } catch (e) {}
+    }
+
     async function loadPareto() {
       try {
         const params = []
@@ -147,12 +170,12 @@ export default {
       } catch (e) {}
     }
 
-    onMounted(() => { load(); loadStats(); loadPareto() })
+    onMounted(() => { load(); loadStats(); loadPareto(); loadDefectCategories(); loadProcessesCache() })
 
     return { items, loading, stats, search, filterType, filterResult, dateFrom, dateTo, page, total, perPage, editing,
       canEdit, canDelete, canCreate, showModal, isEdit, form, orders, processes, orderSearch, processSearch, orderDropdown, processDropdown,
-      DEFECT_CATEGORIES, pareto,
+      defectCategories, pareto,
       fmtDate, fmtDatetime, typeLabel, resultLabel,
-      load, loadStats, searchOrders, searchProcesses, selectOrder, selectProcess, autoCalcQty, openCreate, openEdit, doSave, doDelete, applyFilter, loadPareto }
+      load, loadStats, loadDefectCategories, searchOrders, searchProcesses, selectOrder, selectProcess, autoCalcQty, onCheckedQtyManual, openCreate, openEdit, doSave, doDelete, applyFilter, loadPareto }
   }
 }

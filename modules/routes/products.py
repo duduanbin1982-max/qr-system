@@ -19,6 +19,14 @@ from modules.middleware.validate import validate_json
 from modules.services.product_service import ProductService
 
 
+
+def _safe_audit_log(action, resource_type, resource_id, detail=''):
+    """安全审计日志 失败不中断主流程。"""
+    try:
+        audit_log(action, resource_type, resource_id, detail)
+    except Exception as e:
+        app.logger.warning('audit_log failed: %s', e)
+
 @app.route('/api/products', methods=['GET'])
 @check_auth
 @check_permission('products:view')
@@ -114,10 +122,7 @@ def create_product():
         pid, product_code = ProductService.create_product(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '重复' in str(e) else 400
-    try:
-        audit_log('create_product', 'product', pid, data.get('product_name', ''))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    _safe_audit_log('create_product', 'product', pid, data.get('product_name', ''))
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
 
@@ -164,10 +169,7 @@ def update_product(pid):
         product_code = ProductService.update_product(pid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    try:
-        audit_log('update_product', 'product', pid, str(data))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    _safe_audit_log('update_product', 'product', pid, str(data))
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
 
@@ -312,10 +314,7 @@ def upload_product_attachment(product_id):
         ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('upload_attachment', 'product', product_id, file.filename)
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    _safe_audit_log('upload_attachment', 'product', product_id, file.filename)
     return jsonify({'message': '上传成功'})
 
 
@@ -422,8 +421,5 @@ def delete_product_attachment(attachment_id):
         row = ProductService.delete_attachment(attachment_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    _safe_audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
     return jsonify({'message': '删除成功'})

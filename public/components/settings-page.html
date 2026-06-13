@@ -51,7 +51,7 @@
     </div>
 
     <!-- 添加设置项弹窗 -->
-    <div v-if="showAddKeyModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showAddKeyModal=false">
+    <div v-if="showAddKeyModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center" >
       <div style="background:white;border-radius:12px;padding:24px;width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
         <h4 style="margin:0 0 16px 0">添加设置项</h4>
         <div style="margin-bottom:12px">
@@ -129,7 +129,8 @@
             <input class="form-input" v-model="logFilterKeyword" placeholder="🔍 搜索详情..." style="width:180px;padding:6px 10px;font-size:var(--text-sm)">
             <button class="btn btn-default btn-sm" @click="loadLogs">🔍 搜索</button>
             <button class="btn btn-sm" :class="{ 'btn-perm-active': logFilterCategory==='permission' }" @click="logFilterCategory = logFilterCategory==='permission' ? '' : 'permission'; loadLogs()" style="border:1px solid var(--border)">🔐 权限变更</button>
-            <button class="btn btn-default btn-sm" @click="logFilterAction='';logFilterKeyword='';logFilterCategory='';loadLogs()">清除</button>
+            <button class="btn btn-default btn-sm" @click="logFilterAction='';logFilterKeyword='';logFilterCategory='';loadLogs()">清除筛选</button>
+            <button class="btn btn-sm" style="background:var(--danger);color:#fff;margin-left:var(--space-1)" @click="clearLogs(90)">🗑 清除90天前日志</button>
             <span style="color:var(--text-placeholder);font-size:var(--text-xs);margin-left:auto" v-if="logFilterAction||logFilterKeyword">筛选结果：{{ logsTotal }} 条</span>
           </div>
           <div v-if="logsLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
@@ -539,7 +540,7 @@
       </div>
 
       <!-- Add Menu Modal -->
-      <div v-if="showMenuModal" class="modal-overlay" @click.self="showMenuModal=false">
+      <div v-if="showMenuModal" class="modal-overlay" >
         <div class="modal" style="max-width:420px">
           <div class="modal-header"><span>添加菜单条目</span><span class="modal-close" @click="showMenuModal=false">&times;</span></div>
           <div class="modal-body">
@@ -565,7 +566,7 @@
     <!-- ========== MODALS ========== -->
 
     <!-- Admin Add/Edit Modal -->
-    <div v-if="showAdminModal" class="modal-overlay" @click.self="showAdminModal=false">
+    <div v-if="showAdminModal" class="modal-overlay" >
       <div class="modal">
         <div class="modal-header"><span>{{ adminModalEdit ? '编辑管理员' : '新增管理员' }}</span><span class="modal-close" @click="showAdminModal=false">&times;</span></div>
         <div class="modal-body">
@@ -602,7 +603,7 @@
     </div>
 
     <!-- Role Group Modal -->
-    <div v-if="showGroupModal" class="modal-overlay" @click.self="showGroupModal=false">
+    <div v-if="showGroupModal" class="modal-overlay" >
       <div class="modal">
         <div class="modal-header"><span>{{ groupModalEdit ? '编辑角色组' : '新增角色组' }}</span><span class="modal-close" @click="showGroupModal=false">&times;</span></div>
         <div class="modal-body">
@@ -614,6 +615,7 @@
             </select>
           </div>
           <div class="form-group"><label>描述</label><textarea class="form-input" v-model="groupForm.description" rows="2"></textarea></div>
+          <div class="form-group"><label>权限配置</label><input class="form-input" v-model="groupForm.permissions" placeholder="JSON格式，如 [&quot;*&quot;]"><div style="font-size:var(--text-2xs);color:var(--text-placeholder);margin-top:2px">* = 全部权限，多个用英文逗号分隔</div></div>
           <div class="form-group"><label>状态</label><select class="form-input" v-model="groupForm.status"><option value="active">启用</option><option value="inactive">停用</option></select></div>
         </div>
         <div class="modal-footer">
@@ -624,7 +626,7 @@
     </div>
 
     <!-- Role Modal -->
-    <div v-if="showRoleModal" class="modal-overlay" @click.self="showRoleModal=false">
+    <div v-if="showRoleModal" class="modal-overlay" >
       <div class="modal">
         <div class="modal-header"><span>{{ roleModalEdit ? '编辑角色' : '新增角色' }}</span><span class="modal-close" @click="showRoleModal=false">&times;</span></div>
         <div class="modal-body">
@@ -674,7 +676,7 @@
     </div>
 
     <!-- Position Modal -->
-    <div v-if="showPositionModal" class="modal-overlay" @click.self="showPositionModal=false">
+    <div v-if="showPositionModal" class="modal-overlay" >
       <div class="modal">
         <div class="modal-header"><span>{{ positionModalEdit ? '编辑岗位' : '新增岗位' }}</span><span class="modal-close" @click="showPositionModal=false">&times;</span></div>
         <div class="modal-body">

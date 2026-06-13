@@ -168,6 +168,8 @@ def audit_log(action: str, target_type: str = '', target_id: int = 0, detail: st
         uid = g.current_user.get('id') if hasattr(g, 'current_user') else None
         db.execute('INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) VALUES (?,?,?,?,?)',
                    (uid, action, target_type, target_id, detail))
-        db.commit()
+        # Only commit if NOT inside an active transaction (avoid breaking caller's atomicity)
+        if not getattr(db, 'in_transaction', False):
+            db.commit()
     except Exception as ex:
         logging.getLogger("qr-system").warning(f"audit_log failed: {ex}")

@@ -70,7 +70,7 @@
     </div>
 
     <!-- 新增模态框 -->
-    <div v-if="showModal && !modalEdit" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal && !modalEdit" class="modal-overlay" >
       <div class="modal" style="max-width:650px">
         <div class="modal-header"><span>新建出库单</span><span class="modal-close" @click="showModal=false">&times;</span></div>
         <div class="modal-body">
@@ -111,7 +111,7 @@
     </div>
 
     <!-- 编辑模态框 -->
-    <div v-if="showModal && modalEdit" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal && modalEdit" class="modal-overlay" >
       <div class="modal" style="max-width:500px">
         <div class="modal-header"><span>编辑出库单 — {{ form.shipment_no }}</span><span class="modal-close" @click="showModal=false">&times;</span></div>
         <div class="modal-body">
@@ -136,7 +136,7 @@
     </div>
 
     <!-- 详情模态框 -->
-    <div v-if="showDetail" class="modal-overlay" @click.self="showDetail=false">
+    <div v-if="showDetail" class="modal-overlay" >
       <div class="modal" style="max-width:650px">
         <div class="modal-header"><span>📋 {{ detailShipment?.shipment_no }}</span><span class="modal-close" @click="showDetail=false">&times;</span></div>
         <div class="modal-body">

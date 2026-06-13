@@ -177,7 +177,10 @@ export const api = {
   workerEfficiency: (params) => request('GET', '/api/reports/worker-efficiency' + buildQuery(params)),
   qualityAnalysis:  (params) => request('GET', '/api/reports/quality-analysis' + buildQuery(params)),
   orderAnalysis:    (params) => request('GET', '/api/reports/order-analysis' + buildQuery(params)),
-  
+  dashboardKpi:     (params) => request('GET', '/api/reports/dashboard-kpi' + buildQuery(params)),
+  materialUsage:    (params) => request('GET', '/api/reports/material-usage' + buildQuery(params)),
+  productStats:     (params) => request('GET', '/api/reports/product-stats' + buildQuery(params)),
+  shipmentStats:    (params) => request('GET', '/api/reports/shipment-stats' + buildQuery(params)),
   // ========== 追溯 ==========
   trace:            (code)   => request('GET', '/api/trace/' + encodeURIComponent(code)),
   

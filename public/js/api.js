@@ -48,6 +48,7 @@ export const api = {
   post:   (url, data)   => request('POST', url, data),
   put:    (url, data)   => request('PUT', url, data),
   delete: (url)         => request('DELETE', url),
+  del:    (url)         => request('DELETE', url),
   
   // ========== 认证 ==========
   login:         (data) => request('POST', '/api/auth/login', data),
@@ -82,6 +83,12 @@ export const api = {
   updateProduct:    (id,data)=> request('PUT',  '/api/products/' + id, data),
   deleteProduct:    (id)     => request('DELETE', '/api/products/' + id),
   uploadProductImport:(formData)=> uploadFile('/api/products/import', formData),
+
+  // Product attachments
+  listProductAttachments:   (productId)          => request('GET', '/api/products/' + productId + '/attachments'),
+  uploadProductAttachment:  (productId, formData) => uploadFile('/api/products/' + productId + '/attachments', formData),
+  deleteProductAttachment:  (attachmentId)        => request('DELETE', '/api/product-attachments/' + attachmentId),
+
   
   // ========== 客户 ==========
   listCustomers:    (params) => request('GET', '/api/customers' + buildQuery(params)),
@@ -201,6 +208,7 @@ export const api = {
   
   // ========== 日志 ==========
   listLogs:         (params) => request('GET', '/api/logs' + buildQuery(params)),
+  deleteLogs:       (params) => request("DELETE", "/api/logs" + buildQuery(params)),
 }
 
 function buildQuery(params) {

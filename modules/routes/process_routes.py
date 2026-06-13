@@ -95,11 +95,10 @@ def apply_process_route(rid):
     if not order_id:
         return jsonify({'error': '请指定订单'}), 400
     # 验证订单存在且未被删除
-    from modules.db import get_db
-    db = get_db()
-    order = db.execute('SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL', (order_id,)).fetchone()
-    if not order:
-        return jsonify({'error': '订单不存在或已删除'}), 404
+    try:
+        ProcessRouteService.check_order_exists(order_id)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
     try:
         count = ProcessRouteService.apply_route(rid, order_id)
     except ValueError as e:

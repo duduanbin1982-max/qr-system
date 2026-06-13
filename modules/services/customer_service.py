@@ -1,9 +1,11 @@
-"""
+﻿"""
 qr-system — 客户管理 Service 层
 
 从 routes/customers.py 提取全部业务逻辑。
+SQL 已迁移至 modules.repositories.customer_repository。
 """
 from modules.services import BaseService
+from modules.repositories.customer_repository import CustomerRepository
 
 
 class CustomerService:
@@ -12,136 +14,99 @@ class CustomerService:
     @staticmethod
     def list_customers(keyword=None, page=1, limit=100):
         """客户列表（支持搜索）。"""
-        db = BaseService.db()
-        where = '1=1'
+        where = "1=1"
         params = []
         if keyword:
-            where += ' AND (name LIKE ? OR contact LIKE ? OR phone LIKE ?)'
-            params.extend([f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'])
-        total = db.execute(
-            f'SELECT COUNT(*) FROM customers WHERE {where}', params
-        ).fetchone()[0]
-        offset = (page - 1) * limit
-        rows = db.execute(
-            f'SELECT * FROM customers WHERE {where} ORDER BY id DESC LIMIT ? OFFSET ?',
-            params + [limit, offset]
-        ).fetchall()
-        return {'customers': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
+            where += " AND (name LIKE ? OR contact LIKE ? OR phone LIKE ?)"
+            params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+        rows, total = CustomerRepository.list_all(where, params, page, limit)
+        return {"customers": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
     def create_customer(data):
         """创建客户。Raises ValueError on empty name or duplicate."""
-        name = data.get('name', '').strip()
+        name = data.get("name", "").strip()
         if not name:
-            raise ValueError('客户名称不能为空')
-        db = BaseService.db()
-        existing = db.execute(
-            'SELECT id FROM customers WHERE name = ?', (name,)
-        ).fetchone()
+            raise ValueError("客户名称不能为空")
+        existing = CustomerRepository.find_by_name(name)
         if existing:
-            raise ValueError('客户名称已存在')
+            raise ValueError("客户名称已存在")
         with BaseService.transaction() as txn:
-            cur = txn.execute('''
-                INSERT INTO customers (name, contact, phone, email, address, remark)
-                VALUES (?,?,?,?,?,?)
-            ''', (name, data.get('contact', ''), data.get('phone', ''),
-                  data.get('email', ''), data.get('address', ''), data.get('remark', '')))
-            return cur.lastrowid
+            return CustomerRepository.insert({
+                "name": name,
+                "contact": data.get("contact", ""),
+                "phone": data.get("phone", ""),
+                "email": data.get("email", ""),
+                "address": data.get("address", ""),
+                "remark": data.get("remark", ""),
+            }, db=txn)
 
     @staticmethod
     def update_customer(cid, data):
         """更新客户。Raises ValueError on empty/missing name or duplicate."""
         db = BaseService.db()
-        if 'name' in data:
-            name = (data.get('name') or '').strip()
+        if "name" in data:
+            name = (data.get("name") or "").strip()
             if not name:
-                raise ValueError('客户名称不能为空')
-            existing = db.execute(
-                'SELECT id FROM customers WHERE name = ? AND id != ?', (name, cid)
-            ).fetchone()
+                raise ValueError("客户名称不能为空")
+            existing = CustomerRepository.find_by_name_excluding(name, cid, db=db)
             if existing:
-                raise ValueError('客户名称已存在')
-            data['name'] = name
+                raise ValueError("客户名称已存在")
+            data["name"] = name
 
         sets = []
         params = []
-        for field in ['name', 'contact', 'phone', 'email', 'address', 'remark']:
+        for field in ["name", "contact", "phone", "email", "address", "remark"]:
             if field in data:
-                sets.append(f'{field} = ?')
+                sets.append(f"{field} = ?")
                 params.append(data[field])
         if not sets:
-            raise ValueError('无更新内容')
+            raise ValueError("无更新内容")
 
-        sets.append('updated_at = datetime("now","localtime")')
-        name_changed = 'name' in data
+        name_changed = "name" in data
         with BaseService.transaction() as txn:
-            txn.execute(
-                f'UPDATE customers SET {", ".join(sets)} WHERE id = ?',
-                params + [cid]
-            )
+            CustomerRepository.update(cid, sets, params, db=txn)
             # P0: Cascade customer name update to orders.customer
             if name_changed:
-                new_name = data['name']
-                txn.execute(
-                    'UPDATE orders SET customer = ? WHERE customer_id = ?',
-                    (new_name, cid)
-                )
+                CustomerRepository.cascade_name_to_orders(cid, data["name"], db=txn)
 
     @staticmethod
     def delete_customer(cid):
         """删除客户。活跃订单关联的客户受 FK 保护无法删除；软删除订单自动解除关联。"""
         db = BaseService.db()
-        cust = db.execute('SELECT id FROM customers WHERE id = ?', (cid,)).fetchone()
+        cust = CustomerRepository.find_by_id(cid, db=db)
         if not cust:
-            raise ValueError('客户不存在')
+            raise ValueError("客户不存在")
         # 检查是否有活跃（未软删除）订单
-        active = db.execute(
-            'SELECT COUNT(*) FROM orders WHERE customer_id = ? AND deleted_at IS NULL', (cid,)
-        ).fetchone()[0]
+        active = CustomerRepository.count_active_orders(cid, db=db)
         if active > 0:
-            raise ValueError(f'无法删除：该客户有 {active} 个活跃订单（非软删除），请先处理订单')
+            # 获取前 5 个订单号用于错误提示
+            blocking = CustomerRepository.get_active_order_nos(cid, limit=5, db=db)
+            order_list = ", ".join(blocking) if blocking else str(active)
+            raise ValueError(f"无法删除：该客户有 {active} 个活跃订单（{order_list}...），请先处理订单")
         with BaseService.transaction() as txn:
             # 解除软删除订单的 customer_id 关联（保留 customer 字段以供审计）
-            txn.execute(
-                'UPDATE orders SET customer_id = NULL WHERE customer_id = ? AND deleted_at IS NOT NULL',
-                (cid,)
-            )
-            txn.execute('DELETE FROM customers WHERE id = ?', (cid,))
+            CustomerRepository.dissociate_soft_deleted_orders(cid, db=txn)
+            CustomerRepository.delete(cid, db=txn)
 
     @staticmethod
     def get_customer_orders(cid, page=1, limit=50):
         """获取客户的订单历史（含工序详情和 extra_fields 解析）。"""
         import json
         db = BaseService.db()
-        cust = db.execute('SELECT id FROM customers WHERE id = ?', (cid,)).fetchone()
+        cust = CustomerRepository.find_by_id(cid, db=db)
         if not cust:
-            raise ValueError('客户不存在')
-        total = db.execute(
-            'SELECT COUNT(*) FROM orders WHERE customer_id = ? AND deleted_at IS NULL',
-            (cid,)
-        ).fetchone()[0]
-        offset = (page - 1) * limit
-        rows = db.execute(
-            'SELECT o.*, pr.name as route_name FROM orders o'
-            ' LEFT JOIN process_routes pr ON o.route_id = pr.id'
-            ' WHERE o.customer_id = ? AND o.deleted_at IS NULL'
-            ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?',
-            (cid, limit, offset)
-        ).fetchall()
+            raise ValueError("客户不存在")
+        rows, total = CustomerRepository.get_orders(cid, page, limit, db=db)
 
         result = []
         for row in rows:
             o = dict(row)
             try:
-                o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
+                o["extra_fields"] = json.loads(o.get("extra_fields") or "{}")
             except Exception:
-                o['extra_fields'] = {}
-            procs = db.execute(
-                'SELECT op.*, p.name as process_name'
-                ' FROM order_processes op JOIN processes p ON op.process_id = p.id'
-                ' WHERE op.order_id = ? ORDER BY op.seq_order',
-                (o['id'],)
-            ).fetchall()
-            o['processes'] = [dict(p) for p in procs]
+                o["extra_fields"] = {}
+            procs = CustomerRepository.get_order_processes(o["id"], db=db)
+            o["processes"] = [dict(p) for p in procs]
             result.append(o)
-        return {'orders': result, 'total': total, 'page': page, 'limit': limit}
+        return {"orders": result, "total": total, "page": page, "limit": limit}

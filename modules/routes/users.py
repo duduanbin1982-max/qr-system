@@ -43,7 +43,7 @@ def create_user():
         audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
     except Exception:
         pass
-    return jsonify({'message': '添加成功', 'id': uid})
+    return jsonify({'message': '添加成功', 'id': uid, 'password': password if password else ''})
 
 
 @app.route('/api/users/<int:uid>', methods=['PUT'])

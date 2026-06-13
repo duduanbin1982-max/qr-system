@@ -176,7 +176,18 @@ export default {
           await api.updateUser(modalId.value, data)
           showToast('更新成功')
         } else {
-          await api.createUser(data)
+          const result = await api.createUser(data)
+          if (result.password) {
+            showModal.value = false
+            await load()
+            const pwMsg = '员工 ' + form.value.name + ' 创建成功！\n\n' +
+                '用户名: ' + form.value.username + '\n' +
+                '随机密码: ' + result.password + '\n\n' +
+                '请将密码告知员工，首次登录需修改密码。'
+            alert(pwMsg)
+            showToast(form.value.name + ' 已创建，密码 ' + result.password)
+            return
+          }
           showToast('创建成功')
         }
         showModal.value = false

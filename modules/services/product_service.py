@@ -1,4 +1,4 @@
-"""
+﻿"""
 qr-system — 产品管理 Service 层
 
 从 routes/products.py 提取全部业务逻辑。
@@ -7,61 +7,14 @@ qr-system — 产品管理 Service 层
 from datetime import datetime
 from modules.services import BaseService
 from modules.config import generate_product_code
+from modules.repositories.product_repository import ProductRepository
 
 
 # ============================================================
-# XLSX 解析工具（模块级，零依赖 zipfile + xml）
-# ============================================================
-import zipfile
-import xml.etree.ElementTree as ET
-
+# XLSX 解析  openpyxl
+import openpyxl
 
 MAX_IMPORT_ROWS = 5000
-
-def parse_xlsx(filepath):
-    """Parse .xlsx file, return [{col_letter: cell_value}, ...]. Max {MAX_IMPORT_ROWS} rows."""
-    rows = []
-    with zipfile.ZipFile(filepath, 'r') as z:
-        shared_strings = []
-        if 'xl/sharedStrings.xml' in z.namelist():
-            ss_tree = ET.parse(z.open('xl/sharedStrings.xml'))
-            ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-            for si in ss_tree.findall('.//s:si', ns):
-                text = ''.join(t.text or '' for t in si.findall('.//s:t', ns))
-                shared_strings.append(text)
-
-        sheet = ET.parse(z.open('xl/worksheets/sheet1.xml'))
-        for row_el in sheet.findall('.//s:row', ns):
-            row_data = {}
-            for cell in row_el.findall('s:c', ns):
-                ref = cell.get('r')
-                col_letter = ''.join(c for c in ref if c.isalpha())
-                cell_type = cell.get('t')
-                value_el = cell.find('s:v', ns)
-                if value_el is None or value_el.text is None:
-                    row_data[col_letter] = ''
-                elif cell_type == 's':
-                    idx = int(value_el.text)
-                    row_data[col_letter] = shared_strings[idx] if idx < len(shared_strings) else ''
-                elif cell_type == 'inlineStr':
-                    # Handle inline strings (WPS, LibreOffice exports)
-                    is_el = cell.find('s:is', ns)
-                    if is_el is not None:
-                        t_el = is_el.find('s:t', ns)
-                        row_data[col_letter] = t_el.text if t_el is not None and t_el.text else ''
-                    else:
-                        row_data[col_letter] = ''
-                elif cell_type == 'str':
-                    # Handle formula-result strings
-                    row_data[col_letter] = value_el.text
-                else:
-                    row_data[col_letter] = value_el.text
-            if row_data:
-                rows.append(row_data)
-                if len(rows) >= MAX_IMPORT_ROWS:
-                    break
-    return rows
-
 
 class ProductService:
     """产品管理业务逻辑。所有方法为静态方法，接受纯数据参数。"""
@@ -78,7 +31,6 @@ class ProductService:
         Returns:
             dict: {products: [...], total, page, limit}
         """
-        db = BaseService.db()
         where = 'deleted_at IS NULL'
         params = []
         if keyword:
@@ -87,27 +39,7 @@ class ProductService:
         if category and category in ('结构件', '机加工'):
             where += ' AND category = ?'
             params.append(category)
-        total = db.execute(
-            f'SELECT COUNT(*) FROM products WHERE {where}', params
-        ).fetchone()[0]
-        offset = (page - 1) * limit
-        rows = db.execute(
-            f'SELECT p.*,'
-            f' COALESCE(pa.attachment_count, 0) as attachment_count,'
-            f' pa_img.id as thumbnail_id'
-            f' FROM products p'
-            f' LEFT JOIN ('
-            f'  SELECT product_id, COUNT(*) as attachment_count'
-            f'  FROM product_attachments GROUP BY product_id'
-            f' ) pa ON pa.product_id = p.id'
-            f' LEFT JOIN ('
-            f'  SELECT product_id, MIN(id) as id'
-            f'  FROM product_attachments WHERE file_type LIKE "%image%"'
-            f'  GROUP BY product_id'
-            f' ) pa_img ON pa_img.product_id = p.id'
-            f' WHERE {where} ORDER BY p.id DESC LIMIT ? OFFSET ?',
-            params + [limit, offset]
-        ).fetchall()
+        rows, total = ProductRepository.list_with_attachments(where, params, page, limit)
         return {'products': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
 
     # ============================================================
@@ -117,22 +49,7 @@ class ProductService:
     @staticmethod
     def search_products(q='', limit=20):
         """快速搜索产品，返回 id/product_name/product_code/category。"""
-        db = BaseService.db()
-        if q:
-            rows = db.execute(
-                "SELECT id, product_name, product_code, category, model, spec, style, "
-                "upper_opening, plate_thickness, weight, price, route_id FROM products "
-                "WHERE deleted_at IS NULL AND (product_name LIKE ? OR product_code LIKE ?) "
-                "ORDER BY product_code LIMIT ?",
-                (f'%{q}%', f'%{q}%', limit)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT id, product_name, product_code, category, model, spec, style, "
-                "upper_opening, plate_thickness, weight, price, route_id FROM products "
-                "WHERE deleted_at IS NULL ORDER BY product_code LIMIT ?",
-                (limit,)
-            ).fetchall()
+        rows = ProductRepository.list_search(q, limit)
         return {'products': [dict(r) for r in rows]}
 
     # ============================================================
@@ -157,46 +74,43 @@ class ProductService:
         name = data.get('product_name', '').strip()
         if not name:
             raise ValueError('产品名称不能为空')
+        category = (data.get('category', '') or '').strip()
+        if category and category not in ('结构件', '机加工'):
+            raise ValueError(f'无效的产品分类: {category}，仅支持 结构件/机加工')
 
         model = data.get('model', '').strip()
         spec = data.get('spec', '')
         upper = data.get('upper_opening', '')
         thickness = data.get('plate_thickness', '')
         style = data.get('style', '')
-        product_code = generate_product_code(name, model, spec, upper, thickness, style)
+        product_code = generate_product_code(name, model, spec, upper, thickness, style, lower_opening=data.get('lower_opening', ''), category=category)
         # Auto-generate model from product_code when not provided
         if not model:
             model = product_code
 
         with BaseService.transaction() as db:
-            existing = db.execute(
-                'SELECT id, deleted_at FROM products WHERE product_code = ?', (product_code,)
-            ).fetchone()
+            existing = ProductRepository.find_by_code(product_code, db=db)
             if existing:
                 if existing['deleted_at']:
                     raise ValueError(f'产品编码重复：{product_code}，该产品已被删除，请先联系管理员恢复')
                 raise ValueError(f'产品编码重复：{product_code}，已有产品 ID={existing["id"]}')
 
-            cur = db.execute('''
-                INSERT INTO products (product_name, model, product_code, spec, style,
-                    upper_opening, plate_thickness, category, weight, price,
-                    description, route_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            ''', (
-                name,
-                model,
-                product_code,
-                data.get('spec', ''),
-                style,
-                data.get('upper_opening', ''),
-                data.get('plate_thickness', ''),
-                data.get('category', '结构件').strip() or '结构件',
-                float(data.get('weight') or 0),
-                float(data.get('price') or 0),
-                data.get('description', ''),
-                data.get('route_id') or None
-            ))
-            return cur.lastrowid, product_code
+            insert_data = {
+                'product_name': name,
+                'model': model,
+                'product_code': product_code,
+                'spec': data.get('spec', ''),
+                'style': style,
+                'upper_opening': data.get('upper_opening', ''),
+                'plate_thickness': data.get('plate_thickness', ''),
+                'category': data.get('category', '结构件').strip() or '结构件',
+                'weight': float(data.get('weight') or 0),
+                'price': float(data.get('price') or 0),
+                'description': data.get('description', ''),
+                'route_id': data.get('route_id') or None
+            }
+            pid = ProductRepository.insert(insert_data, db=db)
+            return pid, product_code
 
     # ============================================================
     # 更新
@@ -217,12 +131,7 @@ class ProductService:
         Raises:
             ValueError: 产品不存在、无更新内容、编码重复
         """
-        db = BaseService.db()
-        prod = db.execute('SELECT id, product_name, IFNULL(model,"") as model, '
-                          'IFNULL(spec,"") as spec, IFNULL(style,"") as style, '
-                          'IFNULL(upper_opening,"") as upper_opening, '
-                          'IFNULL(plate_thickness,"") as plate_thickness '
-                          'FROM products WHERE id = ?', (pid,)).fetchone()
+        prod = ProductRepository.find_with_fields(pid)
         if not prod:
             raise ValueError('产品不存在')
 
@@ -252,34 +161,24 @@ class ProductService:
             up = data.get('upper_opening', prod['upper_opening'])
             th = data.get('plate_thickness', prod['plate_thickness'])
             st = data.get('style', prod['style'] or '')
-            new_code = generate_product_code(nm, md, sp, up, th, st)
+            lo = data.get('lower_opening', prod.get('lower_opening', ''))
+            cat = data.get('category', prod.get('category', '结构件'))
+            new_code = generate_product_code(nm, md, sp, up, th, st, lower_opening=lo, category=cat)
 
         with BaseService.transaction() as txn:
             # 在事务内检查唯一性，消除 TOCTOU 竞态
             if new_code:
-                dup = txn.execute(
-                    'SELECT id FROM products WHERE product_code = ? AND id != ? AND deleted_at IS NULL',
-                    (new_code, pid)
-                ).fetchone()
+                dup = ProductRepository.find_by_code_exclude(new_code, pid, db=txn)
                 if dup:
                     raise ValueError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
 
-            txn.execute(
-                f'UPDATE products SET {", ".join(sets)} WHERE id = ?',
-                params + [pid]
-            )
+            ProductRepository.update(pid, sets, params, db=txn)
 
             # 如果关键字段变了，重新生成编码
             if new_code:
-                txn.execute(
-                    'UPDATE products SET product_code = ? WHERE id = ?',
-                    (new_code, pid)
-                )
+                ProductRepository.update_product_code(pid, new_code, db=txn)
 
-        pc_row = db.execute(
-            'SELECT product_code FROM products WHERE id = ?', (pid,)
-        ).fetchone()
-        return pc_row['product_code'] if pc_row else ''
+        return ProductRepository.get_product_code(pid)
 
     # ============================================================
     # 删除
@@ -293,22 +192,16 @@ class ProductService:
         Raises:
             ValueError: 产品不存在或被订单使用
         """
-        db = BaseService.db()
-        prod = db.execute(
-            'SELECT id, product_code FROM products WHERE id = ?', (pid,)
-        ).fetchone()
+        prod = ProductRepository.find_by_id(pid)
         if not prod:
             raise ValueError('产品不存在')
 
-        used = db.execute(
-            'SELECT COUNT(*) FROM orders WHERE product_code = ?',
-            (prod['product_code'],)
-        ).fetchone()[0]
+        used = ProductRepository.count_by_product_code_in_orders(prod['product_code'])
         if used > 0:
             raise ValueError(f'该产品已被 {used} 个订单使用，无法删除')
 
         with BaseService.transaction() as txn:
-            txn.execute("UPDATE products SET deleted_at = datetime('now','localtime') WHERE id = ?", (pid,))
+            ProductRepository.soft_delete(pid, db=txn)
 
     # ============================================================
     # Excel 批量导入
@@ -329,7 +222,20 @@ class ProductService:
             ValueError: 文件解析失败或无数据
         """
         try:
-            rows = parse_xlsx(filepath)
+            wb = openpyxl.load_workbook(filepath, read_only=True)
+            ws = wb.active
+            rows = []
+            for row in ws.iter_rows(min_row=1, values_only=False):
+                row_data = {}
+                for cell in row:
+                    if cell.value is not None:
+                        col_letter = cell.column_letter
+                        row_data[col_letter] = str(cell.value).strip() if cell.value else ''
+                if row_data:
+                    rows.append(row_data)
+                    if len(rows) > MAX_IMPORT_ROWS:
+                        break
+            wb.close()
         except Exception as e:
             raise ValueError(f'文件解析失败: {e}')
 
@@ -359,7 +265,6 @@ class ProductService:
         if 'product_name' not in col_map.values():
             raise ValueError('表头需包含「产品名称」列')
 
-        db = BaseService.db()
         success = 0
         skipped = 0
         errors = []
@@ -382,30 +287,31 @@ class ProductService:
                 upper = product_data.get('upper_opening', '')
                 thickness = product_data.get('plate_thickness', '')
                 style = product_data.get('style', '')
-                product_code = generate_product_code(name, model, spec, upper, thickness, style)
+                product_code = generate_product_code(name, model, spec, upper, thickness, style, lower_opening=product_data.get('lower_opening', ''), category=product_data.get('category', '结构件'))
                 # Auto-generate model from product_code when not provided
                 if not model:
                     model = product_code
 
-                existing = txn.execute(
-                    'SELECT id FROM products WHERE product_code = ?', (product_code,)
-                ).fetchone()
-                if existing:
+                if ProductRepository.exists_by_code(product_code, db=txn):
                     skipped += 1
                     errors.append(f'第{i}行：{product_code}({name})已存在，跳过')
                     continue
 
                 try:
-                    txn.execute(
-                        "INSERT INTO products (product_name, model, product_code, spec, style, "
-                        "upper_opening, plate_thickness, category, weight, price, description) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (name, model, product_code, spec, style, upper, thickness,
-                         product_data.get('category', '结构件') or '结构件',
-                         float(product_data.get('weight') or 0),
-                         float(product_data.get('price') or 0),
-                         product_data.get('description', ''))
-                    )
+                    ProductRepository.insert({
+                        'product_name': name,
+                        'model': model,
+                        'product_code': product_code,
+                        'spec': spec,
+                        'style': style,
+                        'upper_opening': upper,
+                        'lower_opening': product_data.get('lower_opening', ''),
+                        'plate_thickness': thickness,
+                        'category': product_data.get('category', '结构件') or '结构件',
+                        'weight': float(product_data.get('weight') or 0),
+                        'price': float(product_data.get('price') or 0),
+                        'description': product_data.get('description', ''),
+                    }, db=txn)
                     success += 1
                 except Exception as e:
                     skipped += 1
@@ -437,15 +343,7 @@ class ProductService:
     @staticmethod
     def list_attachments(product_id):
         """获取产品附件列表（含上传者姓名）。"""
-        db = BaseService.db()
-        rows = db.execute('''
-            SELECT a.id, a.product_id, a.file_name, a.file_type, a.file_size,
-                   a.created_at, u.name as uploaded_by_name
-            FROM product_attachments a
-            LEFT JOIN users u ON a.uploaded_by = u.id
-            WHERE a.product_id = ?
-            ORDER BY a.created_at DESC
-        ''', (product_id,)).fetchall()
+        rows = ProductRepository.list_attachments(product_id)
         return {'attachments': [dict(r) for r in rows]}
 
     # ============================================================
@@ -463,11 +361,10 @@ class ProductService:
         if len(file_data) > 10 * 1024 * 1024:
             raise ValueError('文件大小超过10MB限制')
         with BaseService.transaction() as db:
-            db.execute('''
-                INSERT INTO product_attachments
-                    (product_id, file_name, file_type, file_size, file_data, uploaded_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (product_id, file_name, file_type, len(file_data), file_data, uploaded_by))
+            ProductRepository.insert_attachment(
+                product_id, file_name, file_type, len(file_data), file_data, uploaded_by,
+                db=db
+            )
 
     # ============================================================
     # 附件 — 获取文件数据
@@ -481,10 +378,7 @@ class ProductService:
         Returns:
             sqlite3.Row or None
         """
-        db = BaseService.db()
-        return db.execute(
-            'SELECT * FROM product_attachments WHERE id = ?', (attachment_id,)
-        ).fetchone()
+        return ProductRepository.find_attachment(attachment_id)
 
     # ============================================================
     # 附件 — 删除
@@ -501,14 +395,9 @@ class ProductService:
         Raises:
             ValueError: 附件不存在
         """
-        db = BaseService.db()
-        row = db.execute(
-            'SELECT * FROM product_attachments WHERE id = ?', (attachment_id,)
-        ).fetchone()
+        row = ProductRepository.find_attachment(attachment_id)
         if not row:
             raise ValueError('附件不存在')
         with BaseService.transaction() as txn:
-            txn.execute(
-                'DELETE FROM product_attachments WHERE id = ?', (attachment_id,)
-            )
+            ProductRepository.delete_attachment(attachment_id, db=txn)
         return row

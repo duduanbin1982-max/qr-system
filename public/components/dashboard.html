@@ -117,7 +117,7 @@
       <!-- 快捷操作 -->
       <div class="section-title">🚀 快捷操作</div>
       <div class="quick-actions">
-        <div class="qa-item" v-for="q in quickActions" :key="q.page" @click="navigate(q.page)">
+        <div class="qa-item" v-for="q in quickActions" :key="q.page" @click="goAction(q)">
           <div class="qa-icon">{{ q.icon }}</div>
           <div class="qa-text">{{ q.text }}</div>
           <div class="qa-desc">{{ q.desc }}</div>

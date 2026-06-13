@@ -1,7 +1,7 @@
 // MaterialList Component — 物料管理
 import { ref, onMounted, computed } from '../../vendor/vue.esm.js'
-import { api } from '../../api.js?v=61'
-import { showToast } from '../../store.js?v=61'
+import { api } from '../../api.js?v=76'
+import { showToast } from '../../store.js?v=76'
 import { can } from '../../auth.js'
 
 export default {
@@ -20,7 +20,7 @@ export default {
     const showSupplierForm = ref(false)
     const supplierForm = ref({ name: '', contact: '', phone: '' })
 
-    const form = ref({ name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', remark: '' })
+    const form = ref({ name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' })
     const stockForm = ref({ type: 'in', quantity: 0, remark: '', operator_name: '' })
 
     // Consumption state
@@ -31,11 +31,30 @@ export default {
     const orderDropdown = ref(false)
 
     const lowStock = computed(() => materials.value.filter(m => m.quantity <= (m.safe_stock || 0)))
+    const filteredMaterials = computed(() => {
+      if (!searchText.value) return materials.value
+      const q = searchText.value.toLowerCase()
+      return materials.value.filter(m =>
+        (m.name || '').toLowerCase().includes(q) ||
+        (m.spec || '').toLowerCase().includes(q) ||
+        (m.location || '').toLowerCase().includes(q)
+      )
+    })
 
     // RBAC
-    const canEdit   = computed(() => can('materials:edit'))
-    const canDelete = computed(() => can('materials:delete'))
-    const canCreate = computed(() => can('materials:create'))
+    const canEdit   = computed(() => can('materials:manage'))
+    const canDelete = computed(() => can('materials:manage'))
+    const canCreate = computed(() => can('materials:manage'))
+
+    // Dialog low stock warning computed properties
+    const stockGap = computed(() => (form.value.quantity || 0) - (form.value.safe_stock || 0))
+    const stockStatus = computed(() => {
+        const gap = stockGap.value
+        if (gap > 0) return { icon: 'passed', cls: 'stock-ok', text: 'Stock OK' }
+        if (gap === 0) return { icon: 'warn', cls: 'stock-warn', text: 'Stock tight' }
+        return { icon: 'danger', cls: 'stock-danger', text: 'Below safety by ' + Math.abs(gap) }
+    })
+    const showStockWarning = computed(() => editing.value && stockGap.value < 0)
 
     async function load() {
       loading.value = true
@@ -48,21 +67,33 @@ export default {
 
     function openCreate() {
       editing.value = null
-      form.value = { name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, remark: '' }
+      form.value = { name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' }
       showForm.value = true
     }
 
     function openEdit(m) {
       editing.value = m.id
-      form.value = { ...m }
+      form.value = (({ supplier_name, ...rest }) => {
+            const f = { ...rest }
+            if (f.supplier_id === '' || f.supplier_id === 0) f.supplier_id = null
+            return f
+        })(m)
       showForm.value = true
     }
 
     async function save() {
       if (!form.value.name.trim()) { showToast('名称必填', 'error'); return }
       try {
-        if (editing.value) await api.put('/api/materials/' + editing.value, form.value)
-        else await api.post('/api/materials', form.value)
+        const payload = { ...form.value }
+        // Normalize all numeric fields
+        for (const k of ['quantity', 'unit_price', 'safe_stock']) {
+            if (payload[k] == null || payload[k] === '' || isNaN(payload[k])) payload[k] = 0
+        }
+        // Normalize supplier_id
+        if (payload.supplier_id === '' || payload.supplier_id === 0 || payload.supplier_id == null) payload.supplier_id = null
+        console.log('SAVE_DEBUG: payload=' + JSON.stringify(payload) + ' editing=' + editing.value)
+        if (editing.value) await api.put('/api/materials/' + editing.value, payload)
+        else await api.post('/api/materials', payload)
         showForm.value = false
         await load()
         showToast(editing.value ? '已更新' : '已创建')
@@ -118,7 +149,7 @@ export default {
       if (!orderSearch.value) { orderResults.value = []; orderDropdown.value = false; return }
       try {
         const r = await api.get('/api/orders?keyword=' + encodeURIComponent(orderSearch.value) + '&limit=8')
-        if (r.ok) { orderResults.value = r.orders || []; orderDropdown.value = orderResults.value.length > 0 }
+        orderResults.value = r.orders || []; orderDropdown.value = orderResults.value.length > 0
       } catch (e) {}
     }
 
@@ -133,18 +164,20 @@ export default {
     async function doConsume() {
       if (consumeForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
       try {
-        const r = await api.post('/api/materials/' + selectedMaterial.value.id + '/consumptions', consumeForm.value)
-        if (r.ok) { showToast('消耗已记录'); openConsume(selectedMaterial.value); await load() }
-        else showToast(r.error || '失败', 'error')
+        await api.post('/api/materials/' + selectedMaterial.value.id + '/consumptions', consumeForm.value)
+        showToast('消耗已记录')
+        openConsume(selectedMaterial.value)
+        await load()
       } catch (e) { showToast('操作失败', 'error') }
     }
 
     async function undoConsume(c) {
       if (!confirm('撤销消耗将恢复库存，确定？')) return
       try {
-        const r = await api.del('/api/materials/consumptions/' + c.id)
-        if (r.ok) { showToast('已撤销'); openConsume(selectedMaterial.value); await load() }
-        else showToast(r.error || '失败', 'error')
+        await api.del('/api/materials/consumptions/' + c.id)
+        showToast('已撤销')
+        openConsume(selectedMaterial.value)
+        await load()
       } catch (e) { showToast('操作失败', 'error') }
     }
 
@@ -173,6 +206,15 @@ export default {
       } catch (e) { showToast(e.message || '添加失败', 'error') }
     }
 
+    async function deleteSupplier(s) {
+      if (!confirm('确定删除供应商「' + s.name + '」？如有物料关联将无法删除。')) return
+      try {
+        await api.del('/api/suppliers/' + s.id)
+        await loadSuppliers()
+        showToast('供应商已删除')
+      } catch (e) { showToast(e.message || '删除失败', 'error') }
+    }
+
     onMounted(() => { load(); loadSuppliers() })
 
     return {
@@ -181,8 +223,8 @@ export default {
       consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
       openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
       openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
-      showSupplierForm, supplierForm, openSupplierAdd, addSupplier,
-      canEdit, canDelete, canCreate,
+      showSupplierForm, supplierForm, openSupplierAdd, addSupplier, deleteSupplier,
+      canEdit, canDelete, canCreate, filteredMaterials, stockGap, stockStatus, showStockWarning,
     }
   }
 }

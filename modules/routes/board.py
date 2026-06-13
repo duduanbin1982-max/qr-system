@@ -1,184 +1,44 @@
-"""
-qr-system — 数据看板路由 (Board)
-供车间大屏公开拉取生产数据（无需认证）
-从 dashboard.py 拆分，独立模块
-"""
+"""qr-system - Board Routes (Refactored)"""
 from datetime import datetime
 from flask import request, jsonify
-
 from modules.app import app
 from modules.cache_utils import ttl_cache
-from modules.db import get_db, get_setting
+from modules.db import get_setting
+from modules.services.board_service import BoardService
 
-# Board endpoint (production overview dashboard) — 公开端点，供车间大屏无需认证拉取数据
+
 @app.route('/api/dashboard/board', methods=['GET'])
-@ttl_cache(30)
 def dashboard_board():
-    # P7-3: Optional board token authentication
     board_token = get_setting('board_token', '')
-    if board_token:
+    has_cookie = request.cookies.get('qr_token', '')
+    if board_token and not has_cookie:
         provided = request.args.get('token', '')
         if provided != board_token:
             return jsonify({'error': 'Unauthorized'}), 401
 
-    db = get_db()
-    today = datetime.now().strftime('%Y-%m-%d')
+    category = request.args.get('category', '').strip()
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    category = request.args.get('category', '').strip()
-    cat_filter = ''
-    cat_params = []
-    if category:
-        cat_filter = ' AND p.category = ?'
-        cat_params = [category]
-
-    total_orders = db.execute(f'''
-        SELECT COUNT(DISTINCT o.id) FROM orders o
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE o.deleted_at IS NULL{cat_filter}
-    ''', cat_params).fetchone()[0]
-    producing_orders = db.execute(f'''
-        SELECT COUNT(DISTINCT o.id) FROM orders o
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE o.status = 'producing' AND o.deleted_at IS NULL{cat_filter}
-    ''', cat_params).fetchone()[0]
-    completed_orders = db.execute(f'''
-        SELECT COUNT(DISTINCT o.id) FROM orders o
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE o.status = 'completed' AND o.deleted_at IS NULL{cat_filter}
-    ''', cat_params).fetchone()[0]
-
-    today_output = db.execute(f'''
-        SELECT COALESCE(SUM(wr.quantity),0) FROM work_records wr
-        JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE DATE(wr.created_at) = ? AND wr.type = 'normal' AND wr.status = 'approved'{cat_filter}
-    ''', [today] + cat_params).fetchone()[0]
-    today_reports = db.execute(f'''
-        SELECT COUNT(*) FROM work_records wr
-        JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE DATE(wr.created_at) = ? AND wr.status = 'approved'{cat_filter}
-    ''', [today] + cat_params).fetchone()[0]
-    today_rework = db.execute(f'''
-        SELECT COALESCE(SUM(rr.quantity),0) FROM rework_records rr
-        JOIN orders o ON rr.order_id = o.id AND o.deleted_at IS NULL
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE DATE(rr.created_at) = ?{cat_filter}
-    ''', [today] + cat_params).fetchone()[0]
-    today_scrap = db.execute(f'''
-        SELECT COALESCE(SUM(sr.quantity),0) FROM scrap_records sr
-        JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE DATE(sr.created_at) = ?{cat_filter}
-    ''', [today] + cat_params).fetchone()[0]
-
-    order_rows = db.execute(f'''
-        SELECT o.id, o.order_no, o.product_name, o.product_code,
-               COALESCE(c.name, o.customer) as customer,
-               o.quantity, o.completed, o.status, o.plan_start, o.plan_end,
-               CASE WHEN o.quantity > 0 THEN CAST(CAST(o.completed AS FLOAT) / o.quantity * 100 AS INTEGER) ELSE 0 END as progress_percent,
-               p.category as product_category
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE o.status IN ('producing', 'pending') AND o.deleted_at IS NULL{cat_filter}
-        ORDER BY o.status = 'producing' DESC, progress_percent, o.created_at DESC
-        LIMIT 50
-    ''', cat_params).fetchall()
-
-    overdue_rows = db.execute(f'''
-        SELECT o.id, o.order_no, o.product_name, o.plan_end,
-               CAST(julianday(?) - julianday(o.plan_end) AS INTEGER) as overdue_days
-        FROM orders o
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE o.plan_end < ? AND o.status != 'completed' AND o.deleted_at IS NULL{cat_filter}
-        ORDER BY o.plan_end ASC
-        LIMIT 20
-    ''', [today] + [today] + cat_params).fetchall()
-
-    proc_cat_filter = ' AND pr.category = ?' if category else ''
-    proc_cat_params = [category] if category else []
-    process_rows = db.execute(f'''
-        SELECT pr.id, pr.name, pr.category,
-               COALESCE(SUM(wr.quantity), 0) as output
-        FROM processes pr
-        LEFT JOIN work_records wr ON pr.id = wr.process_id
-            AND DATE(wr.created_at) = ?
-            AND wr.status = 'approved'
-            AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
-        WHERE 1=1{proc_cat_filter}
-        GROUP BY pr.id, pr.name, pr.category
-        HAVING output > 0
-        ORDER BY output DESC
-        LIMIT 15
-    ''', [today] + proc_cat_params).fetchall()
-    _scrap_rows = db.execute(
-        'SELECT sr.process_id, SUM(sr.quantity) as s FROM scrap_records sr '
-        'JOIN orders o ON sr.order_id = o.id AND o.deleted_at IS NULL '
-        'WHERE DATE(sr.created_at)=? GROUP BY sr.process_id', (today,)
-    ).fetchall()
-    scrap_by_proc = {r['process_id']: r['s'] for r in _scrap_rows}
-    _rework_rows = db.execute(
-        'SELECT rr.process_id, SUM(rr.quantity) as r FROM rework_records rr '
-        'JOIN orders o ON rr.order_id = o.id AND o.deleted_at IS NULL '
-        'WHERE DATE(rr.created_at)=? GROUP BY rr.process_id', (today,)
-    ).fetchall()
-    rework_by_proc = {r['process_id']: r['r'] for r in _rework_rows}
-    process_rows = [dict(r) for r in process_rows]
-    for p in process_rows:
-        p['scrap'] = scrap_by_proc.get(p['id'], 0)
-        p['rework'] = rework_by_proc.get(p['id'], 0)
-
-    worker_rows = db.execute(f'''
-        SELECT u.id, u.name, u.employee_no,
-               COUNT(wr.id) as report_count,
-               COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output,
-               COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap,
-               COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework
-        FROM users u
-        LEFT JOIN work_records wr ON u.id = wr.user_id
-            AND DATE(wr.created_at) = ?
-            AND wr.status = 'approved'
-            AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)
-        LEFT JOIN orders o ON wr.order_id = o.id
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE u.status = 'active'{cat_filter}
-        GROUP BY u.id, u.name, u.employee_no
-        HAVING report_count > 0
-        ORDER BY output DESC
-        LIMIT 20
-    ''', [today] + cat_params).fetchall()
-
-    recent_rows = db.execute(f'''
-        SELECT wr.id, wr.quantity, wr.type, wr.created_at,
-               u.name as worker_name, pr.name as process_name, o.order_no
-        FROM work_records wr
-        LEFT JOIN users u ON wr.user_id = u.id
-        LEFT JOIN processes pr ON wr.process_id = pr.id
-        LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL
-        LEFT JOIN products p ON o.product_code = p.product_code
-        WHERE 1=1{cat_filter}
-        ORDER BY wr.id DESC
-        LIMIT 10
-    ''', cat_params).fetchall()
+    data = BoardService.get_board_data(category)
 
     return jsonify({
+        'now': now_str,
+        'update_time': now_str,
         'stats': {
-            'total_orders': total_orders,
-            'producing_orders': producing_orders,
-            'completed_orders': completed_orders
+            'total_orders': data['total_orders'],
+            'producing_orders': data['producing_orders'],
+            'completed_orders': data['completed_orders'],
         },
         'today': {
-            'today_output': today_output,
-            'today_reports': today_reports,
-            'today_rework': today_rework,
-            'today_scrap': today_scrap
+            'today_output': data['today_output'],
+            'today_scrap': data['today_scrap'],
+            'today_reports': data.get('today_reports', 0),
+            'today_rework': data.get('today_rework', 0),
         },
-        'orders': [dict(r) for r in order_rows],
-        'overdue_orders': [dict(r) for r in overdue_rows],
-        'process_stats': process_rows,
-        'worker_stats': [dict(r) for r in worker_rows],
-        'recent_reports': [dict(r) for r in recent_rows],
-        'update_time': now_str
+        'orders': data['orders_in_progress'],
+        'overdue_orders': data.get('overdue_orders', []),
+        'process_stats': data['process_efficiency'],
+        'worker_stats': data.get('worker_stats', []),
+        'recent_reports': data['recent_work'],
+        'monthly_completion': data['monthly_completion'],
     })

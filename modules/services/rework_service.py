@@ -46,21 +46,25 @@ class ReworkService:
                 'total': total, 'page': page, 'per_page': per_page}
 
     @staticmethod
+    @staticmethod
     def get_stats():
         db = BaseService.db()
         today = datetime.now().strftime('%Y-%m-%d')
-        pending = db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(quantity),0) FROM rework_records WHERE status='pending'").fetchone()
-        today_total = db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(quantity),0) FROM rework_records WHERE DATE(created_at)=?", (today,)).fetchone()
-        today_done = db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(quantity),0) FROM rework_records WHERE DATE(completed_at)=?", (today,)).fetchone()
+        row = db.execute('''
+            SELECT
+                COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) as pending_count,
+                COALESCE(SUM(CASE WHEN status='pending' THEN quantity ELSE 0 END),0) as pending_qty,
+                COALESCE(SUM(CASE WHEN DATE(created_at)=? THEN 1 ELSE 0 END),0) as today_count,
+                COALESCE(SUM(CASE WHEN DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_qty,
+                COALESCE(SUM(CASE WHEN DATE(completed_at)=? THEN 1 ELSE 0 END),0) as today_done,
+                COALESCE(SUM(CASE WHEN DATE(completed_at)=? THEN quantity ELSE 0 END),0) as today_done_qty
+            FROM rework_records
+        ''', (today, today, today, today)).fetchone()
         return {'ok': True,
-                'pending_count': pending[0], 'pending_qty': pending[1] or 0,
-                'today_count': today_total[0], 'today_qty': today_total[1] or 0,
-                'today_done': today_done[0], 'today_done_qty': today_done[1] or 0}
+                'pending_count': row['pending_count'], 'pending_qty': row['pending_qty'],
+                'today_count': row['today_count'], 'today_qty': row['today_qty'],
+                'today_done': row['today_done'], 'today_done_qty': row['today_done_qty']}
 
-    @staticmethod
     def update_rework(rework_id, reason):
         db = BaseService.db()
         rw = db.execute('SELECT * FROM rework_records WHERE id = ?', (rework_id,)).fetchone()

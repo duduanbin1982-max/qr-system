@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>生产进度看板</title>
     <script src="vue3.global.prod.js"></script>
+    <script src="board-common.js"></script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body {
@@ -298,7 +299,7 @@
                                         <td class="order-no">{{ order.order_no }}</td>
                                         <td>
                                             <div>{{ order.product_name || '--' }}</div>
-                                            <div class="order-customer">{{ order.customer || '--' }}</div>
+                                            <div class="order-customer">{{ order.customer_name || '--' }}</div>
                                         </td>
                                         <td>
                                             <span style="font-weight:600;color:#a855f7">{{ order.completed }}</span>
@@ -326,7 +327,7 @@
                                 <tbody>
                                     <tr v-for="order in scrollList" :key="'dup-'+order.id">
                                         <td class="order-no">{{ order.order_no }}</td>
-                                        <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer || '--' }}</div></td>
+                                        <td><div>{{ order.product_name || '--' }}</div><div class="order-customer">{{ order.customer_name || '--' }}</div></td>
                                         <td><span style="font-weight:600;color:#a855f7">{{ order.completed }}</span><span style="color:rgba(255,255,255,0.3)">/</span><span>{{ order.quantity }}</span></td>
                                         <td><div class="progress-bar"><div class="progress-fill" :class="order.status" :style="{ width: (order.progress_percent || 0) + '%' }"></div></div><div class="progress-text">{{ order.progress_percent || 0 }}%</div></td>
                                         <td><span style="display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-1)"><span class="status-badge" :class="order.status">{{ statusText[order.status] }}</span><span v-if="isOverdue(order)" class="overdue-tag">超期</span></span></td>
@@ -347,9 +348,9 @@
                         <div v-if="workerStats.length > 0">
                             <div class="worker-item" v-for="(w, idx) in workerStats" :key="w.name">
                                 <div class="worker-rank" :class="'rank-'+(idx+1)">{{ idx+1 }}</div>
-                                <div class="worker-avatar" :style="{background: avatarColor(w.name)}">{{ w.name[0] }}</div>
+                                <div class="worker-avatar" :style="{background: avatarColor(w.worker_name || w.name)}">{{ (w.worker_name || w.name)[0] }}</div>
                                 <div class="worker-info">
-                                    <div class="worker-name">{{ w.name }}</div>
+                                    <div class="worker-name">{{ w.worker_name || w.name }}</div>
                                     <div class="worker-meta">
                                         报工{{ w.report_count || 0 }}次
                                         <span v-if="w.scrap > 0" style="color:var(--danger)"> · 报废{{ w.scrap }}</span>
@@ -411,12 +412,6 @@
     </div>
     
     <script nonce="{$ nonce $}">
-        const COLOR_PALETTE = [
-            'var(--info)', '#a855f7', 'var(--success)', 'var(--warning)', 'var(--danger)',
-            '#f1c40f', '#1dd1a1', '#7c3aed', '#ff6b9d', '#54a0ff',
-            '#5f27cd', '#01a3a4', '#e66767', '#f8a5c2', '#63cdda'
-        ];
-        
         const { createApp } = Vue;
         
         createApp({
@@ -427,7 +422,6 @@
                     stats: {},
                     today: {},
                     orders: [],
-                    completedOrders: [],
                     overdueOrders: [],
                     processStats: [],
                     workerStats: [],
@@ -436,7 +430,7 @@
                     maxProcessOutput: 1,
                     maxWorkerOutput: 1,
                     timer: null,
-                    statusText: { pending: '待生产', producing: '生产中', completed: '已完成' }
+                    statusText: BoardUtils.statusMap()
                 };
             },
             computed: {
@@ -449,7 +443,7 @@
                 }
             },
             mounted() {
-                this.updateTime = new Date().toLocaleString('zh-CN');
+                this.updateTime = BoardUtils.tickFull();
                 this.updateClock();
                 this.loadData();
                 this.timer = setInterval(() => this.updateClock(), 1000);
@@ -460,12 +454,7 @@
             },
             methods: {
                 updateClock() {
-                    const now = new Date();
-                    this.currentTime = now.toLocaleString('zh-CN', {
-                        year:'numeric', month:'2-digit', day:'2-digit',
-                        hour:'2-digit', minute:'2-digit', second:'2-digit',
-                        hour12: false
-                    });
+                    this.currentTime = BoardUtils.tickFull();
                 },
                 switchCategory(cat) {
                     this.boardCategory = cat;
@@ -473,28 +462,20 @@
                 },
                 async loadData() {
                     try {
-                        let url = '/api/dashboard/board';
-                        if (this.boardCategory) url += '?category=' + encodeURIComponent(this.boardCategory);
-                        const res = await fetch(url);
-                        const data = await res.json();
-                        
-                        this.stats = data.stats || {};
-                        this.today = data.today || {};
-                        this.orders = data.orders || [];
-                        this.completedOrders = data.completed_orders || [];
-                        this.overdueOrders = data.overdue_orders || [];
-                        this.processStats = data.process_stats || [];
-                        this.workerStats = data.worker_stats || [];
-                        this.recentReports = data.recent_reports || [];
-                        this.updateTime = data.update_time || '';
-                        
-                        const maxP = Math.max(...this.processStats.map(p => p.output || 0), 1);
-                        this.maxProcessOutput = maxP;
-                        const maxW = Math.max(...this.workerStats.map(w => w.output || 0), 1);
-                        this.maxWorkerOutput = maxW;
-                        
+                        const data = await BoardAPI.fetchData(this.boardCategory);
+                        this.stats = data.stats;
+                        this.today = data.today;
+                        this.orders = data.orders;
+                        this.overdueOrders = data.overdue_orders;
+                        this.processStats = data.process_stats;
+                        this.workerStats = data.worker_stats;
+                        this.recentReports = data.recent_reports;
+                        this.updateTime = data.update_time;
+
+                        this.maxProcessOutput = Math.max(...this.processStats.map(p => p.output || 0), 1);
+                        this.maxWorkerOutput = Math.max(...this.workerStats.map(w => w.output || 0), 1);
                     } catch (err) {
-                        console.error('加载看板数据失败:', err);
+                        console.error('Failed to load board data:', err);
                     }
                 },
                 getProcessPercent(item) {
@@ -515,19 +496,13 @@
                         : 'linear-gradient(90deg, var(--info), #0090ff)';
                 },
                 avatarColor(name) {
-                    if (!name) return 'var(--info)';
-                    let hash = 0;
-                    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-                    return COLOR_PALETTE[Math.abs(hash) % COLOR_PALETTE.length];
+                    return BoardUtils.avColor(name);
                 },
                 isOverdue(order) {
-                    if (!order.plan_end) return false;
-                    return order.plan_end < new Date().toISOString().slice(0,10);
+                    return BoardUtils.isOverdue(order);
                 },
                 formatTime(timeStr) {
-                    if (!timeStr) return '';
-                    const d = new Date(timeStr);
-                    return d.toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+                    return BoardUtils.fmt(timeStr);
                 }
             }
         }).mount('#app');

@@ -3,7 +3,7 @@ import { ref, computed } from '../../vendor/vue.esm.js'
 
 import OrderList      from '../orders/OrderList.js'
 import CustomerList   from '../customers/CustomerList.js'
-import MaterialList   from '../materials/MaterialList.js'
+import MaterialList   from '../materials/MaterialList.js?v=75'
 import TracePage      from '../trace/TracePage.js'
 import ApprovalPage   from '../approvals/ApprovalPage.js'
 import GanttChart     from '../schedule/GanttChart.js'

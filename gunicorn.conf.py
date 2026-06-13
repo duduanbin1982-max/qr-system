@@ -28,14 +28,3 @@ def on_starting(server):
     os.chdir('/home/dubin/qr-system')
     from modules.db import init_db
     init_db()
-    # Remove incorrect UNIQUE constraint on products.model
-    try:
-        import sqlite3
-        db = sqlite3.connect('data/production.db')
-        db.execute('DROP INDEX IF EXISTS idx_products_model')
-        db.commit()
-        db.close()
-        server.log.info('Removed UNIQUE constraint on products.model')
-    except Exception as e:
-        server.log.warning(f'Failed to drop idx_products_model: {e}')
-    server.log.info('Database initialized')

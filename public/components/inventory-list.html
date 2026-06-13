@@ -97,7 +97,7 @@
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal" class="modal-overlay" >
       <div class="modal" style="max-width:550px">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑库存' : '新增库存' }}</span>
@@ -127,7 +127,7 @@
     </div>
 
     <!-- 出入库模态框 -->
-    <div v-if="showMoveModal" class="modal-overlay" @click.self="showMoveModal=false">
+    <div v-if="showMoveModal" class="modal-overlay" >
       <div class="modal" style="max-width:400px">
         <div class="modal-header">
           <span>{{ moveType === 'in' ? '📥 入库' : '📤 出库' }} — {{ moveTarget?.product_model }}</span>
@@ -150,7 +150,7 @@
     </div>
 
     <!-- 流水日志 -->
-    <div v-if="showLogs" class="modal-overlay" @click.self="showLogs=false">
+    <div v-if="showLogs" class="modal-overlay" >
       <div class="modal" style="max-width:750px">
         <div class="modal-header">
           <span>📋 库存流水</span>

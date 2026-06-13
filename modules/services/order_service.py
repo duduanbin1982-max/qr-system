@@ -436,6 +436,70 @@ class OrderService:
     # ============================================================
 
     @staticmethod
+    def get_order(oid):
+        """获取单个订单"""
+        db = BaseService.db()
+        return db.execute(
+            "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (oid,)
+        ).fetchone()
+
+    @staticmethod
+    def log_remark_history(oid, old_remark, new_remark, user_id, user_name):
+        """记录备注变更历史"""
+        db = BaseService.db()
+        db.execute(
+            "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
+            "VALUES (?,?,?,?,?)",
+            (oid, old_remark, new_remark, user_id, user_name)
+        )
+        db.commit()
+
+    @staticmethod
+    def soft_delete_order(oid, user_id):
+        """软删除订单（适配器）"""
+        return OrderService.delete_order(oid, deleted_by=user_id)
+
+    @staticmethod
+    def list_trash(page=1, limit=20):
+        """回收站列表（适配器）"""
+        return OrderService.trash_orders(page, limit)
+
+    @staticmethod
+    def get_workpiece_progress(order_id):
+        """获取工件报工进度"""
+        db = BaseService.db()
+        order = db.execute(
+            "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
+        ).fetchone()
+        if not order:
+            raise ValueError("订单不存在")
+        items = db.execute(
+            "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
+        ).fetchall()
+        processes = db.execute(
+            "SELECT op.*, p.name as process_name FROM order_processes op "
+            "JOIN processes p ON p.id = op.process_id WHERE op.order_id = ? ORDER BY op.seq_order",
+            (order_id,)
+        ).fetchall()
+        work_records = db.execute(
+            "SELECT wr.serial_no, wr.process_id, wr.status, wr.created_at "
+            "FROM work_records wr WHERE wr.order_id = ? AND wr.serial_no IS NOT NULL AND wr.serial_no != ''",
+            (order_id,)
+        ).fetchall()
+        record_map = {}
+        for r in work_records:
+            sn = r["serial_no"]
+            if sn not in record_map:
+                record_map[sn] = {}
+            record_map[sn][r["process_id"]] = {"status": r["status"], "completed_at": r["created_at"]}
+        return {
+            "order": dict(order),
+            "items": [dict(i) for i in items],
+            "processes": [dict(p) for p in processes],
+            "record_map": record_map,
+        }
+
+    @staticmethod
     def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE):
         """分页查询回收站订单。"""
         db = BaseService.db()
@@ -502,6 +566,8 @@ class OrderService:
             txn.execute('DELETE FROM quality_inspections WHERE order_id = ?', (oid,))
             txn.execute('DELETE FROM order_processes WHERE order_id = ?', (oid,))
             txn.execute('DELETE FROM material_consumptions WHERE order_id = ?', (oid,))
+            txn.execute('DELETE FROM product_items WHERE order_id = ?', (oid,))
+            txn.execute('DELETE FROM order_remark_history WHERE order_id = ?', (oid,))
             txn.execute('DELETE FROM orders WHERE id = ?', (oid,))
 
         return existing['order_no']

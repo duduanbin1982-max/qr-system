@@ -110,21 +110,10 @@ def update_process(pid):
 @check_permission('processes:view')
 def process_impact(pid):
     """查询删除工序的影响范围（不实际删除）。"""
-    from modules.db import get_db
-    db = get_db()
-    existing = db.execute('SELECT id, name FROM processes WHERE id = ?', (pid,)).fetchone()
-    if not existing:
-        return jsonify({'error': '工序不存在'}), 404
-    # Single UNION ALL query instead of 9 separate SELECT COUNT(*)
-    union_parts = []
-    for tbl in ['work_records','scrap_records','rework_records',
-                'quality_inspections','process_prices','process_route_items',
-                'order_processes','position_processes','material_consumptions']:
-        union_parts.append(f"SELECT '{tbl}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
-    union_sql = ' UNION ALL '.join(union_parts)
-    rows = db.execute(union_sql, [pid] * 9).fetchall()
-    impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}
-    return jsonify({'process_id': pid, 'name': existing['name'], 'impact': impact})
+    try:
+        return jsonify(ProcessService.check_impact(pid))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
 
 
 @app.route('/api/processes/<int:pid>', methods=['DELETE'])

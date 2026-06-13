@@ -28,6 +28,7 @@ export default {
     })
     const editPrices = reactive({}) // {process_id: unit_price}
     const saving = ref(false)
+    const switching = ref(false)
 
     // 复制
 
@@ -221,6 +222,8 @@ export default {
     }
 
     async function switchCat(cat) {
+      if (switching.value) return
+      switching.value = true
       if (pricingCategory.value === cat && allRoutes.value.length > 0) return
       pricingCategory.value = cat
       loading.value = true
@@ -228,6 +231,7 @@ export default {
         loadAllRoutes(cat === 'all' ? null : cat),
         loadMatrix()
       ])
+      switching.value = false
     }
 
     onMounted(async () => {

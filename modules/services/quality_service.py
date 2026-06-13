@@ -54,6 +54,19 @@ class QualityService:
         return {'ok': True, 'items': [dict(r) for r in rows], 'total': total, 'page': page, 'per_page': per_page}
 
     @staticmethod
+    def check_order_exists(order_id):
+        """校验订单存在且未被软删除。Raises ValueError on failure."""
+        db = BaseService.db()
+        order = db.execute(
+            'SELECT id, deleted_at FROM orders WHERE id = ?', (order_id,)
+        ).fetchone()
+        if not order:
+            raise ValueError('订单不存在')
+        if order['deleted_at'] is not None:
+            raise ValueError('订单已删除，无法添加检验记录')
+        return order
+
+    @staticmethod
     def create_inspection(data, user_id):
         order_id = data.get('order_id')
         process_id = data.get('process_id')
@@ -70,6 +83,8 @@ class QualityService:
             raise ValueError('订单和工序必填')
         if inspection_type not in INSPECTION_TYPES:
             raise ValueError('无效的检验类型')
+        if defect_category and defect_category not in DEFECT_CATEGORIES:
+            raise ValueError(f'无效的缺陷类别: {defect_category}')
 
         result = 'pass' if quantity_failed == 0 else ('fail' if quantity_passed == 0 else 'partial')
 
@@ -85,6 +100,15 @@ class QualityService:
                   defect_quantity, notes, inspected_at or None))
             return cur.lastrowid
 
+
+    @staticmethod
+    def get_inspection(inspection_id):
+        db = BaseService.db()
+        qi = db.execute('SELECT * FROM quality_inspections WHERE id=?', (inspection_id,)).fetchone()
+        if not qi:
+            raise ValueError('记录不存在')
+        return dict(qi)
+
     @staticmethod
     def update_inspection(inspection_id, data):
         db = BaseService.db()
@@ -95,6 +119,9 @@ class QualityService:
         inspection_type = data.get('inspection_type', qi['inspection_type'])
         if inspection_type not in INSPECTION_TYPES:
             raise ValueError('无效的检验类型')
+        defect_cat = data.get('defect_category', qi.get('defect_category', ''))
+        if defect_cat and defect_cat not in DEFECT_CATEGORIES:
+            raise ValueError(f'无效的缺陷类别: {defect_cat}')
 
         qc = data.get('quantity_checked', qi['quantity_checked'])
         qp = data.get('quantity_passed', qi['quantity_passed'])

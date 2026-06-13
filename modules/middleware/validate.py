@@ -5,6 +5,7 @@ qr-system — 请求体验证中间件
 """
 from functools import wraps
 from flask import request, jsonify
+import json
 import jsonschema
 
 
@@ -16,7 +17,7 @@ SCHEMAS = {
         'type': 'object',
         'required': ['username', 'password'],
         'properties': {
-            'username': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'username': {'type': 'string', 'minLength': 2, 'maxLength': 64},
             'password': {'type': 'string', 'minLength': 8, 'maxLength': 128},
         },
         'additionalProperties': False,
@@ -33,12 +34,11 @@ SCHEMAS = {
         'type': 'object',
         'required': ['username', 'name'],
         'properties': {
-            'username': {'type': 'string', 'minLength': 1, 'maxLength': 64},
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\s\-\/\(\)\.\+\#]+$'},
+            'username': {'type': 'string', 'minLength': 2, 'maxLength': 64},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
             'nickname': {'type': 'string', 'maxLength': 64},
             'email': {'type': 'string', 'format': 'email', 'maxLength': 128},
             'role': {'type': 'string', 'enum': ['admin', 'worker']},
-            'role_id': {'type': ['integer', 'null']},
             'role_id': {'type': ['integer', 'null']},
             'password': {'type': 'string', 'minLength': 8, 'maxLength': 128},
             'employee_no': {'type': 'string', 'maxLength': 32},
@@ -180,6 +180,7 @@ SCHEMAS = {
             'spec': {'type': 'string', 'maxLength': 256},
             'style': {'type': 'string', 'maxLength': 64},
             'upper_opening': {'type': 'string', 'maxLength': 64},
+            'lower_opening': {'type': 'string', 'maxLength': 64},
             'plate_thickness': {'type': 'string', 'maxLength': 32},
             'category': {'type': 'string', 'maxLength': 32},
             'weight': {'type': 'number', 'minimum': 0},
@@ -198,6 +199,7 @@ SCHEMAS = {
             'spec': {'type': 'string', 'maxLength': 256},
             'style': {'type': 'string', 'maxLength': 64},
             'upper_opening': {'type': 'string', 'maxLength': 64},
+            'lower_opening': {'type': 'string', 'maxLength': 64},
             'plate_thickness': {'type': 'string', 'maxLength': 32},
             'category': {'type': 'string', 'maxLength': 32},
             'weight': {'type': 'number', 'minimum': 0},
@@ -213,8 +215,9 @@ SCHEMAS = {
         'type': 'object',
         'required': ['name'],
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\s\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
             'description': {'type': 'string', 'maxLength': 256},
+            'status': {'type': 'string', 'enum': ['active', 'inactive']},
             'process_ids': {
                 'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50
             },
@@ -298,7 +301,8 @@ SCHEMAS = {
             'unit_price': {'type': 'number', 'minimum': 0},
             'safe_stock': {'type': 'number', 'minimum': 0},
             'location': {'type': 'string', 'maxLength': 128},
-            'supplier_id': {'type': ['integer', 'null']},
+            'supplier_id': {'type': ['integer', 'null', 'string']},
+            'material_type': {'type': 'string', 'maxLength': 64},
             'remark': {'type': 'string', 'maxLength': 512},
         },
         'additionalProperties': True,
@@ -313,7 +317,8 @@ SCHEMAS = {
             'unit_price': {'type': 'number', 'minimum': 0},
             'safe_stock': {'type': 'number', 'minimum': 0},
             'location': {'type': 'string', 'maxLength': 128},
-            'supplier_id': {'type': ['integer', 'null']},
+            'supplier_id': {'type': ['integer', 'null', 'string']},
+            'material_type': {'type': 'string', 'maxLength': 64},
             'remark': {'type': 'string', 'maxLength': 512},
         },
         'additionalProperties': True,
@@ -434,7 +439,7 @@ SCHEMAS = {
         'type': 'object',
         'required': ['name'],
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\s\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
             'description': {'type': 'string', 'maxLength': 512},
             'category': {'type': 'string', 'maxLength': 64},
             'seq_order': {'type': 'integer', 'minimum': 0},
@@ -445,7 +450,7 @@ SCHEMAS = {
     'update_process': {
         'type': 'object',
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\s\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
             'description': {'type': 'string', 'maxLength': 512},
             'category': {'type': 'string', 'maxLength': 64},
             'seq_order': {'type': 'integer', 'minimum': 0},
@@ -467,6 +472,7 @@ SCHEMAS = {
             'status': {'type': 'string', 'enum': ['active', 'inactive']},
             'group_name': {'type': 'string', 'maxLength': 64},
             'role': {'type': 'string', 'enum': ['admin', 'worker']},
+            'password': {'type': 'string', 'minLength': 6, 'maxLength': 128},
         },
         'additionalProperties': False,
     },
@@ -498,6 +504,8 @@ def validate_json(schema_name: str):
             try:
                 jsonschema.validate(instance=data, schema=schema)
             except jsonschema.ValidationError as e:
+                import logging
+                logging.getLogger('qr').error(f'SCHEMA_VALIDATE_FAILED: {schema_name} | path: {list(e.absolute_path)} | msg: {e.message} | instance_keys: {list(data.keys()) if isinstance(data, dict) else  not dict} | body(raw): {json.dumps(data, ensure_ascii=False, default=str)[:300]}')
                 # Friendly error message
                 path = ' → '.join(str(p) for p in e.absolute_path) if e.absolute_path else '根对象'
                 return jsonify({'error': f'参数校验失败: {path} — {e.message}'}), 400

@@ -7,8 +7,9 @@ from datetime import datetime
 from flask import request, jsonify, g
 from werkzeug.utils import secure_filename
 
-from modules.app import app
 from modules.db import get_db
+from modules.app import app
+from modules.services.imports_service import ImportsService
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body
 
@@ -184,33 +185,23 @@ def bulk_import_orders():
             continue
 
         # Check duplicate
-        existing = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
+        existing = ImportsService.check_order_exists(order_no)
         if existing:
             errors.append({'row': i + 1, 'order_no': order_no, 'error': 'Duplicate order_no'})
             skipped += 1
             continue
 
         try:
-            db.execute('''
-                INSERT INTO orders (order_no, customer, product_name, quantity, plan_start, plan_end, deadline, remark, product_code, status)
-                VALUES (?,?,?,?,?,?,?,?,?,'pending')
-            ''', (
-                order_no,
-                row.get('customer', '') or '',
-                row.get('product_name', '') or '',
-                int(row.get('quantity', 0) or 0),
-                row.get('plan_start', '') or '',
-                row.get('plan_end', '') or '',
-                row.get('deadline', '') or '',
-                row.get('remark', '') or '',
-                row.get('product_code', '') or '',
-            ))
+            ImportsService.insert_order({
+                'order_no': order_no, 'product_name': product_name, 'product_code': product_code,
+                'customer': customer, 'quantity': quantity, 'status': status,
+                'plan_start': plan_start, 'plan_end': plan_end, 'deadline': deadline, 'remark': remark
+            })
             imported += 1
         except Exception as e:
             errors.append({'row': i + 1, 'order_no': order_no, 'error': str(e)[:100]})
             skipped += 1
 
-    db.commit()
     audit_log('import_orders', detail=f'imported={imported} skipped={skipped}')
     return jsonify({
         'imported': imported,
@@ -242,24 +233,15 @@ def bulk_import_products():
             continue
 
         try:
-            db.execute('''
-                INSERT INTO products (product_name, model, spec, upper_opening, plate_thickness, style, description, unit)
-                VALUES (?,?,?,?,?,?,?,?)
-            ''', (
-                product_name,
-                row.get('model', '') or '',
-                row.get('spec', '') or '',
-                row.get('upper_opening', '') or '',
-                row.get('plate_thickness', '') or '',
-                row.get('style', '') or '',
-                row.get('description', '') or '',
-                row.get('unit', '个') or '个',
-            ))
+            ImportsService.insert_product({
+                'product_name': product_name, 'model': model, 'spec': spec,
+                'category': category, 'weight': weight, 'price': price
+            })
             imported += 1
         except Exception as e:
-            errors.append({'row': i + 1, 'product': product_name, 'error': str(e)[:100]})
+            errors.append({'row': i + 1, 'error': str(e)[:100]})
+            skipped += 1
 
-    db.commit()
     audit_log('import_products', detail=f'imported={imported}')
     return jsonify({
         'imported': imported,
@@ -291,29 +273,22 @@ def bulk_import_customers():
             skipped += 1
             continue
 
-        existing = db.execute('SELECT id FROM customers WHERE name = ?', (name,)).fetchone()
+        existing = ImportsService.check_customer_exists(name)
         if existing:
             errors.append({'row': i + 1, 'name': name, 'error': 'Duplicate name'})
             skipped += 1
             continue
 
         try:
-            db.execute('''
-                INSERT INTO customers (name, contact, phone, address, email)
-                VALUES (?,?,?,?,?)
-            ''', (
-                name,
-                row.get('contact', '') or '',
-                row.get('phone', '') or '',
-                row.get('address', '') or '',
-                row.get('email', '') or '',
-            ))
+            ImportsService.insert_customer({
+                'name': name, 'contact': contact, 'phone': phone,
+                'address': address, 'remark': remark
+            })
             imported += 1
         except Exception as e:
             errors.append({'row': i + 1, 'name': name, 'error': str(e)[:100]})
             skipped += 1
 
-    db.commit()
     audit_log('import_customers', detail=f'imported={imported} skipped={skipped}')
     return jsonify({
         'imported': imported,

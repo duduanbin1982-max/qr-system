@@ -113,7 +113,6 @@ ENABLE_SWAGGER = os.environ.get('ENABLE_SWAGGER', '').lower() == 'true'
 if ENABLE_SWAGGER:
     swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
-
 # ============================================================
 # CSP nonce generation (per-request)
 # ============================================================
@@ -172,7 +171,7 @@ def add_security_headers(response):
     csp_nonce = getattr(g, 'csp_nonce', 'fallback')
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        f"script-src 'self' 'unsafe-eval' cdn.jsdelivr.net unpkg.com 'nonce-{csp_nonce}'; "
+        f"script-src 'self' 'unsafe-eval' 'unsafe-inline' cdn.jsdelivr.net unpkg.com; "
         "style-src 'self' 'unsafe-inline' unpkg.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' https:; "
@@ -185,7 +184,6 @@ def add_security_headers(response):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
 
     return response
-
 
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
 @app.route('/api/v1/health', methods=['GET', 'OPTIONS'])

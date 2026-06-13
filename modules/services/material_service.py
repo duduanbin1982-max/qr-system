@@ -1,253 +1,255 @@
 """
-qr-system — 物料管理 Service 层
+qr-system ? ???? Service ?
 
-从 routes/materials.py 提取物料 + 供应商业务逻辑。
+Brooks R6 fix: ?? SQL ???? MaterialRepository / SupplierRepository?
+Service ???????????????????
 """
-from datetime import datetime
 from modules.services import BaseService
+from modules.repositories.material_repository import MaterialRepository, SupplierRepository
 
 
 class MaterialService:
-    """物料管理业务逻辑。"""
+    """?????????"""
 
     @staticmethod
-    def list_materials():
-        """物料列表（含供应商名称）。"""
-        db = BaseService.db()
-        rows = db.execute('''
-            SELECT m.*, s.name as supplier_name
-            FROM materials m LEFT JOIN suppliers s ON m.supplier_id = s.id
-            ORDER BY m.id DESC
-        ''').fetchall()
-        return {'materials': [dict(r) for r in rows]}
+    def list_materials(page=1, limit=100):
+        """????????????????"""
+        total = MaterialRepository.count_all()
+        offset = (page - 1) * limit
+        rows = MaterialRepository.find_all_with_supplier_paginated(limit, offset)
+        return {
+            'materials': [dict(r) for r in rows],
+            'total': total, 'page': page, 'limit': limit
+        }
 
     @staticmethod
     def create_material(data):
-        """创建物料。Raises ValueError on empty name."""
+        """Create material. Raises ValueError on empty name or duplicate name+spec+material_type."""
         name = data.get('name', '').strip()
         if not name:
             raise ValueError('物料名称不能为空')
+        spec = (data.get('spec') or '').strip()
+        mt = (data.get('material_type') or '').strip()
+        existing = MaterialRepository.check_duplicate(name, spec, mt)
+        if existing:
+            info = name
+            if spec:
+                info += '(' + chr(35268) + chr(26684) + ':' + spec
+                if mt:
+                    info += ', ' + chr(26448) + chr(36136) + ':' + mt
+                info += ')'
+            raise ValueError('物料' + info + '已存在')
+        data_tuple = (
+            name,
+            spec,
+            data.get('unit', '件').strip(),
+            float(data.get('quantity', 0)),
+            float(data.get('unit_price', 0)),
+            float(data.get('safe_stock', 0)),
+            data.get('location', '').strip(),
+            data.get('supplier_id') or None,
+            data.get('remark', '').strip(),
+            mt
+        )
         with BaseService.transaction() as txn:
-            txn.execute(
-                'INSERT INTO materials '
-                '(name, spec, unit, quantity, unit_price, safe_stock, '
-                'location, supplier_id, remark) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                (name,
-                 data.get('spec', '').strip(),
-                 data.get('unit', '件').strip(),
-                 float(data.get('quantity', 0)),
-                 float(data.get('unit_price', 0)),
-                 float(data.get('safe_stock', 0)),
-                 data.get('location', '').strip(),
-                 data.get('supplier_id') or None,
-                 data.get('remark', '').strip())
-            )
+            return MaterialRepository.insert(data_tuple, db=txn)
 
     @staticmethod
     def update_material(mid, data):
-        """更新物料。Raises ValueError on not found or no fields."""
-        db = BaseService.db()
-        row = db.execute(
-            'SELECT id FROM materials WHERE id = ?', (mid,)
-        ).fetchone()
+        """?????Raises ValueError on not found or no fields."""
+        row = MaterialRepository.find_by_id(mid)
         if not row:
-            raise ValueError('物料不存在')
+            raise ValueError('?????')
 
-        fields = []
-        values = []
-        for k in ['name', 'spec', 'unit', 'location', 'remark']:
+        # ????????????
+        if 'name' in data:
+            name = str(data['name']).strip()
+            spec = str(data.get('spec', '')).strip()
+            mt = str(data.get('material_type', '')).strip()
+            dup = MaterialRepository.check_duplicate(name, spec, mt, exclude_id=mid)
+            if dup:
+                info = name
+                if spec:
+                    info += '(' + chr(35268) + chr(26684) + ':' + spec
+                    if mt:
+                        info += ', ' + chr(26448) + chr(36136) + ':' + mt
+                    info += ')'
+                raise ValueError(chr(29289) + chr(26009) + info + chr(24050) + chr(23384) + chr(22312))
+
+        set_clauses = []
+        params = []
+        for k in ['name', 'spec', 'unit', 'location', 'remark', 'material_type']:
             if k in data:
-                fields.append(f'{k} = ?')
-                values.append(str(data[k]).strip())
+                set_clauses.append(f'{k} = ?')
+                params.append(str(data[k]).strip())
         for k in ['quantity', 'unit_price', 'safe_stock', 'supplier_id']:
             if k in data:
-                fields.append(f'{k} = ?')
-                values.append(float(data[k]))
-        if not fields:
+                if data[k] is None and k == 'supplier_id':
+                    set_clauses.append(f'{k} = NULL')
+                else:
+                    set_clauses.append(f'{k} = ?')
+                    params.append(float(data[k] or 0))
+        if not set_clauses:
             raise ValueError('no fields to update')
 
-        fields.append("updated_at = datetime('now','localtime')")
+        set_clauses.append("updated_at = datetime('now','localtime')")
         with BaseService.transaction() as txn:
-            txn.execute(
-                f'UPDATE materials SET {", ".join(fields)} WHERE id = ?',
-                values + [mid]
-            )
+            MaterialRepository.update(mid, set_clauses, params, db=txn)
 
     @staticmethod
     def delete_material(mid):
-        """删除物料。"""
+        """?????????????Raises ValueError on not found or has refs."""
+        mat = MaterialRepository.find_by_id(mid)
+        if not mat:
+            raise ValueError('?????')
+        refs = MaterialRepository.count_refs(mid)
+        if refs > 0:
+            raise ValueError(f'???{mat["name"]}??? {refs} ????????????')
         with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM materials WHERE id = ?', (mid,))
+            MaterialRepository.delete_logs_by_material(mid, db=txn)
+            MaterialRepository.delete(mid, db=txn)
 
     @staticmethod
-    def get_logs(mid):
-        """物料库存日志。"""
-        db = BaseService.db()
-        rows = db.execute(
-            'SELECT ml.*, u.name as operator_name_from_fk FROM material_logs ml'
-            ' LEFT JOIN users u ON ml.operator_id = u.id WHERE ml.material_id = ? '
-            'ORDER BY ml.created_at DESC LIMIT 100', (mid,)
-        ).fetchall()
-        return {'logs': [dict(r) for r in rows]}
+    def get_logs(mid, page=1, limit=100):
+        """???????????"""
+        total = MaterialRepository.count_logs_by_material(mid)
+        offset = (page - 1) * limit
+        rows = MaterialRepository.find_logs_by_material_paginated(mid, limit, offset)
+        return {
+            'logs': [dict(r) for r in rows],
+            'total': total, 'page': page, 'limit': limit
+        }
 
     @staticmethod
     def stock_change(mid, change_type, quantity, remark='', operator_name=''):
-        """物料入库/出库。"""
+        """????/???Raises ValueError on validation failure."""
         if change_type not in ('in', 'out'):
-            raise ValueError('类型必须是 in 或 out')
+            raise ValueError('????? in ? out')
         if quantity <= 0:
-            raise ValueError('数量必须大于0')
+            raise ValueError('??????0')
 
-        db = BaseService.db()
-        row = db.execute(
-            'SELECT id, quantity FROM materials WHERE id = ?', (mid,)
-        ).fetchone()
+        row = MaterialRepository.find_quantity_by_id(mid)
         if not row:
-            raise ValueError('物料不存在')
+            raise ValueError('?????')
 
         new_qty = (row['quantity'] + quantity if change_type == 'in'
                    else row['quantity'] - quantity)
         if new_qty < 0 and change_type == 'out':
-            raise ValueError(f'库存不足，当前库存 {row["quantity"]}')
+            raise ValueError(f'????????? {row["quantity"]}')
 
         with BaseService.transaction() as txn:
-            txn.execute(
-                'UPDATE materials SET quantity = ?, '
-                'updated_at = datetime("now","localtime") WHERE id = ?',
-                (new_qty, mid)
-            )
-            txn.execute(
-                'INSERT INTO material_logs '
-                '(material_id, type, quantity, remark, operator_name) '
-                'VALUES (?, ?, ?, ?, ?)',
-                (mid, change_type, quantity, remark, operator_name)
+            MaterialRepository.update_quantity(mid, new_qty, db=txn)
+            MaterialRepository.insert_log(
+                mid, change_type, quantity, remark, operator_name, db=txn
             )
         return new_qty
 
     @staticmethod
-    def list_consumptions(mid):
-        """物料消耗记录（含订单/工序信息）。"""
-        db = BaseService.db()
-        rows = db.execute('''
-            SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
-                   u.name as operator_name_from_fk
-            FROM material_consumptions mc
-            LEFT JOIN orders o ON mc.order_id = o.id
-            LEFT JOIN processes p ON mc.process_id = p.id
-            LEFT JOIN users u ON mc.operator_id = u.id
-            WHERE mc.material_id = ?
-            ORDER BY mc.created_at DESC LIMIT 100
-        ''', (mid,)).fetchall()
-        return {'consumptions': [dict(r) for r in rows]}
+    def list_consumptions(mid, page=1, limit=100):
+        """??????????/?????????"""
+        total = MaterialRepository.count_consumptions_by_material(mid)
+        offset = (page - 1) * limit
+        rows = MaterialRepository.find_consumptions_by_material_paginated(mid, limit, offset)
+        return {
+            'consumptions': [dict(r) for r in rows],
+            'total': total, 'page': page, 'limit': limit
+        }
 
     @staticmethod
     def create_consumption(mid, order_id, process_id, quantity, notes='',
                            operator_name='', user_id=None):
-        """记录物料消耗（扣减库存）。"""
+        """?????????????Raises ValueError on validation failure."""
         if quantity <= 0:
-            raise ValueError('数量必须大于0')
+            raise ValueError('??????0')
 
-        db = BaseService.db()
-        mat = db.execute(
-            'SELECT id, quantity FROM materials WHERE id=?', (mid,)
-        ).fetchone()
+        mat = MaterialRepository.find_quantity_by_id(mid)
         if not mat:
-            raise ValueError('物料不存在')
+            raise ValueError('?????')
         if mat['quantity'] < quantity:
-            raise ValueError(f'库存不足，当前库存 {mat["quantity"]}')
+            raise ValueError(f'????????? {mat["quantity"]}')
 
         with BaseService.transaction() as txn:
-            txn.execute('''
-                INSERT INTO material_consumptions
-                (material_id, order_id, process_id, quantity,
-                 operator_id, operator_name, notes)
-                VALUES (?,?,?,?,?,?,?)
-            ''', (mid, order_id or None, process_id or None, quantity,
-                  user_id, operator_name, notes))
-            new_qty = mat['quantity'] - quantity
-            txn.execute(
-                "UPDATE materials SET quantity=?, "
-                "updated_at=datetime('now','localtime') WHERE id=?",
-                (new_qty, mid)
+            MaterialRepository.insert_consumption(
+                mid, order_id, process_id, quantity,
+                user_id, operator_name, notes, db=txn
             )
-            txn.execute(
-                'INSERT INTO material_logs '
-                '(material_id, type, quantity, remark, operator_name) '
-                'VALUES (?,?,?,?,?)',
-                (mid, 'out', quantity,
-                 f'消耗: {notes}' if notes else '消耗', operator_name)
+            new_qty = mat['quantity'] - quantity
+            MaterialRepository.update_quantity(mid, new_qty, db=txn)
+            MaterialRepository.insert_log(
+                mid, 'out', quantity,
+                f'??: {notes}' if notes else '??',
+                operator_name, db=txn
             )
         return new_qty
 
     @staticmethod
     def delete_consumption(cid):
-        """撤销物料消耗（归还库存）。"""
-        db = BaseService.db()
-        mc = db.execute(
-            'SELECT * FROM material_consumptions WHERE id=?', (cid,)
-        ).fetchone()
+        """?????????????Raises ValueError if not found."""
+        mc = MaterialRepository.find_consumption_by_id(cid)
         if not mc:
-            raise ValueError('记录不存在')
+            raise ValueError('?????')
 
         with BaseService.transaction() as txn:
-            txn.execute(
-                'UPDATE materials SET quantity=quantity+?, '
-                'updated_at=datetime("now","localtime") WHERE id=?',
-                (mc['quantity'], mc['material_id'])
+            MaterialRepository.increment_quantity(
+                mc['material_id'], mc['quantity'], db=txn
             )
-            txn.execute('DELETE FROM material_consumptions WHERE id=?', (cid,))
+            MaterialRepository.delete_consumption_by_id(cid, db=txn)
 
 
 class SupplierService:
-    """供应商管理业务逻辑。"""
+    """??????????"""
 
     @staticmethod
-    def list_suppliers():
-        """供应商列表。"""
-        db = BaseService.db()
-        rows = db.execute('SELECT * FROM suppliers ORDER BY name').fetchall()
-        return {'suppliers': [dict(r) for r in rows]}
+    def list_suppliers(page=1, limit=100):
+        """??????????"""
+        total = SupplierRepository.count_all()
+        offset = (page - 1) * limit
+        rows = SupplierRepository.find_all_paginated(limit, offset)
+        return {
+            'suppliers': [dict(r) for r in rows],
+            'total': total, 'page': page, 'limit': limit
+        }
 
     @staticmethod
     def create_supplier(data):
-        """创建供应商。"""
+        """??????Raises ValueError on empty name."""
         name = data.get('name', '').strip()
         if not name:
-            raise ValueError('供应商名称不能为空')
+            raise ValueError('?????????')
+        data_tuple = (
+            name,
+            data.get('contact', '').strip(),
+            data.get('phone', '').strip(),
+            data.get('address', '').strip(),
+            data.get('remark', '').strip()
+        )
         with BaseService.transaction() as txn:
-            txn.execute(
-                'INSERT INTO suppliers (name, contact, phone, address, remark) '
-                'VALUES (?,?,?,?,?)',
-                (name, data.get('contact', '').strip(),
-                 data.get('phone', '').strip(),
-                 data.get('address', '').strip(),
-                 data.get('remark', '').strip())
-            )
-            return txn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            return SupplierRepository.insert(data_tuple, db=txn)
 
     @staticmethod
     def update_supplier(sid, data):
-        """更新供应商。"""
-        db = BaseService.db()
-        row = db.execute(
-            'SELECT id FROM suppliers WHERE id=?', (sid,)
-        ).fetchone()
+        """??????Raises ValueError if not found."""
+        row = SupplierRepository.find_by_id(sid)
         if not row:
-            raise ValueError('供应商不存在')
+            raise ValueError('??????')
+        data_tuple = (
+            data.get('name', '').strip(),
+            data.get('contact', '').strip(),
+            data.get('phone', '').strip(),
+            data.get('address', '').strip(),
+            data.get('remark', '').strip()
+        )
         with BaseService.transaction() as txn:
-            txn.execute(
-                'UPDATE suppliers SET name=?, contact=?, phone=?, '
-                'address=?, remark=? WHERE id=?',
-                (data.get('name', '').strip(),
-                 data.get('contact', '').strip(),
-                 data.get('phone', '').strip(),
-                 data.get('address', '').strip(),
-                 data.get('remark', '').strip(), sid)
-            )
+            SupplierRepository.update(sid, data_tuple, db=txn)
 
     @staticmethod
     def delete_supplier(sid):
-        """删除供应商。"""
+        """??????Raises ValueError if not found or has refs."""
+        sup = SupplierRepository.find_by_id(sid)
+        if not sup:
+            raise ValueError('??????')
+        refs = SupplierRepository.count_refs(sid)
+        if refs > 0:
+            raise ValueError(f'????{sup["name"]}?? {refs} ??????????')
         with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM suppliers WHERE id=?', (sid,))
+            SupplierRepository.delete(sid, db=txn)

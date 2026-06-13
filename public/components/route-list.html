@@ -87,7 +87,7 @@
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal" class="modal-overlay" >
       <div class="modal" style="max-width:650px">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑路线' : '新建路线' }}</span>

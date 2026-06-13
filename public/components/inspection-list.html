@@ -101,7 +101,7 @@
     </div>
 
     <!-- Create/Edit Modal -->
-    <div v-if="showModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000" @click.self="showModal=false">
+    <div v-if="showModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000" >
       <div style="background:white;border-radius:var(--radius-lg);padding:28px;width:480px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,0.15)">
         <h3 style="margin:0 0 20px;font-size:17px;color:var(--text-primary)">{{ isEdit ? '编辑检验记录' : '新建检验记录' }}</h3>
 
@@ -134,7 +134,7 @@
         </select>
 
         <div style="display:flex;gap:var(--space-3);margin-bottom:14px">
-          <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--text-placeholder);display:block;margin-bottom:var(--space-1)">检验数量</label><input v-model.number="form.quantity_checked" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)"></div>
+          <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--text-placeholder);display:block;margin-bottom:var(--space-1)">检验数量</label><input v-model.number="form.quantity_checked" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)" @input="onCheckedQtyManual"></div>
           <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--text-placeholder);display:block;margin-bottom:var(--space-1)">合格</label><input v-model.number="form.quantity_passed" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)" @input="autoCalcQty"></div>
           <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--text-placeholder);display:block;margin-bottom:var(--space-1)">不合格</label><input v-model.number="form.quantity_failed" type="number" class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)" @input="autoCalcQty"></div>
         </div>
@@ -143,7 +143,7 @@
           <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--danger);display:block;margin-bottom:var(--space-1)">缺陷类别</label>
             <select v-model="form.defect_category" class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm);border-color:var(--danger-lighter)">
               <option value="">-- 请选择 --</option>
-              <option v-for="c in DEFECT_CATEGORIES" :key="c" :value="c">{{ c }}</option>
+              <option v-for="c in defectCategories" :key="c" :value="c">{{ c }}</option>
             </select>
           </div>
           <div style="flex:1"><label style="font-size:var(--text-sm);color:var(--danger);display:block;margin-bottom:var(--space-1)">缺陷数量</label>

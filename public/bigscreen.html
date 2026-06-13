@@ -5,18 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>车间大屏看板</title>
 <script src="vue3.global.prod.js"></script>
+    <script src="board-common.js"></script>
 <style>
 :root {
   --bg-deep: #050816;
   --panel-bg: rgba(255,255,255,0.03);
   --border: rgba(255,255,255,0.06);
-  --cyan: var(--info);
+  --info: #2563EB;
+  --success: #059669;
+  --warning: #D97706;
+  --danger: #DC2626;
+  --cyan: #2563EB;
   --purple: #a855f7;
-  --green: var(--success);
-  --orange: var(--warning);
-  --red: var(--danger);
+  --green: #059669;
+  --orange: #D97706;
+  --red: #DC2626;
   --pink: #ff6b9d;
   --yellow: #f1c40f;
+  --text-2xs: 10px;
+  --text-xs-alt: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 
@@ -387,7 +402,7 @@ body {
                 <td class="order-no">{{ o.order_no }}</td>
                 <td>
                   <div>{{ o.product_name||'--' }}</div>
-                  <div class="order-meta">{{ o.customer||'--' }}</div>
+                  <div class="order-meta">{{ o.customer_name||'--' }}</div>
                 </td>
                 <td style="font-weight:700">
                   <span style="color:var(--purple)">{{ o.completed||0 }}</span>
@@ -425,11 +440,11 @@ body {
           </div>
           <div class="panel-body">
             <div v-if="workers.length">
-              <div class="worker-item" v-for="(w,i) in workers" :key="w.id||w.name">
+              <div class="worker-item" v-for="(w,i) in workers" :key="w.id||w.worker_name">
                 <div class="worker-rank" :class="i<3?'r'+(i+1):'rx'">{{ i+1 }}</div>
-                <div class="worker-avatar" :style="{background:avColor(w.name)}">{{ w.name?.[0]||'?' }}</div>
+                <div class="worker-avatar" :style="{background:avColor(w.worker_name)}">{{ w.worker_name?.[0]||'?' }}</div>
                 <div class="worker-info">
-                  <div class="worker-name">{{ w.name }}</div>
+                  <div class="worker-name">{{ w.worker_name }}</div>
                   <div class="worker-sub">
                     报工{{ w.report_count }}次
                     <span v-if="w.scrap>0" style="color:var(--red)"> · 废{{ w.scrap }}</span>
@@ -534,8 +549,6 @@ body {
 })();
 
 // ═══════════ Vue App ═══════════
-const CP = ['var(--info)','#a855f7','var(--success)','var(--warning)','var(--danger)','#f1c40f','#1dd1a1','#7c3aed','#ff6b9d','#54a0ff'];
-
 const { createApp } = Vue;
 createApp({
   data() { return {
@@ -546,7 +559,7 @@ createApp({
     orders: [], overdue: [],
     workers: [], procStats: [], recent: [],
     maxProc: 1,
-    st: { pending:'待生产', producing:'生产中', completed:'已完成' },
+    st: BoardUtils.statusMap(),
     timer: null, fetchTimer: null,
   }},
   mounted() {
@@ -561,48 +574,34 @@ createApp({
   },
   methods: {
     tick() {
-      const d = new Date();
-      this.clock = d.toLocaleString('zh-CN', {
-        hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
-      });
+      this.clock = BoardUtils.tickTime();
     },
     switchCat(c) { this.cat = c; this.fetchData(); },
     async fetchData() {
       try {
-        let url = '/api/dashboard/board';
-        if (this.cat) url += '?category=' + encodeURIComponent(this.cat);
-        const res = await fetch(url);
-        const d = await res.json();
-        this.s = d.stats || {};
-        this.t = d.today || {};
-        this.orders = d.orders || [];
-        this.overdue = d.overdue_orders || [];
-        this.workers = (d.worker_stats || []).slice(0, 8);
-        this.procStats = d.process_stats || [];
-        this.recent = (d.recent_reports || []).slice(0, 10);
-        this.updated = d.update_time || new Date().toLocaleString('zh-CN');
+        const d = await BoardAPI.fetchData(this.cat);
+        this.s = d.stats;
+        this.t = d.today;
+        this.orders = d.orders;
+        this.overdue = d.overdue_orders;
+        this.workers = d.worker_stats.slice(0, 8);
+        this.procStats = d.process_stats;
+        this.recent = d.recent_reports.slice(0, 10);
+        this.updated = d.update_time || BoardUtils.tickFull();
         this.maxProc = Math.max(...this.procStats.map(p=>p.output||0), 1);
-      } catch(e) { console.error('加载看板失败:', e); }
+      } catch(e) { console.error('Failed to load board data:', e); }
     },
     procPct(p) {
-      return this.maxProc ? Math.max((p.output||0)/this.maxProc*100, 4) : 0;
+      return BoardUtils.procPct(p, this.maxProc);
     },
     avColor(name) {
-      if (!name) return CP[0];
-      let h = 0;
-      for (let i=0;i<name.length;i++) h = name.charCodeAt(i)+((h<<5)-h);
-      return CP[Math.abs(h)%CP.length];
+      return BoardUtils.avColor(name);
     },
     isOverdue(o) {
-      if (!o.plan_end) return false;
-      const d = new Date();
-      const local = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-      return o.plan_end < local;
+      return BoardUtils.isOverdue(o);
     },
     fmt(ts) {
-      if (!ts) return '';
-      const d = new Date(ts);
-      return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      return BoardUtils.fmt(ts);
     }
   }
 }).mount('#app');

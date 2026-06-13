@@ -36,8 +36,8 @@
             <div><span style="color:var(--text-placeholder)">已完成：</span><strong class="text-success">{{ order.completed || 0 }}</strong></div>
             <div><span style="color:var(--text-placeholder)">报废：</span><strong style="color:var(--danger)">{{ order.scrapped || 0 }}</strong></div>
             <div><span style="color:var(--text-placeholder)">返工：</span><strong style="color:var(--warning)">{{ order.rework || 0 }}</strong></div>
-            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="order.status==='completed'?'badge-success':order.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ order.status }}</span></div>
-            <div><span style="color:var(--text-placeholder)">交期：</span>{{ order.deadline || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">状态：</span><span class="badge" :class="order.status==='completed'?'badge-success':order.status==='producing'?'badge-warning':'badge-info'" style="font-size:var(--text-xs-alt)">{{ order.status==='completed'?'已完成':order.status==='producing'?'生产中':order.status==='pending'?'待生产':order.status }}</span></div>
+            <div><span style="color:var(--text-placeholder)">交期：</span>{{ order.deadline || order.plan_end || '-' }}</div>
           </div>
           <!-- 进度条 -->
           <div style="margin-top:12px">
@@ -47,6 +47,14 @@
             <div style="height:8px;background:var(--border-light);border-radius:var(--radius-sm);overflow:hidden">
               <div :style="{width:pctDone()+'%',height:'100%',background:'var(--primary)',borderRadius:'4px'}"></div>
             </div>
+          </div>
+          <!-- 序列号信息 -->
+          <div v-if="serialNo" style="margin-top:16px;padding:var(--space-4);background:var(--primary-light);border-radius:var(--radius-md);border-left:4px solid var(--primary)">
+            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1)">
+              <span style="font-size:var(--text-lg)">🏷️</span>
+              <span style="font-weight:700;font-family:monospace;font-size:var(--text-lg);color:var(--primary-dark)">{{ serialNo }}</span>
+            </div>
+            <div style="font-size:var(--text-xs);color:var(--text-placeholder)">序列号模式 · 每件 1 次扫码报工</div>
           </div>
           <!-- 工序列表 -->
           <div v-if="order.processes && order.processes.length" style="margin-top:16px">
@@ -112,7 +120,7 @@
             <table v-if="(order.records||[]).length" class="data-table" style="font-size:var(--text-xs)">
               <thead><tr><th>时间</th><th>工序</th><th>工人</th><th>数量</th><th>状态</th></tr></thead>
               <tbody>
-                <tr v-for="r in (order.records||[]).slice(0,30)" :key="r.id">
+                <tr v-for="r in (order.records||[]).filter(r => !serialNo || r.serial_no === serialNo).slice(0,30)" :key="r.id">
                   <td style="font-size:var(--text-xs-alt);white-space:nowrap">{{ r.created_at }}</td>
                   <td>{{ r.process_name }}</td>
                   <td>{{ r.worker_name }}</td>

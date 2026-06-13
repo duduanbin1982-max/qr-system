@@ -126,16 +126,24 @@ export default {
       exportCSV(data, '订单进度表')
     }
 
+    function initDates() {
+      const now = new Date()
+      const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+      wStart.value = fmt(new Date(now - 30 * 86400000))
+      wEnd.value = fmt(now)
+      sStart.value = wStart.value
+      sEnd.value = wEnd.value
+    }
+
     function switchTab(t) {
       tab.value = t
       if (t === 'daily') loadDaily()
       else if (t === 'worker') loadWorker()
-
       else if (t === 'scrap') loadScrap()
       else if (t === 'progress') loadProgress()
     }
 
-    onMounted(() => loadDaily())
+    onMounted(() => { initDates(); loadDaily() })
 
     return {
       tab, switchTab, loading,

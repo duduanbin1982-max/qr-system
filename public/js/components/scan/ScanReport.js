@@ -1,5 +1,5 @@
 // ScanReport Component — 扫码报工
-import { ref, onMounted } from '../../vendor/vue.esm.js'
+import { ref } from '../../vendor/vue.esm.js'
 import { api } from '../../api.js?v=56'
 import { showToast } from '../../store.js?v=56'
 
@@ -30,8 +30,9 @@ export default {
         serialNo.value = (d.item && d.item.serial_no) || null
         // 自动选当前工序
         if (order.value.processes && order.value.processes.length) {
+          const limit = serialNo.value ? 1 : (order.value.quantity || 0)
           for (const p of order.value.processes) {
-            if (p.completed < order.value.quantity) { reportProcess.value = p.process_id; break }
+            if ((p.completed || 0) < limit) { reportProcess.value = p.process_id; break }
           }
           if (!reportProcess.value) reportProcess.value = order.value.processes[0].process_id
         }
@@ -58,7 +59,7 @@ export default {
           order_id: order.value.id,
           process_id: parseInt(reportProcess.value),
           quantity: qty,
-          type: reportType.value,
+          report_type: reportType.value,
           remark: reportRemark.value,
           serial_no: serialNo.value
         })
@@ -66,7 +67,7 @@ export default {
         reportQty.value = 1
         reportRemark.value = ''
         // 重新扫描刷新数据
-        scanCode.value = order.value.order_no
+        scanCode.value = serialNo.value || order.value.order_no
         await doScan()
       } catch(e) {
         showToast(e.message || '报工失败','error')

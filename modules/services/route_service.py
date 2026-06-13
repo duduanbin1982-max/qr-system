@@ -47,11 +47,11 @@ class ProcessRouteService:
             route_ids = [r['id'] for r in rows]
             placeholders = ",".join("?" for _ in route_ids)
             # Safe: placeholders are literal "?" strings, route_ids are integers from DB
-            query = ('SELECT pri.*, p.name as process_name, p.category as category '
-                     'FROM process_route_items pri '
-                     'LEFT JOIN processes p ON pri.process_id = p.id '
-                     'WHERE pri.route_id IN ({}) '
-                     'ORDER BY pri.route_id, pri.seq_order').format(placeholders)
+            query = (f'SELECT pri.*, p.name as process_name, p.category as category '
+                     f'FROM process_route_items pri '
+                     f'LEFT JOIN processes p ON pri.process_id = p.id '
+                     f'WHERE pri.route_id IN ({placeholders}) '
+                     f'ORDER BY pri.route_id, pri.seq_order')
             items = db.execute(query, route_ids).fetchall()
             for item in items:
                 items_by_route.setdefault(item['route_id'], []).append(dict(item))
@@ -180,6 +180,17 @@ class ProcessRouteService:
             txn.execute('DELETE FROM process_route_items WHERE route_id = ?', (rid,))
             txn.execute('DELETE FROM process_routes WHERE id = ?', (rid,))
         return route['name']
+
+    @staticmethod
+    def check_order_exists(order_id):
+        """校验订单存在且未被软删除。Raises ValueError on failure."""
+        db = BaseService.db()
+        order = db.execute(
+            "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
+        ).fetchone()
+        if not order:
+            raise ValueError("订单不存在或已删除")
+        return order
 
     @staticmethod
     def apply_route(rid, order_id):

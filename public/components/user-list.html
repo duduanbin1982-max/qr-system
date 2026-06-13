@@ -65,7 +65,7 @@
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
+    <div v-if="showModal" class="modal-overlay" >
       <div class="modal" style="display:flex;flex-direction:column;max-width:520px;min-width:420px;max-height:82vh;overflow:hidden">
         <div class="modal-header" style="flex-shrink:0">
           <span>{{ modalEdit ? '编辑员工' : '添加员工' }}</span>

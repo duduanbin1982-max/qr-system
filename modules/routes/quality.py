@@ -1,7 +1,6 @@
-"""qr-system — 质量检验路由（委托 QualityService）"""
+"""qr-system ? ???????Refactored: all SQL ? QualityService?"""
 from flask import request, jsonify, g
 from modules.app import app
-from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
@@ -10,10 +9,8 @@ from modules.services.quality_service import QualityService
 
 
 def _safe_int(val, default):
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return default
+    try: return int(val)
+    except (ValueError, TypeError): return default
 
 
 @app.route('/api/quality/inspections', methods=['GET'])
@@ -40,8 +37,8 @@ def quality_list():
 @check_auth
 @check_permission('quality:view')
 def quality_list_alias():
-    """Alias for /api/quality/inspections"""
     return quality_list()
+
 
 @app.route('/api/quality/inspections', methods=['POST'])
 @check_auth
@@ -51,25 +48,18 @@ def quality_create():
     data = get_json_body()
     order_id = data.get('order_id')
     if not order_id or not data.get('process_id'):
-        return jsonify({'error': '订单和工序必填'}), 400
-
-    # Pre-checks (order existence + soft-delete)
-    db = get_db()
-    order = db.execute('SELECT id, deleted_at FROM orders WHERE id = ?', (order_id,)).fetchone()
-    if not order:
-        return jsonify({'error': '订单不存在'}), 404
-    if order['deleted_at'] is not None:
-        return jsonify({'error': '订单已删除，无法添加检验记录'}), 400
+        return jsonify({'error': '???????'}), 400
 
     try:
+        QualityService.check_order_exists(order_id)
         inspection_id = QualityService.create_inspection(data, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
     try:
         audit_log('quality_create', 'quality_inspection', inspection_id, 'created')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    except Exception:
+        pass
     return jsonify({'ok': True, 'id': inspection_id})
 
 
@@ -82,13 +72,12 @@ def quality_update(inspection_id):
     try:
         result = QualityService.update_inspection(inspection_id, data)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-
+        return jsonify({'error': str(e)}), 404 if '???' in str(e) else 400
     try:
         audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
-    return jsonify({'ok': True, 'message': '已更新'})
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'message': '???'})
 
 
 @app.route('/api/quality/inspections/<int:inspection_id>', methods=['DELETE'])
@@ -99,12 +88,11 @@ def quality_delete(inspection_id):
         QualityService.delete_inspection(inspection_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-
     try:
         audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
-    return jsonify({'ok': True, 'message': '已删除'})
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'message': '???'})
 
 
 @app.route('/api/quality/inspections/stats', methods=['GET'])
@@ -116,6 +104,14 @@ def quality_stats():
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
+
+
+@app.route('/api/quality/defect-categories', methods=['GET'])
+@check_auth
+@check_permission('quality:view')
+def quality_defect_categories():
+    from modules.services.quality_service import DEFECT_CATEGORIES
+    return jsonify({'ok': True, 'categories': DEFECT_CATEGORIES})
 
 @app.route('/api/quality/defect-pareto', methods=['GET'])
 @check_auth
