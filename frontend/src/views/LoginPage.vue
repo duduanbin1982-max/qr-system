@@ -39,12 +39,10 @@
       </div>
       <div class="login-form">
         <div class="login-field">
-          <label class="login-label">用户名</label>
           <input class="login-input" v-model="username" placeholder="请输入用户名" 
             @keyup.enter="handleSubmit" autofocus autocomplete="username">
         </div>
         <div class="login-field">
-          <label class="login-label">密码</label>
           <input class="login-input" v-model="password" type="password" 
             placeholder="请输入密码" @keyup.enter="handleSubmit" autocomplete="current-password">
         </div>
