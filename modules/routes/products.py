@@ -173,6 +173,31 @@ def update_product(pid):
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
 
+@app.route('/api/products/<int:pid>/impact', methods=['GET'])
+@check_auth
+@check_permission('products:view')
+def product_impact(pid):
+    try:
+        return jsonify(ProductService.check_product_impact(pid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+
+
+@app.route('/api/products/<int:pid>/restore', methods=['PUT'])
+@check_auth
+@check_permission('products:edit')
+def restore_product(pid):
+    """恢复已软删除的产品"""
+    try:
+        ProductService.restore_product(pid)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    _safe_audit_log('restore_product', 'product', pid)
+    return jsonify({'message': '恢复成功'})
+
+
 @app.route('/api/products/<int:pid>', methods=['DELETE'])
 @check_auth
 @check_permission('products:delete')
@@ -201,6 +226,21 @@ def delete_product(pid):
     except Exception as e:
         app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '删除成功'})
+
+
+
+
+@app.route('/api/products/<int:pid>/purge', methods=['DELETE'])
+@check_auth
+@check_permission('products:delete')
+def purge_product(pid):
+    """物理删除产品及关联数据"""
+    try:
+        ProductService.purge_product(pid)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    _safe_audit_log('purge_product', 'product', pid)
+    return jsonify({'message': '彻底删除成功'})
 
 
 @app.route('/api/products/import', methods=['POST'])
@@ -247,6 +287,8 @@ def import_products():
     finally:
         if os.path.exists(tmp.name):
             os.unlink(tmp.name)
+        if os.path.exists(debug_path):
+            os.unlink(debug_path)
     try:
         audit_log('import_products', 'product', 0, f'imported success={result["success"]} skipped={result.get("skipped",0)} errors={result.get("error_summary","")}')
     except Exception as e:

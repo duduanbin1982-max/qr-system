@@ -176,6 +176,7 @@ const products = ref([])
       modalId.value = null
       currentEditProductId.value = null
       productAttachments.value = []
+      bomForm.value = { material_id: '', quantity: 1, process_id: 10730 }
       showModal.value = true
     }
 
@@ -198,7 +199,11 @@ const products = ref([])
       modalId.value = p.id
       currentEditProductId.value = p.id
       productAttachments.value = []
+      loadMaterialOptions()
+      loadProcessOptions()
       loadProductAttachments(p.id)
+      loadProductBom(p.id)
+      bomForm.value.quantity = 1
       showModal.value = true
     }
 
@@ -208,8 +213,10 @@ const products = ref([])
         return
       }
       try {
-        if (!form.value.product_code && form.value.model) updateProductCode()
+        if (modalEdit.value && !form.value.product_code && form.value.model) updateProductCode()
         const data = { ...form.value }
+        // Let backend generate product_code for new products
+        if (!modalEdit.value) delete data.product_code
         if (modalEdit.value) {
           await api.updateProduct(modalId.value, data)
           showToast('\u66f4\u65b0\u6210\u529f')
@@ -241,6 +248,12 @@ const products = ref([])
 
     const importFile = ref(null)
     const importLoading = ref(false)
+    const productBom = ref([])
+    const bomForm = ref({ material_id: '', quantity: 1, process_id: 10730 })
+    const materialOptions = ref([])
+    const processOptions = ref([])
+    const showTrash = ref(false)
+    const trashedProducts = ref([])
 
     function triggerImport() {
       importFile.value.click()
@@ -270,6 +283,74 @@ const products = ref([])
       event.target.value = ''
     }
 
+    async function loadTrash() {
+      loading.value = true
+      try {
+        const d = await api.listProducts({ deleted: 1 })
+        trashedProducts.value = d.products || []
+      } catch(e) {
+        showToast(e.message || '加载失败', 'error')
+      } finally {
+        loading.value = false
+      }
+    }
+
+    function toggleTrash() {
+      showTrash.value = !showTrash.value
+      if (showTrash.value) loadTrash()
+    }
+
+    async function purge(pid, name) {
+      if (!confirm('Permanently delete "' + name + '"? This cannot be undone!')) return
+      try {
+        await api.purgeProduct(pid)
+        showToast('Permanently deleted')
+        await loadTrash()
+        await load()
+      } catch(e) {
+        showToast(e.message || 'Purge failed', 'error')
+      }
+    }
+
+    async function restore(pid) {
+      try {
+        await api.restoreProduct(pid)
+        showToast('恢复成功')
+        await loadTrash()
+        await load()
+      } catch(e) {
+        showToast(e.message || '恢复失败', 'error')
+      }
+    }
+
+    async function loadMaterialOptions() {
+      try { const d = await api.listMaterials(); materialOptions.value = d.materials || [] } catch(e) {}
+    }
+    async function loadProcessOptions() {
+      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) bomForm.value.process_id = xl.id } catch(e) {}
+    }
+    async function loadProductBom(pid) {
+      try { const d = await api.listProductBom(pid); productBom.value = d.bom || [] } catch(e) { productBom.value = [] }
+    }
+    async function addBomItem() {
+      if (!bomForm.value.material_id) { showToast('请选择物料', 'error'); return }
+      try {
+        await api.addProductBom(currentEditProductId.value, {
+          material_id: bomForm.value.material_id,
+          quantity_per_unit: parseFloat(bomForm.value.quantity) || 1,
+          process_id: bomForm.value.process_id || null
+        })
+        bomForm.value = { material_id: '', quantity: 1, process_id: 10730 }
+        showToast('BOM added')
+        await loadProductBom(currentEditProductId.value)
+      } catch(e) { showToast(e.message || 'Failed', 'error') }
+    }
+    async function removeBomItem(bomId) {
+      try {
+        await api.deleteProductBom(currentEditProductId.value, bomId)
+        await loadProductBom(currentEditProductId.value)
+      } catch(e) { showToast(e.message || 'Failed', 'error') }
+    }
     onMounted(() => load())
 
     watch(() => router.page, (page) => {
@@ -289,5 +370,7 @@ const products = ref([])
       getAttachmentIcon, formatFileSize, openAttachment, getThumbnailUrl, openThumbnail,
       triggerAttachmentInput, handleAttachmentUpload, deleteProductAttachment,
       importFile, triggerImport, handleImport, importLoading, activeCat, switchCat, auth,
+      showTrash, trashedProducts, loadTrash, toggleTrash, restore, purge,
+      productBom, bomForm, materialOptions, processOptions, loadProductBom, addBomItem, removeBomItem,
     }
 }

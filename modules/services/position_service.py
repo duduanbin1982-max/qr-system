@@ -124,6 +124,16 @@ class PositionService:
                         '(position_id, process_id) VALUES (?, ?)', (pos_id, pid))
 
     @staticmethod
+    @staticmethod
+    def check_impact(pos_id):
+        db = BaseService.db()
+        pos = db.execute("SELECT id, name FROM positions WHERE id = ?", (pos_id,)).fetchone()
+        if not pos:
+            raise ValueError("Position not found")
+        users = db.execute("SELECT COUNT(*) FROM users WHERE position_id = ?", (pos_id,)).fetchone()[0]
+        return {"position_id": pos_id, "name": pos["name"], "users": users}
+
+    @staticmethod
     def delete_position(pos_id):
         db = BaseService.db()
         pos = db.execute('SELECT * FROM positions WHERE id = ?', (pos_id,)).fetchone()

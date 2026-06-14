@@ -142,6 +142,19 @@
             </div>
           </div>
         </div>
+        <!-- 创建成功密码展示面板 -->
+        <div v-if="pwResult" style="margin:var(--space-3) var(--space-5);padding:var(--space-4);background:#f0fdf4;border:1px solid #86efac;border-radius:var(--radius-md)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
+            <strong style="color:#166534">✅ {{ pwResult.name }} 创建成功</strong>
+            <span @click="pwResult=null" style="cursor:pointer;font-size:18px;color:var(--text-placeholder)">&times;</span>
+          </div>
+          <div style="font-size:var(--text-sm);color:#14532d;line-height:1.8">
+            <div>用户名：<code style="background:#dcfce7;padding:2px 6px;border-radius:3px">{{ pwResult.username }}</code></div>
+            <div>随机密码：<code style="background:#dcfce7;padding:2px 6px;border-radius:3px;font-weight:bold">{{ pwResult.password }}</code></div>
+          </div>
+          <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:var(--space-2)">请将密码告知员工，首次登录需修改密码</div>
+        </div>
+
         <div class="modal-footer" style="flex-shrink:0">
           <button class="btn btn-default" @click="showModal=false">取消</button>
           <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? "保存中..." : "保存" }}</button>
@@ -164,6 +177,7 @@ export default {
     const processes = ref([])
     const processDropdownOpen = ref(false)
     const dropdownStyle = ref({})
+    const pwResult = ref(null)
     const processSearch = ref('')
     const selectedProcessIds = ref([])
     const loading = ref(true)
@@ -397,7 +411,7 @@ export default {
       processes, processDropdownOpen, processSearch, selectedProcessIds, filteredProcessList, selectedProcessNames, onProcessChange, dropdownStyle, toggleProcessDropdown,
       page, total, pageSize,
       getPositionName, positionMap,
-      saving, openAdd, openEdit, save, del, resetPwd, unlock, load, searchAndLoad,
+      saving, pwResult, openAdd, openEdit, save, del, resetPwd, unlock, load, searchAndLoad,
       prevPage, nextPage
     }
   }

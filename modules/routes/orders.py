@@ -8,7 +8,16 @@ from modules.middleware.data_scope import get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
 from modules.services.order_service import OrderService
+from modules.services.scan_helper_service import ScanHelperService
 
+
+
+def _check_order_data_scope(oid):
+    """Check if current user can access this order based on process permissions."""
+    pids = get_user_process_ids(g.current_user)
+    if pids is not None and not ScanHelperService.check_order_scope(oid, pids):
+        return False
+    return True
 
 @app.route('/api/orders', methods=['GET'])
 @check_auth
@@ -45,8 +54,8 @@ def create_order():
         order_id, _order_no = OrderService.create_order(data)
         try:
             audit_log('create_order', 'order', order_id, data.get('order_no', ''))
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning("audit_log failed: %s", e)
         return jsonify({'message': '创建成功', 'id': order_id})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -59,6 +68,8 @@ def create_order():
 @check_permission('orders:edit')
 @validate_json('update_order')
 def update_order(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     data = get_json_body()
     try:
         # Handle remark history logging via OrderService
@@ -81,14 +92,16 @@ def update_order(oid):
 @check_auth
 @check_permission('orders:delete')
 def delete_order(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     """软删除 — 移入回收站"""
     try:
         user_id = g.current_user['id']
         OrderService.soft_delete_order(oid, user_id)
         try:
             audit_log('delete_order', 'order', oid, '')
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning("audit_log failed: %s", e)
         return jsonify({'message': '已移入回收站'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -98,6 +111,8 @@ def delete_order(oid):
 @check_auth
 @check_permission('orders:delete')
 def restore_order(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     """从回收站恢复"""
     try:
         order_no = OrderService.restore_order(oid)
@@ -120,6 +135,8 @@ def trash_orders():
 @check_auth
 @check_permission('orders:delete')
 def purge_order(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     """彻底删除（仅回收站中的订单）"""
     try:
         order_no = OrderService.purge_order(oid)
@@ -132,6 +149,8 @@ def purge_order(oid):
 @check_auth
 @check_permission('orders:view')
 def get_order_work_records(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     """获取订单报工/报废/返工记录"""
     try:
         order = OrderService.get_order(oid)
@@ -153,6 +172,8 @@ def get_order_work_records(oid):
 @check_auth
 @check_permission('orders:view')
 def get_order_shipments(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
     """获取订单发货记录"""
     try:
         order = OrderService.get_order(oid)
@@ -190,6 +211,8 @@ def batch_create_orders():
 @check_auth
 @check_permission('orders:view')
 def workpiece_progress(order_id):
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}}), 403
     """返回订单每个工件×每道工序的进度矩阵"""
     try:
         progress = OrderService.get_workpiece_progress(order_id)

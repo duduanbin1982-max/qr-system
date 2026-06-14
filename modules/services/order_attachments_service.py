@@ -24,6 +24,11 @@ class OrderAttachmentsService:
             )
             aid = cur.lastrowid
             fpath = os.path.join(upload_dir, f"{aid}_{file_name}")
+    @staticmethod
+    def get_attachment_meta(attachment_id):
+        db = BaseService.db()
+        return db.execute("SELECT order_id FROM order_attachments WHERE id = ?", (attachment_id,)).fetchone()
+
             txn.execute("UPDATE order_attachments SET file_path = ? WHERE id = ?", (fpath, aid))
         return aid, fpath
 

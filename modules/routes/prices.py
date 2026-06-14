@@ -6,13 +6,14 @@ qr-system — 工价管理 + 工资计算路由
 import csv, io
 from datetime import datetime
 
-from flask import request, jsonify, send_file
+from flask import request, jsonify, send_file, g
 
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
-from modules.services.price_service import ProcessPriceService, RoutePriceService, WageService
+from modules.services.price_service import ProcessPriceService, RoutePriceService
+from modules.services.wage_service import WageService
 
 
 # ============================================================
@@ -62,6 +63,16 @@ def update_process_price(pid):
     except Exception as e:
         app.logger.warning('audit_log failed: %s', e)
     return jsonify({'message': '更新成功'})
+
+
+@app.route('/api/process-prices/<int:pid>/impact', methods=['GET'])
+@check_auth
+@check_permission('prices:view')
+def process_price_impact(pid):
+    try:
+        return jsonify(ProcessPriceService.check_price_impact(pid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
 
 @app.route('/api/process-prices/<int:pid>', methods=['DELETE'])
@@ -213,6 +224,16 @@ def save_route_prices(route_id):
 
 
 # ============================================================
+
+@app.route('/api/route-prices/<int:route_id>/history', methods=['GET'])
+@check_auth
+@check_permission('prices:view')
+def get_route_price_history(route_id):
+    """获取路线工价变更历史"""
+    return jsonify(RoutePriceService.get_route_price_history(route_id))
+
+
+# ============================================================
 # Wage & Reports (工资统计与报表)
 # ============================================================
 
@@ -221,6 +242,15 @@ def save_route_prices(route_id):
 @check_permission('prices:view')
 def calculate_wages():
     employee_id = request.args.get('employee_id', type=int)
+    # Row-level access control: non-admin users can only see their own wages
+    if not g.current_user.get('_permissions') or '*' not in g.current_user.get('_permissions', []):
+        if 'prices:view_all' not in g.current_user.get('_permissions', []):
+            # Force to current user's own employee_id
+            current_uid = g.current_user.get('id')
+            current_eno = g.current_user.get('employee_no')
+            if employee_id and employee_id != current_uid:
+                return jsonify({'error': '无权限查看他人工资'}), 403
+            employee_id = current_uid
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')

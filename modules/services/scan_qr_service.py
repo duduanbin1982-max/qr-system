@@ -43,7 +43,7 @@ class ScanQRService:
                     "t": "pi", "sn": serial_no, "oid": order_id, "on": order_no
                 }, ensure_ascii=False)
                 txn.execute(
-                    "INSERT INTO product_items (serial_no, order_id, position_no, qr_content, status, created_at) "
+                    "INSERT OR IGNORE INTO product_items (serial_no, order_id, position_no, qr_content, status, created_at) "
                     "VALUES (?, ?, ?, ?, 'pending', datetime('now', 'localtime'))",
                     (serial_no, order_id, i, qr_content)
                 )

@@ -172,10 +172,14 @@ def add_security_headers(response):
     csp_nonce = getattr(g, 'csp_nonce', 'fallback')
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        f"script-src 'self' 'unsafe-eval' 'unsafe-inline' cdn.jsdelivr.net unpkg.com; "
+        f"script-src 'self' 'nonce-{g.csp_nonce}' cdn.jsdelivr.net unpkg.com; "
         "style-src 'self' 'unsafe-inline' unpkg.com; "
         "img-src 'self' data: blob:; "
-        "connect-src 'self' https:; "
+        "connect-src 'self' cdn.jsdelivr.net unpkg.com; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "img-src 'self' data: blob:; "
         "frame-ancestors 'self'"
     )
     response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'

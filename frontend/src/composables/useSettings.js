@@ -34,21 +34,44 @@ export function useSettings() {
     default_password:'默认密码',
     approval_enabled:'是否启用审批 (1=是 0=否)',
     auto_order_no:'自动生成订单号前缀', page_size:'列表每页条数',
+    smtp_host:'SMTP 服务器地址', smtp_port:'SMTP 端口',
+    smtp_user:'SMTP 用户名', smtp_password:'SMTP 密码',
+    smtp_from:'发件人地址', smtp_tls:'启用 TLS (1=是)',
+    report_recipients:'报表收件人 (逗号分隔)',
+    session_timeout_hours:'会话超时(小时)', session_idle_minutes:'闲置超时(分钟)',
+    board_token:'数据看板Token', process_order_mode:'报工模式',
+    delivery_warning_days:'交期预警天数', limit_by_prev_process:'限制前工序',
+    limit_by_order_qty:'限制订单数量',
+    slow_request_threshold_ms:'慢请求阈值(ms)',
   }
-  const ALLOWED_SETTING_KEYS = new Set(['company_name','contact','phone','address','description','default_password','approval_enabled','auto_order_no','page_size','process_order_mode','delivery_warning_days','limit_by_prev_process','limit_by_order_qty','session_timeout_hours','session_idle_minutes','board_token','smtp_host','smtp_port','smtp_user','smtp_password','smtp_from','smtp_tls','report_recipients','slow_request_threshold_ms'])
+  const ALLOWED_SETTING_KEYS = ref(new Set())  // loaded from API (single source of truth)
 
   async function loadSettings() {
     loading.value = true
-    try { const d = await api.getSettings(); settings.value = d.settings||{}; edits.value = {...settings.value}; deletedKeys.value = new Set() }
-    catch(e) { showToast(e.message,'error') }
+    try {
+      const [settingsData, keysData] = await Promise.all([
+        api.getSettings(),
+        api.get('/api/settings/allowed-keys')
+      ])
+      settings.value = settingsData.settings || {}
+      edits.value = {...settings.value}
+      deletedKeys.value = new Set()
+      if (keysData.allowed_keys) {
+        ALLOWED_SETTING_KEYS.value = new Set(keysData.allowed_keys)
+      }
+    } catch(e) { showToast(e.message,'error') }
     finally { loading.value = false }
   }
   async function saveSettings() {
     saving.value = true
     try {
-      const payload = { ...edits.value }
-      if (deletedKeys.value.size > 0) payload._deleted_keys = [...deletedKeys.value]
-      await api.saveSettings(payload)
+      // P1: Only send company info fields (scoped save)
+      const COMPANY_KEYS = ['company_name','contact','phone','address','description']
+      const payload = {}
+      for (const k of COMPANY_KEYS) {
+        if (k in edits.value) payload[k] = edits.value[k]
+      }
+      await api.post('/api/settings/company-info', payload)
       showToast('保存成功')
       settings.value = {...edits.value}
       deletedKeys.value = new Set()
@@ -60,7 +83,7 @@ export function useSettings() {
     const key = newSettingKey.value.trim()
     if (!key) { showToast('设置项名称不能为空', 'warn'); return }
     if (key in edits.value) { showToast('设置项 \"' + key + '\" 已存在', 'warn'); return }
-    if (!ALLOWED_SETTING_KEYS.has(key)) { showToast('设置项 \"' + key + '\" 不在允许列表中', 'error'); return }
+    if (!ALLOWED_SETTING_KEYS.value.has(key)) { showToast('设置项 \"' + key + '\" 不在允许列表中', 'error'); return }
     edits.value = {...edits.value, [key]: ''}
     showAddKeyModal.value = false
   }
@@ -74,6 +97,7 @@ export function useSettings() {
   // ===== 管理员管理 =====
   const adminUsers = ref([])
   const allUsers = ref([])
+  const allRoles = ref([])
   const adminSearch = ref('')
   const adminLoading = ref(false)
   const selectedAdmins = ref([])
@@ -101,6 +125,10 @@ export function useSettings() {
     try { const d = await api.get('/api/role-groups'); roleGroups.value = d.role_groups||[] }
     catch(e) { showToast('加载角色组失败', 'warn') }
   }
+  async function loadAllRoles() {
+    try { const d = await api.get('/api/roles'); allRoles.value = d.roles||[] }
+    catch(e) { allRoles.value = [] }
+  }
   function toggleSelectAllAdmins() {
     if (adminSelectAll.value) selectedAdmins.value = filteredAdminList.value.map(u=>u.id)
     else selectedAdmins.value = []
@@ -112,13 +140,19 @@ export function useSettings() {
   function openEditAdmin(u) {
     Object.assign(adminForm, { _id:u.id, username:u.username, name:u.name||'', nickname:u.nickname||'', role:u.role||'admin', email:u.email||'', phone:u.phone||'', employee_no:u.employee_no||'', group_name:u.group_name||'超级管理组', status:u.status||'active', password:'' })
     adminModalEdit.value = true; showAdminModal.value = true
-    loadUserRoles(u.id)
+    loadUserRoles(u.id); loadAllRoles()
   }
   async function loadUserRoles(uid) {
     try { const d = await api.get('/api/users/' + uid + '/roles'); userRoleIds.value = (d.roles||[]).map(r=>r.id) }
     catch(e) { userRoleIds.value = [] }
   }
   function toggleUserRole(rid) { const idx = userRoleIds.value.indexOf(rid); if (idx >= 0) userRoleIds.value.splice(idx, 1); else userRoleIds.value.push(rid) }
+  async function saveUserRoles(uid) {
+    try {
+      await api.put('/api/users/' + uid + '/roles', {role_ids: userRoleIds.value})
+      showToast('角色保存成功')
+    } catch(e) { showToast('角色保存失败: ' + (e.message||''), 'warn') }
+  }
   async function saveAdmin() {
     if (!adminForm.username || !adminForm.name) { showToast('用户名和姓名为必填','error'); return }
     const body = { username:adminForm.username, name:adminForm.name, nickname:adminForm.nickname, role:adminForm.role, email:adminForm.email, phone:adminForm.phone, employee_no:adminForm.employee_no, group_name:adminForm.group_name, status:adminForm.status }
@@ -205,17 +239,28 @@ export function useSettings() {
     catch(e) { showToast(e.message,'error') }
     finally { processLoading.value = false }
   }
+  // Setting load helpers (DRY: single parse pattern)
+  function loadNumericSetting(s, key, target, defaultVal) {
+    if (s[key] !== undefined && s[key] !== '') {
+      const v = parseInt(s[key])
+      target[key] = isNaN(v) ? defaultVal : v
+    }
+  }
+  function loadStringSetting(s, key, target, defaultVal) {
+    target[key] = s[key] || defaultVal
+  }
+
   async function loadProcessConfig() {
     processConfigLoading.value = true
     try {
       const d = await api.getSettings(); const s = d.settings || {}
-      if (s.process_order_mode) processConfig.process_order_mode = s.process_order_mode
-      if (s.delivery_warning_days !== undefined && s.delivery_warning_days !== '') { const v = parseInt(s.delivery_warning_days); processConfig.delivery_warning_days = isNaN(v) ? 3 : v }
-      if (s.limit_by_prev_process !== undefined && s.limit_by_prev_process !== '') { const v = parseInt(s.limit_by_prev_process); processConfig.limit_by_prev_process = isNaN(v) ? 1 : v }
-      if (s.limit_by_order_qty !== undefined && s.limit_by_order_qty !== '') { const v = parseInt(s.limit_by_order_qty); processConfig.limit_by_order_qty = isNaN(v) ? 1 : v }
-      if (s.approval_enabled !== undefined && s.approval_enabled !== '') { const v = parseInt(s.approval_enabled); processConfig.approval_enabled = isNaN(v) ? 0 : v }
-      processConfig.auto_order_no = s.auto_order_no || ''
-      if (s.page_size) processConfig.page_size = parseInt(s.page_size) || 20
+      loadStringSetting(s, 'process_order_mode', processConfig, 'sequential')
+      loadNumericSetting(s, 'delivery_warning_days', processConfig, 3)
+      loadNumericSetting(s, 'limit_by_prev_process', processConfig, 1)
+      loadNumericSetting(s, 'limit_by_order_qty', processConfig, 1)
+      loadNumericSetting(s, 'approval_enabled', processConfig, 0)
+      loadNumericSetting(s, 'page_size', processConfig, 20)
+      loadStringSetting(s, 'auto_order_no', processConfig, '')
     } catch(e) { showToast(e.message, 'error') }
     finally { processConfigLoading.value = false }
   }
@@ -355,11 +400,11 @@ export function useSettings() {
   })
 
   return {
-    activeTab, tabs, canManage,
+    ALLOWED_SETTING_KEYS, activeTab, tabs, canManage,
     settings, edits, loading, saving, deletedKeys, companyInfoDirty, showAddKeyModal, newSettingKey, templates,
     loadSettings, saveSettings, addSetting, confirmAddSetting, removeSetting, labelOf,
     allUsers, adminSearch, adminLoading, selectedAdmins, adminSelectAll, showAdminModal, adminModalEdit, adminForm, roleGroups, userRoleIds, filteredAdminList,
-    loadAllUsers, toggleSelectAllAdmins, openAddAdmin, openEditAdmin, saveAdmin, deleteAdminUser, batchDeleteAdmins, loadUserRoles, toggleUserRole,
+    loadAllUsers, toggleSelectAllAdmins, openAddAdmin, openEditAdmin, saveAdmin, deleteAdminUser, batchDeleteAdmins, loadUserRoles, toggleUserRole, saveUserRoles, allRoles, loadAllRoles,
     logs, logsTotal, logsPage, logsLoading, logsLimit, logFilterAction, logFilterKeyword, logFilterDateFrom, logFilterDateTo, logFilterCategory, expandedLogId,
     loadLogs: () => loadLogs(), searchLogs, clearLogs, logsPrevPage, logsNextPage,
     processes, processLoading, processConfig, processConfigLoading, processConfigSaving,

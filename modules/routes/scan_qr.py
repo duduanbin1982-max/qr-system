@@ -11,9 +11,7 @@ from modules.services.scan_qr_service import ScanQRService
 from modules.middleware.error_handler import handle_unexpected_error
 import qrcode as qrcode_lib
 from io import BytesIO
-import os as _os, json as _json
-_QR_DIR = _os.path.dirname(_os.path.abspath(__file__))
-_DATA_FILE = _os.path.join(_QR_DIR, "..", "..", "data", "production.db")
+import json as _json
 
 @app.route('/api/qrcode/<order_no>', methods=['GET'])
 @check_auth

@@ -10,6 +10,7 @@ from flask import request, jsonify, g
 
 from modules.config import SESSION_TIMEOUT_HOURS, SESSION_IDLE_MINUTES
 from modules.db import get_db, get_setting
+from modules.services import BaseService
 
 def has_permission(user: Optional[dict], perm: str) -> bool:
     """检查用户是否拥有指定权限（含角色组权限继承）
@@ -72,9 +73,6 @@ def check_auth(f: Callable) -> Callable:
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        # Also accept token via query param (for download links that can't set headers)
-        if not token:
-            token = request.args.get('token', '')
         # Fallback: read from httpOnly cookie (XSS-safe)
         if not token:
             token = request.cookies.get('qr_token', '')
@@ -169,7 +167,8 @@ def audit_log(action: str, target_type: str = '', target_id: int = 0, detail: st
         db.execute('INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) VALUES (?,?,?,?,?)',
                    (uid, action, target_type, target_id, detail))
         # Only commit if NOT inside an active transaction (avoid breaking caller's atomicity)
-        if not getattr(db, 'in_transaction', False):
+        from modules.services import BaseService
+        if not BaseService.is_in_transaction(db):
             db.commit()
     except Exception as ex:
         logging.getLogger("qr-system").warning(f"audit_log failed: {ex}")

@@ -16,9 +16,16 @@ class ProcessService:
         'order_processes', 'position_processes', 'material_consumptions'
     ]
 
+    @staticmethod
+    def _validate_table_name(table_name):
+        '''Whitelist validation for dynamic table names used in UNION/DELETE queries.'''
+        if table_name not in ProcessService.RELATED_TABLES:
+            raise ValueError(f'Invalid table name: {table_name}')
+        return table_name
+
 
     @staticmethod
-    def list_processes(category='', search='', sort_by='seq_order', sort_dir='asc', limit=None, offset=0):
+    def list_processes(category='', search='', sort_by='seq_order', sort_dir='asc', limit=500, offset=0):
         """工序列表（支持分类筛选、搜索、排序、分页）。"""
         db = BaseService.db()
         # 白名单校验排序字段
@@ -47,18 +54,15 @@ class ProcessService:
         for r in db.execute("SELECT category, COUNT(*) as cnt FROM processes GROUP BY category").fetchall():
             category_counts[r['category']] = r['cnt']
 
-        if limit:
-            # 分页：先查总数
-            count_sql = 'SELECT COUNT(*) FROM processes'
-            if conditions:
-                count_sql += ' WHERE ' + ' AND '.join(conditions)
-            total = db.execute(count_sql, params).fetchone()[0]
+        count_sql = 'SELECT COUNT(*) FROM processes'
+        if conditions:
+            count_sql += ' WHERE ' + ' AND '.join(conditions)
+        total = db.execute(count_sql, params).fetchone()[0]
+        if limit is not None:
             sql += ' LIMIT ? OFFSET ?'
             params.extend([limit, offset])
-            rows = db.execute(sql, params).fetchall()
-            return {'processes': [dict(r) for r in rows], 'total': total, 'category_counts': category_counts}
         rows = db.execute(sql, params).fetchall()
-        return {'processes': [dict(r) for r in rows], 'total': len(rows), 'category_counts': category_counts}
+        return {'processes': [dict(r) for r in rows], 'total': total, 'category_counts': category_counts}
 
     @staticmethod
     def create_process(data):
@@ -92,8 +96,8 @@ class ProcessService:
                     ).fetchone()[0]
                     seq_order = max_seq + 1
                 cur = txn.execute(
-                    'INSERT INTO processes (name, description, category, seq_order, status) '
-                    'VALUES (?,?,?,?,?)',
+                    'INSERT INTO processes (name, description, category, seq_order, status, updated_at) '
+                    'VALUES (?,?,?,?,?, datetime("now","localtime"))',
                     (name, data.get('description', ''),
                      data.get('category', '结构件'), seq_order,
                      data.get('status', 'active'))
@@ -162,7 +166,7 @@ class ProcessService:
         if not existing:
             raise ValueError("工序不存在")
         tables = ProcessService.RELATED_TABLES
-        parts = [f"SELECT '{t}' as tbl, COUNT(*) as cnt FROM {t} WHERE process_id = ?" for t in tables]
+        parts = [f"SELECT '{ProcessService._validate_table_name(t)}' as tbl, COUNT(*) as cnt FROM {t} WHERE process_id = ?" for t in tables]
         union_sql = " UNION ALL ".join(parts)
         rows = db.execute(union_sql, [pid] * len(tables)).fetchall()
         impact = {r["tbl"]: r["cnt"] for r in rows if r["cnt"] > 0}
@@ -181,7 +185,7 @@ class ProcessService:
         related_tables = ProcessService.RELATED_TABLES
         union_parts = []
         for tbl in related_tables:
-            union_parts.append(f"SELECT '{tbl}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
+            union_parts.append(f"SELECT '{ProcessService._validate_table_name(tbl)}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
         union_sql = ' UNION ALL '.join(union_parts)
         rows = db.execute(union_sql, [pid] * len(related_tables)).fetchall()
         impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}

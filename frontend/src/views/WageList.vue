@@ -50,24 +50,24 @@
             </tr>
             <!-- 展开明细 -->
             <tr v-if="expandedId===w.employee_no" style="background:var(--bg-table-stripe)">
-              <td colspan="6" style="padding:0">
-                <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs)">
+              <td colspan="7" style="padding:0">
+                <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs);table-layout:auto">
                   <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder)">
-                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:90px">日期</th>
-                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:110px">订单号</th>
-                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400">产品</th>
-                    <th style="padding:var(--space-2) 12px;text-align:left;font-weight:400;width:80px">工序</th>
-                    <th style="padding:var(--space-2) 12px;text-align:center;font-weight:400;width:60px">数量</th>
-                    <th style="padding:var(--space-2) 12px;text-align:right;font-weight:400;width:70px">单价</th>
-                    <th style="padding:var(--space-2) 12px;text-align:right;font-weight:400;width:80px">工资</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">日期</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">订单号</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">产品</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">工序</th>
+                    <th style="padding:var(--space-2) 8px;text-align:center;font-weight:400;white-space:nowrap">数量</th>
+                    <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">单价</th>
+                    <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">工资</th>
                   </tr></thead>
                   <tbody>
                     <tr v-for="(d, i) in w.details" :key="i" style="border-bottom:1px solid var(--bg-hover)">
-                      <td style="padding:var(--space-2) 12px;color:var(--text-placeholder)">{{ fmtDate(d.date) }}</td>
-                      <td style="padding:var(--space-2) 12px;font-weight:500;color:var(--primary)">{{ d.order_no }}</td>
-                      <td style="padding:var(--space-2) 12px;color:var(--text-secondary)">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
-                      <td style="padding:var(--space-2) 12px;color:var(--primary-accent)">{{ d.process_name }}</td>
-                      <td style="padding:var(--space-2) 12px;text-align:center;font-weight:500">{{ d.quantity }}</td>
+                      <td style="padding:var(--space-2) 8px;color:var(--text-placeholder);white-space:nowrap">{{ fmtDate(d.date) }}</td>
+                      <td style="padding:var(--space-2) 8px;font-weight:500;color:var(--primary);white-space:nowrap">{{ d.order_no }}</td>
+                      <td style="padding:var(--space-2) 8px;color:var(--text-secondary);white-space:nowrap">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
+                      <td style="padding:var(--space-2) 8px;color:var(--primary-accent);white-space:nowrap">{{ d.process_name }}</td>
+                      <td style="padding:var(--space-2) 8px;text-align:center;font-weight:500;white-space:nowrap">{{ d.quantity }}</td>
                       <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">¥{{ fmtMoney(d.unit_price) }}</td>
                       <td style="padding:var(--space-2) 12px;text-align:right;font-weight:600;color:var(--success)">¥{{ fmtMoney(d.wage) }}</td>
                     </tr>

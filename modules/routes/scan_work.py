@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import request, jsonify, g
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.rate_limit import rate_limit
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
@@ -260,31 +261,15 @@ def mobile_report():
         current_seq = current_op["seq_order"] if current_op else 0
 
         # ===== 顺序报工检查 =====
-        process_order_mode = get_setting("process_order_mode", "sequential")
-        if process_order_mode != "out_of_order":
-            prev_incomplete = ScanHelperService.get_prev_incomplete_processes(order_id, current_seq)
-            if prev_incomplete:
-                names = "、".join([p["process_name"] for p in prev_incomplete])
-                return jsonify({"error": f"请先完成前置工序：{names}"}), 400
+        err, code = ScanHelperService.check_process_order(order_id, current_seq)
+        if err:
+            return jsonify(err), code
 
-        # ===== 上道工序累计数量限制 =====
-        if get_setting("limit_by_prev_process", "1") == "1" and current_seq > 1:
-            prev_op = ScanHelperService.get_prev_order_process(order_id, current_seq - 1)
-            if prev_op:
-                new_completed = (current_op["completed"] or 0) + quantity
-                prev_completed = prev_op["completed"] or 0
-                if new_completed > prev_completed:
-                    return jsonify({
-                        "error": f"报工数量不能超过上道工序({prev_op['process_name']})的累计数量 {prev_completed}"
-                    }), 400
-
-        # ===== 订单数量上限限制 =====
-        if get_setting("limit_by_order_qty", "1") == "1":
-            new_completed = (current_op["completed"] or 0) + quantity
-            if new_completed > order["quantity"]:
-                return jsonify({
-                    "error": f"报工累计({new_completed})不能超过订单数量({order['quantity']})"
-                }), 400
+        # ===== 数量上限检查 =====
+        err, code = ScanHelperService.check_quantity_limits(
+            order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
+        if err:
+            return jsonify(err), code
 
         # ===== 防重复报工 =====
         if report_type == "normal":
@@ -301,7 +286,7 @@ def mobile_report():
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
 
         # 使用共享报工写入逻辑
-        ScanHelperService.execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
+        ScanHelperService.execute_report_write(report_type, order_id, process_id, user["id"], user.get("name", ""),
                               quantity, remark, serial_no, need_approval, report_type)
 
         try:
@@ -310,6 +295,8 @@ def mobile_report():
         except Exception:
             pass
         return jsonify({"message": "报工成功"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
 
@@ -365,31 +352,15 @@ def work_report():
         current_seq = current_op["seq_order"] if current_op else 0
 
         # ===== 顺序报工检查 =====
-        process_order_mode = get_setting("process_order_mode", "sequential")
-        if process_order_mode != "out_of_order":
-            prev_incomplete = ScanHelperService.get_prev_incomplete_processes(order_id, current_seq)
-            if prev_incomplete:
-                names = "、".join([p["process_name"] for p in prev_incomplete])
-                return jsonify({"error": f"请先完成前置工序：{names}"}), 400
+        err, code = ScanHelperService.check_process_order(order_id, current_seq)
+        if err:
+            return jsonify(err), code
 
-        # ===== 上道工序累计数量限制 =====
-        if get_setting("limit_by_prev_process", "1") == "1" and current_seq > 1:
-            prev_op = ScanHelperService.get_prev_order_process(order_id, current_seq - 1)
-            if prev_op:
-                new_completed = (current_op["completed"] or 0) + quantity
-                prev_completed = prev_op["completed"] or 0
-                if new_completed > prev_completed:
-                    return jsonify({
-                        "error": f"报工数量不能超过上道工序({prev_op['process_name']})的累计数量 {prev_completed}"
-                    }), 400
-
-        # ===== 订单数量上限限制 =====
-        if get_setting("limit_by_order_qty", "1") == "1":
-            new_completed = (current_op["completed"] or 0) + quantity
-            if new_completed > order["quantity"]:
-                return jsonify({
-                    "error": f"报工累计({new_completed})不能超过订单数量({order['quantity']})"
-                }), 400
+        # ===== 数量上限检查 =====
+        err, code = ScanHelperService.check_quantity_limits(
+            order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
+        if err:
+            return jsonify(err), code
 
         # ===== 审批检查 =====
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
@@ -412,7 +383,7 @@ def work_report():
                 return jsonify({"error": f"序列号 {serial_no} 当前不在该工序，请刷新后重试"}), 400
 
         # ===== 共享报工写入 =====
-        ScanHelperService.execute_report_write(None, report_type, order_id, process_id, user["id"], user.get("name", ""),
+        ScanHelperService.execute_report_write(report_type, order_id, process_id, user["id"], user.get("name", ""),
                               quantity, remark, serial_no, need_approval, report_type)
 
         try:
@@ -420,7 +391,8 @@ def work_report():
                       "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
         except Exception:
             pass
-        return jsonify({"message": "报工成功"})
+    except ValueError as e:
+        return jsonify({ error: str(e)}), 409
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
 

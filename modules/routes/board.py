@@ -5,6 +5,7 @@ from flask import request, jsonify
 from modules.app import app
 from modules.cache_utils import ttl_cache
 from modules.db import get_setting, get_db
+from modules.middleware.auth import check_auth, check_permission
 from modules.services.board_service import BoardService
 
 BOARD_SESSION_HOURS = 8
@@ -51,7 +52,7 @@ def dashboard_board():
             if _verify_board_session(auth_header[7:]):
                 authorized = True
     if not authorized and board_token:
-        provided = request.args.get('token', '')
+        provided = ''  # URL token fallback disabled for security
         if provided == board_token:
             authorized = True
             app.logger.warning('Board accessed via legacy URL token')
@@ -72,6 +73,8 @@ def dashboard_board():
 
 
 @app.route('/api/board/auth/cleanup', methods=['POST'])
+@check_auth
+@check_permission('settings:manage')
 def board_auth_cleanup():
     db = get_db()
     db.execute("DELETE FROM board_sessions WHERE expires_at <= datetime('now','localtime')")

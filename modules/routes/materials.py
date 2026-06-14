@@ -66,6 +66,16 @@ def update_material(mid):
         return handle_unexpected_error(e, 'database operation')
 
 
+@app.route('/api/materials/<int:mid>/impact', methods=['GET'])
+@check_auth
+@check_permission('materials:view')
+def material_impact(mid):
+    try:
+        return jsonify(MaterialService.check_impact(mid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
 @app.route('/api/materials/<int:mid>', methods=['DELETE'])
 @check_auth
 @check_permission('materials:manage')

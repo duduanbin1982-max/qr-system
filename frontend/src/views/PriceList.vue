@@ -62,6 +62,7 @@
                   <th class="col-min-140">工序名称</th>
                   <th class="col-cat">分类</th>
                   <th class="col-min-110 text-center">当前工价</th>
+                  <th class="col-min-110 text-center">生效日期</th>
                   <th class="col-min-130 text-center">新工价 (元)</th>
                 </tr>
               </thead>
@@ -72,6 +73,13 @@
                   <td class="text-center"><span class="badge" :style="{background:s.category==='机加工'?'var(--warning-lighter)':'var(--info-light)',color:s.category==='机加工'?'var(--warning)':'var(--info)',fontSize:'var(--text-xs-alt)'}">{{ s.category || '—' }}</span></td>
                   <td class="text-center">
                     <span v-if="s.unit_price != null" style="display:inline-block;padding:var(--space-1) 10px;background:var(--primary-light);border-radius:var(--radius-sm);color:var(--primary);font-weight:600;font-size:var(--text-sm)">¥{{ Number(s.unit_price).toFixed(2) }}</span>
+                    <span v-else style="color:var(--border)">—</span>
+                  </td>
+                  <td class="text-center" style="font-size:var(--text-xs)">
+                    <span v-if="s.effective_date" :style="{color: isRecentDate(s.effective_date) ? 'var(--warning)' : 'var(--text-placeholder)', fontWeight: isRecentDate(s.effective_date) ? 600 : 400}">
+                      {{ s.effective_date }}
+                      <span v-if="isRecentDate(s.effective_date)" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning);margin-left:4px;animation:pulse 2s infinite" :title="'最近更新'"></span>
+                    </span>
                     <span v-else style="color:var(--border)">—</span>
                   </td>
                   <td class="text-center">
@@ -96,6 +104,37 @@
                 {{ saving ? '⏳ 保存中...' : '💾 保存工价' }}
               </button>
             </div>
+            <!-- 调价历史 -->
+            <div v-if="priceHistory.length" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-light)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <span style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary)">📋 调价历史</span>
+                <button @click="priceHistory=[]" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:var(--text-lg)">&times;</button>
+              </div>
+              <div style="max-height:200px;overflow-y:auto">
+                <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:var(--text-xs)">
+                  <colgroup>
+                    <col style="width:34%"><col style="width:20%"><col style="width:16%"><col style="width:16%"><col style="width:14%">
+                  </colgroup>
+                  <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder)">
+                    <th style="padding:4px 8px;text-align:left">日期</th>
+                    <th style="padding:4px 8px;text-align:left">工序</th>
+                    <th style="padding:4px 8px;text-align:right">旧价</th>
+                    <th style="padding:4px 8px;text-align:right">新价</th>
+                    <th style="padding:4px 8px;text-align:center">生效</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr v-for="h in priceHistory" :key="h.id" style="border-bottom:1px solid var(--bg-hover)">
+                      <td style="padding:4px 8px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder)">{{ h.created_at ? h.created_at.slice(0,16) : '-' }}</td>
+                      <td style="padding:4px 8px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ h.process_name || '-' }}</td>
+                      <td style="padding:4px 8px;text-align:right;white-space:nowrap;color:var(--text-muted)">¥{{ h.old_price != null ? Number(h.old_price).toFixed(2) : '-' }}</td>
+                      <td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:600;color:var(--warning)">¥{{ Number(h.new_price).toFixed(2) }}</td>
+                      <td style="padding:4px 8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder)">{{ h.effective_date || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -142,6 +181,7 @@ export default {
     })
     const editPrices = reactive({}) // {process_id: unit_price}
     const saving = ref(false)
+    const priceHistory = ref([])
     const switching = ref(false)
 
     // 复制
@@ -190,6 +230,7 @@ export default {
         const d = await api.get('/api/route-prices/' + routeId)
         routeSteps.value = d.steps || []
         routeStepsByRoute[routeId] = d.steps || []
+        loadPriceHistory(routeId)
         // Init editPrices
         const prices = {}
         routeSteps.value.forEach(s => {
@@ -201,6 +242,21 @@ export default {
         showToast('加载路线工价失败', 'error')
         expandedRoute.value = null
       }
+    }
+
+    function isRecentDate(dateStr) {
+      if (!dateStr) return false
+      const d = new Date(dateStr)
+      const now = new Date()
+      const diff = (now - d) / (1000 * 60 * 60 * 24)
+      return diff <= 7
+    }
+
+    async function loadPriceHistory(routeId) {
+      try {
+        const d = await api.get("/api/route-prices/" + routeId + "/history")
+        priceHistory.value = d.history || []
+      } catch (e) { priceHistory.value = [] }
     }
 
     const routeStepsByRoute = reactive({})  // { routeId: [...] }
@@ -222,6 +278,7 @@ export default {
         const data = { prices, effective_date: meta.effectiveDate, remark: meta.remark }
         const res = await api.put('/api/route-prices/' + rid, data)
         showToast(res.message || '保存成功')
+        priceHistory.value = []
         expandedRoute.value = null
         await loadMatrix()
       } catch (e) { showToast(e.message || '保存失败', 'error') }
@@ -282,7 +339,7 @@ export default {
           procUrl += '?category=' + encodeURIComponent(pricingCategory.value)
         const [procData, priceData] = await Promise.all([
           api.get(procUrl),
-          api.get('/api/process-prices')
+          api.get('/api/process-prices?limit=99999')
         ])
         processes.value = procData.processes || []
         let allPrices = priceData.process_prices || []
@@ -354,7 +411,7 @@ export default {
         pricingCategory.value = cat
         await Promise.all([loadStats(), loadAllRoutes(cat === 'all' ? null : cat), loadMatrix()])
       } catch (e) {
-        showToast('????????: ' + (e.message || '????'), 'error')
+        showToast('加载失败: ' + (e.message || '网络错误'), 'error')
       }
     })
 
@@ -367,12 +424,12 @@ export default {
       // 状态
       loading, processes, pricingCategory, productPrices, pageTitle,
       routeSteps, allRoutes, filteredRoutes,
-      editPrices, saving,
+      editPrices, saving, priceHistory,
       showMatrix, showDefaultModal, defaultPrices, defaultCategory,
       totalRouteCount, structRouteCount, machRouteCount, pricedRouteCount,
       can, canEdit, canCreate, canDelete,
       // 卡片模式
-      expandedRoute, toggleRoute, editMeta, saveRoute,
+      expandedRoute, toggleRoute, editMeta, saveRoute, isRecentDate, loadPriceHistory,
       // 方法
       switchCat, loadAllRoutes, loadMatrix, deleteProductPrices,
       openDefaults, saveDefaults

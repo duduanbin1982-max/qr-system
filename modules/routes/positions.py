@@ -88,6 +88,16 @@ def update_position(pos_id):
     return jsonify({'message': '更新成功'})
 
 
+@app.route('/api/positions/<int:pos_id>/impact', methods=['GET'])
+@check_auth
+@check_permission('positions:view')
+def position_impact(pos_id):
+    try:
+        return jsonify(PositionService.check_impact(pos_id))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
 @app.route('/api/positions/<int:pos_id>', methods=['DELETE'])
 @check_auth
 @check_permission('positions:delete')

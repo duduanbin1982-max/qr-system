@@ -41,7 +41,10 @@ export function useBoard() {
 
   function switchCategory(cat) { boardCategory.value = cat; loadData() }
 
-  async function loadData() {
+  let _loadingData = false
+async function loadData() {
+  if (_loadingData) return
+  _loadingData = true
     try {
       const params = boardCategory.value ? { category: boardCategory.value } : {}
       const data = await api.board(params)
@@ -90,7 +93,7 @@ export function useBoard() {
     updateClock()
     loadData()
     _timer = setInterval(updateClock, 1000)
-    _refreshTimer = setInterval(loadData, 30000)
+    _refreshTimer = setInterval(loadData, 60000)
   })
   onBeforeUnmount(() => {
     if (_timer) clearInterval(_timer)

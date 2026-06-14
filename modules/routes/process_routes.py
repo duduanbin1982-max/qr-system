@@ -69,6 +69,16 @@ def update_process_route(rid):
     return jsonify({'message': '更新成功'})
 
 
+@app.route('/api/process-routes/<int:rid>/impact', methods=['GET'])
+@check_auth
+@check_permission('routes:view')
+def process_route_impact(rid):
+    try:
+        return jsonify(ProcessRouteService.check_impact(rid))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+
+
 @app.route('/api/process-routes/<int:rid>', methods=['DELETE'])
 @check_auth
 @check_permission('routes:delete')

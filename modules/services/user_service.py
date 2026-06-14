@@ -26,6 +26,7 @@ class UserService:
                 valid_ids = set(row['id'] for row in rows)
                 filtered = [str(x) for x in id_list if x in valid_ids]
                 data['process_ids'] = ','.join(filtered) if filtered else ''
+                data['_valid_process_ids'] = [int(x) for x in filtered] if filtered else []
 
     # ============================================================
     # 查询
@@ -111,6 +112,17 @@ class UserService:
         role_id = data.get('role_id')
         if role not in ('admin', 'worker'):
             raise ValueError('角色值无效，仅允许 admin/worker')
+
+        # P0 Fix: Only admins can create admin accounts
+        if role == 'admin':
+            caller_id = data.get('_caller_user_id')
+            if not caller_id:
+                raise ValueError('只有管理员可以创建管理员账户')
+            chk = BaseService.db().execute(
+                'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (caller_id,)
+            ).fetchone()
+            if not chk:
+                raise ValueError('只有管理员可以创建管理员账户')
 
         db = BaseService.db()
 
@@ -247,6 +259,9 @@ class UserService:
 
         sets = []
         params = []
+        # P2: Prevent empty employee_no UNIQUE conflict
+        if 'employee_no' in data and not data['employee_no']:
+            del data['employee_no']
         for field in ['name', 'nickname', 'email', 'group_name', 'role', 'employee_no',
                        'phone', 'process_ids', 'status', 'position_id']:
             if field in data:
@@ -344,6 +359,30 @@ class UserService:
     # ============================================================
     # 密码重置
     # ============================================================
+
+    @staticmethod
+    def batch_delete_users(ids, current_user_id):
+        """Delete multiple users in a single transaction."""
+        if not ids:
+            return 0
+        db = BaseService.db()
+        # Prevent self-deletion
+        if current_user_id in ids:
+            raise ValueError('不能删除自己')
+        # Prevent deleting built-in admin
+        placeholders = ','.join(['?'] * len(ids))
+        admins = db.execute(
+            f'SELECT id FROM users WHERE id IN ({placeholders}) AND username = ?',
+            ids + ['admin']
+        ).fetchall()
+        if admins:
+            raise ValueError('不能删除内置管理员 (admin)')
+        with BaseService.transaction() as txn:
+            # Delete user_roles first
+            txn.execute(f'DELETE FROM user_roles WHERE user_id IN ({placeholders})', ids)
+            # Then delete users
+            cur = txn.execute(f'DELETE FROM users WHERE id IN ({placeholders})', ids)
+            return cur.rowcount
 
     @staticmethod
     def reset_password(uid, password=None):

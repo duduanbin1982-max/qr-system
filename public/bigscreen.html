@@ -588,7 +588,11 @@ body {
     }
     requestAnimationFrame(draw);
   }
-  window.addEventListener('resize', () => { resize(); init(); });
+  let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => { resize(); init(); }, 500);
+});
   init(); draw();
 })();
 

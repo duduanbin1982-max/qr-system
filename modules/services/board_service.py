@@ -87,7 +87,7 @@ class BoardService:
         """Overdue orders (plan_end < today)."""
         rows = db.execute(
             "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
-            "CAST(julianday('now') - julianday(o.plan_end) AS INTEGER) as overdue_days "
+            "CAST(julianday('now','localtime') - julianday(o.plan_end) AS INTEGER) as overdue_days "
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
             "LEFT JOIN products p ON o.product_code = p.product_code "
             "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "

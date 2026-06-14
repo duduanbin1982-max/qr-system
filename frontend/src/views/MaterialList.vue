@@ -353,6 +353,14 @@ export default {
     }
 
     async function remove(m) {
+      let impactMsg = ''
+      try {
+        const res = await api.get('/api/materials/' + m.id + '/impact')
+        if (res.refs > 0) {
+          showToast('物料「' + m.name + '」有 ' + res.refs + ' 个关联，无法删除', 'warn')
+          return
+        }
+      } catch(e) {}
       if (!confirm('确定删除物料「' + m.name + '」？')) return
       try {
         await api.del('/api/materials/' + m.id)

@@ -1,11 +1,16 @@
-"""
+﻿"""
 qr-system - Service 层基类
 
 提供统一事务管理，消除路由中重复的 BEGIN/COMMIT/ROLLBACK 模板。
 """
 import sqlite3
+import threading
 from contextlib import contextmanager
 from modules.db import get_db
+
+# Thread-safe set of connection IDs currently in active transactions
+_txn_connections = set()
+_txn_lock = threading.Lock()
 
 
 class BaseService:
@@ -25,7 +30,6 @@ class BaseService:
         Usage:
             with BaseService.transaction() as db:
                 db.execute('INSERT ...', params)
-                # 成功自动 commit，异常自动 rollback
 
         Raises:
             RuntimeError: 数据库锁定
@@ -36,6 +40,8 @@ class BaseService:
             db.execute('BEGIN IMMEDIATE')
         except Exception as e:
             raise RuntimeError(f'数据库锁定: {e}')
+        with _txn_lock:
+            _txn_connections.add(id(db))
         try:
             yield db
             db.commit()
@@ -48,3 +54,13 @@ class BaseService:
         except Exception:
             db.execute('ROLLBACK')
             raise
+        finally:
+            with _txn_lock:
+                _txn_connections.discard(id(db))
+
+    @staticmethod
+    def is_in_transaction(db=None):
+        """Check if the given connection (or any) is inside an active transaction."""
+        if db is not None:
+            return id(db) in _txn_connections
+        return len(_txn_connections) > 0

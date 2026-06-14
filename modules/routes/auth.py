@@ -96,8 +96,8 @@ def login():
     u["permissions"] = get_user_permissions(u)
 
     resp = jsonify({"user": u, "must_change_password": bool(u.get("must_change_password", 0))})
-    resp.set_cookie("qr_token", token, httponly=True,
-                    samesite="Lax", max_age=SECONDS_PER_DAY * 7, path="/")
+    resp.set_cookie("qr_token", token, httponly=True, secure=True,
+                    samesite="Strict", max_age=SECONDS_PER_DAY * 7, path="/")
     return resp
 
 

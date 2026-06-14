@@ -113,3 +113,22 @@ def unlock_user(uid):
     except Exception:
         pass
     return jsonify({'message': '账户已解锁'})
+
+@app.route('/api/users/batch-delete', methods=['POST'])
+@check_auth
+@check_permission('users:delete')
+def batch_delete_users():
+    """Delete multiple users in a single transaction."""
+    data = get_json_body()
+    ids = data.get('ids', [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({'error': '无效的用户ID列表'}), 400
+    try:
+        deleted = UserService.batch_delete_users(ids, g.current_user.get('id'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    try:
+        audit_log('batch_delete_users', 'user', 0, f'deleted {deleted} users: {ids[:10]}')
+    except Exception:
+        pass
+    return jsonify({'message': f'成功删除 {deleted} 个用户', 'deleted': deleted})

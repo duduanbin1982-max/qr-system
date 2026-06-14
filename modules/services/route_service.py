@@ -83,7 +83,7 @@ class ProcessRouteService:
 
         with BaseService.transaction() as txn:
             cur = txn.execute(
-                'INSERT INTO process_routes (name, description, category) VALUES (?, ?, ?)',
+                'INSERT INTO process_routes (name, description, category, updated_at) VALUES (?, ?, ?, datetime("now","localtime"))',
                 (name, data.get('description', ''), data.get('category', '结构件'))
             )
             route_id = cur.lastrowid
@@ -180,6 +180,20 @@ class ProcessRouteService:
             txn.execute('DELETE FROM process_route_items WHERE route_id = ?', (rid,))
             txn.execute('DELETE FROM process_routes WHERE id = ?', (rid,))
         return route['name']
+
+    @staticmethod
+    def check_impact(rid):
+        db = BaseService.db()
+        route = db.execute(
+            'SELECT id, name FROM process_routes WHERE id = ?', (rid,)
+        ).fetchone()
+        if not route:
+            raise ValueError('Route not found')
+        used = db.execute(
+            'SELECT COUNT(*) as cnt FROM orders WHERE deleted_at IS NULL AND route_id = ?',
+            (rid,)
+        ).fetchone()['cnt']
+        return {'route_id': rid, 'name': route['name'], 'used_orders': used}
 
     @staticmethod
     def check_order_exists(order_id):

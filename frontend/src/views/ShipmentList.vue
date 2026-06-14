@@ -291,6 +291,13 @@ export default {
     }
 
     async function del(s) {
+      try {
+        const res = await api.get('/api/shipments/' + s.id + '/impact')
+        if (res.items > 0) {
+          showToast('出库单「' + s.shipment_no + '」包含 ' + res.items + ' 个物品，请先清空', 'warn')
+          return
+        }
+      } catch(e) {}
       const msg = s.status === 'completed' ? '已完成出库（将自动归还库存），' : ''
       if (!confirm(msg + '确定删除出库单 ' + s.shipment_no + ' 吗？')) return
       try { await api.deleteShipment(s.id); showToast('删除成功'); await load() }

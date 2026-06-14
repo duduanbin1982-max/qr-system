@@ -97,6 +97,15 @@ class MaterialService:
             MaterialRepository.update(mid, set_clauses, params, db=txn)
 
     @staticmethod
+    @staticmethod
+    def check_impact(mid):
+        mat = MaterialRepository.find_by_id(mid)
+        if not mat:
+            raise ValueError("Material not found")
+        refs = MaterialRepository.count_refs(mid)
+        return {"material_id": mid, "name": mat["name"], "refs": refs}
+
+    @staticmethod
     def delete_material(mid):
         """?????????????Raises ValueError on not found or has refs."""
         mat = MaterialRepository.find_by_id(mid)

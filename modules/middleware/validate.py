@@ -80,7 +80,7 @@ SCHEMAS = {
             'product_name': {'type': 'string', 'maxLength': 128},
             'product_code': {'type': 'string', 'maxLength': 64},
             'quantity': {'type': 'integer', 'minimum': 1, 'maximum': 99999},
-            'status': {'type': 'string', 'enum': ['pending', 'producing', 'completed', 'cancelled']},
+            'status': {'type': 'string', 'enum': ['pending', 'producing', 'completed', 'cancelled', 'paused']},
             'plan_start': {'type': 'string', 'maxLength': 32},
             'plan_end': {'type': 'string', 'maxLength': 32},
             'deadline': {'type': 'string', 'maxLength': 32},

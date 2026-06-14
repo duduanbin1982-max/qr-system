@@ -230,6 +230,28 @@
             </div></div>
           </div>
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
+
+          <!-- 订单物料配方（编辑模式） - 创建时无需操作，系统会自动从产品BOM复制 -->
+          <div v-if="modalEdit" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-light)">
+            <label style="font-weight:600;font-size:var(--text-sm);margin-bottom:8px;display:block">📦 物料配方 <span style="font-weight:normal;color:var(--text-muted);font-size:var(--text-xs)">（每件用量，可覆盖产品默认BOM）</span></label>
+            <div v-if="orderMaterials.length" style="margin-bottom:8px">
+              <div v-for="om in orderMaterials" :key="om.id" style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
+                <span style="flex:1">{{ om.material_name }} {{ om.material_spec || '' }}</span>
+                <span style="color:var(--text-muted);white-space:nowrap">x{{ om.quantity_per_unit }}/件</span>
+                <span v-if="om.process_name" style="color:var(--primary);white-space:nowrap">@{{ om.process_name }}</span>
+                <button @click="removeOrderMaterial(om.id)" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
+              </div>
+            </div>
+            <div v-else style="color:var(--text-muted);font-size:var(--text-xs);margin-bottom:8px">暂无物料配方（可从对应产品的BOM自动继承）</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select v-model="orderMatForm.material_id" style="flex:1;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
+                <option value="">- 选择物料 -</option>
+                <option v-for="m in materialOptions" :key="m.id" :value="m.id">{{ m.name }} {{ m.spec||'' }} [{{ m.material_type||'' }}]</option>
+              </select>
+              <input v-model="orderMatForm.quantity_per_unit" type="number" step="0.1" min="0.1" placeholder="用量/件" style="width:70px;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
+              <button @click="addOrderMaterial" class="btn btn-sm" style="background:var(--primary);color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap">+ 添加</button>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="showModal=false">取消</button>

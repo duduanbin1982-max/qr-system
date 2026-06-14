@@ -6,7 +6,7 @@ import sqlite3, json, bcrypt
 from modules.config import DB_PATH, PREDEFINED_ROLES
 
 MIGRATIONS = []
-LATEST_VERSION = 12
+LATEST_VERSION = 15
 
 def migration(version, description):
     def decorator(fn):
@@ -976,6 +976,43 @@ def m001_baseline(db):
 
     db.commit()
 
+
+
+# ============================================================
+# Migration 13: Board sessions table (moved from routes/board.py to migrations)
+# ============================================================
+try:
+    db.execute('''CREATE TABLE IF NOT EXISTS board_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+except:
+    pass
+
+
+# Migration 14
+try:
+    db.execute("CREATE TABLE IF NOT EXISTS product_bom (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id), UNIQUE(product_id, material_id, process_id))")
+except: pass
+try:
+    db.execute("CREATE TABLE IF NOT EXISTS order_materials (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, source TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id))")
+except: pass
+try:
+    db.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_product ON product_bom(product_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_order_materials_order ON order_materials(order_id)")
+except: pass
+
+
+@migration(15, "Add is_builtin column to roles")
+def m015_roles_is_builtin(db):
+    try:
+        db.execute("ALTER TABLE roles ADD COLUMN is_builtin INTEGER DEFAULT 0")
+    except:
+        pass
+    db.execute("UPDATE roles SET is_builtin = 1 WHERE id IN (1, 2)")
+    db.commit()
 
 
 def run_migrations(db=None):

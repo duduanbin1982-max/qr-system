@@ -24,14 +24,14 @@ class ProductService:
     # ============================================================
 
     @staticmethod
-    def list_products(keyword='', category='', page=1, limit=100):
+    def list_products(keyword='', category='', page=1, limit=100, deleted=False):
         """
         产品列表（支持搜索、分类筛选、分页）。
 
         Returns:
             dict: {products: [...], total, page, limit}
         """
-        where = 'deleted_at IS NULL'
+        where = 'deleted_at IS NOT NULL' if deleted else 'deleted_at IS NULL'
         params = []
         if keyword:
             where += ' AND (product_name LIKE ? OR model LIKE ? OR spec LIKE ?)'
@@ -93,7 +93,7 @@ class ProductService:
             if existing:
                 if existing['deleted_at']:
                     raise ValueError(f'产品编码重复：{product_code}，该产品已被删除，请先联系管理员恢复')
-                raise ValueError(f'产品编码重复：{product_code}，已有产品 ID={existing["id"]}')
+                raise ValueError(f'产品编码 {product_code} 已存在')
 
             insert_data = {
                 'product_name': name,
@@ -182,7 +182,19 @@ class ProductService:
 
     # ============================================================
     # 删除
-    # ============================================================
+    @staticmethod
+    def check_product_impact(pid):
+        db = BaseService.db()
+        prod = db.execute(
+            "SELECT id, product_name, product_code FROM products WHERE id = ? AND deleted_at IS NULL",
+            (pid,)
+        ).fetchone()
+        if not prod:
+            raise ValueError("Product not found")
+        used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
+        return {"product": dict(prod), "used_in_orders": used}
+
+    # ============================================================    # ============================================================
 
     @staticmethod
     def delete_product(pid):
@@ -202,6 +214,31 @@ class ProductService:
 
         with BaseService.transaction() as txn:
             ProductRepository.soft_delete(pid, db=txn)
+
+    @staticmethod
+    def restore_product(pid):
+        prod = dict(ProductRepository.find_by_id(pid))
+        if not prod:
+            raise ValueError('产品不存在')
+        if not prod.get('deleted_at'):
+            raise ValueError('该产品未被删除，无需恢复')
+        with BaseService.transaction() as txn:
+            ProductRepository.restore(pid, db=txn)
+        return prod['product_name']
+
+    @staticmethod
+    def purge_product(pid):
+        prod = dict(ProductRepository.find_by_id(pid))
+        if not prod:
+            raise ValueError("product not found")
+        if not prod.get("deleted_at"):
+            raise ValueError("only soft-deleted products can be purged")
+        used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
+        if used > 0:
+            raise ValueError("product referenced by " + str(used) + " orders, cannot purge")
+        with BaseService.transaction() as txn:
+            ProductRepository.hard_delete(pid, db=txn)
+        return prod["product_name"]
 
     # ============================================================
     # Excel 批量导入
@@ -292,9 +329,13 @@ class ProductService:
                 if not model:
                     model = product_code
 
-                if ProductRepository.exists_by_code(product_code, db=txn):
+                existing = ProductRepository.find_by_code(product_code, db=txn)
+                if existing:
                     skipped += 1
-                    errors.append(f'第{i}行：{product_code}({name})已存在，跳过')
+                    if existing.get("deleted_at"):
+                        errors.append(f'第{i}行：{product_code}({name})的编码与已删除产品重复，请先联系管理员恢复')
+                    else:
+                        errors.append(f'第{i}行：{product_code}({name})已存在，跳过')
                     continue
 
                 try:
@@ -324,7 +365,7 @@ class ProductService:
         
         summary = f'空名称:{empty_name} 重复:{duplicate} 其他:{db_error}'
         # Include first 3 actual error details
-        sample_errors = [e for e in errors if '入库失败' in e or '空名称' not in e and '已存在' not in e][:3]
+        sample_errors = [e for e in errors if '入库失败' in e][:3]
         error_detail = ' | '.join(sample_errors) if sample_errors else ''
         return {
             'success': success,

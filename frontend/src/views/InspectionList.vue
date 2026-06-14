@@ -217,20 +217,20 @@ export default {
       params.push('page=' + p, 'per_page=' + perPage)
       try {
         const r = await api.get('/api/quality/inspections?' + params.join('&'))
-        if (r.ok) { items.value = r.items; total.value = r.total }
+        items.value = r.items; total.value = r.total
       } catch (e) { showToast('加载失败', 'error') }
       finally { loading.value = false }
     }
 
     async function loadStats() {
-      try { const r = await api.get('/api/quality/inspections/stats'); if (r.ok) stats.value = r } catch (e) {}
+      try { const r = await api.get('/api/quality/inspections/stats'); stats.value = r } catch (e) {}
     }
 
     async function searchOrders() {
       if (!orderSearch.value) { orders.value = []; orderDropdown.value = false; return }
       try {
         const r = await api.get('/api/orders?keyword=' + encodeURIComponent(orderSearch.value) + '&limit=10')
-        if (r.ok) { orders.value = r.orders || []; orderDropdown.value = orders.value.length > 0 }
+        orders.value = r.orders || []; orderDropdown.value = orders.value.length > 0
       } catch (e) {}
     }
 
@@ -239,7 +239,7 @@ export default {
     async function loadProcessesCache() {
       try {
         const r = await api.get('/api/processes')
-        if (r.ok) allProcessesCache = (r.processes || []).filter(p => p.status === 'active')
+        allProcessesCache = (r.processes || []).filter(p => p.status === 'active')
       } catch (e) {}
     }
 
@@ -294,8 +294,7 @@ export default {
         } else {
           r = await api.post('/api/quality/inspections', form.value)
         }
-        if (r.ok) { showToast(isEdit.value ? '已更新' : '已创建'); showModal.value = false; load(page.value); loadStats() }
-        else showToast(r.error || '失败', 'error')
+        showToast(isEdit.value ? '已更新' : '已创建'); showModal.value = false; load(page.value); loadStats()
       } catch (e) { showToast('保存失败', 'error') }
     }
 
@@ -303,8 +302,7 @@ export default {
       if (!confirm('确认删除检验记录？')) return
       try {
         const r = await api.del('/api/quality/inspections/' + item.id)
-        if (r.ok) { showToast('已删除'); load(page.value); loadStats() }
-        else showToast(r.error || '失败', 'error')
+        showToast('已删除'); load(page.value); loadStats()
       } catch (e) { showToast('删除失败', 'error') }
     }
 
@@ -316,7 +314,7 @@ export default {
     async function loadDefectCategories() {
       try {
         const r = await api.get('/api/quality/defect-categories')
-        if (r.ok && r.categories) defectCategories.value = r.categories
+        defectCategories.value = r.categories || []
       } catch (e) {}
     }
 
@@ -326,7 +324,7 @@ export default {
         if (dateFrom.value) params.push('from=' + dateFrom.value)
         if (dateTo.value) params.push('to=' + dateTo.value)
         const r = await api.get('/api/quality/defect-pareto?' + params.join('&'))
-        if (r.ok) pareto.value = r
+        pareto.value = r
       } catch (e) {}
     }
 

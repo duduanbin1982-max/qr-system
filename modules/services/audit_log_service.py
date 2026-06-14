@@ -21,7 +21,10 @@ class AuditLogService:
         if user_id:
             where.append('al.user_id = ?'); params.append(user_id)
         if category == 'permission':
-            where.append('(al.action LIKE "%role%" OR al.action LIKE "%menu_permission%" OR al.action LIKE "%permission%")')
+            where.append("al.action IN ('set_user_roles','create_role','update_role','delete_role',"
+                "'create_menu_permission','update_menu_permission','delete_menu_permission',"
+                "'batch_set_roles','save_permissions','batch_update_menu_permissions',"
+                "'reset_password','unlock_user','save_settings')")
         where_sql = ' AND '.join(where)
 
         total = db.execute(

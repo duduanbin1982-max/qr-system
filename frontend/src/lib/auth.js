@@ -92,3 +92,8 @@ export async function changePassword(newPassword) {
   auth.isLoggedIn = true
   return d
 }
+
+// Shared utility: get board/external token from URL params
+export function getBoardToken() {
+  return new URLSearchParams(window.location.search).get('token') || ''
+}

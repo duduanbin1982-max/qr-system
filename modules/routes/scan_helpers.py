@@ -1,3 +1,5 @@
+# DEPRECATED — Use ScanHelperService in modules/services/scan_helper_service.py instead
+# Kept for reference only; do not add new code here.
 """
 qr-system - Scan helpers (extracted from scan.py)
 """
@@ -59,8 +61,8 @@ def _auto_inbound_for_item(order_id, user_id, user_name, serial_no=None):
 
 
 def auto_stock_in(db, order_id, user_id, user_name):
-    """Legacy: kept for backward compatibility."""
-    _auto_inbound_for_item(order_id, user_id, user_name, serial_no=None)
+    """DEPRECATED: Legacy function, use ScanHelperService.auto_inbound_for_item instead."""
+    raise NotImplementedError('auto_stock_in is deprecated, use ScanHelperService')
 
 
 def _execute_report_write(db, report_type, order_id, process_id, user_id, user_name,

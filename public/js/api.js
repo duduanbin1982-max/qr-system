@@ -82,6 +82,8 @@ export const api = {
   createProduct:    (data)   => request('POST', '/api/products', data),
   updateProduct:    (id,data)=> request('PUT',  '/api/products/' + id, data),
   deleteProduct:    (id)     => request('DELETE', '/api/products/' + id),
+  restoreProduct:   (id)     => request('POST', '/api/products/' + id + '/restore'),
+  purgeProduct:     (id)     => request('DELETE', '/api/products/' + id + '/purge'),
   uploadProductImport:(formData)=> uploadFile('/api/products/import', formData),
 
   // Product attachments

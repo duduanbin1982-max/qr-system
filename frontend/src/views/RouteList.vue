@@ -216,6 +216,12 @@ export default {
       }
     }
 
+    const processMap = computed(() => {
+      const m = {}
+      for (const p of allProcesses.value) { m[p.id] = p.process_name }
+      return m
+    })
+
     async function loadProcesses() {
       try { const d = await api.listProcesses(); allProcesses.value = d.processes || [] } catch(e) { showToast('加载工序列表失败', 'warn') }
     }
@@ -248,8 +254,7 @@ export default {
     }
 
     function getProcessName(pid) {
-      const p = allProcesses.value.find(x => x.id == pid)
-      return p ? p.process_name : ''
+      return processMap.value[pid] || ''
     }
 
     async function save() {
@@ -276,7 +281,14 @@ export default {
     }
 
     async function del(r) {
-      if (!confirm('确定删除路线 "' + r.name + '" 吗？')) return
+      let impactMsg = ''
+      try {
+        const res = await api.get('/api/process-routes/' + r.id + '/impact')
+        if (res.used_orders > 0) {
+          impactMsg = '\n\n' + res.used_orders + ' 个订单正在使用此路线'
+        }
+      } catch(e) {}
+      if (!confirm('确定删除路线 "' + r.name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
       try { await api.deleteProcessRoute(r.id); showToast('删除成功'); await load() }
       catch(e) { showToast(e.message || '删除失败', 'error') }
     }

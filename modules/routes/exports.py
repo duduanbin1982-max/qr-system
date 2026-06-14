@@ -5,8 +5,6 @@ from modules.middleware.auth import check_auth
 from modules.export_utils import export_orders_to_excel, export_work_records_to_excel
 from modules.services.export_service import ExportService
 import io
-
-
 @app.route('/api/export/orders', methods=['GET'])
 @check_auth
 def export_orders():
@@ -15,14 +13,6 @@ def export_orders():
     return send_file(output,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True, download_name='orders_export.xlsx')
-
-
-@app.route('/api/exports/orders', methods=['GET'])
-@check_auth
-def export_orders_alias():
-    return export_orders()
-
-
 @app.route('/api/export/work-records', methods=['GET'])
 @check_auth
 def export_work_records():

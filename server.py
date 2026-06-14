@@ -33,7 +33,9 @@ import modules.routes.users       # 用户管理
 import modules.routes.order_attachments  # 订单附件
 import modules.routes.settings    # 系统设置
 import modules.routes.roles       # 角色组+角色管理
-import modules.routes.audit_logs  # 操作日志+权限+用户角色
+import modules.routes.audit_logs  # 操作日志
+import modules.routes.permissions  # 权限+菜单权限
+import modules.routes.user_roles   # 用户角色+权限矩阵+批量角色
 import modules.routes.inventory   # 库存管理
 import modules.routes.shipments   # 出库管理
 import modules.routes.process_routes  # 工序路线管理

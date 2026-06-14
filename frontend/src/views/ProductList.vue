@@ -24,6 +24,7 @@
           <button class="btn btn-default btn-sm" @click="load" style="white-space:nowrap">搜索</button>
           <button v-if="can('products:create')" class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加产品</button>
           <button v-if="can('products:create')" class="btn btn-success btn-sm" @click="triggerImport" style="white-space:nowrap">📥 导入Excel</button>
+          <button v-if="can('products:delete')" class="btn btn-sm" :style="{whiteSpace:'nowrap',background:showTrash?'var(--danger)':'var(--bg-hover)',color:showTrash?'#fff':'var(--text-muted)',border:'1px solid '+(showTrash?'var(--danger)':'var(--border-light)'),borderRadius:'var(--radius-md)'}" @click="toggleTrash">🗑️ 回收站 <span v-if="trashedProducts.length" style="background:#fff;color:var(--danger);border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px">{{ trashedProducts.length }}</span></button>
           <input type="file" ref="importFile" accept=".xlsx" style="display:none" @change="handleImport">
         </div>
       </div>
@@ -78,8 +79,42 @@
       </div>
     </div>
 
+    <!-- ====== 回收站弹窗 ====== -->
+    <div class="modal-overlay" v-if="showTrash">
+      <div class="modal" style="max-width:1000px;max-height:85vh;overflow-y:auto">
+        <div class="modal-header">
+          <h3>🗑️ 回收站（{{ trashedProducts.length }} 条）</h3>
+          <span class="modal-close" @click="showTrash=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div class="table-wrap" v-if="trashedProducts.length">
+            <table class="data-table" style="min-width:800px">
+              <thead><tr><th>产品名称</th><th>产品编码</th><th>型号</th><th>分类</th><th>删除时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="p in trashedProducts" :key="'trash-'+p.id" style="background:var(--bg-warning)">
+                  <td><strong>{{ p.product_name }}</strong></td>
+                  <td><code>{{ p.product_code }}</code></td>
+                  <td>{{ p.model || '-' }}</td>
+                  <td><span class="badge" :class="p.category==='结构件'?'badge-info':'badge-warning'">{{ p.category || '-' }}</span></td>
+                  <td style="color:var(--text-muted);white-space:nowrap">{{ p.deleted_at || '-' }}</td>
+                  <td style="white-space:nowrap">
+                    <button class="btn btn-sm" style="background:var(--success);color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer" @click="restore(p.id)">↩️ 恢复</button>
+                    <button class="btn btn-sm" style="background:var(--danger);color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;margin-left:4px" @click="purge(p.id, p.product_name)">☠️ 彻底删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else style="color:var(--text-muted);text-align:center;padding:40px">回收站为空</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showTrash=false">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ====== 模态框 ====== -->
-    <div class="modal-overlay" v-if="showModal" @click.self="showModal=false">
+    <div class="modal-overlay" v-if="showModal">
       <div class="modal" style="max-width:800px;max-height:90vh;overflow-y:auto">
         <div class="modal-header">
           <h3>{{ modalEdit ? '✏️ 编辑产品' : '➕ 新建产品' }}</h3>
@@ -195,6 +230,25 @@
           </template>
 
           <div class="form-group"><label>描述</label><textarea class="form-input" v-model="form.description" rows="2" placeholder="产品描述或备注"></textarea></div>
+          <div v-if="modalEdit" class="form-group" style="border-top:1px solid var(--border-light);padding-top:12px;margin-top:8px">
+            <label style="font-weight:600">物料配方（BOM）- 创建订单时自动带入</label>
+            <div v-if="productBom.length" style="margin-bottom:8px">
+              <div v-for="bom in productBom" :key="bom.id" style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
+                <span style="flex:1">{{ bom.material_name }} {{ bom.material_spec || '' }}</span>
+                <span style="color:var(--text-muted);white-space:nowrap">x{{ bom.quantity_per_unit }}/件</span>
+                <span v-if="bom.process_name" style="color:var(--primary);white-space:nowrap">@{{ bom.process_name }}</span>
+                <button @click="removeBomItem(bom.id)" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select v-model="bomForm.material_id" style="flex:1;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
+                <option value="">- 选择物料 -</option>
+                <option v-for="m in materialOptions" :key="m.id" :value="m.id">{{ m.name }} {{ m.spec||'' }} [{{ m.material_type||'' }}]</option>
+              </select>
+              <input v-model="bomForm.quantity" type="number" step="0.1" min="0.1" placeholder="用量/件" style="width:70px;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
+              <button @click="addBomItem" class="btn btn-sm" style="background:var(--primary);color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap">+ 添加</button>
+            </div>
+          </div>
 
           <div v-if="modalEdit" class="form-group">
             <label>附件 <span style="color:var(--text-muted);font-weight:normal">(图片/图纸/文档)</span></label>

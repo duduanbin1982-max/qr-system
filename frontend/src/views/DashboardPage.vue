@@ -151,7 +151,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '@/lib/api.js'
 import { navigate } from '@/lib/router.js'
-import { auth } from '@/lib/auth.js'
+import { auth, getBoardToken } from '@/lib/auth.js'
 
 export default {
   setup() {
@@ -211,7 +211,7 @@ export default {
       if (_clock) clearInterval(_clock)
     })
     
-    function goAction(q) { if (q.external) { const tok = new URLSearchParams(window.location.search).get('token') || ''; window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
+    function goAction(q) { if (q.external) { const tok = getBoardToken(); window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
     return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }

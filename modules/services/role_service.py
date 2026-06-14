@@ -48,18 +48,15 @@ class RoleGroupService:
                     raise ValueError('不能将自身设为父级')
                 if not db.execute('SELECT id FROM role_groups WHERE id = ?', (pid,)).fetchone():
                     raise ValueError('父级角色组不存在')
-                to_check = [pid]; visited = {gid}
-                while to_check:
-                    cur = to_check.pop()
-                    if cur in visited:
+                # Simple parent-chain walk (no BFS needed)
+                cur = pid
+                while cur:
+                    if cur == gid:
                         raise ValueError('不能建立循环引用')
-                    visited.add(cur)
-                    children = db.execute(
-                        'SELECT parent_id FROM role_groups WHERE id = ? AND parent_id IS NOT NULL',
-                        (cur,)).fetchall()
-                    for c in children:
-                        if c['parent_id'] not in visited:
-                            to_check.append(c['parent_id'])
+                    row = db.execute(
+                        'SELECT parent_id FROM role_groups WHERE id=? AND parent_id IS NOT NULL',
+                        (cur,)).fetchone()
+                    cur = row['parent_id'] if row else None
 
         if 'name' in data:
             new_name = data['name'].strip()
@@ -83,24 +80,20 @@ class RoleGroupService:
         sets.append('updated_at = datetime("now","localtime")')
         with BaseService.transaction() as txn:
             txn.execute(f'UPDATE role_groups SET {", ".join(sets)} WHERE id = ?', params + [gid])
-
     @staticmethod
     def delete_group(gid):
         db = BaseService.db()
-        children = db.execute(
-            'SELECT COUNT(*) FROM role_groups WHERE parent_id = ?', (gid,)).fetchone()[0]
-        if children > 0:
+        result = db.execute('''
+            SELECT
+                (SELECT COUNT(*) FROM role_groups WHERE parent_id = ?) AS child_count,
+                (SELECT COUNT(*) FROM roles WHERE group_id = ?) AS role_count
+        ''', (gid, gid)).fetchone()
+        if result['child_count'] > 0:
             raise ValueError('该角色组有下级，无法删除')
-        role_count = db.execute(
-            'SELECT COUNT(*) FROM roles WHERE group_id = ?', (gid,)).fetchone()[0]
-        if role_count > 0:
-            raise ValueError(f'该角色组下有 {role_count} 个角色，无法删除')
+        if result['role_count'] > 0:
+            raise ValueError(f'该角色组下有 {result["role_count"]} 个角色，无法删除')
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM role_groups WHERE id = ?', (gid,))
-
-
-# Built-in role IDs (cannot be deleted)
-BUILTIN_ROLE_IDS = (1, 2)
 
 
 class RoleService:
@@ -142,7 +135,7 @@ class RoleService:
     @staticmethod
     def update_role(rid, data):
         db = BaseService.db()
-        role = db.execute('SELECT id, name FROM roles WHERE id = ?', (rid,)).fetchone()
+        role = db.execute('SELECT id, name, is_builtin FROM roles WHERE id = ?', (rid,)).fetchone()
         if not role:
             raise ValueError('角色不存在')
         if 'group_id' in data and data['group_id']:
@@ -194,10 +187,10 @@ class RoleService:
     @staticmethod
     def delete_role(rid):
         db = BaseService.db()
-        role = db.execute('SELECT id, name FROM roles WHERE id = ?', (rid,)).fetchone()
+        role = db.execute('SELECT id, name, is_builtin FROM roles WHERE id = ?', (rid,)).fetchone()
         if not role:
             raise ValueError('角色不存在')
-        if rid in BUILTIN_ROLE_IDS:
+        if role['is_builtin']:
             raise ValueError(f'不能删除内置角色「{role["name"]}」')
         user_count = db.execute(
             'SELECT COUNT(*) FROM user_roles WHERE role_id = ?', (rid,)

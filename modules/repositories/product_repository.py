@@ -181,6 +181,20 @@ class ProductRepository:
         db.execute(
             "UPDATE products SET deleted_at = datetime('now','localtime') WHERE id = ?", (pid,)
         )
+    @staticmethod
+    def restore(pid, db=None):
+        """恢复已软删除的产品。"""
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE products SET deleted_at = NULL WHERE id = ?", (pid,)
+        )
+
+    @staticmethod
+    def hard_delete(pid, db=None):
+        """物理删除产品（先删附件，再删产品）。仅用于回收站中已确认无引用的产品。"""
+        db = db or BaseService.db()
+        db.execute("DELETE FROM product_attachments WHERE product_id = ?", (pid,))
+        db.execute("DELETE FROM products WHERE id = ?", (pid,))
 
     # ============================================================
     # 附件

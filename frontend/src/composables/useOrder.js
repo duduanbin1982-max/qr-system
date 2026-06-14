@@ -47,6 +47,41 @@ const orders = ref([])
       quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', remark:'', status:'pending'
     })
 
+    // ===== 订单物料配方 =====
+    const orderMaterials = ref([])
+    const orderMatForm = ref({ material_id: '', quantity_per_unit: 1, process_id: 10730 })
+    const materialOptions = ref([])
+    const processOptions = ref([])
+
+    async function loadOrderMaterials(orderId) {
+      try { const d = await api.listOrderMaterials(orderId); orderMaterials.value = d.materials || [] } catch(e) { orderMaterials.value = [] }
+    }
+    async function loadMaterialOptions() {
+      try { const d = await api.listMaterials(); materialOptions.value = d.materials || [] } catch(e) {}
+    }
+    async function loadProcessOptions() {
+      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) orderMatForm.value.process_id = xl.id } catch(e) {}
+    }
+    async function addOrderMaterial() {
+      if (!orderMatForm.value.material_id) { showToast('请选择物料', 'error'); return }
+      try {
+        await api.addOrderMaterial(modalId.value, {
+          material_id: orderMatForm.value.material_id,
+          quantity_per_unit: parseFloat(orderMatForm.value.quantity_per_unit) || 1,
+          process_id: orderMatForm.value.process_id || null
+        })
+        orderMatForm.value = { material_id: '', quantity_per_unit: 1, process_id: 10730 }
+        showToast('物料已添加')
+        await loadOrderMaterials(modalId.value)
+      } catch(e) { showToast(e.message || '添加失败', 'error') }
+    }
+    async function removeOrderMaterial(omId) {
+      try {
+        await api.deleteOrderMaterial(modalId.value, omId)
+        await loadOrderMaterials(modalId.value)
+      } catch(e) { showToast(e.message || '删除失败', 'error') }
+    }
+
 
 
     // ===== 产品搜索 Combobox (修复：原模板引用但组件未定义) =====
@@ -305,6 +340,11 @@ const orders = ref([])
       productSearch.value = o.product_code || ''
       modalEdit.value = true; modalId.value = o.id
       loadDropdownData()
+      loadMaterialOptions()
+      loadProcessOptions()
+      loadOrderMaterials(o.id)
+      orderMatForm.value.quantity_per_unit = parseFloat(o.weight) || parseFloat(o.product_weight) || 1
+      orderMatForm.value.process_id = 10730
       showModal.value = true
     }
 
@@ -430,25 +470,44 @@ const orders = ref([])
       if (!qrCodes.value.length) { showToast('请先生成二维码', 'warn'); return }
       const root = document.getElementById('qr-print-root')
       if (!root) { showToast('打印容器未找到', 'error'); return }
-      let html = '<div class="qr-print-grid">'
+      // Use DOM methods instead of innerHTML to prevent XSS
+      root.innerHTML = ''
+      const grid = document.createElement('div')
+      grid.className = 'qr-print-grid'
+      const images = []
       for (let copy = 0; copy < qrPrintCopies.value; copy++) {
         for (const code of qrCodes.value) {
-          html += '<div class="qr-card">'
-          html += '<img src="' + code.qrcode + '" alt="' + (code.serial_no || code.order_no) + '">'
-          html += '<div class="qr-label-info">'
-          html += '<div class="qr-label-no">' + escapeHtml(code.serial_no || code.order_no) + '</div>'
+          const card = document.createElement('div')
+          card.className = 'qr-card'
+          const img = document.createElement('img')
+          img.src = code.qrcode
+          img.alt = code.serial_no || code.order_no || ''
+          img.setAttribute('decoding', 'sync')
+          images.push(img)
+          card.appendChild(img)
+          const info = document.createElement('div')
+          info.className = 'qr-label-info'
+          const no = document.createElement('div')
+          no.className = 'qr-label-no'
+          no.textContent = code.serial_no || code.order_no || ''
+          info.appendChild(no)
           if (code.product_code) {
-            html += '<div class="qr-label-code">' + escapeHtml(code.product_code) + '</div>'
+            const pc = document.createElement('div')
+            pc.className = 'qr-label-code'
+            pc.textContent = code.product_code
+            info.appendChild(pc)
           }
-          html += '</div></div>'
+          card.appendChild(info)
+          grid.appendChild(card)
         }
       }
-      html += '</div>'
-      root.innerHTML = html
+      root.appendChild(grid)
       var oldParent = root.parentNode
       var oldNext = root.nextSibling
       document.body.appendChild(root)
-      setTimeout(function() {
+
+      // Wait for all QR images to fully decode before printing (Edge needs more time)
+      function doPrint() {
         window.print()
         setTimeout(function() {
           if (oldParent) {
@@ -456,7 +515,33 @@ const orders = ref([])
             else oldParent.appendChild(root)
           }
         }, 500)
-      }, 100)
+      }
+
+      if (images.length > 0) {
+        var loaded = 0
+        var total = images.length
+        function onImgReady() {
+          loaded++
+          if (loaded >= total) {
+            // Double rAF ensures layout is fully computed (Edge requires this)
+            requestAnimationFrame(function() {
+              requestAnimationFrame(function() {
+                setTimeout(doPrint, 200)
+              })
+            })
+          }
+        }
+        for (var i = 0; i < images.length; i++) {
+          if (images[i].complete) {
+            onImgReady()
+          } else {
+            images[i].addEventListener('load', onImgReady, { once: true })
+            images[i].addEventListener('error', onImgReady, { once: true })
+          }
+        }
+      } else {
+        setTimeout(doPrint, 300)
+      }
     }
 
     function prevPage() { if (page.value > 1) { page.value--; load() } }
@@ -500,6 +585,9 @@ const orders = ref([])
       canCreate, canEdit, canDelete, canView,
       showTrash, trashOrders, trashTotal, trashPage, trashPageSize, loadTrash, restoreOrder, permanentDelete,
       // 工件进度看板
-      progressOrder, progressLoading, progressData, openProgress
+      progressOrder, progressLoading, progressData, openProgress,
+      // 订单物料配方
+      orderMaterials, orderMatForm, materialOptions, processOptions,
+      loadOrderMaterials, addOrderMaterial, removeOrderMaterial, loadMaterialOptions, loadProcessOptions
     }
 }

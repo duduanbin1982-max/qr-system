@@ -290,6 +290,13 @@ export default {
     }
 
     async function del(item) {
+      try {
+        const res = await api.get('/api/inventory/' + item.id + '/impact')
+        if (res.log_count > 0) {
+          showToast('库存「' + item.product_model + '」有 ' + res.log_count + ' 条流水记录，无法删除', 'warn')
+          return
+        }
+      } catch(e) {}
       if (!confirm('确定删除库存 "' + item.product_model + '" 吗？')) return
       try {
         await api.deleteInventory(item.id)

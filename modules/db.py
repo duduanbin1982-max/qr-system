@@ -1,6 +1,7 @@
 """
 qr-system — 数据库层：连接管理、初始化、设置缓存
 """
+import os
 import sqlite3
 import hashlib
 from typing import Any, Optional, Tuple
@@ -31,23 +32,35 @@ def close_db(exception: Optional[Exception] = None) -> None:
     if db is not None:
         db.close()
 
+_CACHE_STAMP_FILE = os.path.join(os.path.dirname(DB_PATH), '.settings_cache_stamp')
+
+def _get_cache_stamp():
+    try:
+        return os.path.getmtime(_CACHE_STAMP_FILE)
+    except OSError:
+        return 0
+
+def _touch_cache_stamp():
+    with open(_CACHE_STAMP_FILE, 'w') as f:
+        f.write(str(time.time()))
+
 def get_setting(key: str, default: str = '') -> str:
-    """读取系统设置项，带 10 秒缓存"""
     global _settings_cache, _settings_cache_time
-    now = time.time()
-    if _settings_cache is None or now - _settings_cache_time > 10:
+    stamp = _get_cache_stamp()
+    if _settings_cache is None or stamp > _settings_cache_time:
         db = sqlite3.connect(DB_PATH)
         db.row_factory = sqlite3.Row
         rows = db.execute('SELECT key, value FROM system_settings').fetchall()
         db.close()
         _settings_cache = {r['key']: r['value'] for r in rows}
-        _settings_cache_time = now
+        _settings_cache_time = stamp
     return _settings_cache.get(key, default)
 
 def clear_settings_cache() -> None:
     global _settings_cache, _settings_cache_time
     _settings_cache = None
     _settings_cache_time = 0
+    _touch_cache_stamp()
 
 def get_page_size(default: int = 20) -> int:
     """从系统设置读取分页条数"""
