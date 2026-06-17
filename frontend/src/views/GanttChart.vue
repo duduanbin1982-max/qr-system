@@ -44,16 +44,16 @@
       <span v-if="dailyLoad.length > 5" style="color:var(--text-placeholder)">...共 {{ dailyLoad.length }} 处</span>
     </div>
 
-    <div v-if="loading" style="text-align:center;padding:60px;color:var(--text-placeholder)">⏳ 加载中...</div>
-    <div v-else-if="!filteredOrders.length" style="text-align:center;padding:60px;color:var(--text-placeholder)">
+    <div v-if="loading" style="text-align:left;padding:60px;color:var(--text-placeholder)">⏳ 加载中...</div>
+    <div v-else-if="!filteredOrders.length" style="text-align:left;padding:60px;color:var(--text-placeholder)">
       <p style="font-size:48px;margin:0">📅</p><p style="margin-top:12px">暂无排程数据</p>
     </div>
 
     <div v-else class="gantt-scroll" style="position:relative;overflow-x:auto;padding-bottom:16px" @keydown.left.prevent="shiftDays(-1,false)" @keydown.right.prevent="shiftDays(1,false)" @keydown.shift.left.prevent="shiftDays(-1,true)" @keydown.shift.right.prevent="shiftDays(1,true)" tabindex="0">
-      <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 320, 100) + 'px', minWidth:'100%'}">
+      <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 360, 100) + 'px', minWidth:'100%'}">
         <!-- Date Header -->
         <div style="display:flex;border-bottom:2px solid var(--border-light);position:sticky;top:0;background:var(--bg-surface);z-index:2">
-          <div style="min-width:320px;max-width:320px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light)">订单信息</div>
+          <div style="min-width:360px;max-width:360px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light);display:flex;gap:10px;align-items:center"><span style="width:18px"></span><span style="width:85px;white-space:nowrap">订单号</span><span style="width:80px">客户</span><span style="width:56px">状态</span><span style="width:50px">交期</span></div>
           <div style="display:flex;flex:1" v-if="ganttData.days.length">
             <div v-for="d in ganttData.days" :key="d.date"
               :style="{width:dayWidth+'px',textAlign:'center',padding:'8px 2px',fontSize:'10px',borderRight:'1px solid var(--bg-hover)',background:d.isWeekend?'var(--bg-hover)':d.isToday?'var(--primary-light)':'',color:d.isToday?'var(--primary)':'var(--text-placeholder)'}">
@@ -66,19 +66,19 @@
         <div v-for="(order, i) in filteredOrders" :key="order.id" style="position:relative;border-bottom:1px solid var(--bg-hover)" :style="{background:i%2===0?'#fff':'var(--bg-table-stripe)'}">
           <div style="display:flex;min-height:52px;align-items:stretch">
             <!-- Order Info Card -->
-            <div style="min-width:320px;max-width:320px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
+            <div style="min-width:360px;max-width:360px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
               <!-- 第一行：复选框 + 订单号 + 客户 + 状态 + 交期 -->
-              <div style="display:flex;align-items:center;gap:8px">
-                <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" @change="toggleOrder(order.id)" style="flex-shrink:0">
-                <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.order_no">{{ order.order_no }}</span>
-                <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
-                <span :style="{flexShrink:0,fontSize:'9px',padding:'1px 6px',borderRadius:'3px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
-                <span v-if="order.risk!=='normal'" style="flex-shrink:0;font-size:10px" :title="order.risk==='overdue'?'已过期':'即将到期'">{{ order.risk==='overdue'?'🔴':'🟡' }}</span>
-                <span style="flex-shrink:0;font-size:9px;color:var(--text-placeholder)" :title="order.deadline||''">{{ order.deadline ? order.deadline.slice(5) : '-' }}</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" @change="toggleOrder(order.id)" style="width:18px;flex-shrink:0">
+                <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:85px;text-align:left" :title="order.order_no">{{ order.order_no }}</span>
+                <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80px;text-align:left" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
+                <span :style="{flexShrink:0,fontSize:'12px',padding:'1px 6px',borderRadius:'3px',textAlign:'left',minWidth:'56px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
+                <span v-if="order.risk!=='normal'" style="width:16px;flex-shrink:0;font-size:10px;text-align:left" :title="order.risk==='overdue'?'已过期':'即将到期'">{{ order.risk==='overdue'?'🔴':'🟡' }}</span>
+                <span style="flex-shrink:0;font-size:9px;color:var(--text-placeholder);width:50px;text-align:left" :title="order.deadline||''">{{ order.deadline ? order.deadline.slice(5) : '-' }}</span>
               </div>
               <!-- 第二行：产品编码 + 进度条 -->
-              <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.product_code||order.product_name||''">{{ order.product_code || order.product_name || '-' }}</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:9px;color:var(--text-secondary);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.product_code||order.product_name||''">{{ order.product_code || order.product_name || '-' }}</span>
                 <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:60px">
                   <span style="display:inline-block;width:40px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
