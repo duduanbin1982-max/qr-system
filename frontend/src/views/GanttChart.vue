@@ -50,10 +50,10 @@
     </div>
 
     <div v-else class="gantt-scroll" style="position:relative;overflow-x:auto;padding-bottom:16px" @keydown.left.prevent="shiftDays(-1,false)" @keydown.right.prevent="shiftDays(1,false)" @keydown.shift.left.prevent="shiftDays(-1,true)" @keydown.shift.right.prevent="shiftDays(1,true)" tabindex="0">
-      <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 280, 100) + 'px', minWidth:'100%'}">
+      <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 320, 100) + 'px', minWidth:'100%'}">
         <!-- Date Header -->
         <div style="display:flex;border-bottom:2px solid var(--border-light);position:sticky;top:0;background:var(--bg-surface);z-index:2">
-          <div style="min-width:280px;max-width:280px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light)">订单信息</div>
+          <div style="min-width:320px;max-width:320px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light)">订单信息</div>
           <div style="display:flex;flex:1" v-if="ganttData.days.length">
             <div v-for="d in ganttData.days" :key="d.date"
               :style="{width:dayWidth+'px',textAlign:'center',padding:'8px 2px',fontSize:'10px',borderRight:'1px solid var(--bg-hover)',background:d.isWeekend?'var(--bg-hover)':d.isToday?'var(--primary-light)':'',color:d.isToday?'var(--primary)':'var(--text-placeholder)'}">
@@ -66,7 +66,7 @@
         <div v-for="(order, i) in filteredOrders" :key="order.id" style="position:relative;border-bottom:1px solid var(--bg-hover)" :style="{background:i%2===0?'#fff':'var(--bg-table-stripe)'}">
           <div style="display:flex;min-height:52px;align-items:stretch">
             <!-- Order Info Card -->
-            <div style="min-width:280px;max-width:280px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
+            <div style="min-width:320px;max-width:320px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
               <!-- Line 1: Checkbox + Order No + Status + Risk + Deadline -->
               <div style="display:flex;align-items:center;gap:8px">
                 <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" @change="toggleOrder(order.id)" style="flex-shrink:0">
@@ -78,11 +78,11 @@
               <!-- Line 2: Product · Customer + Progress -->
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="(order.product_code||order.product_name||'') + ' · ' + (order.customer_name||'')">{{ order.product_code || order.product_name || '-' }} · {{ order.customer_name || '-' }}</span>
-                <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:80px">
-                  <span style="display:inline-block;width:50px;height:4px;background:var(--bg-hover);border-radius:2px">
+                <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:60px">
+                  <span style="display:inline-block;width:40px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
                   </span>
-                  <span style="font-size:9px;color:var(--text-placeholder);min-width:28px;text-align:right">{{ order.completed_qty||0 }}/{{ order.quantity||0 }}</span>
+                  <span style="font-size:9px;color:var(--text-placeholder);min-width:24px;text-align:right">{{ order.completed_qty||0 }}/{{ order.quantity||0 }}</span>
                 </span>
               </div>
             </div>
@@ -156,7 +156,7 @@
           </div>
           <div v-if="productionLines.length" style="max-height:200px;overflow-y:auto">
             <div v-for="pl in productionLines" :key="pl.id" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--bg-hover);gap:8px">
-              <span style="font-weight:600;min-width:80px">{{ pl.name }}</span>
+              <span style="font-weight:600;min-width:60px">{{ pl.name }}</span>
               <span style="font-size:var(--text-xs);color:var(--text-placeholder);flex:1">{{ pl.description || '-' }} · 产能: {{ pl.capacity || '-' }}/天</span>
               <button class="btn-default" style="font-size:var(--text-xs);padding:2px 8px;color:var(--danger)" @click="delLine(pl)">删除</button>
             </div>
