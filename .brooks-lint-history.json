@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-06-16T11:15:11.861687",
+    "mode": "health",
+    "score": 83,
+    "findings": {
+      "critical": 1,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "full project (29,392 lines, 48 tables)"
+  }
+]

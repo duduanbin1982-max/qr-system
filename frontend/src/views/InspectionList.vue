@@ -36,6 +36,7 @@
             <option value="first_article">首件检验</option>
             <option value="in_process">过程检验</option>
             <option value="final">终检</option>
+            <option value="rework_check">返工复检</option>
           </select>
           <select v-model="filterResult" class="form-input" style="width:100px;font-size:var(--text-sm);padding:6px 8px" @change="applyFilter">
             <option value="">全部结果</option>
@@ -46,6 +47,7 @@
           <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
           <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
           <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
+          <button @click="exportData" class="btn-sm" style="background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);padding:6px 12px;white-space:nowrap;cursor:pointer">📥 导出</button>
           <button class="btn-add" style="margin-left:4px;padding:var(--space-2) 16px;font-size:var(--text-sm)" @click="openCreate" v-if="canCreate">+ 新建检验</button>
         </div>
       </div>
@@ -168,10 +170,18 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
+
+const INSPECTION_TYPES = [
+  { value: 'first_article', label: '首件检验' },
+  { value: 'in_process', label: '过程检验' },
+  { value: 'final', label: '终检' },
+  { value: 'rework_check', label: '返工复检' },
+]
+const RESULT_LABELS = { pass: '合格', fail: '不合格', partial: '部分合格' }
 
 export default {
   setup() {
@@ -187,12 +197,15 @@ export default {
     const total = ref(0)
     const perPage = 20
     const editing = ref(null)
-    const defectCategories = ref(['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他'])
+    const defectCategories = ref([])
 
     // RBAC
     const canEdit   = computed(() => can('quality:edit'))
     const canDelete = computed(() => can('quality:delete'))
-    const canCreate = computed(() => can('quality:create'))
+    const canCreate = computed(() => can('quality:edit'))
+    const templates = ref([])
+    const selectedTemplate = ref('')
+    const attachments = ref([])
 
     // Create/Edit modal
     const showModal = ref(false); const isEdit = ref(false)
@@ -216,20 +229,24 @@ export default {
       if (dateTo.value) params.push('to=' + dateTo.value)
       params.push('page=' + p, 'per_page=' + perPage)
       try {
-        const r = await api.get('/api/quality/inspections?' + params.join('&'))
-        items.value = r.items; total.value = r.total
-      } catch (e) { showToast('加载失败', 'error') }
+        const r = await api.listInspections({
+          search: search.value || undefined, type: filterType.value || undefined,
+          result: filterResult.value || undefined, from: dateFrom.value || undefined,
+          to: dateTo.value || undefined, page: p, per_page: perPage
+        })
+        if (r.ok) { items.value = r.items; total.value = r.total }
+      } catch (e) { showToast(e.message || '加载失败', 'error') }
       finally { loading.value = false }
     }
 
     async function loadStats() {
-      try { const r = await api.get('/api/quality/inspections/stats'); stats.value = r } catch (e) {}
+      try { const r = await api.inspectionStats(); if (r.ok) stats.value = r } catch (e) {}
     }
 
     async function searchOrders() {
       if (!orderSearch.value) { orders.value = []; orderDropdown.value = false; return }
       try {
-        const r = await api.get('/api/orders?keyword=' + encodeURIComponent(orderSearch.value) + '&limit=10')
+        const r = await api.listOrders({ keyword: orderSearch.value, limit: 10 })
         orders.value = r.orders || []; orderDropdown.value = orders.value.length > 0
       } catch (e) {}
     }
@@ -238,8 +255,8 @@ export default {
 
     async function loadProcessesCache() {
       try {
-        const r = await api.get('/api/processes')
-        allProcessesCache = (r.processes || []).filter(p => p.status === 'active')
+        const r = await api.listProcesses({ limit: 200 })
+        allProcessesCache = (r.processes || r.items || []).filter(p => p.status === 'active')
       } catch (e) {}
     }
 
@@ -267,11 +284,61 @@ export default {
       userSetCheckedQty = form.value.quantity_checked > 0
     }
 
+    async function loadTemplates() {
+      try {
+        const r = await api.inspectionTemplates()
+        templates.value = r.templates || []
+      } catch (e) {}
+    }
+
+    function applyTemplate() {
+      if (!selectedTemplate.value) return
+      const t = templates.value.find(tp => tp.code === selectedTemplate.value)
+      if (t) {
+        form.value.inspection_type = t.inspection_type
+        form.value.defect_category = t.defect_categories ? t.defect_categories[0] : ''
+        form.value.notes = '模板: ' + t.name
+      }
+    }
+
+    function onTypeChange() { selectedTemplate.value = '' }
+
+    async function loadAttachments(inspectionId) {
+      try {
+        const r = await api.listQAttachments(inspectionId)
+        attachments.value = r.attachments || []
+      } catch (e) { attachments.value = [] }
+    }
+
+    async function uploadAttachment(e) {
+      const file = e.target.files[0]
+      if (!file) return
+      const fd = new FormData()
+      fd.append('file', file)
+      try {
+        const r = await api.uploadQAttachment(form.value.id, fd)
+        if (r.ok) { showToast('上传成功'); loadAttachments(form.value.id) }
+        else showToast(r.error || '失败', 'error')
+      } catch (err) { showToast('上传失败', 'error') }
+      e.target.value = ''
+    }
+
+    async function delAttachment(aid) {
+      if (!confirm('删除附件？')) return
+      try {
+        const r = await api.deleteQAttachment(aid)
+        if (r.ok) { showToast('已删除'); loadAttachments(form.value.id) }
+      } catch (e) { showToast('删除失败', 'error') }
+    }
+
+    function getQAttachmentUrl(aid) { return api.getQAttachmentUrl(aid) }
+
     function openCreate() {
       userSetCheckedQty = false
       isEdit.value = false
       form.value = { order_id: null, process_id: null, inspection_type: 'first_article', quantity_checked: 0, quantity_passed: 0, quantity_failed: 0, defect_category: '', defect_quantity: 0, notes: '', inspected_at: '' }
       orderSearch.value = ''; processSearch.value = ''; orders.value = []; processes.value = []
+      selectedTemplate.value = ''; attachments.value = []
       showModal.value = true
     }
 
@@ -280,7 +347,9 @@ export default {
       form.value = { ...item }
       orderSearch.value = item.order_no + ' ' + (item.product_name || '')
       processSearch.value = item.process_name || ''
+      selectedTemplate.value = ''
       showModal.value = true
+      loadAttachments(item.id)
     }
 
     async function doSave() {
@@ -290,9 +359,9 @@ export default {
         let r
         if (isEdit.value) {
           const payload = { inspection_type: form.value.inspection_type, quantity_checked: form.value.quantity_checked, quantity_passed: form.value.quantity_passed, quantity_failed: form.value.quantity_failed, defect_category: form.value.defect_category || '', defect_quantity: form.value.defect_quantity || 0, notes: form.value.notes, inspected_at: form.value.inspected_at }
-          r = await api.put('/api/quality/inspections/' + form.value.id, payload)
+          r = await api.updateInspection(form.value.id, payload)
         } else {
-          r = await api.post('/api/quality/inspections', form.value)
+          r = await api.createInspection(form.value)
         }
         showToast(isEdit.value ? '已更新' : '已创建'); showModal.value = false; load(page.value); loadStats()
       } catch (e) { showToast('保存失败', 'error') }
@@ -301,40 +370,50 @@ export default {
     async function doDelete(item) {
       if (!confirm('确认删除检验记录？')) return
       try {
-        const r = await api.del('/api/quality/inspections/' + item.id)
+        const r = await api.deleteInspection(item.id)
         showToast('已删除'); load(page.value); loadStats()
       } catch (e) { showToast('删除失败', 'error') }
     }
 
     function applyFilter() { page.value = 1; load() }
 
+    function exportData() {
+      const qs = []
+      if (search.value) qs.push('search=' + encodeURIComponent(search.value))
+      if (filterType.value) qs.push('type=' + filterType.value)
+      if (filterResult.value) qs.push('result=' + filterResult.value)
+      if (dateFrom.value) qs.push('from=' + dateFrom.value)
+      if (dateTo.value) qs.push('to=' + dateTo.value)
+      window.open('/api/quality/inspections/export?' + qs.join('&'), '_blank')
+    }
+
     // Pareto
     const pareto = ref({ items: [], grand_total: 0 })
 
     async function loadDefectCategories() {
       try {
-        const r = await api.get('/api/quality/defect-categories')
-        defectCategories.value = r.categories || []
-      } catch (e) {}
+        const r = await api.defectCategories()
+        if (r.ok) defectCategories.value = r.categories || []
+      } catch (e) { defectCategories.value = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他'] }
     }
 
     async function loadPareto() {
       try {
-        const params = []
-        if (dateFrom.value) params.push('from=' + dateFrom.value)
-        if (dateTo.value) params.push('to=' + dateTo.value)
-        const r = await api.get('/api/quality/defect-pareto?' + params.join('&'))
-        pareto.value = r
+        const r = await api.defectPareto({ from: dateFrom.value || undefined, to: dateTo.value || undefined })
+        if (r.ok) pareto.value = r
       } catch (e) {}
     }
 
-    onMounted(() => { load(); loadStats(); loadPareto(); loadDefectCategories(); loadProcessesCache() })
+    onMounted(() => { load(); loadStats(); loadPareto(); loadDefectCategories(); loadProcessesCache(); loadTemplates() })
 
     return { items, loading, stats, search, filterType, filterResult, dateFrom, dateTo, page, total, perPage, editing,
+      exportData,
       canEdit, canDelete, canCreate, showModal, isEdit, form, orders, processes, orderSearch, processSearch, orderDropdown, processDropdown,
+      templates, selectedTemplate, attachments,
       defectCategories, pareto,
       fmtDate, fmtDatetime, typeLabel, resultLabel,
-      load, loadStats, loadDefectCategories, searchOrders, searchProcesses, selectOrder, selectProcess, autoCalcQty, onCheckedQtyManual, openCreate, openEdit, doSave, doDelete, applyFilter, loadPareto }
+      load, loadStats, loadDefectCategories, searchOrders, searchProcesses, selectOrder, selectProcess, autoCalcQty, onCheckedQtyManual, openCreate, openEdit, doSave, doDelete, applyFilter, loadPareto,
+      loadTemplates, applyTemplate, onTypeChange, loadAttachments, uploadAttachment, delAttachment, getQAttachmentUrl }
   }
 }
 </script>

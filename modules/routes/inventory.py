@@ -8,6 +8,7 @@ from modules.db import get_page_size
 from modules.middleware.auth import check_auth, check_permission, audit_log
 from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.middleware.validate import validate_json
+from modules.middleware.error_handler import handle_unexpected_error
 from modules.services.inventory_service import InventoryService
 
 
@@ -79,7 +80,7 @@ def create_inventory():
         audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
     except Exception as e:
         app.logger.warning('audit_log failed: %s', e)
-    return jsonify({'message': '创建成功'})
+    return jsonify({'message': '创建成功', 'id': item_id})
 
 
 @app.route('/api/inventory/<int:id>', methods=['PUT'])
@@ -296,6 +297,161 @@ def inventory_alerts():
     """
     return jsonify(InventoryService.get_alerts())
 
+
+@app.route('/api/inventory/<int:id>/adjust', methods=['POST'])
+@check_auth
+@check_permission('inventory:edit')
+def inventory_adjust(id):
+    try:
+        data = request.get_json() or {}
+        actual_qty = data.get('actual_qty', 0)
+        remark = data.get('remark', '')
+        user = g.current_user if hasattr(g, 'current_user') else {}
+        result = InventoryService.stock_adjust(
+            id, actual_qty,
+            operator_id=user.get('id'),
+            operator_name=user.get('name', user.get('username', '')),
+            remark=remark
+        )
+        audit_log('inventory_adjust', 'inventory', id, f'qty adjusted')
+        return jsonify({'ok': True, **result})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return handle_unexpected_error(e, 'database operation')
+
+
+@app.route('/api/inventory/export', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_export():
+    try:
+        output = InventoryService.export_inventory(
+            keyword=request.args.get('keyword', ''),
+            low_stock=request.args.get('low_stock', '') == '1',
+        )
+        from flask import send_file
+        from datetime import datetime as dt
+        output.seek(0)
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         as_attachment=True, download_name=f'inventory_{dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+    except Exception as e:
+        return handle_unexpected_error(e, 'export operation')
+
+
+@app.route('/api/inventory/logs/export', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_logs_export():
+    try:
+        output = InventoryService.export_logs(
+            inv_id=request.args.get('inventory_id', ''),
+            type_filter=request.args.get('type', ''),
+            date_from=request.args.get('from', ''),
+            date_to=request.args.get('to', ''),
+        )
+        from flask import send_file
+        from datetime import datetime as dt
+        output.seek(0)
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         as_attachment=True, download_name=f'inventory_logs_{dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+    except Exception as e:
+        return handle_unexpected_error(e, 'export operation')
+
+
+
+
+
+# ── P2: ABC 分类 ──
+@app.route("/api/inventory/abc", methods=["POST"])
+@check_auth
+@check_permission("inventory:edit")
+def classify_abc():
+    try:
+        result = InventoryService.classify_abc()
+        return jsonify(result)
+    except Exception as e:
+        return handle_unexpected_error(e, "abc classification")
+
+
+# ── P2: 周转率 ──
+@app.route("/api/inventory/turnover", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def inventory_turnover():
+    return jsonify(InventoryService.get_turnover())
+
+
+# ── P2: 安全库存建议 ──
+@app.route("/api/inventory/safe-stock-suggestions", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def safe_stock_suggestions():
+    return jsonify(InventoryService.suggest_safe_stock())
+
+
+# ── P3: 批次追踪 ──
+@app.route("/api/inventory/batch-tracking", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def batch_tracking():
+    item_id = request.args.get("item_id", type=int)
+    lot_no = request.args.get("lot_no", "")
+    return jsonify(InventoryService.get_batch_tracking(item_id=item_id, lot_no=lot_no))
+
+
+# ── P3: 库位管理 ──
+@app.route("/api/inventory/locations", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def inventory_locations():
+    return jsonify(InventoryService.get_locations())
+
+
+@app.route("/api/inventory/locations/move", methods=["POST"])
+@check_auth
+@check_permission("inventory:edit")
+def move_locations():
+    data = get_json_body()
+    try:
+        result = InventoryService.update_location(
+            item_ids=data.get("item_ids", []),
+            new_location=data.get("location", "")
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ── P3: 盘点任务 ──
+@app.route("/api/inventory/count-task", methods=["POST"])
+@check_auth
+@check_permission("inventory:edit")
+def create_count_task():
+    return jsonify(InventoryService.create_count_task())
+
+
+@app.route("/api/inventory/count-status", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def count_status():
+    return jsonify(InventoryService.get_count_status())
+
+
+@app.route("/api/inventory/<int:id>/count", methods=["POST"])
+@check_auth
+@check_permission("inventory:edit")
+def submit_count(id):
+    data = get_json_body()
+    try:
+        result = InventoryService.submit_count(
+            item_id=id,
+            actual_qty=data.get("actual_qty", 0),
+            remark=data.get("remark", "")
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/api/inventory/stats', methods=['GET'])
 @check_auth

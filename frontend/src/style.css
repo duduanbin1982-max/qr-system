@@ -400,6 +400,9 @@ textarea { resize: vertical; min-height: 80px; }
 .btn-default { background: white; color: var(--primary); border: 1px solid var(--primary); }
 .btn-default:hover { background: var(--primary-light); }
 .btn-sm { padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
+.btn-outline { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+.btn-outline:hover { background: var(--primary-light); }
+.btn-outline:disabled { opacity: 0.3; cursor: not-allowed; }
 .btn-add { background: var(--primary-gradient); color: white; border: none; padding: var(--space-2) var(--space-5); border-radius: var(--radius-xl); font-size: var(--text-base); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; }
 .btn-add:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,0.3); }
 .btn-block { width: 100%; justify-content: center; }

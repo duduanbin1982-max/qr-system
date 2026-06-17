@@ -212,7 +212,7 @@ def batch_create_orders():
 @check_permission('orders:view')
 def workpiece_progress(order_id):
     if not _check_order_data_scope(order_id):
-        return jsonify({"error": "无权限访问此订单"}}), 403
+        return jsonify({"error": "无权限访问此订单"}), 403
     """返回订单每个工件×每道工序的进度矩阵"""
     try:
         progress = OrderService.get_workpiece_progress(order_id)

@@ -10,6 +10,7 @@ class DashboardService:
 
     @staticmethod
     @staticmethod
+    @staticmethod
     def _get_dashboard_stats(db, today):
         """Collect 7 order/output KPIs in 2 queries."""
         orders_row = db.execute("""
@@ -27,7 +28,7 @@ class DashboardService:
                 COALESCE(SUM(CASE WHEN type='rework' AND DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_rework
             FROM work_records WHERE DATE(created_at)=?
         """, (today, today, today, today)).fetchone()
-        return {
+        result = {
             "total_orders": orders_row["total_orders"],
             "today_output": wr_row["today_output"] or 0,
             "pending": orders_row["pending"],
@@ -36,6 +37,10 @@ class DashboardService:
             "completed": orders_row["completed"],
             "today_rework": wr_row["today_rework"] or 0,
         }
+        result["pending_approvals"] = db.execute(
+            "SELECT COUNT(*) FROM approval_records WHERE status='pending'"
+        ).fetchone()[0]
+        return result
 
     @staticmethod
     def _get_dashboard_security(db, today):
@@ -57,8 +62,8 @@ class DashboardService:
             "LEFT JOIN processes p ON wr.process_id = p.id "
             "LEFT JOIN users u ON wr.user_id = u.id "
             "WHERE o.deleted_at IS NULL "
-            "-- Note: ORDER BY fields are from hardcoded values, safe from SQL injection
-            ORDER BY wr.created_at DESC LIMIT 10"
+            "/* ORDER BY hardcoded, no injection risk */"
+            "ORDER BY wr.created_at DESC LIMIT 10"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -79,8 +84,8 @@ class DashboardService:
             "CAST(julianday('now','localtime') - julianday(o.plan_end) AS INTEGER) as overdue_days "
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
             "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "
-            "AND o.plan_end != '' AND o.plan_end < ? -- Note: ORDER BY fields are from hardcoded values, safe from SQL injection
-            ORDER BY o.plan_end ASC LIMIT 5",
+            "AND o.plan_end != '' AND o.plan_end < ? "
+            "ORDER BY o.plan_end ASC LIMIT 5",
             (today,)
         ).fetchall()
 
@@ -90,8 +95,8 @@ class DashboardService:
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
             "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "
             "AND o.plan_end != '' AND o.plan_end >= ? AND o.plan_end <= DATE('now','+' || ? || ' days') "
-            "-- Note: ORDER BY fields are from hardcoded values, safe from SQL injection
-            ORDER BY o.plan_end ASC LIMIT 5",
+            "/* ORDER BY hardcoded, no injection risk */"
+            "ORDER BY o.plan_end ASC LIMIT 5",
             (today, warning_days)
         ).fetchall()
 

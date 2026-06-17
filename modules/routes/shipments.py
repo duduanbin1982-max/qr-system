@@ -53,7 +53,9 @@ def list_shipments():
     status = request.args.get('status', '')
     p = parse_pagination()
     page, limit = p['page'], p['limit']
-    return jsonify(ShipmentService.list_shipments(keyword, status, page, limit))
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_dir = request.args.get('sort_dir', 'desc')
+    return jsonify(ShipmentService.list_shipments(keyword, status, page, limit, sort_by, sort_dir))
 
 
 @app.route('/api/shipments', methods=['POST'])
@@ -213,3 +215,117 @@ def complete_shipment(shipment_id):
     except Exception:
         pass
     return jsonify({'message': '出库完成'})
+
+
+
+# ── P1: 批量操作 ──
+@app.route("/api/shipments/batch-complete", methods=["POST"])
+@check_auth
+@check_permission("shipments:edit")
+def batch_complete_shipments():
+    data = get_json_body()
+    try:
+        result = ShipmentService.batch_complete(
+            ids=data.get("ids", []),
+            current_user={"id": g.current_user.get("id"), "name": g.current_user.get("name")}
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/shipments/batch-delete", methods=["POST"])
+@check_auth
+@check_permission("shipments:delete")
+def batch_delete_shipments():
+    data = get_json_body()
+    try:
+        result = ShipmentService.batch_delete(
+            ids=data.get("ids", []),
+            current_user={"id": g.current_user.get("id"), "name": g.current_user.get("name")}
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ── P1: 物流信息 ──
+@app.route("/api/shipments/<int:shipment_id>/logistics", methods=["PUT"])
+@check_auth
+@check_permission("shipments:edit")
+def update_shipment_logistics(shipment_id):
+    data = get_json_body()
+    try:
+        ShipmentService.update_logistics(shipment_id, data)
+        return jsonify({"message": "物流信息更新成功"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ── P1: 取消出库单 ──
+@app.route("/api/shipments/<int:shipment_id>/cancel", methods=["POST"])
+@check_auth
+@check_permission("shipments:edit")
+def cancel_shipment(shipment_id):
+    try:
+        sno = ShipmentService.cancel_shipment(
+            shipment_id,
+            current_user={"id": g.current_user.get("id"), "name": g.current_user.get("name")}
+        )
+        return jsonify({"message": "出库单已取消", "shipment_no": sno})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+
+# P2: stats
+@app.route("/api/shipments/stats", methods=["GET"])
+@check_auth
+@check_permission("shipments:view")
+def shipment_stats():
+    return jsonify(ShipmentService.get_stats())
+
+
+# P2: customer history
+@app.route("/api/shipments/customer-history", methods=["GET"])
+@check_auth
+@check_permission("shipments:view")
+def customer_shipment_history():
+    customer = request.args.get("customer", "")
+    if not customer:
+        return jsonify({"error": "请提供客户名称"}), 400
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify(ShipmentService.get_customer_history(customer, limit))
+
+
+# P2: Excel export
+@app.route("/api/shipments/export", methods=["GET"])
+@check_auth
+@check_permission("shipments:view")
+def export_shipments():
+    from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
+    from openpyxl import Workbook
+    from io import BytesIO
+    keyword = request.args.get("keyword", "")
+    status = request.args.get("status", "")
+    result = ShipmentService.list_shipments(keyword=keyword, status=status, page=1, limit=99999)
+    items = result.get("shipments", [])
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "发货清单"
+    headers = ["出库单号", "客户", "联系人", "电话", "地址", "状态", "总数量", "物流公司", "运单号", "备注", "创建时间", "完成时间"]
+    style_header(ws, headers)
+    status_map = {"pending": "待出库", "partial": "部分出库", "completed": "已出库", "cancelled": "已取消"}
+    for row_idx, item in enumerate(items, 2):
+        vals = [item.get("shipment_no",""), item.get("customer",""), item.get("contact_person",""), item.get("contact_phone",""), item.get("address",""), status_map.get(item.get("status",""), item.get("status","")), item.get("total_quantity",0), item.get("logistics_company",""), item.get("tracking_no",""), item.get("remark",""), (item.get("created_at") or "")[:19], (item.get("completed_at") or "")[:19]]
+        for col_idx, val in enumerate(vals, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = THIN_BORDER
+            cell.alignment = CELL_ALIGN
+    auto_width(ws)
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    from flask import send_file
+    from datetime import datetime as dt
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"shipments_{dt.now().strftime('%Y%m%d_%H%M%S')}.xlsx")

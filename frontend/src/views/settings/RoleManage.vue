@@ -63,7 +63,7 @@
         <div class="modal-header"><span>{{ roleModalEdit ? '编辑角色' : '新增角色' }}</span><span class="modal-close" @click="showRoleModal=false">&times;</span></div>
         <div class="modal-body">
           <div class="form-group"><label>名称 *</label><input class="form-input" v-model="roleForm.name"></div>
-          <div class="form-group"><label>编码 *</label><input class="form-input" v-model="roleForm.code"></div>
+          <div class="form-group"><label>编码</label><span style="color:var(--text-muted);font-size:var(--text-xs)">（留空自动生成）</span><input class="form-input" v-model="roleForm.code"></div>
           <div class="form-group"><label>描述</label><input class="form-input" v-model="roleForm.description"></div>
           <div class="form-group"><label>所属角色组</label>
             <select class="form-input" v-model.number="roleForm.group_id">

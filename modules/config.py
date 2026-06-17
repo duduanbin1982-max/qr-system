@@ -46,8 +46,8 @@ PERMISSION_DEFS = {
     'positions':   ('岗位', ['view','create','edit','delete']),
     'inventory':   ('库存', ['view','create','edit','delete']),
     'shipments':   ('发货', ['view','create','edit','delete']),
-    'scan':        ('扫码报工', ['view','edit']),
-    'stats':       ('统计', ['view']),
+    'scan':        ('扫码报工', ['view','report']),
+    'stats':       ('统计', ['view','export']),
     'trace':       ('追溯', ['view']),
     'approvals':   ('审批', ['view','create','edit']),
     'reports':     ('报表', ['view']),
@@ -55,6 +55,10 @@ PERMISSION_DEFS = {
     'board':       ('看板', ['view']),
     'settings':    ('系统设置', ['manage']),
     'logs':        ('操作日志', ['view','delete']),
+    'materials':   ('物料', ['view','manage']),
+    'quality':     ('质检', ['view','edit','delete']),
+    'rework':      ('返工', ['view','create','edit']),
+    'schedule':    ('排程', ['view']),
 }
 SYSTEM_MANAGE_PERM = 'settings:manage'
 
@@ -71,7 +75,7 @@ PREDEFINED_ROLES = {
         'name': '普通员工', 'code': 'worker',
         'description': '普通工人，可进行报工操作',
         'group_id': 2, 'level': 1,
-        'permissions': ['scan:view', 'scan:edit']
+        'permissions': ['scan:view', 'scan:report']
     },
     # 以下为新增预置
     'production_manager': {
@@ -83,15 +87,15 @@ PREDEFINED_ROLES = {
             'products:view', 'customers:view',
             'processes:view', 'routes:view','routes:create','routes:edit','routes:delete',
             'prices:view','prices:create','prices:edit','prices:delete',
-            'scan:view', 'scan:edit', 'stats:view', 'trace:view', 'reports:view', 'board:view',
-            'approvals:view', 'approvals:edit','inventory:view',
+            'scan:view', 'scan:report', 'stats:view', 'trace:view', 'reports:view', 'board:view',
+            'approvals:view', 'approvals:edit','inventory:view','materials:view','quality:view','rework:view','rework:create','rework:edit',
         ]
     },
     'qc_inspector': {
         'name': '质检员', 'code': 'qc_inspector',
         'description': '质检岗位，扫码报工+追溯+统计',
         'group_id': 2, 'level': 3,
-        'permissions': ['scan:view', 'scan:edit', 'trace:view', 'stats:view', 'products:view']
+        'permissions': ['scan:view', 'scan:report', 'trace:view', 'stats:view', 'products:view']
     },
     'warehouse_keeper': {
         'name': '仓库管理员', 'code': 'warehouse_keeper',

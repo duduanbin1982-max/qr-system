@@ -37,7 +37,8 @@ def list_customers():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     keyword = request.args.get('keyword', '').strip()
-    return jsonify(CustomerService.list_customers(keyword, page, limit))
+    tag = request.args.get('tag', '').strip()
+    return jsonify(CustomerService.list_customers(keyword, page, limit, tag))
 
 
 @app.route('/api/customers', methods=['POST'])

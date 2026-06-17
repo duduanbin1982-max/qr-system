@@ -12,14 +12,19 @@ class CustomerService:
     """客户管理业务逻辑。"""
 
     @staticmethod
-    def list_customers(keyword=None, page=1, limit=100):
-        """客户列表（支持搜索）。"""
+    def list_customers(keyword=None, page=1, limit=100, tag=None):
+        db = BaseService.db()
         where = "1=1"
         params = []
         if keyword:
-            where += " AND (name LIKE ? OR contact LIKE ? OR phone LIKE ?)"
+            where += " AND (c.name LIKE ? OR c.contact LIKE ? OR c.phone LIKE ?)"
             params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
-        rows, total = CustomerRepository.list_all(where, params, page, limit)
+        if tag:
+            where += " AND c.tags LIKE ?"
+            params.append(f"%{tag}%")
+        total = db.execute(f"SELECT COUNT(*) FROM customers c WHERE {where}", params).fetchone()[0]
+        offset = (page - 1) * limit
+        rows = db.execute(f"SELECT c.*, COUNT(o.id) as order_count, MAX(o.created_at) as last_order_date FROM customers c LEFT JOIN orders o ON o.customer_id = c.id AND o.deleted_at IS NULL WHERE {where} GROUP BY c.id ORDER BY c.id DESC LIMIT ? OFFSET ?", params + [limit, offset]).fetchall()
         return {"customers": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
@@ -39,6 +44,7 @@ class CustomerService:
                 "email": data.get("email", ""),
                 "address": data.get("address", ""),
                 "remark": data.get("remark", ""),
+                "tags": data.get("tags", ""),
             }, db=txn)
 
     @staticmethod
@@ -56,7 +62,7 @@ class CustomerService:
 
         sets = []
         params = []
-        for field in ["name", "contact", "phone", "email", "address", "remark"]:
+        for field in ["name", "contact", "phone", "email", "address", "remark", "tags"]:
             if field in data:
                 sets.append(f"{field} = ?")
                 params.append(data[field])

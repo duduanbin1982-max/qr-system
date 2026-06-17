@@ -19,6 +19,7 @@ const orders = ref([])
     const customers = ref([])
     const products = ref([])
     const processRoutes = ref([])
+    const productionLines = ref([])
 
     // 详情展开
     const expandedId = ref(null)
@@ -36,6 +37,11 @@ const orders = ref([])
     const qrPrintLoading = ref(false)
     const qrPrintCopies = ref(1)
     const qrPrintSize = ref('small')
+
+    // ===== 申请返工 =====
+    const showReworkModal = ref(false)
+    const reworkOrder = ref(null)
+    const reworkForm = ref({ process_id: '', quantity: 1, reason: '' })
 
     // 工件进度弹窗
     const progressOrder = ref(null)
@@ -285,6 +291,7 @@ const orders = ref([])
     }
 
     async function loadDropdownData() {
+      try { const d = await api.listProductionLines(); productionLines.value = d.lines || [] } catch(e) { productionLines.value = [] }
       try {
         const [custData, prodData, routeData] = await Promise.all([
           api.listCustomers(),
@@ -311,7 +318,7 @@ const orders = ref([])
       form.value = {
         order_no:'', customer:'', customer_id:null, product_name:'', product_code:'',
         model:'', spec:'', style:'', upper_opening:'', plate_thickness:'', category:'',
-        quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', remark:'', status:'pending'
+        quantity:1, plan_start:'', plan_end:'', deadline:'', route_id:'', production_line_id:null, remark:'', status:'pending'
       }
       productSearch.value = ''
       showProductDropdown.value = false
@@ -334,6 +341,7 @@ const orders = ref([])
         plan_end: o.plan_end || '',
         deadline: o.deadline || '',
         route_id: o.route_id || '',
+        production_line_id: o.production_line_id || null,
         remark: o.remark || '',
         status: o.status || 'pending'
       }
@@ -358,6 +366,8 @@ const orders = ref([])
         if (data.route_id) data.route_id = parseInt(data.route_id) || null
         else delete data.route_id
         if (data.customer_id) data.customer_id = parseInt(data.customer_id)
+        if (data.production_line_id) data.production_line_id = parseInt(data.production_line_id) || null
+        else data.production_line_id = null
 
         if (modalEdit.value) {
           await api.updateOrder(modalId.value, data)
@@ -426,7 +436,9 @@ const orders = ref([])
     // ===== 二维码打印 =====
     function openQrPrint(o) {
       qrPrintOrder.value = o
-      qrMode.value = 'order'
+      // Check if order already has a locked QR mode
+      const existingMode = (o.qr_mode || '').trim()
+      qrMode.value = existingMode || 'order'
       qrCodes.value = []
       showQrPrint.value = true
     }
@@ -455,6 +467,12 @@ const orders = ref([])
     }
 
     function switchQrMode(mode) {
+      // Block mode switch if order already has a locked QR mode
+      const existingMode = ((qrPrintOrder.value?.qr_mode) || '').trim()
+      if (existingMode && existingMode !== mode) {
+        showToast('该订单已锁定为 ' + (existingMode === 'serial' ? '序列号模式' : '订单模式') + '，不可切换', 'warn')
+        return
+      }
       qrMode.value = mode
       qrCodes.value = []
     }
@@ -544,6 +562,33 @@ const orders = ref([])
       }
     }
 
+    // ===== 申请返工 =====
+    function openRework(o) {
+      reworkOrder.value = o
+      reworkForm.value = { process_id: '', quantity: 1, reason: '' }
+      showReworkModal.value = true
+    }
+    async function submitRework() {
+      if (!reworkForm.value.process_id) { showToast('请选择返工工序', 'error'); return }
+      if (!reworkForm.value.quantity || reworkForm.value.quantity < 1) { showToast('请输入有效数量', 'error'); return }
+      if (!reworkForm.value.reason.trim()) { showToast('请输入返工原因', 'error'); return }
+      try {
+        const d = await api.createRework({
+          order_id: reworkOrder.value.id,
+          process_id: parseInt(reworkForm.value.process_id),
+          quantity: parseInt(reworkForm.value.quantity),
+          reason: reworkForm.value.reason
+        })
+        if (d.ok) {
+          showToast('返工记录已创建')
+          showReworkModal.value = false
+          await load()
+        } else {
+          showToast(d.error || '创建失败', 'error')
+        }
+      } catch (e) { showToast(e.message || '操作失败', 'error') }
+    }
+
     function prevPage() { if (page.value > 1) { page.value--; load() } }
     function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
 
@@ -565,7 +610,7 @@ const orders = ref([])
       expandedId, toggleExpand, toggleExpandAndLoad, pct, scrapPct, isOverdue, statusMap,
       pendingCount, producingCount, completedCount,
       // 下拉数据
-      customers, products, processRoutes,
+      customers, products, processRoutes, productionLines,
       // 联动
       onCustomerChange,
       // 模态框
@@ -588,6 +633,8 @@ const orders = ref([])
       progressOrder, progressLoading, progressData, openProgress,
       // 订单物料配方
       orderMaterials, orderMatForm, materialOptions, processOptions,
-      loadOrderMaterials, addOrderMaterial, removeOrderMaterial, loadMaterialOptions, loadProcessOptions
+      loadOrderMaterials, addOrderMaterial, removeOrderMaterial, loadMaterialOptions, loadProcessOptions,
+      // 申请返工
+      showReworkModal, reworkOrder, reworkForm, openRework, submitRework
     }
 }

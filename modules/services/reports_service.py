@@ -6,6 +6,8 @@ _WORKER_ROLE = (
     "u.id IN (SELECT ur.user_id FROM user_roles ur "
     "JOIN roles r ON ur.role_id=r.id WHERE r.code='worker')"
 )
+
+PROCESS_ORDER = ["下料", "铆接", "焊接", "抛丸", "打磨", "镗孔", "喷漆"]
 # SECURITY: All $where variables are built from trusted string constants only.
 
 
@@ -26,7 +28,7 @@ def _calc_defect_rate(items):
     for r in items:
         d = dict(r)
         total = (d.get("output") or 0) + (d.get("scrap") or 0) + (d.get("rework") or 0)
-        d["defect_rate"] = round((d.get("scrap", 0) + d.get("rework", 0)) / total * 100, 1) if total else 0
+        d["defect_rate"] = round((d.get("scrap", 0) + d.get("rework", 0)) / total * 100, 1) if total else None
         result.append(d)
     return result
 
@@ -35,17 +37,17 @@ class ReportsService:
 
     @staticmethod
     def production_trend(start_date, end_date):
-        """Daily output = count of completed product_items (NOT work_records process count)."""
+        """Daily output/scrap = count of product_items (consistent counting units).
+        Rework and report_count still come from work_records (no product_items equivalent)."""
         db = BaseService.db()
         trend = db.execute(
             "SELECT dates.d as date, "
-            # FIXED: output = completed product items per day (not process-level work records)
-            "COALESCE(COUNT(DISTINCT pi.id),0) as output, "
-            "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
+            "COALESCE(COUNT(DISTINCT CASE WHEN pi.status='completed' THEN pi.id END),0) as output, "
+            "COALESCE(COUNT(DISTINCT CASE WHEN pi.status='scrapped' THEN pi.id END),0) as scrap, "
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
             "COUNT(wr.id) as report_count "
             "FROM (WITH RECURSIVE dates(d) AS (SELECT ? UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d<?) SELECT d FROM dates) dates "
-            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status='completed' "
+            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status IN ('completed','scrapped') "
             "LEFT JOIN work_records wr ON DATE(wr.created_at)=dates.d "
             f"AND {_ACTIVE_ORDERS} "
             "GROUP BY dates.d ORDER BY dates.d ASC",
@@ -54,13 +56,16 @@ class ReportsService:
         return [dict(r) for r in trend]
 
     @staticmethod
-    def worker_efficiency(start="", end=""):
+    def worker_efficiency(start="", end="", product_code=""):
         db = BaseService.db()
         date_w, date_p = _build_date_filter(start, end)
-        where = [_ACTIVE_ORDERS]
+        where = [_ACTIVE_ORDERS, "wr.status = 'approved'"]
         params = list(date_p)
         if date_w:
             where.append(date_w)
+        if product_code:
+            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
         w = " AND ".join(where)
         workers = db.execute(
             f"SELECT u.id, u.name, u.employee_no, "
@@ -70,26 +75,30 @@ class ReportsService:
             f"COUNT(DISTINCT DATE(wr.created_at)) as work_days, COUNT(wr.id) as report_count "
             f"FROM users u LEFT JOIN work_records wr ON wr.user_id=u.id AND {w} "
             f"WHERE {_WORKER_ROLE} AND u.status='active' "
-            f"GROUP BY u.id ORDER BY output DESC",
+            f"GROUP BY u.id ORDER BY output DESC LIMIT 200",
             params
         ).fetchall()
         result = []
         for w in workers:
             d = dict(w)
+            total = (d["output"] or 0) + (d["scrap"] or 0)
             d["daily_avg"] = round(d["output"] / d["work_days"], 1) if d["work_days"] else 0
-            d["scrap_rate"] = round(d["scrap"] / d["output"] * 100, 1) if d["output"] else 0
-            d["rework_rate"] = round(d["rework"] / d["output"] * 100, 1) if d["output"] else 0
+            d["scrap_rate"] = round(d["scrap"] / total * 100, 1) if total else 0
+            d["rework_rate"] = round(d["rework"] / total * 100, 1) if total else 0
             result.append(d)
         return result
 
     @staticmethod
-    def quality_analysis(start="", end=""):
+    def quality_analysis(start="", end="", product_code=""):
         db = BaseService.db()
         date_w, date_p = _build_date_filter(start, end)
-        where = [_ACTIVE_ORDERS]
+        where = [_ACTIVE_ORDERS, "wr.status = 'approved'"]
         params = list(date_p)
         if date_w:
             where.append(date_w)
+        if product_code:
+            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
         w = " AND ".join(where)
         by_process = db.execute(
             f"SELECT p.id, p.name, p.category, "
@@ -100,17 +109,7 @@ class ReportsService:
             f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 20",
             params
         ).fetchall()
-        by_worker = db.execute(
-            f"SELECT u.id, u.name, u.employee_no, "
-            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
-            f"COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
-            f"COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework "
-            f"FROM users u LEFT JOIN work_records wr ON wr.user_id=u.id AND {w} "
-            f"WHERE {_WORKER_ROLE} AND u.status='active' "
-            f"GROUP BY u.id ORDER BY output DESC LIMIT 20",
-            params
-        ).fetchall()
-        return {"by_process": _calc_defect_rate(by_process), "by_worker": _calc_defect_rate(by_worker)}
+        return {"by_process": _calc_defect_rate(by_process)}
 
     @staticmethod
     def order_analysis():
@@ -132,33 +131,41 @@ class ReportsService:
         }
 
     @staticmethod
-    def product_stats(start="", end=""):
+    def product_stats(start="", end="", product_code=""):
         db = BaseService.db()
-        date_w, date_p = _build_date_filter(start, end)
         where = ["o.deleted_at IS NULL"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
+        params = []
+        if start:
+            where.append("DATE(o.created_at) >= ?"); params.append(start)
+        if end:
+            where.append("DATE(o.created_at) <= ?"); params.append(end)
+        if product_code:
+            where.append("o.product_code = ?"); params.append(product_code)
         w = " AND ".join(where)
+        item_w = ""
+        if start:
+            item_w += f" AND DATE(pi.completed_at) >= '{start}'"
+        if end:
+            item_w += f" AND DATE(pi.completed_at) <= '{end}'"
         by_product = db.execute(
             f"SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
-            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
-            f"COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
-            f"COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
-            f"COUNT(DISTINCT wr.order_id) as order_count "
+            f"p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
+            f"COALESCE(SUM(o.quantity),0) as order_qty, "
+            f"COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND pi.status='completed'{item_w}),0) as output, "
+            f"COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL" + (f" AND DATE(sr.created_at) >= '{start}'" if start else "") + (f" AND DATE(sr.created_at) <= '{end}'" if end else "") + "),0) as scrap, "
+            f"COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + (f" AND DATE(wr.created_at) >= '{start}'" if start else "") + (f" AND DATE(wr.created_at) <= '{end}'" if end else "") + "),0) as rework, "
+            f"COUNT(DISTINCT o.id) as order_count "
             f"FROM products p "
             f"LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
-            f"LEFT JOIN work_records wr ON wr.order_id=o.id "
             f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 30",
             params
         ).fetchall()
         summary = db.execute(
             f"SELECT COUNT(DISTINCT p.id) as product_count, "
             f"COUNT(DISTINCT o.id) as order_count, "
-            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output "
+            f"COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.deleted_at IS NULL AND pi.status='completed'{item_w}),0) as total_output "
             f"FROM products p "
             f"LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
-            f"LEFT JOIN work_records wr ON wr.order_id=o.id "
             f"WHERE {w}",
             params
         ).fetchone()
@@ -166,15 +173,17 @@ class ReportsService:
             "by_product": [dict(r) for r in by_product],
             "summary": dict(summary) if summary else {},
         }
-
     @staticmethod
-    def material_usage(start="", end=""):
+    def material_usage(start="", end="", product_code=""):
         db = BaseService.db()
         date_w, date_p = _build_date_filter(start, end, prefix="mc")
         where = ["1=1"]
         params = list(date_p)
         if date_w:
             where.append(date_w)
+        if product_code:
+            where.append("mc.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
         w = " AND ".join(where)
         by_material = db.execute(
             f"SELECT m.id, m.name, m.spec, m.material_type, m.unit, "
@@ -187,10 +196,12 @@ class ReportsService:
             params
         ).fetchall()
         summary = db.execute(
-            "SELECT COUNT(*) as material_count, "
-            "COALESCE(SUM(mc.quantity),0) as total_consumed "
-            "FROM materials m "
-            "LEFT JOIN material_consumptions mc ON mc.material_id=m.id"
+            f"SELECT COUNT(DISTINCT m.id) as material_count, "
+            f"COALESCE(SUM(mc.quantity),0) as total_consumed "
+            f"FROM materials m "
+            f"LEFT JOIN material_consumptions mc ON mc.material_id=m.id"
+            + (f" AND {date_w}" if date_w else ""),
+            date_p
         ).fetchone()
         return {
             "by_material": [dict(r) for r in by_material],
@@ -198,34 +209,225 @@ class ReportsService:
         }
 
     @staticmethod
-    def shipment_stats(start="", end=""):
+    def shipment_stats(start="", end="", product_code=""):
         db = BaseService.db()
         date_w, date_p = _build_date_filter(start, end, prefix="s")
         where = ["1=1"]
         params = list(date_p)
         if date_w:
             where.append(date_w)
+        if product_code:
+            where.append("s.id IN (SELECT si.shipment_id FROM shipment_items si JOIN orders o ON si.order_id=o.id WHERE o.product_code = ?)")
+            params.append(product_code)
         w = " AND ".join(where)
         by_status = db.execute(
             f"SELECT s.status, COUNT(*) as count, COALESCE(SUM(s.total_quantity),0) as total_qty "
-            f"FROM shipments s WHERE {w} GROUP BY s.status ORDER BY count DESC"
+            f"FROM shipments s WHERE {w} GROUP BY s.status ORDER BY count DESC",
+            params
         ).fetchall()
         by_customer = db.execute(
             f"SELECT s.customer, COUNT(*) as shipment_count, "
             f"COALESCE(SUM(s.total_quantity),0) as total_qty "
             f"FROM shipments s WHERE {w} "
-            f"GROUP BY s.customer ORDER BY total_qty DESC LIMIT 20"
+            f"GROUP BY s.customer ORDER BY total_qty DESC LIMIT 20",
+            params
         ).fetchall()
         monthly = db.execute(
             f"SELECT substr(s.created_at,1,7) as month, COUNT(*) as count, "
             f"COALESCE(SUM(s.total_quantity),0) as total_qty "
             f"FROM shipments s WHERE {w} AND s.created_at>=date('now','-12 months') "
-            f"GROUP BY substr(s.created_at,1,7) ORDER BY month ASC"
+            f"GROUP BY substr(s.created_at,1,7) ORDER BY month ASC",
+            params
         ).fetchall()
         return {
             "by_status": [dict(r) for r in by_status],
             "by_customer": [dict(r) for r in by_customer],
             "monthly_trend": [dict(r) for r in monthly],
+        }
+
+    @staticmethod
+
+    @staticmethod
+    def product_process_matrix(start="", end=""):
+        """Product x Process cross-tab matrix for heatmap visualization."""
+        db = BaseService.db()
+        date_w, date_p = _build_date_filter(start, end)
+        where = ["wr.status = 'approved'", "o.deleted_at IS NULL"]
+        params = list(date_p)
+        if date_w:
+            where.append(date_w)
+        w = " AND ".join(where)
+        rows = db.execute(
+            f"SELECT p.product_code, p.product_name, p.model, pr.name as process_name, "
+            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output "
+            f"FROM products p "
+            f"JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            f"JOIN work_records wr ON wr.order_id=o.id AND {w} "
+            f"JOIN processes pr ON wr.process_id=pr.id "
+            f"GROUP BY p.product_code, pr.name ORDER BY p.product_code, pr.name",
+            params
+        ).fetchall()
+        products = {}
+        processes_set = set()
+        for r in rows:
+            pc = r["product_code"]
+            if pc not in products:
+                products[pc] = {"product_code": pc, "product_name": r["product_name"],
+                                 "model": r["model"], "data": {}}
+            products[pc]["data"][r["process_name"]] = r["output"]
+            processes_set.add(r["process_name"])
+        return {
+            "products": list(products.values()),
+            "processes": sorted(processes_set),
+        }
+
+    @staticmethod
+    def model_process_stats(start="", end=""):
+        """Aggregate output by model + process."""
+        db = BaseService.db()
+        date_w, date_p = _build_date_filter(start, end)
+        where = ["wr.status = 'approved'", "o.deleted_at IS NULL"]
+        params = list(date_p)
+        if date_w:
+            where.append(date_w)
+        w = " AND ".join(where)
+        rows = db.execute(
+            f"SELECT p.model, pr.name as process_name, "
+            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
+            f"COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
+            f"FROM products p "
+            f"JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            f"JOIN work_records wr ON wr.order_id=o.id AND {w} "
+            f"JOIN processes pr ON wr.process_id=pr.id "
+            f"GROUP BY p.model, pr.name ORDER BY output DESC",
+            params
+        ).fetchall()
+        result = {}
+        for r in rows:
+            model = r["model"] or "-"
+            if model not in result:
+                result[model] = {"model": model, "processes": {}}
+            result[model]["processes"][r["process_name"]] = {
+                "output": r["output"], "scrap": r["scrap"]
+            }
+        return {"by_model": list(result.values())}
+
+    @staticmethod
+    def product_process_stats(start="", end=""):
+        """Per-product process breakdown with flat process list for matrix display."""
+        db = BaseService.db()
+        date_w, date_p = _build_date_filter(start, end)
+        where = ["wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
+        params = list(date_p)
+        if date_w:
+            where.append(date_w)
+        w = " AND ".join(where)
+        # Get all distinct processes first (sorted by custom order)
+        all_procs = db.execute(
+            "SELECT DISTINCT pr.name FROM processes pr "
+            "JOIN work_records wr ON wr.process_id=pr.id "
+            "JOIN orders o ON wr.order_id=o.id "
+            f"WHERE {w} ORDER BY pr.name", params
+        ).fetchall()
+        proc_names = sorted([r["name"] for r in all_procs], key=lambda n: PROCESS_ORDER.index(n) if n in PROCESS_ORDER else 999)
+        # Get product-process matrix
+        rows = db.execute(
+            f"SELECT p.product_code, p.product_name, p.model, p.spec, p.category, "
+            f"pr.name as process_name, "
+            f"COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
+            f"COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
+            f"FROM products p "
+            f"JOIN orders o ON o.product_code=p.product_code "
+            f"JOIN work_records wr ON wr.order_id=o.id "
+            f"JOIN processes pr ON wr.process_id=pr.id "
+            f"WHERE {w} GROUP BY p.product_code, pr.name ORDER BY p.product_code",
+            params
+        ).fetchall()
+        # Build response: products array with data dict keyed by process name
+        prod_map = {}
+        for r in rows:
+            pc = r["product_code"]
+            if pc not in prod_map:
+                prod_map[pc] = {"product_code": pc, "product_name": r["product_name"],
+                                "model": r["model"], "spec": r["spec"],
+                                "category": r["category"], "data": {}}
+            prod_map[pc]["data"][r["process_name"]] = r["output"]
+        products_out = []
+        for pc, md in prod_map.items():
+            total = sum(md["data"].values())
+            products_out.append({**md, "total": total})
+        return {"processes": proc_names, "products": products_out}
+
+
+    @staticmethod
+    def customer_stats(start="", end=""):
+        db = BaseService.db()
+        where = ["o.deleted_at IS NULL"]
+        params = []
+        if start:
+            where.append("DATE(o.created_at) >= ?"); params.append(start)
+        if end:
+            where.append("DATE(o.created_at) <= ?"); params.append(end)
+        w = " AND ".join(where)
+        rows = db.execute(
+            "SELECT COALESCE(c.name, o.customer) as customer_name, "
+            "COUNT(DISTINCT o.id) as order_count, SUM(o.quantity) as total_qty, "
+            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM orders o2 WHERE COALESCE((SELECT name FROM customers c2 WHERE c2.id=o2.customer_id), o2.customer) = COALESCE(c.name, o.customer) AND o2.deleted_at IS NULL AND o2.status IN ('pending','producing','paused')),0) as active_orders "
+            "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
+            "WHERE " + w + " GROUP BY customer_name ORDER BY total_qty DESC LIMIT 30",
+            params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def production_line_stats(start="", end=""):
+        db = BaseService.db()
+        where = ["o.deleted_at IS NULL"]
+        params = []
+        if start:
+            where.append("DATE(o.created_at) >= ?"); params.append(start)
+        if end:
+            where.append("DATE(o.created_at) <= ?"); params.append(end)
+        w = " AND ".join(where)
+        rows = db.execute(
+            "SELECT pl.id as line_id, pl.name as line_name, "
+            "COUNT(DISTINCT o.id) as order_count, SUM(o.quantity) as total_qty, "
+            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM orders o2 WHERE o2.production_line_id=pl.id AND o2.deleted_at IS NULL AND o2.status IN ('pending','producing','paused')),0) as active_orders "
+            "FROM production_lines pl "
+            "LEFT JOIN orders o ON o.production_line_id = pl.id AND " + w + " "
+            "GROUP BY pl.id ORDER BY total_qty DESC",
+            params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def monthly_summary():
+        db = BaseService.db()
+        this_month = db.execute(
+            "SELECT COUNT(DISTINCT o.id) as orders, "
+            "COALESCE(SUM(o.quantity),0) as total_qty, "
+            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.deleted_at IS NULL AND pi.status='completed' AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')),0) as output "
+            "FROM orders o WHERE o.deleted_at IS NULL AND substr(o.created_at,1,7)=strftime('%Y-%m','now')"
+        ).fetchone()
+        last_month = db.execute(
+            "SELECT COUNT(DISTINCT o.id) as orders, "
+            "COALESCE(SUM(o.quantity),0) as total_qty, "
+            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.deleted_at IS NULL AND pi.status='completed' AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now','-1 month')),0) as output "
+            "FROM orders o WHERE o.deleted_at IS NULL AND substr(o.created_at,1,7)=strftime('%Y-%m','now','-1 month')"
+        ).fetchone()
+        def _pct(a, b):
+            if not b: return None
+            return round((a - b) / b * 100, 1)
+        return {
+            "this_month": dict(this_month),
+            "last_month": dict(last_month),
+            "order_change_pct": _pct(this_month["orders"], last_month["orders"]),
+            "output_change_pct": _pct(this_month["output"], last_month["output"]),
+            "completed_change_pct": _pct(this_month["completed_qty"], last_month["completed_qty"]),
         }
 
     @staticmethod
@@ -251,6 +453,8 @@ class ReportsService:
 
     @staticmethod
     def _kpi_completed_month(db):
+        """Count orders completed this month. Uses updated_at as proxy for completion time
+        (orders table has no dedicated completed_at column; updated_at reflects last status change)."""
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL "
             "AND status='completed' AND substr(updated_at,1,7)=strftime('%Y-%m','now')"
@@ -268,6 +472,8 @@ class ReportsService:
 
     @staticmethod
     def _kpi_scrap_rate(db):
+        """Scrap rate = scrapped product_items / (completed + scrapped) this month.
+        Both numerator and denominator use product_items for consistent counting units."""
         total = db.execute(
             "SELECT COUNT(*) FROM product_items pi "
             "JOIN orders o ON pi.order_id=o.id "
@@ -275,19 +481,21 @@ class ReportsService:
             "AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0] or 0
         scrap = db.execute(
-            "SELECT COUNT(*) FROM scrap_records sr "
-            "JOIN orders o ON sr.order_id=o.id "
-            "WHERE o.deleted_at IS NULL "
-            "AND substr(sr.created_at,1,7)=strftime('%Y-%m','now')"
+            "SELECT COUNT(*) FROM product_items pi "
+            "JOIN orders o ON pi.order_id=o.id "
+            "WHERE pi.status='scrapped' AND o.deleted_at IS NULL "
+            "AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0] or 0
         return round(scrap / total * 100, 1) if total else 0
 
     @staticmethod
     def _kpi_active_workers(db):
+        """Count distinct workers with approved work records today."""
         return db.execute(
             f"SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr "
             f"JOIN orders o ON wr.order_id=o.id "
-            f"WHERE o.deleted_at IS NULL AND DATE(wr.created_at)=date('now')"
+            f"WHERE o.deleted_at IS NULL AND wr.status='approved' "
+            f"AND DATE(wr.created_at)=date('now')"
         ).fetchone()[0] or 0
 
     @staticmethod

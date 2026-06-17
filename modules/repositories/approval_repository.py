@@ -33,7 +33,7 @@ class ApprovalRepository:
         db = db or BaseService.db()
         op = '=' if status_condition == 'pending' else '!='
         return db.execute(f'''
-            SELECT ar.*, o.order_no, p.name as process_name,
+            SELECT ar.*, o.order_no, wr.process_id, p.name as process_name,
                    u.name as worker_name, wr.quantity
             FROM approval_records ar
             LEFT JOIN work_records wr ON ar.work_record_id = wr.id
@@ -55,10 +55,10 @@ class ApprovalRepository:
 
     @staticmethod
     def find_work_record(wr_id, db=None):
-        """??????????"""
+        """查询报工记录（含process_id用于多级审批）"""
         db = db or BaseService.db()
         return db.execute(
-            'SELECT quantity, order_id, status FROM work_records WHERE id = ?', (wr_id,)
+            'SELECT id, quantity, order_id, status, process_id FROM work_records WHERE id = ?', (wr_id,)
         ).fetchone()
 
     @staticmethod
@@ -110,3 +110,22 @@ class ApprovalRepository:
         db.execute(
             'UPDATE orders SET completed = completed + ? WHERE id = ?', (quantity, oid)
         )
+
+    @staticmethod
+    def advance_level(record_id, approver_id, approver_name, comment, next_level, db=None):
+        """Advance approval to next level without finalizing."""
+        db = db or BaseService.db()
+        db.execute("""
+            UPDATE approval_records
+            SET current_level = ?, approver_id = ?, approver_name = ?,
+                comment = ?, processed_at = datetime('now','localtime')
+            WHERE id = ?
+        """, (next_level, approver_id, approver_name, comment, record_id))
+
+    @staticmethod
+    def find_approval_config(process_id, db=None):
+        """Find approval config for a process."""
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT * FROM approval_config WHERE process_id = ?", (process_id,)
+        ).fetchone()

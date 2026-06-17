@@ -1,10 +1,11 @@
-// Service Worker - QR System PWA v2 (enhanced)
-const CACHE_NAME = "qr-system-v2.1";
+// Service Worker - QR System PWA v3
+const CACHE_NAME = "qr-system-v3.3";
+// Pre-cache only immutable/large assets (NOT HTML)
 const ASSETS = [
-  "/mobile.html",
   "/offline.html",
   "/jsQR.js",
   "/style.css",
+  "/css/mobile.css?v=3",
   "/manifest.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -36,7 +37,7 @@ self.addEventListener("activate", function(event) {
 self.addEventListener("fetch", function(event) {
   var url = new URL(event.request.url);
 
-  // API: network-first with offline queue
+  // API: network-only
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(event.request).catch(function() {
@@ -49,11 +50,28 @@ self.addEventListener("fetch", function(event) {
     return;
   }
 
-  // Static: cache-first, fallback to offline page
+  // HTML: network-first (never serve stale HTML)
+  if (event.request.mode === "navigate" || url.pathname.endsWith(".html")) {
+    event.respondWith(
+      fetch(event.request).then(function(response) {
+        var clone = response.clone();
+        caches.open(CACHE_NAME).then(function(cache) {
+          cache.put(event.request, clone);
+        });
+        return response;
+      }).catch(function() {
+        return caches.match(event.request).then(function(cached) {
+          return cached || caches.match("/offline.html");
+        });
+      })
+    );
+    return;
+  }
+
+  // Static assets (JS/CSS/images): cache-first, network update in background
   event.respondWith(
     caches.match(event.request).then(function(cached) {
-      if (cached) return cached;
-      return fetch(event.request).then(function(response) {
+      var fetchPromise = fetch(event.request).then(function(response) {
         if (response && response.status === 200) {
           var clone = response.clone();
           caches.open(CACHE_NAME).then(function(cache) {
@@ -61,12 +79,9 @@ self.addEventListener("fetch", function(event) {
           });
         }
         return response;
-      }).catch(function() {
-        if (event.request.mode === "navigate") {
-          return caches.match("/offline.html");
-        }
-        return new Response("Offline", {status: 503});
-      });
+      }).catch(function() {});
+      
+      return cached || fetchPromise;
     })
   );
 });

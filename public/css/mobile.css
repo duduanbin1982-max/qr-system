@@ -1,5 +1,61 @@
-/* === Mobile font-size overrides (+3px) === */
+/* === Unified Mobile CSS — all vars self-contained === */
 :root {
+  /* ── 基础变量（从 style.css 提取） ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --primary: #4F46E5;
+  --primary-dark: #4338CA;
+  --primary-light: #EEF2FF;
+
+  --success: #059669;
+  --success-dark: #047857;
+  --success-light: #ECFDF5;
+  --success-lighter: #D1FAE5;
+
+  --warning: #D97706;
+  --warning-dark: #B45309;
+  --warning-light: #FFFBEB;
+  --warning-lighter: #FEF3C7;
+
+  --danger: #DC2626;
+  --danger-dark: #B91C1C;
+  --danger-light: #FEE2E2;
+  --danger-lighter: #FECACA;
+
+  --info: #2563EB;
+  --info-dark: #1E40AF;
+  --info-light: #DBEAFE;
+  --info-lighter: #BFDBFE;
+
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #4B5563;
+  --text-placeholder: #6B7280;
+  --text-white: #FFFFFF;
+
+  --bg-page: #F3F4F6;
+  --bg-surface: #FFFFFF;
+  --bg-hover: #F3F4F6;
+  --bg-input: #FAFAFA;
+
+  --border: #D1D5DB;
+  --border-light: #E5E7EB;
+  --border-input: #D9D9D9;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.10);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.12);
+  --shadow-focus: 0 0 0 3px rgba(79,70,229,0.15);
+
+  /* ── 移动端字号覆盖 (+3px) ── */
   --text-xs-alt: 14px;
   --text-xs: 15px;
   --text-sm: 16px;
@@ -154,7 +210,7 @@ input,textarea,select{font-size:19px !important}
 .c2{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 40% 0 0}
 .c3{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 40%}
 .c4{bottom:0;right:0;border-width:0 3px 3px 0;border-radius:0 0 40% 0}
-.scan-tip{color:rgba(255,255,255,.8);font-size:13px;font-size:clamp(12px, 3.5vw, 14px);margin-top:16px;margin-top:clamp(12px, 5vw, 24px);text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.scan-tip{color:rgba(255,255,255,.8);font-size:15px;font-size:clamp(12px, 3.5vw, 14px);margin-top:16px;margin-top:clamp(12px, 5vw, 24px);text-shadow:0 1px 4px rgba(0,0,0,.8)}
 .scan-engine{font-size:11px;font-size:clamp(10px, 3vw, 12px);color:var(--primary);margin-top:6px;margin-top:clamp(4px, 1.5vw, 8px);text-shadow:0 1px 4px rgba(0,0,0,.8);min-height:16px}
 
 /* ── Retina: thicker scan line & corner borders ── */
@@ -186,7 +242,7 @@ input,textarea,select{font-size:19px !important}
 }
 
 /* Toast */
-.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:12px 28px;border-radius:24px;font-size:var(--text-base);z-index:9999;pointer-events:none;transition:opacity .25s ease;backdrop-filter:blur(4px)}
+.toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.85);color:#fff;padding:8px 16px;border-radius:16px;font-size:15px;max-width:260px;text-align:center;word-break:break-all;line-height:1.3;z-index:9999;pointer-events:none;transition:opacity .25s ease;backdrop-filter:blur(4px)}
 .back-bar{background:#fff;color:var(--text-primary);border-bottom:1px solid var(--border-light);padding:var(--space-3) 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 
 /* Spinner */

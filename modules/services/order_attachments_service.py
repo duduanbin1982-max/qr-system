@@ -1,4 +1,4 @@
-﻿"""qr-system — OrderAttachmentsService"""
+"""qr-system — OrderAttachmentsService"""
 import os
 from modules.services import BaseService
 
@@ -24,13 +24,13 @@ class OrderAttachmentsService:
             )
             aid = cur.lastrowid
             fpath = os.path.join(upload_dir, f"{aid}_{file_name}")
+            txn.execute("UPDATE order_attachments SET file_path = ? WHERE id = ?", (fpath, aid))
+        return aid, fpath
+
     @staticmethod
     def get_attachment_meta(attachment_id):
         db = BaseService.db()
         return db.execute("SELECT order_id FROM order_attachments WHERE id = ?", (attachment_id,)).fetchone()
-
-            txn.execute("UPDATE order_attachments SET file_path = ? WHERE id = ?", (fpath, aid))
-        return aid, fpath
 
     @staticmethod
     def delete_attachment(attachment_id):

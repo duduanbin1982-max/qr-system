@@ -20,3 +20,15 @@ def trace_product(code):
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
+@app.route("/api/trace/order/<order_no>", methods=["GET"])
+@check_auth
+@check_permission("trace:view")
+def trace_order(order_no):
+    """按订单号追溯整个订单的全部产品"""
+    try:
+        result = TraceService.trace_by_order(order_no)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return handle_unexpected_error(e, "database operation")

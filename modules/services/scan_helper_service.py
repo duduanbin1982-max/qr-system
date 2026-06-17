@@ -2,7 +2,9 @@
 CRITICAL FIX: 所有写操作事务化 — 消除 23 个裸 db.commit()，统一使用 BaseService.transaction()
 """
 import logging
+from datetime import datetime
 from modules.services import BaseService
+from modules.repositories.scan_repository import ScanRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 
@@ -175,24 +177,45 @@ class ScanHelperService:
         return cur_row is not None and cur_row["seq_order"] == max_row["max_seq"]
 
     @staticmethod
-    def get_work_records(order_id, db=None):
-        return ScanHelperService._db(db).execute(
+    def get_work_records(order_id, db=None, limit=None):
+        d = ScanHelperService._db(db)
+        if limit:
+            return d.execute(
+                "SELECT wr.*, u.name as worker_name FROM work_records wr "
+                "LEFT JOIN users u ON wr.user_id = u.id "
+                "WHERE wr.order_id = ? ORDER BY wr.created_at DESC LIMIT ?", (order_id, limit)
+            ).fetchall()
+        return d.execute(
             "SELECT wr.*, u.name as worker_name FROM work_records wr "
             "LEFT JOIN users u ON wr.user_id = u.id "
             "WHERE wr.order_id = ? ORDER BY wr.created_at DESC", (order_id,)
         ).fetchall()
 
     @staticmethod
+    @staticmethod
+    def get_user_order_reports(order_id, user_id, db=None):
+        d = ScanHelperService._db(db)
+        return d.execute(
+            "SELECT id FROM work_records WHERE order_id = ? AND user_id = ? AND type = 'normal'",
+            (order_id, user_id)
+        ).fetchone()
+
+    @staticmethod
+    def get_process_name(process_id, db=None):
+        d = ScanHelperService._db(db)
+        row = d.execute("SELECT name FROM processes WHERE id = ?", (process_id,)).fetchone()
+        return row["name"] if row else "未知工序"
+
     def check_duplicate_normal_report(order_id, process_id, serial_no, user_id, db=None):
         d = ScanHelperService._db(db)
         if serial_no:
             return d.execute(
                 "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
-                "AND serial_no = ? AND type = 'normal'", (order_id, process_id, serial_no)
+                "AND serial_no = ? AND type = 'normal' AND status != 'rejected'", (order_id, process_id, serial_no)
             ).fetchone()
         return d.execute(
             "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
-            "AND user_id = ? AND type = 'normal'", (order_id, process_id, user_id)
+            "AND user_id = ? AND type = 'normal' AND status != 'rejected'", (order_id, process_id, user_id)
         ).fetchone()
 
     @staticmethod
@@ -330,20 +353,27 @@ class ScanHelperService:
         ).fetchone()
 
     @staticmethod
-    def find_or_create_inventory(product_code, product_name, db=None):
+    def find_or_create_inventory(product_code, product_name, order_id=None, db=None):
         d = ScanHelperService._db(db)
+        if order_id:
+            inv = d.execute(
+                "SELECT id FROM inventory WHERE product_model = ? AND order_id = ?",
+                (product_code, order_id)
+            ).fetchone()
+            if inv:
+                return inv["id"]
         inv = d.execute(
-            "SELECT id, product_model FROM inventory WHERE product_model = ?",
+            "SELECT id FROM inventory WHERE product_model = ? AND order_id IS NULL",
             (product_code,)
         ).fetchone()
         if inv:
+            d.execute("UPDATE inventory SET order_id = ? WHERE id = ?", (order_id, inv["id"]))
             return inv["id"]
         cur = d.execute(
-            "INSERT INTO inventory (product_model, product_name, quantity) VALUES (?, ?, 0)",
-            (product_code, product_name or product_code)
+            "INSERT INTO inventory (product_model, product_name, quantity, order_id) VALUES (?, ?, 0, ?)",
+            (product_code, product_name or product_code, order_id)
         )
         return cur.lastrowid
-
     @staticmethod
     def check_inventory_log_dup(order_id, serial_no=None, db=None):
         d = ScanHelperService._db(db)
@@ -383,7 +413,7 @@ class ScanHelperService:
 
             product_code = order_row['product_code']
             product_name = order_row['product_name'] or product_code
-            inv_id = ScanHelperService.find_or_create_inventory(product_code, product_name, db=d)
+            inv_id = ScanHelperService.find_or_create_inventory(product_code, product_name, order_id, db=d)
 
             dup = ScanHelperService.check_inventory_log_dup(order_id, serial_no, db=d)
             if dup:
@@ -411,13 +441,13 @@ class ScanHelperService:
                 dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=db)
                 if dup:
                     raise ValueError("Duplicate defect report")
-            current_op = ScanHelperService.get_order_process(order_id, process_id, db=db)
+            current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
             if not current_op:
                 raise ValueError("Process not in order route")
             err, code = ScanHelperService.check_process_order(order_id, current_op.get("seq_order", 0), db=db)
             if err:
                 raise ValueError(err.get("error", "Process order check failed"))
-            order = ScanHelperService.get_order(order_id, db=db)
+            order = dict(ScanHelperService.get_order(order_id, db=db) or {})
             if order:
                 err2, code2 = ScanHelperService.check_quantity_limits(
                     order_id, current_op.get("seq_order", 0), current_op.get("completed", 0) or 0, quantity, order.get("quantity", 0), db=db)
@@ -439,53 +469,47 @@ class ScanHelperService:
                         new_completed = (op['completed'] or 0) + quantity_local
                         ScanHelperService.update_order_process_completed(order_id, process_id, new_completed, db=db)
 
-                    # Auto-deduct materials from order_materials for this process
-                    # Fallback: if order_materials is empty, use product_bom as default
-                    om_rows = OrderMaterialRepository.get_by_order_and_process(order_id, process_id, db=db)
-                    if not om_rows:
-                        # Fallback to product BOM (only if auto_deduct_material is enabled)
-                    config_row = db.execute("SELECT value FROM system_settings WHERE key = 'auto_deduct_material'").fetchone()
-                    if config_row and config_row['value'] == '1':
-                        prod = db.execute("SELECT id FROM products WHERE product_code = (SELECT product_code FROM orders WHERE id = ?)", (order_id,)).fetchone()
-                        if prod:
-                            bom_rows = ProductBomRepository.list_by_product(prod["id"], db=db)
-                            # Filter by this process (or no process specified = applies to all)
-                            bom_for_process = [b for b in bom_rows if b["process_id"] == process_id or not b["process_id"]]
-                            if bom_for_process:
-                                    for b in bom_for_process:
-                                    bd = dict(b)
-                                    # Fetch actual stock from materials
-                                    stock = db.execute("SELECT quantity FROM materials WHERE id = ?", (b["material_id"],)).fetchone()
-                                    bd["stock_qty"] = stock["quantity"] if stock else 0
-                                    om_rows.append(bd)
-                    for om in om_rows:
-                        deduct_qty = quantity_local * om['quantity_per_unit']
-                        stock_qty = om['stock_qty'] if 'stock_qty' in om.keys() else 0
-                        if stock_qty >= deduct_qty:
-                            # Deduct material stock
-                            db.execute(
-                                "UPDATE materials SET quantity = quantity - ?, updated_at = datetime('now','localtime') WHERE id = ?",
-                                (deduct_qty, om['material_id'])
-                            )
-                            # Log consumption
-                            db.execute(
-                                "INSERT INTO material_consumptions (material_id, order_id, process_id, quantity, operator_id, operator_name, notes) VALUES (?,?,?,?,?,?,'auto-deduct from order BOM')",
-                                (om['material_id'], order_id, process_id, deduct_qty, user_id, user_name)
-                            )
-                            # Log material log
-                            db.execute(
-                                "INSERT INTO material_logs (material_id, type, quantity, remark, operator_id, operator_name) VALUES (?, 'out', ?, 'auto-deduct', ?, ?)",
-                                (om['material_id'], deduct_qty, user_id, user_name)
-                            )
+                    # Auto-create first-article inspection if this is the first work on this process
+                    first_count = db.execute(
+                        "SELECT COUNT(*) FROM work_records WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
+                        (order_id, process_id)
+                    ).fetchone()[0]
+                    if first_count <= 1:
+                        # Check if inspection already exists
+                        existing = db.execute(
+                            "SELECT id FROM quality_inspections WHERE order_id=? AND process_id=? AND inspection_type='first_article'",
+                            (order_id, process_id)
+                        ).fetchone()
+                        if not existing:
+                            try:
+                                from modules.services.quality_service import QualityService
+                                QualityService.create_inspection({
+                                    'order_id': order_id,
+                                    'process_id': process_id,
+                                    'inspection_type': 'first_article',
+                                    'quantity_checked': 1,
+                                    'quantity_passed': 0,
+                                    'quantity_failed': 0,
+                                    'defect_category': '',
+                                    'defect_quantity': 0,
+                                    'notes': '自动创建: 首件报工',
+                                    'inspected_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                }, user_id)
+                            except Exception:
+                                pass  # Non-critical
+
+                    # Auto-deduct materials via ScanRepository
+                    ScanRepository.deduct_materials_for_process(
+                        order_id, process_id, quantity_local, user_id, user_name, db=db)
 
                     if not serial_no and op:
                         order_status = db.execute('SELECT status FROM orders WHERE id = ?', (order_id,)).fetchone()
                         if order_status and order_status['status'] != 'completed':
                             if ScanHelperService.is_last_process(order_id, process_id, db=db):
-                            ScanHelperService.auto_inbound_for_item(order_id, user_id, user_name, serial_no=None, db=db)
+                                ScanHelperService.auto_inbound_for_item(order_id, user_id, user_name, serial_no=None, db=db)
 
                 if serial_no:
-                    current_op = ScanHelperService.get_order_process(order_id, process_id, db=db)
+                    current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
                     if current_op:
                         item = ScanHelperService.get_product_item(serial_no, db=db)
                         if item:

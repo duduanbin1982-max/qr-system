@@ -7,12 +7,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1890ff">
 <meta http-equiv="Permissions-Policy" content="camera=(self)">
-<title>扫码报工</title>
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
-<script src="scan-enhance.js"></script>
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/style.css?v=71">
-<link rel="stylesheet" href="/css/mobile.css?v=1">
+<link rel="stylesheet" href="/css/mobile.css?v=3">
 </head>
 <body>
 
@@ -24,6 +23,18 @@
 <div class="form-group"><label>密码</label><input type="password" id="inp-pwd" placeholder="请输入密码"></div>
 <button class="btn-login" id="btn-login">登 录</button>
 <div class="login-error" id="login-err"></div>
+</div>
+</div>
+
+<!-- CHANGE PASSWORD -->
+<div id="s-change-pwd" class="screen login-screen">
+<div class="login-box">
+<h1>修改密码</h1><p class="sub">首次登录请修改默认密码</p>
+<div class="form-group"><label>原密码</label><input type="password" id="cp-old" placeholder="请输入原密码"></div>
+<div class="form-group"><label>新密码</label><input type="password" id="cp-new" placeholder="至少6位"></div>
+<div class="form-group"><label>确认新密码</label><input type="password" id="cp-new2" placeholder="再次输入新密码"></div>
+<button class="btn-login" id="btn-cp">确认修改</button>
+<div class="login-error" id="cp-err"></div>
 </div>
 </div>
 
@@ -107,13 +118,13 @@
 </div>
 </div>
 
-<script src="/js/mobile/mobile-utils.js"></script>
-<script src="/js/mobile/mobile-auth.js"></script>
-<script src="/js/mobile/mobile-scan.js"></script>
-<script src="/js/mobile/mobile-order.js"></script>
-<script src="/js/mobile/mobile-init.js"></script>
+<script src="/js/mobile/mobile-utils.js?v=25"></script>
+<script src="/js/mobile/mobile-auth.js?v=25"></script>
+<script src="/js/mobile/mobile-scan.js?v=25"></script>
+<script src="/js/mobile/mobile-order.js?v=25"></script>
+<script src="/js/mobile/mobile-init.js?v=25"></script>
 
-<script>
+<script nonce="{$ nonce $}">
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").then(function(reg) {
     console.log("SW registered:", reg.scope);

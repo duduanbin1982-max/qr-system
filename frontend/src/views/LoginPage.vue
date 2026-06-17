@@ -63,6 +63,7 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import { auth } from '@/lib/auth.js'
 
 export default {
   setup(props, { emit }) {
@@ -74,6 +75,28 @@ export default {
     const loading = ref(false)
     const showChangePassword = ref(false)
     
+    function getLandingPage() {
+      const perms = auth.user?.permissions || []
+      if (perms.includes('*')) return 'dashboard'
+      const landingOrder = [
+        { page: 'dashboard', perm: 'dashboard:view' },
+        { page: 'production', perm: 'orders:view' },
+        { page: 'scan', perm: 'scan:view' },
+        { page: 'orders', perm: 'orders:view' },
+        { page: 'inventory', perm: 'inventory:view' },
+        { page: 'stats', perm: 'stats:view' },
+        { page: 'board', perm: 'board:view' },
+        { page: 'reports', perm: 'reports:view' },
+        { page: 'wages', perm: 'orders:view' },
+        { page: 'basic-settings', perm: 'settings:manage' },
+        { page: 'settings', perm: 'settings:manage' },
+      ]
+      for (const item of landingOrder) {
+        if (perms.includes(item.perm)) return item.page
+      }
+      return 'scan'
+    }
+
     async function handleSubmit() {
       if (!username.value || !password.value) {
         error.value = '请输入用户名和密码'
@@ -89,7 +112,7 @@ export default {
           error.value = ''
         } else {
           const { navigate } = await import('@/lib/router.js')
-          navigate('dashboard')
+          navigate(getLandingPage())
         }
       } catch(e) {
         error.value = e.message || '登录失败'
@@ -113,7 +136,7 @@ export default {
         const { changePassword } = await import('@/lib/auth.js')
         await changePassword(newPassword.value)
         const { navigate } = await import('@/lib/router.js')
-        navigate('dashboard')
+        navigate(getLandingPage())
       } catch(e) {
         error.value = e.message || '修改密码失败'
       } finally {

@@ -73,6 +73,7 @@
                       <span class="o-abtn" style="color:var(--primary-accent)" @click="openProgress(o)" title="工件进度">📊</span>
                       <span class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
                       <span class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
+                      <span class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
                       <span class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
                     </div>
                   </td>
@@ -229,6 +230,15 @@
               </select>
             </div></div>
           </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>产线</label>
+              <select class="form-input" v-model="form.production_line_id">
+                <option value="">-- 自动分配 --</option>
+                <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }} (日产能: {{ pl.capacity_per_day || '-' }})</option>
+              </select>
+            </div></div>
+            <div class="form-col"></div>
+          </div>
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
 
           <!-- 订单物料配方（编辑模式） - 创建时无需操作，系统会自动从产品BOM复制 -->
@@ -260,6 +270,37 @@
       </div>
     </div>
 
+    <!-- 申请返工弹窗 -->
+    <div v-if="showReworkModal" class="modal-overlay" >
+      <div class="modal" style="max-width:450px;width:95%">
+        <div class="modal-header">
+          <span>🔧 申请返工 — {{ reworkOrder?.order_no || '' }}</span>
+          <span class="modal-close" @click="showReworkModal=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div style="margin-bottom:12px;font-size:var(--text-sm)">
+            <b>产品:</b> {{ reworkOrder?.product_name }} | <b>数量:</b> {{ reworkOrder?.quantity }}
+          </div>
+          <div class="form-group"><label>返工工序 *</label>
+            <select class="form-input" v-model="reworkForm.process_id">
+              <option value="">-- 请选择工序 --</option>
+              <option v-for="p in (reworkOrder?.processes || [])" :key="p.id" :value="p.id">{{ p.seq_order }}. {{ p.process_name }}</option>
+            </select>
+          </div>
+          <div class="form-group"><label>返工数量 *</label>
+            <input class="form-input" v-model.number="reworkForm.quantity" type="number" min="1" :max="reworkOrder?.quantity || 1" placeholder="返工件数">
+          </div>
+          <div class="form-group"><label>返工原因 *</label>
+            <textarea class="form-input" v-model="reworkForm.reason" rows="2" placeholder="如：焊接缺陷、尺寸超差..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showReworkModal=false">取消</button>
+          <button class="btn btn-primary" @click="submitRework">提交返工</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 二维码打印弹窗 -->
     <div v-if="showQrPrint" class="modal-overlay" >
       <div class="modal qr-modal-lg">
@@ -277,8 +318,8 @@
 
           <!-- 模式选择 -->
           <div class="qr-mode-tabs no-print">
-            <button class="qr-mode-tab" :class="{active:qrMode==='order'}" @click="switchQrMode('order')">📋 订单模式 <small style="opacity:0.6">(1个/订单)</small></button>
-            <button class="qr-mode-tab" :class="{active:qrMode==='serial'}" @click="switchQrMode('serial')">🔢 序列号模式 <small style="opacity:0.6" v-if="qrPrintOrder">(共 {{ qrPrintOrder.quantity }} 件)</small></button>
+            <button class="qr-mode-tab" :class="{active:qrMode==='order'}" :disabled="!!(qrPrintOrder?.qr_mode||'').trim()" @click="switchQrMode('order')">📋 订单模式 <small style="opacity:0.6">(1个/订单)</small>{{ qrPrintOrder?.qr_mode === 'order' ? ' 🔒' : '' }}</button>
+            <button class="qr-mode-tab" :class="{active:qrMode==='serial'}" :disabled="!!(qrPrintOrder?.qr_mode||'').trim()" @click="switchQrMode('serial')">🔢 序列号模式 <small style="opacity:0.6" v-if="qrPrintOrder">(共 {{ qrPrintOrder.quantity }} 件)</small>{{ qrPrintOrder?.qr_mode === 'serial' ? ' 🔒' : '' }}</button>
           </div>
 
           <!-- 控制面板 -->

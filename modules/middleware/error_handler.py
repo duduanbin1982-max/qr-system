@@ -5,7 +5,7 @@ qr-system — 全局错误处理
 """
 import traceback
 import logging
-from flask import jsonify
+from flask import jsonify, current_app
 
 logger = logging.getLogger('qr-system')
 
@@ -22,6 +22,8 @@ def handle_unexpected_error(e: Exception, context: str = '') -> tuple:
     """
     logger.error(f'Unexpected error [{context}]: {type(e).__name__}: {e}')
     logger.error(traceback.format_exc())
+    if current_app and current_app.debug:
+        return jsonify({'error': f'{type(e).__name__}: {str(e)}'}), 500
     return jsonify({'error': '服务器内部错误，请稍后重试'}), 500
 
 

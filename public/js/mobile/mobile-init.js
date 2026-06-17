@@ -5,7 +5,7 @@
   // Restore session if user was previously logged in (sessionStorage + valid cookie)
   if (user()) {
     // Verify cookie is still valid with a lightweight API call
-    fetch(API + '/auth/info', { credentials: 'same-origin' })
+    fetch(API + '/auth/info', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d && d.user) { goMain(); }
@@ -74,6 +74,13 @@
   $('inp-pwd').addEventListener('keyup', function(e) { if (e.key === 'Enter') doLogin(); });
   $('inp-user').addEventListener('keyup', function(e) { if (e.key === 'Enter') $('inp-pwd').focus(); });
   $('inp-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') manualSearch(); });
+
+  _el = document.getElementById('btn-cp');
+  if (_el) _el.addEventListener('click', doChangePassword);
+  
+  _el = document.getElementById('cp-new2');
+  if (_el) _el.addEventListener('keyup', function(e) { if (e.key === 'Enter') doChangePassword(); });
+
   window.addEventListener('beforeunload', function() {
     if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
     if (camStream) { camStream.getTracks().forEach(function(t) { t.stop(); }); camStream = null; }

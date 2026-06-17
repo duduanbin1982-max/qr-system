@@ -74,29 +74,10 @@
           <div class="form-group"><label>状态</label><select class="form-input" v-model="groupForm.status"><option value="active">启用</option><option value="inactive">停用</option></select></div>
           <div class="form-group">
             <label>权限配置</label>
-            <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-md);margin-top:6px">
-              <table style="width:100%;font-size:var(--text-xs);border-collapse:collapse">
-                <thead><tr style="background:var(--bg-table-header);position:sticky;top:0;z-index:1">
-                  <th style="text-align:left;padding:6px 10px;font-size:var(--text-xs-alt);color:var(--text-placeholder)">资源</th>
-                  <th v-for="act in permActionLabels" :key="act.key" style="width:44px;text-align:center;padding:var(--space-1) 2px;font-size:var(--text-2xs);color:var(--text-placeholder)">{{ act.label }}</th>
-                </tr></thead>
-                <tbody>
-                  <tr v-for="p in allPermissions" :key="p.code" style="border-bottom:1px solid var(--bg-hover)">
-                    <td style="padding:var(--space-1) 10px;font-weight:500">{{ p.label }}</td>
-                    <td v-for="act in (p.actions||[])" :key="act" style="text-align:center;padding:var(--space-1)">
-                      <label style="display:block;cursor:pointer;padding:var(--space-1) 0">
-                        <input type="checkbox" :value="p.code+':'+act" v-model="selectedPerms" style="accent-color:var(--primary)">
-                      </label>
-                    </td>
-                    <td v-for="n in (6 - (p.actions||[]).length)" :key="'empty'+n" style="text-align:center;color:var(--border-light)">·</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div style="margin-top:6px;display:flex;align-items:center;gap:12px;font-size:var(--text-xs-alt)">
-              <span style="color:var(--text-placeholder)">已选 {{ selectedPerms.length }} 项</span>
-              <span style="color:var(--primary);cursor:pointer;font-weight:500" @click="selectAllPerms">全选</span>
-              <span v-if="selectedPerms.length > 0" style="color:var(--danger);cursor:pointer;font-weight:500" @click="clearAllPerms">清空</span>
+            <div style="padding:12px;background:var(--info-light);border-radius:var(--radius-md);margin-top:6px;font-size:var(--text-sm);color:var(--text-muted);line-height:1.6">
+              ⚠️ 权限配置已统一迁移至<strong>角色管理</strong>模块。<br>
+              角色组仅作为组织分类，不再参与权限计算。<br>
+              请前往 <strong>基础设置 → 角色管理</strong> 为各角色独立配置权限。
             </div>
           </div>
         </div>

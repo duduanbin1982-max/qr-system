@@ -76,16 +76,28 @@ class ApprovalService:
                     f'??????({order["quantity"]})'
                 )
 
-            with BaseService.transaction() as txn:
-                ApprovalRepository.approve(
-                    record_id, approver_id, approver_name, comment, db=txn
-                )
-                ApprovalRepository.update_work_record_status(
-                    record['work_record_id'], 'approved', db=txn
-                )
-                ApprovalRepository.increment_order_completed(
-                    wr['order_id'], wr['quantity'], db=txn
-                )
+            # Multi-level approval
+            current_level = record.get('current_level', 1) or 1
+            cfg_row = ApprovalRepository.find_approval_config(wr.get('process_id'))
+            max_level = cfg_row['approval_level'] if cfg_row else 1
+
+            if current_level >= max_level:
+                with BaseService.transaction() as txn:
+                    ApprovalRepository.approve(
+                        record_id, approver_id, approver_name, comment, db=txn
+                    )
+                    ApprovalRepository.update_work_record_status(
+                        record['work_record_id'], 'approved', db=txn
+                    )
+                    ApprovalRepository.increment_order_completed(
+                        wr['order_id'], wr['quantity'], db=txn
+                    )
+            else:
+                next_level = current_level + 1
+                with BaseService.transaction() as txn:
+                    ApprovalRepository.advance_level(
+                        record_id, approver_id, approver_name, comment, next_level, db=txn
+                    )
         else:
             with BaseService.transaction() as txn:
                 ApprovalRepository.reject(
@@ -96,3 +108,15 @@ class ApprovalService:
                 )
 
         return action
+
+    @staticmethod
+    def batch_handle(record_ids, action, approver, comment=""):
+        """Batch handle multiple approval records."""
+        processed = 0
+        for rid in record_ids:
+            try:
+                ApprovalService.handle(rid, action, approver, comment)
+                processed += 1
+            except ValueError:
+                pass  # Skip invalid records
+        return processed

@@ -27,7 +27,7 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
     # Fallback: DB query
     db = get_db()
     rows = db.execute('''
-        SELECT r.permissions, rg.permissions as group_permissions
+        SELECT r.permissions
         FROM user_roles ur
         JOIN roles r ON ur.role_id = r.id
         LEFT JOIN role_groups rg ON r.group_id = rg.id
@@ -35,13 +35,12 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
     ''', (user['id'],)).fetchall()
     all_perms = set()
     for row in rows:
-        for col in ['permissions', 'group_permissions']:
-            if row[col]:
-                try:
-                    perms = json.loads(row[col])
-                    all_perms.update(perms)
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        if row['permissions']:
+            try:
+                perms = json.loads(row['permissions'])
+                all_perms.update(perms)
+            except (json.JSONDecodeError, TypeError):
+                pass
     if '*' in all_perms:
         return True
     return perm in all_perms
@@ -52,7 +51,7 @@ def get_user_permissions(user: Optional[dict]) -> List[str]:
         return []
     db = get_db()
     rows = db.execute('''
-        SELECT r.permissions, rg.permissions as group_permissions
+        SELECT r.permissions
         FROM user_roles ur
         JOIN roles r ON ur.role_id = r.id
         LEFT JOIN role_groups rg ON r.group_id = rg.id
@@ -60,13 +59,12 @@ def get_user_permissions(user: Optional[dict]) -> List[str]:
     ''', (user['id'],)).fetchall()
     all_perms = set()
     for row in rows:
-        for col in ['permissions', 'group_permissions']:
-            if row[col]:
-                try:
-                    perms = json.loads(row[col])
-                    all_perms.update(perms)
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        if row['permissions']:
+            try:
+                perms = json.loads(row['permissions'])
+                all_perms.update(perms)
+            except (json.JSONDecodeError, TypeError):
+                pass
     return sorted(all_perms)
 
 def check_auth(f: Callable) -> Callable:

@@ -5,8 +5,9 @@ qr-system — 订单管理 Service 层
 从 routes/orders.py 提取全部业务逻辑。
 """
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from modules.services import BaseService
+from modules.repositories.order_repository import OrderRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
 
@@ -232,7 +233,7 @@ class OrderService:
         extra = {k: v for k, v in data.items()
                  if k not in ('order_no', 'customer', 'customer_id', 'product_name',
                               'quantity', 'plan_start', 'plan_end', 'deadline', 'remark',
-                              'process_ids', 'route_id')}
+                              'process_ids', 'route_id', 'production_line_id')}
 
         process_ids = data.get('process_ids', [])
 
@@ -247,15 +248,16 @@ class OrderService:
 
             cur = txn.execute('''
                 INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
-                    plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending', ?)
+                    plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
             ''', (
                 order_no, customer, customer_id if customer_id else None,
                 data.get('product_name', ''), data.get('quantity', 0),
-                data.get('plan_start', ''), data.get('plan_end', ''),
+                data.get('plan_start', '') or datetime.now().strftime('%Y-%m-%d'), data.get('plan_end', '') or (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
                 data.get('deadline', ''), json.dumps(extra, ensure_ascii=False),
                 data.get('remark', ''), route_id if route_id else None,
-                data.get('product_code', '')
+                data.get('product_code', ''),
+                data.get('production_line_id')
             ))
             order_id = cur.lastrowid
             OrderService._assign_processes(txn, order_id, route_id, process_ids)
@@ -312,7 +314,7 @@ class OrderService:
             RuntimeError: 数据库错误
         """
         db = BaseService.db()
-        existing = db.execute('SELECT id, status FROM orders WHERE id = ?', (oid,)).fetchone()
+        existing = OrderRepository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
 
@@ -336,7 +338,7 @@ class OrderService:
         sets = []
         params = []
         for field in ['order_no', 'customer', 'customer_id', 'product_name', 'product_code',
-                       'quantity', 'plan_start', 'plan_end', 'deadline', 'remark', 'status', 'route_id']:
+                       'quantity', 'plan_start', 'plan_end', 'deadline', 'remark', 'status', 'route_id', 'production_line_id']:
             if field in data:
                 sets.append(f'{field} = ?')
                 params.append(data[field] if data[field] is not None else None)
@@ -386,15 +388,16 @@ class OrderService:
             RuntimeError: 数据库错误
         """
         db = BaseService.db()
-        existing = db.execute('SELECT id, order_no, deleted_at, pre_delete_status FROM orders WHERE id = ?', (oid,)).fetchone()
+        existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
-        if existing['deleted_at']:
+        deleted = existing['deleted_at'] if existing else None
+        if deleted:
             raise ValueError('订单已在回收站中')
 
         with BaseService.transaction() as txn:
             txn.execute(
-                "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, pre_delete_status = status, status = ncelled\ WHERE id = ?",
+                "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, pre_delete_status = status, status = 'cancelled' WHERE id = ?",
                 (deleted_by, oid)
             )
 
@@ -408,7 +411,7 @@ class OrderService:
     def get_work_records(oid):
         """获取订单关联的报工/返工/报废记录。"""
         db = BaseService.db()
-        order = db.execute('SELECT id, order_no FROM orders WHERE id = ?', (oid,)).fetchone()
+        order = OrderRepository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
 
@@ -449,9 +452,7 @@ class OrderService:
     def get_shipments(oid):
         """获取订单关联产品的发货记录。"""
         db = BaseService.db()
-        order = db.execute(
-            'SELECT id, order_no, product_code, product_name FROM orders WHERE id = ?', (oid,)
-        ).fetchone()
+        order = OrderRepository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
 
@@ -481,10 +482,7 @@ class OrderService:
     @staticmethod
     def get_order(oid):
         """获取单个订单"""
-        db = BaseService.db()
-        return db.execute(
-            "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (oid,)
-        ).fetchone()
+        return OrderRepository.find_by_id(oid)
 
     @staticmethod
     def log_remark_history(oid, old_remark, new_remark, user_id, user_name):
@@ -511,9 +509,7 @@ class OrderService:
     def get_workpiece_progress(order_id):
         """获取工件报工进度"""
         db = BaseService.db()
-        order = db.execute(
-            "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
-        ).fetchone()
+        order = OrderRepository.find_by_id(order_id)
         if not order:
             raise ValueError("订单不存在")
         items = db.execute(
@@ -573,15 +569,13 @@ class OrderService:
     def restore_order(oid):
         """从回收站恢复订单。"""
         db = BaseService.db()
-        existing = db.execute(
-            'SELECT id, order_no, deleted_at, pre_delete_status FROM orders WHERE id = ?', (oid,)
-        ).fetchone()
+        existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
         if not existing['deleted_at']:
             raise ValueError('订单不在回收站中')
 
-        old_status = existing.get('pre_delete_status') or 'pending'
+        old_status = existing['pre_delete_status'] or 'pending'
         with BaseService.transaction() as txn:
             txn.execute(
                 "UPDATE orders SET deleted_at = NULL, deleted_by = NULL, status = ? WHERE id = ?",
@@ -593,145 +587,3 @@ class OrderService:
     def purge_order(oid):
         """彻底删除订单及所有关联数据。"""
         db = BaseService.db()
-        existing = db.execute(
-            'SELECT id, order_no, deleted_at, pre_delete_status FROM orders WHERE id = ?', (oid,)
-        ).fetchone()
-        if not existing:
-            raise ValueError('订单不存在')
-        if not existing['deleted_at']:
-            raise ValueError('只能彻底删除回收站中的订单')
-
-        with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM order_attachments WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM work_records WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM scrap_records WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM rework_records WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM quality_inspections WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM order_processes WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM material_consumptions WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM product_items WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM order_remark_history WHERE order_id = ?', (oid,))
-            txn.execute('DELETE FROM orders WHERE id = ?', (oid,))
-
-        return existing['order_no']
-
-    # ============================================================
-    # 批量创建
-    # ============================================================
-    # ============================================================
-
-    @staticmethod
-    def batch_create(orders_data):
-        """
-        批量创建订单。
-
-        Args:
-            orders_data: list of order dicts
-
-        Returns:
-            (created_count, errors_list)
-        """
-        if not orders_data:
-            raise ValueError('无订单数据')
-
-        created = 0
-        errors = []
-        seen_nos = set()
-
-        with BaseService.transaction() as txn:
-            # Pre-load all active processes
-            procs = txn.execute(
-                "SELECT id, seq_order FROM processes WHERE status = 'active' ORDER BY seq_order"
-            ).fetchall()
-            proc_ids = [p['id'] for p in procs]
-            proc_seq_map = {p['id']: p['seq_order'] for p in procs}
-
-            # Pre-load all customer names (avoid per-order query)
-            all_customer_ids = list(set(o.get('customer_id') for o in orders_data if o.get('customer_id')))
-            customer_map = {}
-            if all_customer_ids:
-                placeholders = ','.join('?' for _ in all_customer_ids)
-                cust_rows = txn.execute(
-                    f'SELECT id, name FROM customers WHERE id IN ({placeholders})',
-                    all_customer_ids
-                ).fetchall()
-                customer_map = {r['id']: r['name'] for r in cust_rows}
-
-            # Pre-load all route items (avoid per-order query)
-            all_route_ids = list(set(o.get('route_id') for o in orders_data if o.get('route_id')))
-            route_items_map = {}
-            if all_route_ids:
-                rp = ','.join('?' for _ in all_route_ids)
-                ri_rows = txn.execute(
-                    f'SELECT route_id, process_id, seq_order FROM process_route_items WHERE route_id IN ({rp}) ORDER BY seq_order',
-                    all_route_ids
-                ).fetchall()
-                for ri in ri_rows:
-                    route_items_map.setdefault(ri['route_id'], []).append((ri['process_id'], ri['seq_order']))
-
-            # Collect batch data
-            order_rows = []
-            process_rows = []
-
-            for i, o in enumerate(orders_data):
-                order_no = str(o.get('order_no', '')).strip()
-                route_id = o.get('route_id')
-                if not order_no:
-                    errors.append(f'第{i+1}行: 订单号为空')
-                    continue
-                if order_no in seen_nos:
-                    errors.append(f'第{i+1}行: 批次内订单号{order_no}重复')
-                    continue
-                seen_nos.add(order_no)
-
-                existing = txn.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
-                if existing:
-                    errors.append(f'第{i+1}行: 订单号{order_no}已存在')
-                    continue
-
-                customer_name = customer_map.get(o.get('customer_id'), o.get('customer', ''))
-
-                # Collect order process rows
-                if route_id and route_id in route_items_map:
-                    order_process_data = [(0, pid, seq) for pid, seq in route_items_map[route_id]]
-                else:
-                    order_process_data = [(0, pid, proc_seq_map.get(pid, 0)) for pid in proc_ids]
-
-                order_rows.append((
-                    order_no, customer_name, o.get('customer_id'),
-                    str(o.get('product_name', '')), str(o.get('product_code', '')),
-                    int(o.get('quantity', 0) or 0),
-                    str(o.get('plan_start', '')), str(o.get('plan_end', '')),
-                    str(o.get('deadline', '')), str(o.get('remark', '')),
-                    o.get('route_id'), order_process_data
-                ))
-
-            # Batch insert orders + collect process rows
-            for j, (order_no, customer_name, customer_id, product_name, product_code,
-                     quantity, plan_start, plan_end, deadline, remark, route_id, op_data) in enumerate(order_rows):
-                try:
-                    cur = txn.execute('''
-                        INSERT INTO orders (order_no, customer, customer_id, product_name,
-                            product_code, quantity, plan_start, plan_end, deadline, remark,
-                            route_id, status)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
-                    ''', (
-                        order_no, customer_name, customer_id,
-                        product_name, product_code, quantity,
-                        plan_start, plan_end, deadline, remark, route_id
-                    ))
-                    oid = cur.lastrowid
-                    for _, pid, seq in op_data:
-                        process_rows.append((oid, pid, seq))
-                    created += 1
-                except Exception as e:
-                    errors.append(f'第{j+1}行: {str(e)}')
-
-            # Batch insert all order_processes
-            if process_rows:
-                txn.executemany(
-                    'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                    process_rows
-                )
-
-        return created, errors

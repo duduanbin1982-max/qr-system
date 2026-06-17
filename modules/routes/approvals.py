@@ -61,7 +61,7 @@ def get_approval_config():
     db = get_db()
     rows = db.execute("""
         SELECT ac.id, ac.process_id, ac.require_approval, ac.approver_role,
-               ac.approval_level, p.name as process_name, p.category
+               ac.approval_level, ac.approver_role_2, ac.approver_role_3, p.name as process_name, p.category
         FROM approval_config ac
         LEFT JOIN processes p ON ac.process_id = p.id
         ORDER BY p.name
@@ -84,6 +84,8 @@ def save_approval_config():
         pid = cfg["process_id"]
         require = 1 if cfg.get("require_approval") else 0
         role = cfg.get("approver_role", "admin")
+        role2 = cfg.get("approver_role_2", "")
+        role3 = cfg.get("approver_role_3", "")
         level = cfg.get("approval_level", 1)
 
         existing = db.execute(
@@ -92,14 +94,14 @@ def save_approval_config():
 
         if existing:
             db.execute(
-                "UPDATE approval_config SET require_approval=?, approver_role=?, approval_level=? WHERE process_id=?",
-                (require, role, level, pid)
+                "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, approver_role_3=?, approval_level=? WHERE process_id=?",
+                (require, role, role2, role3, level, pid)
             )
         else:
             if require:
                 db.execute(
-                    "INSERT INTO approval_config (process_id, require_approval, approver_role, approval_level) VALUES (?,?,?,?)",
-                    (pid, require, role, level)
+                    "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level) VALUES (?,?,?,?,?,?)",
+                    (pid, require, role, role2, role3, level)
                 )
             # If require=0 and no existing row, skip (nothing to delete)
 
@@ -109,3 +111,49 @@ def save_approval_config():
 
     db.commit()
     return jsonify({"message": "保存成功"})
+
+@app.route("/api/approvals/batch", methods=["POST"])
+@check_auth
+@check_permission("approvals:edit")
+def batch_approval():
+    """Batch approve/reject: {"ids": [1,2,3], "action": "approve|reject"}"""
+    data = get_json_body()
+    ids = data.get("ids", [])
+    action = data.get("action", "")
+    if not ids or action not in ("approve", "reject"):
+        return jsonify({"error": "参数错误"}), 400
+    try:
+        count = ApprovalService.batch_handle(
+            ids, action,
+            approver={"id": g.current_user["id"], "name": g.current_user["name"]},
+            comment=data.get("comment", "")
+        )
+        return jsonify({"message": f"已处理 {count} 条", "count": count})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/approvals/stats", methods=["GET"])
+@check_auth
+@check_permission("approvals:view")
+def approval_stats():
+    """Approval statistics: avg time, pending > 24h, etc."""
+    db = get_db()
+    pending = db.execute("SELECT COUNT(*) FROM approval_records WHERE status='pending'").fetchone()[0]
+    avg_row = db.execute("""
+        SELECT ROUND(AVG(
+            (julianday(processed_at) - julianday(created_at)) * 24
+        ), 1) as avg_hours
+        FROM approval_records
+        WHERE status != 'pending' AND processed_at IS NOT NULL
+    """).fetchone()
+    pending_over = db.execute("""
+        SELECT COUNT(*) FROM approval_records
+        WHERE status='pending' AND created_at < datetime('now','localtime','-24 hours')
+    """).fetchone()[0]
+    total = db.execute("SELECT COUNT(*) FROM approval_records").fetchone()[0]
+    return jsonify({
+        "pending": pending,
+        "avg_hours": avg_row["avg_hours"] or 0,
+        "pending_over_24h": pending_over,
+        "total": total
+    })

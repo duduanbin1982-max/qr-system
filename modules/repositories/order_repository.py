@@ -15,16 +15,29 @@ class OrderRepository:
     # ============================================================
 
     @staticmethod
-    def find_by_id(order_id, db=None):
+    def find_by_id(order_id, db=None, include_deleted=False):
         """按 ID 查询订单（含关联的客户名、路线名）。"""
         db = db or BaseService.db()
-        return db.execute('''
+        return db.execute(f'''
             SELECT o.*, pr.name as route_name, c.name as customer_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE o.id = ?
+            WHERE o.id = ?{" AND o.deleted_at IS NULL" if not include_deleted else ""}
         ''', (order_id,)).fetchone()
+    @staticmethod
+    def find_including_deleted(order_id, db=None):
+        """查询订单（含软删除）。回收站操作专用。"""
+        return OrderRepository.find_by_id(order_id, db=db, include_deleted=True)
+
+    @staticmethod
+    def find_status_by_id(order_id, db=None):
+        """轻量查询 — 仅返回 id, status, deleted_at，用于状态校验。"""
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id, status, deleted_at FROM orders WHERE id = ?", (order_id,)
+        ).fetchone()
+
 
     @staticmethod
     def find_by_order_no(order_no, db=None):

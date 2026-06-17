@@ -60,11 +60,24 @@ export function useRoleManage() {
     selectedPerms.value = []
     showRoleModal.value = true
   }
+  function expandStarPerms(perms) {
+    if (!Array.isArray(perms)) return perms
+    if (perms.includes('*')) {
+      const all = []
+      for (const p of allPermissions.value) {
+        for (const act of (p.actions || [])) {
+          all.push(p.code + ':' + act)
+        }
+      }
+      return all
+    }
+    return perms
+  }
   function openEditRole(role) {
     roleModalEdit.value = true
     Object.assign(roleForm, { name:role.name, code:role.code, description:role.description||'', group_id:role.group_id, parent_id:role.parent_id, level:role.level||1, permissions:role.permissions||'[]', status:role.status||'active' })
     roleForm._id = role.id
-    try { selectedPerms.value = JSON.parse(role.permissions || '[]') }
+    try { selectedPerms.value = expandStarPerms(JSON.parse(role.permissions || '[]')) }
     catch { selectedPerms.value = [] }
     showRoleModal.value = true
   }

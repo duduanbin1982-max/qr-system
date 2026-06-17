@@ -30,7 +30,7 @@ class TestAuth:
 
     def test_unauthorized_access(self, client):
         resp = client.get("/api/auth/info")
-        assert resp.status_code in (401, 404)
+        assert resp.status_code == 401
 
 
 class TestOrders:
@@ -38,7 +38,7 @@ class TestOrders:
 
     def test_list_orders(self, client, auth_headers):
         resp = client.get("/api/orders", headers=auth_headers)
-        assert resp.status_code in (200, 403, 404, 405)
+        assert resp.status_code == 200
 
     def test_create_order(self, client, auth_headers):
         import time
@@ -49,7 +49,7 @@ class TestOrders:
             "product_name": "Test Product",
             "quantity": 10
         })
-        assert resp.status_code in (200, 201, 400, 403, 500)
+        assert resp.status_code in (200, 201)
 
     def test_order_detail(self, client, auth_headers):
         lst = client.get("/api/orders?limit=1", headers=auth_headers)
@@ -59,7 +59,7 @@ class TestOrders:
             if items:
                 oid = items[0]["id"]
                 resp = client.get(f"/api/orders/{oid}", headers=auth_headers)
-                assert resp.status_code in (200, 403, 404, 405)
+                assert resp.status_code in (200, 405)
 
 
 class TestScanWorkReport:
@@ -67,7 +67,7 @@ class TestScanWorkReport:
 
     def test_list_processes(self, client, auth_headers):
         resp = client.get("/api/processes", headers=auth_headers)
-        assert resp.status_code in (200, 403, 404, 405)
+        assert resp.status_code == 200
 
     def test_scan_unauthorized(self, client):
         resp = client.post("/api/scan/report", json={

@@ -163,16 +163,15 @@ export default {
     const sessionsLoading = ref(false)
 
     const sidebarItems = [
-      { page: 'dashboard', icon: '📊', label: '工作台' },
-      { page: 'production', icon: '🏭', label: '生产管理' },
+      { page: 'dashboard', icon: '📊', label: '工作台', required: 'dashboard:view' },
+      { page: 'production', icon: '🏭', label: '生产管理', required: 'orders:view' },
       { page: 'scan', icon: '📱', label: '扫码报工', required: 'scan:view' },
       { page: 'inventory', icon: '🏗️', label: '库存管理', required: 'inventory:view' },
       { page: 'shipments', icon: '🚚', label: '发货管理', required: 'shipments:view' },
       { page: 'stats', icon: '📈', label: '统计报表', required: 'stats:view' },
-      { page: 'board', icon: '📺', label: '数据看板', required: 'board:view' },
       { page: 'reports', icon: '📊', label: '数据分析', required: 'reports:view' },
       { page: 'wages', icon: '💰', label: '工资核算', required: 'orders:view' },
-      { page: 'basic-settings', icon: '⚙️', label: '基础设置' },
+      { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: 'settings:manage' },
       { page: 'settings', icon: '⚙️', label: '系统设置', required: 'settings:manage' },
     ]
 

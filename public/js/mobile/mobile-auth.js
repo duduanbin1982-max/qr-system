@@ -2,8 +2,10 @@
 //  登录 / 主页面 / 闪光灯
 // ═══════════════════════════════════════════
 
+var _loginBusy = false;
 function doLogin() {
   const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
+  if (_loginBusy) return;
   if (!u || !p) { toast('请输入用户名和密码'); return; }
   const btn = $('btn-login');
   btn.disabled = true; btn.innerHTML = '<span class=\"spin\"></span>登录中...';
@@ -15,23 +17,29 @@ function doLogin() {
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
-    btn.disabled = false; btn.textContent = '登 录';
+    btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false;
     if (d.error) { $('login-err').textContent = d.error; return; }
     window.__qr_user = d.user;
     try { sessionStorage.setItem('qr_user', JSON.stringify(d.user)); } catch(e) {}
-    // token now managed via httpOnly cookie, no sessionStorage needed
+    if (d.must_change_password) {
+      showChangePassword();
+      return;
+    }
     goMain();
   })
-  .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; });
+  .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false; });
 }
 
 function doLogout() {
+  fetch(API + '/auth/logout', {
+    credentials: 'same-origin',
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token() }
+  }).catch(function() {});
   window.__qr_user = null;
-  try { sessionStorage.removeItem('qr_user'); } catch(e) {}
-  // token now managed via httpOnly cookie
+  try { sessionStorage.clear(); } catch(e) {}
   show('login');
 }
-
 function goMain() {
   $('inp-code').value = '';
   curOrder = null; curProcId = null; curSerial = '';
@@ -55,19 +63,19 @@ function toggleManual() {
 }
 
 function loadStats() {
-  fetch(API + '/dashboard', { credentials: 'same-origin' })
+  fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d && d.stats) {
-        $('st-today').textContent = (d.stats.today_records || d.stats.today_output || 0);
-        $('st-qty').textContent = d.stats.today_output || 0;
+      if (d && d.today) {
+        $('st-today').textContent = d.today.records || 0;
+        $('st-qty').textContent = d.today.quantity || 0;
       }
     })
-    .catch(function() { console.log('stats auth fail — token:' + (token() ? 'yes' : 'no')); });
+    .catch(function() { });
 }
 
 function loadRecent() {
-  fetch(API + '/personal/stats', { credentials: 'same-origin' })
+  fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       const list = d.recent_records || [];
@@ -83,7 +91,7 @@ function loadRecent() {
           '<span class="ri-type ' + cls + '">' + lbl + '</span></div>';
       }).join('');
     })
-    .catch(function() { console.log('stats auth fail — token:' + (token() ? 'yes' : 'no')); });
+    .catch(function() { });
 }
 
 function manualSearch() {
@@ -103,4 +111,33 @@ function toggleFlash() {
   track.applyConstraints({ advanced: [{ torch: flashOn }] })
     .then(function() { $('flash-btn').classList.toggle('off', !flashOn); })
     .catch(function() { toast('闪光灯不可用'); });
+}
+
+// ── 修改密码 ──────────────────────────────
+function showChangePassword() {
+  show('change-pwd');
+}
+function doChangePassword() {
+  var oldPw = $('cp-old').value;
+  var newPw = $('cp-new').value;
+  var newPw2 = $('cp-new2').value;
+  var errEl = $('cp-err');
+  if (!oldPw) { errEl.textContent = '请输入原密码'; return; }
+  if (!newPw || newPw.length < 6) { errEl.textContent = '新密码至少6位'; return; }
+  if (newPw !== newPw2) { errEl.textContent = '两次密码不一致'; return; }
+  var btn = $('btn-cp');
+  btn.disabled = true; btn.textContent = '修改中...';
+  fetch(API + '/auth/change-password', {
+    credentials: 'same-origin',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
+    body: JSON.stringify({ old_password: oldPw, new_password: newPw })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    btn.disabled = false; btn.textContent = '确认修改';
+    if (d.error) { errEl.textContent = d.error; return; }
+    goMain();
+  })
+  .catch(function() { errEl.textContent = '网络错误'; btn.disabled = false; btn.textContent = '确认修改'; });
 }

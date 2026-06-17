@@ -4,13 +4,23 @@
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ materials.length }}</div><div class="s-label">物料总数</div></div></div>
       <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val text-danger">{{ lowStock.length }}</div><div class="s-label">低库存预警</div></div></div>
+      <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val">¥{{ totalInventoryValue }}</div><div class="s-label">库存总值</div></div></div>
     </div>
 
     <div class="card">
       <div class="card-header">
         <h3>📦 物料管理</h3>
-        <div style="display:flex;gap:var(--space-2)">
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <span style="font-size:11px;color:var(--text-placeholder)">
+            <span class="abc-badge abc-A" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#ef4444"></span>A 高值
+            <span class="abc-badge abc-B" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#f59e0b"></span>B 中值
+            <span class="abc-badge abc-C" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#10b981"></span>C 低值
+          </span>
           <input v-model="searchText" placeholder="搜索物料..." style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
+          <select v-model="materialTypeFilter" style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:140px">
+            <option value="">全部材质</option>
+            <option v-for="mt in materialTypeOptions" :key="mt" :value="mt">{{ mt }}</option>
+          </select>
           <button class="btn btn-primary" @click="openCreate" v-if="canCreate">+ 新增物料</button>
           <button class="btn" style="background:#0891B2;color:#fff" @click="openSupplierAdd">🏭 供应商管理</button>
         </div>
@@ -23,7 +33,10 @@
         </thead>
         <tbody>
           <tr v-for="m in filteredMaterials" :key="m.id" :class="{ 'row-warn': m.quantity <= (m.safe_stock || 0) }">
-            <td><strong>{{ m.name }}</strong></td>
+            <td>
+              <span :class="'abc-badge abc-' + getAbcClass(m)" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span>
+              <strong>{{ m.name }}</strong>
+            </td>
             <td>{{ m.spec || '-' }}</td>
             <td><span style="color:var(--primary);font-size:var(--text-sm)">{{ m.material_type || '-' }}</span></td>
             <td>{{ m.unit }}</td>
@@ -37,10 +50,10 @@
             <td>{{ m.location || '-' }}</td>
             <td style="white-space:nowrap">
               <button v-if="canEdit" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
-              <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:var(--danger);color:white">消耗</button>
-              <button class="btn btn-sm" @click="viewLogs(m)" style="margin-right:4px">记录</button>
+              <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:#e67e22;color:white">消耗</button>
+              <button class="btn btn-sm" @click="openDetail(m)" style="margin-right:4px;background:var(--teal);color:#fff">详情</button>
               <button class="btn btn-sm" @click="openEdit(m)" v-if="canEdit" style="margin-right:4px">编辑</button>
-              <button class="btn btn-sm btn-danger" @click="remove(m)" v-if="canDelete">删除</button>
+              <button class="btn btn-sm" style="background:#fff;color:#e74c3c;border:1px solid #e74c3c" @click="remove(m)" v-if="canDelete">删除</button>
             </td>
           </tr>
         </tbody>
@@ -249,243 +262,55 @@
       </div>
     </div>
   </div>
+
+    <!-- Detail Modal -->
+    <div class="modal-overlay" v-if="showDetail" >
+      <div class="modal" style="max-width:750px">
+        <div class="modal-header">📋 物料详情 — {{ selectedMaterial?.name }}</div>
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:var(--bg-hover);border-radius:var(--radius-md)">
+            <div><span style="color:var(--text-placeholder);font-size:12px">名称</span><div style="font-weight:600">{{ selectedMaterial?.name }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">规格</span><div>{{ selectedMaterial?.spec || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">材质</span><div style="color:var(--primary)">{{ selectedMaterial?.material_type || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">单位</span><div>{{ selectedMaterial?.unit }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">库存量</span><div style="font-weight:600;color:var(--danger)">{{ selectedMaterial?.quantity }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">单价</span><div>¥{{ Number(selectedMaterial?.unit_price || 0).toFixed(2) }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">安全库存</span><div>{{ selectedMaterial?.safe_stock || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">供应商</span><div style="color:var(--teal)">{{ selectedMaterial?.supplier_name || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">库位</span><div>{{ selectedMaterial?.location || "-" }}</div></div>
+          </div>
+          <h4 style="margin-bottom:12px;font-size:14px">📈 消耗趋势</h4>
+          <canvas ref="trendChart" style="max-height:250px;margin-bottom:16px"></canvas>
+          <div v-if="detailConsumptions.length" style="border-top:1px solid var(--bg-hover);padding-top:12px">
+            <h4 style="margin-bottom:8px;font-size:14px">📝 近期消耗记录</h4>
+            <table class="data-table" style="font-size:var(--text-xs)">
+              <thead><tr><th>日期</th><th>订单</th><th>数量</th><th>操作人</th><th>备注</th></tr></thead>
+              <tbody>
+                <tr v-for="c in detailConsumptions" :key="c.id">
+                  <td>{{ fmtDate(c.created_at) }}</td>
+                  <td style="color:var(--primary);font-weight:500">{{ c.order_no || "-" }}</td>
+                  <td style="color:var(--danger);font-weight:600">-{{ c.quantity }}</td>
+                  <td>{{ c.operator_name || "-" }}</td>
+                  <td style="color:var(--text-placeholder)">{{ c.notes || "-" }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showDetail=false">关闭</button>
+        </div>
+      </div>
+    </div>
 </template>
 
+
 <script>
-import { ref, onMounted, computed } from 'vue'
-import { api } from '@/lib/api.js'
-import { showToast } from '@/lib/store.js'
-import { can } from '@/lib/auth.js'
+import { useMaterial } from '@/composables/useMaterial.js'
 
 export default {
   setup() {
-    const materials = ref([])
-    const logs = ref([])
-    const suppliers = ref([])
-    const loading = ref(true)
-    const showForm = ref(false)
-    const showStock = ref(false)
-    const showConsume = ref(false)
-    const editing = ref(null)
-    const selectedMaterial = ref(null)
-    const searchText = ref('')
-    const showSupplierForm = ref(false)
-    const supplierForm = ref({ name: '', contact: '', phone: '' })
-
-    const form = ref({ name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' })
-    const stockForm = ref({ type: 'in', quantity: 0, remark: '', operator_name: '' })
-
-    // Consumption state
-    const consumptions = ref([])
-    const consumeForm = ref({ order_id: null, process_id: null, quantity: 0, notes: '', operator_name: '' })
-    const orderSearch = ref('')
-    const orderResults = ref([])
-    const orderDropdown = ref(false)
-
-    const lowStock = computed(() => materials.value.filter(m => m.quantity <= (m.safe_stock || 0)))
-    const filteredMaterials = computed(() => {
-      if (!searchText.value) return materials.value
-      const q = searchText.value.toLowerCase()
-      return materials.value.filter(m =>
-        (m.name || '').toLowerCase().includes(q) ||
-        (m.spec || '').toLowerCase().includes(q) ||
-        (m.location || '').toLowerCase().includes(q)
-      )
-    })
-
-    // RBAC
-    const canEdit   = computed(() => can('materials:manage'))
-    const canDelete = computed(() => can('materials:manage'))
-    const canCreate = computed(() => can('materials:manage'))
-
-    // Dialog low stock warning computed properties
-    const stockGap = computed(() => (form.value.quantity || 0) - (form.value.safe_stock || 0))
-    const stockStatus = computed(() => {
-        const gap = stockGap.value
-        if (gap > 0) return { icon: 'passed', cls: 'stock-ok', text: 'Stock OK' }
-        if (gap === 0) return { icon: 'warn', cls: 'stock-warn', text: 'Stock tight' }
-        return { icon: 'danger', cls: 'stock-danger', text: 'Below safety by ' + Math.abs(gap) }
-    })
-    const showStockWarning = computed(() => editing.value && stockGap.value < 0)
-
-    async function load() {
-      loading.value = true
-      try {
-        const d = await api.get('/api/materials')
-        materials.value = d.materials || []
-      } catch (e) { showToast(e.message, 'error') }
-      finally { loading.value = false }
-    }
-
-    function openCreate() {
-      editing.value = null
-      form.value = { name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' }
-      showForm.value = true
-    }
-
-    function openEdit(m) {
-      editing.value = m.id
-      form.value = (({ supplier_name, ...rest }) => {
-            const f = { ...rest }
-            if (f.supplier_id === '' || f.supplier_id === 0) f.supplier_id = null
-            return f
-        })(m)
-      showForm.value = true
-    }
-
-    async function save() {
-      if (!form.value.name.trim()) { showToast('名称必填', 'error'); return }
-      try {
-        const payload = { ...form.value }
-        // Normalize all numeric fields
-        for (const k of ['quantity', 'unit_price', 'safe_stock']) {
-            if (payload[k] == null || payload[k] === '' || isNaN(payload[k])) payload[k] = 0
-        }
-        // Normalize supplier_id
-        if (payload.supplier_id === '' || payload.supplier_id === 0 || payload.supplier_id == null) payload.supplier_id = null
-        console.log('SAVE_DEBUG: payload=' + JSON.stringify(payload) + ' editing=' + editing.value)
-        if (editing.value) await api.put('/api/materials/' + editing.value, payload)
-        else await api.post('/api/materials', payload)
-        showForm.value = false
-        await load()
-        showToast(editing.value ? '已更新' : '已创建')
-      } catch (e) { showToast(e.message, 'error') }
-    }
-
-    async function remove(m) {
-      let impactMsg = ''
-      try {
-        const res = await api.get('/api/materials/' + m.id + '/impact')
-        if (res.refs > 0) {
-          showToast('物料「' + m.name + '」有 ' + res.refs + ' 个关联，无法删除', 'warn')
-          return
-        }
-      } catch(e) {}
-      if (!confirm('确定删除物料「' + m.name + '」？')) return
-      try {
-        await api.del('/api/materials/' + m.id)
-        await load()
-        showToast('已删除')
-      } catch (e) { showToast(e.message, 'error') }
-    }
-
-    function openStock(m) {
-      selectedMaterial.value = m
-      stockForm.value = { type: 'in', quantity: 0, remark: '', operator_name: '' }
-      showStock.value = true
-    }
-
-    async function doStock() {
-      if (stockForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
-      try {
-        await api.post('/api/materials/' + selectedMaterial.value.id + '/stock', stockForm.value)
-        showStock.value = false
-        await load()
-        showToast(stockForm.value.type === 'in' ? '已入库' : '已出库')
-      } catch (e) { showToast(e.message, 'error') }
-    }
-
-    async function viewLogs(m) {
-      selectedMaterial.value = m
-      try {
-        const d = await api.get('/api/materials/' + m.id + '/logs')
-        logs.value = d.logs || []
-      } catch (e) { showToast(e.message, 'error') }
-    }
-
-    // ===== Consumption =====
-    async function openConsume(m) {
-      selectedMaterial.value = m
-      consumeForm.value = { order_id: null, process_id: null, quantity: 0, notes: '', operator_name: '' }
-      orderSearch.value = ''; orderResults.value = []
-      try {
-        const d = await api.get('/api/materials/' + m.id + '/consumptions')
-        consumptions.value = d.consumptions || []
-      } catch (e) { consumptions.value = [] }
-      showConsume.value = true
-    }
-
-    async function searchOrders() {
-      if (!orderSearch.value) { orderResults.value = []; orderDropdown.value = false; return }
-      try {
-        const r = await api.get('/api/orders?keyword=' + encodeURIComponent(orderSearch.value) + '&limit=8')
-        orderResults.value = r.orders || []; orderDropdown.value = orderResults.value.length > 0
-      } catch (e) {}
-    }
-
-    function selectOrder(o) {
-      consumeForm.value.order_id = o.id
-      orderSearch.value = o.order_no + ' ' + (o.product_name || '')
-      orderDropdown.value = false
-    }
-
-    function fmtDate(s) { if (!s) return ''; const m = s.match(/^\d{4}-\d{2}-\d{2}/); return m ? m[0] : s }
-
-    async function doConsume() {
-      if (consumeForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
-      try {
-        await api.post('/api/materials/' + selectedMaterial.value.id + '/consumptions', consumeForm.value)
-        showToast('消耗已记录')
-        openConsume(selectedMaterial.value)
-        await load()
-      } catch (e) { showToast('操作失败', 'error') }
-    }
-
-    async function undoConsume(c) {
-      if (!confirm('撤销消耗将恢复库存，确定？')) return
-      try {
-        await api.del('/api/materials/consumptions/' + c.id)
-        showToast('已撤销')
-        openConsume(selectedMaterial.value)
-        await load()
-      } catch (e) { showToast('操作失败', 'error') }
-    }
-
-    async function loadSuppliers() {
-      try { const d = await api.get('/api/suppliers'); suppliers.value = d.suppliers || [] } catch (e) {}
-    }
-
-    function openSupplierAdd() {
-      supplierForm.value = { name: '', contact: '', phone: '' }
-      showSupplierForm.value = true
-    }
-
-    async function addSupplier() {
-      if (!supplierForm.value.name.trim()) { showToast('供应商名称必填', 'error'); return }
-      try {
-        const r = await api.post('/api/suppliers', supplierForm.value)
-        showSupplierForm.value = false
-        await loadSuppliers()
-        // 自动选中新创建的供应商
-        if (r.id) {
-          form.value.supplier_id = r.id
-        } else if (suppliers.value.length > 0) {
-          form.value.supplier_id = suppliers.value[suppliers.value.length - 1].id
-        }
-        showToast('供应商已添加')
-      } catch (e) { showToast(e.message || '添加失败', 'error') }
-    }
-
-    async function deleteSupplier(s) {
-      if (!confirm('确定删除供应商「' + s.name + '」？如有物料关联将无法删除。')) return
-      try {
-        await api.del('/api/suppliers/' + s.id)
-        await loadSuppliers()
-        showToast('供应商已删除')
-      } catch (e) { showToast(e.message || '删除失败', 'error') }
-    }
-
-    onMounted(() => { load(); loadSuppliers() })
-
-    return {
-      materials, logs, suppliers, loading, showForm, showStock, showConsume, editing, selectedMaterial,
-      form, stockForm, lowStock, searchText,
-      consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
-      openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
-      openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
-      showSupplierForm, supplierForm, openSupplierAdd, addSupplier, deleteSupplier,
-      canEdit, canDelete, canCreate, filteredMaterials, stockGap, stockStatus, showStockWarning,
-    }
+    return { ...useMaterial() }
   }
 }
 </script>

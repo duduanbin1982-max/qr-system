@@ -172,7 +172,7 @@ class UserService:
                 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (username, pw, name, data.get('nickname', ''), data.get('email', ''),
                  data.get('group_name', '员工组'), role, data.get('employee_no', ''),
-                 data.get('phone', ''), data.get('process_ids', ''), position_id or None,
+                 data.get('phone', ''), '', position_id or None,  # P0-2: process_ids deprecated
                  data.get('status', 'active'))
             )
             uid = cur.lastrowid
@@ -204,7 +204,7 @@ class UserService:
             RuntimeError: 数据库错误
         """
         db = BaseService.db()
-        existing = db.execute('SELECT id, role, position_id FROM users WHERE id = ?', (uid,)).fetchone()
+        existing = db.execute('SELECT id, username, name, nickname, email, phone, role, employee_no, group_name, position_id, status FROM users WHERE id = ?', (uid,)).fetchone()
         if not existing:
             raise ValueError('用户不存在')
 
@@ -263,7 +263,7 @@ class UserService:
         if 'employee_no' in data and not data['employee_no']:
             del data['employee_no']
         for field in ['name', 'nickname', 'email', 'group_name', 'role', 'employee_no',
-                       'phone', 'process_ids', 'status', 'position_id']:
+                       'phone', 'status', 'position_id', 'department_id']:  # P0-2: process_ids removed from direct update
             if field in data:
                 sets.append(f'{field} = ?')
                 params.append(data[field])
@@ -303,63 +303,130 @@ class UserService:
                 txn.execute('DELETE FROM user_roles WHERE user_id = ? AND role_id = ?', (uid, old_role_id))
                 txn.execute('INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)', (uid, new_role_id))
 
+        # P3-12: Audit field changes
+        try:
+            changed = []
+            field_labels = {
+                "name": "姓名", "nickname": "昵称", "email": "邮箱", "phone": "手机号",
+                "role": "角色", "employee_no": "工号", "group_name": "角色组",
+                "position_id": "岗位ID", "status": "状态"
+            }
+            for field, label in field_labels.items():
+                old_val = existing[field] if field in existing.keys() else None
+                new_val = data.get(field)
+                if new_val is not None and str(old_val) != str(new_val):
+                    changed.append(f"{label}: {old_val} → {new_val}")
+            if "password" in data and data["password"]:
+                changed.append("密码: 已修改")
+            if changed:
+                detail = "; ".join(changed)
+                db.execute(
+                    "INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) VALUES (?,?,?,?,?)",
+                    (current_user_id, "update_user", "user", uid, detail)
+                )
+                db.commit()
+        except Exception:
+            pass
+
         return True
 
     # ============================================================
     # 删除
     # ============================================================
 
+
+    # ============================================================
+    # P0-1: Soft delete ? restore & permanent delete
+    # ============================================================
+
     @staticmethod
-    def delete_user(uid, current_user_id):
-        """
-        删除用户。
-
-        Args:
-            uid: 要删除的用户 ID
-            current_user_id: 当前操作用户的 ID（用于禁止自杀）
-
-        Raises:
-            ValueError: 校验失败
-            RuntimeError: 数据库错误（含 FK 约束）
-        """
-        if uid == current_user_id:
-            raise ValueError('不能删除自己')
-
+    def restore_user(uid):
         db = BaseService.db()
-        user = db.execute('SELECT id, username FROM users WHERE id = ?', (uid,)).fetchone()
+        user = db.execute("SELECT id, username FROM users WHERE id = ? AND status = 'deleted'", (uid,)).fetchone()
         if not user:
-            raise ValueError('用户不存在')
-        if user['username'] == 'admin':
-            raise ValueError('Cannot delete the built-in admin account')
+            raise ValueError('user not found or not deleted')
+        db.execute("UPDATE users SET status = 'active', deleted_at = NULL WHERE id = ?", (uid,))
+        db.commit()
+        return True
 
-        # C2 FIX: Don't delete the last admin (check both user_roles and users.role)
-        admin_count_roles = db.execute(
-            'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
-        ).fetchone()[0]
-        admin_count_users = db.execute(
-            "SELECT COUNT(*) FROM users WHERE role = 'admin'"
-        ).fetchone()[0]
-        admin_count = max(admin_count_roles, admin_count_users)
-        is_admin = db.execute(
-            'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (uid,)
-        ).fetchone()
-        if not is_admin:
-            is_admin = db.execute(
-                "SELECT 1 FROM users WHERE id = ? AND role = 'admin'", (uid,)
-            ).fetchone()
-        if is_admin and admin_count <= 1:
-            raise ValueError('Cannot delete the last administrator')
-
+    @staticmethod
+    def permanent_delete_user(uid):
+        db = BaseService.db()
+        user = db.execute("SELECT id FROM users WHERE id = ? AND status = 'deleted'", (uid,)).fetchone()
+        if not user:
+            raise ValueError('can only permanently delete trashed users')
         with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM user_processes WHERE user_id = ?', (uid,))
             txn.execute('DELETE FROM user_roles WHERE user_id = ?', (uid,))
             txn.execute('DELETE FROM users WHERE id = ?', (uid,))
+        return True
+
+    @staticmethod
+
+    def delete_user(uid, current_user_id):
+
+        """Soft-delete user by setting status='deleted'."""
+
+        if uid == current_user_id:
+
+            raise ValueError('cannot delete self')
+
+        db = BaseService.db()
+
+        user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (uid,)).fetchone()
+
+        if not user:
+
+            raise ValueError('user not found')
+
+        if user['username'] == 'admin':
+
+            raise ValueError('cannot delete built-in admin account')
+
+        if user['role'] == 'admin':
+
+            active_admins = db.execute(
+
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND status != 'deleted'"
+
+            ).fetchone()[0]
+
+            if active_admins <= 1:
+
+                raise ValueError('cannot delete the last administrator')
+
+        db.execute(
+
+            "UPDATE users SET status = 'deleted', deleted_at = datetime('now','localtime') WHERE id = ?",
+
+            (uid,)
+
+        )
+
+        db.commit()
 
         return True
 
-    # ============================================================
-    # 密码重置
-    # ============================================================
 
+
+
+    @staticmethod
+    def batch_update_status(ids, status, current_user_id=None):
+        """Batch update user status (active/inactive)."""
+        if not ids:
+            return 0
+        if current_user_id and current_user_id in ids:
+            raise ValueError('cannot change own status')
+        if status not in ('active', 'inactive'):
+            raise ValueError('invalid status')
+        db = BaseService.db()
+        placeholders = ','.join(['?'] * len(ids))
+        cur = db.execute(
+            "UPDATE users SET status = ? WHERE id IN (%s) AND status IN ('active','inactive')" % placeholders,
+            [status] + ids
+        )
+        db.commit()
+        return cur.rowcount
     @staticmethod
     def batch_delete_users(ids, current_user_id):
         """Delete multiple users in a single transaction."""
@@ -423,6 +490,118 @@ class UserService:
         with BaseService.transaction() as txn:
             txn.execute('UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?', (uid,))
         return row['username']
+
+    @staticmethod
+    def import_users(filepath):
+        """Import users from .xlsx file. Returns {success, skipped, errors}."""
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        # Map Chinese headers to field names
+        field_map = {
+            "???": "username", "??": "name", "??": "employee_no",
+            "???": "phone", "??": "email", "??": "nickname",
+            "??": "position_name", "??": "role", "??": "password",
+            "??(??)": "process_names",
+        }
+        # Also try English headers
+        en_map = {k.lower(): k for k in ["username","name","employee_no","phone","email","nickname","position_name","role","password","process_names"]}
+        
+        col_map = {}
+        for i, h in enumerate(headers):
+            if h is None: continue
+            h_str = str(h).strip()
+            if h_str in field_map:
+                col_map[i] = field_map[h_str]
+            elif h_str.lower() in en_map:
+                col_map[i] = en_map[h_str.lower()]
+        
+        if not col_map:
+            raise ValueError("????????????: ???/??/??/???/??")
+        
+        db = BaseService.db()
+        # Preload positions
+        pos_rows = db.execute("SELECT id, name FROM positions WHERE status='active'").fetchall()
+        pos_map = {r["name"]: r["id"] for r in pos_rows}
+        
+        success = 0
+        skipped = 0
+        errors = []
+        
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            try:
+                data = {}
+                for col_idx, field in col_map.items():
+                    val = row[col_idx] if col_idx < len(row) else None
+                    data[field] = str(val).strip() if val is not None else ""
+                
+                username = data.get("username", "")
+                name = data.get("name", "")
+                if not username and not name:
+                    skipped += 1
+                    errors.append(f"?{row_idx}?: ?????")
+                    continue
+                if not username:
+                    username = name
+                if not name:
+                    name = username
+                
+                # Check duplicate
+                existing = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+                if existing:
+                    skipped += 1
+                    errors.append(f"?{row_idx}?: ??? {username} ???")
+                    continue
+                
+                # Resolve position
+                pos_name = data.get("position_name", "")
+                position_id = pos_map.get(pos_name) if pos_name else None
+                
+                # Resolve role
+                role = data.get("role", "worker")
+                if role not in ("admin", "worker"):
+                    role = "worker"
+                
+                # Auto employee_no
+                employee_no = data.get("employee_no", "")
+                if not employee_no:
+                    last = db.execute(
+                        "SELECT MAX(CAST(employee_no AS INTEGER)) as max_no FROM users WHERE employee_no GLOB '[0-9]*'"
+                    ).fetchone()
+                    next_no = (last["max_no"] or 0) + 1
+                    employee_no = str(next_no).zfill(4)
+                
+                # Password
+                raw_pw = data.get("password", "") or __import__("secrets").token_urlsafe(8)
+                import bcrypt
+                pw_hash = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+                
+                role_id = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (role,)).fetchone()
+                role_id = role_id[0] if role_id else 2
+                
+                with BaseService.transaction() as txn:
+                    cur = txn.execute(
+                        "INSERT INTO users (username, password, name, nickname, email, group_name, role, employee_no, phone, position_id, status, department_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (username, pw_hash, name, data.get("nickname",""), data.get("email",""),
+                         "???", role, employee_no, data.get("phone",""), position_id, "active")
+                    )
+                    uid = cur.lastrowid
+                    txn.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)", (uid, role_id))
+                
+                success += 1
+            except Exception as e:
+                skipped += 1
+                errors.append(f"?{row_idx}?: {str(e)[:80]}")
+        
+        wb.close()
+        return {
+            "success": success,
+            "skipped": skipped,
+            "total": success + skipped,
+            "errors": errors[:20],
+            "error_summary": "; ".join(errors[:5]) if errors else "",
+        }
 
     # ============================================================
     # 辅助

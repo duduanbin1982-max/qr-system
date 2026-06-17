@@ -231,3 +231,163 @@ class WageService:
             'grand_total_wage': grand_total,
         }
 
+    # -- P0: snapshots --
+    @staticmethod
+    def save_snapshot(year_month, employee_id=None):
+        db = BaseService.db()
+        result = WageService.calculate_wages(
+            employee_id=str(employee_id) if employee_id else "",
+            date_from=year_month + "-01", date_to="", page=1, limit=99999
+        )
+        saved = 0
+        with BaseService.transaction() as txn:
+            for emp in result.get("wages", []):
+                txn.execute(
+                    "INSERT INTO wage_snapshots (employee_id,employee_name,employee_no,year_month,total_quantity,total_wage,rework_wage,details_json,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'draft',datetime('now','localtime')) ON CONFLICT(employee_id,year_month) DO UPDATE SET total_quantity=excluded.total_quantity,total_wage=excluded.total_wage,rework_wage=excluded.rework_wage,details_json=excluded.details_json,updated_at=datetime('now','localtime')",
+                    (emp.get("employee_id",0), emp.get("employee_name",""), emp.get("employee_no",""),
+                     year_month, emp.get("total_quantity",0), emp.get("total_wage",0),
+                     emp.get("rework_wage",0), __import__("json").dumps(emp.get("details",[]), ensure_ascii=False))
+                )
+                saved += 1
+        return {"saved": saved, "year_month": year_month}
+
+    @staticmethod
+    def lock_snapshot(year_month, locked_by="system", notes=""):
+        db = BaseService.db()
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE wage_snapshots SET status='locked',locked_at=datetime('now','localtime'),locked_by=?,notes=? WHERE year_month=? AND status='draft'",
+                (locked_by, notes, year_month)
+            )
+            count = txn.execute("SELECT changes()").fetchone()[0]
+        return {"locked": count, "year_month": year_month, "notes": notes}
+
+    @staticmethod
+    def list_snapshots(year_month):
+        db = BaseService.db()
+        rows = db.execute("SELECT * FROM wage_snapshots WHERE year_month=? ORDER BY total_wage DESC", (year_month,)).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def confirm_snapshot(year_month, confirmed_by="system"):
+        db = BaseService.db()
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE wage_snapshots SET status='confirmed',confirmed_at=datetime('now','localtime'),confirmed_by=? WHERE year_month=? AND status='locked'",
+                (confirmed_by, year_month)
+            )
+            count = txn.execute("SELECT changes()").fetchone()[0]
+        return {"confirmed": count, "year_month": year_month}
+
+    @staticmethod
+    def get_snapshot_status(year_month):
+        db = BaseService.db()
+        rows = db.execute(
+            "SELECT status, COUNT(*) as cnt, SUM(total_wage) as total_wage FROM wage_snapshots WHERE year_month=? GROUP BY status",
+            (year_month,)
+        ).fetchall()
+        result = {"draft": 0, "locked": 0, "confirmed": 0, "total_wage": 0}
+        for r in rows:
+            result[r["status"]] = r["cnt"]
+            result["total_wage"] += r["total_wage"] or 0
+        result["total_employees"] = sum(v for k,v in result.items() if k != "total_wage")
+        return result
+
+    # -- P2-P3: adjustments, trends, positions, prediction --
+    @staticmethod
+    def list_adjustments(user_id=None, year_month=None):
+        db = BaseService.db()
+        where = []
+        params = []
+        if user_id:
+            where.append("user_id=?"); params.append(user_id)
+        if year_month:
+            where.append("year_month=?"); params.append(year_month)
+        sql = "SELECT a.*, u.name as employee_name FROM wage_adjustments a LEFT JOIN users u ON a.user_id=u.id"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY a.created_at DESC"
+        return [dict(r) for r in db.execute(sql, params).fetchall()]
+
+    @staticmethod
+    def save_adjustment(user_id, year_month, adj_type, amount, reason, created_by):
+        db = BaseService.db()
+        db.execute(
+            "INSERT OR REPLACE INTO wage_adjustments (user_id, year_month, type, amount, reason, created_by) VALUES (?,?,?,?,?,?)",
+            (user_id, year_month, adj_type, amount, reason or "", created_by)
+        )
+        db.commit()
+        return {"success": True, "id": db.execute("SELECT last_insert_rowid()").fetchone()[0]}
+
+    @staticmethod
+    def delete_adjustment(adj_id):
+        db = BaseService.db()
+        db.execute("DELETE FROM wage_adjustments WHERE id=?", (adj_id,))
+        db.commit()
+        return {"deleted": db.total_changes}
+
+    @staticmethod
+    def get_adjustments_total(user_id, year_month):
+        db = BaseService.db()
+        rows = db.execute(
+            "SELECT type, SUM(amount) as total FROM wage_adjustments WHERE user_id=? AND year_month=? GROUP BY type",
+            (user_id, year_month)
+        ).fetchall()
+        result = {"bonus": 0, "deduction": 0, "allowance": 0, "net": 0}
+        for r in rows:
+            result[r["type"]] = r["total"] or 0
+        result["net"] = result["bonus"] + result["allowance"] - result["deduction"]
+        return result
+
+    @staticmethod
+    def wage_trends(months=12):
+        db = BaseService.db()
+        rows = db.execute(
+            "SELECT year_month, SUM(total_wage) as total_wage, SUM(total_quantity) as total_quantity, COUNT(DISTINCT employee_id) as employee_count FROM wage_snapshots WHERE status IN ('draft','locked','confirmed') GROUP BY year_month ORDER BY year_month DESC LIMIT ?",
+            (months,)
+        ).fetchall()
+        result = []
+        for r in reversed(rows):
+            result.append({
+                "year_month": r["year_month"],
+                "total_wage": round(r["total_wage"] or 0, 2),
+                "total_quantity": r["total_quantity"] or 0,
+                "employee_count": r["employee_count"] or 0,
+            })
+        return result
+
+    @staticmethod
+    def position_summary(year_month):
+        db = BaseService.db()
+        rows = db.execute(
+            "SELECT COALESCE(pos.name, '未分配') as position_name, COUNT(DISTINCT wr.user_id) as employee_count, SUM(wr.quantity) as total_quantity, SUM(wr.quantity * COALESCE(pp_dedup.unit_price, rp.unit_price, 0)) as total_wage FROM work_records wr JOIN users u ON wr.user_id = u.id LEFT JOIN positions pos ON u.position_id = pos.id LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL LEFT JOIN products pr ON o.product_code = pr.product_code AND pr.deleted_at IS NULL LEFT JOIN route_prices rp ON o.route_id = rp.route_id AND wr.process_id = rp.process_id AND rp.status = 'active' AND rp.effective_date <= date('now','localtime') " + WageService._PP_DEDUP_JOIN + " WHERE wr.status = 'approved' AND wr.type = 'normal' AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month') GROUP BY pos.name ORDER BY total_wage DESC",
+            (year_month + "-01", year_month + "-01")
+        ).fetchall()
+        grand_total = sum(r["total_wage"] or 0 for r in rows)
+        return {"year_month": year_month, "summary": [dict(r) for r in rows], "grand_total_wage": grand_total}
+
+    @staticmethod
+    def wage_prediction(months=6):
+        db = BaseService.db()
+        rows = db.execute(
+            "SELECT year_month, SUM(total_wage) as total_wage, SUM(total_quantity) as total_quantity FROM wage_snapshots WHERE status IN ('draft','locked','confirmed') GROUP BY year_month ORDER BY year_month DESC LIMIT ?",
+            (months,)
+        ).fetchall()
+        if len(rows) < 2:
+            return {"predicted_wage": 0, "predicted_quantity": 0, "confidence": 0, "months_data": len(rows)}
+        wages = [r["total_wage"] or 0 for r in reversed(rows)]
+        n = len(wages)
+        x_mean = (n - 1) / 2
+        y_mean = sum(wages) / n
+        denom = max(sum((i - x_mean)**2 for i in range(n)), 1)
+        slope = sum((i - x_mean) * (wages[i] - y_mean) for i in range(n)) / denom
+        predicted_wage = y_mean + slope * n
+        ss_res = sum((wages[i] - (y_mean + slope * (i - x_mean)))**2 for i in range(n))
+        ss_tot = sum((w - y_mean)**2 for w in wages)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        return {
+            "predicted_wage": round(max(0, predicted_wage), 2),
+            "confidence": round(min(100, max(0, r2 * 100))),
+            "months_data": n, "trend": "up" if slope > 0 else "down" if slope < 0 else "stable",
+            "avg_wage": round(y_mean, 2),
+        }

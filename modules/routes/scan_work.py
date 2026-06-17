@@ -41,8 +41,24 @@ def scan_order():
                     except (json.JSONDecodeError, TypeError):
                         item_info["qr_data"] = {}
 
+        # Fallback: if code is a plain-text serial number, look it up directly
+        if not order:
+            item = ScanHelperService.get_product_item(code)
+            if item:
+                item_info = dict(item)
+                serial_no = code
+                order = ScanHelperService.get_order(item["order_id"])
+
         if not order:
             return jsonify({"error": f"未找到订单或产品: {code}"}), 404
+
+        # QR模式校验：序列号模式订单拒绝订单号扫描
+        if not serial_no:
+            o_pre = dict(order)
+            _qr_mode = (o_pre.get("qr_mode") or "").strip()
+            _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
+            if _qr_mode == "serial" or _has_items:
+                return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         o = dict(order)
         if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
@@ -172,8 +188,24 @@ def mobile_scan():
                 if not order:
                     order = ScanHelperService.get_order(item["order_id"])
 
+        # Fallback: if code is a plain-text serial number, look it up directly
+        if not order:
+            item = ScanHelperService.get_product_item(code)
+            if item:
+                item_info = dict(item)
+                serial_no = code
+                order = ScanHelperService.get_order(item["order_id"])
+
         if not order:
             return jsonify({"error": f"未找到订单或产品: {code}"}), 404
+
+        # QR模式校验：序列号模式订单拒绝订单号扫描
+        if not serial_no:
+            o_pre = dict(order)
+            _qr_mode = (o_pre.get("qr_mode") or "").strip()
+            _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
+            if _qr_mode == "serial" or _has_items:
+                return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         o = dict(order)
         if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
@@ -245,6 +277,11 @@ def mobile_report():
             return jsonify({"error": "订单不存在"}), 404
         if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权对此订单报工"}), 403
+
+        # ===== 序列号模式守卫 =====
+        has_items_m = bool(ScanHelperService.get_product_items_by_order(order_id))
+        if has_items_m and not serial_no:
+            return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         op_check = ScanHelperService.check_process_in_order(order_id, process_id)
         if not op_check:
@@ -336,6 +373,11 @@ def work_report():
         if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(g.current_user)):
             return jsonify({"error": "您无权对此订单报工"}), 403
 
+        # ===== 序列号模式守卫 =====
+        has_items_wr = bool(ScanHelperService.get_product_items_by_order(order_id))
+        if has_items_wr and not serial_no:
+            return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
+
         # ===== 工序存在性校验 =====
         op_check = ScanHelperService.check_process_in_order(order_id, process_id)
         if not op_check:
@@ -391,8 +433,10 @@ def work_report():
                       "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
         except Exception:
             pass
+
+        return jsonify({'message': '报工成功'})
     except ValueError as e:
-        return jsonify({ error: str(e)}), 409
+        return jsonify({'error': str(e)}), 409
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
 

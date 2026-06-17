@@ -2,28 +2,16 @@
 //  双引擎扫码模块
 // ═══════════════════════════════════════════
 
-// ── 引擎检测 ────────────────────────────────
-function initBD() {
-  if (typeof BarcodeDetector !== 'undefined') {
-    try {
-      bd = new BarcodeDetector({ formats: ['qr_code'] });
-      return true;
-    } catch(e) {}
-  }
-  return false;
-}
-
 // ── 打开摄像头 ──────────────────────────────
 function openCam() {
   show('scan');
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    toast('此浏览器不支持摄像头，请使用拍照解码');
+    toast('无摄像头权限');
     show('main');
     return;
   }
 
-  let hasBD = false;  // 强制jsQR：华为BarcodeDetector.detect(video)不可靠
   $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
 
   const video = $('cam-video');
@@ -34,8 +22,7 @@ function openCam() {
     camStream = stream;
     video.srcObject = stream;
     video.play().then(function() {
-      if (hasBD) { startBD(video); }
-      else { startJsQR(video); }
+      startJsQR(video);
     });
   })
   .catch(function(err) {
@@ -51,32 +38,6 @@ function openCam() {
     toast(msg, 5000);
     show('main');
   });
-}
-
-// ── 路径1: BarcodeDetector (Chrome 硬件加速) ──
-function startBD(video) {
-  var busy = false;
-
-  function tick() {
-    if (!camStream) return;
-    if (busy) { requestAnimationFrame(tick); return; }
-    busy = true;
-    bd.detect(video)
-    .then(function(codes) {
-      if (codes && codes.length > 0) {
-        var text = codes[0].rawValue;
-        const now = Date.now();
-        if (text !== lastCode || now - lastTime >= 3000) {
-          lastCode = text; lastTime = now;
-          onScan(text);
-        }
-      }
-    })
-    .catch(function() {})  // 忽略单帧错误
-    .finally(function() { busy = false; requestAnimationFrame(tick); });
-  }
-
-  requestAnimationFrame(tick);
 }
 
 // ── 路径2: jsQR (纯JS通用降级) ─────────────
@@ -175,7 +136,7 @@ function handlePhoto(e) {
         if (result2 && result2.data) {
           processCode(result2.data);
         } else {
-          toast('未能识别二维码，请确保二维码清晰完整');
+          toast('未识别到二维码');
           show('main');
         }
       }

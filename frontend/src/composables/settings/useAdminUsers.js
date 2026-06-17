@@ -62,7 +62,7 @@ export function useAdminUsers() {
     showAdminModal.value = true
   }
   async function loadUserRoles(uid) {
-    try { const d = await api.get('/api/user-roles/' + uid); userRoleIds.value = (d.roles||[]).map(r => r.id) }
+    try { const d = await api.get('/api/users/' + uid + '/roles'); userRoleIds.value = (d.roles||[]).map(r => r.id) }
     catch(e) { userRoleIds.value = [] }
   }
   function toggleUserRole(rid) {
@@ -72,7 +72,7 @@ export function useAdminUsers() {
   }
   async function saveUserRoles(uid) {
     if (!uid) { showToast('请先保存用户','warn'); return }
-    try { await api.post('/api/user-roles/' + uid, { role_ids: [...userRoleIds.value] }); showToast('角色保存成功') }
+    try { await api.put('/api/users/' + uid + '/roles', { role_ids: [...userRoleIds.value] }); showToast('角色保存成功') }
     catch(e) { showToast(e.message,'error') }
   }
   async function saveAdmin() {

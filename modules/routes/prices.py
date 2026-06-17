@@ -338,4 +338,62 @@ def process_wage_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
     return jsonify(WageService.process_wage_summary(year_month))
 
+@app.route("/api/wages/adjustments", methods=["GET"])
+def list_wage_adjustments():
+    user_id = request.args.get("user_id")
+    year_month = request.args.get("year_month")
+    return jsonify(WageService.list_adjustments(user_id=user_id, year_month=year_month))
+
+@app.route("/api/wages/adjustments", methods=["POST"])
+def save_wage_adjustment():
+    data = request.get_json()
+    return jsonify(WageService.save_adjustment(
+        user_id=data["user_id"], year_month=data["year_month"],
+        adj_type=data["type"], amount=data["amount"],
+        reason=data.get("reason", ""), created_by="system"
+    ))
+
+@app.route("/api/wages/adjustments/<int:adj_id>", methods=["DELETE"])
+def delete_wage_adjustment(adj_id):
+    return jsonify(WageService.delete_adjustment(adj_id))
+
+@app.route("/api/wages/adjustments-total", methods=["GET"])
+def get_adjustments_total():
+    user_id = request.args.get("user_id")
+    year_month = request.args.get("year_month")
+    return jsonify(WageService.get_adjustments_total(
+        user_id=int(user_id) if user_id else 0, year_month=year_month or ""
+    ))
+
+@app.route("/api/wages/trends", methods=["GET"])
+def wage_trends():
+    months = request.args.get("months", 12, type=int)
+    return jsonify(WageService.wage_trends(months=min(months, 36)))
+
+@app.route("/api/wages/confirm", methods=["POST"])
+def confirm_wage_snapshot():
+    year_month = request.args.get("year_month", "")
+    if not year_month:
+        return jsonify({"error": "missing year_month"}), 400
+    return jsonify(WageService.confirm_snapshot(year_month, "admin"))
+
+@app.route("/api/wages/snapshot-status", methods=["GET"])
+def wage_snapshot_status():
+    year_month = request.args.get("year_month", "")
+    if not year_month:
+        return jsonify({"error": "missing year_month"}), 400
+    return jsonify(WageService.get_snapshot_status(year_month))
+
+@app.route("/api/wages/position-summary", methods=["GET"])
+def position_wage_summary():
+    year_month = request.args.get("year_month", "")
+    if not year_month:
+        from datetime import datetime
+        year_month = datetime.now().strftime("%Y-%m")
+    return jsonify(WageService.position_summary(year_month))
+
+@app.route("/api/wages/prediction", methods=["GET"])
+def wage_prediction():
+    months = request.args.get("months", 6, type=int)
+    return jsonify(WageService.wage_prediction(months=min(months, 24)))
 

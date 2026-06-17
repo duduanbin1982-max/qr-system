@@ -23,8 +23,6 @@ import modules.routes.orders      # orders CRUD + batch + work-records
 import modules.routes.customers   # customers CRUD + order history
 import modules.routes.prices      # process-prices + route-prices + wages
 import modules.routes.products    # products CRUD + import + attachments
-import modules.routes.scan        # re-exports from scan_helpers/scan_work/scan_qr
-import modules.routes.scan_helpers
 import modules.routes.scan_work
 import modules.routes.scan_qr
 import modules.routes.reports     # stats + production trends + efficiency
@@ -43,6 +41,7 @@ import modules.routes.trace       # 产品追溯
 import modules.routes.approvals   # 审批管理
 import modules.routes.positions   # 岗位管理
 import modules.routes.materials    # 物料管理
+import modules.routes.departments  # 部门班组管理
 import modules.routes.schedule   # 生产排程
 import modules.routes.rework     # 返工管理
 import modules.routes.quality   # 质量检验

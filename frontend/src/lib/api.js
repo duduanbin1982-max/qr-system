@@ -5,7 +5,8 @@ const BASE = ''
 export async function request(method, url, data) {
   const opts = {
     method,
-    headers: {}
+    headers: {},
+    credentials: "include"
   }
   // Token is sent via httpOnly cookie (auto-attached by browser).
   // No localStorage or Authorization header needed.
@@ -179,6 +180,7 @@ export const api = {
   // ========== 统计 ==========
   dailyStats:       (params) => request('GET', '/api/stats/daily' + buildQuery(params)),
   workerStats:      (params) => request('GET', '/api/stats/worker' + buildQuery(params)),
+  workerDetail:     (params) => request('GET', '/api/stats/worker-detail' + buildQuery(params)),
   scrapStats:       (params) => request('GET', '/api/stats/scrap' + buildQuery(params)),
   orderProgress:    (params) => request('GET', '/api/stats/order-progress' + buildQuery(params)),
   dailyReport:      (params) => request('GET', '/api/daily-report' + buildQuery(params)),
@@ -188,16 +190,22 @@ export const api = {
   qualityAnalysis:  (params) => request('GET', '/api/reports/quality-analysis' + buildQuery(params)),
   orderAnalysis:    (params) => request('GET', '/api/reports/order-analysis' + buildQuery(params)),
   dashboardKpi:     (params) => request('GET', '/api/reports/dashboard-kpi' + buildQuery(params)),
-  materialUsage:    (params) => request('GET', '/api/reports/material-usage' + buildQuery(params)),
-  productStats:     (params) => request('GET', '/api/reports/product-stats' + buildQuery(params)),
-  shipmentStats:    (params) => request('GET', '/api/reports/shipment-stats' + buildQuery(params)),
+  materialUsage:    (params) => request('GET', '/api/stats/material' + buildQuery(params)),
+  productStats:     (params) => request('GET', '/api/stats/product' + buildQuery(params)),
+  productProcessMatrix: (params) => request('GET', '/api/reports/product-process-matrix' + buildQuery(params)),
+  modelProcessStats: (params) => request('GET', '/api/reports/model-process-stats' + buildQuery(params)),
+  productProcessStats: (params) => request('GET', '/api/stats/product-process' + buildQuery(params)),
+  shipmentStats:    (params) => request('GET', '/api/stats/shipment' + buildQuery(params)),
   // ========== 追溯 ==========
   trace:            (code)   => request('GET', '/api/trace/' + encodeURIComponent(code)),
+  traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),
+  traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),
   
   // ========== 审批 ==========
   pendingApprovals:  ()       => request('GET', '/api/approvals/pending'),
   approvalHistory:  (params) => request('GET', '/api/approvals/history' + buildQuery(params)),
   handleApproval:   (id,action,comment) => request('POST', '/api/approvals/' + id + '/' + action, {comment: comment || ''}),
+  batchApproval:    (ids, action) => request('POST', '/api/approvals/batch', {ids: ids, action: action}),
   
   // ========== 系统设置 ==========
   getSettings:      ()       => request('GET', '/api/settings'),
@@ -222,6 +230,36 @@ export const api = {
   // ========== 日志 ==========
   listLogs:         (params) => request('GET', '/api/logs' + buildQuery(params)),
   deleteLogs:       (params) => request("POST", "/api/logs/clear", params),
+
+  // ========== 质检 ==========
+  listInspections:  (params) => request('GET', '/api/quality/inspections' + buildQuery(params)),
+  inspectionStats:  ()       => request('GET', '/api/quality/inspections/stats'),
+  createInspection: (data)   => request('POST', '/api/quality/inspections', data),
+  updateInspection: (id,data)=> request('PUT', '/api/quality/inspections/' + id, data),
+  deleteInspection: (id)     => request('DELETE', '/api/quality/inspections/' + id),
+  defectCategories: ()       => request('GET', '/api/quality/defect-categories'),
+  defectPareto:     (params) => request('GET', '/api/quality/defect-pareto' + buildQuery(params)),
+  inspectionTemplates: ()     => request('GET', '/api/quality/inspection-templates'),
+  batchInspections:   (data)  => request('POST', '/api/quality/inspections/batch', data),
+  listQAttachments:   (iid)   => request('GET', '/api/quality/inspections/' + iid + '/attachments'),
+  uploadQAttachment:  (iid,formData) => fetch('/api/quality/inspections/' + iid + '/attachments', {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') },
+    body: formData
+  }).then(r => r.json()),
+  deleteQAttachment:  (aid)   => request('DELETE', '/api/quality/attachments/' + aid),
+  getQAttachmentUrl:  (aid)   => '/api/quality/attachments/' + aid,
+
+  // ========== 返工 ==========
+  listRework:       (params) => request('GET', '/api/rework' + buildQuery(params)),
+  reworkStats:      ()       => request('GET', '/api/rework/stats'),
+  createRework:     (data)   => request('POST', '/api/rework', data),
+  updateRework:     (id,data)=> request('PUT', '/api/rework/' + id, data),
+  completeRework:   (id,data)=> request('POST', '/api/rework/' + id + '/complete', data),
+  batchCompleteRework: (data)=> request('POST', '/api/rework/batch-complete', data),
+  exportRework:     (params) => request('GET', '/api/rework/export' + buildQuery(params)),
+
+  // ========== 产线 ==========
+  listProductionLines: ()     => request('GET', '/api/production-lines'),
 }
 
 function buildQuery(params) {

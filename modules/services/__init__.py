@@ -13,6 +13,24 @@ _txn_connections = set()
 _txn_lock = threading.Lock()
 
 
+
+
+# Testability seam: allow overriding DB path for testing
+_test_db_path = None
+
+def set_test_db_path(path):
+    """Set an alternative database path for testing."""
+    global _test_db_path
+    _test_db_path = path
+
+def get_db_path():
+    """Return the configured database path."""
+    if _test_db_path:
+        return _test_db_path
+    from modules.config import DB_PATH
+    return DB_PATH
+
+
 class BaseService:
     """所有 Service 的基类，提供事务管理。"""
 

@@ -64,6 +64,7 @@ SCHEMAS = {
             'deadline': {'type': 'string', 'maxLength': 32},
             'remark': {'type': 'string', 'maxLength': 1024},
             'route_id': {'type': ['integer', 'null']},
+            'production_line_id': {'type': ['integer', 'null']},
             'process_ids': {
                 'type': 'array',
                 'items': {'type': 'integer'},
@@ -86,6 +87,7 @@ SCHEMAS = {
             'deadline': {'type': 'string', 'maxLength': 32},
             'remark': {'type': 'string', 'maxLength': 1024},
             'route_id': {'type': ['integer', 'null']},
+            'production_line_id': {'type': ['integer', 'null']},
         },
         'additionalProperties': True,
     },
@@ -344,6 +346,7 @@ SCHEMAS = {
             'email': {'type': 'string', 'maxLength': 128},
             'address': {'type': 'string', 'maxLength': 256},
             'remark': {'type': 'string', 'maxLength': 512},
+            'tags': {'type': 'string', 'maxLength': 256},
         },
         'additionalProperties': False,
     },
@@ -356,6 +359,7 @@ SCHEMAS = {
             'email': {'type': 'string', 'maxLength': 128},
             'address': {'type': 'string', 'maxLength': 256},
             'remark': {'type': 'string', 'maxLength': 512},
+            'tags': {'type': 'string', 'maxLength': 256},
         },
         'additionalProperties': False,
     },
@@ -462,6 +466,7 @@ SCHEMAS = {
     'update_user': {
         'type': 'object',
         'properties': {
+            'username': {'type': 'string', 'minLength': 2, 'maxLength': 64},
             'name': {'type': 'string', 'minLength': 1, 'maxLength': 64},
             'nickname': {'type': 'string', 'maxLength': 64},
             'email': {'type': 'string', 'format': 'email', 'maxLength': 128},

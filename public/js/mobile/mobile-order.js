@@ -37,7 +37,8 @@ function doScan(code) {
     show('order');
     // 序列号模式：每张二维码对应1件工件，数量恒为1
     // 订单模式：取工序剩余待完成数
-    var remaining = curSerial ? 1
+    var remaining = (curSerial || d.item) ? 1
+      : d.has_items ? 1
       : Math.max(0, d.order.current_process
         ? (d.order.quantity || 0) - (d.order.current_process.completed || 0)
         : 1);
@@ -48,7 +49,7 @@ function doScan(code) {
       updateReportBtn();
     }
   })
-  .catch(function(e) { console.log('scan auth fail — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast('网络错误，请检查连接'); show('main'); });
+  .catch(function(e) { console.log('scan auth fail — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast('网络异常'); show('main'); });
 }
 
 // ═══════════════════════════════════════════
@@ -138,10 +139,10 @@ function doReport() {
     order_id: curOrder.id,
     process_id: curProcId,
     quantity: parseInt($('rpt-qty').value) || 1,
-    type: reportType
+    report_type: reportType
   };
   if (reportType !== 'normal') {
-    body.reason = ($('rpt-reason').value || '').trim() || '未填写';
+    body.remark = ($('rpt-reason').value || '').trim() || '未填写';
   }
   if (curSerial) body.serial_no = curSerial;
 
@@ -165,5 +166,5 @@ function doReport() {
       '<div>👤 操作人: ' + esc(d.worker ? d.worker.name : (user() ? user().name : '未知')) + '</div>';
     show('ok');
   })
-  .catch(function() { toast('网络错误'); btn.disabled = false; updateReportBtn(); });
+  .catch(function() { toast('网络异常'); btn.disabled = false; updateReportBtn(); });
 }

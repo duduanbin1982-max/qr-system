@@ -6,18 +6,11 @@ import { showToast } from '@/lib/store.js'
 export function useRoleGroups() {
   const groups = ref([])
   const roles = ref([])
-  const allPermissions = ref([])
   const groupLoading = ref(false)
   const showGroupModal = ref(false)
   const groupModalEdit = ref(false)
   const groupForm = reactive({ name:'', description:'', parent_id:null, status:'active', permissions:'' })
   const expandedGroup = ref(null)
-  const selectedPerms = ref([])
-  const permActionLabels = [
-    { key:'view', label:'查看' }, { key:'create', label:'创建' },
-    { key:'edit', label:'编辑' }, { key:'delete', label:'删除' },
-    { key:'manage', label:'管理' }, { key:'export', label:'导出' },
-  ]
 
   const groupRoles = computed(() =>
     expandedGroup.value
@@ -55,17 +48,11 @@ export function useRoleGroups() {
     catch(e) { roles.value = [] }
   }
 
-  async function loadPermissions() {
-    try { const d = await api.get('/api/permissions'); allPermissions.value = d.permissions||[] }
-    catch(e) { allPermissions.value = [] }
-  }
-
   function toggleGroup(gid) { expandedGroup.value = expandedGroup.value === gid ? null : gid }
 
   function openAddGroup() {
     groupModalEdit.value = false
     Object.assign(groupForm, { name:'', description:'', parent_id:null, status:'active', permissions:'' })
-    selectedPerms.value = []
     showGroupModal.value = true
   }
 
@@ -73,35 +60,13 @@ export function useRoleGroups() {
     groupModalEdit.value = true
     Object.assign(groupForm, { name:group.name, description:group.description||'', parent_id:group.parent_id, status:group.status||'active', permissions:group.permissions||'' })
     groupForm._id = group.id
-    // Parse existing permissions
-    try {
-      const p = JSON.parse(group.permissions || '[]')
-      selectedPerms.value = Array.isArray(p) ? p : []
-    } catch { selectedPerms.value = [] }
     showGroupModal.value = true
-  }
-
-  function selectAllPerms() {
-    const all = []
-    for (const p of allPermissions.value) {
-      for (const act of (p.actions || [])) {
-        all.push(p.code + ':' + act)
-      }
-    }
-    selectedPerms.value = all
-  }
-
-  function clearAllPerms() {
-    selectedPerms.value = []
   }
 
   async function saveGroup() {
     if (!groupForm.name) { showToast('角色组名称不能为空','error'); return }
     try {
-      // Check if all permissions selected → use ["*"]
-      const allCount = allPermissions.value.reduce((sum, p) => sum + (p.actions||[]).length, 0)
-      const perms = selectedPerms.value.length >= allCount ? '["*"]' : JSON.stringify(selectedPerms.value)
-      const body = { name:groupForm.name, description:groupForm.description, parent_id:groupForm.parent_id, status:groupForm.status, permissions:perms }
+      const body = { name:groupForm.name, description:groupForm.description, parent_id:groupForm.parent_id, status:groupForm.status }
       if (groupModalEdit.value) await api.updateRoleGroup(groupForm._id, body)
       else await api.createRoleGroup(body)
       showToast(groupModalEdit.value?'更新成功':'创建成功')
@@ -116,12 +81,12 @@ export function useRoleGroups() {
     catch(e) { showToast(e.message,'error') }
   }
 
-  onMounted(() => { loadGroups(); loadRoles(); loadPermissions() })
+  onMounted(() => { loadGroups(); loadRoles(); })
 
   return {
-    groups, roles, allPermissions, groupLoading, showGroupModal, groupModalEdit, groupForm,
-    expandedGroup, groupRoles, roleCountByGroup, selectedPerms, permActionLabels,
+    groups, roles, groupLoading, showGroupModal, groupModalEdit, groupForm,
+    expandedGroup, groupRoles, roleCountByGroup,
     loadGroups, loadRoles, toggleGroup, openAddGroup, openEditGroup, saveGroup, deleteGroup, canDeleteGroup, childrenCountByGroup,
-    selectAllPerms, clearAllPerms,
+
   }
 }

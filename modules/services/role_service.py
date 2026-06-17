@@ -2,6 +2,7 @@
 qr-system — 角色组 + 角色管理 Service 层
 """
 from modules.services import BaseService
+from modules.config import _get_pinyin_initial
 
 
 class RoleGroupService:
@@ -30,7 +31,7 @@ class RoleGroupService:
                 'INSERT INTO role_groups (name, description, parent_id, status, permissions) '
                 'VALUES (?,?,?,?,?)',
                 (name, data.get('description', ''), parent_id,
-                 data.get('status', 'active'), data.get('permissions', '')))
+                 data.get('status', 'active'), (json.dumps(data.get('permissions', []), ensure_ascii=False) if isinstance(data.get('permissions'), list) else data.get('permissions', ''))))
             return cur.lastrowid
 
     @staticmethod
@@ -73,7 +74,7 @@ class RoleGroupService:
         for field in ['name', 'description', 'parent_id', 'status', 'permissions']:
             if field in data:
                 sets.append(f'{field} = ?')
-                params.append(data[field])
+                val = data[field]; params.append(json.dumps(val, ensure_ascii=False) if isinstance(val, list) else val)
         if not sets:
             raise ValueError('无更新内容')
 
@@ -113,8 +114,13 @@ class RoleService:
     def create_role(data):
         name = data.get('name', '').strip()
         code = data.get('code', '').strip()
-        if not name or not code:
-            raise ValueError('角色名称和编码不能为空')
+        if not name:
+            raise ValueError('角色名称不能为空')
+        if not code:
+            # Auto-generate code from name using pinyin initials
+            code = ''.join(_get_pinyin_initial(ch) for ch in name if _get_pinyin_initial(ch)).lower()
+            if not code:
+                code = 'role_' + str(hash(name + str(__import__('time').time())))[-8:]
         db = BaseService.db()
         group_id = data.get('group_id')
         if group_id and not db.execute('SELECT id FROM role_groups WHERE id = ?', (group_id,)).fetchone():
@@ -176,7 +182,7 @@ class RoleService:
                       'level', 'permissions', 'status']:
             if field in data:
                 sets.append(f'{field} = ?')
-                params.append(data[field])
+                val = data[field]; params.append(json.dumps(val, ensure_ascii=False) if isinstance(val, list) else val)
         if not sets:
             raise ValueError('无更新内容')
 

@@ -52,12 +52,19 @@ def batch_qrcode():
 
         db = get_db()
         codes = []
+        skipped = []
         
         for oid in order_ids:
             order = ScanQRService.find_order_by_id(oid)
             if not order:
                 continue
-            
+
+            # QR mode lock check
+            existing_mode = (order['qr_mode'] or '').strip() if order['qr_mode'] else ''
+            if existing_mode and existing_mode != mode:
+                skipped.append(order['order_no'] if order['order_no'] else str(oid))
+                continue
+
             if mode == 'serial':
                 # 产品序列号模式：为每件产品生成标签
                 items = ScanQRService.find_items_by_order(oid)
@@ -89,6 +96,7 @@ def batch_qrcode():
                         'position': item['position_no'],
                         'qrcode': f'data:image/png;base64,{b64}'
                     })
+                db.execute('UPDATE orders SET qr_mode = ? WHERE id = ?', ('serial', oid))
             else:
                 # 订单模式：每个订单一个二维码
                 qr = qrcode_lib.QRCode(version=2, box_size=8, border=1)
@@ -109,9 +117,16 @@ def batch_qrcode():
                     'product_code': product_code,
                     'quantity': order['quantity'],
                     'qrcode': f'data:image/png;base64,{b64}'
-                })
+                    })
+                db.execute('UPDATE orders SET qr_mode = ? WHERE id = ?', ('order', oid))
 
-        return jsonify({'codes': codes})
+        db.commit()
+
+        result = {'codes': codes}
+        if skipped:
+            result['skipped'] = skipped
+            result['warning'] = 'Skipped locked orders: ' + ', '.join(skipped)
+        return jsonify(result)
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 

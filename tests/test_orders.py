@@ -23,7 +23,7 @@ class TestOrderCRUD:
             "product_name": "Test Product",
             "quantity": 10
         })
-        assert resp.status_code in (200, 201, 400, 500)
+        assert resp.status_code in (200, 201)
 
     def test_update_order(self, client, auth_headers):
         # List orders to find one
@@ -37,7 +37,7 @@ class TestOrderCRUD:
         resp = client.put(f"/api/orders/{oid}", headers=auth_headers, json={
             "remark": "Updated by test"
         })
-        assert resp.status_code in (200, 400, 403, 500)
+        assert resp.status_code == 200
 
 
 class TestOrderDeleteFlow:
@@ -51,14 +51,14 @@ class TestOrderDeleteFlow:
         oid = items[0]["id"]
         # Soft delete
         del_resp = client.delete(f"/api/orders/{oid}", headers=auth_headers)
-        assert del_resp.status_code in (200, 400, 403, 500)
+        assert del_resp.status_code in (200, 404)
         # Restore
         restore_resp = client.post(f"/api/orders/{oid}/restore", headers=auth_headers)
-        assert restore_resp.status_code in (200, 400, 404)
+        assert restore_resp.status_code in (200, 404)
 
     def test_trash_list(self, client, auth_headers):
         resp = client.get("/api/orders/trash", headers=auth_headers)
-        assert resp.status_code in (200, 403)
+        assert resp.status_code == 200
 
     def test_work_records(self, client, auth_headers):
         lst = client.get("/api/orders?limit=1", headers=auth_headers)
@@ -69,7 +69,7 @@ class TestOrderDeleteFlow:
             pytest.skip("No orders")
         oid = items[0]["id"]
         resp = client.get(f"/api/orders/{oid}/work-records", headers=auth_headers)
-        assert resp.status_code in (200, 400, 403, 404, 500)
+        assert resp.status_code == 200
 
     def test_shipments(self, client, auth_headers):
         lst = client.get("/api/orders?limit=1", headers=auth_headers)
@@ -80,7 +80,7 @@ class TestOrderDeleteFlow:
             pytest.skip("No orders")
         oid = items[0]["id"]
         resp = client.get(f"/api/orders/{oid}/shipments", headers=auth_headers)
-        assert resp.status_code in (200, 400, 403, 404, 500)
+        assert resp.status_code == 200
 
 
 class TestOrderEdgeCases:
@@ -90,7 +90,7 @@ class TestOrderEdgeCases:
 
     def test_restore_nonexistent(self, client, auth_headers):
         resp = client.post("/api/orders/99999/restore", headers=auth_headers)
-        assert resp.status_code in (200, 400, 404)
+        assert resp.status_code in (200, 400)
 
     def test_purge_nonexistent(self, client, auth_headers):
         resp = client.delete("/api/orders/99999/purge", headers=auth_headers)
@@ -105,4 +105,4 @@ class TestOrderEdgeCases:
             pytest.skip("No orders")
         oid = items[0]["id"]
         resp = client.get(f"/api/orders/{oid}/workpiece-progress", headers=auth_headers)
-        assert resp.status_code in (200, 400, 403, 404, 500)
+        assert resp.status_code == 200

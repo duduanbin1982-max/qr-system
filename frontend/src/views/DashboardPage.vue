@@ -47,6 +47,16 @@
           <div class="hs-val">{{ stats?.today_scrap || 0 }}</div>
           <div class="hs-label">今日报废</div>
         </div>
+        <div class="hs-card hs-purple" @click="navigate('approvals')" :class="{ 'hs-pulse': (stats?.pending_approvals || 0) > 0 }">
+          <div class="hs-icon">📋</div>
+          <div class="hs-val" :style="{color: (stats?.pending_approvals||0) > 0 ? 'var(--danger)' : ''}">{{ stats?.pending_approvals || 0 }}</div>
+          <div class="hs-label">待审批</div>
+        </div>
+        <div v-if="stats?.low_stock?.length" class="hs-card hs-danger" @click="navigate('inventory')" style="border: 2px solid var(--danger); animation: hsPulse 2s infinite;">
+          <div class="hs-icon">📦</div>
+          <div class="hs-val" style="color:var(--danger)">{{ stats.low_stock.length }}</div>
+          <div class="hs-label">低库存预警</div>
+        </div>
       </div>
       
       <!-- Secondary Stats -->
@@ -60,6 +70,11 @@
           <div class="ss-icon">✅</div>
           <div class="ss-val">{{ stats?.completed || 0 }}</div>
           <div class="ss-label">已完成订单</div>
+        </div>
+        <div class="ss-card" @click="navigate('approvals')">
+          <div class="ss-icon">📋</div>
+          <div class="ss-val" :style="{color: (stats?.pending_approvals||0) > 0 ? 'var(--danger)' : ''}">{{ stats?.pending_approvals || 0 }}</div>
+          <div class="ss-label">待审批报工</div>
         </div>
         <div class="ss-card" @click="navigate('scan')">
           <div class="ss-icon">📝</div>
@@ -156,6 +171,7 @@ import { auth, getBoardToken } from '@/lib/auth.js'
 export default {
   setup() {
     const stats = ref(null)
+    const approvalTimer = ref(null)
     const security = ref(null)
     const records = ref([])
     const companyName = ref('')
@@ -212,6 +228,10 @@ export default {
     })
     
     function goAction(q) { if (q.external) { const tok = getBoardToken(); window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
+    onUnmounted(() => {
+      if (approvalTimer.value) clearInterval(approvalTimer.value)
+    })
+
     return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }

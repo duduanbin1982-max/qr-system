@@ -86,6 +86,7 @@ def _parse_file(file_storage):
 
 @app.route('/api/import/preview', methods=['POST'])
 @check_auth
+@check_permission("orders:create")
 def import_preview():
     """Upload file and return preview of parsed rows."""
     import_type = request.form.get('type', 'orders')
