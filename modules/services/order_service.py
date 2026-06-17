@@ -584,5 +584,17 @@ class OrderService:
 
     @staticmethod
     def purge_order(oid):
-        """彻底删除订单及所有关联数据。"""
         db = BaseService.db()
+        existing = OrderRepository.find_including_deleted(oid)
+        if not existing:
+            raise ValueError('订单不存在')
+        if not existing.get('deleted_at'):
+            raise ValueError('只能彻底删除回收站中的订单')
+        with BaseService.transaction() as txn:
+            for tbl in ["order_attachments", "order_notes", "order_remark_history",
+                        "order_materials", "order_processes", "product_items",
+                        "work_records", "scrap_records", "rework_records",
+                        "approval_records", "quality_inspections"]:
+                txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
+            txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
+        return existing.get('order_no', "")
