@@ -27,7 +27,7 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
     # Fallback: DB query
     db = get_db()
     rows = db.execute('''
-        SELECT r.permissions
+        SELECT r.permissions as role_perms, rg.permissions as group_perms
         FROM user_roles ur
         JOIN roles r ON ur.role_id = r.id
         LEFT JOIN role_groups rg ON r.group_id = rg.id
@@ -35,9 +35,15 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
     ''', (user['id'],)).fetchall()
     all_perms = set()
     for row in rows:
-        if row['permissions']:
+        if row['role_perms']:
             try:
-                perms = json.loads(row['permissions'])
+                perms = json.loads(row['role_perms'])
+                all_perms.update(perms)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if row['group_perms']:
+            try:
+                perms = json.loads(row['group_perms'])
                 all_perms.update(perms)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -51,7 +57,7 @@ def get_user_permissions(user: Optional[dict]) -> List[str]:
         return []
     db = get_db()
     rows = db.execute('''
-        SELECT r.permissions
+        SELECT r.permissions as role_perms, rg.permissions as group_perms
         FROM user_roles ur
         JOIN roles r ON ur.role_id = r.id
         LEFT JOIN role_groups rg ON r.group_id = rg.id
@@ -59,9 +65,15 @@ def get_user_permissions(user: Optional[dict]) -> List[str]:
     ''', (user['id'],)).fetchall()
     all_perms = set()
     for row in rows:
-        if row['permissions']:
+        if row['role_perms']:
             try:
-                perms = json.loads(row['permissions'])
+                perms = json.loads(row['role_perms'])
+                all_perms.update(perms)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if row['group_perms']:
+            try:
+                perms = json.loads(row['group_perms'])
                 all_perms.update(perms)
             except (json.JSONDecodeError, TypeError):
                 pass
