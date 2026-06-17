@@ -67,17 +67,18 @@
           <div style="display:flex;min-height:52px;align-items:stretch">
             <!-- Order Info Card -->
             <div style="min-width:320px;max-width:320px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
-              <!-- Line 1: Checkbox + Order No + Status + Risk + Deadline -->
+              <!-- 第一行：复选框 + 订单号 + 客户 + 状态 + 交期 -->
               <div style="display:flex;align-items:center;gap:8px">
                 <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" @change="toggleOrder(order.id)" style="flex-shrink:0">
                 <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.order_no">{{ order.order_no }}</span>
+                <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
                 <span :style="{flexShrink:0,fontSize:'9px',padding:'1px 6px',borderRadius:'3px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
                 <span v-if="order.risk!=='normal'" style="flex-shrink:0;font-size:10px" :title="order.risk==='overdue'?'已过期':'即将到期'">{{ order.risk==='overdue'?'🔴':'🟡' }}</span>
                 <span style="flex-shrink:0;font-size:9px;color:var(--text-placeholder)" :title="order.deadline||''">{{ order.deadline ? order.deadline.slice(5) : '-' }}</span>
               </div>
-              <!-- Line 2: Product · Customer + Progress -->
+              <!-- 第二行：产品编码 + 进度条 -->
               <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="(order.product_code||order.product_name||'') + ' · ' + (order.customer_name||'')">{{ order.product_code || order.product_name || '-' }} · {{ order.customer_name || '-' }}</span>
+                <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.product_code||order.product_name||''">{{ order.product_code || order.product_name || '-' }}</span>
                 <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:60px">
                   <span style="display:inline-block;width:40px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
@@ -156,7 +157,7 @@
           </div>
           <div v-if="productionLines.length" style="max-height:200px;overflow-y:auto">
             <div v-for="pl in productionLines" :key="pl.id" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--bg-hover);gap:8px">
-              <span style="font-weight:600;min-width:60px">{{ pl.name }}</span>
+              <span style="font-weight:600;min-width:80px">{{ pl.name }}</span>
               <span style="font-size:var(--text-xs);color:var(--text-placeholder);flex:1">{{ pl.description || '-' }} · 产能: {{ pl.capacity || '-' }}/天</span>
               <button class="btn-default" style="font-size:var(--text-xs);padding:2px 8px;color:var(--danger)" @click="delLine(pl)">删除</button>
             </div>
