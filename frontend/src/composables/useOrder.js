@@ -433,6 +433,10 @@ const orders = ref([])
       }
     }
 
+
+    function prevPage() { if (page.value > 1) { page.value--; load() } }
+    function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
+
     onMounted(async () => { await loadDropdownData(); load() })
 
     return {
