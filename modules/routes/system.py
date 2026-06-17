@@ -5,7 +5,8 @@ from flask import request, jsonify, send_file
 from modules.app import app
 from modules.db import get_db
 from modules.config import DATA_DIR
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.services.system_service import SystemService
 
 

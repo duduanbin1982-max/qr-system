@@ -10,7 +10,8 @@ from werkzeug.utils import secure_filename
 from modules.db import get_db
 from modules.app import app
 from modules.services.imports_service import ImportsService
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission, has_permission
 from modules.middleware.helpers import get_json_body
 
 try:
@@ -94,7 +95,6 @@ def import_preview():
         return jsonify({'error': 'Invalid import type'}), 400
 
     perm = IMPORT_FIELDS[import_type]['perms']
-    from modules.middleware.auth import has_permission
     if not has_permission(g.current_user, perm):
         return jsonify({'error': 'No permission'}), 403
 

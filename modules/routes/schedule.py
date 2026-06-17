@@ -3,7 +3,8 @@ qr-system — 生产排程路由（Refactored: SQL → ScheduleService）
 """
 from flask import jsonify, request
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.services.schedule_service import ScheduleService

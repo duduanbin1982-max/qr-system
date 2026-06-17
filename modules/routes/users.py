@@ -7,7 +7,8 @@ from flask import request, jsonify, g, send_file
 
 from modules.app import app
 from modules.db import get_setting, get_db
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 import os
 import uuid

@@ -7,7 +7,8 @@ from flask import request, jsonify
 
 from modules.app import app
 from modules.db import get_setting, clear_settings_cache
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.services.setting_service import SettingsService, ALLOWED_KEYS
 

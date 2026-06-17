@@ -11,7 +11,8 @@ from io import BytesIO  # for attachment download
 from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
 from modules.db import get_page_size
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
 from werkzeug.utils import secure_filename
 from modules.middleware.helpers import get_json_body

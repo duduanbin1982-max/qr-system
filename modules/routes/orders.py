@@ -2,7 +2,8 @@
 from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db, get_page_size
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.data_scope import get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error

@@ -1,7 +1,8 @@
 """qr-system — Permission & Menu Routes"""
 from flask import request, jsonify, g
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.config import PERMISSION_DEFS
 from modules.services.audit_log_service import AuditLogService

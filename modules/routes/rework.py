@@ -4,7 +4,8 @@ qr-system ? ???????Refactored: SQL ? ReworkService?
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.services.rework_service import ReworkService
 

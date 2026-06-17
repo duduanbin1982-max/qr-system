@@ -3,7 +3,8 @@ import base64, json
 from datetime import datetime
 from flask import request, jsonify, g
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.rate_limit import rate_limit
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body

@@ -9,7 +9,8 @@ from datetime import datetime
 from flask import request, jsonify, send_file, g
 
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
 from modules.services.price_service import ProcessPriceService, RoutePriceService

@@ -2,7 +2,8 @@
 import os
 from flask import request, jsonify, g
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.services.order_attachments_service import OrderAttachmentsService
 from modules.middleware.data_scope import get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService

@@ -1,7 +1,8 @@
 # P3-14: Department/Team Hierarchy Management
 from flask import request, jsonify
 from modules.app import app
-from modules.middleware.auth import check_auth, check_permission, audit_log
+from modules.middleware.audit import audit_log
+from modules.middleware.auth import check_auth, check_permission
 from modules.db import get_db
 
 SQL_LIST = """SELECT id, name, description, parent_id, sort_order, status, created_at
