@@ -20,7 +20,7 @@ accesslog = 'logs/gunicorn_access.log'
 errorlog = 'logs/gunicorn_error.log'
 loglevel = 'info'
 raw_env = [
-    'SECRET_KEY=' + os.environ.get('SECRET_KEY', 'change-me')
+    'SECRET_KEY=' + os.environ['SECRET_KEY']  # fail-secure: crash if not set
 ]
 
 def on_starting(server):
