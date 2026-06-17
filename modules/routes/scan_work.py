@@ -31,6 +31,7 @@ def scan_order():
         # 先当订单号查
         order = ScanHelperService.get_order_by_no(code)
         item_info = None
+        serial_no = None
         if not order:
             item = ScanHelperService.get_product_item(code)
             if item:

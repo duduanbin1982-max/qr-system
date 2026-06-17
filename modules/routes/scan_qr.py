@@ -2,7 +2,7 @@
 qr-system - QR code generation routes
 """
 import base64, json
-from flask import request, jsonify, g
+from flask import request, jsonify, g, send_file
 from modules.app import app
 from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
@@ -161,7 +161,7 @@ def generate_order_qr(order_id):
     img = qr.make_image(fill_color='black', back_color='white')
     
     # Convert to base64 PNG
-    buf = io.BytesIO()
+    buf = BytesIO()
     img.save(buf, format='PNG')
     buf.seek(0)
     data_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
