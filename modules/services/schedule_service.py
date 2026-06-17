@@ -69,7 +69,7 @@ class ScheduleService:
             ref = now
         # First day of the month after next: go to next month, then next again
         y, m = ref.year, ref.month
-        m += 2  # skip to month after next
+        m += 1  # skip to next month
         if m > 12:
             y += 1
             m -= 12
