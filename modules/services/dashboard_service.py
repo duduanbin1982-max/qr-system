@@ -9,8 +9,6 @@ class DashboardService:
     # ============================================================
 
     @staticmethod
-    @staticmethod
-    @staticmethod
     def _get_dashboard_stats(db, today):
         """Collect 7 order/output KPIs in 2 queries."""
         orders_row = db.execute("""
@@ -62,7 +60,6 @@ class DashboardService:
             "LEFT JOIN processes p ON wr.process_id = p.id "
             "LEFT JOIN users u ON wr.user_id = u.id "
             "WHERE o.deleted_at IS NULL "
-            "/* ORDER BY hardcoded, no injection risk */"
             "ORDER BY wr.created_at DESC LIMIT 10"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -95,7 +92,6 @@ class DashboardService:
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
             "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "
             "AND o.plan_end != '' AND o.plan_end >= ? AND o.plan_end <= DATE('now','+' || ? || ' days') "
-            "/* ORDER BY hardcoded, no injection risk */"
             "ORDER BY o.plan_end ASC LIMIT 5",
             (today, warning_days)
         ).fetchall()

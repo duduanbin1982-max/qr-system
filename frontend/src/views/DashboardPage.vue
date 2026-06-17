@@ -228,10 +228,6 @@ export default {
     })
     
     function goAction(q) { if (q.external) { const tok = getBoardToken(); window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
-    onUnmounted(() => {
-      if (approvalTimer.value) clearInterval(approvalTimer.value)
-    })
-
     return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }
