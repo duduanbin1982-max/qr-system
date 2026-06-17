@@ -10,7 +10,7 @@ class ScheduleService:
     def get_gantt_data():
         db = BaseService.db()
         rows = db.execute('''
-            SELECT o.id, o.order_no, o.product_name, o.plan_start, o.plan_end,
+            SELECT o.id, o.order_no, o.product_name, o.product_code, o.plan_start, o.plan_end,
                    o.deadline, o.status, o.quantity, o.completed,
                    COALESCE(c.name, o.customer) as customer_name,
                    COALESCE(pl.name, '') as production_line,
@@ -48,6 +48,7 @@ class ScheduleService:
                 'deadline': r['deadline'],
                 'completed_qty': r['completed'],
                 'product_name': r['product_name'],
+                'product_code': r['product_code'],
                 'customer_name': r['customer_name'],
                 'plan_start': start, 'plan_end': end,
                 'status': r['status'], 'quantity': r['quantity'],

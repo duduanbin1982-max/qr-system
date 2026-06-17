@@ -77,7 +77,7 @@
               </div>
               <!-- Line 2: Product · Customer + Progress -->
               <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="(order.product_name||'') + ' · ' + (order.customer_name||'')">{{ order.product_name || '-' }} · {{ order.customer_name || '-' }}</span>
+                <span style="font-size:var(--text-xs);color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="(order.product_code||order.product_name||'') + ' · ' + (order.customer_name||'')">{{ order.product_code || order.product_name || '-' }} · {{ order.customer_name || '-' }}</span>
                 <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:80px">
                   <span style="display:inline-block;width:50px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
