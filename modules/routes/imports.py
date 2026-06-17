@@ -185,6 +185,16 @@ def bulk_import_orders():
             skipped += 1
             continue
 
+        product_name = (row.get('product_name') or '').strip()
+        product_code = (row.get('product_code') or '').strip()
+        customer = (row.get('customer') or '').strip()
+        quantity = row.get('quantity', 0)
+        status = (row.get('status') or 'pending').strip()
+        plan_start = (row.get('plan_start') or '').strip()
+        plan_end = (row.get('plan_end') or '').strip()
+        deadline = (row.get('deadline') or '').strip()
+        remark = (row.get('remark') or '').strip()
+
         # Check duplicate
         existing = ImportsService.check_order_exists(order_no)
         if existing:
@@ -225,13 +235,21 @@ def bulk_import_products():
 
     db = get_db()
     imported = 0
+    skipped = 0
     errors = []
 
     for i, row in enumerate(rows):
         product_name = (row.get('product_name') or '').strip()
         if not product_name:
             errors.append({'row': i + 1, 'error': 'Missing product_name'})
+            skipped += 1
             continue
+
+        model = (row.get('model') or '').strip()
+        spec = (row.get('spec') or '').strip()
+        category = (row.get('category') or '').strip()
+        weight = row.get('weight', 0)
+        price = row.get('price', 0)
 
         try:
             ImportsService.insert_product({
@@ -279,6 +297,11 @@ def bulk_import_customers():
             errors.append({'row': i + 1, 'name': name, 'error': 'Duplicate name'})
             skipped += 1
             continue
+
+        contact = (row.get('contact') or '').strip()
+        phone = (row.get('phone') or '').strip()
+        address = (row.get('address') or '').strip()
+        remark = (row.get('remark') or '').strip()
 
         try:
             ImportsService.insert_customer({
