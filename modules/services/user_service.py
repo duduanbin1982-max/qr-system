@@ -7,6 +7,7 @@ qr-system — 用户管理 Service 层
 import bcrypt
 import secrets
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 
 
 class UserService:
@@ -41,9 +42,6 @@ class UserService:
             dict: {users, total, page, limit}
         """
         db = BaseService.db()
-        page = max(page, 1)
-        limit = min(max(limit, 1), 200)
-
         where = ['1=1']
         params = []
         if role_filter:
@@ -60,7 +58,7 @@ class UserService:
         where_sql = ' AND '.join(where)
         total = db.execute(f'SELECT COUNT(*) FROM users WHERE {where_sql}', params).fetchone()[0]
 
-        rows = db.execute(f'''
+        base_sql = f'''
             SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no,
                    u.phone, u.process_ids, u.status, u.created_at,
                    (SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, u.last_active, u.position_id,
@@ -68,14 +66,16 @@ class UserService:
                    (SELECT r.code FROM user_roles ur2 JOIN roles r ON ur2.role_id = r.id WHERE ur2.user_id = u.id ORDER BY r.level LIMIT 1) as role_code,
                    (SELECT COUNT(*) FROM user_roles ur2 WHERE ur2.user_id = u.id AND ur2.role_id = 1) > 0 as has_admin_role
             FROM users u WHERE {where_sql}
-            ORDER BY u.id LIMIT ? OFFSET ?
-        ''', params + [limit, (page - 1) * limit]).fetchall()
+            {build_sort_clause("u.id", {"u.id": "u.id"}, default="u.id")}
+        '''
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
+        rows = db.execute(paginated_sql, all_params).fetchall()
 
         return {
             'users': [dict(r) for r in rows],
             'total': total,
             'page': page,
-            'limit': limit
+            'limit': size
         }
 
     # ============================================================

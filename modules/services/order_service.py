@@ -7,6 +7,7 @@ qr-system — 订单管理 Service 层
 import json
 from datetime import datetime, timedelta
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
@@ -104,9 +105,6 @@ class OrderService:
                     data_scope_pids=None):
         """分页查询订单列表（含数据权限过滤）。"""
         db = BaseService.db()
-        page = max(page, 1)
-        limit = min(max(limit, 1), 200)
-
         where = ['o.deleted_at IS NULL']
         params = []
         if status:
@@ -136,15 +134,16 @@ class OrderService:
             f"SELECT COUNT(*) FROM orders o WHERE {where_sql}", params
         ).fetchone()[0]
 
-        rows = db.execute(f'''
+        base_sql = f'''
             SELECT o.*, pr.name as route_name, c.name as customer_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
             WHERE {where_sql}
-            ORDER BY o.updated_at DESC, o.id DESC
-            LIMIT ? OFFSET ?
-        ''', params + [limit, (page - 1) * limit]).fetchall()
+            {build_sort_clause("o.updated_at", {"o.updated_at": "o.updated_at", "o.id": "o.id"}, default="o.updated_at")}
+        '''
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
+        rows = db.execute(paginated_sql, all_params).fetchall()
 
         order_ids = [row['id'] for row in rows]
         all_procs = {}
@@ -181,7 +180,7 @@ class OrderService:
         counts = {r['status']: r['cnt'] for r in status_counts}
 
         return {
-            'orders': result, 'total': total, 'page': page, 'limit': limit,
+            'orders': result, 'total': total, 'page': page, 'limit': size,
             'pending': counts.get('pending', 0),
             'producing': counts.get('producing', 0),
             'completed': counts.get('completed', 0)

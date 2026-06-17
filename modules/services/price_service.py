@@ -1,6 +1,7 @@
 """qr-system — 工价管理 Service 层"""
 from datetime import datetime
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 
 
 class ProcessPriceService:
@@ -23,18 +24,17 @@ class ProcessPriceService:
                      ' LEFT JOIN products pr ON pp.product_id = pr.id'
                      f' {where_clause}')
         total = db.execute(count_sql, params).fetchone()[0]
-        offset = (page - 1) * limit
-        query = ('SELECT pp.*, p.name as process_name, p.seq_order,'
+        base_sql = ('SELECT pp.*, p.name as process_name, p.seq_order,'
                  ' pr.product_name as product_name, pr.model as product_model,'
                  ' pr.product_code as product_code'
                  ' FROM process_prices pp'
                  ' LEFT JOIN processes p ON pp.process_id = p.id'
                  ' LEFT JOIN products pr ON pp.product_id = pr.id'
                  f' {where_clause}'
-                 ' ORDER BY pr.product_name, p.seq_order, pp.effective_date DESC'
-                 ' LIMIT ? OFFSET ?')
-        rows = db.execute(query, params + [limit, offset]).fetchall()
-        return {'process_prices': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
+                 ' ' + build_sort_clause("pr.product_name", {"pr.product_name": "pr.product_name", "p.seq_order": "p.seq_order"}, default="pr.product_name"))
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
+        rows = db.execute(paginated_sql, all_params).fetchall()
+        return {'process_prices': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': size}
 
     @staticmethod
     def create_price(data):

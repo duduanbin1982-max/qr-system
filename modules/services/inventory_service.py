@@ -6,6 +6,7 @@ qr-system — 库存管理 Service 层
 import sqlite3
 from datetime import datetime
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 
 
 class InventoryService:
@@ -23,17 +24,17 @@ class InventoryService:
         if low_stock:
             clauses.append('quantity <= safe_stock AND safe_stock > 0')
         where = ' AND '.join(clauses)
+        base_sql = (
+            'SELECT *, CASE WHEN quantity <= safe_stock AND safe_stock > 0 '
+            'THEN 1 ELSE 0 END as is_low FROM inventory WHERE ' + where
+            + ' ' + build_sort_clause("updated_at", {"updated_at": "updated_at"}, default="updated_at")
+        )
         total = db.execute(
             'SELECT COUNT(*) FROM inventory WHERE ' + where, params
         ).fetchone()[0]
-        offset = (page - 1) * limit
-        rows = db.execute(
-            'SELECT *, CASE WHEN quantity <= safe_stock AND safe_stock > 0 '
-            'THEN 1 ELSE 0 END as is_low FROM inventory WHERE ' + where
-            + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?',
-            params + [limit, offset]
-        ).fetchall()
-        return {'items': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
+        rows = db.execute(paginated_sql, all_params).fetchall()
+        return {'items': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': size}
 
     @staticmethod
     def create_item(data):

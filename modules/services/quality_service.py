@@ -1,6 +1,7 @@
 """qr-system — 质量检验 Service 层"""
 from datetime import datetime
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 
 
 INSPECTION_TYPES = {'first_article': '首件检验', 'in_process': '过程检验', 'final': '终检', 'rework_check': '返工复检'}
@@ -38,8 +39,7 @@ class QualityService:
             JOIN processes p ON qi.process_id=p.id
             WHERE {where_clause}''', params).fetchone()[0]
 
-        offset = (page - 1) * per_page
-        rows = db.execute(f'''
+        base_sql = f'''
             SELECT qi.*, o.order_no, o.product_name,
                    COALESCE(c.name, o.customer) as customer_name,
                    p.name as process_name, u.name as inspector_name
@@ -49,9 +49,11 @@ class QualityService:
             JOIN processes p ON qi.process_id = p.id
             LEFT JOIN users u ON qi.inspector_id = u.id
             WHERE {where_clause}
-            ORDER BY qi.inspected_at DESC LIMIT ? OFFSET ?
-        ''', params + [per_page, offset]).fetchall()
-        return {'ok': True, 'items': [dict(r) for r in rows], 'total': total, 'page': page, 'per_page': per_page}
+            {build_sort_clause("qi.inspected_at", {"qi.inspected_at": "qi.inspected_at"}, default="qi.inspected_at")}
+        '''
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=per_page)
+        rows = db.execute(paginated_sql, all_params).fetchall()
+        return {'ok': True, 'items': [dict(r) for r in rows], 'total': total, 'page': page, 'per_page': size}
 
     @staticmethod
     def check_order_exists(order_id):
