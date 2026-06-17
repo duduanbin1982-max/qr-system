@@ -5,7 +5,6 @@ if os.path.exists(_env_path):
     load_dotenv(_env_path)
 
 # gunicorn config for qr-system
-import os
 import gunicorn
 
 # 隐藏 Server 响应头（默认暴露 gunicorn 版本号）
