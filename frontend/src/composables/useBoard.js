@@ -45,21 +45,22 @@ export function useBoard() {
 async function loadData() {
   if (_loadingData) return
   _loadingData = true
-    try {
-      const params = boardCategory.value ? { category: boardCategory.value } : {}
-      const data = await api.board(params)
-      stats.value = data.stats || {}
-      today.value = data.today || {}
-      orders.value = data.orders || []
-      overdueOrders.value = data.overdue_orders || []
-      processStats.value = data.process_stats || []
-      workerStats.value = data.worker_stats || []
-      recentReports.value = data.recent_reports || []
-      updateTime.value = data.update_time || new Date().toLocaleString('zh-CN')
-      maxProcessOutput.value = Math.max(...processStats.value.map(p => p.output || 0), 1)
-      maxWorkerOutput.value = Math.max(...workerStats.value.map(w => w.output || 0), 1)
-    } catch(e) { showToast(e.message, 'error') }
-  }
+  try {
+    const params = boardCategory.value ? { category: boardCategory.value } : {}
+    const data = await api.board(params)
+    stats.value = data.stats || {}
+    today.value = data.today || {}
+    orders.value = data.orders || []
+    overdueOrders.value = data.overdue_orders || []
+    processStats.value = data.process_stats || []
+    workerStats.value = data.worker_stats || []
+    recentReports.value = data.recent_reports || []
+    updateTime.value = data.update_time || new Date().toLocaleString('zh-CN')
+    maxProcessOutput.value = Math.max(...processStats.value.map(p => p.output || 0), 1)
+    maxWorkerOutput.value = Math.max(...workerStats.value.map(w => w.output || 0), 1)
+  } catch(e) { showToast(e.message, 'error') }
+  finally { _loadingData = false }
+}
 
   function getProcessPercent(item) {
     return maxProcessOutput.value && item.output ? Math.max((item.output / maxProcessOutput.value) * 100, 5) : 0

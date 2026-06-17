@@ -1,3 +1,4 @@
+@import './styles/print.css';
 /* ===== 生产管理系统 - 统一设计风格 v2 ===== */
 :root {
   /* 间距体系 (4px 基准) */
@@ -2179,4 +2180,3 @@ textarea:focus-visible {
 .perm-item-name { font-family:monospace;color:#374151 }
 
 /* Print styles — extracted */
-@import '''./styles/print.css''';

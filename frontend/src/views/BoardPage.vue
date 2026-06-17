@@ -16,7 +16,7 @@
     <div v-if="overdueOrders.length > 0" class="overdue-alert">
       <span>🚨</span>
       <span>有 <strong style="color:#ff6b6b;font-size:var(--text-xl)">{{ overdueOrders.length }}</strong> 个订单已超期！</span>
-      <span style="color:rgba(255,255,255,0.5);font-size:var(--text-sm)">（最迟{{ overdueOrders[0].plan_end }}，已超{{ overdueOrders[0].overdue_days }}天）</span>
+      <span style="color:rgba(255,255,255,0.5);font-size:var(--text-sm)">（最迟{{ overdueOrders[0] && overdueOrders[0].plan_end || '--' }}，已超{{ overdueOrders[0] && overdueOrders[0].overdue_days || 0 }}天）</span>
     </div>
 
     <!-- Stats Bar -->
@@ -106,7 +106,7 @@
           <div v-if="workerStats.length > 0">
             <div class="worker-item" v-for="(w, idx) in workerStats" :key="w.worker_name">
               <div class="worker-rank" :class="'rank-'+(idx+1)">{{ idx+1 }}</div>
-              <div class="worker-avatar" :style="{background: avatarColor(w.worker_name)}">{{ (w.worker_name||'?')[0] }}</div>
+              <div class="worker-avatar" :style="{background: avatarColor(w.worker_name)}">{{ ((w.worker_name||'?')[0] || '?') }}</div>
               <div class="worker-info">
                 <div class="worker-name">{{ w.worker_name }}</div>
                 <div class="worker-meta">报工{{ w.report_count || 0 }}次<span v-if="w.scrap > 0" style="color:#ff6b6b"> · 报废{{ w.scrap }}</span><span v-if="w.rework > 0" style="color:#ff9f43"> · 返工{{ w.rework }}</span></div>

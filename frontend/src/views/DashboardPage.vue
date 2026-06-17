@@ -109,8 +109,8 @@
       </div>
 
       <!-- 交期预警 -->
-      <div v-if="deliveryWarnings && (deliveryWarnings.overdue.length || deliveryWarnings.approaching.length)" class="delivery-alerts">
-        <div v-if="deliveryWarnings.overdue.length" class="alert alert-danger">
+      <div v-if="deliveryWarnings && ((deliveryWarnings.overdue||[]).length || (deliveryWarnings.approaching||[]).length)" class="delivery-alerts">
+        <div v-if="(deliveryWarnings.overdue||[]).length" class="alert alert-danger">
           <strong>🚨 已逾期订单 ({{ deliveryWarnings.overdue.length }})</strong>
           <div v-for="o in deliveryWarnings.overdue" :key="o.id" class="alert-item">
             <span class="alert-order-no">{{ o.order_no }}</span>
@@ -119,7 +119,7 @@
             <span class="alert-meta">计划: {{ o.plan_end }}</span>
           </div>
         </div>
-        <div v-if="deliveryWarnings.approaching.length" class="alert alert-warning">
+        <div v-if="(deliveryWarnings.approaching||[]).length" class="alert alert-warning">
           <strong>⏰ 即将到期 ({{ deliveryWarnings.approaching.length }})，预警天数: {{ deliveryWarnings.warning_days }}天</strong>
           <div v-for="o in deliveryWarnings.approaching" :key="o.id" class="alert-item">
             <span class="alert-order-no">{{ o.order_no }}</span>
