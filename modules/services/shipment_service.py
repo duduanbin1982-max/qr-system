@@ -1,6 +1,7 @@
 """qr-system — 出库管理 Service 层"""
 from datetime import datetime
 from modules.services import BaseService
+from modules.services.query_utils import paginate, build_sort_clause
 
 
 def _generate_shipment_no(db, prefix=None):
@@ -36,10 +37,12 @@ class ShipmentService:
             params.append(status)
 
         total = db.execute(f'SELECT COUNT(*) FROM shipments WHERE {where}', params).fetchone()[0]
-        allowed_sorts = {'created_at': 's.created_at', 'customer': 's.customer', 'status': 's.status', 'total_quantity': 's.total_quantity'}
-        sort_col = allowed_sorts.get(sort_by, 's.created_at')
-        direction = 'DESC' if sort_dir.upper() == 'DESC' else 'ASC'
-        rows = db.execute(f'''
+        sort_clause = build_sort_clause(
+            sort_by,
+            {'created_at': 's.created_at', 'customer': 's.customer', 'status': 's.status', 'total_quantity': 's.total_quantity'},
+            default='s.created_at'
+        )
+        base_sql = f'''
             SELECT s.*, COALESCE(si.item_count, 0) as item_count
             FROM shipments s
             LEFT JOIN (
@@ -47,9 +50,11 @@ class ShipmentService:
                 FROM shipment_items GROUP BY shipment_id
             ) si ON si.shipment_id = s.id
             WHERE {where}
-            ORDER BY {sort_col} {direction} LIMIT ? OFFSET ?
-        ''', params + [limit, (page - 1) * limit]).fetchall()
-        return {'shipments': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
+            {sort_clause}
+        '''
+        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
+        rows = db.execute(paginated_sql, all_params).fetchall()
+        return {'shipments': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': size}
 
     @staticmethod
     def create_shipment(data, created_by):
