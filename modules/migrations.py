@@ -36,7 +36,7 @@ def m001_baseline(db):
     try:
         db.execute("ALTER TABLE product_items ADD COLUMN version INTEGER DEFAULT 1")
         db.commit()
-    except:
+    except Exception as e:
         pass
 
     db.execute("PRAGMA foreign_keys=OFF")  # OFF to avoid FK conflicts on existing data during CREATE TABLE IF NOT EXISTS
@@ -51,7 +51,7 @@ def m001_baseline(db):
     # 迁移 orders 软删除字段
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT DEFAULT NULL")
-    except: pass
+    except Exception as e: pass
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
     except sqlite3.OperationalError:
@@ -541,7 +541,7 @@ def m001_baseline(db):
     # 确保软删除字段存在（_orders_new 迁移可能覆盖）
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT DEFAULT NULL")
-    except: pass
+    except Exception as e: pass
     try:
         db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
     except sqlite3.OperationalError:
@@ -551,25 +551,25 @@ def m001_baseline(db):
     # 兼容旧数据库：添加 category 列（结构件/机加工）
     try:
         db.execute('ALTER TABLE processes ADD COLUMN category TEXT DEFAULT "结构件"')
-    except:
+    except Exception as e:
         pass
     try:
         db.execute('ALTER TABLE products ADD COLUMN category TEXT DEFAULT "结构件"')
-    except:
+    except Exception as e:
         pass
     try:
         db.execute('ALTER TABLE products ADD COLUMN price REAL DEFAULT 0')
-    except:
+    except Exception as e:
         pass
     try:
         db.execute('ALTER TABLE products ADD COLUMN route_id INTEGER DEFAULT NULL')
-    except:
+    except Exception as e:
         pass
 
     # 迁移后建索引
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_products_route ON products(route_id)')
-    except:
+    except Exception as e:
         pass
 
     # 数据迁移：根据工价记录的工序集合推断产品路线
@@ -590,7 +590,7 @@ def m001_baseline(db):
                 proc_set = set(int(x) for x in proc_ids_str.split(',') if x)
                 if proc_set and proc_set.issubset(route_processes) and len(proc_set) >= len(route_processes) * 0.5:
                     db.execute('UPDATE products SET route_id = ? WHERE id = ? AND route_id IS NULL', (rid, pid))
-    except:
+    except Exception as e:
         pass
 
     # 角色组和角色权限表
@@ -680,13 +680,13 @@ def m001_baseline(db):
     ''')
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_route_prices_route ON route_prices(route_id)')
-    except:
+    except Exception as e:
         pass
 
     # 兼容旧数据库
     try:
         db.execute('ALTER TABLE roles ADD COLUMN permissions TEXT DEFAULT ""')
-    except: pass
+    except Exception as e: pass
     try:
         db.execute('ALTER TABLE roles ADD COLUMN level INTEGER DEFAULT 1')
     except sqlite3.OperationalError:
@@ -764,40 +764,40 @@ def m001_baseline(db):
     # Add last_active column if missing
     try:
         db.execute('ALTER TABLE users ADD COLUMN last_active TEXT DEFAULT ""')
-    except:
+    except Exception as e:
         pass
 
     # Add v2 columns (nickname, email, group_name, position_id) if missing
     for col, col_type in [('nickname','TEXT DEFAULT ""'), ('email','TEXT DEFAULT ""'), ('group_name','TEXT DEFAULT ""')]:
         try:
             db.execute(f'ALTER TABLE users ADD COLUMN {col} {col_type}')
-        except:
+        except Exception as e:
             pass
     try:
         db.execute('ALTER TABLE users ADD COLUMN position_id INTEGER DEFAULT NULL')
-    except:
+    except Exception as e:
         pass
 
     # 暴力破解防护：登录失败计数 + 锁定时间
     try:
         db.execute('ALTER TABLE users ADD COLUMN failed_login_count INTEGER DEFAULT 0')
-    except:
+    except Exception as e:
         pass
     try:
         db.execute('ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL')
-    except:
+    except Exception as e:
         pass
 
     # 首次登录强制修改密码标记
     try:
         db.execute('ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0')
-    except:
+    except Exception as e:
         pass
     # 标记默认密码账户需首次登录修改密码
     try:
         db.execute("UPDATE users SET must_change_password = 1 WHERE username IN ('admin','worker1','worker2','worker3','worker4') AND must_change_password = 0")
         db.commit()
-    except:
+    except Exception as e:
         pass
 
     # 登录尝试记录表（IP速率限制用）
@@ -810,7 +810,7 @@ def m001_baseline(db):
     ''')
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_la_ip_created ON login_attempts(ip_address, created_at)')
-    except:
+    except Exception as e:
         pass
 
     # 登录审计日志表（安全审计 + 异常检测 + 排障）
@@ -828,10 +828,10 @@ def m001_baseline(db):
     ''')
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_ll_user_id ON login_logs(user_id)')
-    except: pass
+    except Exception as e: pass
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_ll_username ON login_logs(username)')
-    except: pass
+    except Exception as e: pass
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_ll_created ON login_logs(created_at DESC)')
     except sqlite3.OperationalError:
@@ -861,7 +861,7 @@ def m001_baseline(db):
     ''')
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_us_token ON user_sessions(token)')
-    except: pass
+    except Exception as e: pass
     try:
         db.execute('CREATE INDEX IF NOT EXISTS idx_us_user_id ON user_sessions(user_id)')
     except sqlite3.OperationalError:
@@ -878,19 +878,19 @@ def m001_baseline(db):
     # Add unique constraint on processes.name
     try:
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')
-    except:
+    except Exception as e:
         pass
 
     # Add unique constraint on positions.name
     try:
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_name ON positions(name)')
-    except:
+    except Exception as e:
         pass
 
     # Add unique constraint on role_groups.name
     try:
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_role_groups_name ON role_groups(name)')
-    except:
+    except Exception as e:
         pass
 
     # audit_logs 索引（性能优化）
@@ -898,7 +898,7 @@ def m001_baseline(db):
         db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)')
         db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
         db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)')
-    except:
+    except Exception as e:
         pass
 
     # ============================================================
@@ -970,7 +970,7 @@ def m001_baseline(db):
                         'material_consumptions','order_processes','product_items','order_attachments']:
                 db.execute(f'DELETE FROM {tbl} WHERE order_id = ?', (oid,))
             db.execute('DELETE FROM orders WHERE id = ?', (oid,))
-    except: pass
+    except Exception as e: pass
 
     db.commit()
 
@@ -988,28 +988,28 @@ try:
         expires_at TEXT NOT NULL,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )''')
-except:
+except Exception as e:
     pass
 
 
 # Migration 14
 try:
     db.execute("CREATE TABLE IF NOT EXISTS product_bom (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id), UNIQUE(product_id, material_id, process_id))")
-except: pass
+except Exception as e: pass
 try:
     db.execute("CREATE TABLE IF NOT EXISTS order_materials (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, source TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id))")
-except: pass
+except Exception as e: pass
 try:
     db.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_product ON product_bom(product_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_order_materials_order ON order_materials(order_id)")
-except: pass
+except Exception as e: pass
 
 
 @migration(15, "Add is_builtin column to roles")
 def m015_roles_is_builtin(db):
     try:
         db.execute("ALTER TABLE roles ADD COLUMN is_builtin INTEGER DEFAULT 0")
-    except:
+    except Exception as e:
         pass
     db.execute("UPDATE roles SET is_builtin = 1 WHERE id IN (1, 2)")
     db.commit()

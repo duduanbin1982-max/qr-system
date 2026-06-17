@@ -201,7 +201,7 @@ class ReworkService:
                     from datetime import datetime, timedelta as dt
                     created_dt = dt.strptime(created[:19], '%Y-%m-%d %H:%M:%S')
                     duration = round((dt.now() - created_dt).total_seconds() / 3600, 1)
-                except:
+                except Exception as e:
                     pass
             txn.execute('''UPDATE rework_records SET status = 'completed', reason = ?,
                           completed_at = datetime("now","localtime"),
