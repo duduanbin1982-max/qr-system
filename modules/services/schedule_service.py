@@ -61,6 +61,25 @@ class ScheduleService:
             if start:
                 if min_date is None or start < min_date: min_date = start
                 if max_date is None or end > max_date: max_date = end
+
+        # Extend max_date to end of next month
+        if max_date:
+            ref = datetime.strptime(max_date, '%Y-%m-%d')
+        else:
+            ref = now
+        # First day of the month after next: go to next month, then next again
+        y, m = ref.year, ref.month
+        m += 2  # skip to month after next
+        if m > 12:
+            y += 1
+            m -= 12
+        # Last day of that month = first day of following month - 1 day
+        if m == 12:
+            last_day = datetime(y + 1, 1, 1) - timedelta(days=1)
+        else:
+            last_day = datetime(y, m + 1, 1) - timedelta(days=1)
+        max_date = last_day.strftime('%Y-%m-%d')
+
         return {'ok': True, 'orders': orders, 'min_date': min_date, 'max_date': max_date}
     @staticmethod
     def update_order_schedule(order_id, plan_start, plan_end):
