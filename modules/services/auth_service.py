@@ -14,6 +14,15 @@ class AuthService:
         return db if db is not None else BaseService.db()
 
     @staticmethod
+    def lock_minutes(fail_count):
+        """Progressive lockout duration in minutes."""
+        thresholds = [(20, 1440), (15, 120), (10, 30), (5, 5)]
+        for threshold, minutes in thresholds:
+            if fail_count >= threshold:
+                return minutes
+        return 5
+
+    @staticmethod
     def get_login_rate(ip, cutoff, db=None):
         return AuthService._db(db).execute(
             "SELECT COUNT(*) FROM login_attempts WHERE ip_address = ? AND created_at > ?",

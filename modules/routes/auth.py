@@ -14,13 +14,6 @@ from modules.constants import SECONDS_PER_DAY, SECONDS_PER_WEEK
 from modules.services.auth_service import AuthService
 
 
-def _lock_minutes(fail_count):
-    """渐进式锁定时间（分钟）"""
-    thresholds = [(20, 1440), (15, 120), (10, 30), (5, 5)]
-    for threshold, minutes in thresholds:
-        if fail_count >= threshold:
-            return minutes
-    return 5
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -77,7 +70,7 @@ def login():
         fail_count = (user["failed_login_count"] or 0) + 1
         locked_until = None
         if fail_count >= 5:
-            locked_until = (datetime.now() + timedelta(minutes=_lock_minutes(fail_count))).strftime("%Y-%m-%d %H:%M:%S")
+            locked_until = (datetime.now() + timedelta(minutes=AuthService.lock_minutes(fail_count))).strftime("%Y-%m-%d %H:%M:%S")
         AuthService.update_login_failure(user["id"], fail_count, locked_until)
         AuthService.insert_login_log(username, ip, ua, 0, user_id=user["id"], fail_reason="wrong_password")
         remaining_attempts = max(5 - fail_count, 0)

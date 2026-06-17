@@ -12,6 +12,7 @@ from modules.db import get_db
 from modules.app import app
 from modules.db import get_db, get_setting
 from modules.services.email_reports_service import EmailReportsService
+from modules.services.smtp_crypto import decrypt_smtp_password
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 
@@ -21,7 +22,7 @@ def _get_smtp_config():
         'host': get_setting('smtp_host', ''),
         'port': int(get_setting('smtp_port', '0') or '0'),
         'user': get_setting('smtp_user', ''),
-        'password': get_setting('smtp_password', ''),
+        'password': decrypt_smtp_password(get_setting('smtp_password', '')),
         'from_email': get_setting('smtp_from', ''),
         'to_emails': get_setting('report_recipients', ''),
         'use_tls': get_setting('smtp_tls', '1') == '1',

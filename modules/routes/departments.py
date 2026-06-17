@@ -61,7 +61,7 @@ def update_department(dep_id):
     dep = db.execute("SELECT id FROM departments WHERE id = ?", (dep_id,)).fetchone()
     if not dep:
         return jsonify({"error": "Not found"}), 404
-    sets = []
+    sets = []  # whitelist
     params = []
     for f in ["name", "description", "parent_id", "sort_order", "status"]:
         if f in data:
