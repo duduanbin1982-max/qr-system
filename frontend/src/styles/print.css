@@ -1,0 +1,120 @@
+/* QR Code Print Styles — extracted from style.css */
+/* ===== QR 码预览/打印样式 ===== */
+.qr-modal-lg { max-width: 960px !important; }
+.qr-mode-tabs { display: flex; gap: 0; background: var(--bg-hover); border-radius: var(--radius-md); padding: 4px; margin-bottom: 12px; }
+.qr-mode-tab { flex: 1; text-align: center; padding: 10px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-base); font-weight: 500; transition: all 0.2s; border: none; background: transparent; color: var(--text-placeholder); }
+.qr-mode-tab.active { background: var(--bg-surface); color: var(--primary); box-shadow: var(--shadow-sm); }
+
+/* ===== 二维码打印样式（TSC TPP-244Plus） ===== */
+@media print {
+  body > *:not(#qr-print-root) { display: none !important; }
+  
+  #qr-print-root {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 83mm !important;
+  }
+  #qr-print-root * { visibility: visible !important; }
+  
+  .qr-print-grid { 
+    display: grid !important;
+    grid-template-columns: 39.5mm 39.5mm !important;
+    gap: 1.4mm !important;
+    padding: 0.3mm 0 0 0 !important;
+    margin: 0 !important;
+    width: 83mm !important;
+  }
+  
+  .qr-print-grid .qr-card {
+    width: 39.5mm !important;
+    height: 30mm !important;
+    padding: 0.3mm 1.3mm 1.3mm 1.3mm !important;
+    margin: 0 !important;
+    page-break-inside: avoid !important;
+    border: none !important;
+    border-radius: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 0.2mm !important;
+    background: white !important;
+    text-align: left !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    transform: translate(1.5mm, -0.5mm) !important;
+  }
+  
+  .qr-print-grid .qr-card img { 
+    width: 20mm !important; 
+    height: 20mm !important; 
+    flex-shrink: 0 !important;
+    image-rendering: pixelated !important;
+  }
+  
+  .qr-print-grid .qr-label-info {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    gap: 0.2mm !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    margin-top: -3.5mm !important;
+  }
+  .qr-print-grid .qr-label-no {
+    font-size: 8pt !important;
+    font-weight: bold !important;
+    color: var(--text-primary) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+  }
+  .qr-print-grid .qr-label-code {
+    font-size: 7pt !important;
+    color: var(--text-muted) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-align: center !important;
+    max-width: 100% !important;
+  }
+}
+
+/* ========== 二维码打印样式（TSC TPP-244Plus） ========== */
+
+/* 屏幕预览样式 */
+.qr-modal-lg { max-width: 960px !important; }
+.qr-mode-tabs { display: flex; gap: 0; background: #F3F4F6; border-radius: 10px; padding: 4px; margin-bottom: 12px; }
+.qr-mode-tab { flex: 1; text-align: center; padding: 10px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; border: none; background: transparent; color: #6B7280; }
+.qr-mode-tab.active { background: white; color: #4F46E5; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.qr-control-bar { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+.qr-control-group { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; color: #6B7280; }
+.qr-control-group select, .qr-control-group input { padding: 6px 10px; border: 1px solid #D1D5DB; border-radius: var(--radius-sm); font-size: 13px; background: white; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; justify-items: center; }
+.qr-card { 
+  width: 100%; max-width: 260px;
+  background: white; border: 2px solid #E5E7EB; border-radius: var(--radius-lg); 
+  padding: 14px; text-align: center; transition: all 0.2s;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.qr-card:hover { border-color: #4F46E5; box-shadow: 0 4px 16px rgba(79,70,229,0.12); }
+.qr-card img { width: 140px; height: 140px; border: 1px solid #F3F4F6; border-radius: var(--radius-md); background: white; }
+.qr-card .qr-label-info { width: 100%; }
+.qr-card .qr-label-no { font-size: 12px; font-weight: 600; color: #4F46E5; font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; }
+.qr-card .qr-label-code { font-size: var(--text-2xs); color: #6B7280; }
+.qr-card-actions { display: flex; gap: var(--space-2); justify-content: center; width: 100%; }
+.qr-print-order-info { 
+  display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; 
+  padding: 12px 16px; background: linear-gradient(135deg, #EEF2FF, #F5F3FF); 
+  border-radius: 10px; font-size: 13px; color: #374151; border: 1px solid #C7D2FE;
+}
+.qr-print-order-info span { display: inline-flex; align-items: center; gap: 4px; }
+.qr-print-order-info strong { color: #4F46E5; }
+.qr-content-tooltip { font-size: var(--text-2xs); color: #9CA3AF; word-break: break-all; max-width: 200px; cursor: help; }
+.qr-empty-state { text-align:center;padding:48px 20px;color:#9CA3AF; }
