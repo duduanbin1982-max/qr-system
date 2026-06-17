@@ -696,11 +696,11 @@ def m001_baseline(db):
     # 初始化默认角色组和管理员角色
     db.execute('INSERT OR IGNORE INTO role_groups (id, name, description) VALUES (1, "系统管理组", "系统内置最高权限角色组")')
     db.execute('INSERT OR IGNORE INTO roles (id, name, code, description, group_id, level, permissions) VALUES (1, "系统管理员", "admin", "系统内置管理员，拥有全部权限", 1, 1, ?)',
-               (json.dumps(PREDEFINED_ROLES[1]['permissions']),))
+               (json.dumps(PREDEFINED_ROLES['admin']['permissions']),))
     # 普通员工角色组
     db.execute('INSERT OR IGNORE INTO role_groups (id, name, description) VALUES (2, "普通员工组", "普通员工角色组")')
     db.execute('INSERT OR IGNORE INTO roles (id, name, code, description, group_id, level, permissions) VALUES (2, "普通员工", "worker", "普通工人，可进行报工操作", 2, 1, ?)',
-               (json.dumps(PREDEFINED_ROLES[2]['permissions']),))
+               (json.dumps(PREDEFINED_ROLES['worker']['permissions']),))
 
     # 新增预置角色（生产主管、质检员、仓库管理员）
     for role_key in ['production_manager', 'qc_inspector', 'warehouse_keeper']:
@@ -713,10 +713,10 @@ def m001_baseline(db):
     # 迁移：修复旧角色中 permissions 为空或非JSON的
     db.execute('''UPDATE roles SET permissions = ?
                   WHERE id = 1 AND (permissions IS NULL OR permissions = '' OR permissions = '""')''',
-               (json.dumps(PREDEFINED_ROLES[1]['permissions']),))
+               (json.dumps(PREDEFINED_ROLES['admin']['permissions']),))
     db.execute('''UPDATE roles SET permissions = ?
                   WHERE id = 2 AND (permissions IS NULL OR permissions = '' OR permissions = '""')''',
-               (json.dumps(PREDEFINED_ROLES[2]['permissions']),))
+               (json.dumps(PREDEFINED_ROLES['worker']['permissions']),))
 
     # Prevent duplicate processes by enforcing UNIQUE on name
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')

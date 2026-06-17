@@ -63,15 +63,15 @@ PERMISSION_DEFS = {
 SYSTEM_MANAGE_PERM = 'settings:manage'
 
 # 预置角色权限配置
-# 注：键类型混用 — 1/2 为整数（内置角色ID），其余为字符串 code
+# 注：所有键统一为字符串 code
 PREDEFINED_ROLES = {
-    1: {  # 系统管理员 — 全部
+    'admin': {  # 系统管理员 — 全部
         'name': '系统管理员', 'code': 'admin',
         'description': '系统内置管理员，拥有全部权限',
         'group_id': 1, 'level': 1,
         'permissions': ['*']  # * 表示全部
     },
-    2: {  # 普通员工 — 仅扫码报工
+    'worker': {  # 普通员工 — 仅扫码报工
         'name': '普通员工', 'code': 'worker',
         'description': '普通工人，可进行报工操作',
         'group_id': 2, 'level': 1,
