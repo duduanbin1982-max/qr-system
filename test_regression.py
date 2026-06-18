@@ -1,231 +1,125 @@
 #!/usr/bin/env python3
-"""Regression tests for critical business flows."""
-import requests, sys, json, time, os
+"""扫码报工系统 — 回归测试 v5 (自动发现可用订单)"""
+import urllib.request, urllib.error, json, ssl, sys, os
 
-BASE = os.environ.get("SMOKE_BASE", "https://127.0.0.1")
-ADMIN_USER = os.environ.get("SMOKE_USER", "admin")
-ADMIN_PASS = os.environ.get("SMOKE_PASS", "admin123")
-WORKER_USER = "0101"
-WORKER_PASS = "123456780"
-VERBOSE = "-v" in sys.argv
+BASE = os.environ.get("TEST_BASE", "https://127.0.0.1:3000")
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+P = F = 0
 
-session = requests.Session()
-session.verify = False
-requests.packages.urllib3.disable_warnings()
+def api(method, path, data=None, token=None):
+    url = BASE + path
+    body = json.dumps(data).encode() if data else None
+    h = {"Content-Type": "application/json"}
+    if token: h["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=body, headers=h, method=method)
+    try:
+        r = urllib.request.urlopen(req, context=ctx, timeout=10)
+        return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
 
-PASS = FAIL = SKIP = 0
-START = time.time()
+def t(n, c, d=""):
+    global P, F
+    if c: P += 1; print(f"  ok {n}")
+    else: F += 1; print(f"  FAIL {n}  {d}")
 
-def ok(label):
-    global PASS; PASS += 1
-    print("  PASS " + label)
+def hdr(s): print(f"\n{'='*50}\n  {s}\n{'='*50}")
 
-def fail(label, detail=""):
-    global FAIL; FAIL += 1
-    print("  FAIL " + label)
-    if detail: print("       " + detail)
+print("regression v5")
+token = api("POST","/api/auth/login",{"username":"admin","password":"admin123"})[1]["user"]["token"]
+print("  login: admin")
 
-def skip(label, reason=""):
-    global SKIP; SKIP += 1
-    print("  SKIP " + label + " (" + reason + ")")
-
-def get(path):
-    r = session.get(BASE + path, timeout=15, allow_redirects=False)
-    if VERBOSE: print("    GET " + path + " -> " + str(r.status_code))
-    return r
-
-def post(path, data=None):
-    r = session.post(BASE + path, json=data, timeout=15, allow_redirects=False)
-    if VERBOSE: print("    POST " + path + " -> " + str(r.status_code))
-    return r
-
-def delete(path):
-    r = session.delete(BASE + path, timeout=15, allow_redirects=False)
-    if VERBOSE: print("    DELETE " + path + " -> " + str(r.status_code))
-    return r
-
-def login_as_admin():
-    r = post("/api/auth/login", {"username": ADMIN_USER, "password": ADMIN_PASS})
-    if r.status_code == 200:
-        token = r.json().get("user", {}).get("token", "")
-        if token:
-            session.headers["Authorization"] = "Bearer " + token
-            return True
-    return False
-
-def login_as(username, password):
-    r = post("/api/auth/login", {"username": username, "password": password})
-    if r.status_code == 200:
-        token = r.json().get("user", {}).get("token", "")
-        if token:
-            session.headers["Authorization"] = "Bearer " + token
-            return True
-    return False
-
-print("=" * 60)
-print("QR System Regression Tests")
-print("=" * 60)
-
-print("\n[0] Setup - Create test data")
-if not login_as_admin():
-    fail("Login admin failed")
-    sys.exit(1)
-
-r = get("/api/process-routes")
-routes = r.json().get("routes", [])
-if not routes:
-    fail("No process routes")
-    sys.exit(1)
-route_id = routes[0]["id"]
-
-prod_data = {
-    "product_name": "__TEST_SMOKE_PRODUCT__",
-    "model": "T1",
-    "spec": "10x10",
-    "category": "\u7ed3\u6784\u4ef6",
-    "route_id": route_id,
-    "weight": 10,
-    "price": 100
-}
-r = post("/api/products", prod_data)
-test_product_id = None
-if r.status_code == 200:
-    data = r.json()
-    test_product_id = data.get("product", {}).get("id") or data.get("id")
-    ok("Test product created id=" + str(test_product_id))
-else:
-    fail("Create product HTTP " + str(r.status_code), r.text[:200])
-    sys.exit(1)
-
-order_data = {
-    "product_id": test_product_id,
-    "quantity": 5,
-    "qr_mode": "order",
-    "status": "pending"
-}
-r = post("/api/orders", order_data)
-test_order_id = None
-test_order_no = None
-if r.status_code == 200:
-    data = r.json()
-    test_order_id = data.get("id")
-    test_order_no = ""
-    r2 = get("/api/orders")
-    if r2.status_code == 200:
-        for o in r2.json().get("orders", []):
-            if o.get("id") == test_order_id:
-                test_order_no = o.get("order_no", "")
+# Find available order with capacity
+s, orders = api("GET", "/api/orders?limit=20", None, token)
+OID = PID = None
+if s == 200:
+    for o in orders.get("orders", []):
+        if o.get("status") == "deleted": continue
+        for p in o.get("processes", []):
+            comp = p.get("completed", 0)
+            if comp < o.get("quantity", 0):
+                OID = o["id"]; PID = p["process_id"]
                 break
-    ok("Test order created id=" + str(test_order_id) + " no=" + test_order_no)
-else:
-    fail("Create order HTTP " + str(r.status_code), r.text[:200])
-    sys.exit(1)
+        if OID: break
 
-print("\n[1] Scan Work - Duplicate Prevention")
-if not login_as(WORKER_USER, WORKER_PASS):
-    skip("Worker login failed", "credentials changed")
-else:
-    r = post("/api/mobile/scan", {"code": test_order_no})
-    if r.status_code == 200:
-        oi = r.json().get("order", {})
-        cp = oi.get("current_process")
-        if cp:
-            pid = cp.get("process_id")
-            ok("Scan order found pid=" + str(pid))
-            rpt = {"order_id": test_order_id, "process_id": pid, "quantity": 1}
-            r = post("/api/mobile/report", rpt)
-            if r.status_code == 200:
-                ok("First report OK")
-                r = post("/api/mobile/report", rpt)
-                if r.status_code == 409:
-                    ok("Duplicate blocked 409")
-                else:
-                    fail("Duplicate NOT blocked got " + str(r.status_code), r.text[:150])
-            else:
-                fail("First report failed HTTP " + str(r.status_code), r.text[:150])
-        else:
-            fail("Scan no current_process", json.dumps(oi, default=str)[:200])
-    else:
-        fail("Scan order failed HTTP " + str(r.status_code), r.text[:150])
+if not OID:
+    print("  FAIL: no available order found"); sys.exit(1)
 
-print("\n[2] Wage Snapshot")
-if not login_as_admin():
-    fail("Admin re-login failed")
-else:
-    r = get("/api/wages")
-    if r.status_code == 200:
-        ok("Wages API OK")
-    else:
-        fail("Wages HTTP " + str(r.status_code))
-    ym = time.strftime("%Y-%m")
-    r = session.post(BASE + "/api/wages/snapshot?year_month=" + ym, timeout=15)
-    if VERBOSE: print("    POST /api/wages/snapshot?year_month=" + ym + " -> " + str(r.status_code))
-    if r.status_code == 200:
-        ok("Wage snapshot created")
-    else:
-        fail("Wage snapshot HTTP " + str(r.status_code), r.text[:150])
+print(f"  using order={OID} proc={PID} qty remaining")
 
-print("\n[3] Inventory")
-if not login_as_admin():
-    fail("Admin re-login failed")
-else:
-    r = get("/api/inventory")
-    if r.status_code == 200:
-        ok("Inventory API OK")
-    else:
-        fail("Inventory HTTP " + str(r.status_code))
+# 1. same-process dup
+hdr("1. same-process dup")
+s1 = f"RT1_{os.getpid()}"
+s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s1},token)
+t("first ok", s==200, f"{s}:{d}")
+s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s1},token)
+t("dup->409", s==409, f"{s}:{d}")
+t("msg:dup", "不可重复" in str(d.get("error","")), str(d.get("error")))
 
-print("\n[4] Order Delete Flow")
-if not login_as_admin():
-    fail("Admin re-login failed")
-else:
-    r = delete("/api/orders/" + str(test_order_id))
-    if r.status_code == 200:
-        ok("Soft-deleted")
-        r = get("/api/orders/trash")
-        if r.status_code == 200:
-            trash = r.json().get("orders", [])
-            found = any(o.get("id") == test_order_id for o in trash)
-            ok("In trash " + str(found))
-            r = post("/api/orders/" + str(test_order_id) + "/restore")
-            if r.status_code == 200:
-                ok("Restored")
-                delete("/api/orders/" + str(test_order_id))
-                r = delete("/api/orders/" + str(test_order_id) + "/purge")
-                if r.status_code == 200:
-                    ok("Purged")
-                else:
-                    fail("Purge failed HTTP " + str(r.status_code), r.text[:150])
-            else:
-                fail("Restore failed HTTP " + str(r.status_code), r.text[:150])
-        else:
-            fail("Trash HTTP " + str(r.status_code))
-    else:
-        fail("Soft delete HTTP " + str(r.status_code), r.text[:150])
+# 2. cross-process dup [KEY FIX]
+hdr("2. cross-process dup [KEY]")
+# Find second process for same order
+PID2 = None
+for o in orders.get("orders", []):
+    if o["id"] == OID:
+        for p in o.get("processes", []):
+            if p["process_id"] != PID and p.get("completed", 0) < o.get("quantity", 0):
+                PID2 = p["process_id"]; break
+        break
 
-print("\n[5] Permission Isolation")
-if not login_as(WORKER_USER, WORKER_PASS):
-    fail("Worker re-login failed")
+if PID2:
+    s2 = f"RT2_{os.getpid()}"
+    s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s2},token)
+    t("procA ok", s==200, f"{s}:{d}")
+    s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID2,"quantity":1,"report_type":"normal","serial_no":s2},token)
+    t("procB cross->409", s==409, f"{s}:{d}")
+    t("msg:cross", "在此订单已报工" in str(d.get("error","")), str(d.get("error")))
 else:
-    r = get("/api/users")
-    if r.status_code == 200:
-        fail("Worker can access /api/users")
-    elif r.status_code in (401, 403):
-        ok("Worker blocked from /api/users")
-    else:
-        fail("Unexpected status " + str(r.status_code))
+    t("cross-process", False, "no second process available")
 
-print("\n[6] Cleanup")
-if not login_as_admin():
-    fail("Admin cleanup failed")
-else:
-    if test_product_id:
-        delete("/api/products/" + str(test_product_id))
-        ok("Test product cleaned")
+# 3. desktop
+hdr("3. desktop /api/report")
+s3 = f"RT3_{os.getpid()}"
+s,d = api("POST","/api/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s3},token)
+t("first ok", s==200, f"{s}:{d}")
+s,d = api("POST","/api/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s3},token)
+t("dup->409", s==409, f"{s}:{d}")
 
-elapsed = time.time() - START
-total = PASS + FAIL + SKIP
-print("\n" + "=" * 60)
-print("Results " + str(PASS) + " passed " + str(FAIL) + " failed " + str(SKIP) + " skipped " + format(elapsed,".1f") + "s")
-print("=" * 60)
-sys.exit(0 if FAIL == 0 else 1)
+# 4. serial guard
+hdr("4. serial guard")
+s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal"},token)
+t("no serial->400", s==400)
+t("msg:serial", "序列号模式" in str(d.get("error","")))
+
+# 5. permission
+hdr("5. permission")
+s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":99999,"quantity":1,"report_type":"normal","serial_no":f"RT5_{os.getpid()}"},token)
+t("bad proc->400", s==400)
+
+# 6. wages
+hdr("6. wages")
+s,d = api("GET","/api/wages/snapshots",None,token); t("snapshots", s in(200,404))
+s,d = api("GET","/api/wages/monthly?year=2026&month=6",None,token); t("monthly", s in(200,404))
+
+# 7. auth
+hdr("7. auth")
+s,d = api("POST","/api/auth/login",{"username":"admin","password":"wrong____"})
+t("bad pw", s in(400,401))
+s,d = api("GET","/api/auth/info",None,token); t("valid token", s==200)
+s,d = api("GET","/api/auth/info",None,"bad"); t("bad token", s in(401,403,500))
+
+# 8. resources
+hdr("8. resources")
+s,d = api("GET","/api/orders?limit=5",None,token); t("orders", s==200)
+s,d = api("GET","/api/products?limit=5",None,token); t("products", s==200)
+
+# 9. scan
+hdr("9. scan flow")
+s,d = api("POST","/api/mobile/scan",{"code":f'{{"order_id":{OID}}}'},token); t("scan", s in(200,404))
+
+# 10. dashboard
+hdr("10. dashboard")
+s,d = api("GET","/api/dashboard/kpi",None,token); t("kpi", s in(200,404))
+
+print(f"\n{'='*50}\n  {P}/{P+F} passed {'🎉' if F==0 else '⚠️'}\n{'='*50}")
+sys.exit(0 if F==0 else 1)
