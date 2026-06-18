@@ -267,6 +267,10 @@ def mobile_report():
         quantity = data.get("quantity", 1)
         serial_no = data.get("serial_no", "").strip() or None
         report_type = data.get("report_type", "normal")
+        # 系统管理员仅允许返工/报废，不可正常报工
+        user_role = g.current_user.get("role", "")
+        if user_role == "admin" and report_type == "normal":
+            return jsonify({"error": "系统管理员仅可进行返工和报废操作，不可正常报工"}), 403
         remark = data.get("remark", "")
 
         if not order_id or not process_id:
@@ -367,6 +371,10 @@ def work_report():
         quantity = data.get("quantity", 1)
         serial_no = data.get("serial_no", "").strip() or None
         report_type = data.get("report_type", "normal")
+        # 系统管理员仅允许返工/报废，不可正常报工
+        user_role = g.current_user.get("role", "")
+        if user_role == "admin" and report_type == "normal":
+            return jsonify({"error": "系统管理员仅可进行返工和报废操作，不可正常报工"}), 403
         remark = data.get("remark", "")
 
         if not order_id or not process_id:
