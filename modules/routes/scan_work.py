@@ -317,7 +317,8 @@ def mobile_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
-            return jsonify({"error": "您无权对此工序报工"}), 403
+            proc_name = ScanHelperService.get_process_name(process_id)
+            return jsonify({"error": f"工序「{proc_name}」不在您的报工权限范围内"}), 403
 
         # ===== 工序存在性校验（获取完整信息） =====
         current_op = ScanHelperService.get_order_process(order_id, process_id)
@@ -418,7 +419,8 @@ def work_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
-            return jsonify({"error": "您无权对此工序报工"}), 403
+            proc_name = ScanHelperService.get_process_name(process_id)
+            return jsonify({"error": f"工序「{proc_name}」不在您的报工权限范围内"}), 403
 
         current_op = ScanHelperService.get_order_process(order_id, process_id)
         if order["route_id"] and not current_op:

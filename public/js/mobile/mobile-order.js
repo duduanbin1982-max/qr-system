@@ -15,7 +15,7 @@ function processCode(code) {
       if (d.error) { toast(d.error); show('main'); return; }
       doScan(d.code);
     })
-    .catch(function() { toast('解码失败'); show('main'); });
+    .catch(function() { toast('二维码数据解码失败，请确认二维码有效'); show('main'); });
     return;
   }
   doScan(code);
