@@ -37,12 +37,20 @@ function doScan(code) {
     show('order');
     // 序列号模式：每张二维码对应1件工件，数量恒为1
     // 订单模式：取工序剩余待完成数
-    var remaining = (curSerial || d.item) ? 1
-      : d.has_items ? 1
+    // 序列号模式：每张二维码对应1件，数量锁定为1，禁止修改
+    var isSerialMode = !!(curSerial || d.item || d.order.has_items);
+    var remaining = isSerialMode ? 1
       : Math.max(0, d.order.current_process
         ? (d.order.quantity || 0) - (d.order.current_process.completed || 0)
         : 1);
-    $('rpt-qty').value = remaining;
+    $("rpt-qty").value = remaining;
+    if (isSerialMode) {
+      $("rpt-qty").disabled = true;
+      $("rpt-qty").title = "序列号模式，数量固定为1";
+    } else {
+      $("rpt-qty").disabled = false;
+      $("rpt-qty").title = "";
+    }
     if (reportMode === 'auto') {
       setTimeout(function() { doReport(); }, 1200);
     } else {

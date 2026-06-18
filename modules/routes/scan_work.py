@@ -80,7 +80,9 @@ def scan_order():
         o["records"] = [dict(r) for r in records]
 
         if item_info:
+            o["has_items"] = True
             return jsonify({"order": o, "item": item_info})
+        o["has_items"] = bool(ScanHelperService.get_product_items_by_order(o["id"]))
         return jsonify({"order": o})
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
@@ -270,7 +272,11 @@ def mobile_report():
         if not order_id or not process_id:
             return jsonify({"error": "缺少订单或工序信息"}), 400
 
-        if serial_no and quantity > 1:
+        # ===== 序列号模式：每件工件独立报工，数量恒为1 =====
+        has_prod_items = bool(ScanHelperService.get_product_items_by_order(order_id))
+        if has_prod_items and quantity > 1:
+            quantity = 1
+        elif serial_no and quantity > 1:
             quantity = 1
 
         user = g.current_user
