@@ -429,7 +429,7 @@ class UserService:
         return cur.rowcount
     @staticmethod
     def batch_delete_users(ids, current_user_id):
-        """Delete multiple users in a single transaction."""
+        """Soft-delete multiple users (set status='deleted')."""
         if not ids:
             return 0
         db = BaseService.db()
@@ -444,12 +444,12 @@ class UserService:
         ).fetchall()
         if admins:
             raise ValueError('不能删除内置管理员 (admin)')
-        with BaseService.transaction() as txn:
-            # Delete user_roles first
-            txn.execute(f'DELETE FROM user_roles WHERE user_id IN ({placeholders})', ids)
-            # Then delete users
-            cur = txn.execute(f'DELETE FROM users WHERE id IN ({placeholders})', ids)
-            return cur.rowcount
+        cur = db.execute(
+            f"UPDATE users SET status = 'deleted', deleted_at = datetime('now','localtime') WHERE id IN ({placeholders})",
+            ids
+        )
+        db.commit()
+        return cur.rowcount
 
     @staticmethod
     def reset_password(uid, password=None):

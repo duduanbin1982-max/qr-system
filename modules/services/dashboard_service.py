@@ -35,6 +35,12 @@ class DashboardService:
             "completed": orders_row["completed"],
             "today_rework": wr_row["today_rework"] or 0,
         }
+        # Low stock inventory items
+        low_rows = db.execute(
+            "SELECT product_model, product_name, quantity, safe_stock FROM inventory WHERE safe_stock > 0 AND quantity <= safe_stock LIMIT 10"
+        ).fetchall()
+        result["low_stock"] = [dict(r) for r in low_rows]
+
         result["pending_approvals"] = db.execute(
             "SELECT COUNT(*) FROM approval_records WHERE status='pending'"
         ).fetchone()[0]
@@ -54,12 +60,11 @@ class DashboardService:
     def _get_dashboard_recent(db):
         """Recent 10 work records with order/process/worker names."""
         rows = db.execute(
-            "SELECT wr.*, o.order_no, p.name as process_name, u.name as worker_name "
+            "SELECT wr.*, COALESCE(o.order_no,'-') as order_no, p.name as process_name, u.name as worker_name "
             "FROM work_records wr "
-            "LEFT JOIN orders o ON wr.order_id = o.id "
+            "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
             "LEFT JOIN processes p ON wr.process_id = p.id "
             "LEFT JOIN users u ON wr.user_id = u.id "
-            "WHERE o.deleted_at IS NULL "
             "ORDER BY wr.created_at DESC LIMIT 10"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -103,21 +108,23 @@ class DashboardService:
         }
 
     @staticmethod
-    def _get_quick_actions():
-        """Default quick-action shortcuts for the workbench."""
-        return [
-            {"page": "orders",   "icon": "📋", "label": "订单管理", "desc": "管理生产订单"},
-            {"page": "scan",     "icon": "📱", "label": "扫码报工", "desc": "扫描二维码报工"},
-            {"page": "products", "icon": "🏭", "label": "产品管理", "desc": "维护产品信息"},
-            {"page": "prices",   "icon": "💰", "label": "工价管理", "desc": "管理工序工价"},
-            {"page": "users",    "icon": "👥", "label": "员工管理", "desc": "管理用户权限"},
-            {"page": "stats",    "icon": "📊", "label": "统计报表", "desc": "查看生产统计"},
-            {"page": "board",    "icon": "📺", "label": "数据看板", "desc": "实时生产大屏", "external": "/board.html"},
-            {"page": "settings", "icon": "⚙️", "label": "系统设置", "desc": "系统配置管理"},
+    def _get_quick_actions(user=None):
+        """Role-aware quick-action shortcuts for the workbench."""
+        all_actions = [
+            {"page": "orders",   "icon": "📋", "label": "订单管理", "desc": "管理生产订单", "roles": ["admin","manager"]},
+            {"page": "scan",     "icon": "📱", "label": "扫码报工", "desc": "扫描二维码报工", "roles": ["admin","manager","worker"]},
+            {"page": "products", "icon": "🏭", "label": "产品管理", "desc": "维护产品信息", "roles": ["admin","manager"]},
+            {"page": "prices",   "icon": "💰", "label": "工价管理", "desc": "管理工序工价", "roles": ["admin","manager"]},
+            {"page": "users",    "icon": "👥", "label": "员工管理", "desc": "管理用户权限", "roles": ["admin","manager"]},
+            {"page": "stats",    "icon": "📊", "label": "统计报表", "desc": "查看生产统计", "roles": ["admin","manager","worker"]},
+            {"page": "board",    "icon": "📺", "label": "数据看板", "desc": "实时生产大屏", "external": "/board.html", "roles": ["admin","manager","worker"]},
+            {"page": "settings", "icon": "⚙️", "label": "系统设置", "desc": "系统配置管理", "roles": ["admin"]},
         ]
+        role = (user or {}).get("role", "worker")
+        return [a for a in all_actions if role in a.get("roles", [])]
 
     @staticmethod
-    def get_dashboard():
+    def get_dashboard(user=None):
         """Aggregated dashboard: stats + security + records + warnings + actions."""
         db = BaseService.db()
         today = datetime.now().strftime("%Y-%m-%d")
@@ -130,5 +137,5 @@ class DashboardService:
             "recent_records": DashboardService._get_dashboard_recent(db),
             "company_name": company["value"] if company else "",
             "delivery_warnings": DashboardService._get_dashboard_warnings(db, today),
-            "quick_actions": DashboardService._get_quick_actions(),
+            "quick_actions": DashboardService._get_quick_actions(user),
         }

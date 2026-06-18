@@ -11,7 +11,7 @@
           </div>
         </div>
         <div v-if="monthlyLoading" style="text-align:center;padding:60px">⏳ 加载中...</div>
-        <div v-else style="padding:0 20px 20px">
+        <div v-else-if="monthlyData.summary.length" style="padding:0 20px 20px">
           <div class="summary-bar" style="margin-top:12px">
             <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val text-primary">{{ monthlyData.summary.length }}</div><div class="s-label">员工数</div></div></div>
             <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val text-success">{{ monthlyData.grand_total_quantity }}</div><div class="s-label">总件数</div></div></div>
@@ -44,7 +44,13 @@
               </tr>
             </tbody>
           </table>
+          <div v-if="monthlyTotalPages > 1" style="display:flex;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-3) 20px;border-top:1px solid var(--border-light)">
+            <button class="btn-default btn-sm" @click="monthlyPrevPage" :disabled="monthlyPage<=1">◀ 上一页</button>
+            <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ monthlyPage }} / {{ monthlyTotalPages }} 页 · 共 {{ monthlyTotal }} 人</span>
+            <button class="btn-default btn-sm" @click="monthlyNextPage" :disabled="monthlyPage>=monthlyTotalPages">下一页 ▶</button>
+          </div>
         </div>
+        <div v-else style="text-align:center;padding:60px;color:var(--text-placeholder)"><p style="font-size:48px;margin:0">📊</p><p style="margin-top:12px">暂无月度汇总数据</p></div>
       </div>
     </div>
 </template>

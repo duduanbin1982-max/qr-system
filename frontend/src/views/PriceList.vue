@@ -156,16 +156,13 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
-import { handleApiError } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { router } from '@/lib/router.js'
 
 export default {
   setup() {
     const loading = ref(true)
-    const processes = ref([])
-
-       const routeSteps = ref([])
+    const routeSteps = ref([])
     const allRoutes = ref([])
     const totalRouteCount = computed(() => filteredRoutes.value.length)
     const structRouteCount = computed(() => {
@@ -186,20 +183,13 @@ export default {
 
     // 复制
 
-    // 默认工价
-    const showDefaultModal = ref(false)
-    const defaultPrices = reactive({}) // {process_id: unit_price}
-    const defaultCategory = ref('')
 
     // RBAC 权限
     const canEdit = computed(() => can('prices:edit'))
     const canCreate = computed(() => can('prices:create'))
     const canDelete = computed(() => can('prices:delete'))
 
-    // 透视表
-    const processPricesRaw = ref([])
     const pricingCategory = ref('all')
-    const showMatrix = ref(false)
 
     // 按分类筛选产品
     const filteredRoutes = computed(() => {
@@ -300,25 +290,6 @@ export default {
       return 'all'
     }
 
-    const productPrices = computed(() => {
-      const map = {}
-      processPricesRaw.value.forEach(r => {
-        const key = r.product_id == null ? 'null' : '' + r.product_id
-        if (!map[key]) {
-          map[key] = {
-            key, product_id: r.product_id,
-            product_code: r.product_code || '(通用)',
-            prices: {}, price_ids: [],
-            effective_date: r.effective_date, hasActive: false
-          }
-        }
-        map[key].prices[r.process_id] = r.unit_price
-        map[key].price_ids.push(r.id)
-        if (r.effective_date) map[key].effective_date = r.effective_date
-        if (r.status === 'active') map[key].hasActive = true
-      })
-      return Object.values(map)
-    })
 
     // ====== 数据加载 ======
     async function loadStats() { /* counts now computed reactively */ }
@@ -332,65 +303,14 @@ export default {
       } catch (e) { showToast('加载路线失败: ' + (e.message || '网络错误'), 'error') }
     }
 
-    async function loadMatrix() {
-      try {
-        let procUrl = '/api/processes'
-        if (pricingCategory.value && pricingCategory.value !== 'all')
-          procUrl += '?category=' + encodeURIComponent(pricingCategory.value)
-        const [procData, priceData] = await Promise.all([
-          api.get(procUrl),
-          api.get('/api/process-prices?limit=99999')
-        ])
-        processes.value = procData.processes || []
-        let allPrices = priceData.process_prices || []
-        if (pricingCategory.value && pricingCategory.value !== 'all') {
-          allPrices = allPrices.filter(r =>
-            processes.value.some(p => p.id === r.process_id)
-          )
-        }
-        processPricesRaw.value = allPrices
-      } catch (e) { showToast(e.message || '加载失败', 'error') }
-      finally { loading.value = false }
+    function loadMatrix() {
+      loading.value = false
     }
 
-    async function openDefaults(cat) {
-      defaultCategory.value = cat
-      try {
-        const d = await api.getDefaultPrices(cat)
-        const prices = {}
-        ;(d.defaults || []).forEach(r => { prices[r.process_id] = r.unit_price })
-        Object.keys(defaultPrices).forEach(k => delete defaultPrices[k])
-        Object.assign(defaultPrices, prices)
-        showDefaultModal.value = true
-      } catch (e) { showToast('加载默认工价失败', 'error') }
-    }
 
-    async function saveDefaults() {
-      try {
-        const prices = {}
-        let hasAny = false
-        Object.entries(defaultPrices).forEach(([pid, val]) => {
-          if (val !== '' && val != null && val !== undefined) { prices[pid] = parseFloat(val); hasAny = true }
-        })
-        if (!hasAny) { showToast('请至少填写一个工序', 'error'); return }
-        const res = await api.saveDefaultPrices({ prices })
-        showToast(res.message || '保存成功')
-        showDefaultModal.value = false
-        await loadMatrix()
-      } catch (e) { showToast('保存失败: ' + e.message, 'error') }
-    }
 
     // ====== 透视表操作 ======
-    async function deleteProductPrices(row) {
-      const ids = row.price_ids || []
-      if (ids.length === 0) { showToast('没有可删除的工价', 'error'); return }
-      if (!confirm('确定删除该产品的所有工价配置吗？此操作不可恢复。')) return
-      try {
-        await Promise.all(ids.map(id => api.deleteProcessPrice(id)))
-        showToast('删除成功')
-        await loadMatrix()
-      } catch (e) { showToast(e.message || '删除失败', 'error') }
-    }
+
 
     async function switchCat(cat) {
       if (switching.value) return
@@ -422,17 +342,17 @@ export default {
 
     return {
       // 状态
-      loading, processes, pricingCategory, productPrices, pageTitle,
+      loading, pricingCategory, pageTitle,
       routeSteps, allRoutes, filteredRoutes,
       editPrices, saving, priceHistory,
-      showMatrix, showDefaultModal, defaultPrices, defaultCategory,
+      
       totalRouteCount, structRouteCount, machRouteCount, pricedRouteCount,
       can, canEdit, canCreate, canDelete,
       // 卡片模式
       expandedRoute, toggleRoute, editMeta, saveRoute, isRecentDate, loadPriceHistory,
       // 方法
-      switchCat, loadAllRoutes, loadMatrix, deleteProductPrices,
-      openDefaults, saveDefaults
+      switchCat, loadAllRoutes, loadMatrix,
+
     }
   }
 }

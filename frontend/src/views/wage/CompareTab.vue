@@ -22,7 +22,7 @@
               <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500">趋势</th>
             </tr></thead>
             <tbody>
-              <tr v-for="c in compareData" :key="c.employee_name" style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm)">
+              <tr v-for="c in compareData" :key="c.employee_name + c.wageA + c.wageB" style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm)">
                 <td style="padding:var(--space-3) 12px;font-weight:600">{{ c.employee_name }}</td>
                 <td style="padding:var(--space-3) 12px;text-align:right">¥{{ fmtMoney(c.wageA) }}</td>
                 <td style="padding:var(--space-3) 12px;text-align:right">¥{{ fmtMoney(c.wageB) }}</td>

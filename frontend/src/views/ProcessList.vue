@@ -258,22 +258,23 @@ export default {
     }
 
     async function del(p) {
-    let impactMsg = ''
     try {
       const impactRes = await api.get('/api/processes/' + p.id + '/impact')
       const impact = impactRes.impact || {}
-      const labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
-        quality_inspections:'质检记录', process_prices:'工价记录', process_route_items:'路线工序关联',
-        order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
       const keys = Object.keys(impact)
       if (keys.length > 0) {
-        impactMsg = '\n\n将级联删除以下数据：\n'
+        const labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
+          quality_inspections:'质检记录', process_route_items:'路线工序关联',
+          order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
+        let detail = ''
         for (let i = 0; i < keys.length; i++) {
-          impactMsg += '  - ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条\n'
+          detail += '\n  ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条'
         }
+        showToast('该工序有关联数据，无法删除：' + detail, 'error')
+        return
       }
-    } catch(e) {}
-    if (!confirm('确定删除工序 "' + p.process_name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
+    } catch(e) { showToast(e.message || '影响检查失败', 'error'); return }
+    if (!confirm('确定删除工序 "' + p.process_name + '" 吗？\n此操作不可恢复！')) return
     try {
       await api.deleteProcess(p.id)
       showToast('删除成功')

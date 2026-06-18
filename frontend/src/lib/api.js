@@ -113,6 +113,7 @@ export const api = {
   createUser:       (data)   => request('POST', '/api/users', data),
   updateUser:       (id,data)=> request('PUT',  '/api/users/' + id, data),
   deleteUser:       (id)     => request('DELETE', '/api/users/' + id),
+  permanentDeleteUser: (id)     => request('DELETE', '/api/users/' + id + '/permanent'),
   resetPassword:    (id,data)=> request('POST', '/api/users/' + id + '/reset-password', data),
   
   // ========== 工序 ==========
@@ -126,19 +127,12 @@ export const api = {
   createProcessRoute:(data)  => request('POST', '/api/process-routes', data),
   updateProcessRoute:(id,data)=>request('PUT', '/api/process-routes/' + id, data),
   deleteProcessRoute:(id)    => request('DELETE', '/api/process-routes/' + id),
-  applyProcessRoute: (id)    => request('POST', '/api/process-routes/' + id + '/apply'),
+  applyProcessRoute: (id, orderId) => request("POST", "/api/process-routes/" + id + "/apply", { order_id: orderId }),
   
   // ========== 工价 ==========
-  listProcessPrices:()       => request('GET', '/api/process-prices'),
-  createProcessPrice:(data)  => request('POST', '/api/process-prices', data),
-  updateProcessPrice:(id,data)=>request('PUT', '/api/process-prices/' + id, data),
-  deleteProcessPrice:(id)    => request('DELETE', '/api/process-prices/' + id),
   // 产品路线工价（新）
   getRoutePricing: (productId)    => request('GET', '/api/products/' + productId + '/route-pricing'),
   saveRoutePricing: (productId, data) => request('POST', '/api/products/' + productId + '/route-pricing', data),
-  copyPrices: (data)              => request('POST', '/api/process-prices/copy', data),
-  getDefaultPrices: (category)    => request('GET', '/api/process-prices/defaults' + (category ? '?category=' + encodeURIComponent(category) : '')),
-  saveDefaultPrices: (data)       => request('POST', '/api/process-prices/defaults', data),
   
   // 路线级工价（v4）
   getRoutePrices: (params)      => request('GET', '/api/route-prices' + buildQuery(params)),

@@ -215,6 +215,18 @@ export function useUser() {
     }
   }
 
+  async function purgeUser(uid, name) {
+    if (!confirm('确定彻底删除员工 "' + name + '" 吗？\n\n此操作不可恢复！')) return
+    if (!confirm('再次确认：这将从数据库中永久移除该员工')) return
+    try {
+      await api.permanentDeleteUser(uid)
+      showToast('已彻底删除')
+      await load()
+    } catch(e) {
+      showToast(e.message || '彻底删除失败', 'error')
+    }
+  }
+
   async function resetPwd(u) {
     const pw = prompt('请输入新密码（留空则随机生成）：', '')
     if (!pw) return
@@ -246,7 +258,7 @@ export function useUser() {
     processes, processDropdownOpen, processSearch, selectedProcessIds, filteredProcessList, selectedProcessNames, onProcessChange, dropdownStyle, toggleProcessDropdown,
     page, total, pageSize,
     getPositionName, positionMap,
-    saving, pwResult, openAdd, openEdit, save, del, resetPwd, unlock, load, searchAndLoad,
+    saving, pwResult, openAdd, openEdit, save, del, purgeUser, resetPwd, unlock, load, searchAndLoad,
     prevPage, nextPage
   }
   return _instance

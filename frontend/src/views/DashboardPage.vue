@@ -52,9 +52,9 @@
           <div class="hs-val" :style="{color: (stats?.pending_approvals||0) > 0 ? 'var(--danger)' : ''}">{{ stats?.pending_approvals || 0 }}</div>
           <div class="hs-label">待审批</div>
         </div>
-        <div v-if="stats?.low_stock?.length" class="hs-card hs-danger" @click="navigate('inventory')" style="border: 2px solid var(--danger); animation: hsPulse 2s infinite;">
+        <div class="hs-card" @click="navigate('inventory')" :class="(stats?.low_stock?.length||0) > 0 ? 'hs-danger' : 'hs-success'" :style="(stats?.low_stock?.length||0) > 0 ? 'border: 2px solid var(--danger); animation: hsPulse 2s infinite;' : 'border: 2px solid var(--success);'">
           <div class="hs-icon">📦</div>
-          <div class="hs-val" style="color:var(--danger)">{{ stats.low_stock.length }}</div>
+          <div class="hs-val" :style="{color: (stats?.low_stock?.length||0) > 0 ? 'var(--danger)' : 'var(--success)'}">{{ stats?.low_stock?.length || 0 }}</div>
           <div class="hs-label">低库存预警</div>
         </div>
       </div>
@@ -80,31 +80,6 @@
           <div class="ss-icon">📝</div>
           <div class="ss-val">{{ stats?.today_rework || 0 }}</div>
           <div class="ss-label">今日返工</div>
-        </div>
-      </div>
-
-      <!-- 登录安全卡片 -->
-      <div v-if="security" class="section-title dash-security-title">🛡️ 登录安全</div>
-      <div v-if="security" class="sec-stats sec-stats-4col">
-        <div class="ss-card" :class="{ 'ss-card-alert': security.locked_users > 0 }" @click="navigate('users')">
-          <div class="ss-icon">{{ security.locked_users > 0 ? '🔒' : '🟢' }}</div>
-          <div class="ss-val" :class="{ 'ss-val-danger': security.locked_users > 0 }">{{ security.locked_users }}</div>
-          <div class="ss-label">锁定账户</div>
-        </div>
-        <div class="ss-card" :class="{ 'ss-card-warn': security.today_failed_logins > 10 }">
-          <div class="ss-icon">⚠️</div>
-          <div class="ss-val" :class="{ 'ss-val-warning': security.today_failed_logins > 10 }">{{ security.today_failed_logins }}</div>
-          <div class="ss-label">今日失败登录</div>
-        </div>
-        <div class="ss-card">
-          <div class="ss-icon">✅</div>
-          <div class="ss-val">{{ security.today_success_logins }}</div>
-          <div class="ss-label">今日成功登录</div>
-        </div>
-        <div class="ss-card" :class="{ 'ss-card-alert': security.suspicious_ips > 0 }">
-          <div class="ss-icon">{{ security.suspicious_ips > 0 ? '🌍' : '🏠' }}</div>
-          <div class="ss-val" :class="{ 'ss-val-danger': security.suspicious_ips > 0 }">{{ security.suspicious_ips }}</div>
-          <div class="ss-label">新IP登录</div>
         </div>
       </div>
 
@@ -140,6 +115,31 @@
         </div>
       </div>
       
+      <!-- 登录安全卡片 -->
+      <div v-if="security" class="section-title dash-security-title">🛡️ 登录安全</div>
+      <div v-if="security" class="sec-stats sec-stats-4col">
+        <div class="ss-card" :class="{ 'ss-card-alert': security.locked_users > 0 }" @click="navigate('users')">
+          <div class="ss-icon">{{ security.locked_users > 0 ? '🔒' : '🟢' }}</div>
+          <div class="ss-val" :class="{ 'ss-val-danger': security.locked_users > 0 }">{{ security.locked_users }}</div>
+          <div class="ss-label">锁定账户</div>
+        </div>
+        <div class="ss-card" :class="{ 'ss-card-warn': security.today_failed_logins > 10 }">
+          <div class="ss-icon">⚠️</div>
+          <div class="ss-val" :class="{ 'ss-val-warning': security.today_failed_logins > 10 }">{{ security.today_failed_logins }}</div>
+          <div class="ss-label">今日失败登录</div>
+        </div>
+        <div class="ss-card">
+          <div class="ss-icon">✅</div>
+          <div class="ss-val">{{ security.today_success_logins }}</div>
+          <div class="ss-label">今日成功登录</div>
+        </div>
+        <div class="ss-card" :class="{ 'ss-card-alert': security.suspicious_ips > 0 }">
+          <div class="ss-icon">{{ security.suspicious_ips > 0 ? '🌍' : '🏠' }}</div>
+          <div class="ss-val" :class="{ 'ss-val-danger': security.suspicious_ips > 0 }">{{ security.suspicious_ips }}</div>
+          <div class="ss-label">新IP登录</div>
+        </div>
+      </div>
+
       <!-- 最近报工 -->
       <div class="section-title">📝 最近报工记录</div>
       <table class="data-table" v-if="records.length">
@@ -171,7 +171,6 @@ import { auth, getBoardToken } from '@/lib/auth.js'
 export default {
   setup() {
     const stats = ref(null)
-    const approvalTimer = ref(null)
     const security = ref(null)
     const records = ref([])
     const companyName = ref('')
@@ -227,7 +226,7 @@ export default {
       if (_clock) clearInterval(_clock)
     })
     
-    function goAction(q) { if (q.external) { const tok = getBoardToken(); window.open(q.external + (tok ? '?token=' + tok : ''), '_blank'); } else { navigate(q.page); } }
+    function goAction(q) { if (q.external) { getBoardToken(); window.open(q.external, '_blank'); } else { navigate(q.page); } }
     return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }

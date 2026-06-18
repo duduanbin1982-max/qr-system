@@ -10,7 +10,7 @@ import tempfile  # for import_products temp file
 from io import BytesIO  # for attachment download
 from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
-from modules.db import get_page_size
+from modules.db import get_page_size, get_db
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
@@ -53,7 +53,8 @@ def list_products():
     category = request.args.get('category', '').strip()
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-    return jsonify(ProductService.list_products(keyword, category, page, limit))
+    deleted = request.args.get('deleted', '0').strip() in ('1', 'true', 'True')
+    return jsonify(ProductService.list_products(keyword, category, page, limit, deleted=deleted))
 
 
 @app.route('/api/products/search', methods=['GET'])
@@ -466,3 +467,79 @@ def delete_product_attachment(attachment_id):
         return jsonify({'error': str(e)}), 404
     _safe_audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
     return jsonify({'message': '删除成功'})
+
+# ============================================================
+# Product BOM (物料配方)
+# ============================================================
+
+@app.route("/api/products/<int:product_id>/bom", methods=["GET"])
+@check_auth
+@check_permission("products:view")
+def list_product_bom(product_id):
+    """获取产品物料配方"""
+    db = get_db()
+    rows = db.execute("""
+        SELECT pb.*, m.name as material_name, m.spec as material_spec, m.material_type,
+               p.name as process_name
+        FROM product_bom pb
+        LEFT JOIN materials m ON pb.material_id = m.id
+        LEFT JOIN processes p ON pb.process_id = p.id
+        WHERE pb.product_id = ?
+        ORDER BY pb.id
+    """, (product_id,)).fetchall()
+    return jsonify({"bom": [dict(r) for r in rows]})
+
+
+@app.route("/api/products/<int:product_id>/bom", methods=["POST"])
+@check_auth
+@check_permission("products:edit")
+def add_product_bom(product_id):
+    """添加物料配方项"""
+    data = request.get_json(silent=True) or {}
+    material_id = data.get("material_id")
+    quantity = data.get("quantity_per_unit", data.get("quantity", 1))
+    process_id = data.get("process_id") or None
+
+    if not material_id:
+        return jsonify({"error": "请选择物料"}), 400
+
+    db = get_db()
+    # Check product exists
+    prod = db.execute("SELECT id FROM products WHERE id = ? AND deleted_at IS NULL", (product_id,)).fetchone()
+    if not prod:
+        return jsonify({"error": "产品不存在"}), 404
+
+    try:
+        db.execute(
+            "INSERT INTO product_bom (product_id, material_id, quantity_per_unit, process_id) VALUES (?,?,?,?)",
+            (product_id, material_id, float(quantity), process_id)
+        )
+        db.commit()
+        new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = db.execute("""
+            SELECT pb.*, m.name as material_name, m.spec as material_spec, m.material_type,
+                   p.name as process_name
+            FROM product_bom pb
+            LEFT JOIN materials m ON pb.material_id = m.id
+            LEFT JOIN processes p ON pb.process_id = p.id
+            WHERE pb.id = ?
+        """, (new_id,)).fetchone()
+        return jsonify({"bom": dict(row)}), 201
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"error": "该物料+工序组合已存在"}), 409
+        raise
+
+
+@app.route("/api/products/<int:product_id>/bom/<int:bom_id>", methods=["DELETE"])
+@check_auth
+@check_permission("products:edit")
+def delete_product_bom(product_id, bom_id):
+    """删除物料配方项"""
+    db = get_db()
+    row = db.execute("SELECT id FROM product_bom WHERE id = ? AND product_id = ?", (bom_id, product_id)).fetchone()
+    if not row:
+        return jsonify({"error": "配方项不存在"}), 404
+    db.execute("DELETE FROM product_bom WHERE id = ?", (bom_id,))
+    db.commit()
+    return jsonify({"message": "已删除"})

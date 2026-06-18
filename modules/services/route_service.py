@@ -176,6 +176,12 @@ class ProcessRouteService:
         ).fetchone()
         if used['cnt'] > 0:
             raise ValueError(f'该路线已被 {used["cnt"]} 个订单使用，无法删除')
+        product_count = db.execute(
+            'SELECT COUNT(*) as cnt FROM products WHERE deleted_at IS NULL AND route_id = ?',
+            (rid,)
+        ).fetchone()
+        if product_count['cnt'] > 0:
+            raise ValueError(f'该路线已被 {product_count["cnt"]} 个产品引用，无法删除')
         with BaseService.transaction() as txn:
             txn.execute('DELETE FROM process_route_items WHERE route_id = ?', (rid,))
             txn.execute('DELETE FROM process_routes WHERE id = ?', (rid,))

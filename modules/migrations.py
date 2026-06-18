@@ -99,7 +99,7 @@ def m001_baseline(db):
             status TEXT DEFAULT 'pending',
             current_process_id INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id)
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
         );
 
         CREATE INDEX IF NOT EXISTS idx_product_items_order ON product_items(order_id);
@@ -146,7 +146,7 @@ def m001_baseline(db):
             completed INTEGER DEFAULT 0,
             scrapped INTEGER DEFAULT 0,
             rework INTEGER DEFAULT 0,
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
         );
 
@@ -160,10 +160,15 @@ def m001_baseline(db):
             quantity INTEGER DEFAULT 0,
             remark TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
+
+        CREATE INDEX IF NOT EXISTS idx_wr_user_created ON work_records(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_wr_dedup ON work_records(order_id, process_id, user_id, COALESCE(serial_no, ''));
+        CREATE INDEX IF NOT EXISTS idx_wr_created ON work_records(created_at);
+        CREATE INDEX IF NOT EXISTS idx_wr_user ON work_records(user_id);
 
         CREATE TABLE IF NOT EXISTS scrap_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,7 +178,7 @@ def m001_baseline(db):
             quantity INTEGER DEFAULT 0,
             reason TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -193,7 +198,7 @@ def m001_baseline(db):
             notes TEXT DEFAULT '',
             inspected_at TEXT DEFAULT (datetime('now','localtime')),
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
             FOREIGN KEY (inspector_id) REFERENCES users(id)
         );
@@ -206,7 +211,7 @@ def m001_baseline(db):
             quantity INTEGER DEFAULT 0,
             reason TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -314,7 +319,7 @@ def m001_baseline(db):
             notes TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (material_id) REFERENCES materials(id),
-            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (process_id) REFERENCES processes(id)
         );
         CREATE INDEX IF NOT EXISTS idx_mc_material ON material_consumptions(material_id);
@@ -442,24 +447,6 @@ def m001_baseline(db):
         );
         CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
 
-        -- 工序单价配置表
-        CREATE TABLE IF NOT EXISTS process_prices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER,
-            process_id INTEGER NOT NULL,
-            unit_price REAL NOT NULL DEFAULT 0,
-            effective_date TEXT DEFAULT '',
-            status TEXT DEFAULT 'active',
-            remark TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            updated_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
-            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_process_prices_product ON process_prices(product_id);
-        CREATE INDEX IF NOT EXISTS idx_process_prices_process ON process_prices(process_id);
-
         -- 产品管理表
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -581,15 +568,6 @@ def m001_baseline(db):
             ).fetchall())
             if not route_processes:
                 continue
-            priced_products = db.execute('''
-                SELECT product_id, group_concat(process_id ORDER BY process_id) as proc_ids
-                FROM process_prices WHERE product_id IS NOT NULL
-                GROUP BY product_id
-            ''').fetchall()
-            for (pid, proc_ids_str) in priced_products:
-                proc_set = set(int(x) for x in proc_ids_str.split(',') if x)
-                if proc_set and proc_set.issubset(route_processes) and len(proc_set) >= len(route_processes) * 0.5:
-                    db.execute('UPDATE products SET route_id = ? WHERE id = ? AND route_id IS NULL', (rid, pid))
     except Exception as e:
         pass
 
@@ -674,7 +652,7 @@ def m001_baseline(db):
             created_at TEXT DEFAULT (datetime('now','localtime')),
             updated_at TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (route_id) REFERENCES process_routes(id) ON DELETE CASCADE,
-            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
+            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE RESTRICT,
             UNIQUE(route_id, process_id)
         )
     ''')

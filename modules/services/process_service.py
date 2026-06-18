@@ -12,7 +12,7 @@ class ProcessService:
     """工序管理业务逻辑。"""
     RELATED_TABLES = [
         'work_records', 'scrap_records', 'rework_records',
-        'quality_inspections', 'process_prices', 'process_route_items',
+        'quality_inspections', 'process_route_items',
         'order_processes', 'position_processes', 'material_consumptions'
     ]
 
@@ -174,7 +174,7 @@ class ProcessService:
 
     @staticmethod
     def delete_process(pid):
-        """Delete process with impact audit and full cascade cleanup."""
+        """Delete process with impact audit. Blocks deletion if critical data exists."""
         db = BaseService.db()
         existing = db.execute(
             'SELECT id, name FROM processes WHERE id = ?', (pid,)
@@ -190,9 +190,15 @@ class ProcessService:
         rows = db.execute(union_sql, [pid] * len(related_tables)).fetchall()
         impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}
 
+        if impact:
+            critical_tables = ['work_records', 'order_processes', 'process_route_items', 'quality_inspections']
+            blockers = {k: v for k, v in impact.items() if k in critical_tables}
+            if blockers:
+                details = ', '.join(f'{k}: {v}' for k, v in blockers.items())
+                raise ValueError(f'该工序有关联数据无法删除：{details}')
+            raise ValueError(f'该工序有 {sum(impact.values())} 条关联数据，无法直接删除')
+
         with BaseService.transaction() as txn:
-            for tbl in related_tables:
-                txn.execute(f'DELETE FROM {tbl} WHERE process_id = ?', (pid,))
             txn.execute('DELETE FROM processes WHERE id = ?', (pid,))
 
-        return {'name': existing['name'], 'impact': impact}
+        return {'name': existing['name'], 'impact': {}}

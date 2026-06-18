@@ -81,7 +81,7 @@
 
     <!-- ====== 回收站弹窗 ====== -->
     <div class="modal-overlay" v-if="showTrash">
-      <div class="modal" style="max-width:1000px;max-height:85vh;overflow-y:auto">
+      <div class="modal" style="width:90vw;max-width:1100px;max-height:85vh;overflow-y:auto">
         <div class="modal-header">
           <h3>🗑️ 回收站（{{ trashedProducts.length }} 条）</h3>
           <span class="modal-close" @click="showTrash=false">&times;</span>

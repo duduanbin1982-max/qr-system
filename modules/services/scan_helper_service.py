@@ -218,6 +218,15 @@ class ScanHelperService:
             "AND user_id = ? AND type = 'normal' AND status != 'rejected'", (order_id, process_id, user_id)
         ).fetchone()
 
+
+    @staticmethod
+    def check_serial_duplicate_in_order(order_id, serial_no, user_id, db=None):
+        """Check if a serial_no has been reported by this user on ANY process in this order."""
+        d = ScanHelperService._db(db)
+        return d.execute(
+            "SELECT id FROM work_records WHERE order_id = ? AND serial_no = ? AND user_id = ? LIMIT 1",
+            (order_id, serial_no, user_id)
+        ).fetchone() is not None
     @staticmethod
     def check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=None):
         d = ScanHelperService._db(db)

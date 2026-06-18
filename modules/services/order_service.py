@@ -588,13 +588,13 @@ class OrderService:
         existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
-        if not existing.get('deleted_at'):
+        if not existing['deleted_at']:
             raise ValueError('只能彻底删除回收站中的订单')
         with BaseService.transaction() as txn:
-            for tbl in ["order_attachments", "order_notes", "order_remark_history",
+            for tbl in ["order_attachments", "order_remark_history",
                         "order_materials", "order_processes", "product_items",
                         "work_records", "scrap_records", "rework_records",
-                        "approval_records", "quality_inspections"]:
+                        "quality_inspections"]:
                 txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
             txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
-        return existing.get('order_no', "")
+        return existing['order_no'] or ""

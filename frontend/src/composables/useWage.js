@@ -58,12 +58,13 @@ const activeTab = ref("piece")
       if (dateFrom.value) params.date_from = dateFrom.value
       if (dateTo.value) params.date_to = dateTo.value
       if (includeRework.value) params.include_rework = "1"
+      if (hideZero.value) params.hide_zero = "1"
       params.page = page.value
       params.limit = limit.value
       try {
         const r = await api.listWages(params)
         const raw = r.wages || []
-        wages.value = raw.map(w => ({ ...w, dailyGroups: buildDailyGroups(w.details) }))
+        wages.value = raw.map(w => ({ ...w }))
         total.value = r.total || 0
       } catch (e) { showToast("加载失败", "error") }
       finally { loading.value = false }
@@ -146,8 +147,12 @@ const activeTab = ref("piece")
 
     // --- monthly state ---
     const monthlyData = ref({ summary: [], grand_total_quantity: 0, grand_total_wage: 0 })
-    const monthlyLoading = ref(false)
+    const monthlyLoading = ref(true)
     const monthlyMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
+    const monthlyPage = ref(1)
+    const monthlyLimit = ref(50)
+    const monthlyTotal = ref(0)
+    const monthlyTotalPages = computed(() => Math.max(1, Math.ceil(monthlyTotal.value / monthlyLimit.value)))
 
     function monthlyPercent(wage) {
       if (!monthlyData.value.grand_total_wage) return 0
@@ -156,11 +161,14 @@ const activeTab = ref("piece")
     async function loadMonthly() {
       monthlyLoading.value = true
       try {
-        const r = await api.get("/api/wages/monthly-summary?year_month="+monthlyMonth.value)
-        monthlyData.value = r
+        const r = await api.get("/api/wages/monthly-summary?year_month="+monthlyMonth.value+"&page="+monthlyPage.value+"&limit="+monthlyLimit.value)
+        monthlyData.value = r; monthlyTotal.value = r.total || 0
       } catch(e) { showToast("加载月度汇总失败","error") }
       finally { monthlyLoading.value = false }
     }
+    function monthlyPrevPage(){if(monthlyPage.value>1){monthlyPage.value--;loadMonthly()}}
+    function monthlyNextPage(){if(monthlyPage.value<monthlyTotalPages.value){monthlyPage.value++;loadMonthly()}}
+
     function exportMonthlyCSV() {
       const rows = [["排名","姓名","工号","总件数","总工资","占比"]]
       for (let i=0;i<monthlyData.value.summary.length;i++) {
@@ -177,7 +185,7 @@ const activeTab = ref("piece")
 
     // --- process state ---
     const processData = ref({ summary: [], grand_total_wage: 0 })
-    const processLoading = ref(false)
+    const processLoading = ref(true)
     const processMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
 
     function processColor(i) { return PROCESS_COLORS[i % PROCESS_COLORS.length] }
@@ -201,26 +209,27 @@ const activeTab = ref("piece")
     // --- compare state ---
     const compareData = ref([])
     const compareLoading = ref(false)
-    const compareMonthA = ref("")
-    const compareMonthB = ref("")
+    const compareMonthA = ref(new Date(new Date().getFullYear(),new Date().getMonth()-1,1).toISOString().slice(0,7))
+    const compareMonthB = ref(new Date().toISOString().slice(0,7))
 
     async function loadCompare() {
       if (!compareMonthA.value || !compareMonthB.value) { showToast("请选择两个月份","error"); return }
       compareLoading.value = true
       try {
         const [rA,rB] = await Promise.all([
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthA.value),
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthB.value)
+          api.get("/api/wages/monthly-summary?year_month="+compareMonthA.value+"&page=1&limit=500"),
+          api.get("/api/wages/monthly-summary?year_month="+compareMonthB.value+"&page=1&limit=500")
         ])
-        const mapA = {}; for (const s of (rA.summary||[])) mapA[s.employee_name] = s.total_wage||0
-        const mapB = {}; for (const s of (rB.summary||[])) mapB[s.employee_name] = s.total_wage||0
-        const allNames = new Set([...Object.keys(mapA), ...Object.keys(mapB)])
+        const mapA = {}; const mapB = {}; const nameMap = {}
+        for (const s of (rA.summary||[])) { const k = s.employee_no || s.employee_name; mapA[k] = s.total_wage||0; nameMap[k] = s.employee_name }
+        for (const s of (rB.summary||[])) { const k = s.employee_no || s.employee_name; mapB[k] = s.total_wage||0; nameMap[k] = s.employee_name }
+        const allKeys = new Set([...Object.keys(mapA), ...Object.keys(mapB)])
         const list = []
-        for (const name of allNames) {
-          const wageA = mapA[name]||0; const wageB = mapB[name]||0
+        for (const key of allKeys) {
+          const wageA = mapA[key]||0; const wageB = mapB[key]||0
           const change = wageB - wageA
           const changePct = wageA ? ((change/wageA)*100).toFixed(1) : (wageB>0 ? 100 : 0)
-          list.push({ employee_name: name, wageA, wageB, change, changePct: Number(changePct) })
+          list.push({ employee_name: nameMap[key] || key, wageA, wageB, change, changePct: Number(changePct) })
         }
         list.sort((a,b)=>Math.abs(b.change)-Math.abs(a.change))
         compareData.value = list
@@ -231,7 +240,7 @@ const activeTab = ref("piece")
 
     // --- adjustment state ---
     const adjustments = ref([])
-    const adjLoading = ref(false)
+    const adjLoading = ref(true)
     const adjMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
     const showAdjForm = ref(false)
     const adjForm = ref({ user_id: null, type: "bonus", amount: 0, reason: "" })
@@ -239,7 +248,7 @@ const activeTab = ref("piece")
     const adjNet = computed(() => adjustments.value.reduce((s,a) => s + (a.type=="deduction"?-a.amount:a.amount), 0))
 
     async function loadEmployees() {
-      try { const r = await api.listUsers(); employeeList.value = r.users || [] }
+      try { const r = await api.listUsers(); employeeList.value = (r.users || []).filter(u => (u.roles && u.roles.some(r => r.code === "worker"))) }
       catch(e) { /* silent */ }
     }
     async function loadAdjustments() {
@@ -249,7 +258,7 @@ const activeTab = ref("piece")
       finally { adjLoading.value = false }
     }
     async function saveAdjustment() {
-      if (!adjForm.value.user_id || !adjForm.value.amount) { showToast("请填写员工和金额","error"); return }
+      if (!adjForm.value.user_id || !adjForm.value.amount || adjForm.value.amount <= 0) { showToast("请填写员工和金额","error"); return }
       try {
         await api.post("/api/wages/adjustments", { ...adjForm.value, year_month: adjMonth.value })
         showToast("保存成功")
@@ -267,7 +276,7 @@ const activeTab = ref("piece")
 
     // --- trend state ---
     const trendData = ref([])
-    const trendLoading = ref(false)
+    const trendLoading = ref(true)
     const trendMonths = ref(6)
     const trendChartRef = ref(null)
     let trendChart = null
@@ -276,7 +285,7 @@ const activeTab = ref("piece")
     function trendTotalQty() { return trendData.value.reduce((s,d) => s + (d.total_quantity||0), 0) }
     function trendAvg() {
       if (!trendData.value.length) return 0
-      return fmtMoney(trendTotal() / trendData.value.length)
+      return (trendTotal() / trendData.value.length).toFixed(2)
     }
 
     async function loadTrends() {
@@ -320,7 +329,7 @@ const activeTab = ref("piece")
 
     // --- position state ---
     const posData = ref({ summary: [], grand_total_wage: 0 })
-    const posLoading = ref(false)
+    const posLoading = ref(true)
     const posMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
 
     function posPercent(wage) {
@@ -336,7 +345,7 @@ const activeTab = ref("piece")
 
     // --- prediction state ---
     const predData = ref({})
-    const predLoading = ref(false)
+    const predLoading = ref(true)
     const predMonths = ref(6)
 
     async function loadPrediction() {
@@ -357,14 +366,14 @@ const activeTab = ref("piece")
     }
 
     if (!_instance) { onMounted(() => { load(); loadSnapStatus(); _refreshTimer = setInterval(load, 60000) }) }
-    if (!_instance) { onBeforeUnmount(() => { if (_refreshTimer) clearInterval(_refreshTimer) }) }
+    if (!_instance) { onBeforeUnmount(() => { if (_refreshTimer) clearInterval(_refreshTimer); _instance = null }) }
 
     _instance = {
       activeTab, tabs, switchTab,
       wages, loading, dateFrom, dateTo, expandedId, includeRework, hideZero, page, limit, total, totalPages,
       fmtMoney, fmtDate, load, toggle, filteredWages, grandTotal, grandQty, exportCSV, prevPage, nextPage,
       saveSnapshot, lockSnapshot, confirmSnapshot, printPayslip, showLockDialog, lockNotes, snapStatus,
-      monthlyData, monthlyLoading, monthlyMonth, monthlyPercent, loadMonthly, exportMonthlyCSV,
+      monthlyData, monthlyLoading, monthlyMonth, monthlyPage, monthlyLimit, monthlyTotal, monthlyTotalPages, monthlyPercent, loadMonthly, exportMonthlyCSV, monthlyPrevPage, monthlyNextPage,
       processData, processLoading, processMonth, processColor, processPercent, barHeight, loadProcess,
       compareData, compareLoading, compareMonthA, compareMonthB, loadCompare,
       adjustments, adjLoading, adjMonth, showAdjForm, adjForm, employeeList, adjNet, loadAdjustments, saveAdjustment, deleteAdjustment,

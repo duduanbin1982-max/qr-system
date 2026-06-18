@@ -289,6 +289,22 @@ def mobile_report():
         if not op_check:
             return jsonify({"error": "该工序不在订单工艺路线中"}), 400
 
+        # ===== 跨工序防重复（序列号在此订单整体已报工） =====
+        if serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
+            return jsonify({"error": f"序列号 {serial_no} 在此订单已报工，不可重复扫码！"}), 409
+
+        # ===== 防重复报工 =====
+        if report_type == "normal":
+            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
+            if dup:
+                msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
+                return jsonify({"error": msg}), 409
+        elif report_type in ("scrap", "rework"):
+            dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
+            if dup:
+                return jsonify({"error": "请勿短时间重复提交"}), 409
+
+        # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
             return jsonify({"error": "您无权对此工序报工"}), 403
@@ -309,17 +325,6 @@ def mobile_report():
             order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
         if err:
             return jsonify(err), code
-
-        # ===== 防重复报工 =====
-        if report_type == "normal":
-            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
-            if dup:
-                msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
-                return jsonify({"error": msg}), 409
-        elif report_type in ("scrap", "rework"):
-            dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
-            if dup:
-                return jsonify({"error": "请勿短时间重复提交"}), 409
 
         # 审批检查
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
@@ -385,6 +390,17 @@ def work_report():
         if not op_check:
             return jsonify({"error": "该工序不在订单工艺路线中"}), 400
 
+
+        # ===== 防重复报工 =====
+        if report_type == "normal":
+            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
+            if dup:
+                msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
+                return jsonify({"error": msg}), 409
+        elif report_type in ("scrap", "rework"):
+            dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
+            if dup:
+                return jsonify({"error": "请勿短旴间重复提交"}), 409
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
@@ -408,17 +424,6 @@ def work_report():
 
         # ===== 审批检查 =====
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
-
-        # ===== 防重复报工 =====
-        if report_type == "normal":
-            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
-            if dup:
-                msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
-                return jsonify({"error": msg}), 409
-        elif report_type in ("scrap", "rework"):
-            dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
-            if dup:
-                return jsonify({"error": "请勿短时间重复提交"}), 409
 
         # Serial number: validate item's current process matches
         if serial_no and report_type == "normal":

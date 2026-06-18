@@ -68,7 +68,7 @@ class OrderRepository:
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
             WHERE {where_sql}
-            ORDER BY o.updated_at DESC, o.id DESC
+            ORDER BY o.created_at DESC, o.id DESC
             LIMIT ? OFFSET ?
         ''', params + [limit, offset]).fetchall()
         return rows, total

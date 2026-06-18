@@ -50,6 +50,7 @@
                     <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(u)" title="编辑">✏️</span>
                     <span v-if="canEdit" class="o-abtn" style="color:var(--warning);cursor:pointer" @click="resetPwd(u)" title="重置密码">🔑</span>
                     <span v-if="canDelete" class="o-abtn o-del" @click="del(u)" title="删除">🗑️</span>
+                    <span v-if="canDelete" class="o-abtn" style="color:var(--danger);cursor:pointer;font-size:12px" @click="purgeUser(u.id, u.name)" title="彻底删除">☠️</span>
                   </div>
                 </td>
               </tr>

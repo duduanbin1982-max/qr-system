@@ -89,10 +89,7 @@ class ProductService:
             model = product_code
 
         with BaseService.transaction() as db:
-            existing = ProductRepository.find_by_code(product_code, db=db)
-            if existing:
-                if existing['deleted_at']:
-                    raise ValueError(f'产品编码重复：{product_code}，该产品已被删除，请先联系管理员恢复')
+            if ProductRepository.exists_by_code(product_code, db=db):
                 raise ValueError(f'产品编码 {product_code} 已存在')
 
             insert_data = {
@@ -152,7 +149,7 @@ class ProductService:
 
         # 检查编码是否会重复
         key_fields = {'product_name', 'model', 'spec', 'upper_opening',
-                      'plate_thickness', 'style'}
+                      'lower_opening', 'plate_thickness', 'style'}
         new_code = None
         if key_fields & set(data.keys()):
             nm = data.get('product_name', prod['product_name'])
@@ -161,8 +158,8 @@ class ProductService:
             up = data.get('upper_opening', prod['upper_opening'])
             th = data.get('plate_thickness', prod['plate_thickness'])
             st = data.get('style', prod['style'] or '')
-            lo = data.get('lower_opening', prod.get('lower_opening', ''))
-            cat = data.get('category', prod.get('category', '结构件'))
+            lo = data.get('lower_opening', dict(prod).get('lower_opening', ''))
+            cat = data.get('category', dict(prod).get('category', '结构件'))
             new_code = generate_product_code(nm, md, sp, up, th, st, lower_opening=lo, category=cat)
 
         with BaseService.transaction() as txn:

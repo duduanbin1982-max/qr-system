@@ -135,7 +135,13 @@ def delete_process(pid):
     try:
         result = ProcessService.delete_process(pid)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+        msg = str(e)
+        if '不存在' in msg:
+            return jsonify({'error': msg}), 404
+        elif '关联数据' in msg:
+            return jsonify({'error': msg}), 409
+        else:
+            return jsonify({'error': msg}), 400
     try:
         audit_log('delete_process', 'process', pid,
                   f'name={result.get("name","")} impact={result.get("impact",{})}')

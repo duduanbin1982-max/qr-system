@@ -3,6 +3,7 @@ import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { handleApiError } from '@/lib/api.js'
+import { useQrcode } from './useQrcode.js'
 import { auth, can } from '@/lib/auth.js'
 
 export function useOrder() {
@@ -29,16 +30,26 @@ const orders = ref([])
     const modalEdit = ref(false)
     const modalId = ref(null)
 
-    // 二维码打印
-    const showQrPrint = ref(false)
-    const qrPrintOrder = ref(null)
-    const qrMode = ref('order')
-    const qrCodes = ref([])
-    const qrPrintLoading = ref(false)
-    const qrPrintCopies = ref(1)
-    const qrPrintSize = ref('small')
+    const qr = useQrcode()
 
     // ===== 申请返工 =====
+
+    // 申请返工
+    function openRework(o) { reworkOrder.value = o; reworkForm.value = { process_id: "", quantity: 1, reason: "" }; showReworkModal.value = true }
+    async function submitRework() {
+      const o = reworkOrder.value
+      const f = reworkForm.value
+      if (!f.process_id) { showToast("请选择工序", "error"); return }
+      if (!f.quantity || f.quantity < 1) { showToast("数量必须大于0", "error"); return }
+      if (!f.reason.trim()) { showToast("请输入返工原因", "error"); return }
+      try {
+        await api.post("/api/scan", { order_id: o.id, process_id: parseInt(f.process_id), quantity: parseInt(f.quantity), report_type: "rework", remark: f.reason })
+        showToast("返工申请已提交")
+        showReworkModal.value = false
+        await load()
+      } catch(e) { showToast(e.message || "提交失败", "error") }
+    }
+
     const showReworkModal = ref(false)
     const reworkOrder = ref(null)
     const reworkForm = ref({ process_id: '', quantity: 1, reason: '' })
@@ -98,12 +109,12 @@ const orders = ref([])
     const productCursor = ref(-1)
 
     function onProductSearchFocus() { showProductDropdown.value = true; productCursor.value = -1 }
-        let _searchTimer = null
+        let _productSearchTimer = null
     function onProductSearchInput() {
       const q = (productSearch.value || '').trim().toLowerCase()
       if (!q) { productSearchResults.value = []; productCursor.value = -1; return }
-      clearTimeout(_searchTimer)
-      _searchTimer = setTimeout(() => {
+      clearTimeout(_productSearchTimer)
+      _productSearchTimer = setTimeout(() => {
         productSearchResults.value = products.value.filter(p =>
           (p.product_code || '').toLowerCase().includes(q) ||
           (p.product_name || '').toLowerCase().includes(q)
@@ -289,6 +300,15 @@ const orders = ref([])
         loading.value = false
       }
     }
+
+
+    let _searchTimer = null
+    function searchAndLoad() { page.value = 1; load() }
+    function debouncedSearch() {
+      if (_searchTimer) clearTimeout(_searchTimer)
+      _searchTimer = setTimeout(() => { page.value = 1; load() }, 300)
+    }
+    function customerChange() { page.value = 1; load() }
 
     async function loadDropdownData() {
       try { const d = await api.listProductionLines(); productionLines.value = d.lines || [] } catch(e) { productionLines.value = [] }

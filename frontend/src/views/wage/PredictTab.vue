@@ -5,7 +5,7 @@
         <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 20px">
           <h3 style="font-size:var(--text-lg);font-weight:700;margin:0">🔮 工资预测</h3>
           <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto">
-            <select v-model="predMonths" class="form-input" style="width:120px;font-size:var(--text-sm)" @change="loadPrediction">
+            <select v-model="predMonths" class="form-input" style="width:120px;font-size:var(--text-sm)" >
               <option :value="3">近3月</option>
               <option :value="6">近6月</option>
               <option :value="12">近12月</option>
