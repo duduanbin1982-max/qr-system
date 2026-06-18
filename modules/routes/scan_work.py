@@ -317,8 +317,13 @@ def mobile_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
+            # 找到订单当前应报工的前置工序
+            prev_procs = ScanHelperService.get_prev_incomplete_processes(order_id, 999)
+            if prev_procs:
+                hint = "、".join([p["process_name"] for p in prev_procs])
+                return jsonify({"error": f"请先完成前置工序：{hint}"}), 400
             proc_name = ScanHelperService.get_process_name(process_id)
-            return jsonify({"error": f"工序「{proc_name}」不在您的报工权限范围内"}), 403
+            return jsonify({"error": f"请先完成前置工序"}), 403
 
         # ===== 工序存在性校验（获取完整信息） =====
         current_op = ScanHelperService.get_order_process(order_id, process_id)
@@ -419,8 +424,13 @@ def work_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
+            # 找到订单当前应报工的前置工序
+            prev_procs = ScanHelperService.get_prev_incomplete_processes(order_id, 999)
+            if prev_procs:
+                hint = "、".join([p["process_name"] for p in prev_procs])
+                return jsonify({"error": f"请先完成前置工序：{hint}"}), 400
             proc_name = ScanHelperService.get_process_name(process_id)
-            return jsonify({"error": f"工序「{proc_name}」不在您的报工权限范围内"}), 403
+            return jsonify({"error": f"请先完成前置工序"}), 403
 
         current_op = ScanHelperService.get_order_process(order_id, process_id)
         if order["route_id"] and not current_op:
