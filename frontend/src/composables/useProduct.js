@@ -176,7 +176,7 @@ const products = ref([])
       modalId.value = null
       currentEditProductId.value = null
       productAttachments.value = []
-      bomForm.value = { material_id: '', quantity: 1, process_id: 10730 }
+      bomForm.value = { material_id: '', quantity: parseFloat(form.value.weight) || 1, process_id: 10730 }
       showModal.value = true
     }
 
@@ -203,7 +203,7 @@ const products = ref([])
       loadProcessOptions()
       loadProductAttachments(p.id)
       loadProductBom(p.id)
-      bomForm.value.quantity = 1
+      bomForm.value.quantity = parseFloat(form.value.weight) || 1
       showModal.value = true
     }
 
@@ -340,7 +340,7 @@ const products = ref([])
           quantity_per_unit: parseFloat(bomForm.value.quantity) || 1,
           process_id: bomForm.value.process_id || null
         })
-        bomForm.value = { material_id: '', quantity: 1, process_id: 10730 }
+        bomForm.value = { material_id: '', quantity: parseFloat(form.value.weight) || 1, process_id: 10730 }
         showToast('BOM added')
         await loadProductBom(currentEditProductId.value)
       } catch(e) { showToast(e.message || 'Failed', 'error') }

@@ -235,7 +235,7 @@
             <div v-if="productBom.length" style="margin-bottom:8px">
               <div v-for="bom in productBom" :key="bom.id" style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
                 <span style="flex:1">{{ bom.material_name }} {{ bom.material_spec || '' }}</span>
-                <span style="color:var(--text-muted);white-space:nowrap">x{{ bom.quantity_per_unit }}/件</span>
+                <span style="color:var(--text-muted);white-space:nowrap">x{{ bom.quantity_per_unit }}KG</span>
                 <span v-if="bom.process_name" style="color:var(--primary);white-space:nowrap">@{{ bom.process_name }}</span>
                 <button @click="removeBomItem(bom.id)" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
               </div>
@@ -245,7 +245,7 @@
                 <option value="">- 选择物料 -</option>
                 <option v-for="m in materialOptions" :key="m.id" :value="m.id">{{ m.name }} {{ m.spec||'' }} [{{ m.material_type||'' }}]</option>
               </select>
-              <input v-model="bomForm.quantity" type="number" step="0.1" min="0.1" placeholder="用量/件" style="width:70px;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
+              <input v-model="bomForm.quantity" type="number" step="0.1" min="0.1" placeholder="用量(KG)" style="width:70px;padding:4px;border:1px solid var(--border-light);border-radius:4px;font-size:13px">
               <button @click="addBomItem" class="btn btn-sm" style="background:var(--primary);color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap">+ 添加</button>
             </div>
           </div>
