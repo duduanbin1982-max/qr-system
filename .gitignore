@@ -32,3 +32,4 @@ server.log
 data.db
 ssl_backup/
 server.pid
+*.bak-*

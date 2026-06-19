@@ -145,10 +145,22 @@ class OrderRepository:
     @staticmethod
     def soft_delete(order_id, deleted_by, db=None):
         db = db or BaseService.db()
+        now = db.execute("SELECT datetime('now','localtime')").fetchone()[0]
         db.execute(
-            "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, status = 'cancelled' WHERE id = ?",
-            (deleted_by, order_id)
+            "UPDATE orders SET deleted_at = ?, deleted_by = ?, status = 'cancelled' WHERE id = ?",
+            (now, deleted_by, order_id)
         )
+        # Cascade soft-delete to related records
+        db.execute("UPDATE work_records SET status='deleted' WHERE order_id=? AND status!='deleted'", (order_id,))
+        db.execute("UPDATE product_items SET status='deleted' WHERE order_id=? AND status!='deleted'", (order_id,))
+        db.execute("DELETE FROM order_processes WHERE order_id=?", (order_id,))
+        db.execute("UPDATE inventory SET quantity=0, remark='订单已删除' WHERE order_id=?", (order_id,))
+        # Also restore cascade
+    @staticmethod
+    def soft_restore(order_id, db=None):
+        db = db or BaseService.db()
+        db.execute("UPDATE work_records SET status='approved' WHERE order_id=? AND status='deleted'", (order_id,))
+        db.execute("UPDATE product_items SET status='active' WHERE order_id=? AND status='deleted'", (order_id,))
 
     @staticmethod
     def restore(order_id, prev_status, db=None):
