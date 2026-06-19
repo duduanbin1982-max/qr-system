@@ -47,7 +47,7 @@ export default {
       if (!customers.value.length) return
       const data = [['客户','订单数','总数量','已完成','生产中','完成率']]
       customers.value.forEach(c => data.push([c.customer_name,c.order_count,c.total_qty,c.completed_qty,c.active_orders,(c.total_qty>0?Math.round(c.completed_qty/c.total_qty*100):0)+'%']))
-      exportCSV(data, '客户统计_' + new Date().toISOString().slice(0,10))
+      const dt = props.start ? props.start + '_' + (props.end||'') : new Date().toISOString().slice(0,10); exportCSV(data, '客户统计_' + dt)
     }
     watch(() => [props.start, props.end], load)
     onMounted(load)

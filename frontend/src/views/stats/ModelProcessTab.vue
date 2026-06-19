@@ -56,7 +56,7 @@ export default {
         r.push(p.total)
         return r
       })
-      exportCSV([h, ...rows], '产品工序统计_'+new Date().toISOString().slice(0,10))
+      const dt = props.start ? props.start + '_' + (props.end||'') : new Date().toISOString().slice(0,10); exportCSV([h, ...rows], '工序统计_'+dt)
     }
     watch(() => [props.start, props.end], load)
     onMounted(load)

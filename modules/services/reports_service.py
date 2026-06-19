@@ -2,10 +2,6 @@
 from modules.services import BaseService
 
 _ACTIVE_ORDERS = "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)"
-_WORKER_ROLE = (
-    "u.id IN (SELECT ur.user_id FROM user_roles ur "
-    "JOIN roles r ON ur.role_id=r.id WHERE r.code='worker')"
-)
 
 PROCESS_ORDER = ["下料", "铆接", "焊接", "抛丸", "打磨", "镗孔", "喷漆"]
 # SECURITY: All $where variables are built from trusted string constants only.
@@ -74,8 +70,8 @@ class ReportsService:
             f"COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
             f"COUNT(DISTINCT DATE(wr.created_at)) as work_days, COUNT(wr.id) as report_count "
             f"FROM users u LEFT JOIN work_records wr ON wr.user_id=u.id AND {w} "
-            f"WHERE {_WORKER_ROLE} AND u.status='active' "
-            f"GROUP BY u.id ORDER BY output DESC LIMIT 200",
+            f"WHERE u.status='active' "
+            f"GROUP BY u.id ORDER BY output DESC",
             params
         ).fetchall()
         result = []
