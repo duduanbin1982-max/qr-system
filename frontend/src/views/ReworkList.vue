@@ -359,7 +359,10 @@ export default {
           result_remark: ''
         })
         if (d.ok) {
-          showToast(`已完成 ${d.completed} 条返工`)
+          const msg = d.errors && d.errors.length
+            ? `已完成 ${d.completed} 条，${d.errors.length} 条失败`
+            : `已完成 ${d.completed} 条返工`
+          showToast(msg)
           selectedIds.value = []
           showBatchModal.value = false
           batchReason.value = ''

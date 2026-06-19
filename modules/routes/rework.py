@@ -91,7 +91,6 @@ def rework_export():
             worker_id=request.args.get('worker_id', type=int),
             process_id=request.args.get('process_id', type=int),
         )
-        from flask import send_file
         output.seek(0)
         return send_file(
             output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -151,7 +150,7 @@ def rework_update(rework_id):
     try:
         data = request.get_json() or {}
         if 'reason' not in data:
-            return jsonify({'error': '?????'}), 400
+            return jsonify({'error': '缺少必填字段: reason'}), 400
         ReworkService.update_rework(rework_id, data['reason'])
         audit_log('rework_edit', 'rework', rework_id, 'reason updated')
         return jsonify({'ok': True})

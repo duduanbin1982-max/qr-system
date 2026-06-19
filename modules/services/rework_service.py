@@ -52,7 +52,6 @@ class ReworkService:
                 'total': total, 'page': page, 'per_page': per_page}
 
     @staticmethod
-    @staticmethod
     def create_rework(order_id, process_id, user_id, quantity, reason=''):
         db = BaseService.db()
         # Verify order and process exist

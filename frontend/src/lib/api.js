@@ -262,6 +262,9 @@ export const api = {
   completeRework:   (id,data)=> request('POST', '/api/rework/' + id + '/complete', data),
   batchCompleteRework: (data)=> request('POST', '/api/rework/batch-complete', data),
   exportRework:     (params) => request('GET', '/api/rework/export' + buildQuery(params)),
+  reworkTrend:      (params) => request('GET', '/api/rework/trend' + buildQuery(params)),
+  reworkTopProcesses:(params) => request('GET', '/api/rework/top-processes' + buildQuery(params)),
+  reworkWorkerStats:()       => request('GET', '/api/rework/worker-stats'),
 
   // ========== 产线 ==========
   listProductionLines: ()     => request('GET', '/api/production-lines'),
