@@ -30,11 +30,12 @@ def schedule_update_order(order_id):
         data = get_json_body()
         plan_start = data.get("plan_start", "").strip()
         plan_end = data.get("plan_end", "").strip()
+        production_line_id = data.get("production_line_id") or None
 
         if not plan_start or not plan_end:
             return jsonify({"error": "计划开始和结束日期不能为空"}), 400
 
-        ScheduleService.update_order_schedule(order_id, plan_start, plan_end)
+        ScheduleService.update_order_schedule(order_id, plan_start, plan_end, production_line_id)
         audit_log("update_schedule", "order", order_id,
                   f"plan: {plan_start} ~ {plan_end}")
         return jsonify({"ok": True, "message": "排程已更新"})

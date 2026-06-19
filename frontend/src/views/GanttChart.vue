@@ -20,7 +20,7 @@
         </select>
         <select v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
           <option value="">全部产线</option>
-          <option v-for="pl in productionLines" :key="pl.id" :value="pl.name">{{ pl.name }}</option>
+          <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
         </select>
         <button class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showLineMgr=true">🏭 产线管理</button>
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
@@ -131,9 +131,9 @@
           <div class="form-group"><label>开始日期</label><input v-model="editForm.plan_start" type="date" class="form-input"></div>
           <div class="form-group"><label>结束日期</label><input v-model="editForm.plan_end" type="date" class="form-input"></div>
           <div class="form-group"><label>产线</label>
-            <select v-model="editForm.production_line" class="form-input">
+            <select v-model="editForm.production_line_id" class="form-input">
               <option value="">未分配</option>
-              <option v-for="pl in productionLines" :key="pl.id" :value="pl.name">{{ pl.name }}</option>
+              <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
             </select>
           </div>
         </div>
@@ -151,14 +151,14 @@
         <div class="modal-body">
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
             <input v-model="lineForm.name" class="form-input" placeholder="产线名称" style="flex:1;min-width:120px">
-            <input v-model="lineForm.description" class="form-input" placeholder="描述" style="flex:1;min-width:100px">
-            <input v-model.number="lineForm.capacity" type="number" class="form-input" placeholder="产能/天" style="width:80px">
+            <input v-model="lineForm.remark" class="form-input" placeholder="描述" style="flex:1;min-width:100px">
+            <input v-model.number="lineForm.capacity_per_day" type="number" class="form-input" placeholder="产能/天" style="width:80px">
             <button class="btn btn-primary btn-sm" @click="addLine">添加</button>
           </div>
           <div v-if="productionLines.length" style="max-height:200px;overflow-y:auto">
             <div v-for="pl in productionLines" :key="pl.id" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--bg-hover);gap:8px">
               <span style="font-weight:600;min-width:80px">{{ pl.name }}</span>
-              <span style="font-size:var(--text-xs);color:var(--text-placeholder);flex:1">{{ pl.description || '-' }} · 产能: {{ pl.capacity || '-' }}/天</span>
+              <span style="font-size:var(--text-xs);color:var(--text-placeholder);flex:1">{{ pl.remark || '-' }} · 产能: {{ pl.capacity_per_day || '-' }}/天</span>
               <button class="btn-default" style="font-size:var(--text-xs);padding:2px 8px;color:var(--danger)" @click="delLine(pl)">删除</button>
             </div>
           </div>

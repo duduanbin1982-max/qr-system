@@ -7,6 +7,18 @@ import html2canvas from 'html2canvas'
 let _instance = null
 
 export function useGantt() {
+  // Always register lifecycle hooks (even when returning cached state)
+  onMounted(() => {
+    if (_instance) {
+      _instance.load()
+      _instance.loadLines()
+      document.addEventListener('keydown', _instance.onKeyDown)
+    }
+  })
+  onBeforeUnmount(() => {
+    document.removeEventListener('keydown', _instance.onKeyDown || (() => {}))
+  })
+
   if (_instance) return _instance
 
   const orders = ref([])
@@ -183,7 +195,7 @@ export function useGantt() {
         const newEnd = new Date(order.plan_start)
         newEnd.setDate(newEnd.getDate() + days - 1)
         const endStr = newEnd.toISOString().slice(0, 10)
-        await api.put('/api/schedule/order/' + order.id, { plan_start: order.plan_start, plan_end: endStr })
+        await api.updateScheduleOrder(order.id, { plan_start: order.plan_start, plan_end: endStr })
         order.plan_end = endStr
         showToast('工期已调整为 ' + days + ' 天')
       } else if (_dragResizeEdge === 'left') {
@@ -191,7 +203,7 @@ export function useGantt() {
         const newStart = new Date(minDate)
         newStart.setDate(newStart.getDate() + daysOffset)
         const startStr = newStart.toISOString().slice(0, 10)
-        await api.put('/api/schedule/order/' + order.id, { plan_start: startStr, plan_end: order.plan_end })
+        await api.updateScheduleOrder(order.id, { plan_start: startStr, plan_end: order.plan_end })
         order.plan_start = startStr
         showToast('开始日期已调整')
       }
@@ -202,25 +214,32 @@ export function useGantt() {
 
   // ── Double-click Edit ──
   const showEditModal = ref(false)
-  const editForm = ref({ plan_start: '', plan_end: '', production_line: '' })
+  const editForm = ref({ plan_start: '', plan_end: '', production_line_id: '' })
 
   function editOrderDates(order) {
     if (!canEdit.value) return
     dragTarget.value = order
-    editForm.value = { plan_start: order.plan_start || '', plan_end: order.plan_end || '', production_line: order.production_line || '' }
+    editForm.value = { plan_start: order.plan_start || '', plan_end: order.plan_end || '', production_line_id: order.production_line_id || '' }
     showEditModal.value = true
   }
 
   async function saveEditDates() {
     if (!dragTarget.value) return
     try {
-      await api.put('/api/schedule/order/' + dragTarget.value.id, { plan_start: editForm.value.plan_start, plan_end: editForm.value.plan_end })
+      await api.updateScheduleOrder(dragTarget.value.id, {
+        plan_start: editForm.value.plan_start,
+        plan_end: editForm.value.plan_end,
+        production_line_id: editForm.value.production_line_id || null
+      })
       dragTarget.value.plan_start = editForm.value.plan_start
       dragTarget.value.plan_end = editForm.value.plan_end
-      if (editForm.value.production_line !== dragTarget.value.production_line) {
-        try { await api.put('/api/orders/' + dragTarget.value.id, { production_line: editForm.value.production_line }) }
-        catch (e) { /* non-critical */ }
-        dragTarget.value.production_line = editForm.value.production_line
+      if (editForm.value.production_line_id) {
+        const pl = productionLines.value.find(p => p.id === editForm.value.production_line_id)
+        dragTarget.value.production_line = pl ? pl.name : ''
+        dragTarget.value.production_line_id = editForm.value.production_line_id
+      } else {
+        dragTarget.value.production_line = ''
+        dragTarget.value.production_line_id = null
       }
       showToast('已保存')
       showEditModal.value = false
@@ -238,22 +257,22 @@ export function useGantt() {
   // ── Production Lines ──
   const productionLines = ref([])
   const showLineMgr = ref(false)
-  const lineForm = ref({ name: '', description: '', capacity: 0 })
+  const lineForm = ref({ name: '', remark: '', capacity_per_day: 10 })
 
   async function loadLines() {
-    try { const d = await api.get('/api/production-lines'); productionLines.value = d.lines || d || [] }
+    try { const d = await api.listProductionLines(); productionLines.value = d.lines || d || [] }
     catch (e) { /* silent */ }
   }
 
   async function addLine() {
     if (!lineForm.value.name.trim()) { showToast('产线名称必填', 'error'); return }
-    try { await api.post('/api/production-lines', lineForm.value); showToast('产线已添加'); lineForm.value = { name: '', description: '', capacity: 0 }; await loadLines() }
+    try { await api.createProductionLine(lineForm.value); showToast('产线已添加'); lineForm.value = { name: '', remark: '', capacity_per_day: 10 }; await loadLines() }
     catch (e) { showToast(e.message || '添加失败', 'error') }
   }
 
   async function delLine(line) {
     if (!confirm('确定删除产线「' + line.name + '」？')) return
-    try { await api.del('/api/production-lines/' + line.id); showToast('已删除'); await loadLines() }
+    try { await api.deleteProductionLine(line.id); showToast('已删除'); await loadLines() }
     catch (e) { showToast(e.message || '删除失败', 'error') }
   }
 
@@ -277,7 +296,7 @@ export function useGantt() {
     if (!selectedOrderIds.value.length) { showToast('请先选择订单', 'warning'); return }
     const days = batchDays.value * (direction === 'right' ? 1 : -1)
     try {
-      const r = await api.post('/api/schedule/batch-shift', { order_ids: selectedOrderIds.value, days })
+      const r = await api.batchShiftSchedule({ order_ids: selectedOrderIds.value, days })
       showToast(r.message || ('已偏移 ' + r.count + ' 个订单'))
       selectedOrderIds.value = []
       allSelected.value = false
@@ -289,7 +308,7 @@ export function useGantt() {
   async function load() {
     loading.value = true
     try {
-      const r = await api.get('/api/schedule/gantt')
+      const r = await api.getScheduleGantt()
       if (r.ok !== false) { orders.value = r.orders || []; dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' } }
     } catch (e) { showToast('加载排程失败', 'error') }
     finally { loading.value = false }
@@ -311,9 +330,6 @@ export function useGantt() {
       }
     })
   }
-
-  onMounted(() => { load(); loadLines(); document.addEventListener('keydown', onKeyDown) })
-  onBeforeUnmount(() => { document.removeEventListener('keydown', onKeyDown) })
 
     async function exportImage() {
     const el = document.querySelector('.gantt-scroll')

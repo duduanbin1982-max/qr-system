@@ -10,7 +10,7 @@ class ScheduleService:
     def get_gantt_data():
         db = BaseService.db()
         rows = db.execute('''
-            SELECT o.id, o.order_no, o.product_name, o.product_code, o.plan_start, o.plan_end,
+            SELECT o.id, o.order_no, o.product_name, o.product_code, o.plan_start, o.plan_end, o.production_line_id,
                    o.deadline, o.status, o.quantity, o.completed,
                    COALESCE(c.name, o.customer) as customer_name,
                    COALESCE(pl.name, '') as production_line,
@@ -20,7 +20,6 @@ class ScheduleService:
             LEFT JOIN production_lines pl ON o.production_line_id = pl.id
             WHERE o.plan_start IS NOT NULL AND o.plan_start != ''
               AND o.deleted_at IS NULL
-              AND o.status != 'completed'
             ORDER BY o.plan_start, o.order_no
         ''').fetchall()
 
@@ -56,6 +55,7 @@ class ScheduleService:
                 'progress': progress,
                 'risk': risk,
                 'production_line': r['production_line'],
+                'production_line_id': r['production_line_id'],
                 'line_capacity': r['line_capacity'],
             })
             if start:
@@ -82,8 +82,8 @@ class ScheduleService:
 
         return {'ok': True, 'orders': orders, 'min_date': min_date, 'max_date': max_date}
     @staticmethod
-    def update_order_schedule(order_id, plan_start, plan_end):
-        """拖拽排程：更新订单计划时间"""
+    def update_order_schedule(order_id, plan_start, plan_end, production_line_id=None):
+        """拖拽排程：更新订单计划时间及产线"""
         db = BaseService.db()
         order = db.execute(
             "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL",
@@ -93,8 +93,8 @@ class ScheduleService:
             raise ValueError("订单不存在")
 
         db.execute(
-            "UPDATE orders SET plan_start = ?, plan_end = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (plan_start, plan_end, order_id)
+            "UPDATE orders SET plan_start = ?, plan_end = ?, production_line_id = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+            (plan_start, plan_end, production_line_id, order_id)
         )
         db.commit()
 
