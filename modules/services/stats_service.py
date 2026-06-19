@@ -70,7 +70,7 @@ class StatsService:
             f"JOIN orders o ON sr.order_id=o.id "
             f"JOIN processes p ON sr.process_id=p.id "
             f"JOIN users u ON sr.user_id=u.id "
-            f"WHERE {w} ORDER BY sr.created_at DESC LIMIT 500", params
+            f"WHERE {w} ORDER BY sr.created_at DESC", params
         ).fetchall()
         # Summary
         summary = db.execute(

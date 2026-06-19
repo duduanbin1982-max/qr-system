@@ -103,7 +103,7 @@ export default {
       if (!records.value.length) { showToast('没有数据可导出', 'warning'); return }
       const data = [['订单号','产品','工序','工人','工号','数量','原因','时间']]
       records.value.forEach(r => data.push([r.order_no, r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.reason||'', r.created_at]))
-      exportCSV(data, '报废记录_' + new Date().toISOString().slice(0, 10))
+      const dateTag = props.start ? props.start + '_' + (props.end || '') : new Date().toISOString().slice(0, 10); exportCSV(data, '报废记录_' + dateTag)
     }
     watch(() => [props.start, props.end, props.productCode], loadScrap)
     onMounted(loadScrap)
