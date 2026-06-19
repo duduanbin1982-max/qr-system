@@ -208,6 +208,8 @@ export const api = {
   modelProcessStats: (params) => request('GET', '/api/reports/model-process-stats' + buildQuery(params)),
   productProcessStats: (params) => request('GET', '/api/stats/product-process' + buildQuery(params)),
   reportShipmentStats: (params) => request('GET', '/api/stats/shipment' + buildQuery(params)),
+  customerStats:    (params) => request('GET', '/api/stats/customer' + buildQuery(params)),
+  materialDetail:   (params) => request('GET', '/api/stats/material-detail' + buildQuery(params)),
   // ========== 追溯 ==========
   trace:            (code)   => request('GET', '/api/trace/' + encodeURIComponent(code)),
   traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),

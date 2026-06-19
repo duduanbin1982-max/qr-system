@@ -1,6 +1,6 @@
 ﻿"""qr-system - Stats Routes (Refactored)"""
 from datetime import datetime
-from flask import request, jsonify
+from flask import request, jsonify, send_file
 from modules.app import app
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
@@ -229,18 +229,16 @@ def stats_export_pdf():
     product_code = request.args.get("product_code", "")
     try:
         from io import BytesIO
-        from flask import send_file
-        from datetime import datetime as dt
         # Simple HTML-to-PDF via print: return HTML that auto-prints
         html_parts = ['<html><head><meta charset="UTF-8"><title>统计报表</title>']
         html_parts.append('<style>body{font-family:sans-serif;padding:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#f5f5f5}h2{color:#333}</style>')
         html_parts.append('</head><body><h2>扫码报工 - 统计报表</h2>')
-        html_parts.append(f'<p>Tab: {tab} | 日期: {start} ~ {end} | 导出时间: {dt.now().strftime("%Y-%m-%d %H:%M")}</p>')
+        html_parts.append(f'<p>Tab: {tab} | 日期: {start} ~ {end} | 导出时间: {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>')
         html_parts.append('<p style="color:#999;font-size:12px">请使用浏览器打印功能(Ctrl+P)保存为PDF</p>')
         html_parts.append('</body></html>')
         output = BytesIO(''.join(html_parts).encode('utf-8'))
         output.seek(0)
         return send_file(output, mimetype='text/html; charset=utf-8',
-                        as_attachment=True, download_name=f'stats_{tab}_{dt.now().strftime("%Y%m%d_%H%M%S")}.html')
+                        as_attachment=True, download_name=f'stats_{tab}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html')
     except Exception as e:
         return handle_unexpected_error(e, "pdf export")

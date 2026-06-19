@@ -89,7 +89,7 @@ export default {
     async function load() {
       loading.value = true
       try {
-        const d = await api.get('/api/inventory')
+        const d = await api.listInventory()
         inventory.value = d.items || []
         await nextTick()
         renderPie()

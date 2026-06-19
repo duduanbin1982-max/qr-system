@@ -145,7 +145,7 @@ export default {
     async function load() {
       loading.value=true; chartError.value=false
       try {
-        const d=await api.get('/api/reports/quality-analysis', { start:props.start||'', end:props.end||'', product_code:props.productCode||'' })
+        const d = await api.qualityAnalysis({ start: props.start || '', end: props.end || '', product_code: props.productCode || '' })
         byProcess.value=d.by_process||[]
         qiByProcess.value=d.qi_by_process||[]
         trendLabels.value=d.trend_labels||[]
