@@ -318,7 +318,7 @@ export default {
       showTurnover.value = true
       turnoverLoading.value = true
       try {
-        const d = await api.get('/api/inventory/turnover')
+        const d = await api.inventoryTurnover()
         turnoverData.value = d.data || []
       } catch(e) { showToast('加载周转数据失败','error') }
       finally { turnoverLoading.value = false }
@@ -327,14 +327,14 @@ export default {
     async function doCount() {
       if (!confirm('确定创建盘点任务吗？')) return
       try {
-        await api.post('/api/inventory/count-task', {})
+        await api.createCountTask()
         showToast('盘点任务已创建')
       } catch(e) { showToast(e.message || '创建失败','error') }
     }
 
     async function loadLocations() {
       try {
-        const d = await api.get('/api/inventory/locations')
+        const d = await api.listLocations()
         locations.value = d.locations || []
       } catch(e) {}
     }
@@ -394,7 +394,7 @@ export default {
 
     async function del(item) {
       try {
-        const res = await api.get('/api/inventory/' + item.id + '/impact')
+        const res = await api.inventoryImpact(item.id)
         if (res.log_count > 0) {
           showToast('库存「' + item.product_model + '」有 ' + res.log_count + ' 条流水记录，无法删除', 'warn')
           return

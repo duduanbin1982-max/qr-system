@@ -2,7 +2,8 @@
 
 注：docstring 中的 Swagger 标记仅供文档参考，项目未集成 Flask-RESTX。
 """
-from flask import request, jsonify, g
+from flask import request, jsonify, g, send_file
+from datetime import datetime
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.audit import audit_log
@@ -332,11 +333,9 @@ def inventory_export():
             keyword=request.args.get('keyword', ''),
             low_stock=request.args.get('low_stock', '') == '1',
         )
-        from flask import send_file
-        from datetime import datetime as dt
         output.seek(0)
         return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True, download_name=f'inventory_{dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+                         as_attachment=True, download_name=f'inventory_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
     except Exception as e:
         return handle_unexpected_error(e, 'export operation')
 
@@ -352,11 +351,9 @@ def inventory_logs_export():
             date_from=request.args.get('from', ''),
             date_to=request.args.get('to', ''),
         )
-        from flask import send_file
-        from datetime import datetime as dt
         output.seek(0)
         return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True, download_name=f'inventory_logs_{dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+                         as_attachment=True, download_name=f'inventory_logs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
     except Exception as e:
         return handle_unexpected_error(e, 'export operation')
 

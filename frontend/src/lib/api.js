@@ -158,6 +158,10 @@ export const api = {
   inventoryLogs:    (params) => request('GET', '/api/inventory/logs' + buildQuery(params)),
   inventoryAlerts:  ()       => request('GET', '/api/inventory/alerts'),
   inventoryStats:   ()       => request('GET', '/api/inventory/stats'),
+  inventoryTurnover:()       => request('GET', '/api/inventory/turnover'),
+  createCountTask:  ()       => request('POST', '/api/inventory/count-task', {}),
+  listLocations:    ()       => request('GET', '/api/inventory/locations'),
+  inventoryImpact:  (id)     => request('GET', '/api/inventory/' + id + '/impact'),
   
   // ========== 发货 ==========
   listShipments:    (params) => request('GET', '/api/shipments' + buildQuery(params)),
