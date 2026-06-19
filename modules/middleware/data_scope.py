@@ -4,6 +4,7 @@ qr-system — 数据权限中间件：基于岗位+角色的数据范围控制
 from typing import Any, List, Optional, Tuple, Union
 from modules.db import get_db
 from modules.middleware.auth import get_user_permissions
+from modules.config import GLOBAL_DATA_SCOPE_PERMS
 
 def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
     if not user:
@@ -46,9 +47,7 @@ def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
 
     # 5. Check global permissions (admin etc.)
     perms = get_user_permissions(user)
-    global_perms = {"orders:view", "stats:view", "inventory:view", "*",
-                    "shipments:view", "reports:view", "dashboard:view",
-                    "scan:view", "scan:report"}
+    global_perms = GLOBAL_DATA_SCOPE_PERMS
     if perms and (set(perms) & global_perms or "*" in perms):
         return None
 

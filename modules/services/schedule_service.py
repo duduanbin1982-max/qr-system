@@ -92,32 +92,31 @@ class ScheduleService:
         if not order:
             raise ValueError("订单不存在")
 
-        db.execute(
-            "UPDATE orders SET plan_start = ?, plan_end = ?, production_line_id = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (plan_start, plan_end, production_line_id, order_id)
-        )
-        db.commit()
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE orders SET plan_start = ?, plan_end = ?, production_line_id = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                (plan_start, plan_end, production_line_id, order_id)
+            )
 
     @staticmethod
     def batch_shift(order_ids, days):
-        """批量偏移订单排程日期"""
-        db = BaseService.db()
+        """批量偏移订单排程日期（事务化）"""
         count = 0
-        for oid in order_ids:
-            order = db.execute(
-                "SELECT id, plan_start, plan_end FROM orders WHERE id = ? AND deleted_at IS NULL",
-                (oid,)
-            ).fetchone()
-            if not order or not order["plan_start"]:
-                continue
-            # Shift dates by days using SQLite date functions
-            db.execute("""
-                UPDATE orders SET
-                    plan_start = date(plan_start, '+' || ? || ' days'),
-                    plan_end = date(plan_end, '+' || ? || ' days'),
-                    updated_at = datetime('now','localtime')
-                WHERE id = ?
-            """, (days, days, oid))
-            count += 1
-        db.commit()
+        with BaseService.transaction() as txn:
+            for oid in order_ids:
+                order = txn.execute(
+                    "SELECT id, plan_start, plan_end FROM orders WHERE id = ? AND deleted_at IS NULL",
+                    (oid,)
+                ).fetchone()
+                if not order or not order["plan_start"]:
+                    continue
+                # Shift dates by days using SQLite date functions
+                txn.execute("""
+                    UPDATE orders SET
+                        plan_start = date(plan_start, '+' || ? || ' days'),
+                        plan_end = date(plan_end, '+' || ? || ' days'),
+                        updated_at = datetime('now','localtime')
+                    WHERE id = ?
+                """, (days, days, oid))
+                count += 1
         return count

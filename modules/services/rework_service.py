@@ -1,3 +1,4 @@
+import logging
 """qr-system — 返工管理 Service 层"""
 from datetime import datetime, timedelta
 from modules.services import BaseService
@@ -200,8 +201,9 @@ class ReworkService:
                     from datetime import datetime, timedelta as dt
                     created_dt = dt.strptime(created[:19], '%Y-%m-%d %H:%M:%S')
                     duration = round((dt.now() - created_dt).total_seconds() / 3600, 1)
-                except Exception as e:
-                    pass
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).debug('rework duration calc failed: %s', rework_id)
             txn.execute('''UPDATE rework_records SET status = 'completed', reason = ?,
                           completed_at = datetime("now","localtime"),
                           completed_by = ?, result = ?, result_remark = ?, duration_hours = ?
@@ -231,7 +233,10 @@ class ReworkService:
                 'inspected_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }, user_id)
         except Exception:
-            pass  # Non-critical, don't block rework completion
+            import logging
+            logging.getLogger(__name__).warning(
+                'auto_create_inspection on rework complete failed: rework_id=%s', rework_id
+            )  # Non-critical, don't block rework completion
 
     # ============ P3: Analytics ============
 

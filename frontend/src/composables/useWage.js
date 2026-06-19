@@ -248,7 +248,7 @@ const activeTab = ref("piece")
     const adjNet = computed(() => adjustments.value.reduce((s,a) => s + (a.type=="deduction"?-a.amount:a.amount), 0))
 
     async function loadEmployees() {
-      try { const r = await api.listUsers(); employeeList.value = (r.users || []).filter(u => (u.roles && u.roles.some(r => r.code === "worker"))) }
+      try { const r = await api.listUsers(); employeeList.value = (r.users || []).filter(u => (u.roles && u.roles.some(r => (r.code || "").toLowerCase() === "worker" || r.is_worker))) }
       catch(e) { showToast("加载员工列表失败","error") }
     }
     async function loadAdjustments() {

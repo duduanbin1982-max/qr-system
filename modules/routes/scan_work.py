@@ -1,5 +1,5 @@
 ﻿"""qr-system - Scan work report routes (desktop + mobile) — Service-layer refactored"""
-import base64, json
+import base64, json, logging
 from datetime import datetime
 from flask import request, jsonify, g
 from modules.app import app
@@ -354,7 +354,11 @@ def mobile_report():
             audit_log("report_" + report_type, "order", order_id,
                       "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).warning(
+                'audit_log failed for report_%s: order_id=%s process_id=%s',
+                report_type, order_id, process_id
+            )
         return jsonify({"message": "报工成功"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
@@ -467,7 +471,11 @@ def work_report():
             audit_log("report_" + report_type, "order", order_id,
                       "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).warning(
+                'audit_log failed for report_%s: order_id=%s process_id=%s',
+                report_type, order_id, process_id
+            )
 
         return jsonify({'message': '报工成功'})
     except ValueError as e:

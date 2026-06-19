@@ -98,6 +98,8 @@ if __name__ == '__main__':
     init_db()
     print('=== 扫码报工生产管理系统 V2 ===')
     import ssl
+    ssl_cert = os.environ.get("SSL_CERT_FILE", "server.crt")
+    ssl_key = os.environ.get("SSL_KEY_FILE", "server.key")
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_ctx.load_cert_chain("server.crt", "server.key")
+    ssl_ctx.load_cert_chain(ssl_cert, ssl_key)
     app.run(host="0.0.0.0", port=3000, debug=False, ssl_context=ssl_ctx)

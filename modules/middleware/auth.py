@@ -39,14 +39,14 @@ def has_permission(user: Optional[dict], perm: str) -> bool:
             try:
                 perms = json.loads(row['role_perms'])
                 all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logging.getLogger('qr').warning(f'has_permission: invalid role_perms JSON for user {user.get("id")}: {e}')
         if row['group_perms']:
             try:
                 perms = json.loads(row['group_perms'])
                 all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logging.getLogger('qr').warning(f'has_permission: invalid group_perms JSON for user {user.get("id")}: {e}')
     if '*' in all_perms:
         return True
     return perm in all_perms
@@ -69,14 +69,14 @@ def get_user_permissions(user: Optional[dict]) -> List[str]:
             try:
                 perms = json.loads(row['role_perms'])
                 all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logging.getLogger('qr').warning(f'get_user_permissions: invalid role_perms JSON for user {user.get("id")}: {e}')
         if row['group_perms']:
             try:
                 perms = json.loads(row['group_perms'])
                 all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logging.getLogger('qr').warning(f'get_user_permissions: invalid group_perms JSON for user {user.get("id")}: {e}')
     return sorted(all_perms)
 
 def check_auth(f: Callable) -> Callable:
@@ -144,13 +144,19 @@ def check_auth(f: Callable) -> Callable:
 
         if expired or idle_expired:
             db.execute('UPDATE users SET token = "" WHERE id = ?', (g.current_user['id'],))
-            db.commit()
+            try:
+                db.commit()
+            except Exception:
+                db.execute("ROLLBACK")
             return jsonify({'error': 'Login expired due to inactivity'}), 401
 
         # Update last_active
         db.execute('UPDATE users SET last_active = datetime("now","localtime") WHERE id = ?',
                    (g.current_user['id'],))
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.execute("ROLLBACK")
 
         return f(*args, **kwargs)
     return decorated

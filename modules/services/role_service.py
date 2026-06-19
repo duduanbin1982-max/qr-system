@@ -1,6 +1,7 @@
 """
 qr-system — 角色组 + 角色管理 Service 层
 """
+import json
 from modules.services import BaseService
 from modules.config import _get_pinyin_initial
 
@@ -120,7 +121,7 @@ class RoleService:
             # Auto-generate code from name using pinyin initials
             code = ''.join(_get_pinyin_initial(ch) for ch in name if _get_pinyin_initial(ch)).lower()
             if not code:
-                code = 'role_' + str(hash(name + str(__import__('time').time())))[-8:]
+                import uuid; code = 'role_' + uuid.uuid4().hex[:8]
         db = BaseService.db()
         group_id = data.get('group_id')
         if group_id and not db.execute('SELECT id FROM role_groups WHERE id = ?', (group_id,)).fetchone():

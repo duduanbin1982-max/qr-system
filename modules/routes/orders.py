@@ -2,6 +2,7 @@
 from flask import request, jsonify, g
 from modules.app import app
 from modules.db import get_db, get_page_size
+from modules.services import BaseService
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
@@ -319,6 +320,8 @@ def workpiece_progress(order_id):
 
 @app.route("/api/orders/<int:order_id>/materials", methods=["GET"])
 @check_auth
+
+@check_permission("orders:view")
 def list_order_materials(order_id):
     """获取订单物料配方"""
     order = OrderService.get_order(order_id)
@@ -338,6 +341,7 @@ def list_order_materials(order_id):
 
 @app.route("/api/orders/<int:order_id>/materials", methods=["POST"])
 @check_auth
+@check_permission("orders:edit")
 def add_order_material(order_id):
     """添加订单物料配方项"""
     order = OrderService.get_order(order_id)
@@ -349,42 +353,40 @@ def add_order_material(order_id):
     process_id = data.get("process_id")
     if not material_id:
         return jsonify({"error": "请选择物料"}), 400
-    db = get_db()
-    # Check dup
-    dup = db.execute(
-        "SELECT id FROM order_materials WHERE order_id=? AND material_id=? AND process_id=?",
-        (order_id, material_id, process_id or 0)
-    ).fetchone()
-    if dup:
-        return jsonify({"error": "该物料+工序组合已存在"}), 409
-    db.execute(
-        "INSERT INTO order_materials (order_id, material_id, quantity_per_unit, process_id) VALUES (?,?,?,?)",
-        (order_id, material_id, quantity, process_id or 0)
-    )
-    db.commit()
-    new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    row = db.execute(
-        """SELECT om.id, om.material_id, m.name as material_name, m.spec, m.material_type,
-                  om.quantity_per_unit, om.process_id, p.name as process_name
-           FROM order_materials om
-           LEFT JOIN materials m ON om.material_id = m.id
-           LEFT JOIN processes p ON om.process_id = p.id
-           WHERE om.id = ?""", (new_id,)
-    ).fetchone()
-    return jsonify({"material": dict(row)}), 201
+    with BaseService.transaction() as txn:
+        # Check dup
+        dup = txn.execute(
+            "SELECT id FROM order_materials WHERE order_id=? AND material_id=? AND process_id=?",
+            (order_id, material_id, process_id or 0)
+        ).fetchone()
+        if dup:
+            return jsonify({"error": "该物料+工序组合已存在"}), 409
+        txn.execute(
+            "INSERT INTO order_materials (order_id, material_id, quantity_per_unit, process_id) VALUES (?,?,?,?)",
+            (order_id, material_id, quantity, process_id or 0)
+        )
+        new_id = txn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = txn.execute(
+            """SELECT om.id, om.material_id, m.name as material_name, m.spec, m.material_type,
+                      om.quantity_per_unit, om.process_id, p.name as process_name
+               FROM order_materials om
+               LEFT JOIN materials m ON om.material_id = m.id
+               LEFT JOIN processes p ON om.process_id = p.id
+               WHERE om.id = ?""", (new_id,)
+        ).fetchone()
+        return jsonify({"material": dict(row)}), 201
 
 
 @app.route("/api/orders/<int:order_id>/materials/<int:item_id>", methods=["DELETE"])
 @check_auth
 def delete_order_material(order_id, item_id):
     """删除订单物料配方项"""
-    db = get_db()
-    row = db.execute(
+    with BaseService.transaction() as txn:
+        row = txn.execute(
         "SELECT id FROM order_materials WHERE id=? AND order_id=?",
         (item_id, order_id)
     ).fetchone()
     if not row:
         return jsonify({"error": "配方项不存在"}), 404
-    db.execute("DELETE FROM order_materials WHERE id=?", (item_id,))
-    db.commit()
+    txn.execute("DELETE FROM order_materials WHERE id=?", (item_id,))
     return jsonify({"message": "已删除"})

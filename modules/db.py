@@ -48,10 +48,22 @@ def get_setting(key: str, default: str = '') -> str:
     global _settings_cache, _settings_cache_time
     stamp = _get_cache_stamp()
     if _settings_cache is None or stamp > _settings_cache_time:
-        db = sqlite3.connect(DB_PATH)
-        db.row_factory = sqlite3.Row
+        # Prefer Flask's per-request connection when in app context,
+        # fall back to a direct connection for startup/CLI usage
+        db = None
+        own_conn = False
+        try:
+            from flask import g as _flask_g
+            db = _flask_g.db if hasattr(_flask_g, 'db') else None
+        except Exception:
+            pass
+        if db is None:
+            db = sqlite3.connect(DB_PATH)
+            db.row_factory = sqlite3.Row
+            own_conn = True
         rows = db.execute('SELECT key, value FROM system_settings').fetchall()
-        db.close()
+        if own_conn:
+            db.close()
         _settings_cache = {r['key']: r['value'] for r in rows}
         _settings_cache_time = stamp
     return _settings_cache.get(key, default)

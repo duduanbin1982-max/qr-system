@@ -1,5 +1,6 @@
 ﻿"""qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
 from datetime import datetime
+import json
 from modules.services import BaseService
 from modules.repositories.wage_repository import WageRepository
 
@@ -39,8 +40,9 @@ class WageService:
         wr_where = ' AND '.join(wr_where_parts)
 
         # Use WageRepository for user pagination
-        user_where = "u.status = 'active' AND u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'worker')"
-        user_params = []
+        user_where = "u.status = 'active' AND u.id IN (SELECT ur.user_id FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = ?)"
+        worker_code = db.execute("SELECT COALESCE((SELECT value FROM system_settings WHERE key='worker_role_code'), 'worker')").fetchone()[0]
+        user_params = [worker_code]
         if employee_id:
             user_where += ' AND u.id = ?'; user_params.append(employee_id)
         user_rows, total = WageRepository.get_worker_paged(user_where, user_params, db, page, limit)
@@ -237,7 +239,7 @@ class WageService:
                     "INSERT INTO wage_snapshots (employee_id,employee_name,employee_no,year_month,total_quantity,total_wage,rework_wage,details_json,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'draft',datetime('now','localtime')) ON CONFLICT(employee_id,year_month) DO UPDATE SET total_quantity=excluded.total_quantity,total_wage=excluded.total_wage,rework_wage=excluded.rework_wage,details_json=excluded.details_json,updated_at=datetime('now','localtime')",
                     (emp.get("employee_id",0), emp.get("employee_name",""), emp.get("employee_no",""),
                      year_month, emp.get("total_quantity",0), emp.get("total_wage",0),
-                     emp.get("rework_wage",0), __import__("json").dumps(emp.get("details",[]), ensure_ascii=False))
+                     emp.get("rework_wage",0), json.dumps(emp.get("details",[]), ensure_ascii=False))
                 )
                 saved += 1
         return {"saved": saved, "year_month": year_month}

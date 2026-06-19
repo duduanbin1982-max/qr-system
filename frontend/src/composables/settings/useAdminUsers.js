@@ -11,7 +11,7 @@ export function useAdminUsers() {
   const selectedAdmins = ref([])
   const showAdminModal = ref(false)
   const adminModalEdit = ref(false)
-  const adminForm = reactive({ username:'', name:'', nickname:'', password:'', role:'admin', email:'', phone:'', employee_no:'', status:'active', group_name:'' })
+  const adminForm = reactive({ username:'', name:'', nickname:'', password:'', role:'', email:'', phone:'', employee_no:'', status:'active', group_name:'' })
   const roleGroups = ref([])
   const userRoleIds = ref([])
 
@@ -50,7 +50,7 @@ export function useAdminUsers() {
   }
   function openAddAdmin() {
     adminModalEdit.value = false
-    Object.assign(adminForm, { username:'', name:'', nickname:'', password:'', role:'admin', email:'', phone:'', employee_no:'', status:'active', group_name:'' })
+    Object.assign(adminForm, { username:'', name:'', nickname:'', password:'', role:'', email:'', phone:'', employee_no:'', status:'active', group_name:'' })
     userRoleIds.value = []
     showAdminModal.value = true
   }
@@ -78,7 +78,7 @@ export function useAdminUsers() {
   async function saveAdmin() {
     if (!adminForm.username) { showToast('用户名不能为空','error'); return }
     try {
-      const body = { username:adminForm.username, name:adminForm.name, nickname:adminForm.nickname, role:'admin', email:adminForm.email, phone:adminForm.phone, employee_no:adminForm.employee_no, status:adminForm.status, group_name:adminForm.group_name }
+      const body = { username:adminForm.username, name:adminForm.name, nickname:adminForm.nickname, role:'', email:adminForm.email, phone:adminForm.phone, employee_no:adminForm.employee_no, status:adminForm.status, group_name:adminForm.group_name }
       if (adminForm.password) body.password = adminForm.password
 
       let userId = adminForm._id

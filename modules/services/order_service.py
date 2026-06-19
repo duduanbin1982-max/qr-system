@@ -415,14 +415,16 @@ class OrderService:
             raise ValueError('订单不存在')
 
         def _fetch(table, rec_type):
-            return db.execute(f'''
-                SELECT r.*, u.name as worker_name, p.name as process_name, ? as record_type
-                FROM {table} r
-                JOIN users u ON r.user_id = u.id
-                JOIN processes p ON r.process_id = p.id
-                WHERE r.order_id = ?
-                ORDER BY r.created_at DESC
-            ''', (rec_type, oid)).fetchall()
+            allowed = {"work_records": "work_records", "scrap_records": "scrap_records", "rework_records": "rework_records"}
+            tbl = allowed.get(table, "work_records")
+            return db.execute(
+                "SELECT r.*, u.name as worker_name, p.name as process_name, ? as record_type "
+                "FROM " + tbl + " r "
+                "JOIN users u ON r.user_id = u.id "
+                "JOIN processes p ON r.process_id = p.id "
+                "WHERE r.order_id = ? "
+                "ORDER BY r.created_at DESC",
+                (rec_type, oid)).fetchall()
 
         normal = _fetch('work_records', 'normal')
         scrap = _fetch('scrap_records', 'scrap')
@@ -486,13 +488,12 @@ class OrderService:
     @staticmethod
     def log_remark_history(oid, old_remark, new_remark, user_id, user_name):
         """记录备注变更历史"""
-        db = BaseService.db()
-        db.execute(
-            "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
-            "VALUES (?,?,?,?,?)",
-            (oid, old_remark, new_remark, user_id, user_name)
-        )
-        db.commit()
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
+                "VALUES (?,?,?,?,?)",
+                (oid, old_remark, new_remark, user_id, user_name)
+            )
 
     @staticmethod
     def soft_delete_order(oid, user_id):
@@ -608,6 +609,6 @@ class OrderService:
                         "order_materials", "order_processes", "product_items",
                         "work_records", "scrap_records", "rework_records",
                         "quality_inspections"]:
-                txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
+                txn.execute("DELETE FROM " + tbl + " WHERE order_id = ?", (oid,))
             txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
         return existing['order_no'] or ""

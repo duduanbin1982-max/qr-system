@@ -152,7 +152,7 @@ def auth_info():
 def change_password():
     data = get_json_body()
     new_password = data.get("new_password", "").strip()
-    if not new_password or len(new_password) < 6:
+    if not new_password or len(new_password) < 8:
         return jsonify({"error": "新密码至少需要6位"}), 400
 
     import bcrypt as _bcrypt

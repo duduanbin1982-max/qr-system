@@ -6,6 +6,7 @@ from modules.app import app
 from modules.cache_utils import ttl_cache
 from modules.db import get_setting, get_db, clear_settings_cache
 from modules.middleware.auth import check_auth, check_permission
+from modules.services import BaseService
 from modules.services.board_service import BoardService
 
 BOARD_SESSION_HOURS = 8
@@ -30,7 +31,8 @@ def _is_board_token_valid():
             if age_days > BOARD_TOKEN_MAX_AGE_DAYS:
                 return False, f'Board token expired ({age_days} days old, max {BOARD_TOKEN_MAX_AGE_DAYS})'
         except (ValueError, TypeError):
-            pass
+            import logging
+            logging.getLogger("qr.board").warning("Invalid board_token_created_at value: %s", created_at_str)
     return True, ''
 
 
@@ -55,8 +57,8 @@ def board_auth():
     db.execute(
         "CREATE TABLE IF NOT EXISTS board_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')))"
     )
-    db.execute("INSERT INTO board_sessions (token, expires_at) VALUES (?, ?)", (session_token, expires_at))
-    db.commit()
+    with BaseService.transaction() as txn:
+        txn.execute("INSERT INTO board_sessions (token, expires_at) VALUES (?, ?)", (session_token, expires_at))
     return jsonify({
         'token': session_token,
         'expires_at': expires_at,
@@ -74,18 +76,18 @@ def board_auth_rotate():
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     db = get_db()
-    # Store the hash, never the plaintext
-    db.execute(
-        "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token', ?)",
-        (new_hash,)
-    )
-    db.execute(
-        "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token_created_at', ?)",
-        (now_str,)
-    )
-    # Invalidate all existing sessions immediately
-    db.execute("DELETE FROM board_sessions")
-    db.commit()
+    with BaseService.transaction() as txn:
+        # Store the hash, never the plaintext
+        txn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token', ?)",
+            (new_hash,)
+        )
+        txn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token_created_at', ?)",
+            (now_str,)
+        )
+        # Invalidate all existing sessions immediately
+        txn.execute("DELETE FROM board_sessions")
     clear_settings_cache()
 
     return jsonify({
@@ -109,7 +111,8 @@ def board_auth_status():
             created_at = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
             age_days = (datetime.now() - created_at).days
         except (ValueError, TypeError):
-            pass
+            import logging
+            logging.getLogger("qr.board").warning("Invalid board_token_created_at value: %s", created_at_str)
 
     db = get_db()
     active_sessions = db.execute(
@@ -186,6 +189,6 @@ def dashboard_board():
 @check_permission('settings:manage')
 def board_auth_cleanup():
     db = get_db()
-    db.execute("DELETE FROM board_sessions WHERE expires_at <= datetime('now','localtime')")
-    db.commit()
+    with BaseService.transaction() as txn:
+        txn.execute("DELETE FROM board_sessions WHERE expires_at <= datetime('now','localtime')")
     return jsonify({'message': 'cleaned'})

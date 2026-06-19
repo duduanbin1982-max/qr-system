@@ -200,22 +200,25 @@ class ReportsService:
             where.append("o.product_code = ?"); params.append(product_code)
         w = " AND ".join(where)
         item_w = ""
+        item_extra = []
         if start:
-            item_w += f" AND DATE(pi.completed_at) >= '{start}'"
+            item_w += " AND DATE(pi.completed_at) >= ?"
+            item_extra.append(start)
         if end:
-            item_w += f" AND DATE(pi.completed_at) <= '{end}'"
+            item_w += " AND DATE(pi.completed_at) <= ?"
+            item_extra.append(end)
         by_product = db.execute(
             f"SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
             f"p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
             f"COALESCE(SUM(o.quantity),0) as order_qty, "
             f"COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND pi.status='completed'{item_w}),0) as output, "
-            f"COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL" + (f" AND DATE(sr.created_at) >= '{start}'" if start else "") + (f" AND DATE(sr.created_at) <= '{end}'" if end else "") + "),0) as scrap, "
-            f"COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + (f" AND DATE(wr.created_at) >= '{start}'" if start else "") + (f" AND DATE(wr.created_at) <= '{end}'" if end else "") + "),0) as rework, "
+            f"COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL" + (f" AND DATE(sr.created_at) >= ?" if start else "") + (f" AND DATE(sr.created_at) <= ?" if end else "") + "),0) as scrap, "
+            f"COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + (f" AND DATE(wr.created_at) >= ?" if start else "") + (f" AND DATE(wr.created_at) <= ?" if end else "") + "),0) as rework, "
             f"COUNT(DISTINCT o.id) as order_count "
             f"FROM products p "
             f"LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
-            f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 30",
-            params
+            f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 200",
+            params + item_extra + item_extra + item_extra
         ).fetchall()
         summary = db.execute(
             f"SELECT COUNT(DISTINCT p.id) as product_count, "
@@ -224,7 +227,7 @@ class ReportsService:
             f"FROM products p "
             f"LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
             f"WHERE {w}",
-            params
+            params + item_extra
         ).fetchone()
         return {
             "by_product": [dict(r) for r in by_product],
@@ -249,7 +252,7 @@ class ReportsService:
             f"COUNT(DISTINCT mc.order_id) as order_count "
             f"FROM materials m "
             f"LEFT JOIN material_consumptions mc ON mc.material_id=m.id AND {w} "
-            f"GROUP BY m.id ORDER BY total_used DESC LIMIT 30",
+            f"GROUP BY m.id ORDER BY total_used DESC LIMIT 200",
             params
         ).fetchall()
         summary = db.execute(
@@ -286,7 +289,7 @@ class ReportsService:
             f"SELECT s.customer, COUNT(*) as shipment_count, "
             f"COALESCE(SUM(s.total_quantity),0) as total_qty "
             f"FROM shipments s WHERE {w} "
-            f"GROUP BY s.customer ORDER BY total_qty DESC LIMIT 20",
+            f"GROUP BY s.customer ORDER BY total_qty DESC LIMIT 100",
             params
         ).fetchall()
         monthly = db.execute(
@@ -432,7 +435,7 @@ class ReportsService:
             "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
             "COALESCE((SELECT COUNT(*) FROM orders o2 WHERE COALESCE((SELECT name FROM customers c2 WHERE c2.id=o2.customer_id), o2.customer) = COALESCE(c.name, o.customer) AND o2.deleted_at IS NULL AND o2.status IN ('pending','producing','paused')),0) as active_orders "
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
-            "WHERE " + w + " GROUP BY customer_name ORDER BY total_qty DESC LIMIT 30",
+            "WHERE " + w + " GROUP BY customer_name ORDER BY total_qty DESC LIMIT 200",
             params
         ).fetchall()
         return [dict(r) for r in rows]

@@ -108,23 +108,29 @@ class UserService:
         if not all(c.isalnum() or c in '_-.' for c in username):
             raise ValueError('用户名只能包含字母、数字、下划线、连字符和点号')
 
+        db = BaseService.db()
+
+        # Resolve role from DB (supports custom roles)
         role = data.get('role', 'worker')
         role_id = data.get('role_id')
-        if role not in ('admin', 'worker'):
-            raise ValueError('角色值无效，仅允许 admin/worker')
+        if not role_id and role:
+            role_row = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (role,)).fetchone()
+            if not role_row:
+                role_row = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', ('worker',)).fetchone()
+            role_id = role_row[0] if role_row else 2
+        if not role_id:
+            role_id = 2
 
-        # P0 Fix: Only admins can create admin accounts
-        if role == 'admin':
+        # P0 Fix: Only admins can create users with admin-level role (role_id=1)
+        if role_id == 1:
             caller_id = data.get('_caller_user_id')
             if not caller_id:
                 raise ValueError('只有管理员可以创建管理员账户')
-            chk = BaseService.db().execute(
+            chk = db.execute(
                 'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (caller_id,)
             ).fetchone()
             if not chk:
                 raise ValueError('只有管理员可以创建管理员账户')
-
-        db = BaseService.db()
 
         # 唯一性检查
         existing = db.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
@@ -161,9 +167,7 @@ class UserService:
             raise ValueError('密码长度不能少于6位')
         pw = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
 
-        if not role_id:
-            role_id = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (role,)).fetchone()
-            role_id = role_id[0] if role_id else 2
+# role_id already resolved above
 
         with BaseService.transaction() as txn:
             cur = txn.execute(
@@ -238,7 +242,15 @@ class UserService:
                 data['group_name'] = gn_row[0]
 
         # P1-2: Only admins can promote users to admin role
-        if 'role' in data and data['role'] == 'admin' and old_role != 'admin':
+        new_role_id_for_check = new_role_id
+        if not new_role_id_for_check and 'role' in data:
+            rr = db.execute('SELECT id FROM roles WHERE code = ? LIMIT 1', (data['role'],)).fetchone()
+            new_role_id_for_check = rr[0] if rr else None
+        old_role_id_for_check = db.execute(
+            'SELECT id FROM roles WHERE code = ? LIMIT 1', (old_role,)
+        ).fetchone()
+        old_role_id_for_check = old_role_id_for_check[0] if old_role_id_for_check else None
+        if new_role_id_for_check == 1 and old_role_id_for_check != 1:
             is_admin = db.execute(
                 'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (current_user_id,)
             ).fetchone()
@@ -246,7 +258,7 @@ class UserService:
                 raise ValueError('only administrators can promote users to admin role')
 
         # C1: Only admins can change roles, and you cannot change your own
-        if 'role' in data and data['role'] != old_role:
+        if new_role_id_for_check is not None and new_role_id_for_check != old_role_id_for_check:
             if current_user_id is None:
                 raise ValueError('Only administrators can change roles')
             if current_user_id == uid:
@@ -380,26 +392,21 @@ class UserService:
 
         db = BaseService.db()
 
-        user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (uid,)).fetchone()
+        user = db.execute("SELECT id, username FROM users WHERE id = ?", (uid,)).fetchone()
 
         if not user:
 
             raise ValueError('user not found')
 
-        if user['username'] == 'admin':
-
-            raise ValueError('cannot delete built-in admin account')
-
-        if user['role'] == 'admin':
-
+        # Role-based admin check via junction table
+        is_admin = db.execute(
+            'SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1', (uid,)
+        ).fetchone()
+        if is_admin:
             active_admins = db.execute(
-
-                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND status != 'deleted'"
-
+                'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
             ).fetchone()[0]
-
             if active_admins <= 1:
-
                 raise ValueError('cannot delete the last administrator')
 
         db.execute(
@@ -443,14 +450,19 @@ class UserService:
         # Prevent self-deletion
         if current_user_id in ids:
             raise ValueError('不能删除自己')
-        # Prevent deleting built-in admin
+        # Prevent deleting last admin (role-based check)
         placeholders = ','.join(['?'] * len(ids))
-        admins = db.execute(
-            f'SELECT id FROM users WHERE id IN ({placeholders}) AND username = ?',
-            ids + ['admin']
-        ).fetchall()
-        if admins:
-            raise ValueError('不能删除内置管理员 (admin)')
+        # Check if any of the target users have admin role
+        admin_check = db.execute(
+            f'SELECT COUNT(*) FROM user_roles WHERE role_id = 1 AND user_id IN ({placeholders})',
+            ids
+        ).fetchone()[0]
+        if admin_check > 0:
+            total_admins = db.execute(
+                'SELECT COUNT(*) FROM user_roles WHERE role_id = 1'
+            ).fetchone()[0]
+            if total_admins <= admin_check:
+                raise ValueError('不能移除所有管理员')
         cur = db.execute(
             f"UPDATE users SET status = 'deleted', deleted_at = datetime('now','localtime') WHERE id IN ({placeholders})",
             ids
@@ -460,30 +472,43 @@ class UserService:
 
     @staticmethod
     def reset_password(uid, password=None):
-        """
-        重置用户密码。
+        """Reset user password with validation and account unlock.
 
         Args:
-            uid: 用户 ID
-            password: 新密码（空字符串 / None 则自动生成随机密码）
+            uid: User ID
+            password: New password (empty/None generates random 8-char token)
 
         Returns:
-            str: 新密码（明文，用于返回给管理员）
+            str: New password in plaintext
 
         Raises:
-            ValueError: 用户不存在
-            RuntimeError: 数据库错误
+            ValueError: User not found / password too weak / user disabled
+            RuntimeError: Database error
         """
         new_pw = password if password else secrets.token_urlsafe(8)
+        if password:
+            if len(password) < 8:
+                raise ValueError('密码至少需要8个字符')
+            if not any(c.isalpha() for c in password):
+                raise ValueError('密码需包含至少一个字母')
+            if not any(c.isdigit() for c in password):
+                raise ValueError('密码需包含至少一个数字')
         hashed = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
 
         db = BaseService.db()
-        existing = db.execute('SELECT id FROM users WHERE id = ?', (uid,)).fetchone()
+        existing = db.execute('SELECT id, status FROM users WHERE id = ?', (uid,)).fetchone()
         if not existing:
             raise ValueError('用户不存在')
+        if existing['status'] != 'active':
+            raise ValueError('用户已禁用，无法重置密码')
 
         with BaseService.transaction() as txn:
-            txn.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, uid))
+            txn.execute(
+                'UPDATE users SET password = ?, password_version = 2, '
+                'must_change_password = 1, locked_until = NULL, '
+                'failed_login_count = 0 WHERE id = ?',
+                (hashed, uid)
+            )
 
         return new_pw
 
@@ -567,8 +592,10 @@ class UserService:
                 
                 # Resolve role
                 role = data.get("role", "worker")
-                if role not in ("admin", "worker"):
-                    role = "worker"
+                # Resolve role from DB (supports custom roles)
+                role = data.get("role", "worker")
+                role_id = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (role,)).fetchone()
+                role_id = role_id[0] if role_id else 2
                 
                 # Auto employee_no
                 employee_no = data.get("employee_no", "")
@@ -580,12 +607,8 @@ class UserService:
                     employee_no = str(next_no).zfill(4)
                 
                 # Password
-                raw_pw = data.get("password", "") or __import__("secrets").token_urlsafe(8)
-                import bcrypt
+                raw_pw = data.get("password", "") or secrets.token_urlsafe(8)
                 pw_hash = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
-                
-                role_id = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (role,)).fetchone()
-                role_id = role_id[0] if role_id else 2
                 
                 with BaseService.transaction() as txn:
                     cur = txn.execute(

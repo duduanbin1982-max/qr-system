@@ -11,6 +11,7 @@ from io import BytesIO  # for attachment download
 from flask import request, jsonify, send_file, make_response, g
 from modules.app import app
 from modules.db import get_page_size, get_db
+from modules.services import BaseService
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
@@ -503,32 +504,31 @@ def add_product_bom(product_id):
     if not material_id:
         return jsonify({"error": "请选择物料"}), 400
 
-    db = get_db()
-    # Check product exists
-    prod = db.execute("SELECT id FROM products WHERE id = ? AND deleted_at IS NULL", (product_id,)).fetchone()
-    if not prod:
-        return jsonify({"error": "产品不存在"}), 404
+    with BaseService.transaction() as txn:
+        # Check product exists
+        prod = txn.execute("SELECT id FROM products WHERE id = ? AND deleted_at IS NULL", (product_id,)).fetchone()
+        if not prod:
+            return jsonify({"error": "产品不存在"}), 404
 
-    try:
-        db.execute(
-            "INSERT INTO product_bom (product_id, material_id, quantity_per_unit, process_id) VALUES (?,?,?,?)",
-            (product_id, material_id, float(quantity), process_id)
-        )
-        db.commit()
-        new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        row = db.execute("""
-            SELECT pb.*, m.name as material_name, m.spec as material_spec, m.material_type,
+        try:
+            txn.execute(
+                "INSERT INTO product_bom (product_id, material_id, quantity_per_unit, process_id) VALUES (?,?,?,?)",
+                (product_id, material_id, float(quantity), process_id)
+            )
+            new_id = txn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            row = txn.execute("""
+                SELECT pb.*, m.name as material_name, m.spec as material_spec, m.material_type,
                    p.name as process_name
             FROM product_bom pb
             LEFT JOIN materials m ON pb.material_id = m.id
             LEFT JOIN processes p ON pb.process_id = p.id
             WHERE pb.id = ?
         """, (new_id,)).fetchone()
-        return jsonify({"bom": dict(row)}), 201
-    except Exception as e:
-        if "UNIQUE" in str(e).upper():
-            return jsonify({"error": "该物料+工序组合已存在"}), 409
-        raise
+            return jsonify({"bom": dict(row)}), 201
+        except Exception as e:
+            if "UNIQUE" in str(e).upper():
+                return jsonify({"error": "该物料+工序组合已存在"}), 409
+            raise
 
 
 @app.route("/api/products/<int:product_id>/bom/<int:bom_id>", methods=["DELETE"])
@@ -536,10 +536,9 @@ def add_product_bom(product_id):
 @check_permission("products:edit")
 def delete_product_bom(product_id, bom_id):
     """删除物料配方项"""
-    db = get_db()
-    row = db.execute("SELECT id FROM product_bom WHERE id = ? AND product_id = ?", (bom_id, product_id)).fetchone()
-    if not row:
-        return jsonify({"error": "配方项不存在"}), 404
-    db.execute("DELETE FROM product_bom WHERE id = ?", (bom_id,))
-    db.commit()
-    return jsonify({"message": "已删除"})
+    with BaseService.transaction() as txn:
+        row = txn.execute("SELECT id FROM product_bom WHERE id = ? AND product_id = ?", (bom_id, product_id)).fetchone()
+        if not row:
+            return jsonify({"error": "配方项不存在"}), 404
+        txn.execute("DELETE FROM product_bom WHERE id = ?", (bom_id,))
+        return jsonify({"message": "已删除"})

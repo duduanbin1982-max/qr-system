@@ -35,7 +35,7 @@ SCHEMAS = {
         'required': ['username', 'name'],
         'properties': {
             'username': {'type': 'string', 'minLength': 2, 'maxLength': 64},
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-/().+#]+$'},
             'nickname': {'type': 'string', 'maxLength': 64},
             'email': {'type': 'string', 'format': 'email', 'maxLength': 128},
             'role': {'type': 'string', 'enum': ['admin', 'worker']},
@@ -217,7 +217,7 @@ SCHEMAS = {
         'type': 'object',
         'required': ['name'],
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-/().+#]+$'},
             'description': {'type': 'string', 'maxLength': 256},
             'status': {'type': 'string', 'enum': ['active', 'inactive']},
             'process_ids': {
@@ -443,7 +443,7 @@ SCHEMAS = {
         'type': 'object',
         'required': ['name'],
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-/().+#]+$'},
             'description': {'type': 'string', 'maxLength': 512},
             'category': {'type': 'string', 'maxLength': 64},
             'seq_order': {'type': 'integer', 'minimum': 0},
@@ -454,7 +454,7 @@ SCHEMAS = {
     'update_process': {
         'type': 'object',
         'properties': {
-            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-\/\(\)\.\+\#]+$'},
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 64, 'pattern': '^[\u4e00-\u9fa5a-zA-Z0-9\\s\\-/().+#]+$'},
             'description': {'type': 'string', 'maxLength': 512},
             'category': {'type': 'string', 'maxLength': 64},
             'seq_order': {'type': 'integer', 'minimum': 0},

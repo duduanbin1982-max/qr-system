@@ -27,20 +27,6 @@ if _secret:
     app.secret_key = _secret
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制请求体最大 16MB
 
-# ============================================================
-# Security Headers (P0 hardening)
-# ============================================================
-@app.after_request
-def add_hardening_headers(response):
-    """注入安全响应头"""
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    # HSTS only if served over HTTPS (gunicorn with SSL)
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    return response
-
 from modules.middleware.error_handler import register_error_handlers
 register_error_handlers(app)
 from modules.middleware.request_tracker import RequestTracker
@@ -163,8 +149,8 @@ def add_security_headers(response):
     # 标准安全头
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    if request.is_secure or request.headers.get('X-Forwarded-Proto', '') == 'https':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'camera=(self), microphone=(), geolocation=()'
 
@@ -172,7 +158,7 @@ def add_security_headers(response):
     csp_nonce = getattr(g, 'csp_nonce', 'fallback')
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{g.csp_nonce}' cdn.jsdelivr.net unpkg.com; "
+        f"script-src 'self' 'nonce-{csp_nonce}' cdn.jsdelivr.net unpkg.com; "
         "style-src 'self' 'unsafe-inline' unpkg.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' cdn.jsdelivr.net unpkg.com; "

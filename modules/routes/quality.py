@@ -8,6 +8,7 @@ from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
 from modules.middleware.validate import validate_json
+from modules.services import BaseService
 from modules.services.quality_service import QualityService
 
 
@@ -55,7 +56,7 @@ def quality_create():
     try:
         audit_log('quality_create', 'quality_inspection', inspection_id, 'created')
     except Exception:
-        pass
+        app.logger.warning('audit_log failed for quality_create: inspection_id=%s', inspection_id)
     return jsonify({'ok': True, 'id': inspection_id})
 
 
@@ -72,7 +73,7 @@ def quality_update(inspection_id):
     try:
         audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
     except Exception:
-        pass
+        app.logger.warning('audit_log failed for quality_edit: inspection_id=%s', inspection_id)
     return jsonify({'ok': True, 'message': '已更新'})
 
 
@@ -87,7 +88,7 @@ def quality_delete(inspection_id):
     try:
         audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
     except Exception:
-        pass
+        app.logger.warning('audit_log failed for quality_delete: inspection_id=%s', inspection_id)
     return jsonify({'ok': True, 'message': '已删除'})
 
 
@@ -229,11 +230,11 @@ def quality_attachment_upload(inspection_id):
         import mimetypes
         mime = mimetypes.guess_type(file.filename)[0] or ''
         db = get_db()
-        db.execute(
-            'INSERT INTO quality_attachments (inspection_id, file_name, file_type, file_size, file_data, uploaded_by, created_at) VALUES (?,?,?,?,?,?,datetime("now","localtime"))',
-            (inspection_id, file.filename, mime, len(file_data), file_data, g.current_user.get('id'))
-        )
-        db.commit()
+        with BaseService.transaction() as txn:
+            txn.execute(
+                'INSERT INTO quality_attachments (inspection_id, file_name, file_type, file_size, file_data, uploaded_by, created_at) VALUES (?,?,?,?,?,?,datetime("now","localtime"))',
+                (inspection_id, file.filename, mime, len(file_data), file_data, g.current_user.get('id'))
+            )
         return jsonify({'ok': True, 'message': '上传成功'})
     except Exception as e:
         return handle_unexpected_error(e, 'file upload')
@@ -261,8 +262,8 @@ def quality_attachment_download(att_id):
 def quality_attachment_delete(att_id):
     try:
         db = get_db()
-        db.execute('DELETE FROM quality_attachments WHERE id = ?', (att_id,))
-        db.commit()
+        with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM quality_attachments WHERE id = ?', (att_id,))
         return jsonify({'ok': True, 'message': '已删除'})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')

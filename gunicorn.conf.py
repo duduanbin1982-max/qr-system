@@ -12,8 +12,8 @@ gunicorn.SERVER = 'webserver'
 
 chdir = '/home/dubin/qr-system'
 bind = '127.0.0.1:3000'
-certfile = 'server.crt'
-keyfile = 'server.key'
+certfile = os.environ.get('SSL_CERT_FILE', 'server.crt')
+keyfile = os.environ.get('SSL_KEY_FILE', 'server.key')
 workers = 2        # SQLite WAL mode supports concurrent reads, BEGIN IMMEDIATE handles write conflicts
 timeout = 120
 accesslog = 'logs/gunicorn_access.log'

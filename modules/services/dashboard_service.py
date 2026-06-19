@@ -108,7 +108,6 @@ class DashboardService:
         }
 
     @staticmethod
-    @staticmethod
     def _get_quick_actions(user=None):
         """Permission-based quick-action shortcuts for the workbench."""
         all_actions = [

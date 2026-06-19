@@ -81,40 +81,39 @@ def save_approval_config():
     """Save approval_config: {process_id: int, require_approval: 1|0, approver_role: str, approval_level: int}
     Also supports batch: {"configs": [{...}, ...]}
     """
-    db = get_db()
+    from modules.services import BaseService
     data = get_json_body()
     configs = data.get("configs", [data] if "process_id" in data else [])
 
-    for cfg in configs:
-        pid = cfg["process_id"]
-        require = 1 if cfg.get("require_approval") else 0
-        role = cfg.get("approver_role", "admin")
-        role2 = cfg.get("approver_role_2", "")
-        role3 = cfg.get("approver_role_3", "")
-        level = cfg.get("approval_level", 1)
+    with BaseService.transaction() as txn:
+        for cfg in configs:
+            pid = cfg["process_id"]
+            require = 1 if cfg.get("require_approval") else 0
+            role = cfg.get("approver_role", "admin")
+            role2 = cfg.get("approver_role_2", "")
+            role3 = cfg.get("approver_role_3", "")
+            level = cfg.get("approval_level", 1)
 
-        existing = db.execute(
-            "SELECT id FROM approval_config WHERE process_id = ?", (pid,)
-        ).fetchone()
+            existing = txn.execute(
+                "SELECT id FROM approval_config WHERE process_id = ?", (pid,)
+            ).fetchone()
 
-        if existing:
-            db.execute(
-                "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, approver_role_3=?, approval_level=? WHERE process_id=?",
-                (require, role, role2, role3, level, pid)
-            )
-        else:
-            if require:
-                db.execute(
-                    "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level) VALUES (?,?,?,?,?,?)",
-                    (pid, require, role, role2, role3, level)
+            if existing:
+                txn.execute(
+                    "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, approver_role_3=?, approval_level=? WHERE process_id=?",
+                    (require, role, role2, role3, level, pid)
                 )
-            # If require=0 and no existing row, skip (nothing to delete)
+            else:
+                if require:
+                    txn.execute(
+                        "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level) VALUES (?,?,?,?,?,?)",
+                        (pid, require, role, role2, role3, level)
+                    )
 
-        # If require_approval is turned off, delete the config row
-        if not require and existing:
-            db.execute("DELETE FROM approval_config WHERE process_id = ?", (pid,))
+            # If require_approval is turned off, delete the config row
+            if not require and existing:
+                txn.execute("DELETE FROM approval_config WHERE process_id = ?", (pid,))
 
-    db.commit()
     return jsonify({"message": "保存成功"})
 
 @app.route("/api/approvals/batch", methods=["POST"])

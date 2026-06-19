@@ -109,6 +109,13 @@ PREDEFINED_ROLES = {
     },
 }
 
+# Permissions that grant global data scope (view all data regardless of position)
+GLOBAL_DATA_SCOPE_PERMS = {
+    "orders:view", "stats:view", "inventory:view", "*",
+    "shipments:view", "reports:view", "dashboard:view",
+    "scan:view", "scan:report",
+}
+
 def expand_permissions(perm_list: List[str]) -> List[str]:
     """展开权限列表，['*'] 返回所有权限，否则展开为 'resource:action'"""
     if '*' in perm_list:

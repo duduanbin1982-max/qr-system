@@ -17,7 +17,7 @@ export const auth = reactive({
 export function can(permission) {
   if (!auth.user) return false
   const perms = auth.user.permissions || []
-  if (perms.includes('*') || auth.isAdmin) return true
+  if (auth.isAdmin) return true
   return perms.includes(permission)
 }
 
@@ -27,7 +27,7 @@ export async function login(username, password) {
   const u = d.user || d
   const mustChange = d.must_change_password === true
   auth.user = u
-  auth.isAdmin = u.role === 'admin' || (u.permissions && u.permissions.includes('*'))
+  auth.isAdmin = !!(u.permissions && u.permissions.includes('*'))
   auth.isLoggedIn = !mustChange  // 需改密时不算已登录
   auth.mustChangePassword = mustChange
   auth.loading = false
@@ -52,7 +52,7 @@ export async function restoreSession() {
     const d = await api.authInfo()
     if (d && d.user) {
       auth.user = d.user
-      auth.isAdmin = d.user.role === 'admin' || (d.user.permissions && d.user.permissions.includes('*'))
+      auth.isAdmin = !!(d.user.permissions && d.user.permissions.includes('*'))
       auth.mustChangePassword = d.must_change_password === true
       auth.isLoggedIn = !auth.mustChangePassword
       auth.loading = false

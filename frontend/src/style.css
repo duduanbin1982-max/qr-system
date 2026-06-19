@@ -62,7 +62,7 @@
 
   /* 背景/边框 */
   --bg-page: #F3F4F6;
-  --bg-page-alt: var(--bg-page-alt);
+  --bg-page-alt: #E5E7EB;  /* was self-ref: fixed */
   --bg-surface: #FFFFFF;
   --bg-hover: #F3F4F6;
   --bg-input: #FAFAFA;
@@ -76,7 +76,7 @@
   /* 侧边栏专用 */
   --sidebar-bg-start: #1A1F3C;
   --sidebar-bg-end: #2D3561;
-  --sidebar-badge: var(--sidebar-badge);
+  --sidebar-badge: #F59E0B;  /* was self-ref: fixed */
   --sidebar-text: rgba(255,255,255,0.7);
   --sidebar-text-dim: rgba(255,255,255,0.5);
 

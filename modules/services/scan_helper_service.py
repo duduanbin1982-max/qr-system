@@ -502,7 +502,10 @@ class ScanHelperService:
                                     'inspected_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                 }, user_id)
                             except Exception:
-                                pass  # Non-critical
+                                _logger.warning(
+                                    'auto_create_inspection failed: order_id=%s process_id=%s',
+                                    order_id, process_id
+                                )  # Non-critical
 
                     # Auto-deduct materials via ScanRepository
                     ScanRepository.deduct_materials_for_process(
