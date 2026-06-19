@@ -388,7 +388,7 @@ function addItem() { items.value.push({ inventory_id:'', product_model:'', produ
 
     async function del(s) {
       try {
-        const res = await api.get('/api/shipments/' + s.id + '/impact')
+        const res = await api.shipmentImpact(s.id)
         if (res.items > 0) {
           showToast('出库单「' + s.shipment_no + '」包含 ' + res.items + ' 个物品，请先清空', 'warn')
           return

@@ -6,7 +6,7 @@ from modules.services.query_utils import paginate, build_sort_clause
 
 def _generate_shipment_no(db, prefix=None):
     if not prefix:
-        setting = None  # P3: settings table may not exist yet
+        setting = None  # Settings lookup
         prefix = setting['value'] if setting else 'SH'
     today = datetime.now().strftime('%Y%m%d')
     prefix_len = len(prefix) + 10
@@ -368,7 +368,7 @@ class ShipmentService:
         ).fetchall()
         return { "order": dict(order), "items": [dict(it) for it in items] }
 
-    # P2: stats    # P2: stats
+    # P2: stats
     @staticmethod
     def get_stats():
         db = BaseService.db()

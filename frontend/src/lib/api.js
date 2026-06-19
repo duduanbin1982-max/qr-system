@@ -174,6 +174,11 @@ export const api = {
   receiveShipment:  (id,data)=> request('POST', '/api/shipments/' + id + '/receive', data),
   recordPayment:    (id,data)=> request('POST', '/api/shipments/' + id + '/payment', data),
   getShipmentOrderItems: (id) => request('GET', '/api/shipments/order-items/' + id),
+  cancelShipment:   (id)     => request('POST', '/api/shipments/' + id + '/cancel'),
+  shipmentImpact:   (id)     => request('GET', '/api/shipments/' + id + '/impact'),
+  customerHistory:  (params) => request('GET', '/api/shipments/customer-history' + buildQuery(params)),
+  shipmentStats:    ()       => request('GET', '/api/shipments/stats'),
+  exportShipments:  (params) => request('GET', '/api/shipments/export' + buildQuery(params)),
   
   // ========== 扫码报工 ==========
   scan:             (data)   => request('POST', '/api/scan', data),
@@ -202,7 +207,7 @@ export const api = {
   productProcessMatrix: (params) => request('GET', '/api/reports/product-process-matrix' + buildQuery(params)),
   modelProcessStats: (params) => request('GET', '/api/reports/model-process-stats' + buildQuery(params)),
   productProcessStats: (params) => request('GET', '/api/stats/product-process' + buildQuery(params)),
-  shipmentStats:    (params) => request('GET', '/api/stats/shipment' + buildQuery(params)),
+  reportShipmentStats: (params) => request('GET', '/api/stats/shipment' + buildQuery(params)),
   // ========== 追溯 ==========
   trace:            (code)   => request('GET', '/api/trace/' + encodeURIComponent(code)),
   traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),

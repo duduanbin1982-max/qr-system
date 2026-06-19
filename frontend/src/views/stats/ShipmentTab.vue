@@ -56,7 +56,7 @@ export default {
     const shipmentByStatus = ref([]); const shipmentByCustomer = ref([]); const shipmentMonthly = ref([])
     const loading = ref(false); const updateTime = ref('')
     const load = createLoader(loading, updateTime, async () => {
-      const d = await api.shipmentStats(buildParams(props.start, props.end, props.productCode || ''))
+      const d = await api.reportShipmentStats(buildParams(props.start, props.end, props.productCode || ''))
       shipmentByStatus.value = d.by_status || []; shipmentByCustomer.value = d.by_customer || []; shipmentMonthly.value = d.monthly_trend || []
     })
     

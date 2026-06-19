@@ -1,5 +1,6 @@
 """qr-system — 出库管理（路由层）"""
-from flask import request, jsonify, g
+from flask import request, jsonify, g, send_file
+from datetime import datetime
 from modules.app import app
 from modules.db import get_page_size
 from modules.middleware.audit import audit_log
@@ -371,6 +372,4 @@ def export_shipments():
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    from flask import send_file
-    from datetime import datetime as dt
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"shipments_{dt.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"shipments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
