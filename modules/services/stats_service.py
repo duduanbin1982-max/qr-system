@@ -135,9 +135,7 @@ class StatsService:
         if product_code:
             where_parts.append("o.product_code = ?"); params.append(product_code)
         where_clause = " AND ".join(where_parts)
-        # Worker role filter: only count users with worker role
-        worker_filter = ("u.id IN (SELECT ur.user_id FROM user_roles ur "
-                         "JOIN roles r ON ur.role_id=r.id WHERE r.code='worker')")
+# Worker filter removed — admins cannot scan work per mobile module
         workers = db.execute(
             f"SELECT u.id as id, u.name as name, u.employee_no, "
             f"COUNT(DISTINCT DATE(wr.created_at)) as work_days, "
@@ -148,8 +146,8 @@ class StatsService:
             f"FROM work_records wr "
             f"JOIN users u ON wr.user_id=u.id "
             f"JOIN orders o ON wr.order_id=o.id "
-            f"WHERE {where_clause} AND {worker_filter} "
-            f"GROUP BY u.id ORDER BY {col} {direction} LIMIT 100", params
+            f"WHERE {where_clause} "
+            f"GROUP BY u.id ORDER BY {col} {direction}", params
         ).fetchall()
         return [dict(r) for r in workers]
 
@@ -172,7 +170,7 @@ class StatsService:
             "SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END) AS scrap "
             'FROM work_records wr '
             'JOIN orders o ON wr.order_id=o.id '
-            'LEFT JOIN products pr ON o.product_code=pr.product_code '
+            'LEFT JOIN products pr ON o.product_code=pr.product_code AND pr.deleted_at IS NULL '
             'JOIN processes p ON wr.process_id=p.id '
             'WHERE ' + w + ' GROUP BY o.product_name, pr.model, pr.spec, p.id '
             'ORDER BY o.product_name, pr.model, p.name',
