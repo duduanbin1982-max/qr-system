@@ -36,7 +36,7 @@ function doScan(code) {
 
     // -- 管理员/质检员扫码 → 重定向到抽检页面 --
     var _u = user();
-    if (_u && (_u.group_name === "系统管理组" || _u.group_name === "超级管理组" || _u.role === "admin" || _u.role === "inspector" || (_u.permissions && _u.permissions.indexOf("inspection:create") !== -1))) {
+    if (_u && _u.permissions && (_u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:view") !== -1)) {
       closeCam();
       window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code) + "&token=" + encodeURIComponent(token());
       return;

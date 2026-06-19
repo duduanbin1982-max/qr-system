@@ -178,9 +178,7 @@ def add_security_headers(response):
         "connect-src 'self' cdn.jsdelivr.net unpkg.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
-        "form-action 'self'; "
-        "img-src 'self' data: blob:; "
-        "frame-ancestors 'self'"
+        "form-action 'self'"
     )
     response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
 

@@ -70,8 +70,9 @@ function toggleManual() {
 
 function loadStats() {
   fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-    .then(function(r) { if (_checkAuth(r)) return r.json(); return r.json(); })
+    .then(function(r) { if (_checkAuth(r)) return null; return r.json(); })
     .then(function(d) {
+      if (!d) return;
       if (d && d.today) {
         $('st-today').textContent = d.today.records || 0;
         $('st-qty').textContent = d.today.quantity || 0;
