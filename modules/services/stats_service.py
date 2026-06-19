@@ -147,7 +147,7 @@ class StatsService:
             f"JOIN users u ON wr.user_id=u.id "
             f"JOIN orders o ON wr.order_id=o.id "
             f"WHERE {where_clause} "
-            f"GROUP BY u.id ORDER BY {col} {direction}", params
+            f"GROUP BY u.id ORDER BY {col} {direction} LIMIT 500", params
         ).fetchall()
         return [dict(r) for r in workers]
 

@@ -77,7 +77,7 @@ def get_route_price_history(route_id):
 
 @app.route('/api/wages', methods=['GET'])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def calculate_wages():
     employee_id = request.args.get('employee_id', type=int)
     # Row-level access control: non-admin users can only see their own wages
@@ -127,7 +127,7 @@ def calculate_wages():
 
 @app.route('/api/daily-report', methods=['GET'])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def daily_report():
     date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
     export = request.args.get('export', '')
@@ -153,7 +153,7 @@ def daily_report():
 
 @app.route('/api/production-progress', methods=['GET'])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def production_progress():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 50, type=int), 1), 200)
@@ -161,7 +161,7 @@ def production_progress():
 
 @app.route('/api/wages/monthly-summary', methods=['GET'])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def monthly_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
     page = max(request.args.get('page', 1, type=int), 1)
@@ -170,14 +170,14 @@ def monthly_summary():
 
 @app.route('/api/wages/process-summary', methods=['GET'])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def process_wage_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
     return jsonify(WageService.process_wage_summary(year_month))
 
 @app.route("/api/wages/adjustments", methods=["GET"])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def list_wage_adjustments():
     user_id = request.args.get("user_id")
     year_month = request.args.get("year_month")
@@ -185,7 +185,7 @@ def list_wage_adjustments():
 
 @app.route("/api/wages/adjustments", methods=["POST"])
 @check_auth
-@check_permission('prices:edit')
+@check_permission('wages:edit')
 def save_wage_adjustment():
     data = request.get_json()
     return jsonify(WageService.save_adjustment(
@@ -196,13 +196,13 @@ def save_wage_adjustment():
 
 @app.route("/api/wages/adjustments/<int:adj_id>", methods=["DELETE"])
 @check_auth
-@check_permission('prices:edit')
+@check_permission('wages:edit')
 def delete_wage_adjustment(adj_id):
     return jsonify(WageService.delete_adjustment(adj_id))
 
 @app.route("/api/wages/adjustments-total", methods=["GET"])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def get_adjustments_total():
     user_id = request.args.get("user_id")
     year_month = request.args.get("year_month")
@@ -212,23 +212,23 @@ def get_adjustments_total():
 
 @app.route("/api/wages/trends", methods=["GET"])
 @check_auth
-@check_permission("prices:view")
+@check_permission("wages:view")
 def wage_trends():
     months = request.args.get("months", 12, type=int)
     return jsonify(WageService.wage_trends(months=min(months, 36)))
 
 @app.route("/api/wages/confirm", methods=["POST"])
 @check_auth
-@check_permission("prices:edit")
+@check_permission("wages:edit")
 def confirm_wage_snapshot():
     year_month = request.args.get("year_month", "")
     if not year_month:
         return jsonify({"error": "missing year_month"}), 400
-    return jsonify(WageService.confirm_snapshot(year_month, "admin"))
+    return jsonify(WageService.confirm_snapshot(year_month, g.current_user.get("name", g.current_user.get("username", "system"))))
 
 @app.route("/api/wages/snapshot-status", methods=["GET"])
 @check_auth
-@check_permission("prices:view")
+@check_permission("wages:view")
 def wage_snapshot_status():
     year_month = request.args.get("year_month", "")
     if not year_month:
@@ -237,7 +237,7 @@ def wage_snapshot_status():
 
 @app.route("/api/wages/snapshot", methods=["POST"])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def save_wage_snapshot():
     year_month = request.args.get("year_month", "")
     if not year_month:
@@ -246,17 +246,17 @@ def save_wage_snapshot():
 
 @app.route("/api/wages/lock", methods=["POST"])
 @check_auth
-@check_permission('prices:view')
+@check_permission('wages:view')
 def lock_wage_snapshot():
     data = request.get_json() or {}
     year_month = request.args.get("year_month", "")
     if not year_month:
         return jsonify({"error": "missing year_month"}), 400
-    return jsonify(WageService.lock_snapshot(year_month, g.current_user.get("name", "admin"), data.get("notes", "")))
+    return jsonify(WageService.lock_snapshot(year_month, g.current_user.get("name", g.current_user.get("username", "system")), data.get("notes", "")))
 
 @app.route("/api/wages/position-summary", methods=["GET"])
 @check_auth
-@check_permission("prices:view")
+@check_permission("wages:view")
 def position_wage_summary():
     year_month = request.args.get("year_month", "")
     if not year_month:
@@ -266,7 +266,7 @@ def position_wage_summary():
 
 @app.route("/api/wages/prediction", methods=["GET"])
 @check_auth
-@check_permission("prices:view")
+@check_permission("wages:view")
 def wage_prediction():
     months = request.args.get("months", 6, type=int)
     return jsonify(WageService.wage_prediction(months=min(months, 24)))

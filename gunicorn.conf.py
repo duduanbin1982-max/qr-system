@@ -10,7 +10,8 @@ import gunicorn
 # 隐藏 Server 响应头（默认暴露 gunicorn 版本号）
 gunicorn.SERVER = 'webserver'
 
-chdir = '/home/dubin/qr-system'
+base_dir = os.path.dirname(os.path.abspath(__file__))
+chdir = base_dir
 bind = '127.0.0.1:3000'
 certfile = os.environ.get('SSL_CERT_FILE', 'server.crt')
 keyfile = os.environ.get('SSL_KEY_FILE', 'server.key')
@@ -24,6 +25,6 @@ raw_env = [
 ]
 
 def on_starting(server):
-    os.chdir('/home/dubin/qr-system')
+    os.chdir(base_dir)
     from modules.db import init_db
     init_db()
