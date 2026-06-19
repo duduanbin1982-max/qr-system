@@ -198,6 +198,7 @@ export const api = {
   dailyReport:      (params) => request('GET', '/api/daily-report' + buildQuery(params)),
   productionProgress:(params)=>request('GET', '/api/production-progress' + buildQuery(params)),
   productionTrend:  (params) => request('GET', '/api/reports/production-trend' + buildQuery(params)),
+  monthlySummary:   ()       => request('GET', '/api/stats/monthly-summary'),
   workerEfficiency: (params) => request('GET', '/api/reports/worker-efficiency' + buildQuery(params)),
   qualityAnalysis:  (params) => request('GET', '/api/reports/quality-analysis' + buildQuery(params)),
   orderAnalysis:    (params) => request('GET', '/api/reports/order-analysis' + buildQuery(params)),
