@@ -43,7 +43,7 @@ class ReportsService:
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
             "COUNT(wr.id) as report_count "
             "FROM (WITH RECURSIVE dates(d) AS (SELECT ? UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d<?) SELECT d FROM dates) dates "
-            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status IN ('completed','scrapped') "
+            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status IN ('completed','scrapped') AND pi.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL) "
             "LEFT JOIN work_records wr ON DATE(wr.created_at)=dates.d "
             f"AND {_ACTIVE_ORDERS} "
             "GROUP BY dates.d ORDER BY dates.d ASC",
@@ -102,7 +102,7 @@ class ReportsService:
             f"COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
             f"COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework "
             f"FROM processes p JOIN work_records wr ON wr.process_id=p.id "
-            f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 20",
+            f"WHERE {w} GROUP BY p.id ORDER BY output DESC",
             params
         ).fetchall()
         result = {"by_process": _calc_defect_rate(by_process)}
