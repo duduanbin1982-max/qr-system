@@ -70,8 +70,8 @@ export default {
 
     async function loadProducts() {
       try {
-        const d = await api.productStats({})
-        productOptions.value = (d.by_product||[]).map(p=>({code:p.product_code,label:p.product_name+' '+p.model}))
+        const d = await api.listProducts({limit: 500})
+        productOptions.value = (d.products||[]).map(p=>({code:p.product_code,label:p.product_name+' '+p.model}))
       } catch(e) {
         showToast('加载产品列表失败，筛选功能不可用', 'warning')
       }
