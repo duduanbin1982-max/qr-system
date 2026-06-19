@@ -1,4 +1,4 @@
-"""qr-system \u2014 ReportsService (refactored)"""
+﻿"""qr-system \u2014 ReportsService (refactored)"""
 from modules.services import BaseService
 
 _ACTIVE_ORDERS = "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)"
@@ -92,7 +92,7 @@ class ReportsService:
     def quality_analysis(start="", end="", product_code=""):
         db = BaseService.db()
         date_w, date_p = _build_date_filter(start, end)
-        where = [_ACTIVE_ORDERS, "wr.status = 'approved'"]
+        where = [_ACTIVE_ORDERS, 'wr.status = "approved"']
         params = list(date_p)
         if date_w:
             where.append(date_w)
@@ -109,8 +109,66 @@ class ReportsService:
             f"WHERE {w} GROUP BY p.id ORDER BY output DESC LIMIT 20",
             params
         ).fetchall()
-        return {"by_process": _calc_defect_rate(by_process)}
-
+        result = {"by_process": _calc_defect_rate(by_process)}
+        try:
+            from modules.services.quality_service import QualityService
+        except ImportError:
+            return result
+        try:
+            trend_list = QualityService.pass_rate_trend(weeks=6, start=start, end=end)
+            if isinstance(trend_list, list):
+                result["trend_labels"] = [t["label"] for t in trend_list]
+                result["trend_pass_rates"] = [t["rate"] for t in trend_list]
+        except Exception:
+            pass
+        try:
+            spc = QualityService.spc_p_chart(limit=50, start=start, end=end)
+            if isinstance(spc, dict):
+                result["spc_samples"] = [s["rate"] for s in spc.get("samples", [])]
+                result["spc_ucl"] = spc.get("ucl", 0)
+                result["spc_cl"] = spc.get("cl", 0)
+                result["spc_lcl"] = spc.get("lcl", 0)
+        except Exception:
+            pass
+        try:
+            insp = QualityService.inspector_performance(start=start, end=end)
+            if isinstance(insp, dict):
+                result["inspector_data"] = insp.get("data", [])
+        except Exception:
+            pass
+        try:
+            supp = QualityService.supplier_quality(start=start, end=end)
+            if isinstance(supp, dict):
+                result["supplier_data"] = supp.get("data", [])
+        except Exception:
+            pass
+        try:
+            qi_where = ["1=1"]
+            qi_params = []
+            if start:
+                qi_where.append("DATE(qi.inspected_at) >= ?")
+                qi_params.append(start)
+            if end:
+                qi_where.append("DATE(qi.inspected_at) <= ?")
+                qi_params.append(end)
+            if product_code:
+                qi_where.append("qi.product_code = ?")
+                qi_params.append(product_code)
+            qi_w = " AND ".join(qi_where)
+            qi_by_process = db.execute(
+                "SELECT qi.process_name as name, COUNT(*) as total_inspections, "
+                "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
+                "COALESCE(SUM(CASE WHEN qi.result IN('fail','partial') THEN 1 ELSE 0 END),0) as fail_count, "
+                "COALESCE(SUM(CASE WHEN qi.result='scrap' THEN 1 ELSE 0 END),0) as scrap_count, "
+                "COALESCE(SUM(CASE WHEN qi.result='rework' THEN 1 ELSE 0 END),0) as rework_count "
+                "FROM quality_inspections qi WHERE " + qi_w + " AND qi.process_name != '' "
+                "GROUP BY qi.process_name ORDER BY total_inspections DESC",
+                qi_params
+            ).fetchall()
+            result["qi_by_process"] = [dict(r) for r in qi_by_process]
+        except Exception:
+            pass
+        return result
     @staticmethod
     def order_analysis():
         db = BaseService.db()

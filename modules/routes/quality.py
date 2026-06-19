@@ -25,7 +25,7 @@ def quality_list():
             process_id=request.args.get('process_id', type=int),
             inspection_type=request.args.get('type', ''),
             result=request.args.get('result', ''),
-            search=request.args.get('search', ''),
+            search=request.args.get('search', request.args.get('keyword', '')),
             date_from=request.args.get('from', ''),
             date_to=request.args.get('to', ''),
             page=_safe_int(request.args.get('page', '1'), 1),
@@ -33,13 +33,6 @@ def quality_list():
         ))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
-
-
-@app.route('/api/quality', methods=['GET'])
-@check_auth
-@check_permission('quality:view')
-def quality_list_alias():
-    return quality_list()
 
 
 @app.route('/api/quality/inspections', methods=['POST'])
@@ -50,7 +43,7 @@ def quality_create():
     data = get_json_body()
     order_id = data.get('order_id')
     if not order_id or not data.get('process_id'):
-        return jsonify({'error': '???????'}), 400
+        return jsonify({'error': '订单和工序必填'}), 400
 
     try:
         QualityService.check_order_exists(order_id)
@@ -74,12 +67,12 @@ def quality_update(inspection_id):
     try:
         result = QualityService.update_inspection(inspection_id, data)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '???' in str(e) else 400
+        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
     try:
         audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
     except Exception:
         pass
-    return jsonify({'ok': True, 'message': '???'})
+    return jsonify({'ok': True, 'message': '已更新'})
 
 
 @app.route('/api/quality/inspections/<int:inspection_id>', methods=['DELETE'])
@@ -94,7 +87,7 @@ def quality_delete(inspection_id):
         audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
     except Exception:
         pass
-    return jsonify({'ok': True, 'message': '???'})
+    return jsonify({'ok': True, 'message': '已删除'})
 
 
 @app.route('/api/quality/inspections/stats', methods=['GET'])
@@ -118,7 +111,7 @@ def quality_export():
             process_id=request.args.get('process_id', type=int),
             inspection_type=request.args.get('type', ''),
             result=request.args.get('result', ''),
-            search=request.args.get('search', ''),
+            search=request.args.get('search', request.args.get('keyword', '')),
             date_from=request.args.get('from', ''),
             date_to=request.args.get('to', ''),
         )
@@ -288,3 +281,38 @@ def quality_defect_pareto():
         ))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
+
+# ═══════════════════════════════════════
+#  Mobile Inspection Routes (merged from inspection.py)
+# ═══════════════════════════════════════
+
+@app.route("/api/inspection/submit", methods=["POST"])
+@check_auth
+@check_permission("quality:edit")
+def inspection_submit():
+    """Submit inspection result from mobile scan (redirected here)"""
+    data = get_json_body()
+    try:
+        QualityService.submit_inspection(data, g.current_user.get("id"), g.current_user.get("name", ""))
+        audit_log("create", "inspection", 0, "qc " + data.get("result", "") + " " + data.get("process_name", ""))
+        return jsonify({"message": "ok"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/inspection", methods=["GET"])
+@check_auth
+@check_permission("quality:view")
+def inspection_list():
+    """Simple inspection list (used by InspectionList page)"""
+    keyword = request.args.get("keyword", "")
+    result = request.args.get("result", "")
+    page = _safe_int(request.args.get("page", "1"), 1)
+    limit = _safe_int(request.args.get("limit", "20"), 20)
+    return jsonify(QualityService.list_inspections_simple(keyword, page, limit, result))
+
+@app.route("/api/inspection/stats", methods=["GET"])
+@check_auth
+@check_permission("quality:view")
+def inspection_stats():
+    """Simple inspection stats"""
+    return jsonify(QualityService.get_inspection_stats())

@@ -35,9 +35,10 @@ def list_inventory():
     """
     keyword = request.args.get('keyword', '')
     low_stock = request.args.get('low_stock', '0') == '1'
+    location = request.args.get('location', '')
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-    return jsonify(InventoryService.list_items(keyword, low_stock, page, limit))
+    return jsonify(InventoryService.list_items(keyword, low_stock, location, page, limit))
 
 
 @app.route('/api/inventory', methods=['POST'])

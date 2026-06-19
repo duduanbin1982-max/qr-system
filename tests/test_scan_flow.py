@@ -21,7 +21,7 @@ class TestScanWorkFlow:
         })
         assert resp.status_code in (200, 404)
 
-    def test_work_report_submit(self, client, auth_headers):
+    def test_work_report_submit(self, client, auth_headers, worker_auth_headers):
         """POST /api/report — submit a work report."""
         # First create an order, then report on it
         order_no = f"TEST-FLOW-{int(time.time())}"
@@ -50,7 +50,7 @@ class TestScanWorkFlow:
         process_id = processes[0]["id"]
 
         # Submit work report
-        report_resp = client.post("/api/report", headers=auth_headers, json={
+        report_resp = client.post("/api/report", headers=worker_auth_headers, json={
             "order_id": order_id,
             "process_id": process_id,
             "quantity": 5,

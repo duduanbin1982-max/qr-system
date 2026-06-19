@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import request, jsonify, g
 from modules.app import app
 from modules.middleware.audit import audit_log
-from modules.middleware.auth import check_auth, check_permission
+from modules.middleware.auth import check_auth, check_permission, has_permission
 from modules.middleware.rate_limit import rate_limit
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
@@ -59,7 +59,7 @@ def scan_order():
             o_pre = dict(order)
             _qr_mode = (o_pre.get("qr_mode") or "").strip()
             _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
-            if _qr_mode == "serial" or _has_items:
+            if (_qr_mode == "serial" or _has_items) and not has_permission(g.current_user, "quality:view"):
                 return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         o = dict(order)
@@ -292,23 +292,23 @@ def mobile_report():
 
         # ===== 序列号模式守卫 =====
         has_items_m = bool(ScanHelperService.get_product_items_by_order(order_id))
-        if has_items_m and not serial_no:
+        if has_items_m and not serial_no and not has_permission(g.current_user,   "quality:view"):
             return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         op_check = ScanHelperService.check_process_in_order(order_id, process_id)
         if not op_check:
             return jsonify({"error": "该工序不在订单工艺路线中"}), 400
 
-        # ===== 跨工序防重复（序列号在此订单整体已报工） =====
-        if serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
-            return jsonify({"error": f"序列号 {serial_no} 在此订单已报工，不可重复扫码！"}), 409
+        # ===== 跨工序防重复（序列号在此订单整体已报工，仅拦截普通报工） =====
+        if report_type == "normal" and serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
+            return jsonify({"error": f"序列号 {serial_no} 在此订单已报工，不可重复扫码！", "can_scrap_rework": True}), 409
 
         # ===== 防重复报工 =====
         if report_type == "normal":
             dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
             if dup:
                 msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
-                return jsonify({"error": msg}), 409
+                return jsonify({"error": msg, "can_scrap_rework": True}), 409
         elif report_type in ("scrap", "rework"):
             dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
             if dup:
@@ -317,13 +317,12 @@ def mobile_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
-            # 找到订单当前应报工的前置工序
-            prev_procs = ScanHelperService.get_prev_incomplete_processes(order_id, 999)
-            if prev_procs:
-                hint = "、".join([p["process_name"] for p in prev_procs])
-                return jsonify({"error": f"请先完成前置工序：{hint}"}), 400
-            proc_name = ScanHelperService.get_process_name(process_id)
-            return jsonify({"error": f"请先完成前置工序"}), 403
+            proc = ScanHelperService._db(None).execute(
+                "SELECT name FROM processes WHERE id=?", (process_id,)
+            ).fetchone()
+            if proc:
+                return jsonify({"error": f"工序「{proc["name"]}」不在您的报工权限范围内"}), 403
+            return jsonify({"error": "您没有此工序的报工权限"}), 403
 
         # ===== 工序存在性校验（获取完整信息） =====
         current_op = ScanHelperService.get_order_process(order_id, process_id)
@@ -331,16 +330,18 @@ def mobile_report():
             return jsonify({"error": "该工序不在订单工艺路线中"}), 400
         current_seq = current_op["seq_order"] if current_op else 0
 
-        # ===== 顺序报工检查 =====
-        err, code = ScanHelperService.check_process_order(order_id, current_seq)
-        if err:
-            return jsonify(err), code
+        # ===== 顺序报工检查（仅普通报工） =====
+        if report_type == "normal":
+            err, code = ScanHelperService.check_process_order(order_id, current_seq)
+            if err:
+                return jsonify(err), code
 
-        # ===== 数量上限检查 =====
-        err, code = ScanHelperService.check_quantity_limits(
-            order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
-        if err:
-            return jsonify(err), code
+        # ===== 数量上限检查（仅普通报工） =====
+        if report_type == "normal":
+            err, code = ScanHelperService.check_quantity_limits(
+                order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
+            if err:
+                return jsonify(err), code
 
         # 审批检查
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
@@ -402,7 +403,7 @@ def work_report():
 
         # ===== 序列号模式守卫 =====
         has_items_wr = bool(ScanHelperService.get_product_items_by_order(order_id))
-        if has_items_wr and not serial_no:
+        if has_items_wr and not serial_no and not has_permission(g.current_user,   "quality:view"):
             return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         # ===== 工序存在性校验 =====
@@ -416,7 +417,7 @@ def work_report():
             dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
             if dup:
                 msg = f"序列号 {serial_no} 在此工序已报工，不可重复扫码！" if serial_no else "此工序您已报工，不可重复扫码"
-                return jsonify({"error": msg}), 409
+                return jsonify({"error": msg, "can_scrap_rework": True}), 409
         elif report_type in ("scrap", "rework"):
             dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type)
             if dup:
@@ -424,29 +425,30 @@ def work_report():
         # ===== 工序级权限校验 =====
         user_pids = get_user_process_ids(g.current_user)
         if user_pids is not None and process_id not in user_pids:
-            # 找到订单当前应报工的前置工序
-            prev_procs = ScanHelperService.get_prev_incomplete_processes(order_id, 999)
-            if prev_procs:
-                hint = "、".join([p["process_name"] for p in prev_procs])
-                return jsonify({"error": f"请先完成前置工序：{hint}"}), 400
-            proc_name = ScanHelperService.get_process_name(process_id)
-            return jsonify({"error": f"请先完成前置工序"}), 403
+            proc = ScanHelperService._db(None).execute(
+                "SELECT name FROM processes WHERE id=?", (process_id,)
+            ).fetchone()
+            if proc:
+                return jsonify({"error": f"工序「{proc["name"]}」不在您的报工权限范围内"}), 403
+            return jsonify({"error": "您没有此工序的报工权限"}), 403
 
         current_op = ScanHelperService.get_order_process(order_id, process_id)
         if order["route_id"] and not current_op:
             return jsonify({"error": "该工序不在订单工艺路线中"}), 400
         current_seq = current_op["seq_order"] if current_op else 0
 
-        # ===== 顺序报工检查 =====
-        err, code = ScanHelperService.check_process_order(order_id, current_seq)
-        if err:
-            return jsonify(err), code
+        # ===== 顺序报工检查（仅普通报工） =====
+        if report_type == "normal":
+            err, code = ScanHelperService.check_process_order(order_id, current_seq)
+            if err:
+                return jsonify(err), code
 
-        # ===== 数量上限检查 =====
-        err, code = ScanHelperService.check_quantity_limits(
-            order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
-        if err:
-            return jsonify(err), code
+        # ===== 数量上限检查（仅普通报工） =====
+        if report_type == "normal":
+            err, code = ScanHelperService.check_quantity_limits(
+                order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
+            if err:
+                return jsonify(err), code
 
         # ===== 审批检查 =====
         need_approval = ScanHelperService.check_approval_required(process_id) is not None

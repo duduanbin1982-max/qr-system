@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
@@ -217,8 +217,8 @@ const activeTab = ref("piece")
       compareLoading.value = true
       try {
         const [rA,rB] = await Promise.all([
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthA.value+"&page=1&limit=500"),
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthB.value+"&page=1&limit=500")
+          api.get("/api/wages/monthly-summary?year_month="+compareMonthA.value+"&page=1&limit=2000"),
+          api.get("/api/wages/monthly-summary?year_month="+compareMonthB.value+"&page=1&limit=2000")
         ])
         const mapA = {}; const mapB = {}; const nameMap = {}
         for (const s of (rA.summary||[])) { const k = s.employee_no || s.employee_name; mapA[k] = s.total_wage||0; nameMap[k] = s.employee_name }
@@ -228,7 +228,7 @@ const activeTab = ref("piece")
         for (const key of allKeys) {
           const wageA = mapA[key]||0; const wageB = mapB[key]||0
           const change = wageB - wageA
-          const changePct = wageA ? ((change/wageA)*100).toFixed(1) : (wageB>0 ? 100 : 0)
+          const changePct = wageA ? Number(((change/wageA)*100).toFixed(1)) : (wageB>0 ? 999 : 0)
           list.push({ employee_name: nameMap[key] || key, wageA, wageB, change, changePct: Number(changePct) })
         }
         list.sort((a,b)=>Math.abs(b.change)-Math.abs(a.change))
@@ -249,7 +249,7 @@ const activeTab = ref("piece")
 
     async function loadEmployees() {
       try { const r = await api.listUsers(); employeeList.value = (r.users || []).filter(u => (u.roles && u.roles.some(r => r.code === "worker"))) }
-      catch(e) { /* silent */ }
+      catch(e) { showToast("加载员工列表失败","error") }
     }
     async function loadAdjustments() {
       adjLoading.value = true
@@ -292,6 +292,7 @@ const activeTab = ref("piece")
       trendLoading.value = true
       try {
         trendData.value = await api.get("/api/wages/trends?months="+trendMonths.value) || []
+        await nextTick()
         renderTrendChart()
       } catch(e) { showToast("加载趋势失败","error") }
       finally { trendLoading.value = false }
@@ -330,6 +331,7 @@ const activeTab = ref("piece")
     // --- position state ---
     const posData = ref({ summary: [], grand_total_wage: 0 })
     const posLoading = ref(true)
+    const posError = ref(null)
     const posMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
 
     function posPercent(wage) {
@@ -339,19 +341,20 @@ const activeTab = ref("piece")
     async function loadPosition() {
       posLoading.value = true
       try { posData.value = await api.get("/api/wages/position-summary?year_month="+posMonth.value) || {} }
-      catch(e) { showToast("加载岗位汇总失败","error") }
+      catch(e) { posError.value = "加载岗位汇总失败: " + (e.message || e); showToast("加载岗位汇总失败","error") }
       finally { posLoading.value = false }
     }
 
     // --- prediction state ---
     const predData = ref({})
     const predLoading = ref(true)
+    const predError = ref(null)
     const predMonths = ref(6)
 
     async function loadPrediction() {
       predLoading.value = true
       try { predData.value = await api.get("/api/wages/prediction?months="+predMonths.value) || {} }
-      catch(e) { showToast("加载预测失败","error") }
+      catch(e) { predError.value = "加载预测失败: " + (e.message || e); showToast("加载预测失败","error") }
       finally { predLoading.value = false }
     }
 
@@ -378,8 +381,8 @@ const activeTab = ref("piece")
       compareData, compareLoading, compareMonthA, compareMonthB, loadCompare,
       adjustments, adjLoading, adjMonth, showAdjForm, adjForm, employeeList, adjNet, loadAdjustments, saveAdjustment, deleteAdjustment,
       trendData, trendLoading, trendMonths, trendChartRef, trendTotal, trendTotalQty, trendAvg, loadTrends,
-      posData, posLoading, posMonth, posPercent, loadPosition,
-      predData, predLoading, predMonths, loadPrediction
+      posData, posLoading, posError, posMonth, posPercent, loadPosition,
+      predData, predLoading, predError, predMonths, loadPrediction
     }
   return _instance
 }

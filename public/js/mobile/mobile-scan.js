@@ -1,3 +1,4 @@
+'use strict';
 // ═══════════════════════════════════════════
 //  双引擎扫码模块
 // ═══════════════════════════════════════════
@@ -145,12 +146,10 @@ function handlePhoto(e) {
       show('main');
     }
   };
+  img.src = URL.createObjectURL(file);
   img.onerror = function() {
     toast('图片加载失败，请重试');
     show('main');
   };
-  img.src = URL.createObjectURL(file);
-  img.addEventListener('load', function() { URL.revokeObjectURL(img.src); });
-  img.addEventListener('error', function() { URL.revokeObjectURL(img.src); });
   e.target.value = '';
 }

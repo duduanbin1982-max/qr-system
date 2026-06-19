@@ -144,6 +144,7 @@ export const api = {
   
   // ========== 库存 ==========
   listInventory:    (params) => request('GET', '/api/inventory' + buildQuery(params)),
+  classifyABC:      ()       => request('POST', '/api/inventory/abc'),
   createInventory:  (data)   => request('POST', '/api/inventory', data),
   updateInventory:  (id,data)=> request('PUT',  '/api/inventory/' + id, data),
   deleteInventory:  (id)     => request('DELETE', '/api/inventory/' + id),
@@ -161,6 +162,9 @@ export const api = {
   deleteShipment:   (id)     => request('DELETE', '/api/shipments/' + id),
   completeShipment: (id)     => request('POST', '/api/shipments/' + id + '/complete'),
   draftShipment:    ()       => request('GET', '/api/shipments/draft'),
+  receiveShipment:  (id,data)=> request('POST', '/api/shipments/' + id + '/receive', data),
+  recordPayment:    (id,data)=> request('POST', '/api/shipments/' + id + '/payment', data),
+  getShipmentOrderItems: (id) => request('GET', '/api/shipments/order-items/' + id),
   
   // ========== 扫码报工 ==========
   scan:             (data)   => request('POST', '/api/scan', data),
@@ -226,8 +230,8 @@ export const api = {
   deleteLogs:       (params) => request("POST", "/api/logs/clear", params),
 
   // ========== 质检 ==========
-  listInspections:  (params) => request('GET', '/api/quality/inspections' + buildQuery(params)),
-  inspectionStats:  ()       => request('GET', '/api/quality/inspections/stats'),
+  listInspections:  (params) => request('GET', '/api/inspection' + buildQuery(params)),
+  inspectionStats:  ()       => request('GET', '/api/inspection/stats'),
   createInspection: (data)   => request('POST', '/api/quality/inspections', data),
   updateInspection: (id,data)=> request('PUT', '/api/quality/inspections/' + id, data),
   deleteInspection: (id)     => request('DELETE', '/api/quality/inspections/' + id),

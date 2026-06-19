@@ -43,7 +43,7 @@
   </div>
 </template>
 <script>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { exportCSV } from './shared.js'
@@ -53,29 +53,11 @@ export default {
     const records = ref([])
     const summary = ref({})
     const byProcess = ref([])
-    async function loadScrap() {
-      try {
-        const params = {}
-        if (props.start) params.start = props.start
-        if (props.end) params.end = props.end
-        if (props.productCode) params.product_code = props.productCode
-        const d = await api.scrapStats(params)
-        records.value = d.records || []
-        summary.value = d.summary || {}
-        byProcess.value = d.by_process || []
-      } catch (e) { showToast(e.message, 'error') }
-    }
-    function exportCsv() {
-      if (!records.value.length) { showToast('没有数据可导出', 'warning'); return }
-      const data = [['订单号','产品','工序','工人','工号','数量','原因','时间']]
-      records.value.forEach(r => data.push([r.order_no, r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.reason||'', r.created_at]))
-      exportCSV(data, '报废记录_' + new Date().toISOString().slice(0, 10))
-    }
     const reasonChart = ref(null)
     const reasonData = ref({ labels: [], values: [] })
     let chartInstance = null
 
-    function buildReasonData() {
+    async function buildReasonData() {
       const reasonMap = {}
       records.value.forEach(r => {
         const key = r.reason || '未填写'
@@ -85,6 +67,7 @@ export default {
         labels: Object.keys(reasonMap),
         values: Object.values(reasonMap)
       }
+      await nextTick()
       if (reasonChart.value) renderPie()
     }
 
@@ -113,7 +96,7 @@ export default {
         records.value = d.records || []
         summary.value = d.summary || {}
         byProcess.value = d.by_process || []
-        buildReasonData()
+        await buildReasonData()
       } catch (e) { showToast(e.message, 'error') }
     }
     function exportCsv() {

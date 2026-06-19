@@ -47,7 +47,8 @@ def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
     # 5. Check global permissions (admin etc.)
     perms = get_user_permissions(user)
     global_perms = {"orders:view", "stats:view", "inventory:view", "*",
-                    "shipments:view", "reports:view", "dashboard:view"}
+                    "shipments:view", "reports:view", "dashboard:view",
+                    "scan:view", "scan:report"}
     if perms and (set(perms) & global_perms or "*" in perms):
         return None
 

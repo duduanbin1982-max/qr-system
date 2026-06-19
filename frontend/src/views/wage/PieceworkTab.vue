@@ -18,6 +18,7 @@
       <button class="btn-default btn-sm" @click="confirmSnapshot" style="font-size:var(--text-xs);padding:2px 10px">✅ 确认归档</button>
     </span>
   </div>
+
   <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">
     <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) 20px">
       <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2);margin:0">
@@ -49,57 +50,43 @@
           <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500">明细</th>
         </tr></thead>
         <tbody>
-          <template v-for="w in filteredWages" :key="w.employee_no">
-          <tr style="border-bottom:1px solid var(--bg-hover);font-size:var(--text-sm);cursor:pointer" @click="toggle(w.employee_id || w.employee_no)" :style="{background:expandedId===(w.employee_id || w.employee_no)?'var(--primary-light)':''}">
-            <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ expandedId===(w.employee_id || w.employee_no) ? '▼' : '▶' }}</td>
-            <td style="padding:var(--space-3) 12px;font-weight:600;color:var(--text-primary)">{{ w.employee_name }}</td>
-            <td style="padding:var(--space-3) 12px;color:var(--text-secondary);font-size:var(--text-xs)">{{ w.position_name || '-' }}</td>
-            <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs)">{{ w.employee_no || '-' }}</td>
-            <td style="padding:var(--space-3) 12px;text-align:center;font-weight:600">{{ w.total_quantity }}</td>
-            <td style="padding:var(--space-3) 12px;text-align:right;font-weight:700;color:var(--warning);font-size:var(--text-base)">¥{{ fmtMoney(w.total_wage) }}</td>
-            <td style="padding:var(--space-3) 12px;color:var(--text-placeholder);font-size:var(--text-xs)">{{ w.details.length }} 条记录</td>
-          </tr>
-          <tr v-if="expandedId===(w.employee_id || w.employee_no)" style="background:var(--bg-table-stripe)">
-            <td colspan="7" style="padding:0">
-              <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs);table-layout:fixed">
-                <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder)">
-                  <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap;width:12%">日期</th>
-                  <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap;width:15%">订单号</th>
-                  <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;width:28%">产品</th>
-                  <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">工序</th>
-                  <th style="padding:var(--space-2) 8px;text-align:center;font-weight:400;white-space:nowrap">数量</th>
-                  <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">单价</th>
-                  <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">工资</th>
-                </tr></thead>
-                <tbody>
-                  <tr v-for="(d, i) in w.details" :key="i" style="border-bottom:1px solid var(--bg-hover)">
-                    <td style="padding:var(--space-2) 8px;color:var(--text-placeholder);white-space:nowrap">{{ fmtDate(d.date) }}</td>
-                    <td style="padding:var(--space-2) 8px;font-weight:500;color:var(--primary);white-space:nowrap">{{ d.order_no }}</td>
-                    <td style="padding:var(--space-2) 8px;color:var(--text-secondary);word-break:break-all">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
-                    <td style="padding:var(--space-2) 8px;color:var(--primary-accent);white-space:nowrap">{{ d.process_name }}</td>
-                    <td style="padding:var(--space-2) 8px;text-align:center;font-weight:500;white-space:nowrap">{{ d.quantity }}</td>
-                    <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">¥{{ fmtMoney(d.unit_price) }}</td>
-                    <td style="padding:var(--space-2) 12px;text-align:right;font-weight:600;color:var(--success)">¥{{ fmtMoney(d.wage) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </td>
-          </tr>
-          
-    <!-- Lock dialog -->
-    <div v-if="showLockDialog" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showLockDialog=false">
-      <div class="card" style="width:400px;max-width:90vw;padding:24px;border-radius:var(--radius-lg)">
-        <h3 style="margin:0 0 4px">🔒 锁定 {{ currentMonth }}</h3>
-        <p style="font-size:var(--text-xs);color:var(--text-placeholder);margin:0 0 16px">锁定后工资数据不可修改，可进一步确认归档</p>
-        <label style="display:block;font-size:var(--text-xs);color:var(--text-placeholder);margin-bottom:4px">备注</label>
-        <textarea v-model="lockNotes" class="form-input" style="width:100%;height:60px;font-size:var(--text-sm);padding:8px" placeholder="如：经部门负责人审核确认"></textarea>
-        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px">
-          <button class="btn-default" @click="showLockDialog=false">取消</button>
-          <button class="btn-primary" @click="lockSnapshot">确认锁定</button>
-        </div>
-      </div>
-    </div>
-</template>
+          <template v-for="(w, wi) in filteredWages" :key="w.employee_id">
+            <tr @click="toggle(w.employee_id)" style="cursor:pointer;border-bottom:1px solid var(--bg-hover);transition:background .15s;font-size:var(--text-sm)" :style="{background:expandedId===w.employee_id?'var(--bg-hover)':'transparent'}">
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder)">{{ wi+1 }}</td>
+              <td style="padding:var(--space-3) 12px;font-weight:600">{{ w.employee_name }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder)">{{ w.position_name || '-' }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder)">{{ w.employee_no || '-' }}</td>
+              <td style="padding:var(--space-3) 12px;text-align:center;font-weight:500">{{ w.total_quantity }}</td>
+              <td style="padding:var(--space-3) 12px;text-align:right;font-weight:600;color:var(--warning-dark)">¥{{ fmtMoney(w.total_wage) }}</td>
+              <td style="padding:var(--space-3) 12px;color:var(--text-placeholder)">{{ (w.details||[]).length }} 条</td>
+            </tr>
+            <tr v-if="expandedId===w.employee_id">
+              <td colspan="7" style="padding:0;background:var(--bg-secondary)">
+                <table style="width:100%;border-collapse:collapse;margin:var(--space-2) 0">
+                  <thead><tr style="background:var(--bg-tertiary);font-size:var(--text-xs);color:var(--text-placeholder)">
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">日期</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">订单号</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">产品</th>
+                    <th style="padding:var(--space-2) 8px;text-align:left;font-weight:400;white-space:nowrap">工序</th>
+                    <th style="padding:var(--space-2) 8px;text-align:center;font-weight:400;white-space:nowrap">数量</th>
+                    <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">单价</th>
+                    <th style="padding:var(--space-2) 8px;text-align:right;font-weight:400;white-space:nowrap">工资</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr v-for="(d, i) in w.details" :key="i" style="border-bottom:1px solid var(--bg-hover)">
+                      <td style="padding:var(--space-2) 8px;color:var(--text-placeholder);white-space:nowrap">{{ fmtDate(d.date) }}</td>
+                      <td style="padding:var(--space-2) 8px;font-weight:500;color:var(--primary);white-space:nowrap">{{ d.order_no }}</td>
+                      <td style="padding:var(--space-2) 8px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
+                      <td style="padding:var(--space-2) 8px;color:var(--primary-accent);white-space:nowrap">{{ d.process_name }}</td>
+                      <td style="padding:var(--space-2) 8px;text-align:center;font-weight:500;white-space:nowrap">{{ d.quantity }}</td>
+                      <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">¥{{ fmtMoney(d.unit_price) }}</td>
+                      <td style="padding:var(--space-2) 12px;text-align:right;font-weight:600;color:var(--success)">¥{{ fmtMoney(d.wage) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -109,21 +96,21 @@
       <button class="btn-default btn-sm" @click="nextPage" :disabled="page>=totalPages">下一页 ▶</button>
     </div>
   </div>
-</div>
 
-    <!-- Lock dialog -->
-    <div v-if="showLockDialog" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showLockDialog=false">
-      <div class="card" style="width:400px;max-width:90vw;padding:24px;border-radius:var(--radius-lg)">
-        <h3 style="margin:0 0 4px">🔒 锁定 {{ currentMonth }}</h3>
-        <p style="font-size:var(--text-xs);color:var(--text-placeholder);margin:0 0 16px">锁定后工资数据不可修改，可进一步确认归档</p>
-        <label style="display:block;font-size:var(--text-xs);color:var(--text-placeholder);margin-bottom:4px">备注</label>
-        <textarea v-model="lockNotes" class="form-input" style="width:100%;height:60px;font-size:var(--text-sm);padding:8px" placeholder="如：经部门负责人审核确认"></textarea>
-        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px">
-          <button class="btn-default" @click="showLockDialog=false">取消</button>
-          <button class="btn-primary" @click="lockSnapshot">确认锁定</button>
-        </div>
+  <!-- Lock dialog -->
+  <div v-if="showLockDialog" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showLockDialog=false">
+    <div class="card" style="width:400px;max-width:90vw;padding:24px;border-radius:var(--radius-lg)">
+      <h3 style="margin:0 0 4px">🔒 锁定 {{ currentMonth }}</h3>
+      <p style="font-size:var(--text-xs);color:var(--text-placeholder);margin:0 0 16px">锁定后工资数据不可修改，可进一步确认归档</p>
+      <label style="display:block;font-size:var(--text-xs);color:var(--text-placeholder);margin-bottom:4px">备注</label>
+      <textarea v-model="lockNotes" class="form-input" style="width:100%;height:60px;font-size:var(--text-sm);padding:8px" placeholder="如：经部门负责人审核确认"></textarea>
+      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px">
+        <button class="btn-default" @click="showLockDialog=false">取消</button>
+        <button class="btn-primary" @click="lockSnapshot">确认锁定</button>
       </div>
     </div>
+  </div>
+</div>
 </template>
 
 <script>

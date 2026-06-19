@@ -33,6 +33,15 @@ function doScan(code) {
   .then(function(d) {
     if (d.error) { toast(d.error); show('main'); return; }
     if (d.item) { d.order.item = d.item; }
+
+    // -- 管理员/质检员扫码 → 重定向到抽检页面 --
+    var _u = user();
+    if (_u && (_u.group_name === "系统管理组" || _u.group_name === "超级管理组" || _u.role === "admin" || _u.role === "inspector" || (_u.permissions && _u.permissions.indexOf("inspection:create") !== -1))) {
+      closeCam();
+      window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code) + "&token=" + encodeURIComponent(token());
+      return;
+    }
+
     renderOrder(d.order);
     show('order');
     // 序列号模式：每张二维码对应1件工件，数量恒为1

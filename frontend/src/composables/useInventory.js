@@ -45,7 +45,7 @@ export function useInventory() {
       try { 
         const d = await api.inventoryStats()
         Object.assign(stats.value, d)
-      } catch(e) { console.error('loadStats failed:', e) }
+      } catch(e) {}
     }
 
     async function load() {

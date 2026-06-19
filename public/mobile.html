@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1890ff">
 <meta http-equiv="Permissions-Policy" content="camera=(self)">
-<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/css/mobile.css?v=3">
+<link rel="stylesheet" href="/css/mobile.css?v=4">
 </head>
 <body>
 
@@ -53,7 +53,7 @@
 <div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button>查询</button></div>
 <input type="file" id="photo-input" accept="image/*" style="display:none">
 <div class="recent-section" id="recent-section">
-<div class="recent-title"><span>📋 最近报工</span><span style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer">刷新</span></div>
+<div class="recent-title"><span>📋 最近报工</span><span class="refresh-btn" style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer">刷新</span></div>
 <div id="recent-list"><div class="empty-recent"><span class="icon">📋</span>暂无记录</div></div>
 </div>
 <div class="bottom-bar"><span class="bottom-link">退出登录</span></div>
@@ -118,48 +118,13 @@
 </div>
 </div>
 
-<script src="/js/mobile/mobile-utils.js?v=25"></script>
-<script src="/js/mobile/mobile-auth.js?v=25"></script>
-<script src="/js/mobile/mobile-scan.js?v=25"></script>
-<script src="/js/mobile/mobile-order.js?v=25"></script>
-<script src="/js/mobile/mobile-init.js?v=25"></script>
+<script src="/js/mobile/mobile-utils.js?v=26"></script>
+<script src="/js/mobile/mobile-auth.js?v=27"></script>
+<script src="/js/mobile/mobile-scan.js?v=26"></script>
+<script src="/js/mobile/mobile-order.js?v=27"></script>
+<script src="/js/mobile/mobile-init.js?v=26"></script>
 
-<script nonce="{$ nonce $}">
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").then(function(reg) {
-    console.log("SW registered:", reg.scope);
-    reg.addEventListener("updatefound", function() {
-      var worker = reg.installing;
-      worker.addEventListener("statechange", function() {
-        if (worker.state === "activated" && navigator.serviceWorker.controller) {
-          var toast = document.createElement("div");
-          toast.style.cssText = "position:fixed;top:0;left:0;right:0;background:#4F46E5;color:#fff;text-align:center;padding:8px;z-index:9999;cursor:pointer";
-          toast.textContent = "有新版本，点击刷新";
-          toast.addEventListener("click", function() { location.reload(); });
-          document.body.appendChild(toast);
-          setTimeout(function() { toast.remove(); }, 5000);
-        }
-      });
-    });
-  }).catch(function(e) { console.log("SW failed:", e); });
 
-  // Offline indicator
-  window.addEventListener("online", function() {
-    var bar = document.getElementById("offline-bar");
-    if (bar) bar.remove();
-  });
-  window.addEventListener("offline", function() {
-    var bar = document.createElement("div");
-    bar.id = "offline-bar";
-    bar.style.cssText = "position:fixed;top:0;left:0;right:0;background:#F59E0B;color:#fff;text-align:center;padding:6px;z-index:9999;font-size:14px";
-    bar.textContent = "当前离线 - 数据将在恢复网络后同步";
-    document.body.appendChild(bar);
-  });
-  if (!navigator.onLine) {
-    window.dispatchEvent(new Event("offline"));
-  }
-}
-</script>
 
 </body>
 </html>

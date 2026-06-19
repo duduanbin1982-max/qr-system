@@ -5,7 +5,7 @@
         <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 20px">
           <h3 style="font-size:var(--text-lg);font-weight:700;margin:0">👥 岗位工资汇总</h3>
           <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto">
-            <input v-model="posMonth" type="month" class="form-input" style="width:160px;font-size:var(--text-sm)" >
+            <input v-model="posMonth" type="month" class="form-input" style="width:160px;font-size:var(--text-sm)" @change="loadPosition" >
             <button class="btn-default btn-sm" @click="loadPosition">查询</button>
           </div>
         </div>

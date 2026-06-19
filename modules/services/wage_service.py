@@ -1,4 +1,4 @@
-"""qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
+﻿"""qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.wage_repository import WageRepository
@@ -11,7 +11,7 @@ class WageService:
     _PRICE_JOIN = (
         "LEFT JOIN route_prices rp ON o.route_id = rp.route_id "
         "AND wr.process_id = rp.process_id AND rp.status = 'active' "
-        "AND rp.effective_date <= date('now','localtime')"
+        "AND rp.effective_date <= DATE(wr.created_at)"
     )
 
     _PRICE_SELECT = (
@@ -43,7 +43,7 @@ class WageService:
         user_params = []
         if employee_id:
             user_where += ' AND u.id = ?'; user_params.append(employee_id)
-        user_rows, total = WageRepository.get_worker_paged(user_where, user_params, db)
+        user_rows, total = WageRepository.get_worker_paged(user_where, user_params, db, page, limit)
         user_map = {row['id']: {'employee_name': row['name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': row['position_name'] or ''} for row in user_rows}
         user_ids = list(user_map.keys())
         if not user_ids:
@@ -177,11 +177,21 @@ class WageService:
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
         ''', (year_month + '-01', year_month + '-01')).fetchone()[0]
+        # Grand totals for ALL workers (not just current page)
+        gt = db.execute('''
+            SELECT COALESCE(SUM(wr.quantity),0) as total_qty,
+                   COALESCE(SUM(wr.quantity * ''' + price_select.replace('as unit_price', '') + '''),0) as total_wage
+            FROM work_records wr
+            LEFT JOIN orders o ON wr.order_id = o.id
+            ''' + price_join + '''
+            WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+        ''', (year_month + '-01', year_month + '-01')).fetchone()
         return {
             'year_month': year_month,
             'summary': [dict(r) for r in rows],
-            'grand_total_wage': sum(r['total_wage'] or 0 for r in rows),
-            'grand_total_quantity': sum(r['total_quantity'] or 0 for r in rows),
+            'grand_total_wage': round(gt['total_wage'] or 0, 2),
+            'grand_total_quantity': gt['total_qty'] or 0,
             'total': total_count, 'page': page, 'limit': limit,
         }
 
@@ -295,12 +305,24 @@ class WageService:
     @staticmethod
     def save_adjustment(user_id, year_month, adj_type, amount, reason, created_by):
         db = BaseService.db()
-        db.execute(
-            "INSERT OR REPLACE INTO wage_adjustments (user_id, year_month, type, amount, reason, created_by) VALUES (?,?,?,?,?,?)",
-            (user_id, year_month, adj_type, amount, reason or "", created_by)
-        )
+        existing = db.execute(
+            "SELECT id FROM wage_adjustments WHERE user_id=? AND year_month=? AND type=?",
+            (user_id, year_month, adj_type)
+        ).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE wage_adjustments SET amount=?, reason=?, created_by=? WHERE id=?",
+                (amount, reason or "", created_by, existing["id"])
+            )
+            adj_id = existing["id"]
+        else:
+            db.execute(
+                "INSERT INTO wage_adjustments (user_id, year_month, type, amount, reason, created_by) VALUES (?,?,?,?,?,?)",
+                (user_id, year_month, adj_type, amount, reason or "", created_by)
+            )
+            adj_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         db.commit()
-        return {"success": True, "id": db.execute("SELECT last_insert_rowid()").fetchone()[0]}
+        return {"success": True, "id": adj_id}
 
     @staticmethod
     def delete_adjustment(adj_id):
@@ -329,8 +351,33 @@ class WageService:
             "SELECT year_month, SUM(total_wage) as total_wage, SUM(total_quantity) as total_quantity, COUNT(DISTINCT employee_id) as employee_count FROM wage_snapshots WHERE status IN ('draft','locked','confirmed') GROUP BY year_month ORDER BY year_month DESC LIMIT ?",
             (months,)
         ).fetchall()
+        if rows:
+            result = []
+            for r in reversed(rows):
+                result.append({
+                    "year_month": r["year_month"],
+                    "total_wage": round(r["total_wage"] or 0, 2),
+                    "total_quantity": r["total_quantity"] or 0,
+                    "employee_count": r["employee_count"] or 0,
+                })
+            return result
+        # Fallback: live data from work_records when no snapshots saved
+        price_join, price_select = WageService._price_joins()
+        rows2 = db.execute(
+            "SELECT strftime('%Y-%m', wr.created_at) as year_month, "
+            "COALESCE(SUM(wr.quantity),0) as total_quantity, "
+            "COALESCE(SUM(wr.quantity * " + price_select.replace('as unit_price', '') + "),0) as total_wage, "
+            "COUNT(DISTINCT wr.user_id) as employee_count "
+            "FROM work_records wr "
+            "LEFT JOIN orders o ON wr.order_id = o.id " + price_join + " "
+            "WHERE wr.status = 'approved' AND wr.type = 'normal' "
+            "AND wr.created_at >= date('now','-" + str(months) + " months') "
+            "GROUP BY strftime('%Y-%m', wr.created_at) "
+            "ORDER BY year_month ASC LIMIT ?",
+            (months,)
+        ).fetchall()
         result = []
-        for r in reversed(rows):
+        for r in rows2:
             result.append({
                 "year_month": r["year_month"],
                 "total_wage": round(r["total_wage"] or 0, 2),
@@ -369,8 +416,11 @@ class WageService:
         ss_res = sum((wages[i] - (y_mean + slope * (i - x_mean)))**2 for i in range(n))
         ss_tot = sum((w - y_mean)**2 for w in wages)
         r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        quantities = [r["total_quantity"] or 0 for r in reversed(rows)]
+        predicted_quantity = round(sum(quantities) / n)
         return {
             "predicted_wage": round(max(0, predicted_wage), 2),
+            "predicted_quantity": predicted_quantity,
             "confidence": round(min(100, max(0, r2 * 100))),
             "months_data": n, "trend": "up" if slope > 0 else "down" if slope < 0 else "stable",
             "avg_wage": round(y_mean, 2),

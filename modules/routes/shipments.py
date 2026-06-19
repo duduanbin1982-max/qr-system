@@ -264,6 +264,39 @@ def update_shipment_logistics(shipment_id):
 
 
 # ── P1: 取消出库单 ──
+@app.route("/api/shipments/<int:shipment_id>/receive", methods=["POST"])
+@check_auth
+@check_permission("shipments:edit")
+def receive_shipment(shipment_id):
+    data = get_json_body()
+    try:
+        sno = ShipmentService.receive_shipment(
+            shipment_id, g.current_user,
+            receiver=data.get("receiver", ""),
+            receive_date=data.get("receive_date", "")
+        )
+        audit_log("receive", "shipment", shipment_id, "签收 " + sno)
+        return jsonify({"message": "签收成功", "shipment_no": sno})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/shipments/<int:shipment_id>/payment", methods=["POST"])
+@check_auth
+@check_permission("shipments:edit")
+def record_shipment_payment(shipment_id):
+    data = get_json_body()
+    try:
+        sno = ShipmentService.record_payment(
+            shipment_id, g.current_user,
+            amount=data.get("amount", 0),
+            method=data.get("method", ""),
+            remark=data.get("remark", "")
+        )
+        audit_log("payment", "shipment", shipment_id, f"收款 {data.get('amount',0)} {sno}")
+        return jsonify({"message": "收款成功", "shipment_no": sno})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
 @app.route("/api/shipments/<int:shipment_id>/cancel", methods=["POST"])
 @check_auth
 @check_permission("shipments:edit")
@@ -286,6 +319,16 @@ def cancel_shipment(shipment_id):
 def shipment_stats():
     return jsonify(ShipmentService.get_stats())
 
+
+
+@app.route("/api/shipments/order-items/<int:order_id>", methods=["GET"])
+@check_auth
+@check_permission("shipments:view")
+def shipment_order_items(order_id):
+    try:
+        return jsonify(ShipmentService.get_order_stock(order_id))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
 # P2: customer history
 @app.route("/api/shipments/customer-history", methods=["GET"])
@@ -314,11 +357,12 @@ def export_shipments():
     wb = Workbook()
     ws = wb.active
     ws.title = "发货清单"
-    headers = ["出库单号", "客户", "联系人", "电话", "地址", "状态", "总数量", "物流公司", "运单号", "备注", "创建时间", "完成时间"]
+    headers = ["出库单号", "客户", "联系人", "电话", "地址", "状态", "总数量", "物流公司", "运单号", "应收金额", "已收金额", "收款状态", "备注", "创建时间", "完成时间"]
     style_header(ws, headers)
     status_map = {"pending": "待出库", "partial": "部分出库", "completed": "已出库", "cancelled": "已取消"}
     for row_idx, item in enumerate(items, 2):
-        vals = [item.get("shipment_no",""), item.get("customer",""), item.get("contact_person",""), item.get("contact_phone",""), item.get("address",""), status_map.get(item.get("status",""), item.get("status","")), item.get("total_quantity",0), item.get("logistics_company",""), item.get("tracking_no",""), item.get("remark",""), (item.get("created_at") or "")[:19], (item.get("completed_at") or "")[:19]]
+        pay_map = {"unpaid":"未收款","partial":"部分收","paid":"已收清"}
+        vals = [item.get("shipment_no",""), item.get("customer",""), item.get("contact_person",""), item.get("contact_phone",""), item.get("address",""), status_map.get(item.get("status",""), item.get("status","")), item.get("total_quantity",0), item.get("logistics_company",""), item.get("tracking_no",""), item.get("receivable_amount",0), item.get("paid_amount",0), pay_map.get(item.get("payment_status",""), item.get("payment_status","") or "未收款"), item.get("remark",""), (item.get("created_at") or "")[:19], (item.get("completed_at") or "")[:19]]
         for col_idx, val in enumerate(vals, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = THIN_BORDER

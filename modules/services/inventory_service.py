@@ -13,24 +13,28 @@ class InventoryService:
     """库存管理业务逻辑。"""
 
     @staticmethod
-    def list_items(keyword='', low_stock=False, page=1, limit=100):
+    def list_items(keyword='', low_stock=False, location='', page=1, limit=100):
         """库存列表（搜索 + 低库存筛选 + 分页）。"""
         db = BaseService.db()
         clauses = ['1=1']
         params = []
         if keyword:
-            clauses.append('(product_model LIKE ? OR product_name LIKE ?)')
-            params.extend([f'%{keyword}%', f'%{keyword}%'])
+            clauses.append('(i.product_model LIKE ? OR i.product_name LIKE ? OR i.specification LIKE ? OR i.location LIKE ? OR i.unit LIKE ? OR i.remark LIKE ? OR o.order_no LIKE ? OR o.customer LIKE ?)')
+            params.extend([f'%{keyword}%'] * 8)
         if low_stock:
-            clauses.append('quantity <= safe_stock AND safe_stock > 0')
+            clauses.append('i.quantity <= i.safe_stock AND i.safe_stock > 0')
+        if location:
+            clauses.append('i.location = ?')
+            params.append(location)
         where = ' AND '.join(clauses)
         base_sql = (
-            'SELECT *, CASE WHEN quantity <= safe_stock AND safe_stock > 0 '
-            'THEN 1 ELSE 0 END as is_low FROM inventory WHERE ' + where
-            + ' ' + build_sort_clause("updated_at", {"updated_at": "updated_at"}, default="updated_at")
+            'SELECT i.*, o.order_no, o.customer, p.price, CASE WHEN i.quantity <= i.safe_stock AND i.safe_stock > 0 '
+            'THEN 1 ELSE 0 END as is_low FROM inventory i '
+            'LEFT JOIN orders o ON i.order_id = o.id LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE ' + where
+            + ' ' + build_sort_clause("updated_at", {"updated_at": "i.updated_at"}, default="i.updated_at")
         )
         total = db.execute(
-            'SELECT COUNT(*) FROM inventory WHERE ' + where, params
+            'SELECT COUNT(*) FROM inventory i LEFT JOIN orders o ON i.order_id = o.id LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE ' + where, params
         ).fetchone()[0]
         paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
         rows = db.execute(paginated_sql, all_params).fetchall()
@@ -46,8 +50,8 @@ class InventoryService:
             try:
                 txn.execute('''
                     INSERT INTO inventory (product_model, product_name, specification,
-                        quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                        quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, order_id)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ''', (
                     model,
                     data.get('product_name', ''),
@@ -59,7 +63,8 @@ class InventoryService:
                     data.get('remark', ''),
                     data.get('category', ''),
                     data.get('unit_cost', 0),
-                    data.get('last_count_date', '')
+                    data.get('last_count_date', ''),
+                    data.get('order_id') or None
                 ))
             except sqlite3.IntegrityError:
                 raise ValueError('产品型号已存在')
@@ -74,11 +79,11 @@ class InventoryService:
         db = BaseService.db()
         with BaseService.transaction() as txn:
             dup = txn.execute(
-                'SELECT id FROM inventory WHERE product_model = ? AND id != ?',
-                (model, item_id)
+                'SELECT id FROM inventory WHERE product_model = ? AND order_id = ? AND id != ?',
+                (model, data.get('order_id'), item_id)
             ).fetchone()
             if dup:
-                raise ValueError('产品型号已存在')
+                raise ValueError('该订单下产品型号已存在')
             txn.execute('''
                 UPDATE inventory SET
                     product_model = ?, product_name = ?, specification = ?,
@@ -333,6 +338,7 @@ class InventoryService:
     def export_inventory(keyword='', low_stock=False):
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
         from openpyxl import Workbook
+        from openpyxl.styles import Font
         from io import BytesIO
 
         result = InventoryService.list_items(keyword=keyword, low_stock=low_stock, page=1, limit=99999)
@@ -342,13 +348,14 @@ class InventoryService:
         ws = wb.active
         ws.title = '库存清单'
 
-        headers = ['产品型号', '产品名称', '规格', '当前库存', '安全库存', '状态', '存放位置', '单位', '备注', '更新时间']
+        headers = ['产品名称', '订单号', '客户', '产品型号', '规格', '当前库存', '安全库存', '状态', '存放位置', '单位', '备注', '更新时间']
         style_header(ws, headers)
 
         for row_idx, item in enumerate(items, 2):
             status = '⚠低库存' if item.get('is_low') else '正常'
             vals = [
-                item.get('product_model', ''), item.get('product_name', ''),
+                item.get('product_name', ''), item.get('order_no', ''),
+                item.get('customer', ''), item.get('product_model', ''),
                 item.get('specification', ''), item.get('quantity', 0),
                 item.get('safe_stock', 0), status,
                 item.get('location', ''), item.get('unit', ''),

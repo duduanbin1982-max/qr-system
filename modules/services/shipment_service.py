@@ -9,7 +9,7 @@ def _generate_shipment_no(db, prefix=None):
         setting = None  # P3: settings table may not exist yet
         prefix = setting['value'] if setting else 'SH'
     today = datetime.now().strftime('%Y%m%d')
-    prefix_len = len(prefix) + 9
+    prefix_len = len(prefix) + 10
     row = db.execute(
         'SELECT MAX(CAST(SUBSTR(shipment_no, ?) AS INTEGER)) as max_seq FROM shipments WHERE shipment_no LIKE ?',
         (prefix_len, prefix + today + '-%')
@@ -85,12 +85,13 @@ class ShipmentService:
             try:
                 cur = txn.execute('''
                     INSERT INTO shipments (shipment_no, customer, contact_person,
-                        contact_phone, address, status, total_quantity, remark, created_by, deduction_mode)
-                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                        contact_phone, address, status, total_quantity, remark, created_by, deduction_mode, material_bill_no, receivable_amount)
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
                 ''', (shipment_no, data.get('customer', ''), data.get('contact_person', ''),
                       data.get('contact_phone', ''), data.get('address', ''),
                       total_qty, data.get('remark', ''), created_by,
-                      data.get('deduction_mode', 'on_complete')))
+                      data.get('deduction_mode', 'on_complete'),
+                      data.get('material_bill_no', ''), data.get('receivable_amount', 0)))
             except Exception as e:
                 if 'UNIQUE' in str(e):
                     raise ValueError('出库单号已存在，请稍后重试')
@@ -114,7 +115,7 @@ class ShipmentService:
                 if not product_code:
                     inv_row = txn.execute("SELECT product_model FROM inventory WHERE id = ?", (item.get("inventory_id", 0),)).fetchone()
                     if inv_row:
-                        prod_row = txn.execute("SELECT product_code FROM products WHERE model = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1", (inv_row["product_model"],)).fetchone()
+                        prod_row = txn.execute("SELECT product_code FROM products WHERE product_code = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1", (inv_row["product_model"],)).fetchone()
                         product_code = prod_row["product_code"] if prod_row else inv_row["product_model"]
                     else:
                         product_code = item.get('product_model', '')
@@ -157,7 +158,7 @@ class ShipmentService:
         row = db.execute('SELECT * FROM shipments WHERE id = ?', (shipment_id,)).fetchone()
         if not row:
             raise ValueError('出库单不存在')
-        fields = ['customer', 'contact_person', 'contact_phone', 'address', 'remark', 'status']
+        fields = ['customer', 'contact_person', 'contact_phone', 'address', 'remark', 'status', 'receivable_amount', 'payment_status']
         updates = []
         params = []
         for f in fields:
@@ -278,6 +279,44 @@ class ShipmentService:
             )
 
     @staticmethod
+    def receive_shipment(shipment_id, current_user, receiver="", receive_date=""):
+        db = BaseService.db()
+        row = db.execute("SELECT * FROM shipments WHERE id = ?", (shipment_id,)).fetchone()
+        if not row:
+            raise ValueError("出库单不存在")
+        if row["status"] == "received":
+            raise ValueError("已签收")
+        if row["status"] != "completed":
+            raise ValueError("仅已出库可签收")
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE shipments SET status='received', remark = remark || ? WHERE id=?",
+                ((" 签收人: " + receiver + " 签收日期: " + receive_date) if receiver else "", shipment_id)
+            )
+        return row["shipment_no"]
+
+    @staticmethod
+    def record_payment(shipment_id, current_user, amount, method="", remark=""):
+        """记录收款。"""
+        db = BaseService.db()
+        row = db.execute("SELECT * FROM shipments WHERE id = ?", (shipment_id,)).fetchone()
+        if not row:
+            raise ValueError("出库单不存在")
+        if row["status"] not in ("completed", "received"):
+            raise ValueError("仅已出库或已签收可收款")
+        new_paid = (row["paid_amount"] or 0) + amount
+        receivable = row["receivable_amount"] or 0
+        if new_paid > receivable:
+            raise ValueError(f"收款金额超出应收({receivable})")
+        payment_status = "paid" if new_paid >= receivable else "partial"
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE shipments SET paid_amount = ?, payment_status = ?, payment_date = ?, payment_method = ?, payment_remark = ? WHERE id = ?",
+                (new_paid, payment_status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), method, remark, shipment_id)
+            )
+        return row["shipment_no"]
+
+    @staticmethod
     def cancel_shipment(shipment_id, current_user):
         """取消出库单。已完成单需归还库存。"""
         db = BaseService.db()
@@ -311,13 +350,31 @@ class ShipmentService:
             )
         return row["shipment_no"]
 
-    # P2: stats
+    # P0: 按订单获取可出库库存
+    @staticmethod
+    def get_order_stock(order_id):
+        db = BaseService.db()
+        order = db.execute(
+            "SELECT id, order_no, customer, product_name, product_code FROM orders WHERE id = ?",
+            (order_id,)
+        ).fetchone()
+        if not order:
+            raise ValueError("订单不存在")
+        items = db.execute(
+            "SELECT i.id as inventory_id, i.product_model, i.product_name, i.specification, "
+            "i.quantity, i.unit, i.order_id FROM inventory i "
+            "WHERE i.order_id = ? AND i.quantity > 0",
+            (order_id,)
+        ).fetchall()
+        return { "order": dict(order), "items": [dict(it) for it in items] }
+
+    # P2: stats    # P2: stats
     @staticmethod
     def get_stats():
         db = BaseService.db()
         today = datetime.now().strftime("%Y-%m-%d")
         month_start = datetime.now().strftime("%Y-%m-01")
-        stats = db.execute("SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) as pending, COALESCE(SUM(CASE WHEN status='partial' THEN 1 ELSE 0 END),0) as partial, COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN date(created_at)=? THEN 1 ELSE 0 END),0) as today_count, COALESCE(SUM(CASE WHEN date(created_at)>=? THEN 1 ELSE 0 END),0) as month_count, COALESCE(SUM(CASE WHEN date(completed_at)=? THEN 1 ELSE 0 END),0) as today_completed, COALESCE(SUM(CASE WHEN status='completed' THEN total_quantity ELSE 0 END),0) as total_shipped_qty FROM shipments", (today, month_start, today)).fetchone()
+        stats = db.execute("SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) as pending, COALESCE(SUM(CASE WHEN status='received' THEN 1 ELSE 0 END),0) as received, COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN date(created_at)=? THEN 1 ELSE 0 END),0) as today_count, COALESCE(SUM(CASE WHEN date(created_at)>=? THEN 1 ELSE 0 END),0) as month_count, COALESCE(SUM(CASE WHEN date(completed_at)=? THEN 1 ELSE 0 END),0) as today_completed, COALESCE(SUM(CASE WHEN status='completed' THEN total_quantity ELSE 0 END),0) as total_shipped_qty, COALESCE(SUM(receivable_amount),0) as total_receivable, COALESCE(SUM(paid_amount),0) as total_paid, COALESCE(SUM(CASE WHEN payment_status='paid' THEN 1 ELSE 0 END),0) as paid_count, COALESCE(SUM(CASE WHEN payment_status='partial' THEN 1 ELSE 0 END),0) as partial_paid FROM shipments", (today, month_start, today)).fetchone()
         return dict(stats)
 
     @staticmethod

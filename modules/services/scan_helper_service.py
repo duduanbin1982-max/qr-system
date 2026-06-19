@@ -38,7 +38,7 @@ class ScanHelperService:
     @staticmethod
     def get_order_for_stock(order_id, db=None):
         return ScanHelperService._db(db).execute(
-            "SELECT id, order_no, product_code, product_name, quantity FROM orders WHERE id = ?",
+            "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec FROM orders o LEFT JOIN products p ON o.product_code = p.product_code WHERE o.id = ?",
             (order_id,)
         ).fetchone()
 
@@ -362,7 +362,8 @@ class ScanHelperService:
         ).fetchone()
 
     @staticmethod
-    def find_or_create_inventory(product_code, product_name, order_id=None, db=None):
+    def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
+        """Per-order inventory: each order gets its own inventory record, no merging."""
         d = ScanHelperService._db(db)
         if order_id:
             inv = d.execute(
@@ -371,16 +372,10 @@ class ScanHelperService:
             ).fetchone()
             if inv:
                 return inv["id"]
-        inv = d.execute(
-            "SELECT id FROM inventory WHERE product_model = ? AND order_id IS NULL",
-            (product_code,)
-        ).fetchone()
-        if inv:
-            d.execute("UPDATE inventory SET order_id = ? WHERE id = ?", (order_id, inv["id"]))
-            return inv["id"]
+        # Always create new per-order record; never reuse unassigned inventory
         cur = d.execute(
-            "INSERT INTO inventory (product_model, product_name, quantity, order_id) VALUES (?, ?, 0, ?)",
-            (product_code, product_name or product_code, order_id)
+            "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) VALUES (?, ?, 0, ?, ?)",
+            (product_code, product_name or product_code, order_id, specification or "")
         )
         return cur.lastrowid
     @staticmethod
@@ -422,7 +417,7 @@ class ScanHelperService:
 
             product_code = order_row['product_code']
             product_name = order_row['product_name'] or product_code
-            inv_id = ScanHelperService.find_or_create_inventory(product_code, product_name, order_id, db=d)
+            inv_id = ScanHelperService.find_or_create_inventory(product_code, product_name, order_id, (order_row["spec"] or "") if order_row else "", db=d)
 
             dup = ScanHelperService.check_inventory_log_dup(order_id, serial_no, db=d)
             if dup:
@@ -453,15 +448,17 @@ class ScanHelperService:
             current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
             if not current_op:
                 raise ValueError("Process not in order route")
-            err, code = ScanHelperService.check_process_order(order_id, current_op.get("seq_order", 0), db=db)
-            if err:
-                raise ValueError(err.get("error", "Process order check failed"))
-            order = dict(ScanHelperService.get_order(order_id, db=db) or {})
-            if order:
-                err2, code2 = ScanHelperService.check_quantity_limits(
-                    order_id, current_op.get("seq_order", 0), current_op.get("completed", 0) or 0, quantity, order.get("quantity", 0), db=db)
-                if err2:
-                    raise ValueError(err2.get("error", "Quantity limit exceeded"))
+            # 顺序 & 数量上限检查仅对普通报工生效
+            if report_type == "normal":
+                err, code = ScanHelperService.check_process_order(order_id, current_op.get("seq_order", 0), db=db)
+                if err:
+                    raise ValueError(err.get("error", "Process order check failed"))
+                order = dict(ScanHelperService.get_order(order_id, db=db) or {})
+                if order:
+                    err2, code2 = ScanHelperService.check_quantity_limits(
+                        order_id, current_op.get("seq_order", 0), current_op.get("completed", 0) or 0, quantity, order.get("quantity", 0), db=db)
+                    if err2:
+                        raise ValueError(err2.get("error", "Quantity limit exceeded"))
             work_status = 'pending' if need_approval else 'approved'
             quantity_local = 1 if serial_no else quantity
 

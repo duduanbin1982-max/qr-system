@@ -1,4 +1,4 @@
-"""qr-system — 质量检验 Service 层"""
+﻿"""qr-system — 质量检验 Service 层"""
 from datetime import datetime
 from modules.services import BaseService
 from modules.services.query_utils import paginate, build_sort_clause
@@ -249,7 +249,7 @@ class QualityService:
         return {'created': len(created), 'ids': created, 'errors': errors}
 
     @staticmethod
-    def spc_p_chart(order_id=None, process_id=None, limit=20):
+    def spc_p_chart(order_id=None, process_id=None, limit=20, **kwargs):
         db = BaseService.db()
         where = ['1=1']
         params = []
@@ -295,7 +295,7 @@ class QualityService:
                 'total_failed': total_failed if samples else 0}
 
     @staticmethod
-    def inspector_performance():
+    def inspector_performance(**kwargs):
         db = BaseService.db()
         rows = db.execute('''
             SELECT u.id, u.name,
@@ -325,7 +325,7 @@ class QualityService:
         return {'ok': True, 'data': result}
 
     @staticmethod
-    def supplier_quality():
+    def supplier_quality(**kwargs):
         db = BaseService.db()
         rows = db.execute('''
             SELECT c.id as customer_id, c.name as customer_name,
@@ -358,9 +358,27 @@ class QualityService:
         return {'ok': True, 'data': result}
 
     @staticmethod
-    def pass_rate_trend(weeks=6):
+    def pass_rate_trend(weeks=6, start="", end=""):
         db = BaseService.db()
-        rows = db.execute('''
+        if start or end:
+            where_parts = []
+            trend_params = []
+            if start:
+                where_parts.append("DATE(inspected_at) >= ?")
+                trend_params.append(start)
+            if end:
+                where_parts.append("DATE(inspected_at) <= ?")
+                trend_params.append(end)
+            rows = db.execute(f'''
+            SELECT strftime('%Y-W%W', inspected_at) as week,
+                   COUNT(*) as total,
+                   COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count
+            FROM quality_inspections
+            WHERE {" AND ".join(where_parts)}
+            GROUP BY week ORDER BY week
+        ''', trend_params).fetchall()
+        else:
+            rows = db.execute('''
             SELECT strftime('%Y-W%W', inspected_at) as week,
                    COUNT(*) as total,
                    COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count

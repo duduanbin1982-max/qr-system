@@ -1,8 +1,14 @@
+'use strict';
 // ═══════════════════════════════════════════
 //  登录 / 主页面 / 闪光灯
 // ═══════════════════════════════════════════
 
 var _loginBusy = false;
+// W3: Token expiry check — auto-logout on 401
+function _checkAuth(r) {
+  if (r.status === 401) { doLogout(); toast('登录已过期，请重新登录', 3000); return true; }
+  return false;
+}
 function doLogin() {
   const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
   if (_loginBusy) return;
@@ -54,7 +60,7 @@ function goMain() {
   loadRecent();
 }
 
-function goBack() { curOrder = null; show('main'); loadStats(); loadRecent(); }
+function goBack() { curOrder = null; reportMode = 'auto'; reportType = 'normal'; show('main'); loadStats(); loadRecent(); }
 
 function toggleManual() {
   var row = $('manual-row');
@@ -64,7 +70,7 @@ function toggleManual() {
 
 function loadStats() {
   fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { if (_checkAuth(r)) return r.json(); return r.json(); })
     .then(function(d) {
       if (d && d.today) {
         $('st-today').textContent = d.today.records || 0;
@@ -76,7 +82,7 @@ function loadStats() {
 
 function loadRecent() {
   fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { if (_checkAuth(r)) return null; return r.json(); })
     .then(function(d) {
       const list = d.recent_records || [];
       const el = $('recent-list');

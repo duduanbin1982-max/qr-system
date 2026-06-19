@@ -90,8 +90,8 @@ def _ensure_test_user(db):
     ).fetchone()
     if not existing:
         cursor = db.execute(
-            "INSERT INTO users (username, password, name, role, status, password_version) VALUES (?, ?, ?, ?, ?, 2)",
-            (TEST_USER, TEST_HASH, "Test Runner", "admin", "active")
+            "INSERT INTO users (username, password, name, role, status, password_version, employee_no) VALUES (?, ?, ?, ?, ?, 2, ?)",
+            (TEST_USER, TEST_HASH, "Test Runner", "admin", "active", "TEST-ADMIN-001")
         )
         user_id = cursor.lastrowid
     else:
@@ -174,6 +174,59 @@ def test_order_id(client):
 @pytest.fixture
 def auth_headers(auth_token):
     return {"Authorization": f"Bearer {auth_token}"}
+
+# Worker account for reporting tests (admin can't do normal reporting)
+WORKER_USER = "testworker"
+WORKER_PASS = "Test@1234"
+WORKER_HASH = bcrypt.hashpw(WORKER_PASS.encode(), bcrypt.gensalt()).decode()
+
+def _ensure_worker_user(db):
+    existing = db.execute("SELECT id FROM users WHERE username = ?", (WORKER_USER,)).fetchone()
+    if not existing:
+        cursor = db.execute(
+            "INSERT INTO users (username, password, name, role, status, password_version, group_name, employee_no) VALUES (?, ?, ?, ?, ?, 2, ?, ?)",
+            (WORKER_USER, WORKER_HASH, "Test Worker", "worker", "active", "员工组", "TEST-WORKER-001")
+        )
+        user_id = cursor.lastrowid
+    else:
+        db.execute(
+            "UPDATE users SET password = ?, status = 'active', role = 'worker', locked_until = NULL, failed_login_count = 0, password_version = 2 WHERE username = ?",
+            (WORKER_HASH, WORKER_USER)
+        )
+        user_id = existing["id"]
+    # Ensure worker role
+    worker_role = db.execute("SELECT id FROM roles WHERE code = 'worker' AND status = 'active'").fetchone()
+    if worker_role:
+        existing_role = db.execute(
+            "SELECT id FROM user_roles WHERE user_id = ? AND role_id = ?",
+            (user_id, worker_role["id"])
+        ).fetchone()
+        if not existing_role:
+            db.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+                (user_id, worker_role["id"])
+            )
+    db.commit()
+    return user_id
+
+@pytest.fixture
+def worker_auth_token(client):
+    with client.application.app_context():
+        from modules.db import get_db
+        db = get_db()
+        _ensure_worker_user(db)
+    resp = client.post("/api/auth/login", json={
+        "username": WORKER_USER,
+        "password": WORKER_PASS
+    })
+    data = resp.get_json()
+    if data and "user" in data:
+        return data["user"].get("token", "")
+    return data.get("token", "") if data else ""
+
+@pytest.fixture
+def worker_auth_headers(worker_auth_token):
+    return {"Authorization": f"Bearer {worker_auth_token}"}
 
 @atexit.register
 def _cleanup_test_db():

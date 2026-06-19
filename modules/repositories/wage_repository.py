@@ -1,4 +1,4 @@
-"""
+﻿"""
 qr-system — WageRepository（工资核算数据访问层）
 """
 from modules.services import BaseService
@@ -28,7 +28,7 @@ class WageRepository:
         return db.execute(query, p2_params).fetchall()
 
     @staticmethod
-    def get_worker_paged(user_where, user_params, db=None):
+    def get_worker_paged(user_where, user_params, db=None, page=1, limit=50):
         """分页查询工人列表（含岗位名）。"""
         db = db or BaseService.db()
         total = db.execute(
