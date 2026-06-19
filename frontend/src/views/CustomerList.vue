@@ -225,7 +225,7 @@ export default {
     async function del(c) {
       deleteCheck.value = c; deleteCheckOrders.value = []
       try {
-        const d = await api.get("/api/customers/" + c.id + "/orders")
+        const d = await api.customerOrders(c.id)
         const active = (d.orders || []).filter(o => o.deleted_at === null || o.deleted_at === undefined)
         if (active.length > 0) { deleteCheckOrders.value = active; showDeleteBlock.value = true; return }
       } catch(e) {}
@@ -235,7 +235,7 @@ export default {
     }
     async function viewDetail(c) {
       detail.value = c; showDetail.value = true
-      try { const d = await api.get("/api/customers/" + c.id + "/orders"); detailOrders.value = d.orders || [] }
+      try { const d = await api.customerOrders(c.id); detailOrders.value = d.orders || [] }
       catch(e) { detailOrders.value = [] }
     }
     onMounted(() => load())

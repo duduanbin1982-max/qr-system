@@ -43,7 +43,7 @@ const orders = ref([])
       if (!f.quantity || f.quantity < 1) { showToast("数量必须大于0", "error"); return }
       if (!f.reason.trim()) { showToast("请输入返工原因", "error"); return }
       try {
-        await api.post("/api/scan", { order_id: o.id, process_id: parseInt(f.process_id), quantity: parseInt(f.quantity), report_type: "rework", remark: f.reason })
+        await api.scan({ order_id: o.id, process_id: parseInt(f.process_id), quantity: parseInt(f.quantity), report_type: "rework", remark: f.reason })
         showToast("返工申请已提交")
         showReworkModal.value = false
         await load()
@@ -371,7 +371,9 @@ const orders = ref([])
       loadMaterialOptions()
       loadProcessOptions()
       loadOrderMaterials(o.id)
-      orderMatForm.value.quantity_per_unit = parseFloat(o.weight) || parseFloat(o.product_weight) || 1
+      // Get product weight from loaded products list
+      const product = products.value.find(p => p.product_code === o.product_code)
+      orderMatForm.value.quantity_per_unit = parseFloat(product?.weight) || parseFloat(o.weight) || parseFloat(o.product_weight) || 1
       orderMatForm.value.process_id = 10730
       showModal.value = true
     }
@@ -431,7 +433,7 @@ const orders = ref([])
       if (!confirm('确认彻底删除该订单？所有关联数据将永久消失，不可恢复！')) return
       try {
         // 彻底删除：需要调用后端硬删除接口
-        await api.delete(`/api/orders/${oid}/purge`)
+        await api.purgeOrder(oid)
         showToast('已彻底删除')
         await loadTrash()
       } catch(e) { showToast(e.message || '删除失败', 'error') }
@@ -443,7 +445,7 @@ const orders = ref([])
       progressLoading.value = true
       progressData.value = null
       try {
-        const d = await api.get('/api/orders/' + o.id + '/workpiece-progress')
+        const d = await api.getWorkpieceProgress(o.id)
         progressData.value = d
       } catch(e) {
         showToast('加载进度失败: ' + (e.message || ''), 'error')

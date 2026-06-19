@@ -35,6 +35,8 @@ def list_orders():
         page=page, limit=limit, status=status, keyword=keyword,
         customer=customer, data_scope_pids=pids
     )
+    # Force sort by order_no descending (newest first)
+    result['orders'] = sorted(result.get('orders', []), key=lambda o: o.get('order_no', ''), reverse=True)
     return jsonify(result)
 
 
@@ -219,6 +221,8 @@ def workpiece_progress(order_id):
         progress = OrderService.get_workpiece_progress(order_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        return jsonify({'error': '加载工件进度失败: ' + str(e)}), 500
 
     order = progress['order']
     items = progress['items']

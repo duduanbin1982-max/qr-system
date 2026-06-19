@@ -30,12 +30,12 @@ export function useRoleManage() {
 
   async function loadRoles() {
     roleLoading.value = true
-    try { const d = await api.get('/api/roles'); roles.value = d.roles||[] }
+    try { const d = await api.listRoles(); roles.value = d.roles||[] }
     catch(e) { showToast(e.message,'error') }
     finally { roleLoading.value = false }
   }
   async function loadGroups() {
-    try { const d = await api.get('/api/role-groups'); groups.value = d.role_groups||[] }
+    try { const d = await api.listRoleGroups(); groups.value = d.role_groups||[] }
     catch(e) { groups.value = [] }
   }
   async function loadPermissions() {

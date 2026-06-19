@@ -252,8 +252,12 @@ export default {
       const label = action === 'approve' ? '通过' : '拒绝'
       if (!confirm('确定批量' + label + ' ' + selectedIds.value.length + ' 条审批？')) return
       try {
-        await api.batchApproval(selectedIds.value, action)
-        showToast('已批量' + label)
+        const result = await api.batchApproval(selectedIds.value, action)
+        if (result.failed && result.failed.length > 0) {
+          showToast(result.message + '，' + result.failed.length + ' 条失败', 'warning')
+        } else {
+          showToast('已批量' + label)
+        }
         selectedIds.value = []
         selectAll.value = false
         await load()
@@ -268,27 +272,28 @@ export default {
 
     async function loadStats() {
       try {
-        const d = await api.get('/api/approvals/stats')
+        const d = await api.approvalStats()
         stats.value = d
       } catch(e) {}
     }
 
     async function loadConfig() {
       try {
-        const d = await api.get('/api/approvals/config')
+        const d = await api.approvalConfig()
         configProcesses.value = d.configs || []
       } catch(e) { showToast('加载配置失败', 'error') }
     }
 
     async function saveConfig(p) {
       try {
-        await api.post('/api/approvals/config', {
+        const level = p.approver_role_3 ? 3 : (p.approver_role_2 ? 2 : 1)
+        await api.saveApprovalConfig({
           process_id: p.process_id || p.id,
           require_approval: p.require_approval,
           approver_role: p.approver_role || 'admin',
           approver_role_2: p.approver_role_2 || '',
           approver_role_3: p.approver_role_3 || '',
-          approval_level: p.approval_level || 1
+          approval_level: level
         })
       } catch(e) { showToast('保存失败', 'error') }
     }

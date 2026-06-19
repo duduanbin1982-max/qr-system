@@ -61,10 +61,14 @@ def get_approval_config():
     """Return all approval_config rows with process names."""
     db = get_db()
     rows = db.execute("""
-        SELECT ac.id, ac.process_id, ac.require_approval, ac.approver_role,
-               ac.approval_level, ac.approver_role_2, ac.approver_role_3, p.name as process_name, p.category
-        FROM approval_config ac
-        LEFT JOIN processes p ON ac.process_id = p.id
+        SELECT ac.id, ac.process_id, COALESCE(ac.require_approval, 0) as require_approval,
+               COALESCE(ac.approver_role, 'admin') as approver_role,
+               COALESCE(ac.approval_level, 1) as approval_level,
+               COALESCE(ac.approver_role_2, '') as approver_role_2,
+               COALESCE(ac.approver_role_3, '') as approver_role_3,
+               p.name as process_name, p.category
+        FROM processes p
+        LEFT JOIN approval_config ac ON ac.process_id = p.id
         ORDER BY p.name
     """).fetchall()
     return jsonify({"configs": [dict(r) for r in rows]})
@@ -124,12 +128,19 @@ def batch_approval():
     if not ids or action not in ("approve", "reject"):
         return jsonify({"error": "参数错误"}), 400
     try:
-        count = ApprovalService.batch_handle(
+        count, failed = ApprovalService.batch_handle(
             ids, action,
             approver={"id": g.current_user["id"], "name": g.current_user["name"]},
             comment=data.get("comment", "")
         )
-        return jsonify({"message": f"已处理 {count} 条", "count": count})
+        if failed:
+            return jsonify({
+                "message": f"已处理 {count}/{len(ids)} 条",
+                "count": count,
+                "total": len(ids),
+                "failed": failed
+            })
+        return jsonify({"message": f"已处理 {count} 条", "count": count, "total": len(ids)})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 

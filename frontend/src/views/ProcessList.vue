@@ -259,7 +259,7 @@ export default {
 
     async function del(p) {
     try {
-      const impactRes = await api.get('/api/processes/' + p.id + '/impact')
+      const impactRes = await api.getProcessImpact(p.id)
       const impact = impactRes.impact || {}
       const keys = Object.keys(impact)
       if (keys.length > 0) {

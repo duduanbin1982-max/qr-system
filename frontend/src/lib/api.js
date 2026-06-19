@@ -70,6 +70,7 @@ export const api = {
   trashOrders:      (params) => request("GET", "/api/orders/trash" + buildQuery(params)),
   restoreOrder:     (id)     => request("POST", "/api/orders/" + id + "/restore"),
   purgeOrder:       (id)     => request("DELETE", "/api/orders/" + id + "/purge"),
+  getWorkpieceProgress: (id)  => request('GET', '/api/orders/' + id + '/workpiece-progress'),
   batchCreateOrders:(data)   => request('POST', '/api/orders/batch', data),
   
   // ========== 订单附件 ==========
@@ -113,20 +114,24 @@ export const api = {
   createUser:       (data)   => request('POST', '/api/users', data),
   updateUser:       (id,data)=> request('PUT',  '/api/users/' + id, data),
   deleteUser:       (id)     => request('DELETE', '/api/users/' + id),
+  restoreUser:      (id)     => request('POST', '/api/users/' + id + '/restore'),
   permanentDeleteUser: (id)     => request('DELETE', '/api/users/' + id + '/permanent'),
   resetPassword:    (id,data)=> request('POST', '/api/users/' + id + '/reset-password', data),
+  unlockUser:       (id)     => request('POST', '/api/users/' + id + '/unlock'),
   
   // ========== 工序 ==========
   listProcesses:    (params) => request('GET', '/api/processes' + buildQuery(params)),
   createProcess:    (data)   => request('POST', '/api/processes', data),
   updateProcess:    (id,data)=> request('PUT',  '/api/processes/' + id, data),
   deleteProcess:    (id)     => request('DELETE', '/api/processes/' + id),
+  getProcessImpact: (id)     => request('GET', '/api/processes/' + id + '/impact'),
   
   // ========== 工序路线 ==========
   listProcessRoutes:(params) => request("GET", "/api/process-routes" + buildQuery(params)),
   createProcessRoute:(data)  => request('POST', '/api/process-routes', data),
   updateProcessRoute:(id,data)=>request('PUT', '/api/process-routes/' + id, data),
   deleteProcessRoute:(id)    => request('DELETE', '/api/process-routes/' + id),
+  getRouteImpact:   (id)     => request('GET', '/api/process-routes/' + id + '/impact'),
   applyProcessRoute: (id, orderId) => request("POST", "/api/process-routes/" + id + "/apply", { order_id: orderId }),
   
   // ========== 工价 ==========
@@ -197,13 +202,15 @@ export const api = {
   // ========== 追溯 ==========
   trace:            (code)   => request('GET', '/api/trace/' + encodeURIComponent(code)),
   traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),
-  traceByOrder:     (orderNo) => request('GET', '/api/trace/order/' + encodeURIComponent(orderNo)),
   
   // ========== 审批 ==========
   pendingApprovals:  ()       => request('GET', '/api/approvals/pending'),
   approvalHistory:  (params) => request('GET', '/api/approvals/history' + buildQuery(params)),
   handleApproval:   (id,action,comment) => request('POST', '/api/approvals/' + id + '/' + action, {comment: comment || ''}),
   batchApproval:    (ids, action) => request('POST', '/api/approvals/batch', {ids: ids, action: action}),
+  approvalStats:    ()       => request('GET', '/api/approvals/stats'),
+  approvalConfig:   ()       => request('GET', '/api/approvals/config'),
+  saveApprovalConfig: (data) => request('POST', '/api/approvals/config', data),
   
   // ========== 系统设置 ==========
   getSettings:      ()       => request('GET', '/api/settings'),

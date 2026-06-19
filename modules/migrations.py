@@ -6,7 +6,7 @@ import sqlite3, json, bcrypt
 from modules.config import DB_PATH, PREDEFINED_ROLES
 
 MIGRATIONS = []
-LATEST_VERSION = 15
+LATEST_VERSION = 16
 
 def migration(version, description):
     def decorator(fn):
@@ -993,7 +993,29 @@ def m015_roles_is_builtin(db):
     db.commit()
 
 
+@migration(16, "Add approval missing columns (approver_role_2/3, processed_at, current_level)")
+def m016_approval_columns(db):
+    try:
+        db.execute("ALTER TABLE approval_config ADD COLUMN approver_role_2 TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE approval_config ADD COLUMN approver_role_3 TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE approval_records ADD COLUMN processed_at TEXT")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE approval_records ADD COLUMN current_level INTEGER DEFAULT 1")
+    except Exception:
+        pass
+    db.commit()
+
+
 def run_migrations(db=None):
+
     """Run all pending migrations in order."""
     own_db = db is None
     if own_db:

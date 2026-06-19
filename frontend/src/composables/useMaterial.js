@@ -99,7 +99,7 @@ export function useMaterial() {
   async function load() {
     loading.value = true
     try {
-      const d = await api.get('/api/materials')
+      const d = await api.listMaterials()
       materials.value = d.materials || []
     } catch (e) { showToast(e.message, 'error') }
     finally { loading.value = false }
@@ -113,8 +113,7 @@ export function useMaterial() {
 
   function openEdit(m) {
     editing.value = m.id
-    const { supplier_name, ...rest } = m
-    const f = { ...rest }
+    const f = { ...m }
     if (f.supplier_id === '' || f.supplier_id === 0) f.supplier_id = null
     form.value = f
     showForm.value = true
@@ -129,9 +128,9 @@ export function useMaterial() {
       }
       if (payload.supplier_id === '' || payload.supplier_id === 0) payload.supplier_id = null
       if (editing.value) {
-        await api.put('/api/materials/' + editing.value, payload)
+        await api.updateMaterial(editing.value, payload)
       } else {
-        await api.post('/api/materials', payload)
+        await api.createMaterial(payload)
       }
       showForm.value = false
       showToast('保存成功')
@@ -142,12 +141,12 @@ export function useMaterial() {
   async function remove(m) {
     if (!confirm('确定删除物料「' + m.name + '」？')) return
     try {
-      const res = await api.get('/api/materials/' + m.id + '/impact')
-      if (res && res.in_use) {
-        showToast('该物料正在被' + (res.refs || []).length + '个订单使用，无法删除', 'error')
+      const res = await api.getMaterialImpact(m.id)
+      if (res && (res.refs || 0) > 0) {
+        showToast('该物料正在被 ' + res.refs + ' 个地方引用，无法删除', 'error')
         return
       }
-      await api.del('/api/materials/' + m.id)
+      await api.deleteMaterial(m.id)
       showToast('已删除')
       await load()
     } catch (e) { showToast(e.message || '删除失败', 'error') }
@@ -162,7 +161,7 @@ export function useMaterial() {
   async function doStock() {
     if (stockForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
     try {
-      await api.post('/api/materials/' + selectedMaterial.value.id + '/stock', stockForm.value)
+      await api.materialStockChange(selectedMaterial.value.id, stockForm.value)
       showStock.value = false
       showToast('操作成功')
       await load()
@@ -172,7 +171,7 @@ export function useMaterial() {
   async function viewLogs(m) {
     selectedMaterial.value = m
     try {
-      const d = await api.get('/api/materials/' + m.id + '/logs')
+      const d = await api.getMaterialLogs(m.id)
       logs.value = d.logs || []
     } catch (e) { logs.value = [] }
   }
@@ -182,7 +181,7 @@ export function useMaterial() {
     showConsume.value = true
     consumeForm.value = { order_id: null, process_id: null, quantity: 0, notes: '', operator_name: '' }
     try {
-      const d = await api.get('/api/materials/' + m.id + '/consumptions')
+      const d = await api.getMaterialConsumptions(m.id)
       consumptions.value = d.consumptions || []
     } catch (e) { consumptions.value = [] }
   }
@@ -207,7 +206,7 @@ export function useMaterial() {
   async function doConsume() {
     if (consumeForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
     try {
-      await api.post('/api/materials/' + selectedMaterial.value.id + '/consumptions', consumeForm.value)
+      await api.createMaterialConsumption(selectedMaterial.value.id, consumeForm.value)
       showToast('消耗已记录')
       openConsume(selectedMaterial.value)
       await load()
@@ -217,7 +216,7 @@ export function useMaterial() {
   async function undoConsume(c) {
     if (!confirm('撤销消耗将恢复库存，确定？')) return
     try {
-      await api.del('/api/materials/consumptions/' + c.id)
+      await api.deleteMaterialConsumption(c.id)
       showToast('已撤销')
       openConsume(selectedMaterial.value)
       await load()
@@ -225,7 +224,7 @@ export function useMaterial() {
   }
 
   async function loadSuppliers() {
-    try { const d = await api.get('/api/suppliers'); suppliers.value = d.suppliers || [] } catch (e) {}
+    try { const d = await api.listSuppliers(); suppliers.value = d.suppliers || [] } catch (e) {}
   }
 
   function openSupplierAdd() {
@@ -236,7 +235,7 @@ export function useMaterial() {
   async function addSupplier() {
     if (!supplierForm.value.name.trim()) { showToast('供应商名称必填', 'error'); return }
     try {
-      const r = await api.post('/api/suppliers', supplierForm.value)
+      const r = await api.createSupplier(supplierForm.value)
       showSupplierForm.value = false
       await loadSuppliers()
       if (r.id) {
@@ -251,7 +250,7 @@ export function useMaterial() {
   async function deleteSupplier(s) {
     if (!confirm('确定删除供应商「' + s.name + '」？如有物料关联将无法删除。')) return
     try {
-      await api.del('/api/suppliers/' + s.id)
+      await api.deleteSupplier(s.id)
       await loadSuppliers()
       showToast('供应商已删除')
     } catch (e) { showToast(e.message || '删除失败', 'error') }
@@ -285,6 +284,7 @@ export function useMaterial() {
     })
     const dates = Object.keys(byDate).sort()
     const amounts = dates.map(d => byDate[d])
+    if (typeof Chart === 'undefined') return
     trendChart.value._chart = new Chart(ctx, {
       type: "bar",
       data: {

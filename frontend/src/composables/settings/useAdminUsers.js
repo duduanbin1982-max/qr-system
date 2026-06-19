@@ -18,7 +18,7 @@ export function useAdminUsers() {
   const filteredAdminList = computed(() => {
     let list = allUsers.value
     const kw = adminSearch.value.trim().toLowerCase()
-    if (kw) list = list.filter(u => (u.username||'').toLowerCase().includes(kw) || (u.name||'').toLowerCase().includes(kw) || (u.nickname||'').toLowerCase().includes(kw))
+    if (kw) list = list.filter(u => (u.username||'').toLowerCase().includes(kw) || (u.name||'').toLowerCase().includes(kw) || (u.nickname||'').toLowerCase().includes(kw) || (u.email||'').toLowerCase().includes(kw) || (u.phone||'').toLowerCase().includes(kw) || (u.employee_no||'').toLowerCase().includes(kw))
     return list
   })
 
@@ -35,7 +35,7 @@ export function useAdminUsers() {
   }
   async function loadRoleGroups() {
     try { const d = await api.get('/api/role-groups'); roleGroups.value = d.role_groups||[] }
-    catch(e) { showToast('加载角色组失败', 'warn') }
+    catch(e) { console.warn('加载角色组失败:', e.message || e) }
   }
   async function loadAllRoles() {
     try { const d = await api.get('/api/roles'); allRoles.value = d.roles||[] }
@@ -104,6 +104,16 @@ export function useAdminUsers() {
     try { await api.deleteUser(uid); showToast('删除成功'); loadAllUsers() }
     catch(e) { showToast(e.message,'error') }
   }
+  async function restoreAdminUser(uid) {
+    if (!confirm('确定恢复该管理员？')) return
+    try { await api.restoreUser(uid); showToast('恢复成功'); loadAllUsers() }
+    catch(e) { showToast(e.message,'error') }
+  }
+  async function permanentDeleteAdminUser(uid) {
+    if (!confirm('彻底删除将无法恢复，确定继续？')) return
+    try { await api.permanentDeleteUser(uid); showToast('已彻底删除'); loadAllUsers() }
+    catch(e) { showToast(e.message,'error') }
+  }
   async function batchDeleteAdmins() {
     if (selectedAdmins.value.length === 0) { showToast('请选择要删除的管理员','warn'); return }
     if (!confirm('确定删除选中的 ' + selectedAdmins.value.length + ' 个管理员？')) return
@@ -122,7 +132,7 @@ export function useAdminUsers() {
     showAdminModal, adminModalEdit, adminForm, roleGroups, userRoleIds,
     filteredAdminList, isAllSelected,
     loadAllUsers, toggleSelectAllAdmins, openAddAdmin, openEditAdmin, saveAdmin,
-    deleteAdminUser, batchDeleteAdmins, loadUserRoles, toggleUserRole, saveUserRoles,
+    deleteAdminUser, restoreAdminUser, permanentDeleteAdminUser, batchDeleteAdmins, loadUserRoles, toggleUserRole, saveUserRoles,
     loadAllRoles, loadRoleGroups,
   }
 }

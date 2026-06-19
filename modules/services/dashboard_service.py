@@ -108,20 +108,23 @@ class DashboardService:
         }
 
     @staticmethod
+    @staticmethod
     def _get_quick_actions(user=None):
-        """Role-aware quick-action shortcuts for the workbench."""
+        """Permission-based quick-action shortcuts for the workbench."""
         all_actions = [
-            {"page": "orders",   "icon": "📋", "label": "订单管理", "desc": "管理生产订单", "roles": ["admin","manager"]},
-            {"page": "scan",     "icon": "📱", "label": "扫码报工", "desc": "扫描二维码报工", "roles": ["admin","manager","worker"]},
-            {"page": "products", "icon": "🏭", "label": "产品管理", "desc": "维护产品信息", "roles": ["admin","manager"]},
-            {"page": "prices",   "icon": "💰", "label": "工价管理", "desc": "管理工序工价", "roles": ["admin","manager"]},
-            {"page": "users",    "icon": "👥", "label": "员工管理", "desc": "管理用户权限", "roles": ["admin","manager"]},
-            {"page": "stats",    "icon": "📊", "label": "统计报表", "desc": "查看生产统计", "roles": ["admin","manager","worker"]},
-            {"page": "board",    "icon": "📺", "label": "数据看板", "desc": "实时生产大屏", "external": "/board.html", "roles": ["admin","manager","worker"]},
-            {"page": "settings", "icon": "⚙️", "label": "系统设置", "desc": "系统配置管理", "roles": ["admin"]},
+            {"page": "orders",   "icon": "📋", "label": "订单管理", "desc": "管理生产订单", "perm": "orders:view"},
+            {"page": "scan",     "icon": "📱", "label": "扫码报工", "desc": "扫描二维码报工", "perm": "scan:view"},
+            {"page": "products", "icon": "🏭", "label": "产品管理", "desc": "维护产品信息", "perm": "products:view"},
+            {"page": "prices",   "icon": "💰", "label": "工价管理", "desc": "管理工序工价", "perm": "prices:view"},
+            {"page": "users",    "icon": "👥", "label": "员工管理", "desc": "管理用户权限", "perm": "users:view"},
+            {"page": "stats",    "icon": "📊", "label": "统计报表", "desc": "查看生产统计", "perm": "stats:view"},
+            {"page": "board",    "icon": "📺", "label": "数据看板", "desc": "实时生产大屏", "external": "/board.html", "perm": "board:view"},
+            {"page": "settings", "icon": "⚙️", "label": "系统设置", "desc": "系统配置管理", "perm": "settings:manage"},
         ]
-        role = (user or {}).get("role", "worker")
-        return [a for a in all_actions if role in a.get("roles", [])]
+        perms = set(user.get("_permissions", []) if user else [])
+        # * means all permissions (admin)
+        has_all = "*" in perms
+        return [a for a in all_actions if has_all or a.get("perm", "") in perms]
 
     @staticmethod
     def get_dashboard(user=None):

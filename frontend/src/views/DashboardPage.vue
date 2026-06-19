@@ -226,7 +226,7 @@ export default {
       if (_clock) clearInterval(_clock)
     })
     
-    function goAction(q) { if (q.external) { getBoardToken(); window.open(q.external, '_blank'); } else { navigate(q.page); } }
+    async function goAction(q) { if (q.external) { await getBoardToken(); window.open(q.external, '_blank'); } else { navigate(q.page); } }
     return { stats, security, records, loading, error, load, now, companyName, deliveryWarnings, quickActions, navigate, auth, goAction }
   }
 }

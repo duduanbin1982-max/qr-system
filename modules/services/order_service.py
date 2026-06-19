@@ -140,7 +140,7 @@ class OrderService:
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
             WHERE {where_sql}
-            {build_sort_clause("o.updated_at", {"o.updated_at": "o.updated_at", "o.id": "o.id"}, default="o.updated_at")}
+            ORDER BY o.order_no DESC
         '''
         paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
         rows = db.execute(paginated_sql, all_params).fetchall()
@@ -581,6 +581,19 @@ class OrderService:
                 (old_status, oid)
             )
         return existing['order_no']
+
+    @staticmethod
+    def batch_create(orders_data):
+        """批量创建订单。返回 (created_count, errors_list)。"""
+        created = 0
+        errors = []
+        for item in orders_data:
+            try:
+                OrderService.create_order(item)
+                created += 1
+            except Exception as e:
+                errors.append(str(e))
+        return created, errors
 
     @staticmethod
     def purge_order(oid):

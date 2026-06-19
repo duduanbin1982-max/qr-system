@@ -52,7 +52,7 @@ def list_products():
     keyword = request.args.get('keyword', '').strip()
     category = request.args.get('category', '').strip()
     page = max(request.args.get('page', 1, type=int), 1)
-    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    limit = min(max(request.args.get("limit", 500, type=int), 1), 500)
     deleted = request.args.get('deleted', '0').strip() in ('1', 'true', 'True')
     return jsonify(ProductService.list_products(keyword, category, page, limit, deleted=deleted))
 

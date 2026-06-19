@@ -5,7 +5,8 @@
       <div class="summary-bar" style="margin-bottom:var(--space-4)">
         <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val">{{ filteredAdminList.length }}</div><div class="s-label">管理员总数</div></div></div>
         <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ filteredAdminList.filter(u=>u.status==='active').length }}</div><div class="s-label">正常</div></div></div>
-        <div class="summary-item"><span class="s-icon">⛔</span><div><div class="s-val text-danger">{{ filteredAdminList.filter(u=>u.status!=='active').length }}</div><div class="s-label">停用</div></div></div>
+        <div class="summary-item"><span class="s-icon">⛔</span><div><div class="s-val text-warning">{{ filteredAdminList.filter(u=>u.status==='inactive').length }}</div><div class="s-label">停用</div></div></div>
+        <div class="summary-item"><span class="s-icon">🗑️</span><div><div class="s-val text-danger">{{ filteredAdminList.filter(u=>u.status==='deleted').length }}</div><div class="s-label">已删除</div></div></div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -37,11 +38,13 @@
                     <td style="color:var(--text-placeholder)">{{ u.email || '-' }}</td>
                     <td>{{ u.phone || '-' }}</td>
                     <td>{{ u.employee_no || '-' }}</td>
-                    <td><span class="badge" :class="u.status==='active'?'completed':'pending'">{{ u.status==='active'?'正常':'停用' }}</span></td>
+                    <td><span class="badge" :class="u.status==='active'?'completed':u.status==='deleted'?'danger':'pending'">{{ u.status==='active'?'正常':u.status==='deleted'?'已删除':'停用' }}</span></td>
                     <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ u.last_active || '无' }}</td>
                     <td style="text-align:center;white-space:nowrap">
                       <button class="o-abtn edit" @click="openEditAdmin(u)">✏️</button>
-                      <button v-if="u.username!=='admin'" class="o-abtn del" @click="deleteAdminUser(u.id)">🗑️</button>
+                      <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--success-light);color:var(--success)" @click="restoreAdminUser(u.id)" title="恢复">🔄</button>
+                      <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--danger-light);color:var(--danger)" @click="permanentDeleteAdminUser(u.id)" title="彻底删除">💀</button>
+                      <button v-if="u.username!=='admin' && u.status!=='deleted'" class="o-abtn del" @click="deleteAdminUser(u.id)">🗑️</button>
                     </td>
                   </tr>
                 </tbody>

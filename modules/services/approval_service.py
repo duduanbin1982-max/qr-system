@@ -111,12 +111,15 @@ class ApprovalService:
 
     @staticmethod
     def batch_handle(record_ids, action, approver, comment=""):
-        """Batch handle multiple approval records."""
+        """Batch handle multiple approval records.
+        Returns (processed_count, failed_ids) tuple.
+        """
         processed = 0
+        failed = []
         for rid in record_ids:
             try:
                 ApprovalService.handle(rid, action, approver, comment)
                 processed += 1
-            except ValueError:
-                pass  # Skip invalid records
-        return processed
+            except ValueError as e:
+                failed.append({"id": rid, "reason": str(e)})
+        return processed, failed

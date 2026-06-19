@@ -283,7 +283,7 @@ export default {
     async function del(r) {
       let impactMsg = ''
       try {
-        const res = await api.get('/api/process-routes/' + r.id + '/impact')
+        const res = await api.getRouteImpact(r.id)
         if (res.used_orders > 0) {
           impactMsg = '\n\n' + res.used_orders + ' 个订单正在使用此路线'
         }

@@ -16,10 +16,10 @@ export function useProcessConfig() {
       Object.assign(processConfig, {
         process_order_mode: s.process_order_mode || 'sequential',
         delivery_warning_days: parseInt(s.delivery_warning_days) || 7,
-        limit_by_prev_process: s.limit_by_prev_process || '1',
-        limit_by_order_qty: s.limit_by_order_qty || '1',
+        limit_by_prev_process: s.limit_by_prev_process === '0' ? 0 : 1,
+        limit_by_order_qty: s.limit_by_order_qty === '0' ? 0 : 1,
         page_size: parseInt(s.page_size) || 20,
-        approval_enabled: s.approval_enabled || '0',
+        approval_enabled: s.approval_enabled === '1' ? 1 : 0,
         auto_order_no: s.auto_order_no || '',
       })
     } catch(e) { showToast(e.message, 'error') }

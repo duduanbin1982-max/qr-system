@@ -106,11 +106,12 @@ class CustomerRepository:
         """插入新客户，返回 customer_id。需要外层事务管理。"""
         db = db or BaseService.db()
         cur = db.execute("""
-            INSERT INTO customers (name, contact, phone, email, address, remark)
-            VALUES (?,?,?,?,?,?)
+            INSERT INTO customers (name, contact, phone, email, address, remark, tags)
+            VALUES (?,?,?,?,?,?,?)
         """, (data["name"], data.get("contact", ""),
               data.get("phone", ""), data.get("email", ""),
-              data.get("address", ""), data.get("remark", "")))
+              data.get("address", ""), data.get("remark", ""),
+              data.get("tags", "")))
         return cur.lastrowid
 
     @staticmethod

@@ -16,11 +16,11 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th style="width:60px">序号</th>
-                  <th>工序名称</th>
-                  <th style="width:100px">分类</th>
-                  <th style="width:120px">审批状态</th>
-                  <th style="width:100px">操作</th>
+                  <th style="width:60px;text-align:center">序号</th>
+                  <th style="width:auto">工序名称</th>
+                  <th style="width:100px;text-align:center">分类</th>
+                  <th style="width:130px;text-align:center">审批状态</th>
+                  <th style="width:130px;text-align:center;white-space:nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -50,7 +50,7 @@
                         cursor:'pointer', fontWeight:500
                       }"
                     >
-                      {{ isApprovalRequired(proc.id) ? '🔓 关闭审批' : '🔒 开启审批' }}
+                      <span style="white-space:nowrap">{{ isApprovalRequired(proc.id) ? '🔓 关闭审批' : '🔒 开启审批' }}</span>
                     </button>
                   </td>
                 </tr>

@@ -13,7 +13,7 @@ export function usePositions() {
 
   async function loadPositions() {
     positionLoading.value = true
-    try { const d = await api.get('/api/positions'); positions.value = d.positions||[] }
+    try { const d = await api.listPositions(); positions.value = d.positions||[] }
     catch(e) { showToast(e.message,'error') }
     finally { positionLoading.value = false }
   }

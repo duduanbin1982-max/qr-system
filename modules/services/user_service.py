@@ -356,8 +356,15 @@ class UserService:
         if not user:
             raise ValueError('can only permanently delete trashed users')
         with BaseService.transaction() as txn:
+            txn.execute('DELETE FROM user_sessions WHERE user_id = ?', (uid,))
+            txn.execute('DELETE FROM login_logs WHERE user_id = ?', (uid,))
             txn.execute('DELETE FROM user_processes WHERE user_id = ?', (uid,))
             txn.execute('DELETE FROM user_roles WHERE user_id = ?', (uid,))
+            txn.execute('DELETE FROM audit_logs WHERE user_id = ?', (uid,))
+            txn.execute('DELETE FROM audit_logs WHERE target_id = ? AND target_type = ?', (uid, 'user'))
+            txn.execute('DELETE FROM order_remark_history WHERE user_id = ?', (uid,))
+            txn.execute('DELETE FROM wage_snapshots WHERE employee_id = ?', (uid,))
+            txn.execute('DELETE FROM wage_adjustments WHERE user_id = ?', (uid,))
             txn.execute('DELETE FROM users WHERE id = ?', (uid,))
         return True
 
