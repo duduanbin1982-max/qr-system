@@ -1,5 +1,6 @@
 """qr-system ? ???????Refactored: all SQL ? QualityService?"""
 from flask import request, jsonify, g, send_file
+from datetime import datetime
 from modules.db import get_db
 from modules.app import app
 from modules.middleware.audit import audit_log
@@ -115,12 +116,10 @@ def quality_export():
             date_from=request.args.get('from', ''),
             date_to=request.args.get('to', ''),
         )
-        from flask import send_file
-        from datetime import datetime as dt
         output.seek(0)
         return send_file(
             output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True, download_name=f'quality_inspections_{dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+            as_attachment=True, download_name=f'quality_inspections_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
         )
     except Exception as e:
         return handle_unexpected_error(e, 'export operation')
@@ -249,7 +248,6 @@ def quality_attachment_download(att_id):
         row = db.execute('SELECT * FROM quality_attachments WHERE id = ?', (att_id,)).fetchone()
         if not row:
             return jsonify({'error': '附件不存在'}), 404
-        from flask import send_file
         from io import BytesIO
         return send_file(BytesIO(row['file_data']), mimetype=row['file_type'] or 'application/octet-stream',
                          as_attachment=True, download_name=row['file_name'])

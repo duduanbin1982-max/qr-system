@@ -52,6 +52,7 @@
 <script>
 import { ref, onMounted } from 'vue'
 import { api } from '@/lib/api.js'
+import { showToast } from '@/lib/store.js'
 
 export default {
   setup() {
@@ -66,16 +67,19 @@ export default {
         if (keyword.value) params.keyword = keyword.value
         if (filterResult.value) params.result = filterResult.value
         const d = await api.listInspections(params)
-        items.value = d.inspections || []
+        items.value = d.items || []
       } catch(e) {}
     }
 
     async function loadStats() {
-      try { stats.value = await api.inspectionStats() } catch(e) {}
+      try { stats.value = await api.inspectionStats() } catch(e) { /* silent: stats are non-critical */ }
     }
 
     function exportExcel() {
-      window.open('/api/inspection/export', '_blank')
+      const qs = []
+      if (keyword.value) qs.push('search=' + encodeURIComponent(keyword.value))
+      if (filterResult.value) qs.push('result=' + filterResult.value)
+      window.open('/api/quality/inspections/export?' + qs.join('&'), '_blank')
     }
 
     onMounted(() => { load(); loadStats() })

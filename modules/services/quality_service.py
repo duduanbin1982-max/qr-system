@@ -5,7 +5,7 @@ from modules.services.query_utils import paginate, build_sort_clause
 
 
 INSPECTION_TYPES = {'first_article': '首件检验', 'in_process': '过程检验', 'final': '终检', 'rework_check': '返工复检'}
-DEFECT_CATEGORIES = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他']  # 注：前端 InspectionList.js 中重复定义，修改需同步
+DEFECT_CATEGORIES = ['尺寸超差', '外观缺陷', '材质问题', '焊接缺陷', '装配不良', '其他']  # 注：前端 InspectionList.vue 中如重复定义，修改需同步
 
 
 class QualityService:
