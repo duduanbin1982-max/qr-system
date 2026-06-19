@@ -152,13 +152,16 @@ class ReportsService:
                 qi_params.append(product_code)
             qi_w = " AND ".join(qi_where)
             qi_by_process = db.execute(
-                "SELECT qi.process_name as name, COUNT(*) as total_inspections, "
+                "SELECT p.name, COUNT(*) as total_inspections, "
                 "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
                 "COALESCE(SUM(CASE WHEN qi.result IN('fail','partial') THEN 1 ELSE 0 END),0) as fail_count, "
                 "COALESCE(SUM(CASE WHEN qi.result='scrap' THEN 1 ELSE 0 END),0) as scrap_count, "
                 "COALESCE(SUM(CASE WHEN qi.result='rework' THEN 1 ELSE 0 END),0) as rework_count "
-                "FROM quality_inspections qi WHERE " + qi_w + " AND qi.process_name != '' "
-                "GROUP BY qi.process_name ORDER BY total_inspections DESC",
+                "FROM quality_inspections qi "
+                "JOIN processes p ON qi.process_id = p.id "
+                "JOIN orders o ON qi.order_id = o.id AND o.deleted_at IS NULL "
+                "WHERE " + qi_w + " "
+                "GROUP BY p.name ORDER BY total_inspections DESC",
                 qi_params
             ).fetchall()
             result["qi_by_process"] = [dict(r) for r in qi_by_process]
