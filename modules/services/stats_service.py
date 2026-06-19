@@ -4,7 +4,7 @@ from modules.services import BaseService
 
 class StatsService:
     @staticmethod
-    def get_daily_records(date, product_code=""):
+    def get_daily_records(date, product_code="", page_param=1, per_page_param=500):
         db = BaseService.db()
         where_parts = ["wr.status='approved'", "DATE(wr.created_at)=?",
                        "o.deleted_at IS NULL", "o.status != 'cancelled'"]
@@ -13,9 +13,10 @@ class StatsService:
             where_parts.append("o.product_code = ?")
             where_params.append(product_code)
         where_clause = " AND ".join(where_parts)
-        # Worker role filter: only count workers
-        worker_filter = ("u.id IN (SELECT ur.user_id FROM user_roles ur "
-                         "JOIN roles r ON ur.role_id=r.id WHERE r.code='worker')")
+        # Pagination support
+        page = int(page_param or 1)
+        per_page = min(int(per_page_param or 500), 2000)
+        offset = (page - 1) * per_page
         records = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, "
             "o.order_no, o.product_name, p.name as process_name, p.id as process_id, "
@@ -24,8 +25,8 @@ class StatsService:
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
             "JOIN users u ON wr.user_id=u.id "
-            "WHERE " + where_clause + " AND " + worker_filter
-            + " ORDER BY wr.created_at DESC LIMIT 1000", where_params
+            "WHERE " + where_clause
+            + " ORDER BY wr.created_at DESC LIMIT ? OFFSET ?", where_params + [per_page, offset]
         ).fetchall()
         summary = db.execute(
             "SELECT p.id, p.name, COUNT(*) as record_count, "
@@ -36,12 +37,18 @@ class StatsService:
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
             "JOIN users u ON wr.user_id=u.id "
-            "WHERE " + where_clause + " AND " + worker_filter
+            "WHERE " + where_clause
             + " GROUP BY p.id ORDER BY record_count DESC", where_params
         ).fetchall()
+        total_count = db.execute(
+            "SELECT COUNT(*) FROM work_records wr "
+            "JOIN orders o ON wr.order_id=o.id "
+            "WHERE " + where_clause, where_params
+        ).fetchone()[0]
         return {
             "records": [dict(r) for r in records],
             "summary": [dict(s) for s in summary],
+            "total": total_count, "page": page, "per_page": per_page
         }
 
     @staticmethod

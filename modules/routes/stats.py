@@ -17,7 +17,9 @@ def stats_daily():
     date = request.args.get('date', '') or datetime.now().strftime('%Y-%m-%d')
     product_code = request.args.get('product_code', '')
     try:
-        result = StatsService.get_daily_records(date, product_code)
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 500, type=int)
+        result = StatsService.get_daily_records(date, product_code, page, per_page)
         return jsonify(result)
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
