@@ -115,10 +115,13 @@
             </div>
             <div v-if="items.length">
               <div v-for="(it, idx) in items" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:var(--space-2);background:var(--bg-table-header);border-radius:var(--radius-md);flex-wrap:wrap">
-                <select class="form-input" v-model="it.inventory_id" @change="onInvChange(idx)" style="flex:2;font-size:var(--text-xs);min-width:120px">
-                  <option value="">-- 选择库存 --</option>
-                  <option v-for="inv in inventory" :key="inv.id" :value="inv.id">{{ inv.product_model }} [{{ inv.order_no || '-' }}] ({{ inv.quantity }}{{ inv.unit }})</option>
-                </select>
+                <div style="flex:2;min-width:120px">
+                  <input class="form-input" v-model="it._search" placeholder="🔍 搜索型号/名称/订单号..." style="width:100%;font-size:var(--text-xs);margin-bottom:2px;padding:4px 8px">
+                  <select class="form-input" v-model="it.inventory_id" @change="onInvChange(idx)" style="width:100%;font-size:var(--text-xs)">
+                    <option value="">-- 选择库存 --</option>
+                    <option v-for="inv in filterInv(it._search)" :key="inv.id" :value="inv.id">{{ inv.product_model }} [{{ inv.order_no || '-' }}] ({{ inv.quantity }}{{ inv.unit }})</option>
+                  </select>
+                </div>
                 <input class="form-input" v-model.number="it.quantity" type="number" min="1" placeholder="数量" @change="updateReceivable" style="width:60px;font-size:var(--text-xs);text-align:center">
                 <span @click="removeItem(idx)" style="color:var(--danger);cursor:pointer;font-size:var(--text-base)">✕</span>
               </div>
@@ -339,9 +342,19 @@ export default {
       showModal.value = true
     }
 
-function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'' }) }
+function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'', _search:'' }) }
 
     function removeItem(idx) { items.value.splice(idx, 1); updateReceivable() }
+
+        function filterInv(search) {
+      if (!search) return inventory.value
+      const kw = search.toLowerCase()
+      return inventory.value.filter(i =>
+        (i.product_model||'').toLowerCase().includes(kw) ||
+        (i.product_name||'').toLowerCase().includes(kw) ||
+        (i.order_no||'').toLowerCase().includes(kw)
+      )
+    }
 
     function onInvChange(idx) {
       const inv = inventory.value.find(i => i.id === items.value[idx].inventory_id)
@@ -478,7 +491,7 @@ ${items.map((it, i) => '<tr><td>' + (i+1) + '</td><td>' + (escapeHtml(it.product
     return {
       shipments, loading, saving, total, page, limit, filterStatus, searchKeyword, statusMap, paymentStatusMap,
       pendingCount, completedCount, receivableTotal, paidTotal, unpaidTotal, inventory,
-      showModal, modalEdit, form, items, openAdd, openEdit, addItem, removeItem, onInvChange, save, del,
+      showModal, modalEdit, form, items, openAdd, openEdit, addItem, removeItem, onInvChange, filterInv, save, del,
       showDetail, detailShipment, viewDetail, doComplete, doReceive, doPayment, openPayment, printDeliveryNote,
       showPayModal, payTarget, payAmount, payMethod, payDate, payRemark,
       prevPage, nextPage, load, exportExcel, auth, canCreate, canEdit, canDelete
