@@ -1,204 +1,143 @@
-"""
-qr-system — 工序管理 Service 层
-
-从 routes/processes.py 提取全部业务逻辑。
-"""
+﻿"""qr-system - ProcessService (Repository-refactored)"""
 import re
 import sqlite3
 from modules.services import BaseService
+from modules.repositories.process_repository import ProcessRepository
 
 
 class ProcessService:
-    """工序管理业务逻辑。"""
     RELATED_TABLES = [
-        'work_records', 'scrap_records', 'rework_records',
-        'quality_inspections', 'process_route_items',
-        'order_processes', 'position_processes', 'material_consumptions'
+        "work_records", "scrap_records", "rework_records",
+        "quality_inspections", "process_route_items",
+        "order_processes", "position_processes", "material_consumptions"
     ]
 
     @staticmethod
     def _validate_table_name(table_name):
-        '''Whitelist validation for dynamic table names used in UNION/DELETE queries.'''
         if table_name not in ProcessService.RELATED_TABLES:
-            raise ValueError(f'Invalid table name: {table_name}')
+            raise ValueError("Invalid table name: " + table_name)
         return table_name
 
-
     @staticmethod
-    def list_processes(category='', search='', sort_by='seq_order', sort_dir='asc', limit=500, offset=0):
-        """工序列表（支持分类筛选、搜索、排序、分页）。"""
-        db = BaseService.db()
-        # 白名单校验排序字段
-        allowed_sort = {'seq_order', 'name', 'category', 'status', 'created_at'}
+    def list_processes(category="", search="", sort_by="seq_order", sort_dir="asc", limit=500, offset=0):
+        allowed_sort = {"seq_order", "name", "category", "status", "created_at"}
         if sort_by not in allowed_sort:
-            sort_by = 'seq_order'
-        if sort_dir.lower() not in ('asc', 'desc'):
-            raise ValueError('Invalid sort_dir')
+            sort_by = "seq_order"
+        if sort_dir.lower() not in ("asc", "desc"):
+            raise ValueError("Invalid sort_dir")
         sort_dir = sort_dir.upper()
         limit = max(1, min(int(limit), 200)) if limit else None
-        sql = ('SELECT id, name AS process_name, description, category, '
-               'seq_order, status, created_at FROM processes')
+
         params = []
         conditions = []
         if category:
-            conditions.append('category = ?')
+            conditions.append("category = ?")
             params.append(category)
         if search:
             conditions.append('name LIKE ? ESCAPE "\\"')
-            safe_search = search.replace('%', '\\%').replace('_', '\\_')
-            params.append(f'%{safe_search}%')
-        if conditions:
-            sql += ' WHERE ' + ' AND '.join(conditions)
-        sql += f' ORDER BY {sort_by} {sort_dir}, id {sort_dir}'
-        category_counts = {}
-        for r in db.execute("SELECT category, COUNT(*) as cnt FROM processes GROUP BY category").fetchall():
-            category_counts[r['category']] = r['cnt']
+            safe_search = search.replace("%", "\\%").replace("_", "\\_")
+            params.append("%" + safe_search + "%")
 
-        count_sql = 'SELECT COUNT(*) FROM processes'
-        if conditions:
-            count_sql += ' WHERE ' + ' AND '.join(conditions)
-        total = db.execute(count_sql, params).fetchone()[0]
-        if limit is not None:
-            sql += ' LIMIT ? OFFSET ?'
-            params.extend([limit, offset])
-        rows = db.execute(sql, params).fetchall()
-        return {'processes': [dict(r) for r in rows], 'total': total, 'category_counts': category_counts}
+        category_counts = ProcessRepository.get_category_counts()
+        total = ProcessRepository.count_all(conditions, params)
+        rows = ProcessRepository.list_all(conditions, params, sort_by, sort_dir, limit, offset)
+        return {"processes": [dict(r) for r in rows], "total": total, "category_counts": category_counts}
 
     @staticmethod
     def create_process(data):
-        """
-        创建工序。Raises ValueError on empty name or duplicate.
-        """
-        name = data.get('name', '').strip()
+        name = data.get("name", "").strip()
         if not name:
-            raise ValueError('工序名称不能为空')
+            raise ValueError("Process name required")
         if re.search(r"[';<>]", name):
-            raise ValueError('工序名称不能包含特殊字符')
+            raise ValueError("Process name contains invalid characters")
 
-        db = BaseService.db()
-        seq_order = data.get('seq_order')
+        existing = ProcessRepository.find_by_name(name)
+        if existing:
+            raise ValueError("Process '" + name + "' already exists")
+
+        seq_order = data.get("seq_order")
         if seq_order is not None:
             try:
                 seq_order = int(seq_order)
             except (ValueError, TypeError):
                 seq_order = None
-        # Pre-check duplicate name (friendly error, before transaction)
-        existing = db.execute('SELECT id FROM processes WHERE name = ?', (name,)).fetchone()
-        if existing:
-            raise ValueError(f'工序【{name}】已存在，不能重复添加')
+
+        category = data.get("category", "structural")
+        if seq_order is None:
+            seq_order = ProcessRepository.get_max_seq(category) + 1
+
         try:
             with BaseService.transaction() as txn:
-                if seq_order is None:
-                    category = data.get('category', '结构件')
-                    max_seq = txn.execute(
-                        'SELECT COALESCE(MAX(seq_order),0) FROM processes WHERE category = ?',
-                        (category,)
-                    ).fetchone()[0]
-                    seq_order = max_seq + 1
-                cur = txn.execute(
-                    'INSERT INTO processes (name, description, category, seq_order, status, updated_at) '
-                    'VALUES (?,?,?,?,?, datetime("now","localtime"))',
-                    (name, data.get('description', ''),
-                     data.get('category', '结构件'), seq_order,
-                     data.get('status', 'active'))
+                return ProcessRepository.insert_txn(
+                    name, data.get("description", ""), category,
+                    seq_order, data.get("status", "active"), db=txn
                 )
-                return cur.lastrowid
         except sqlite3.IntegrityError:
-            raise ValueError(f'工序【{name}】已存在，不能重复添加')
+            raise ValueError("Process '" + name + "' already exists")
 
     @staticmethod
     def update_process(pid, data):
-        """更新工序。Raises ValueError on not found or empty name."""
-        db = BaseService.db()
-        existing = db.execute(
-            'SELECT id, name FROM processes WHERE id = ?', (pid,)
-        ).fetchone()
+        existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError('工序不存在')
+            raise ValueError("Process not found")
 
-        if 'name' in data:
-            name = (data.get('name') or '').strip()
+        if "name" in data:
+            name = (data.get("name") or "").strip()
             if not name:
-                raise ValueError('工序名称不能为空')
+                raise ValueError("Process name required")
             if re.search(r"[';<>]", name):
-                raise ValueError('工序名称不能包含特殊字符')
-            data['name'] = name
+                raise ValueError("Process name contains invalid characters")
+            data["name"] = name
 
         field_map = {
-            'name': 'name', 'description': 'description',
-            'category': 'category', 'seq_order': 'seq_order', 'status': 'status'
+            "name": "name", "description": "description",
+            "category": "category", "seq_order": "seq_order", "status": "status"
         }
         sets = []
         params = []
-        for field in ['name', 'description', 'category', 'seq_order', 'status']:
+        for field in ["name", "description", "category", "seq_order", "status"]:
             if field in data:
-                sets.append(f'{field_map[field]} = ?')
+                sets.append(field_map[field] + " = ?")
                 params.append(data[field])
         if not sets:
-            raise ValueError('无更新内容')
+            raise ValueError("No update fields")
 
-        # Pre-check duplicate name if name is being changed
-        if 'name' in data:
-            dup = db.execute('SELECT id FROM processes WHERE name = ? AND id != ?', (data['name'], pid)).fetchone()
+        if "name" in data:
+            dup = ProcessRepository.find_duplicate_name(data["name"], pid)
             if dup:
-                raise ValueError(f'工序名称【{data["name"]}】已存在，不能重复')
+                raise ValueError("Process name '" + data["name"] + "' already exists")
 
-        # Always set updated_at
         sets.append('updated_at = datetime("now","localtime")')
 
-        with BaseService.transaction() as txn:
-            try:
-                txn.execute(
-                    f'UPDATE processes SET {", ".join(sets)} WHERE id = ?',
-                    params + [pid]
-                )
-            except sqlite3.IntegrityError:
-                raise ValueError(f'工序名称已存在，不能重复')
-
+        try:
+            with BaseService.transaction() as txn:
+                ProcessRepository.update_txn(", ".join(sets), params, pid, db=txn)
+        except sqlite3.IntegrityError:
+            raise ValueError("Process name already exists")
 
     @staticmethod
     def check_impact(pid):
-        """查询删除工序的影响范围。Raises ValueError if not found."""
-        db = BaseService.db()
-        existing = db.execute(
-            "SELECT id, name FROM processes WHERE id = ?", (pid,)
-        ).fetchone()
+        existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError("工序不存在")
-        tables = ProcessService.RELATED_TABLES
-        parts = [f"SELECT '{ProcessService._validate_table_name(t)}' as tbl, COUNT(*) as cnt FROM {t} WHERE process_id = ?" for t in tables]
-        union_sql = " UNION ALL ".join(parts)
-        rows = db.execute(union_sql, [pid] * len(tables)).fetchall()
-        impact = {r["tbl"]: r["cnt"] for r in rows if r["cnt"] > 0}
+            raise ValueError("Process not found")
+        impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
         return {"process_id": pid, "name": existing["name"], "impact": impact}
 
     @staticmethod
     def delete_process(pid):
-        """Delete process with impact audit. Blocks deletion if critical data exists."""
-        db = BaseService.db()
-        existing = db.execute(
-            'SELECT id, name FROM processes WHERE id = ?', (pid,)
-        ).fetchone()
+        existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError('不存在')
+            raise ValueError("Not found")
 
-        related_tables = ProcessService.RELATED_TABLES
-        union_parts = []
-        for tbl in related_tables:
-            union_parts.append(f"SELECT '{ProcessService._validate_table_name(tbl)}' as tbl, COUNT(*) as cnt FROM {tbl} WHERE process_id = ?")
-        union_sql = ' UNION ALL '.join(union_parts)
-        rows = db.execute(union_sql, [pid] * len(related_tables)).fetchall()
-        impact = {r['tbl']: r['cnt'] for r in rows if r['cnt'] > 0}
-
+        impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
         if impact:
-            critical_tables = ['work_records', 'order_processes', 'process_route_items', 'quality_inspections']
+            critical_tables = ["work_records", "order_processes", "process_route_items", "quality_inspections"]
             blockers = {k: v for k, v in impact.items() if k in critical_tables}
             if blockers:
-                details = ', '.join(f'{k}: {v}' for k, v in blockers.items())
-                raise ValueError(f'该工序有关联数据无法删除：{details}')
-            raise ValueError(f'该工序有 {sum(impact.values())} 条关联数据，无法直接删除')
+                details = ", ".join(k + ": " + str(v) for k, v in blockers.items())
+                raise ValueError("Process has related data: " + details)
+            raise ValueError("Process has " + str(sum(impact.values())) + " related records, cannot delete")
 
         with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM processes WHERE id = ?', (pid,))
-
-        return {'name': existing['name'], 'impact': {}}
+            ProcessRepository.delete_txn(pid, db=txn)
+        return {"name": existing["name"], "impact": {}}
