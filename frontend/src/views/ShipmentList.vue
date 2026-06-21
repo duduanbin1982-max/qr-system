@@ -387,15 +387,14 @@ function addItem() { items.value.push({ inventory_id:'', product_model:'', produ
     }
 
     async function del(s) {
+      let impactInfo = ''
       try {
         const res = await api.shipmentImpact(s.id)
         if (res.items > 0) {
-          showToast('出库单「' + s.shipment_no + '」包含 ' + res.items + ' 个物品，请先清空', 'warn')
-          return
+          impactInfo = '（含 ' + res.items + ' 个物品，将自动归还库存）'
         }
-      } catch(e) {}
-      const msg = s.status === 'completed' ? '已完成出库（将自动归还库存），' : ''
-      if (!confirm(msg + '确定删除出库单 ' + s.shipment_no + ' 吗？')) return
+      } catch(e) { /* non-blocking: proceed with deletion even if impact check fails */ }
+      if (!confirm('确定删除出库单 ' + s.shipment_no + ' 吗？' + impactInfo)) return
       try { await api.deleteShipment(s.id); showToast('删除成功'); await load() }
       catch(e) { showToast(e.message || '删除失败','error') }
     }
