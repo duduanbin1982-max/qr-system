@@ -29,7 +29,7 @@ export function useAdminUsers() {
 
   async function loadAllUsers() {
     adminLoading.value = true
-    try { const d = await api.get('/api/users?role=admin'); allUsers.value = d.users||[] }
+    try { const d = await api.get('/api/users?not_role=worker'); allUsers.value = d.users||[] }
     catch(e) { showToast(e.message,'error') }
     finally { adminLoading.value = false }
   }

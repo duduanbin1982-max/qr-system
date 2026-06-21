@@ -26,9 +26,10 @@ def list_users():
     limit_raw = request.args.get('limit', get_setting('page_size', '20'), type=int)
     limit = min(max(int(limit_raw or 20), 1), 200)
     role_filter = request.args.get('role', '').strip()
+    role_not = request.args.get('not_role', '').strip()
     keyword = request.args.get('keyword', '').strip()
     status = request.args.get('status', '').strip()
-    return jsonify(UserService.list_users(page, limit, role_filter, keyword, status))
+    return jsonify(UserService.list_users(page, limit, role_filter, role_not, keyword, status))
 
 
 @app.route('/api/users', methods=['POST'])

@@ -56,7 +56,7 @@ export function useUser() {
     loading.value = true
     try {
       const [userData, posData, procData] = await Promise.all([
-        api.listUsers({ page: page.value, limit: pageSize, keyword: searchKeyword.value, role: '' }),
+        api.listUsers({ page: page.value, limit: pageSize, keyword: searchKeyword.value, role: 'worker' }),
         api.listPositions(),
         api.listProcesses()
       ])
@@ -119,7 +119,7 @@ export function useUser() {
   function openAdd() {
     form.value = {
       username: '', name: '', email: '',
-      role: '',
+      role: 'worker',
       status: 'active',
       employee_no: '', phone: '', process_ids: '', password: '',
       position_id: ''

@@ -34,7 +34,7 @@ class UserService:
     # ============================================================
 
     @staticmethod
-    def list_users(page=1, limit=20, role_filter='', keyword='', status=''):
+    def list_users(page=1, limit=20, role_filter='', role_not='', keyword='', status=''):
         """
         分页查询用户列表。
 
@@ -47,8 +47,11 @@ class UserService:
         if role_filter:
             where.append('u.role = ?')
             params.append(role_filter)
-        else:
-            # Exclude super-admin from employee management list
+        if role_not:
+            where.append('u.role != ?')
+            params.append(role_not)
+        if not role_filter and not role_not:
+            # Default (employee management): exclude super-admin
             where.append("u.username != 'admin'")
         if status:
             where.append('u.status = ?')
