@@ -27,7 +27,7 @@
         <div class="table-wrap">
           <table v-if="items.length" class="data-table" style="min-width:800px">
             <thead><tr>
-              <th>订单号</th><th>产品编码</th><th>工序</th><th>判定</th><th>返修工序</th><th>质检员</th><th>备注</th><th>时间</th>
+              <th>订单号</th><th>产品编码</th><th>工序</th><th>判定</th><th>返修工序</th><th>质检员</th><th>备注</th><th>时间</th><th style="width:60px;text-align:center">操作</th>
             </tr></thead>
             <tbody>
               <tr v-for="r in items" :key="r.id">
@@ -38,7 +38,7 @@
                 <td>{{ r.rework_process || '-' }}</td>
                 <td>{{ r.inspector_name || '-' }}</td>
                 <td style="font-size:var(--text-xs);max-width:120px;overflow:hidden;text-overflow:ellipsis">{{ r.remark || '-' }}</td>
-                <td style="font-size:var(--text-xs);white-space:nowrap">{{ r.created_at }}</td>
+                <td style="font-size:var(--text-xs);white-space:nowrap">{{ r.created_at }}</td><td style="text-align:center"><span class="o-abtn o-del" @click="del(r)" title="删除">🗑️</span></td>
               </tr>
             </tbody>
           </table>
@@ -82,8 +82,14 @@ export default {
       window.open('/api/quality/inspections/export?' + qs.join('&'), '_blank')
     }
 
+        async function del(r) {
+      if (!confirm('确定删除抽检记录吗？')) return
+      try { await api.deleteInspection(r.id); showToast('删除成功'); await load(); await loadStats() }
+      catch(e) { showToast(e.message || '删除失败','error') }
+    }
+
     onMounted(() => { load(); loadStats() })
-    return { items, stats, keyword, filterResult, load, exportExcel }
+    return { items, stats, keyword, filterResult, load, exportExcel, del }
   }
 }
 </script>
