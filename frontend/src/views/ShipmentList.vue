@@ -44,7 +44,7 @@
                 <th style="width:8%;text-align:center">应收</th>
                 <th style="width:8%;text-align:center">已收</th>
                 <th class="pay-status-th">收款状态</th>
-                <th style="width:15%;text-align:center">操作</th>
+                <th style="width:auto;min-width:180px;text-align:center">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -62,7 +62,7 @@
                   <td style="text-align:center;font-weight:600" :style="{color: (s.paid_amount||0) >= (s.receivable_amount||0) ? 'var(--success)' : 'inherit'}">{{ s.paid_amount || '-' }}</td>
                   <td class="pay-status-td"><span class="badge" :class="paymentStatusMap[s.payment_status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt);white-space:nowrap">{{ paymentStatusMap[s.payment_status]?.label||s.payment_status||'未收款' }}</span></td>
                   <td style="text-align:center">
-                    <div class="o-actions" style="justify-content:center;gap:4px" @click.stop>
+                    <div class="o-actions" style="justify-content:center;gap:4px;overflow:visible;flex-wrap:wrap" @click.stop>
                       <span v-if="s.status==='pending'" class="action-slot" style="min-width:112px"><button class="btn btn-success btn-sm" @click="doComplete(s)" style="font-size:var(--text-xs-alt);padding:var(--space-1) 8px">✅完成</button></span>
                       <template v-else>
                         <span class="action-slot"><button v-if="s.status==='completed'" class="btn btn-primary btn-sm" @click="doReceive(s)" style="font-size:var(--text-xs-alt);padding:var(--space-1) 8px">📬签收</button></span>
