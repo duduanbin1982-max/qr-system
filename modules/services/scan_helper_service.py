@@ -450,10 +450,10 @@ class ScanHelperService:
 
         # Admin/inspector accounts can only do rework/scrap
         if has_permission(user, "quality:edit") and report_type == "normal":
-            return ({"error": "quality/admin accounts can only rework/scrap, not normal report"}, 403), None, None
+            return ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403), None, None
 
         if not order_id or not process_id:
-            return ({"error": "missing order or process info"}, 400), None, None
+            return ({"error": "缺少订单或工序信息"}, 400), None, None
 
         # Serial mode: each item reports individually, quantity always 1
         has_items = bool(ScanHelperService.get_product_items_by_order(order_id))
@@ -465,45 +465,45 @@ class ScanHelperService:
         # Order existence + scope check
         order = ScanHelperService.get_order(order_id)
         if not order:
-            return ({"error": "order not found"}, 404), None, None
+            return ({"error": "订单不存在"}, 404), None, None
         if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(user)):
-            return ({"error": "no permission to report on this order"}, 403), None, None
+            return ({"error": "您没有此订单的报工权限"}, 403), None, None
 
         # Serial mode guard: serial-mode orders require item QR scan
         has_items_m = bool(ScanHelperService.get_product_items_by_order(order_id))
         if has_items_m and not serial_no and not has_permission(user, "quality:view"):
-            return ({"error": "this order is in serial mode, please scan item QR"}, 400), None, None
+            return ({"error": "此订单为序列号模式，请扫描工件二维码后再报工"}, 400), None, None
 
         # Process existence
         if not ScanHelperService.check_process_in_order(order_id, process_id):
-            return ({"error": "process not in order route"}, 400), None, None
+            return ({"error": "该工序不在订单工艺路线中"}, 400), None, None
 
         # Cross-process duplicate check (serial)
         if report_type == "normal" and serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
-            return ({"error": "serial " + str(serial_no) + " already reported in this order", "can_scrap_rework": True}, 409), None, None
+            return ({"error": "序列号 " + str(serial_no) + " 在此订单中已报工", "can_scrap_rework": True}, 409), None, None
 
         # Duplicate report check
         if report_type == "normal":
             dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
             if dup:
-                msg = "serial " + str(serial_no) + " already reported at this process" if serial_no else "already reported at this process"
+                msg = "序列号 " + str(serial_no) + " 在此工序已报工" if serial_no else "此工序已报工"
                 return ({"error": msg, "can_scrap_rework": True}, 409), None, None
         elif report_type in ("scrap", "rework"):
             if ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type):
-                return ({"error": "duplicate submission, please wait"}, 409), None, None
+                return ({"error": "请勿重复提交，请稍后再试"}, 409), None, None
 
         # Process-level permission check
         user_pids = get_user_process_ids(user)
         if user_pids is not None and process_id not in user_pids:
             proc = ScanHelperService._db(None).execute("SELECT name FROM processes WHERE id=?", (process_id,)).fetchone()
             if proc:
-                return ({"error": "process \"" + proc["name"] + "\" not in your permission scope"}, 403), None, None
-            return ({"error": "no permission for this process"}, 403), None, None
+                return ({"error": "工序「" + proc["name"] + "」不在您的权限范围内"}, 403), None, None
+            return ({"error": "您没有此工序的报工权限"}, 403), None, None
 
         # Process exists in route
         current_op = ScanHelperService.get_order_process(order_id, process_id)
         if order["route_id"] and not current_op:
-            return ({"error": "process not in order route"}, 400), None, None
+            return ({"error": "该工序不在订单工艺路线中"}, 400), None, None
         current_seq = current_op["seq_order"] if current_op else 0
 
         # Sequential report check (normal only)
@@ -523,7 +523,7 @@ class ScanHelperService:
         if serial_no and report_type == "normal":
             item = ScanHelperService.get_product_item(serial_no)
             if item and item["current_process_id"] and item["current_process_id"] != process_id:
-                return ({"error": "serial " + str(serial_no) + " not at this process, please refresh"}, 400), None, None
+                return ({"error": "序列号 " + str(serial_no) + " 不在当前工序，请刷新后再试"}, 400), None, None
 
         return (None, None), quantity, serial_no
 
@@ -537,26 +537,26 @@ class ScanHelperService:
             if report_type == "normal":
                 dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user_id, db=db)
                 if dup:
-                    msg = "Sequence {} already reported at this process".format(serial_no) if serial_no else "Already reported at this process"
+                    msg = "序列号 {} 在此工序已报工".format(serial_no) if serial_no else "此工序已报工"
                     raise ValueError(msg)
             elif report_type in ("scrap", "rework"):
                 dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=db)
                 if dup:
-                    raise ValueError("Duplicate defect report")
+                    raise ValueError("请勿重复提交缺陷报告")
             current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
             if not current_op:
-                raise ValueError("Process not in order route")
+                raise ValueError("该工序不在订单工艺路线中")
             # 顺序 & 数量上限检查仅对普通报工生效
             if report_type == "normal":
                 err, code = ScanHelperService.check_process_order(order_id, current_op.get("seq_order", 0), db=db)
                 if err:
-                    raise ValueError(err.get("error", "Process order check failed"))
+                    raise ValueError(err.get("error", "工序顺序校验失败，请按工艺路线顺序报工"))
                 order = dict(ScanHelperService.get_order(order_id, db=db) or {})
                 if order:
                     err2, code2 = ScanHelperService.check_quantity_limits(
                         order_id, current_op.get("seq_order", 0), current_op.get("completed", 0) or 0, quantity, order.get("quantity", 0), db=db)
                     if err2:
-                        raise ValueError(err2.get("error", "Quantity limit exceeded"))
+                        raise ValueError(err2.get("error", "报工数量超出订单总量限制"))
             work_status = 'pending' if need_approval else 'approved'
             quantity_local = 1 if serial_no else quantity
 
