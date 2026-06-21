@@ -1,38 +1,29 @@
-"""
-qr-system — NotificationService
-"""
+﻿"""qr-system - NotificationService"""
 from modules.services import BaseService
+from modules.repositories.notification_repository import NotificationRepository
 
 
 class NotificationService:
 
     @staticmethod
-    def list_unread(user_id, limit=50):
-        db = BaseService.db()
-        rows = db.execute(
-            "SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 "
-            "ORDER BY created_at DESC LIMIT ?", (user_id, limit)
-        ).fetchall()
+    def list_unread(user_id):
+        rows = NotificationRepository.list_unread(user_id)
         return [dict(r) for r in rows]
 
     @staticmethod
+    def list_all(user_id, page=1, limit=20):
+        return NotificationRepository.list_all(user_id, page=page, limit=limit)
+
+    @staticmethod
     def mark_read(nid, user_id):
-        db = BaseService.db()
-        db.execute(
-            "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", (nid, user_id)
-        )
-        db.commit()
+        with BaseService.transaction() as txn:
+            NotificationRepository.mark_read_txn(nid, user_id, db=txn)
 
     @staticmethod
     def mark_all_read(user_id):
-        db = BaseService.db()
-        db.execute("UPDATE notifications SET is_read = 1 WHERE user_id = ?", (user_id,))
-        db.commit()
+        with BaseService.transaction() as txn:
+            NotificationRepository.mark_all_read_txn(user_id, db=txn)
 
     @staticmethod
     def unread_count(user_id):
-        db = BaseService.db()
-        return db.execute(
-            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0", (user_id,)
-        ).fetchone()[0]
-
+        return NotificationRepository.unread_count(user_id)

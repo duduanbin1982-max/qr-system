@@ -1,46 +1,34 @@
-"""qr-system — OrderAttachmentsService"""
+﻿"""qr-system - OrderAttachmentsService"""
 import os
 from modules.services import BaseService
+from modules.repositories.order_attachments_repository import OrderAttachmentsRepository
 
 
 class OrderAttachmentsService:
     @staticmethod
     def list_attachments(order_id):
-        db = BaseService.db()
-        rows = db.execute(
-            "SELECT * FROM order_attachments WHERE order_id = ? ORDER BY id DESC",
-            (order_id,)
-        ).fetchall()
+        rows = OrderAttachmentsRepository.list_by_order(order_id)
         return [dict(r) for r in rows]
 
     @staticmethod
     def upload_attachment(order_id, file_name, file_type, file_size, uploaded_by, upload_dir):
-        db = BaseService.db()
         with BaseService.transaction() as txn:
-            cur = txn.execute(
-                "INSERT INTO order_attachments (order_id, file_name, file_type, file_size, uploaded_by) "
-                "VALUES (?,?,?,?,?)",
-                (order_id, file_name, file_type, file_size, uploaded_by)
+            aid = OrderAttachmentsRepository.insert_txn(
+                order_id, file_name, file_type, file_size, uploaded_by, db=txn
             )
-            aid = cur.lastrowid
-            fpath = os.path.join(upload_dir, f"{aid}_{file_name}")
-            txn.execute("UPDATE order_attachments SET file_path = ? WHERE id = ?", (fpath, aid))
+            fpath = os.path.join(upload_dir, str(aid) + "_" + file_name)
+            OrderAttachmentsRepository.update_file_path_txn(aid, fpath, db=txn)
         return aid, fpath
 
     @staticmethod
     def get_attachment_meta(attachment_id):
-        db = BaseService.db()
-        return db.execute("SELECT order_id FROM order_attachments WHERE id = ?", (attachment_id,)).fetchone()
+        return OrderAttachmentsRepository.find_by_id(attachment_id)
 
     @staticmethod
     def delete_attachment(attachment_id):
-        db = BaseService.db()
-        row = db.execute(
-            "SELECT order_id, file_name, file_path FROM order_attachments WHERE id = ?",
-            (attachment_id,)
-        ).fetchone()
+        row = OrderAttachmentsRepository.find_with_meta(attachment_id)
         if not row:
-            raise ValueError("附件不存在")
+            raise ValueError("Attachment not found")
         with BaseService.transaction() as txn:
-            txn.execute("DELETE FROM order_attachments WHERE id = ?", (attachment_id,))
+            OrderAttachmentsRepository.delete_txn(attachment_id, db=txn)
         return row

@@ -1,37 +1,28 @@
-﻿"""
-qr-system — PasswordService（密码策略）
-"""
+﻿"""qr-system - PasswordService"""
 import bcrypt
 from modules.services import BaseService
+from modules.repositories.password_repository import PasswordRepository
 
 
 class PasswordService:
     @staticmethod
     def admin_reset_password(user_id, new_password):
-        """管理员重置用户密码。Raises ValueError on failure."""
+        """Admin reset user password. Raises ValueError on failure."""
         import re
         if len(new_password) < 8:
-            raise ValueError('密码至少需要8个字符')
+            raise ValueError('Password must be at least 8 characters')
         if not re.search(r'[A-Z]', new_password) and not re.search(r'[a-z]', new_password):
-            raise ValueError('密码需包含至少一个字母')
+            raise ValueError('Password must contain at least one letter')
         if not re.search(r'[0-9]', new_password):
-            raise ValueError('密码需包含至少一个数字')
+            raise ValueError('Password must contain at least one digit')
 
-        db = BaseService.db()
-        user = db.execute(
-            'SELECT id, username, status FROM users WHERE id = ?', (user_id,)
-        ).fetchone()
+        user = PasswordRepository.find_active_user(user_id)
         if not user:
-            raise ValueError('用户不存在')
+            raise ValueError('User not found')
         if user['status'] != 'active':
-            raise ValueError('用户已禁用')
+            raise ValueError('User is disabled')
 
         hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         with BaseService.transaction() as txn:
-            txn.execute(
-                'UPDATE users SET password = ?, password_version = 2, '
-                'must_change_password = 1, locked_until = NULL, '
-                'failed_login_count = 0 WHERE id = ?',
-                (hashed, user_id)
-            )
+            PasswordRepository.reset_password_txn(user_id, hashed, db=txn)
         return user['username']

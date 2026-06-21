@@ -1,29 +1,18 @@
-﻿"""
-qr-system — OrderNotesService
-"""
+﻿"""qr-system - OrderNotesService"""
 from modules.services import BaseService
+from modules.repositories.order_notes_repository import OrderNotesRepository
 
 
 class OrderNotesService:
     @staticmethod
     def get_remarks(oid, page=1, limit=20):
-        db = BaseService.db()
-        order = db.execute(
-            'SELECT id, order_no, remark FROM orders WHERE id = ? AND deleted_at IS NULL',
-            (oid,)
-        ).fetchone()
+        order = OrderNotesRepository.find_order(oid)
         if not order:
             raise ValueError('Order not found')
 
-        total = db.execute(
-            'SELECT COUNT(*) FROM order_remark_history WHERE order_id = ?', (oid,)
-        ).fetchone()[0]
+        total = OrderNotesRepository.count_history(oid)
         offset = (page - 1) * limit
-        rows = db.execute('''
-            SELECT id, old_remark, new_remark, user_id, user_name, created_at
-            FROM order_remark_history WHERE order_id = ?
-            ORDER BY id DESC LIMIT ? OFFSET ?
-        ''', (oid, limit, offset)).fetchall()
+        rows = OrderNotesRepository.list_history(oid, limit, offset)
 
         history = [{
             'id': r['id'], 'old_remark': r['old_remark'],
