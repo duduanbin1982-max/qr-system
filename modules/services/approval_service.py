@@ -110,6 +110,35 @@ class ApprovalService:
         return action
 
     @staticmethod
+    def list_configs():
+        """获取所有工序的审批配置"""
+        rows = ApprovalRepository.find_all_configs()
+        return {"configs": [dict(r) for r in rows]}
+
+    @staticmethod
+    def save_configs(configs):
+        """保存审批配置(支持批量)
+        Args:
+            configs: list of dict {process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level}
+        """
+        from modules.services import BaseService
+        with BaseService.transaction() as txn:
+            for cfg in configs:
+                pid = cfg["process_id"]
+                require = 1 if cfg.get("require_approval") else 0
+                role = cfg.get("approver_role", "admin")
+                role2 = cfg.get("approver_role_2", "")
+                role3 = cfg.get("approver_role_3", "")
+                level = cfg.get("approval_level", 1)
+                ApprovalRepository.upsert_config(pid, require, role, role2, role3, level, db=txn)
+        return True
+
+    @staticmethod
+    def get_stats():
+        """获取审批统计数据"""
+        return ApprovalRepository.get_approval_stats()
+
+    @staticmethod
     def batch_handle(record_ids, action, approver, comment=""):
         """Batch handle multiple approval records.
         Returns (processed_count, failed_ids) tuple.

@@ -1,14 +1,12 @@
 """qr-system ? ???????Refactored: all SQL ? QualityService?"""
 from flask import request, jsonify, g, send_file
 from datetime import datetime
-from modules.db import get_db
 from modules.app import app
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
 from modules.middleware.validate import validate_json
-from modules.services import BaseService
 from modules.services.quality_service import QualityService
 
 
@@ -134,7 +132,6 @@ def quality_spc():
         return jsonify(QualityService.spc_p_chart(
             order_id=request.args.get('order_id', type=int),
             process_id=request.args.get('process_id', type=int),
-            limit=request.args.get('limit', 20, type=int),
         ))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
@@ -206,12 +203,7 @@ def quality_defect_categories():
 @check_permission('quality:view')
 def quality_attachments_list(inspection_id):
     try:
-        db = get_db()
-        rows = db.execute(
-            'SELECT id, file_name, file_type, file_size, uploaded_by, created_at FROM quality_attachments WHERE inspection_id = ? ORDER BY id DESC',
-            (inspection_id,)
-        ).fetchall()
-        return jsonify({'ok': True, 'attachments': [dict(r) for r in rows]})
+        return jsonify(QualityService.list_attachments(inspection_id))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -222,20 +214,12 @@ def quality_attachments_list(inspection_id):
 def quality_attachment_upload(inspection_id):
     try:
         if 'file' not in request.files:
-            return jsonify({'error': '请选择文件'}), 400
+            return jsonify({'error': 'no file selected'}), 400
         file = request.files['file']
         if not file.filename:
-            return jsonify({'error': '文件名为空'}), 400
-        file_data = file.read()
-        import mimetypes
-        mime = mimetypes.guess_type(file.filename)[0] or ''
-        db = get_db()
-        with BaseService.transaction() as txn:
-            txn.execute(
-                'INSERT INTO quality_attachments (inspection_id, file_name, file_type, file_size, file_data, uploaded_by, created_at) VALUES (?,?,?,?,?,?,datetime("now","localtime"))',
-                (inspection_id, file.filename, mime, len(file_data), file_data, g.current_user.get('id'))
-            )
-        return jsonify({'ok': True, 'message': '上传成功'})
+            return jsonify({'error': 'empty filename'}), 400
+        QualityService.upload_attachment(inspection_id, file, g.current_user.get('id'))
+        return jsonify({'ok': True, 'message': 'uploaded'})
     except Exception as e:
         return handle_unexpected_error(e, 'file upload')
 
@@ -245,13 +229,12 @@ def quality_attachment_upload(inspection_id):
 @check_permission('quality:view')
 def quality_attachment_download(att_id):
     try:
-        db = get_db()
-        row = db.execute('SELECT * FROM quality_attachments WHERE id = ?', (att_id,)).fetchone()
-        if not row:
-            return jsonify({'error': '附件不存在'}), 404
+        row = QualityService.download_attachment(att_id)
         from io import BytesIO
         return send_file(BytesIO(row['file_data']), mimetype=row['file_type'] or 'application/octet-stream',
                          as_attachment=True, download_name=row['file_name'])
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
     except Exception as e:
         return handle_unexpected_error(e, 'file download')
 
@@ -261,10 +244,10 @@ def quality_attachment_download(att_id):
 @check_permission('quality:edit')
 def quality_attachment_delete(att_id):
     try:
-        db = get_db()
-        with BaseService.transaction() as txn:
-            txn.execute('DELETE FROM quality_attachments WHERE id = ?', (att_id,))
-        return jsonify({'ok': True, 'message': '已删除'})
+        QualityService.delete_attachment(att_id)
+        return jsonify({'ok': True, 'message': 'deleted'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 

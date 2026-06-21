@@ -413,6 +413,62 @@ class InventoryService:
         return output
 
     @staticmethod
+    def submit_count(item_id, actual_qty, remark=""):
+        if actual_qty < 0:
+            raise ValueError("count quantity cannot be negative")
+        with BaseService.transaction() as txn:
+            inv = txn.execute(
+                "SELECT * FROM inventory WHERE id = ?", (item_id,)
+            ).fetchone()
+            if not inv:
+                raise ValueError("item not found")
+            old_qty = inv["quantity"]
+            diff = actual_qty - old_qty
+            txn.execute(
+                "UPDATE inventory SET quantity = ?, last_count_date = date('now'), "
+                "updated_at = datetime('now','localtime') WHERE id = ?",
+                (actual_qty, item_id)
+            )
+            log_type = "adjust" if diff != 0 else "count"
+            log_remark = remark or ("count: " + str(old_qty) + " -> " + str(actual_qty))
+            txn.execute(
+                "INSERT INTO inventory_logs (inventory_id, type, quantity, remark, operator_id, operator_name) "
+                "VALUES (?,?,?,?,?,?)",
+                (item_id, log_type, diff if diff != 0 else 0, log_remark, None, "system"))
+        return {"ok": True, "old_qty": old_qty, "new_qty": actual_qty, "diff": diff}
+
+    @staticmethod
+    def get_impact(item_id):
+        db = BaseService.db()
+        item = db.execute(
+            "SELECT product_model, product_name, quantity FROM inventory WHERE id = ?",
+            (item_id,)
+        ).fetchone()
+        if not item:
+            raise ValueError("item not found")
+        log_count = db.execute(
+            "SELECT COUNT(*) FROM inventory_logs WHERE inventory_id = ?",
+            (item_id,)
+        ).fetchone()[0]
+        order_count = db.execute(
+            "SELECT COUNT(*) FROM orders o JOIN inventory i ON i.order_id = o.id "
+            "WHERE i.id = ? AND o.deleted_at IS NULL",
+            (item_id,)
+        ).fetchone()[0]
+        warnings = []
+        if log_count > 0:
+            warnings.append("will delete " + str(log_count) + " log records")
+        if order_count > 0:
+            warnings.append("linked to " + str(order_count) + " orders")
+        return {
+            "item": dict(item),
+            "log_count": log_count,
+            "order_count": order_count,
+            "can_delete": True,
+            "warnings": [w for w in warnings if w]
+        }
+
+    @staticmethod
     def get_stats():
         """库存统计（2次查询替代4次）。"""
         db = BaseService.db()

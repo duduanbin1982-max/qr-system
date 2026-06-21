@@ -115,6 +115,11 @@
           </div>
           <div v-else style="text-align:center;padding:30px;color:var(--text-placeholder)">暂无订单记录</div>
         </div>
+        <div v-if="detailOrders.length >= detailPageSize" style="display:flex;justify-content:center;gap:8px;margin-top:12px">
+          <button class="btn btn-sm btn-default" @click="detailPrevPage" :disabled="detailPage <= 1">上一页</button>
+          <span style="padding:4px 12px;font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ detailPage }} 页</span>
+          <button class="btn btn-sm btn-default" @click="detailNextPage">下一页</button>
+        </div>
         <div class="modal-footer"><button class="btn btn-primary" @click="showDetail=false">关闭</button></div>
       </div>
     </div>
@@ -152,6 +157,9 @@ export default {
     const detail = ref(null)
     const detailOrders = ref([])
     const showDetail = ref(false)
+    const detailPage = ref(1)
+    const detailTotal = ref(0)
+    const detailPageSize = 10
     const deleteCheck = ref(null)
     const deleteCheckOrders = ref([])
     const showDeleteBlock = ref(false)
@@ -228,16 +236,23 @@ export default {
         const d = await api.customerOrders(c.id)
         const active = (d.orders || []).filter(o => o.deleted_at === null || o.deleted_at === undefined)
         if (active.length > 0) { deleteCheckOrders.value = active; showDeleteBlock.value = true; return }
-      } catch(e) {}
+      } catch(e) { showToast("无法检查订单关联，跳过预检", "warning") }
       if (!confirm("确定删除客户 \"" + c.name + "\" 吗？")) return
       try { await api.deleteCustomer(c.id); showToast("删除成功"); await load() }
       catch(e) { showToast(e.message || "删除失败", "error") }
     }
     async function viewDetail(c) {
-      detail.value = c; showDetail.value = true
-      try { const d = await api.customerOrders(c.id); detailOrders.value = d.orders || [] }
-      catch(e) { detailOrders.value = [] }
+      detail.value = c; showDetail.value = true; detailPage.value = 1
+      await loadDetailOrders(c.id)
     }
+    async function loadDetailOrders(cid) {
+      try {
+        const d = await api.get('/api/customers/' + cid + '/orders?page=' + detailPage.value + '&limit=' + detailPageSize)
+        detailOrders.value = d.orders || []
+      } catch(e) { detailOrders.value = [] }
+    }
+    function detailPrevPage() { if (detailPage.value > 1) { detailPage.value--; loadDetailOrders(detail.value.id) } }
+    function detailNextPage() { detailPage.value++; loadDetailOrders(detail.value.id) }
     onMounted(() => load())
     
     return {
@@ -245,7 +260,8 @@ export default {
       showModal, modalEdit, form, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
       deleteCheck, deleteCheckOrders, showDeleteBlock,
-      hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags
+      hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,
+      detailPage, detailPageSize, detailPrevPage, detailNextPage
     }
   }
 }

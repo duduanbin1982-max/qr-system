@@ -378,6 +378,30 @@ class ShipmentService:
         return dict(stats)
 
     @staticmethod
+    def get_impact(shipment_id):
+        db = BaseService.db()
+        s = db.execute(
+            "SELECT id, shipment_no, status, customer, total_quantity FROM shipments WHERE id = ?",
+            (shipment_id,)
+        ).fetchone()
+        if not s:
+            raise ValueError("shipment not found")
+        item_count = db.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as qty FROM shipment_items WHERE shipment_id = ?",
+            (shipment_id,)
+        ).fetchone()
+        inv_count = db.execute(
+            "SELECT COUNT(DISTINCT inventory_id) FROM shipment_items WHERE shipment_id = ?",
+            (shipment_id,)
+        ).fetchone()[0]
+        return {
+            "shipment": dict(s),
+            "items": item_count["cnt"] or 0,
+            "total_qty": item_count["qty"] or 0,
+            "inventory_refs": inv_count or 0
+        }
+
+    @staticmethod
     def get_customer_history(customer, limit=50):
         db = BaseService.db()
         rows = db.execute("SELECT s.*, COALESCE(si.item_count,0) as item_count FROM shipments s LEFT JOIN (SELECT shipment_id, COUNT(*) as item_count FROM shipment_items GROUP BY shipment_id) si ON si.shipment_id = s.id WHERE s.customer = ? ORDER BY s.created_at DESC LIMIT ?", (customer, limit)).fetchall()

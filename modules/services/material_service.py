@@ -8,6 +8,11 @@ from modules.services import BaseService
 from modules.repositories.material_repository import MaterialRepository, SupplierRepository
 
 
+class MaterialNotFoundError(ValueError):
+    """Raised when a material is not found."""
+    pass
+
+
 class MaterialService:
     """?????????"""
 
@@ -34,9 +39,9 @@ class MaterialService:
         if existing:
             info = name
             if spec:
-                info += '(' + chr(35268) + chr(26684) + ':' + spec
+                info += '(' + '规格' + ':' + spec
                 if mt:
-                    info += ', ' + chr(26448) + chr(36136) + ':' + mt
+                    info += ', ' + '材质' + ':' + mt
                 info += ')'
             raise ValueError('物料' + info + '已存在')
         data_tuple = (
@@ -70,11 +75,11 @@ class MaterialService:
             if dup:
                 info = name
                 if spec:
-                    info += '(' + chr(35268) + chr(26684) + ':' + spec
+                    info += '(' + '规格' + ':' + spec
                     if mt:
-                        info += ', ' + chr(26448) + chr(36136) + ':' + mt
+                        info += ', ' + '材质' + ':' + mt
                     info += ')'
-                raise ValueError(chr(29289) + chr(26009) + info + chr(24050) + chr(23384) + chr(22312))
+                raise ValueError('物料' + info + '已存在')
 
         set_clauses = []
         params = []
@@ -96,7 +101,6 @@ class MaterialService:
         with BaseService.transaction() as txn:
             MaterialRepository.update(mid, set_clauses, params, db=txn)
 
-    @staticmethod
     @staticmethod
     def check_impact(mid):
         mat = MaterialRepository.find_by_id(mid)

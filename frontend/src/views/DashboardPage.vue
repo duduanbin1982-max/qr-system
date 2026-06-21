@@ -202,7 +202,7 @@ export default {
         records.value = d.recent_records || []
         companyName.value = d.company_name || ''
         deliveryWarnings.value = d.delivery_warnings || null
-        quickActions.value = (d.quick_actions || []).filter(q => q && q.page).map(q => ({ page: q.page, icon: q.icon || '📋', text: q.label || q.page, desc: q.desc || '', external: q.external || null }))
+        quickActions.value = (d.quick_actions || []).filter(q => q && typeof q.page === 'string' && q.page.trim().length > 0).map(q => ({ page: q.page.trim(), icon: q.icon || '📋', text: q.label || q.page, desc: q.desc || '', external: q.external || null }))
       } catch(e) {
         error.value = e.message || '加载失败'
       } finally {
@@ -212,18 +212,21 @@ export default {
     
     let _timer = null
     let _clock = null
+    // Visibility change handler - defined inline to avoid minifier scope issues
+    function _onVisible() { if (!document.hidden) { load(); updateTime(); } }
 
     onMounted(() => {
       load()
       updateTime()
-      // 每60秒自动刷新 + 每分钟更新时钟
-      _timer = setInterval(load, 60000)
+      _timer = setInterval(load, 30000)
       _clock = setInterval(updateTime, 60000)
+      document.addEventListener('visibilitychange', _onVisible)
     })
 
     onUnmounted(() => {
       if (_timer) clearInterval(_timer)
       if (_clock) clearInterval(_clock)
+      document.removeEventListener('visibilitychange', _onVisible)
     })
     
     async function goAction(q) { if (q.external) { await getBoardToken(); window.open(q.external, '_blank'); } else { navigate(q.page); } }

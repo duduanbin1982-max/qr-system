@@ -5,10 +5,19 @@ from modules.services import BaseService
 
 class BoardService:
 
+    # Whitelist of valid product categories
+    _VALID_CATEGORIES = {"机加工", "结构件", "machining", "structure"}
+
     @staticmethod
     def _category_filter(category):
-        """Build SQL filter clause for product category."""
+        """Build SQL filter clause for product category.
+        Uses parameterized query (safe from SQL injection).
+        Whitelist validation for defense-in-depth.
+        """
         if not category:
+            return "", []
+        category = str(category).strip()
+        if category not in BoardService._VALID_CATEGORIES:
             return "", []
         return " AND p.category = ?", [category]
 

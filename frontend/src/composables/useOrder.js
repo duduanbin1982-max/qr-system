@@ -66,7 +66,7 @@ const orders = ref([])
 
     // ===== 订单物料配方 =====
     const orderMaterials = ref([])
-    const orderMatForm = ref({ material_id: '', quantity_per_unit: 1, process_id: 10730 })
+    const orderMatForm = ref({ material_id: '', quantity_per_unit: 1, process_id: null })
     const materialOptions = ref([])
     const processOptions = ref([])
 
@@ -77,7 +77,7 @@ const orders = ref([])
       try { const d = await api.listMaterials(); materialOptions.value = d.materials || [] } catch(e) {}
     }
     async function loadProcessOptions() {
-      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) orderMatForm.value.process_id = xl.id } catch(e) {}
+      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) orderMatForm.value.process_id = xl.id; else if (processOptions.value.length > 0) orderMatForm.value.process_id = processOptions.value[0].id } catch(e) {}
     }
     async function addOrderMaterial() {
       if (!orderMatForm.value.material_id) { showToast('请选择物料', 'error'); return }
@@ -87,7 +87,7 @@ const orders = ref([])
           quantity_per_unit: parseFloat(orderMatForm.value.quantity_per_unit) || 1,
           process_id: orderMatForm.value.process_id || null
         })
-        orderMatForm.value = { material_id: '', quantity_per_unit: 1, process_id: 10730 }
+        orderMatForm.value = { material_id: '', quantity_per_unit: 1, process_id: null }
         showToast('物料已添加')
         await loadOrderMaterials(modalId.value)
       } catch(e) { showToast(e.message || '添加失败', 'error') }
@@ -374,7 +374,7 @@ const orders = ref([])
       // Get product weight from loaded products list
       const product = products.value.find(p => p.product_code === o.product_code)
       orderMatForm.value.quantity_per_unit = parseFloat(product?.weight) || parseFloat(o.weight) || parseFloat(o.product_weight) || 1
-      orderMatForm.value.process_id = 10730
+      orderMatForm.value.process_id = processOptions.value[0]?.id || null
       showModal.value = true
     }
 

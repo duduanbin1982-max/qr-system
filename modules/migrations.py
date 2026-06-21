@@ -1014,6 +1014,23 @@ def m016_approval_columns(db):
     db.commit()
 
 
+
+@migration(17, "Add indexes on approval_records and approval_config")
+def m017_approval_indexes(db):
+    db.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_records(status)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_approval_work_record ON approval_records(work_record_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_approval_created ON approval_records(created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_approval_config_process ON approval_config(process_id)")
+    db.commit()
+
+
+
+@migration(18, "Add index on quality_attachments.inspection_id")
+def m018_quality_attachments_index(db):
+    db.execute("CREATE INDEX IF NOT EXISTS idx_qa_inspection_id ON quality_attachments(inspection_id)")
+    db.commit()
+
+
 def run_migrations(db=None):
 
     """Run all pending migrations in order."""

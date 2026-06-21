@@ -11,11 +11,7 @@ ITEM_FIELDS = [
     'qr_content', 'status', 'current_process_id', 'created_at'
 ]
 
-# ? JOIN ??????? order ?????
-ORDER_POP_FIELDS = [
-    'order_no', 'product_name', 'order_quantity', 'completed',
-    'order_status', 'order_created', 'customer'
-]
+
 
 
 class TraceService:
@@ -55,17 +51,14 @@ class TraceService:
         order_id = item_row['order_id']
         if order_id:
             order = {
-                'order_no': item_dict.pop('order_no', ''),
-                'product_name': item_dict.pop('product_name', ''),
-                'quantity': item_dict.pop('order_quantity', 0),
-                'completed': item_dict.pop('completed', 0),
-                'status': item_dict.pop('order_status', ''),
-                'created_at': item_dict.pop('order_created', ''),
-                'customer': item_dict.pop('customer', ''),
+                'order_no': item_row.get('order_no', ''),
+                'product_name': item_row.get('product_name', ''),
+                'quantity': item_row.get('order_quantity', 0),
+                'completed': item_row.get('completed', 0),
+                'status': item_row.get('order_status', ''),
+                'created_at': item_row.get('order_created', ''),
+                'customer': item_row.get('customer', ''),
             }
-        else:
-            for k in ORDER_POP_FIELDS:
-                item_dict.pop(k, None)
 
         # 3. ?? item_dict???? product_items ???
         clean_item = {k: item_dict.get(k) for k in ITEM_FIELDS if k in item_dict}

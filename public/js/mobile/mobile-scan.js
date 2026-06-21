@@ -48,7 +48,7 @@ function startJsQR(video) {
   const ctx = canvas.getContext('2d');
 
   scanTimer = setInterval(function() {
-    if (!camStream) return;
+    if (!camStream) { clearInterval(scanTimer); scanTimer = null; return; }
     if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
     canvas.width  = video.videoWidth;

@@ -423,6 +423,17 @@ def move_locations():
 
 
 # ── P3: 盘点任务 ──
+
+@app.route("/api/inventory/<int:id>/impact", methods=["GET"])
+@check_auth
+@check_permission("inventory:view")
+def inventory_impact(id):
+    """Get impact analysis for deleting an inventory item."""
+    try:
+        return jsonify(InventoryService.get_impact(id))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
 @app.route("/api/inventory/count-task", methods=["POST"])
 @check_auth
 @check_permission("inventory:edit")

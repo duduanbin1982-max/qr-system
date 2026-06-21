@@ -2,24 +2,48 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
-import html2canvas from 'html2canvas'
+let _html2canvas = null
+async function getHtml2canvas() {
+  if (!_html2canvas) {
+    const m = await import('html2canvas')
+    _html2canvas = m.default
+  }
+  return _html2canvas
+}
 
 let _instance = null
+let _mountCount = 0
+let _globalKbdRegistered = false
 
 export function useGantt() {
-  // Always register lifecycle hooks (even when returning cached state)
+  // Return existing singleton immediately on subsequent mounts
+  if (_instance) {
+    _mountCount++
+    return _instance
+  }
+
+  const isFirstMount = _mountCount === 0
+  _mountCount++
+
   onMounted(() => {
-    if (_instance) {
+    // _instance is guaranteed to be set by this point (assigned before return)
+    if (_instance && _instance.load) {
       _instance.load()
       _instance.loadLines()
+    }
+    if (!_globalKbdRegistered) {
       document.addEventListener('keydown', _instance.onKeyDown)
+      _globalKbdRegistered = true
     }
   })
   onBeforeUnmount(() => {
-    document.removeEventListener('keydown', _instance.onKeyDown || (() => {}))
+    _mountCount--
+    if (_mountCount <= 0) {
+      document.removeEventListener('keydown', _instance?.onKeyDown || (() => {}))
+      _globalKbdRegistered = false
+      _mountCount = 0
+    }
   })
-
-  if (_instance) return _instance
 
   const orders = ref([])
   const loading = ref(true)
@@ -261,7 +285,7 @@ export function useGantt() {
 
   async function loadLines() {
     try { const d = await api.listProductionLines(); productionLines.value = d.lines || d || [] }
-    catch (e) { /* silent */ }
+    catch (e) { console.warn('Production lines load failed:', e); productionLines.value = [] }
   }
 
   async function addLine() {
@@ -319,22 +343,23 @@ export function useGantt() {
   }
 
   // ── Shortcuts ──
-  function shiftDays(dir, big) {
+  async function shiftDays(dir, big) {
     if (!selectedOrderIds.value.length) return
     const days = big ? 7 : 1
-    selectedOrderIds.value.forEach(id => {
-      const o = orders.value.find(o => o.id === id)
-      if (o) {
-        if (o.plan_start) { const d = new Date(o.plan_start); d.setDate(d.getDate() + days * dir); o.plan_start = d.toISOString().slice(0, 10) }
-        if (o.plan_end) { const d = new Date(o.plan_end); d.setDate(d.getDate() + days * dir); o.plan_end = d.toISOString().slice(0, 10) }
-      }
-    })
+    const shiftVal = days * dir
+    try {
+      const r = await api.batchShiftSchedule({ order_ids: [...selectedOrderIds.value], days: shiftVal })
+      showToast(r.message || ('Shifted ' + (r.count || 0) + ' orders'))
+      selectedOrderIds.value = []
+      await load()
+    } catch (e) { showToast(e.message || 'Shift failed', 'error') }
   }
 
     async function exportImage() {
     const el = document.querySelector('.gantt-scroll')
     if (!el) { showToast('未找到甘特图', 'error'); return }
     try {
+      const html2canvas = await getHtml2canvas()
       const canvas = await html2canvas(el, { backgroundColor: '#ffffff', scale: 2 })
       const link = document.createElement('a')
       link.download = '生产排程_' + new Date().toISOString().slice(0,10) + '.png'
@@ -351,7 +376,8 @@ export function useGantt() {
     showEditModal, editForm, editOrderDates, saveEditDates, undoLastDrag,
     productionLines, showLineMgr, lineForm, addLine, delLine,
     selectedOrderIds, batchDays, batchShift, allSelected, toggleAll, toggleOrder,
-    canEdit, canCreate, shiftDays, exportImage, dailyLoad, isOverloaded
+    canEdit, canCreate, shiftDays, exportImage, dailyLoad, isOverloaded,
+    load, loadLines, onKeyDown
   }
   return _instance
 }

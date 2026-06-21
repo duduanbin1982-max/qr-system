@@ -36,8 +36,6 @@ def list_orders():
         page=page, limit=limit, status=status, keyword=keyword,
         customer=customer, data_scope_pids=pids
     )
-    # Force sort by order_no descending (newest first)
-    result['orders'] = sorted(result.get('orders', []), key=lambda o: o.get('order_no', ''), reverse=True)
     return jsonify(result)
 
 
@@ -76,15 +74,9 @@ def update_order(oid):
         return jsonify({"error": "无权限访问此订单"}), 403
     data = get_json_body()
     try:
-        # Handle remark history logging via OrderService
-        if 'remark' in data:
-            existing = OrderService.get_order(oid)
-            old_remark = dict(existing).get('remark', '') if existing else ''
-            if data['remark'] != old_remark:
-                uname = g.current_user.get('name', g.current_user.get('username', ''))
-                OrderService.log_remark_history(oid, old_remark, data['remark'], g.current_user['id'], uname)
-
-        OrderService.update_order(oid, data)
+        # Remark history is now handled inside OrderService.update_order for TOCTOU safety
+        uname = g.current_user.get('name', g.current_user.get('username', ''))
+        OrderService.update_order(oid, data, user_id=g.current_user['id'], user_name=uname)
         return jsonify({'message': '更新成功'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -379,6 +371,7 @@ def add_order_material(order_id):
 
 @app.route("/api/orders/<int:order_id>/materials/<int:item_id>", methods=["DELETE"])
 @check_auth
+@check_permission("orders:edit")
 def delete_order_material(order_id, item_id):
     """删除订单物料配方项"""
     with BaseService.transaction() as txn:

@@ -107,7 +107,7 @@ export const api = {
   createCustomer:   (data)   => request('POST', '/api/customers', data),
   updateCustomer:   (id,data)=> request('PUT',  '/api/customers/' + id, data),
   deleteCustomer:   (id)     => request('DELETE', '/api/customers/' + id),
-  customerOrders:   (id)     => request('GET', '/api/customers/' + id + '/orders'),
+  customerOrders:   (id, params) => request('GET', '/api/customers/' + id + '/orders' + buildQuery(params || {})),
   
   // ========== 员工 ==========
   listUsers:        (params) => request('GET', '/api/users' + buildQuery(params)),
@@ -142,6 +142,7 @@ export const api = {
   // 路线级工价（v4）
   getRoutePrices: (params)      => request('GET', '/api/route-prices' + buildQuery(params)),
   getRoutePricingDetail: (routeId) => request('GET', '/api/route-prices/' + routeId),
+  getRoutePricingHistory: (routeId) => request('GET', '/api/route-prices/' + routeId + '/history'),
   saveRouteLevelPricing: (routeId, data) => request('PUT', '/api/route-prices/' + routeId, data),
   
   // ========== 工资 ==========

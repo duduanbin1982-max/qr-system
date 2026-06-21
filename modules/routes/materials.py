@@ -9,7 +9,7 @@ from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
-from modules.services.material_service import MaterialService, SupplierService
+from modules.services.material_service import MaterialService, SupplierService, MaterialNotFoundError
 
 
 # ============================================================

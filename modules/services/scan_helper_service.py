@@ -262,9 +262,17 @@ class ScanHelperService:
 
     @staticmethod
     def insert_approval_record(wr_id, db=None):
-        ScanHelperService._db(db).execute(
+        """插入审批记录，已存在 pending 记录则跳过（防止重复提交）"""
+        d = ScanHelperService._db(db)
+        existing = d.execute(
+            "SELECT id FROM approval_records WHERE work_record_id=? AND status='pending'", (wr_id,)
+        ).fetchone()
+        if existing:
+            return existing['id']
+        cur = d.execute(
             "INSERT INTO approval_records (work_record_id, status) VALUES (?, 'pending')", (wr_id,)
         )
+        return cur.lastrowid
 
     @staticmethod
     def update_order_process_completed(order_id, process_id, new_completed, db=None):
@@ -429,6 +437,90 @@ class ScanHelperService:
             _logger.warning('auto_inbound failed: %s', e)
 
     # ======================== 报工写入（事务化核心） ========================
+
+
+    @staticmethod
+    def validate_report(order_id, process_id, user, quantity, serial_no, report_type):
+        """Shared validation for both desktop and mobile report endpoints.
+        Returns (error_dict, status_code) or (None, None) on success.
+        Also returns validated (quantity, serial_no) after adjustments.
+        """
+        from modules.middleware.auth import has_permission
+        from modules.middleware.data_scope import get_user_process_ids
+
+        # Admin/inspector accounts can only do rework/scrap
+        if has_permission(user, "quality:edit") and report_type == "normal":
+            return ({"error": "quality/admin accounts can only rework/scrap, not normal report"}, 403), None, None
+
+        if not order_id or not process_id:
+            return ({"error": "missing order or process info"}, 400), None, None
+
+        # Serial mode: each item reports individually, quantity always 1
+        has_items = bool(ScanHelperService.get_product_items_by_order(order_id))
+        if has_items and quantity > 1:
+            quantity = 1
+        elif serial_no and quantity > 1:
+            quantity = 1
+
+        # Order existence + scope check
+        order = ScanHelperService.get_order(order_id)
+        if not order:
+            return ({"error": "order not found"}, 404), None, None
+        if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(user)):
+            return ({"error": "no permission to report on this order"}, 403), None, None
+
+        # Serial mode guard: serial-mode orders require item QR scan
+        has_items_m = bool(ScanHelperService.get_product_items_by_order(order_id))
+        if has_items_m and not serial_no and not has_permission(user, "quality:view"):
+            return ({"error": "this order is in serial mode, please scan item QR"}, 400), None, None
+
+        # Process existence
+        if not ScanHelperService.check_process_in_order(order_id, process_id):
+            return ({"error": "process not in order route"}, 400), None, None
+
+        # Cross-process duplicate check (serial)
+        if report_type == "normal" and serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
+            return ({"error": "serial " + str(serial_no) + " already reported in this order", "can_scrap_rework": True}, 409), None, None
+
+        # Duplicate report check
+        if report_type == "normal":
+            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
+            if dup:
+                msg = "serial " + str(serial_no) + " already reported at this process" if serial_no else "already reported at this process"
+                return ({"error": msg, "can_scrap_rework": True}, 409), None, None
+        elif report_type in ("scrap", "rework"):
+            if ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type):
+                return ({"error": "duplicate submission, please wait"}, 409), None, None
+
+        # Process-level permission check
+        user_pids = get_user_process_ids(user)
+        if user_pids is not None and process_id not in user_pids:
+            proc = ScanHelperService._db(None).execute("SELECT name FROM processes WHERE id=?", (process_id,)).fetchone()
+            if proc:
+                return ({"error": "process \"" + proc["name"] + "\" not in your permission scope"}, 403), None, None
+            return ({"error": "no permission for this process"}, 403), None, None
+
+        # Process exists in route
+        current_op = ScanHelperService.get_order_process(order_id, process_id)
+        if order["route_id"] and not current_op:
+            return ({"error": "process not in order route"}, 400), None, None
+        current_seq = current_op["seq_order"] if current_op else 0
+
+        # Sequential report check (normal only)
+        if report_type == "normal":
+            err, code = ScanHelperService.check_process_order(order_id, current_seq)
+            if err:
+                return (err, code), None, None
+
+        # Quantity limit check (normal only)
+        if report_type == "normal":
+            err, code = ScanHelperService.check_quantity_limits(
+                order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
+            if err:
+                return (err, code), None, None
+
+        return (None, None), quantity, serial_no
+
 
     @staticmethod
     def execute_report_write(report_type, order_id, process_id, user_id, user_name,

@@ -96,7 +96,7 @@ def batch_qrcode():
                         'position': item['position_no'],
                         'qrcode': f'data:image/png;base64,{b64}'
                     })
-                db.execute('UPDATE orders SET qr_mode = ? WHERE id = ?', ('serial', oid))
+                ScanQRService.set_qr_mode(oid, 'serial')
             else:
                 # 订单模式：每个订单一个二维码
                 qr = qrcode_lib.QRCode(version=2, box_size=8, border=1)
@@ -118,9 +118,7 @@ def batch_qrcode():
                     'quantity': order['quantity'],
                     'qrcode': f'data:image/png;base64,{b64}'
                     })
-                db.execute('UPDATE orders SET qr_mode = ? WHERE id = ?', ('order', oid))
-
-        db.commit()
+                ScanQRService.set_qr_mode(oid, 'order')
 
         result = {'codes': codes}
         if skipped:

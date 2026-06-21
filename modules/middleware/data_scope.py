@@ -56,12 +56,20 @@ def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
 
 
 
+# Whitelist of allowed column names for process_filter_condition
+_ALLOWED_FILTER_COLUMNS = {'process_id', 'id', 'wr.process_id', 'op.process_id'}
+
 def process_filter_condition(user: Optional[dict], column: str = 'process_id') -> Tuple[str, List[int]]:
     """返回 (where_clause, params) 用于 SQL 过滤。
     - 管理员/全局角色：('1=1', [])
-    - 无工序权限：('1=0', [])  
+    - 无工序权限：('1=0', [])
     - 特定工序：('{column} IN (?,?,?)', [pids])
+    
+    Safety: column name is validated against _ALLOWED_FILTER_COLUMNS whitelist
+    to prevent SQL injection through dynamic column names.
     """
+    if column not in _ALLOWED_FILTER_COLUMNS:
+        raise ValueError(f"Invalid filter column: {column}")
     pids = get_user_process_ids(user)
     if pids is None:
         return ('1=1', [])

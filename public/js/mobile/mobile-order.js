@@ -38,7 +38,8 @@ function doScan(code) {
     var _u = user();
     if (_u && _u.permissions && (_u.permissions.indexOf("*") !== -1 || _u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:view") !== -1)) {
       closeCam();
-      window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code) + "&token=" + encodeURIComponent(token());
+      try { sessionStorage.setItem("iq_token", token()); sessionStorage.setItem("iq_code", code); } catch(e) {}
+      window.location.href = "/mobile_inspection.html";
       return;
     }
 
@@ -144,7 +145,7 @@ function updateReportBtn() {
   btn.className = 'btn-report' + (reportType !== 'normal' ? ' ' + reportType : '');
 }
 
-$('rpt-qty').addEventListener('input', updateReportBtn);
+if ($('rpt-qty')) { $('rpt-qty').addEventListener('input', updateReportBtn); }
 
 // ── 提交报工 ─────────────────────────────────
 function doReport() {

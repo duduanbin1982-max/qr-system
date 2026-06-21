@@ -56,3 +56,12 @@ class ScanQRService:
             "SELECT product_code FROM products WHERE product_name = ? LIMIT 1", (product_name,)
         ).fetchone()
         return row["product_code"] if row else ""
+    @staticmethod
+    def set_qr_mode(order_id, mode):
+        """Set the QR mode for an order (uses transaction internally)."""
+        from modules.services import BaseService
+        with BaseService.transaction() as txn:
+            txn.execute(
+                "UPDATE orders SET qr_mode = ? WHERE id = ?", (mode, order_id)
+            )
+

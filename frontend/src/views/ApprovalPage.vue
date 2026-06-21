@@ -178,7 +178,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
@@ -247,6 +247,12 @@ export default {
       }
     }
 
+    // 筛选条件变化时清空已选项，防止误操作不可见记录
+    watch([filterOrderNo, filterWorker, filterProcess], () => {
+      selectedIds.value = []
+      selectAll.value = false
+    })
+
     async function batchHandle(action) {
       if (selectedIds.value.length === 0) return
       const label = action === 'approve' ? '通过' : '拒绝'
@@ -274,7 +280,7 @@ export default {
       try {
         const d = await api.approvalStats()
         stats.value = d
-      } catch(e) {}
+      } catch(e) { console.warn('Approval stats load failed:', e) }
     }
 
     async function loadConfig() {

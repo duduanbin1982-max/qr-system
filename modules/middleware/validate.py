@@ -18,7 +18,7 @@ SCHEMAS = {
         'required': ['username', 'password'],
         'properties': {
             'username': {'type': 'string', 'minLength': 2, 'maxLength': 64},
-            'password': {'type': 'string', 'minLength': 8, 'maxLength': 128},
+            'password': {'type': 'string', 'minLength': 6, 'maxLength': 128},
         },
         'additionalProperties': False,
     },
@@ -40,7 +40,7 @@ SCHEMAS = {
             'email': {'type': 'string', 'format': 'email', 'maxLength': 128},
             'role': {'type': 'string', 'enum': ['admin', 'worker']},
             'role_id': {'type': ['integer', 'null']},
-            'password': {'type': 'string', 'minLength': 8, 'maxLength': 128},
+            'password': {'type': 'string', 'minLength': 6, 'maxLength': 128},
             'employee_no': {'type': 'string', 'maxLength': 32},
             'phone': {'type': 'string', 'maxLength': 32},
             'position_id': {'type': ['integer', 'null']},

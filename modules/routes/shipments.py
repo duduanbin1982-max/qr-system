@@ -322,6 +322,17 @@ def shipment_stats():
 
 
 
+
+@app.route("/api/shipments/<int:shipment_id>/impact", methods=["GET"])
+@check_auth
+@check_permission("shipments:view")
+def shipment_impact(shipment_id):
+    """Check impact before deleting a shipment."""
+    try:
+        return jsonify(ShipmentService.get_impact(shipment_id))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
 @app.route("/api/shipments/order-items/<int:order_id>", methods=["GET"])
 @check_auth
 @check_permission("shipments:view")

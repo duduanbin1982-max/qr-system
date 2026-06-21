@@ -301,7 +301,8 @@ export default {
     }
 
     async function loadStats() {
-      try { const r = await api.reworkStats(); if (r.ok) stats.value = r } catch (e) {}
+      try { const r = await api.reworkStats(); if (r && r.ok) stats.value = r }
+      catch (e) { console.warn('Rework stats load failed:', e) }
     }
 
     const completingItem = ref(null)
@@ -386,11 +387,11 @@ export default {
       try {
         const w = await api.listUsers({limit: 200})
         workers.value = w.users || w.items || []
-      } catch (e) {}
+      } catch (e) { console.warn('Workers dropdown load failed:', e); workers.value = [] }
       try {
         const p = await api.listProcesses({limit: 200})
         processes.value = p.processes || p.items || []
-      } catch (e) {}
+      } catch (e) { console.warn('Processes dropdown load failed:', e); processes.value = [] }
     }
 
     function switchTab(status) { statusFilter.value = status; search.value = ''; filterWorker.value = ''; filterProcess.value = ''; selectedIds.value = []; page.value = 1; load() }

@@ -92,7 +92,7 @@
             </div>
             <div class="form-row">
               <div class="form-col" style="flex:1">
-                <div class="form-group"><label>数量</label><input class="form-input" v-model.number="reportQty" type="number" min="1"></div>
+                <div class="form-group"><label>数量</label><input class="form-input" v-model.number="reportQty" min="1" :max="order?.quantity || 9999" type="number"></div>
               </div>
               <div class="form-col" style="flex:2">
                 <div class="form-group"><label>类型</label>
@@ -213,9 +213,16 @@ export default {
         showToast('报工成功！')
         reportQty.value = 1
         reportRemark.value = ''
-        // 重新扫描刷新数据
-        scanCode.value = serialNo.value || order.value.order_no
-        await doScan()
+        // Refresh order data without full re-scan flash
+        if (order.value) {
+          try {
+            const d = await api.scan({ code: serialNo.value || order.value.order_no })
+            if (d.order) {
+              order.value = d.order
+              serialNo.value = (d.item && d.item.serial_no) || null
+            }
+          } catch(e) { /* keep existing order data */ }
+        }
       } catch(e) {
         showToast(e.message || '报工失败','error')
       } finally {

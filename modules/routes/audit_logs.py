@@ -1,4 +1,5 @@
-"""qr-system — 操作日志路由"""
+"""qr-system — 操作日忖路由
+"""
 from flask import request, jsonify
 from modules.app import app
 from modules.middleware.audit import audit_log
@@ -18,6 +19,8 @@ def list_logs():
         keyword=request.args.get("keyword", "").strip(),
         user_id=request.args.get("user_id", type=int),
         category=request.args.get("category", "").strip(),
+        date_from=request.args.get('date_from', '').strip(),
+        date_to=request.args.get('date_to', '').strip(),
     )
     return jsonify(result)
 

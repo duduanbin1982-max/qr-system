@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from flask import request, jsonify
 from modules.app import app
 from modules.cache_utils import ttl_cache
+from modules.middleware.rate_limit import rate_limit
 from modules.db import get_setting, get_db, clear_settings_cache
 from modules.middleware.auth import check_auth, check_permission
 from modules.services import BaseService
@@ -37,6 +38,7 @@ def _is_board_token_valid():
 
 
 @app.route('/api/board/auth', methods=['POST'])
+@rate_limit(max_rpm=10)
 def board_auth():
     data = request.get_json(silent=True) or {}
     provided = (data.get('board_token') or '').strip()
@@ -54,9 +56,7 @@ def board_auth():
     db = get_db()
     session_token = secrets.token_hex(32)
     expires_at = (datetime.now() + timedelta(hours=BOARD_SESSION_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS board_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')))"
-    )
+
     with BaseService.transaction() as txn:
         txn.execute("INSERT INTO board_sessions (token, expires_at) VALUES (?, ?)", (session_token, expires_at))
     return jsonify({
@@ -143,6 +143,7 @@ def _verify_board_session(token):
 
 
 @app.route('/api/dashboard/board', methods=['GET'])
+@ttl_cache(ttl_seconds=15)
 def dashboard_board():
     # Authorization: cookie > Bearer session > (URL token disabled for security)
     has_cookie = request.cookies.get('qr_token', '')

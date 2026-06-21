@@ -5,7 +5,6 @@ qr-system ? TraceRepository???????
 """
 from modules.services import BaseService
 
-
 class TraceRepository:
     """?????????"""
 
@@ -78,20 +77,6 @@ class TraceRepository:
             ORDER BY s.created_at DESC
             LIMIT 10
         """, (order_id,)).fetchall()
-
-    @staticmethod
-    def find_shipments_by_product_name(product_name, db=None):
-        """??????????????????? product_name ?????"""
-        db = db or BaseService.db()
-        return db.execute('''
-            SELECT DISTINCT s.id, s.shipment_no, s.customer, s.status,
-                   s.total_quantity, s.completed_at
-            FROM shipments s
-            JOIN shipment_items si ON si.shipment_id = s.id
-            WHERE si.product_name = ?
-            ORDER BY s.created_at DESC
-            LIMIT 10
-        ''', (product_name,)).fetchall()
 
     @staticmethod
     def find_order_by_no(order_no, db=None):

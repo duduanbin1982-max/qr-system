@@ -284,7 +284,9 @@ export default {
 
     // Trace history (localStorage)
     const HISTORY_KEY = 'qr_trace_history'
-    const traceHistory = ref(JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'))
+    let _history = []
+try { _history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') } catch(_) {}
+const traceHistory = ref(_history)
 
     function saveHistory(code, mode) {
       const list = traceHistory.value.filter(h => !(h.code === code && h.mode === mode))

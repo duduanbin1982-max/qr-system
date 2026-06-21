@@ -237,13 +237,14 @@ class OrderService:
         process_ids = data.get('process_ids', [])
 
         with BaseService.transaction() as txn:
-            # 冲突检查 + 自动重试
-            existing = txn.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
-            if existing:
+            # 冲突检查 + 自动重试（最多5次）
+            for _ in range(5):
+                existing = txn.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
+                if not existing:
+                    break
                 order_no = _generate_order_no(txn)
-                existing2 = txn.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
-                if existing2:
-                    raise ValueError('订单号冲突，请重试')
+            else:
+                raise ValueError('订单号冲突，请重试（已重试5次）')
 
             cur = txn.execute('''
                 INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
@@ -304,9 +305,15 @@ class OrderService:
     }
 
     @staticmethod
-    def update_order(oid, data):
+    def update_order(oid, data, user_id=None, user_name=None):
         """
-        更新订单（含状态机校验）。
+        更新订单（含状态机校验 + 备注历史记录）。
+
+        Args:
+            oid: 订单ID
+            data: 更新字段
+            user_id: 操作用户ID（用于备注历史）
+            user_name: 操作用户名（用于备注历史）
 
         Raises:
             ValueError: 订单不存在 / 状态转换非法
@@ -334,6 +341,10 @@ class OrderService:
                 if cust:
                     data['customer'] = cust['name']
 
+        # Detect remark change BEFORE entering transaction (TOCTOU-safe: re-check inside txn)
+        remark_changed = 'remark' in data
+        old_remark = existing['remark'] if remark_changed and existing else None
+
         sets = []
         params = []
         for field in ['order_no', 'customer', 'customer_id', 'product_name', 'product_code',
@@ -343,13 +354,19 @@ class OrderService:
                 params.append(data[field] if data[field] is not None else None)
 
         with BaseService.transaction() as txn:
+            # TOCTOU-safe remark history: re-read inside transaction
+            if remark_changed and user_id:
+                current = txn.execute('SELECT remark FROM orders WHERE id = ?', (oid,)).fetchone()
+                if current and data['remark'] != (current['remark'] or ''):
+                    OrderService.log_remark_history(oid, old_remark or '', data['remark'], user_id, user_name or '', db=txn)
+
             if sets:
                 sets.append('updated_at = datetime("now","localtime")')
                 params.append(oid)
                 txn.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
 
             if 'process_ids' in data:
-                new_pids = [int(pid) for pid in data["process_ids"]]
+                new_pids = sorted(set(int(pid) for pid in data["process_ids"]))
                 existing_procs = txn.execute(
                     'SELECT process_id FROM order_processes WHERE order_id = ?', (oid,)
                 ).fetchall()
@@ -486,14 +503,21 @@ class OrderService:
         return OrderRepository.find_by_id(oid)
 
     @staticmethod
-    def log_remark_history(oid, old_remark, new_remark, user_id, user_name):
-        """记录备注变更历史"""
-        with BaseService.transaction() as txn:
-            txn.execute(
+    def log_remark_history(oid, old_remark, new_remark, user_id, user_name, db=None):
+        """记录备注变更历史。当 db 参数传入时复用已有事务连接。"""
+        if db is not None:
+            db.execute(
                 "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
                 "VALUES (?,?,?,?,?)",
                 (oid, old_remark, new_remark, user_id, user_name)
             )
+        else:
+            with BaseService.transaction() as txn:
+                txn.execute(
+                    "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
+                    "VALUES (?,?,?,?,?)",
+                    (oid, old_remark, new_remark, user_id, user_name)
+                )
 
     @staticmethod
     def soft_delete_order(oid, user_id):
@@ -604,11 +628,16 @@ class OrderService:
             raise ValueError('订单不存在')
         if not existing['deleted_at']:
             raise ValueError('只能彻底删除回收站中的订单')
+        # Whitelist of child tables for cascading delete (verified safe)
+        _PURGE_CHILD_TABLES = [
+            "order_attachments", "order_remark_history",
+            "order_materials", "order_processes", "product_items",
+            "work_records", "scrap_records", "rework_records",
+            "quality_inspections"
+        ]
         with BaseService.transaction() as txn:
-            for tbl in ["order_attachments", "order_remark_history",
-                        "order_materials", "order_processes", "product_items",
-                        "work_records", "scrap_records", "rework_records",
-                        "quality_inspections"]:
-                txn.execute("DELETE FROM " + tbl + " WHERE order_id = ?", (oid,))
+            for tbl in _PURGE_CHILD_TABLES:
+                # Table names are from hardcoded whitelist, safe from SQL injection
+                txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
             txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
         return existing['order_no'] or ""

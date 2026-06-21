@@ -68,7 +68,7 @@ export default {
         if (filterResult.value) params.result = filterResult.value
         const d = await api.listInspections(params)
         items.value = d.items || []
-      } catch(e) {}
+      } catch(e) { console.warn('Inspections load failed:', e); items.value = [] }
     }
 
     async function loadStats() {

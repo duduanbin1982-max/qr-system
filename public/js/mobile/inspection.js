@@ -7,9 +7,11 @@
   var scanSerialNo = '';
 
   function getToken() {
-    var params = new URLSearchParams(window.location.search);
-    var t = params.get('token') || '';
-    if (t) return t;
+    // Try sessionStorage first (set by mobile-order.js redirect), then cookie
+    try {
+      var t = sessionStorage.getItem('iq_token') || '';
+      if (t) { sessionStorage.removeItem('iq_token'); return t; }
+    } catch(e) {}
     try {
       var u = JSON.parse(sessionStorage.getItem('qr_user'));
       if (u && u.token) return u.token;

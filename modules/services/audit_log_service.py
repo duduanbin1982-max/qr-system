@@ -9,7 +9,7 @@ class AuditLogService:
     # 操作日志查询
     # ============================================================
     @staticmethod
-    def list_logs(page=1, limit=50, action='', keyword='', user_id=None, category=''):
+    def list_logs(page=1, limit=50, action='', keyword='', user_id=None, category='', date_from='', date_to=''):
         db = BaseService.db()
         where = ['1=1']
         params = []
@@ -25,6 +25,10 @@ class AuditLogService:
                 "'create_menu_permission','update_menu_permission','delete_menu_permission',"
                 "'batch_set_roles','save_permissions','batch_update_menu_permissions',"
                 "'reset_password','unlock_user','save_settings')")
+        if date_from:
+            where.append('al.created_at >= ?'); params.append(date_from)
+        if date_to:
+            where.append('al.created_at <= ?'); params.append(date_to + ' 23:59:59')
         where_sql = ' AND '.join(where)
 
         total = db.execute(

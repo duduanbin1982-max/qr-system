@@ -9,7 +9,6 @@ from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.middleware.validate import validate_json
 from modules.services.approval_service import ApprovalService
-from modules.db import get_db
 
 
 @app.route('/api/approvals/pending', methods=['GET'])
@@ -59,19 +58,7 @@ def handle_approval(record_id, action):
 @check_permission('approvals:edit')
 def get_approval_config():
     """Return all approval_config rows with process names."""
-    db = get_db()
-    rows = db.execute("""
-        SELECT ac.id, ac.process_id, COALESCE(ac.require_approval, 0) as require_approval,
-               COALESCE(ac.approver_role, 'admin') as approver_role,
-               COALESCE(ac.approval_level, 1) as approval_level,
-               COALESCE(ac.approver_role_2, '') as approver_role_2,
-               COALESCE(ac.approver_role_3, '') as approver_role_3,
-               p.name as process_name, p.category
-        FROM processes p
-        LEFT JOIN approval_config ac ON ac.process_id = p.id
-        ORDER BY p.name
-    """).fetchall()
-    return jsonify({"configs": [dict(r) for r in rows]})
+    return jsonify(ApprovalService.list_configs())
 
 
 @app.route('/api/approvals/config', methods=['POST'])
@@ -81,39 +68,9 @@ def save_approval_config():
     """Save approval_config: {process_id: int, require_approval: 1|0, approver_role: str, approval_level: int}
     Also supports batch: {"configs": [{...}, ...]}
     """
-    from modules.services import BaseService
     data = get_json_body()
     configs = data.get("configs", [data] if "process_id" in data else [])
-
-    with BaseService.transaction() as txn:
-        for cfg in configs:
-            pid = cfg["process_id"]
-            require = 1 if cfg.get("require_approval") else 0
-            role = cfg.get("approver_role", "admin")
-            role2 = cfg.get("approver_role_2", "")
-            role3 = cfg.get("approver_role_3", "")
-            level = cfg.get("approval_level", 1)
-
-            existing = txn.execute(
-                "SELECT id FROM approval_config WHERE process_id = ?", (pid,)
-            ).fetchone()
-
-            if existing:
-                txn.execute(
-                    "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, approver_role_3=?, approval_level=? WHERE process_id=?",
-                    (require, role, role2, role3, level, pid)
-                )
-            else:
-                if require:
-                    txn.execute(
-                        "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level) VALUES (?,?,?,?,?,?)",
-                        (pid, require, role, role2, role3, level)
-                    )
-
-            # If require_approval is turned off, delete the config row
-            if not require and existing:
-                txn.execute("DELETE FROM approval_config WHERE process_id = ?", (pid,))
-
+    ApprovalService.save_configs(configs)
     return jsonify({"message": "保存成功"})
 
 @app.route("/api/approvals/batch", methods=["POST"])
@@ -148,23 +105,4 @@ def batch_approval():
 @check_permission("approvals:view")
 def approval_stats():
     """Approval statistics: avg time, pending > 24h, etc."""
-    db = get_db()
-    pending = db.execute("SELECT COUNT(*) FROM approval_records WHERE status='pending'").fetchone()[0]
-    avg_row = db.execute("""
-        SELECT ROUND(AVG(
-            (julianday(processed_at) - julianday(created_at)) * 24
-        ), 1) as avg_hours
-        FROM approval_records
-        WHERE status != 'pending' AND processed_at IS NOT NULL
-    """).fetchone()
-    pending_over = db.execute("""
-        SELECT COUNT(*) FROM approval_records
-        WHERE status='pending' AND created_at < datetime('now','localtime','-24 hours')
-    """).fetchone()[0]
-    total = db.execute("SELECT COUNT(*) FROM approval_records").fetchone()[0]
-    return jsonify({
-        "pending": pending,
-        "avg_hours": avg_row["avg_hours"] or 0,
-        "pending_over_24h": pending_over,
-        "total": total
-    })
+    return jsonify(ApprovalService.get_stats())

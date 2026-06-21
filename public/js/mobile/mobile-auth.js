@@ -26,7 +26,8 @@ function doLogin() {
     btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false;
     if (d.error) { $('login-err').textContent = d.error; return; }
     window.__qr_user = d.user;
-    try { sessionStorage.setItem('qr_user', JSON.stringify(d.user)); } catch(e) {}
+    var _safe = { id: d.user.id, name: d.user.name, username: d.user.username, token: d.user.token, permissions: d.user.permissions };
+    try { sessionStorage.setItem('qr_user', JSON.stringify(_safe)); } catch(e) {}
     if (d.must_change_password) {
       showChangePassword();
       return;
