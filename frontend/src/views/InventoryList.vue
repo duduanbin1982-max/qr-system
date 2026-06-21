@@ -87,7 +87,7 @@
                 </td>
                 <td style="text-align:center;font-size:var(--text-xs);font-weight:500;color:var(--text-placeholder)">{{ item.unit }}</td>
                 <td style="text-align:center">
-                  <div class="inv-actions">
+                  <div class="inv-actions" @click.stop>
                     <button v-if="canEdit" class="inv-btn inv-btn-in" @click="openMove(item, 'in')" title="入库">
                       <span>📥</span><span>入库</span>
                     </button>
