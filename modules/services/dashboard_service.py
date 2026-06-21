@@ -1,6 +1,7 @@
-"""qr-system -- DashboardService"""
+﻿"""qr-system -- DashboardService (Repository pattern)"""
 from datetime import datetime
 from modules.services import BaseService
+from modules.repositories.dashboard_repository import DashboardRepository
 
 
 class DashboardService:
@@ -10,22 +11,9 @@ class DashboardService:
 
     @staticmethod
     def _get_dashboard_stats(db, today):
-        """Collect 7 order/output KPIs in 2 queries."""
-        orders_row = db.execute("""
-            SELECT
-                COUNT(*) as total_orders,
-                SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status='producing' THEN 1 ELSE 0 END) as producing,
-                SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed
-            FROM orders WHERE deleted_at IS NULL
-        """).fetchone()
-        wr_row = db.execute("""
-            SELECT
-                COALESCE(SUM(CASE WHEN DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_output,
-                COALESCE(SUM(CASE WHEN type='scrap' AND DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_scrap,
-                COALESCE(SUM(CASE WHEN type='rework' AND DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_rework
-            FROM work_records WHERE DATE(created_at)=?
-        """, (today, today, today, today)).fetchone()
+        """Collect 7 order/output KPIs from repository."""
+        orders_row = DashboardRepository.get_order_stats(db=db)
+        wr_row = DashboardRepository.get_work_record_daily_stats(today, db=db)
         result = {
             "total_orders": orders_row["total_orders"],
             "today_output": wr_row["today_output"] or 0,
@@ -35,71 +23,41 @@ class DashboardService:
             "completed": orders_row["completed"],
             "today_rework": wr_row["today_rework"] or 0,
         }
-        # Low stock inventory items
-        low_rows = db.execute(
-            "SELECT product_model, product_name, quantity, safe_stock FROM inventory WHERE safe_stock > 0 AND quantity <= safe_stock LIMIT 10"
-        ).fetchall()
+        low_rows = DashboardRepository.get_low_stock_items(db=db)
         result["low_stock"] = [dict(r) for r in low_rows]
-
-        result["pending_approvals"] = db.execute(
-            "SELECT COUNT(*) FROM approval_records WHERE status='pending'"
-        ).fetchone()[0]
+        result["pending_approvals"] = DashboardRepository.get_pending_approvals_count(db=db)
         return result
 
     @staticmethod
     def _get_dashboard_security(db, today):
         """Collect login security stats."""
         return {
-            "locked_users": db.execute("SELECT COUNT(*) FROM users WHERE locked_until IS NOT NULL AND locked_until > datetime('now','localtime')").fetchone()[0],
-            "today_failed_logins": db.execute("SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=0", (today,)).fetchone()[0],
-            "today_success_logins": db.execute("SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=1", (today,)).fetchone()[0],
-            "suspicious_ips": db.execute("SELECT COUNT(DISTINCT ip_address) FROM login_logs WHERE DATE(created_at)=? AND ip_address NOT IN (SELECT DISTINCT ip_address FROM login_logs WHERE DATE(created_at)<?)", (today, today)).fetchone()[0],
+            "locked_users": DashboardRepository.get_locked_users_count(db=db),
+            "today_failed_logins": DashboardRepository.get_today_failed_logins(today, db=db),
+            "today_success_logins": DashboardRepository.get_today_success_logins(today, db=db),
+            "suspicious_ips": DashboardRepository.get_suspicious_ips_count(today, db=db),
         }
 
     @staticmethod
     def _get_dashboard_recent(db):
         """Recent 10 work records with order/process/worker names."""
-        rows = db.execute(
-            "SELECT wr.*, COALESCE(o.order_no,'-') as order_no, p.name as process_name, u.name as worker_name "
-            "FROM work_records wr "
-            "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
-            "LEFT JOIN processes p ON wr.process_id = p.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
-            "ORDER BY wr.created_at DESC LIMIT 10"
-        ).fetchall()
+        rows = DashboardRepository.get_recent_work_records(limit=10, db=db)
         return [dict(r) for r in rows]
 
     @staticmethod
     def _get_dashboard_warnings(db, today):
         """Delivery warnings: overdue + approaching orders."""
-        from modules.db import get_setting
+        setting_row = DashboardRepository.get_delivery_warning_setting(db=db)
         try:
-            warning_days = int(get_setting("delivery_warning_days", "3"))
+            warning_days = int(setting_row['value']) if setting_row else 3
         except (ValueError, TypeError):
             warning_days = 3
 
         if warning_days <= 0:
             return {"warning_days": 0, "overdue": [], "approaching": []}
 
-        overdue = db.execute(
-            "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
-            "CAST(julianday('now','localtime') - julianday(o.plan_end) AS INTEGER) as overdue_days "
-            "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
-            "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "
-            "AND o.plan_end != '' AND o.plan_end < ? "
-            "ORDER BY o.plan_end ASC LIMIT 5",
-            (today,)
-        ).fetchall()
-
-        approaching = db.execute(
-            "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
-            "CAST(julianday(o.plan_end) - julianday('now','localtime') AS INTEGER) as days_left "
-            "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
-            "WHERE o.deleted_at IS NULL AND o.status NOT IN ('completed','cancelled') "
-            "AND o.plan_end != '' AND o.plan_end >= ? AND o.plan_end <= DATE('now','+' || ? || ' days') "
-            "ORDER BY o.plan_end ASC LIMIT 5",
-            (today, warning_days)
-        ).fetchall()
+        overdue = DashboardRepository.get_overdue_orders(today, limit=5, db=db)
+        approaching = DashboardRepository.get_approaching_orders(today, warning_days, limit=5, db=db)
 
         return {
             "warning_days": warning_days,
@@ -121,7 +79,6 @@ class DashboardService:
             {"page": "settings", "icon": "⚙️", "label": "系统设置", "desc": "系统配置管理", "perm": "settings:manage"},
         ]
         perms = set(user.get("_permissions", []) if user else [])
-        # * means all permissions (admin)
         has_all = "*" in perms
         return [a for a in all_actions if has_all or a.get("perm", "") in perms]
 
@@ -131,7 +88,7 @@ class DashboardService:
         db = BaseService.db()
         today = datetime.now().strftime("%Y-%m-%d")
 
-        company = db.execute("SELECT value FROM system_settings WHERE key='company_name'").fetchone()
+        company = DashboardRepository.get_company_name(db=db)
 
         return {
             "stats": DashboardService._get_dashboard_stats(db, today),

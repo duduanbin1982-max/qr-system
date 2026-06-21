@@ -1,17 +1,13 @@
-﻿"""qr-system — AuthService（认证数据访问层）
-CRITICAL FIX: 所有写操作接受可选 db 参数，仅独立调用时自行 commit，事务共享时不 commit
+﻿"""qr-system — AuthService（认证业务逻辑层）
+Repository pattern: all SQL lives in AuthRepository. Service handles business logic only.
 """
 import bcrypt, secrets, hashlib
 from modules.services import BaseService
+from modules.repositories.auth_repository import AuthRepository
 
 
 class AuthService:
-    """认证数据访问 — login/logout/session/password 全部 DB 操作。"""
-
-    @staticmethod
-    def _db(db=None):
-        """获取数据库连接：优先使用传入的 db（事务中），否则新建连接。"""
-        return db if db is not None else BaseService.db()
+    """Authentication business logic — login/logout/session/password workflows."""
 
     @staticmethod
     def lock_minutes(fail_count):
@@ -24,34 +20,23 @@ class AuthService:
 
     @staticmethod
     def get_login_rate(ip, cutoff, db=None):
-        return AuthService._db(db).execute(
-            "SELECT COUNT(*) FROM login_attempts WHERE ip_address = ? AND created_at > ?",
-            (ip, cutoff)
-        ).fetchone()[0]
+        return AuthRepository.get_login_rate(ip, cutoff, db=db)
 
     @staticmethod
     def insert_login_log(username, ip, ua, success, user_id=None, fail_reason=None, db=None):
-        d = AuthService._db(db)
-        d.execute(
-            "INSERT INTO login_logs (username, user_id, ip_address, success, fail_reason, user_agent) "
-            "VALUES (?,?,?,?,?,?)",
-            (username, user_id, ip, success, fail_reason, ua)
-        )
+        AuthRepository.insert_login_log(username, ip, ua, success, user_id, fail_reason, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def insert_login_attempt(ip, db=None):
-        d = AuthService._db(db)
-        d.execute("INSERT INTO login_attempts (ip_address) VALUES (?)", (ip,))
+        AuthRepository.insert_login_attempt(ip, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def find_user(username, db=None):
-        return AuthService._db(db).execute(
-            'SELECT * FROM users WHERE username = ? AND status = "active"', (username,)
-        ).fetchone()
+        return AuthRepository.find_user(username, db=db)
 
     @staticmethod
     def check_password(user, password):
@@ -62,95 +47,56 @@ class AuthService:
 
     @staticmethod
     def upgrade_password(user_id, new_hash, db=None):
-        d = AuthService._db(db)
-        d.execute(
-            "UPDATE users SET password = ?, password_version = 2 WHERE id = ?",
-            (new_hash, user_id)
-        )
+        AuthRepository.upgrade_password(user_id, new_hash, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def update_login_failure(user_id, fail_count, locked_until=None, db=None):
-        d = AuthService._db(db)
-        if locked_until:
-            d.execute(
-                "UPDATE users SET failed_login_count = ?, locked_until = ? WHERE id = ?",
-                (fail_count, locked_until, user_id)
-            )
-        else:
-            d.execute(
-                "UPDATE users SET failed_login_count = ? WHERE id = ?", (fail_count, user_id)
-            )
+        AuthRepository.update_login_failure(user_id, fail_count, locked_until, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def create_session(user_id, token, ip, ua, db=None):
-        d = AuthService._db(db)
-        d.execute(
-            'UPDATE users SET token = ?, last_active = datetime("now","localtime"), '
-            'failed_login_count = 0, locked_until = NULL WHERE id = ?',
-            (token, user_id)
-        )
-        d.execute(
-            "INSERT INTO user_sessions (user_id, token, ip_address, user_agent) VALUES (?,?,?,?)",
-            (user_id, token, ip, ua)
-        )
+        AuthRepository.create_session_update_user(user_id, token, db=db)
+        AuthRepository.create_session_insert(user_id, token, ip, ua, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def get_user_role_code(user_id, db=None):
-        row = AuthService._db(db).execute(
-            "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? ORDER BY r.level LIMIT 1", (user_id,)
-        ).fetchone()
-        return row['code'] if row else 'worker'
+        return AuthRepository.get_user_role_code(user_id, db=db)
 
     @staticmethod
     def logout(user_id, token, db=None):
-        d = AuthService._db(db)
-        d.execute("UPDATE users SET token = NULL WHERE id = ?", (user_id,))
-        d.execute("UPDATE user_sessions SET is_active = 0 WHERE token = ?", (token,))
+        AuthRepository.logout_update_user(user_id, db=db)
+        AuthRepository.logout_deactivate_session(token, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
 
     @staticmethod
     def list_sessions(user_id, db=None):
-        return AuthService._db(db).execute(
-            "SELECT id, ip_address, user_agent, created_at, last_active, is_active "
-            "FROM user_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
-            (user_id,)
-        ).fetchall()
+        return AuthRepository.list_sessions(user_id, db=db)
 
     @staticmethod
     def find_session_by_id(sid, db=None):
         """根据 session ID 查找会话（不限定用户，用于管理员踢人检查）"""
-        return AuthService._db(db).execute(
-            "SELECT * FROM user_sessions WHERE id = ?", (sid,)
-        ).fetchone()
+        return AuthRepository.find_session_by_id(sid, db=db)
 
     @staticmethod
     def delete_session(sid, user_id, db=None):
-        d = AuthService._db(db)
-        sess = d.execute(
-            "SELECT * FROM user_sessions WHERE id = ? AND user_id = ?", (sid, user_id)
-        ).fetchone()
+        sess = AuthRepository.get_session_for_user(sid, user_id, db=db)
         if not sess:
             return None
-        d.execute("UPDATE user_sessions SET is_active = 0 WHERE id = ?", (sid,))
-        d.execute("UPDATE users SET token = NULL WHERE token = ?", (sess['token'],))
+        AuthRepository.deactivate_session_by_id(sid, db=db)
+        AuthRepository.clear_user_token_by_token(sess['token'], db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
         return sess
 
     @staticmethod
     def change_password(user_id, new_hash, db=None):
-        d = AuthService._db(db)
-        d.execute(
-            "UPDATE users SET password = ?, password_version = 2, must_change_password = 0 WHERE id = ?",
-            (new_hash, user_id)
-        )
+        AuthRepository.change_password(user_id, new_hash, db=db)
         if db is None:
-            d.commit()
+            BaseService.db().commit()
