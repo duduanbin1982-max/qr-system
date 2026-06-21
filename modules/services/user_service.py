@@ -45,18 +45,21 @@ class UserService:
         where = ['1=1']
         params = []
         if role_filter:
-            where.append('role = ?')
+            where.append('u.role = ?')
             params.append(role_filter)
+        else:
+            # Exclude super-admin from employee management list
+            where.append("u.username != 'admin'")
         if status:
-            where.append('status = ?')
+            where.append('u.status = ?')
             params.append(status)
         if keyword:
-            where.append('(username LIKE ? OR name LIKE ? OR nickname LIKE ? OR employee_no LIKE ? OR phone LIKE ?)')
+            where.append('(u.username LIKE ? OR u.name LIKE ? OR u.nickname LIKE ? OR u.employee_no LIKE ? OR u.phone LIKE ?)')
             kw = f'%{keyword}%'
             params.extend([kw, kw, kw, kw, kw])
 
         where_sql = ' AND '.join(where)
-        total = db.execute(f'SELECT COUNT(*) FROM users WHERE {where_sql}', params).fetchone()[0]
+        total = db.execute(f'SELECT COUNT(*) FROM users u WHERE {where_sql}', params).fetchone()[0]
 
         base_sql = f'''
             SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no,
