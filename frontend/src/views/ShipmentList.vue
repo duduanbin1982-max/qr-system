@@ -115,12 +115,23 @@
             </div>
             <div v-if="items.length">
               <div v-for="(it, idx) in items" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:var(--space-2);background:var(--bg-table-header);border-radius:var(--radius-md);flex-wrap:wrap">
-                <div style="flex:2;min-width:120px">
-                  <input class="form-input" v-model="it._search" placeholder="🔍 搜索型号/名称/订单号..." style="width:100%;font-size:var(--text-xs);margin-bottom:2px;padding:4px 8px">
-                  <select class="form-input" v-model="it.inventory_id" @change="onInvChange(idx)" style="width:100%;font-size:var(--text-xs)">
-                    <option value="">-- 选择库存 --</option>
-                    <option v-for="inv in filterInv(it._search)" :key="inv.id" :value="inv.id">{{ inv.product_model }} [{{ inv.order_no || '-' }}] ({{ inv.quantity }}{{ inv.unit }})</option>
-                  </select>
+                <div style="flex:2;min-width:120px;position:relative">
+                  <template v-if="it.inventory_id">
+                    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-xs);cursor:pointer" @click="it._showDrop=true; it._search=''; it.inventory_id=''; it.product_model=''; it.product_name=''; it.unit='件'">
+                      <span><strong>{{ it.product_model }}</strong> <span style="color:var(--text-placeholder)">{{ it.product_name }}</span></span>
+                      <span style="color:var(--primary);font-size:var(--text-2xs)">切换</span>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <input class="form-input" v-model="it._search" placeholder="🔍 输入型号/名称搜索..." @focus="it._showDrop=true" @blur="hideDrop(idx)" style="width:100%;font-size:var(--text-sm);padding:6px 8px">
+                    <div v-if="it._showDrop && filterInv(it._search).length" style="position:absolute;top:100%;left:0;right:0;z-index:50;max-height:200px;overflow-y:auto;background:white;border:1px solid var(--primary);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,0.15)">
+                      <div v-for="inv in filterInv(it._search)" :key="inv.id" @mousedown.prevent="selectInv(idx, inv)" style="padding:6px 10px;font-size:var(--text-xs);cursor:pointer;border-bottom:1px solid var(--bg-hover);display:flex;justify-content:space-between;align-items:center" @mouseenter="inv._hover=true" @mouseleave="inv._hover=false" :style="{background: inv._hover ? 'var(--primary-light)' : 'white'}">
+                        <span><strong>{{ inv.product_model }}</strong> <span style="color:var(--text-placeholder)">[{{ inv.order_no || '-' }}]</span></span>
+                        <span style="color:var(--text-muted)">{{ inv.product_name || '' }} ({{ inv.quantity }})</span>
+                      </div>
+                    </div>
+                    <div v-if="it._showDrop && it._search && !filterInv(it._search).length" style="position:absolute;top:100%;left:0;right:0;z-index:50;background:white;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:12px;text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">无匹配产品</div>
+                  </template>
                 </div>
                 <input class="form-input" v-model.number="it.quantity" type="number" min="1" placeholder="数量" @change="updateReceivable" style="width:60px;font-size:var(--text-xs);text-align:center">
                 <span @click="removeItem(idx)" style="color:var(--danger);cursor:pointer;font-size:var(--text-base)">✕</span>
@@ -342,11 +353,23 @@ export default {
       showModal.value = true
     }
 
-function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'', _search:'' }) }
+function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'', _search:'', _showDrop:false }) }
 
     function removeItem(idx) { items.value.splice(idx, 1); updateReceivable() }
 
-        function filterInv(search) {
+            function selectInv(idx, inv) {
+      items.value[idx].inventory_id = inv.id
+      items.value[idx].product_model = inv.product_model
+      items.value[idx].product_name = inv.product_name || ''
+      items.value[idx].unit = inv.unit || '件'
+      items.value[idx]._showDrop = false
+      items.value[idx]._search = ''
+      updateReceivable()
+    }
+    function hideDrop(idx) {
+      setTimeout(() => { if (items.value[idx]) items.value[idx]._showDrop = false }, 150)
+    }
+    function filterInv(search) {
       if (!search) return inventory.value
       const kw = search.toLowerCase()
       return inventory.value.filter(i =>
@@ -491,7 +514,7 @@ ${items.map((it, i) => '<tr><td>' + (i+1) + '</td><td>' + (escapeHtml(it.product
     return {
       shipments, loading, saving, total, page, limit, filterStatus, searchKeyword, statusMap, paymentStatusMap,
       pendingCount, completedCount, receivableTotal, paidTotal, unpaidTotal, inventory,
-      showModal, modalEdit, form, items, openAdd, openEdit, addItem, removeItem, onInvChange, filterInv, save, del,
+      showModal, modalEdit, form, items, openAdd, openEdit, addItem, removeItem, onInvChange, selectInv, hideDrop, filterInv, save, del,
       showDetail, detailShipment, viewDetail, doComplete, doReceive, doPayment, openPayment, printDeliveryNote,
       showPayModal, payTarget, payAmount, payMethod, payDate, payRemark,
       prevPage, nextPage, load, exportExcel, auth, canCreate, canEdit, canDelete
