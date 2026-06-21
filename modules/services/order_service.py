@@ -361,7 +361,7 @@ class OrderService:
                     OrderService.log_remark_history(oid, old_remark or '', data['remark'], user_id, user_name or '', db=txn)
 
             if sets:
-                sets.append('updated_at = datetime("now","localtime")')
+                sets.append("updated_at = datetime('now','localtime')")
                 params.append(oid)
                 txn.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
 

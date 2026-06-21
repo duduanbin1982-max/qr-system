@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import pytest
 import bcrypt
@@ -14,21 +15,27 @@ import tempfile, sqlite3, shutil
 _TEST_DB = os.path.join(tempfile.gettempdir(), 'qr_test_' + str(os.getpid()) + '.db')
 
 def _setup_test_db():
-    """Copy production DB schema (not data) to temp DB for safe testing."""
+    """Create in-memory SQLite DB from production schema for fast testing."""
+    schema_file = '/tmp/qr_schema.sql'
+    # Regenerate schema dump if stale (>1 hour or missing)
     prod_db = '/home/dubin/qr-system/data/production.db'
-    if os.path.exists(prod_db):
-        shutil.copy2(prod_db, _TEST_DB)
-        # Clear all data but keep schema
-        conn = sqlite3.connect(_TEST_DB)
-        conn.execute("PRAGMA foreign_keys = OFF")
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        for (tname,) in tables:
-            if tname not in ('sqlite_sequence',):
-                conn.execute(f"DELETE FROM {tname}")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.commit()
-        conn.close()
-    return _TEST_DB
+    if not os.path.exists(schema_file) or (os.path.exists(prod_db) and os.path.getmtime(prod_db) > os.path.getmtime(schema_file)):
+        import subprocess
+        subprocess.run(['sqlite3', prod_db, '.schema'], stdout=open(schema_file, 'w'), check=True)
+    
+    # Use shared in-memory DB: all connections share the same memory DB
+    db_uri = 'file:qrtest?mode=memory&cache=shared'
+    conn = sqlite3.connect(db_uri, uri=True)
+    with open(schema_file, 'r') as f:
+        schema_sql = f.read()
+    # Filter out internal SQLite tables that cannot be created explicitly
+    schema_sql = re.sub(r'CREATE TABLE sqlite_\w+[^;]*;', '', schema_sql)
+    # Also filter CREATE INDEX on sqlite_* and sqlite_stat* tables
+    schema_sql = re.sub(r'CREATE.*INDEX.*ON sqlite_\w+[^;]*;', '', schema_sql)
+    conn.executescript(schema_sql)
+    conn.commit()
+    conn.close()
+    return db_uri
 
 
 _setup_test_db()
@@ -83,38 +90,45 @@ TEST_PASS = "Test@1234"
 TEST_HASH = bcrypt.hashpw(TEST_PASS.encode(), bcrypt.gensalt()).decode()
 
 
-def _ensure_test_user(db):
-    """Create or update test user with full admin permissions."""
+def _ensure_user(db, username, password_hash, name, role, employee_no, group_name=None):
+    """Create or update a test user with role assignment. Parameterized to avoid duplication."""
     existing = db.execute(
-        "SELECT id FROM users WHERE username = ?", (TEST_USER,)
+        "SELECT id FROM users WHERE username = ?", (username,)
     ).fetchone()
     if not existing:
+        cols = "username, password, name, role, status, password_version, employee_no"
+        vals = "?, ?, ?, ?, ?, 2, ?"
+        params = [username, password_hash, name, role, "active", employee_no]
+        if group_name:
+            cols += ", group_name"
+            vals += ", ?"
+            params.append(group_name)
         cursor = db.execute(
-            "INSERT INTO users (username, password, name, role, status, password_version, employee_no) VALUES (?, ?, ?, ?, ?, 2, ?)",
-            (TEST_USER, TEST_HASH, "Test Runner", "admin", "active", "TEST-ADMIN-001")
+            f"INSERT INTO users ({cols}) VALUES ({vals})", params
         )
         user_id = cursor.lastrowid
     else:
         db.execute(
-            "UPDATE users SET password = ?, status = 'active', role = 'admin', locked_until = NULL, failed_login_count = 0, password_version = 2 WHERE username = ?",
-            (TEST_HASH, TEST_USER)
+            "UPDATE users SET password = ?, status = 'active', role = ?, locked_until = NULL, failed_login_count = 0, password_version = 2 WHERE username = ?",
+            (password_hash, role, username)
         )
         user_id = existing["id"]
-    # Ensure test user has admin role in user_roles table (needed by has_permission)
-    admin_role = db.execute("SELECT id FROM roles WHERE code = 'admin' AND status = 'active'").fetchone()
-    if admin_role:
+    # Ensure role assignment in user_roles table (needed by has_permission)
+    role_row = db.execute("SELECT id FROM roles WHERE code = ? AND status = 'active'", (role,)).fetchone()
+    if role_row:
         existing_role = db.execute(
             "SELECT id FROM user_roles WHERE user_id = ? AND role_id = ?",
-            (user_id, admin_role["id"])
+            (user_id, role_row["id"])
         ).fetchone()
         if not existing_role:
             db.execute(
                 "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
-                (user_id, admin_role["id"])
+                (user_id, role_row["id"])
             )
-
-    db.execute("DELETE FROM login_attempts")
-    db.execute("DELETE FROM login_logs")
+    # Clear login attempts for admin users (not needed for workers)
+    if role == "admin":
+        db.execute("DELETE FROM login_attempts")
+        db.execute("DELETE FROM login_logs")
     db.commit()
     return user_id
 
@@ -125,7 +139,7 @@ def client():
     app.config["SECRET_KEY"] = "test-secret-key"
     with app.app_context():
         db = get_db()
-        _ensure_test_user(db)
+        _ensure_user(db, TEST_USER, TEST_HASH, "Test Runner", "admin", "TEST-ADMIN-001")
     return app.test_client()
 
 
@@ -180,41 +194,13 @@ WORKER_USER = "testworker"
 WORKER_PASS = "Test@1234"
 WORKER_HASH = bcrypt.hashpw(WORKER_PASS.encode(), bcrypt.gensalt()).decode()
 
-def _ensure_worker_user(db):
-    existing = db.execute("SELECT id FROM users WHERE username = ?", (WORKER_USER,)).fetchone()
-    if not existing:
-        cursor = db.execute(
-            "INSERT INTO users (username, password, name, role, status, password_version, group_name, employee_no) VALUES (?, ?, ?, ?, ?, 2, ?, ?)",
-            (WORKER_USER, WORKER_HASH, "Test Worker", "worker", "active", "员工组", "TEST-WORKER-001")
-        )
-        user_id = cursor.lastrowid
-    else:
-        db.execute(
-            "UPDATE users SET password = ?, status = 'active', role = 'worker', locked_until = NULL, failed_login_count = 0, password_version = 2 WHERE username = ?",
-            (WORKER_HASH, WORKER_USER)
-        )
-        user_id = existing["id"]
-    # Ensure worker role
-    worker_role = db.execute("SELECT id FROM roles WHERE code = 'worker' AND status = 'active'").fetchone()
-    if worker_role:
-        existing_role = db.execute(
-            "SELECT id FROM user_roles WHERE user_id = ? AND role_id = ?",
-            (user_id, worker_role["id"])
-        ).fetchone()
-        if not existing_role:
-            db.execute(
-                "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
-                (user_id, worker_role["id"])
-            )
-    db.commit()
-    return user_id
 
 @pytest.fixture
 def worker_auth_token(client):
     with client.application.app_context():
         from modules.db import get_db
         db = get_db()
-        _ensure_worker_user(db)
+        _ensure_user(db, WORKER_USER, WORKER_HASH, "Test Worker", "worker", "TEST-WORKER-001", "员工组")
     resp = client.post("/api/auth/login", json={
         "username": WORKER_USER,
         "password": WORKER_PASS

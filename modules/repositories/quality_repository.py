@@ -354,13 +354,40 @@ class QualityRepository:
     # ============================================================
 
     @staticmethod
+    @staticmethod
     def insert_mobile_inspection_txn(data, user_id, db):
+        process_id = data.get("process_id")
+        # Auto-convert empty string to None for robust null checks
+        if process_id == "" or process_id == 0:
+            process_id = None
+        if not process_id and data.get("process_name") and data.get("order_id"):
+            row = db.execute(
+                "SELECT op.process_id FROM order_processes op "
+                "JOIN processes p ON op.process_id = p.id "
+                "WHERE op.order_id = ? AND p.name = ?",
+                (data["order_id"], data["process_name"])
+            ).fetchone()
+            if row:
+                process_id = row["process_id"]
+        if not process_id:
+            # Last resort: get first process of the order
+            order_id = data.get("order_id")
+            if order_id:
+                row = db.execute(
+                    "SELECT op.process_id FROM order_processes op "
+                    "WHERE op.order_id = ? ORDER BY op.seq_order LIMIT 1",
+                    (order_id,)
+                ).fetchone()
+                if row:
+                    process_id = row["process_id"]
+        if not process_id:
+            raise ValueError("无法确定抽检工序，请选择工序后重试")
         cur = db.execute(
             "INSERT INTO quality_inspections "
             "(order_id, process_id, order_no, product_code, process_name, inspector_name, "
             "inspector_id, result, notes, rework_process, remark, serial_no) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (data.get("order_id"), data.get("process_id"),
+            (data.get("order_id"), process_id,
              data.get("order_no", ""), data.get("product_code", ""),
              data.get("process_name", ""), data.get("inspector_name", ""),
              user_id, data.get("result", ""), data.get("notes", ""),

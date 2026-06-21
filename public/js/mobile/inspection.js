@@ -2,6 +2,7 @@
 (function() {
   var orderData = null;
   var selectedProcess = null;
+  var selectedProcessId = null;
   var scanMode = 'order'; // 'serial' or 'order'
   var scanSerialNo = '';
 
@@ -47,6 +48,7 @@
     items.forEach(function(item) { item.classList.remove('selected'); });
     el.classList.add('selected');
     selectedProcess = el.getAttribute('data-process');
+    selectedProcessId = el.getAttribute('data-process-id');
     document.getElementById('selectedProcess').textContent = selectedProcess;
     enableButtons(true);
     clearMsg();
@@ -58,8 +60,9 @@
     if (!selectedProcess) {
       var procs = orderData.processes || [];
       if (procs.length === 1) {
-        selectedProcess = procs[0].process_name || procs[0].name || '';
+        selectedProcess = procs[0].process_name || procs[0].name || "" || '';
         document.getElementById('selectedProcess').textContent = selectedProcess;
+        selectedProcessId = procs[0].process_id || procs[0].id || '';
       } else {
         showMsg('请先选择上方工序', 'error');
         return;
@@ -68,6 +71,7 @@
 
     var token = getToken();
     var data = {
+      process_id: selectedProcessId,
       order_id: orderData.id,
       order_no: orderData.order_no || '',
       product_code: orderData.product_code || orderData.product_name || '',
@@ -107,7 +111,7 @@
 
   function init() {
     var params = new URLSearchParams(window.location.search);
-    var code = params.get('code') || '';
+    var code = params.get('code') || sessionStorage.getItem('iq_code') || '';
 
     if (!code) {
       document.getElementById('info').innerHTML = '';
@@ -196,7 +200,7 @@
       var pname = p.process_name || p.name || '';
       var completed = p.completed || 0;
       var isCurrent = orderData && orderData.current_process && orderData.current_process.process_name === pname;
-      html += '<div class="proc-item' + (isCurrent ? ' selected' : '') + '" data-process="' + esc(pname) + '">' +
+      html += '<div class="proc-item' + (isCurrent ? ' selected' : '') + '" data-process="' + esc(pname) + '" data-process-id="' + (p.process_id || p.id || '') + '">' +
         '<div class="dot"></div>' +
         '<span class="pname">' + esc(pname) + '</span>' +
         '<span class="pstat">' + (isCurrent ? '当前工序 · ' : '') + '已完成 ' + completed + '</span>' +

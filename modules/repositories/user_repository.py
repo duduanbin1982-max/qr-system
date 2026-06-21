@@ -42,7 +42,7 @@ class UserRepository:
         if role_not:
             where.append("u.role != ?")
             params.append(role_not)
-        if not role_filter and not role_not:
+        if role_filter != 'admin' and not role_not:
             where.append("u.username != 'admin'")
         if status:
             where.append("u.status = ?")

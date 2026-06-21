@@ -107,6 +107,43 @@ const orders = ref([])
     const productSearchResults = ref([])
     const recentProducts = ref([])
     const productCursor = ref(-1)
+    // ===== 工序路线搜索 Combobox =====
+    const routeSearch = ref('')
+    const showRouteDropdown = ref(false)
+    const routeCursor = ref(-1)
+
+    const filteredRoutes = computed(() => {
+      const q = (routeSearch.value || '').trim().toLowerCase()
+      if (!q) return processRoutes.value
+      return processRoutes.value.filter(r =>
+        (r.name || '').toLowerCase().includes(q)
+      )
+    })
+
+    function onRouteSearchFocus() { showRouteDropdown.value = true; routeCursor.value = -1 }
+    function onRouteSearchInput() { routeCursor.value = filteredRoutes.value.length ? 0 : -1 }
+    function moveRouteCursor(dir) {
+      const list = filteredRoutes.value
+      if (!list.length) return
+      routeCursor.value = Math.min(Math.max(routeCursor.value + dir, 0), list.length - 1)
+    }
+    function selectRouteByEnter() {
+      const list = filteredRoutes.value
+      if (routeCursor.value >= 0 && routeCursor.value < list.length) {
+        selectRoute(list[routeCursor.value])
+      }
+    }
+    function clearRouteSearch() {
+      routeSearch.value = ''
+      routeCursor.value = -1
+      form.value.route_id = ''
+    }
+    function selectRoute(r) {
+      form.value.route_id = r.id
+      routeSearch.value = r.name || ''
+      showRouteDropdown.value = false
+      routeCursor.value = -1
+    }
 
     function onProductSearchFocus() { showProductDropdown.value = true; productCursor.value = -1 }
         let _productSearchTimer = null
@@ -467,6 +504,10 @@ const orders = ref([])
       pendingCount, producingCount, completedCount,
       // 下拉数据
       customers, products, processRoutes, productionLines,
+      // 工序路线搜索 Combobox
+      routeSearch, showRouteDropdown, routeCursor, filteredRoutes,
+      onRouteSearchFocus, onRouteSearchInput, moveRouteCursor, selectRouteByEnter,
+      clearRouteSearch, selectRoute,
       // 联动
       onCustomerChange,
       // 模态框

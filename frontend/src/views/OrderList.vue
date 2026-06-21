@@ -144,26 +144,18 @@
             <div class="form-col" style="flex:2">
               <div class="form-group"><label>订单号</label><input class="form-input" v-model="form.order_no" placeholder="自动生成" :disabled="!modalEdit"></div>
             </div>
-            <div class="form-col" style="flex:1" v-if="modalEdit">
-              <div class="form-group"><label>状态</label>
-                <select class="form-input" v-model="form.status">
-                  <option value="pending">待生产</option>
-                  <option value="producing">生产中</option>
-                  <option value="completed">已完成</option>
-                  <option value="cancelled">已取消</option>
-                  <option value="paused">已暂停</option>
+            <div class="form-col" style="flex:2">
+              <div class="form-group"><label>客户</label>
+                <select class="form-input" v-model="form.customer_id" @change="onCustomerChange">
+                  <option value="">-- 请选择客户 --</option>
+                  <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
               </div>
             </div>
           </div>
           <div class="form-row">
-            <div class="form-col"><div class="form-group"><label>客户</label>
-                <select class="form-input" v-model="form.customer_id" @change="onCustomerChange">
-                  <option value="">-- 请选择客户 --</option>
-                  <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }}</option>
-                </select>
-              </div></div>
             <div class="form-col"><div class="form-group"><label>产品名称 *</label><input class="form-input" v-model="form.product_name" placeholder="如：底壳"></div></div>
+            <div class="form-col"><div class="form-group"><label>数量 *</label><input class="form-input" v-model.number="form.quantity" type="number" min="1" placeholder="生产数量"></div></div>
           </div>
           <!-- 产品编码搜索 — 独占整行 -->
           <div class="form-group" style="margin-bottom:12px"><label>产品编码搜索</label>
@@ -217,17 +209,39 @@
             <span v-if="form.weight" style="font-size:13px;color:#374151"><b>重量</b> {{ form.weight }}kg</span>
           </div>
           <div class="form-row">
-            <div class="form-col"><div class="form-group"><label>数量 *</label><input class="form-input" v-model.number="form.quantity" type="number" min="1" placeholder="生产数量"></div></div>
             <div class="form-col"><div class="form-group"><label>计划开始</label><input class="form-input" v-model="form.plan_start" type="date"></div></div>
             <div class="form-col"><div class="form-group"><label>计划结束</label><input class="form-input" v-model="form.plan_end" type="date"></div></div>
           </div>
           <div class="form-row">
             <div class="form-col"><div class="form-group"><label>交期</label><input class="form-input" v-model="form.deadline" type="date"></div></div>
             <div class="form-col"><div class="form-group"><label>工序路线</label>
-              <select class="form-input" v-model="form.route_id">
-                <option value="">-- 请选择工序路线 --</option>
-                <option v-for="r in processRoutes" :key="r.id" :value="r.id">{{ r.name }}</option>
-              </select>
+              <div class="combobox" style="width:100%">
+                <input class="form-input combobox-input" v-model="routeSearch"
+                  placeholder="&#128269; 输入路线名称搜索..."
+                  @focus="onRouteSearchFocus"
+                  @input="onRouteSearchInput"
+                  @keydown.escape="showRouteDropdown=false"
+                  @keydown.enter.prevent="selectRouteByEnter"
+                  @keydown.down.prevent="moveRouteCursor(1)"
+                  @keydown.up.prevent="moveRouteCursor(-1)"
+                  autocomplete="off">
+                <span v-if="routeSearch" class="combobox-clear" @click="clearRouteSearch">&#10005;</span>
+                <div class="combobox-dropdown" v-if="showRouteDropdown && filteredRoutes.length"
+                  @mousedown.prevent>
+                  <div v-for="(r, i) in filteredRoutes" :key="r.id"
+                    class="combobox-item"
+                    :class="{ active: routeCursor === i }"
+                    @click="selectRoute(r)"
+                    @mouseenter="routeCursor = i">
+                    <code style="font-size:var(--text-sm);font-weight:600;color:var(--primary);min-width:60px">#{{ r.id }}</code>
+                    <span style="flex:1;font-size:var(--text-sm)">{{ r.name }}</span>
+                  </div>
+                </div>
+                <div class="combobox-dropdown" v-if="showRouteDropdown && !routeSearch && !filteredRoutes.length"
+                  @mousedown.prevent>
+                  <div class="combobox-item" style="color:var(--text-placeholder);justify-content:center">暂无工序路线数据</div>
+                </div>
+              </div>
             </div></div>
           </div>
           <div class="form-row">
@@ -237,7 +251,17 @@
                 <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }} (日产能: {{ pl.capacity_per_day || '-' }})</option>
               </select>
             </div></div>
-            <div class="form-col"></div>
+            <div class="form-col" v-if="modalEdit">
+              <div class="form-group"><label>状态</label>
+                <select class="form-input" v-model="form.status">
+                  <option value="pending">待生产</option>
+                  <option value="producing">生产中</option>
+                  <option value="completed">已完成</option>
+                  <option value="cancelled">已取消</option>
+                  <option value="paused">已暂停</option>
+                </select>
+              </div>
+            </div>
           </div>
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
 

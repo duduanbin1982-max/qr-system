@@ -104,8 +104,8 @@ class RoleService:
         if not code:
             code = "".join(_get_pinyin_initial(ch) for ch in name if _get_pinyin_initial(ch)).lower()
             if len(code) < 3:
-                import time, uuid
-                code = "role_" + uuid.uuid4().hex[:6]
+                import time
+                code = "role_" + hex(int(time.time() * 1000))[2:]
         group_id = data.get("group_id")
         if group_id and not RoleRepository.group_exists(group_id):
             raise ValueError("所属角色组不存在")

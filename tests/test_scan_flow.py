@@ -21,44 +21,24 @@ class TestScanWorkFlow:
         })
         assert resp.status_code in (200, 404)
 
-    def test_work_report_submit(self, client, auth_headers, worker_auth_headers):
+    def test_work_report_submit(self, client, auth_headers, worker_auth_headers, test_order_id):
         """POST /api/report — submit a work report."""
-        # First create an order, then report on it
-        order_no = f"TEST-FLOW-{int(time.time())}"
-        create_resp = client.post("/api/orders", headers=auth_headers, json={
-            "order_no": order_no,
-            "customer": "Integration Test",
-            "product_name": "Test Part",
-            "quantity": 10
-        })
-        if create_resp.status_code not in (200, 201):
-            pytest.skip(f"Cannot create order (status={create_resp.status_code})")
-
-        order_id = create_resp.get_json().get("id")
-        if not order_id:
-            pytest.skip("No order id returned")
-
-        # Get first process
+        # Get first available process
         proc_resp = client.get("/api/processes", headers=auth_headers)
-        if proc_resp.status_code != 200:
-            pytest.skip("Cannot list processes")
-
+        assert proc_resp.status_code == 200
         processes = proc_resp.get_json().get("items", proc_resp.get_json().get("processes", []))
-        if not processes:
-            pytest.skip("No processes available")
-
+        assert len(processes) > 0, "Need at least one process for report test"
         process_id = processes[0]["id"]
 
         # Submit work report
         report_resp = client.post("/api/report", headers=worker_auth_headers, json={
-            "order_id": order_id,
+            "order_id": test_order_id,
             "process_id": process_id,
             "quantity": 5,
             "serial_no": f"SN-{int(time.time())}",
             "report_type": "normal"
         })
-        # 400 = validation error (ok), 200 = success (ok)
-        assert report_resp.status_code in (200, 400, 201)
+        assert report_resp.status_code in (200, 201)
 
     def test_qr_code_generation(self, client, auth_headers):
         """POST /api/qrcode/batch — generate QR codes."""

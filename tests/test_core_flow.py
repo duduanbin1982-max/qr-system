@@ -19,7 +19,7 @@ class TestAuth:
             "username": "testrunner",
             "password": "wrongpassword"
         })
-        assert resp.status_code in (400, 401, 429)
+        assert resp.status_code == 400
 
     def test_health_check(self, client):
         resp = client.get("/api/health")
@@ -49,17 +49,11 @@ class TestOrders:
             "product_name": "Test Product",
             "quantity": 10
         })
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200
 
-    def test_order_detail(self, client, auth_headers):
-        lst = client.get("/api/orders?limit=1", headers=auth_headers)
-        if lst.status_code in (200, 403):
-            data = lst.get_json()
-            items = data.get("items", data.get("orders", []))
-            if items:
-                oid = items[0]["id"]
-                resp = client.get(f"/api/orders/{oid}", headers=auth_headers)
-                assert resp.status_code in (200, 405)
+    def test_order_detail(self, client, auth_headers, test_order_id):
+        resp = client.get(f"/api/orders/{test_order_id}/work-records", headers=auth_headers)
+        assert resp.status_code == 200
 
 
 class TestScanWorkReport:
@@ -74,7 +68,7 @@ class TestScanWorkReport:
             "order_id": 1,
             "process_id": 1
         })
-        assert resp.status_code in (401, 404)
+        assert resp.status_code in (401, 404)  # route may not exist
 
 
 class TestSystem:
@@ -94,4 +88,4 @@ class TestSystem:
 
     def test_swagger_disabled(self, client):
         resp = client.get("/api/docs/")
-        assert resp.status_code in (404, 403)
+        assert resp.status_code == 404

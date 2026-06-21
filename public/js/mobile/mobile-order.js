@@ -39,7 +39,7 @@ function doScan(code) {
     if (_u && _u.permissions && (_u.permissions.indexOf("*") !== -1 || _u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:view") !== -1)) {
       closeCam();
       try { sessionStorage.setItem("iq_token", token()); sessionStorage.setItem("iq_code", code); } catch(e) {}
-      window.location.href = "/mobile_inspection.html";
+      window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code);
       return;
     }
 
