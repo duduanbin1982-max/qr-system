@@ -118,10 +118,11 @@ class RoleService:
         if not name:
             raise ValueError('角色名称不能为空')
         if not code:
-            # Auto-generate code from name using pinyin initials
+            # Auto-generate code from name (pinyin initials, fallback to UUID)
             code = ''.join(_get_pinyin_initial(ch) for ch in name if _get_pinyin_initial(ch)).lower()
-            if not code:
-                import uuid; code = 'role_' + uuid.uuid4().hex[:8]
+            if len(code) < 3:
+                import time, uuid
+                code = 'role_' + uuid.uuid4().hex[:6]
         db = BaseService.db()
         group_id = data.get('group_id')
         if group_id and not db.execute('SELECT id FROM role_groups WHERE id = ?', (group_id,)).fetchone():

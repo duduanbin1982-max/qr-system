@@ -82,7 +82,7 @@ export function useRoleManage() {
     showRoleModal.value = true
   }
   async function saveRole() {
-    if (!roleForm.name || !roleForm.code) { showToast('角色名称和编码不能为空','error'); return }
+    if (!roleForm.name) { showToast('角色名称不能为空','error'); return }
     roleForm.permissions = JSON.stringify(selectedPerms.value)
     try {
       const body = { ...roleForm }; delete body._id
