@@ -1,6 +1,5 @@
 // Mobile Inspection Page v4 - Serial vs Order mode aware
 (function() {
-  var API = '/api';
   var orderData = null;
   var selectedProcess = null;
   var scanMode = 'order'; // 'serial' or 'order'

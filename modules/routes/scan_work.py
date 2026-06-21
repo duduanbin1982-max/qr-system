@@ -328,12 +328,6 @@ def work_report():
         if err:
             return jsonify(err), code
 
-        # Serial number: validate item current process matches
-        if serial_no and report_type == "normal":
-            item = ScanHelperService.get_product_item(serial_no)
-            if item and item["current_process_id"] and item["current_process_id"] != process_id:
-                return jsonify({"error": "serial " + str(serial_no) + " not at this process, please refresh"}), 400
-
         # Approval check
         need_approval = ScanHelperService.check_approval_required(process_id) is not None
 

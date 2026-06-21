@@ -4,7 +4,6 @@
 //  扫码报工系统 — 手机扫码模块 v3
 // ═══════════════════════════════════════════
 
-const API = '/api';
 
 // ── 状态 ──────────────────────────────────
 let curOrder   = null;
@@ -42,7 +41,6 @@ function toast(msg, ms) {
 
 // Auth: dual channel — httpOnly cookie (primary) + Bearer token (fallback).
 // phone browsers may drop non-Secure cookies on HTTPS; Bearer is backup.
-function token()  { var u = user(); if (u && u.token) return u.token; var m = document.cookie.match(/(?:^|;\s*)qr_token=([^;]*)/); return m ? m[1] : ''; }
 function user()   {
   if (window.__qr_user) return window.__qr_user;
   try { var u = JSON.parse(sessionStorage.getItem('qr_user')); if (u) { window.__qr_user = u; return u; } } catch(e) {}
