@@ -97,32 +97,33 @@ import { auth, restoreSession, logout } from '@/lib/auth.js'
 import { router, navigate, restoreNavState } from '@/lib/router.js'
 import { store, showToast } from '@/lib/store.js'
 import { api } from '@/lib/api.js'
-import { ref, onMounted, computed, reactive, watch } from 'vue'
-import LoginPage from './LoginPage.vue'
-import DashboardPage from './DashboardPage.vue'
-import CustomerList from './CustomerList.vue'
-import ProductList from './ProductList.vue'
-import UserList from './UserList.vue'
-import ProcessList from './ProcessList.vue'
-import InventoryList from './InventoryList.vue'
-import MaterialList from './MaterialList.vue'
-import OrderList from './OrderList.vue'
-import PriceList from './PriceList.vue'
-import RouteList from './RouteList.vue'
-import ScanReport from './ScanReport.vue'
-import ShipmentList from './ShipmentList.vue'
-import StatsPage from './StatsPage.vue'
-import ReportsPage from './ReportsPage.vue'
-import TracePage from './TracePage.vue'
-import SettingsPage from './SettingsPage.vue'
-import BoardPage from './BoardPage.vue'
-import BasicSettings from './BasicSettings.vue'
-import ProductionSettings from './ProductionSettings.vue'
-import ReworkList from './ReworkList.vue'
-import GanttChart from './GanttChart.vue'
-import ApprovalPage from './ApprovalPage.vue'
-import InspectionList from './InspectionList.vue'
-import WageList from './WageList.vue'
+import { ref, onMounted, computed, reactive, watch, defineAsyncComponent } from 'vue'
+
+const LoginPage = defineAsyncComponent(() => import('./LoginPage.vue'))
+const DashboardPage = defineAsyncComponent(() => import('./DashboardPage.vue'))
+const CustomerList = defineAsyncComponent(() => import('./CustomerList.vue'))
+const ProductList = defineAsyncComponent(() => import('./ProductList.vue'))
+const UserList = defineAsyncComponent(() => import('./UserList.vue'))
+const ProcessList = defineAsyncComponent(() => import('./ProcessList.vue'))
+const InventoryList = defineAsyncComponent(() => import('./InventoryList.vue'))
+const MaterialList = defineAsyncComponent(() => import('./MaterialList.vue'))
+const OrderList = defineAsyncComponent(() => import('./OrderList.vue'))
+const PriceList = defineAsyncComponent(() => import('./PriceList.vue'))
+const RouteList = defineAsyncComponent(() => import('./RouteList.vue'))
+const ScanReport = defineAsyncComponent(() => import('./ScanReport.vue'))
+const ShipmentList = defineAsyncComponent(() => import('./ShipmentList.vue'))
+const StatsPage = defineAsyncComponent(() => import('./StatsPage.vue'))
+const ReportsPage = defineAsyncComponent(() => import('./ReportsPage.vue'))
+const TracePage = defineAsyncComponent(() => import('./TracePage.vue'))
+const SettingsPage = defineAsyncComponent(() => import('./SettingsPage.vue'))
+const BoardPage = defineAsyncComponent(() => import('./BoardPage.vue'))
+const BasicSettings = defineAsyncComponent(() => import('./BasicSettings.vue'))
+const ProductionSettings = defineAsyncComponent(() => import('./ProductionSettings.vue'))
+const ReworkList = defineAsyncComponent(() => import('./ReworkList.vue'))
+const GanttChart = defineAsyncComponent(() => import('./GanttChart.vue'))
+const ApprovalPage = defineAsyncComponent(() => import('./ApprovalPage.vue'))
+const InspectionList = defineAsyncComponent(() => import('./InspectionList.vue'))
+const WageList = defineAsyncComponent(() => import('./WageList.vue'))
 
 // Expose globals for template compatibility
 window.A = { auth, router, store, showToast, navigate, logout, api }

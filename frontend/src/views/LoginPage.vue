@@ -62,8 +62,9 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
-import { auth } from '@/lib/auth.js'
+import { ref } from 'vue'
+import { auth, login, changePassword } from '@/lib/auth.js'
+import { navigate } from '@/lib/router.js'
 
 export default {
   setup(props, { emit }) {
@@ -105,13 +106,11 @@ export default {
       loading.value = true
       error.value = ''
       try {
-        const { login } = await import('@/lib/auth.js')
         const result = await login(username.value, password.value)
         if (result.mustChangePassword) {
           showChangePassword.value = true
           error.value = ''
         } else {
-          const { navigate } = await import('@/lib/router.js')
           navigate(getLandingPage())
         }
       } catch(e) {
@@ -133,9 +132,7 @@ export default {
       loading.value = true
       error.value = ''
       try {
-        const { changePassword } = await import('@/lib/auth.js')
         await changePassword(newPassword.value)
-        const { navigate } = await import('@/lib/router.js')
         navigate(getLandingPage())
       } catch(e) {
         error.value = e.message || '修改密码失败'
