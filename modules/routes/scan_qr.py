@@ -4,7 +4,6 @@ qr-system - QR code generation routes
 import base64, json
 from flask import request, jsonify, g, send_file
 from modules.app import app
-from modules.db import get_db
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.services.scan_qr_service import ScanQRService
@@ -50,7 +49,6 @@ def batch_qrcode():
         if not order_ids:
             return jsonify({'error': '请选择订单'}), 400
 
-        db = get_db()
         codes = []
         skipped = []
         
@@ -132,7 +130,6 @@ def batch_qrcode():
 @check_auth
 def generate_order_qr(order_id):
     """Generate QR code for an order (returns base64 PNG data URL)."""
-    db = get_db()
     order = ScanQRService.find_order_for_qr(order_id)
     
     if not order:

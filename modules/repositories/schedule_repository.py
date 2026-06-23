@@ -3,7 +3,7 @@ qr-system - ScheduleRepository
 
 All SQL for schedule/gantt operations.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class ScheduleRepository:

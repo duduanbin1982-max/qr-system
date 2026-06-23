@@ -12,7 +12,7 @@ from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.data_scope import get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
-from modules.db import get_setting
+from modules.services.setting_service import SettingsService
 import qrcode as qrcode_lib
 from io import BytesIO
 

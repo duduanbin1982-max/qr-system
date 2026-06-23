@@ -4,7 +4,7 @@ qr-system - QualityRepository
 All SQL for quality_inspections and quality_attachments tables.
 """
 from datetime import datetime
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class QualityRepository:

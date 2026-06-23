@@ -1,5 +1,5 @@
-﻿"""qr-system - OrderNotesRepository"""
-from modules.services import BaseService
+"""qr-system - OrderNotesRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class OrderNotesRepository:

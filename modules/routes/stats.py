@@ -1,4 +1,4 @@
-﻿"""qr-system - Stats Routes (Refactored)"""
+"""qr-system - Stats Routes (Refactored)"""
 from datetime import datetime
 from flask import request, jsonify, send_file
 from modules.app import app
@@ -157,28 +157,10 @@ def stats_material_detail():
     if not material_id:
         return jsonify({"error": "material_id required"}), 400
     try:
-        from modules.services import BaseService
-        db = BaseService.db()
-        where = ["mc.material_id = ?"]
-        params = [material_id]
-        if start:
-            where.append("DATE(mc.created_at) >= ?"); params.append(start)
-        if end:
-            where.append("DATE(mc.created_at) <= ?"); params.append(end)
-        w = " AND ".join(where)
-        rows = db.execute(
-            "SELECT mc.id, mc.quantity, mc.created_at, o.order_no, o.product_name, "
-            "p.name as process_name FROM material_consumptions mc "
-            "LEFT JOIN orders o ON mc.order_id = o.id "
-            "LEFT JOIN processes p ON mc.process_id = p.id "
-            "WHERE " + w + " ORDER BY mc.created_at DESC LIMIT 200",
-            params
-        ).fetchall()
-        return jsonify({"details": [dict(r) for r in rows]})
+        details = StatsService.get_material_detail(material_id, start, end)
+        return jsonify({"details": details})
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
-
-
 
 @app.route("/api/stats/customer", methods=["GET"])
 @check_auth

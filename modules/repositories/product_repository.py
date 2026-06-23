@@ -1,10 +1,10 @@
-﻿"""
+"""
 qr-system — ProductRepository（数据访问层）
 
 Brooks R6 fix: 将所有 products / product_attachments 表 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 class ProductRepository:
     """产品数据访问 — 所有 products / product_attachments 表 CRUD 集中管理。"""

@@ -1,10 +1,10 @@
-﻿"""
+"""
 qr-system — OrderRepository（数据访问层）
 
 Brooks R6 fix: 将所有 orders 表 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class OrderRepository:

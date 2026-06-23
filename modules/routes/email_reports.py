@@ -8,9 +8,8 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
-from modules.db import get_db
 from modules.app import app
-from modules.db import get_db, get_setting
+from modules.services.setting_service import SettingsService
 from modules.services.email_reports_service import EmailReportsService
 from modules.services.smtp_crypto import decrypt_smtp_password
 from modules.middleware.audit import audit_log
@@ -19,13 +18,13 @@ from modules.middleware.auth import check_auth, check_permission
 def _get_smtp_config():
     """Get SMTP config from system_settings with defaults."""
     return {
-        'host': get_setting('smtp_host', ''),
-        'port': int(get_setting('smtp_port', '0') or '0'),
-        'user': get_setting('smtp_user', ''),
-        'password': decrypt_smtp_password(get_setting('smtp_password', '')),
-        'from_email': get_setting('smtp_from', ''),
-        'to_emails': get_setting('report_recipients', ''),
-        'use_tls': get_setting('smtp_tls', '1') == '1',
+        'host': SettingsService.get_value('smtp_host', ''),
+        'port': int(SettingsService.get_value('smtp_port', '0') or '0'),
+        'user': SettingsService.get_value('smtp_user', ''),
+        'password': decrypt_smtp_password(SettingsService.get_value('smtp_password', '')),
+        'from_email': SettingsService.get_value('smtp_from', ''),
+        'to_emails': SettingsService.get_value('report_recipients', ''),
+        'use_tls': SettingsService.get_value('smtp_tls', '1') == '1',
     }
 
 def _send_email(subject, body_html):
@@ -67,7 +66,6 @@ def _send_email(subject, body_html):
 
 def _build_daily_report():
     """Generate daily production report HTML."""
-    db = get_db()
     today = datetime.now().strftime('%Y-%m-%d')
 
     # Today's summary (via service)
@@ -138,7 +136,6 @@ def send_daily_report():
 @check_permission('reports:view')
 def send_weekly_report():
     """Send weekly production report email."""
-    db = get_db()
     now = datetime.now()
     week_start = (now - timedelta(days=now.weekday())).strftime('%Y-%m-%d')
     week_end = now.strftime('%Y-%m-%d')

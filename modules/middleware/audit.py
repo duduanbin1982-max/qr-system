@@ -9,7 +9,7 @@ def audit_log(action: str, target_type: str = '', target_id: int = 0, detail: st
         db.execute('INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) VALUES (?,?,?,?,?)',
                    (uid, action, target_type, target_id, detail))
         # Only commit if NOT inside an active transaction (avoid breaking caller's atomicity)
-        from modules.services import BaseService
+        from modules.db_unit_of_work import BaseService
         if not BaseService.is_in_transaction(db):
             db.commit()
     except Exception as ex:

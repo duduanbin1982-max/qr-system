@@ -1,5 +1,5 @@
-﻿"""qr-system — RouteRepository（工序路线数据访问层）"""
-from modules.services import BaseService
+"""qr-system — RouteRepository（工序路线数据访问层）"""
+from modules.db_unit_of_work import BaseService
 
 
 class RouteRepository:

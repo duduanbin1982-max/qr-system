@@ -1,7 +1,7 @@
 """
 qr-system — ScanRepository（扫码报工数据访问层）
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class ScanRepository:

@@ -11,6 +11,7 @@ from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
+from modules.setting_reader import get_setting
 
 # Extracted constants — Brooks R4 fix
 
@@ -27,7 +28,6 @@ def _generate_order_no(db):
     如果未配置，默认使用 YYMMDD 格式。
     调用方必须在外层管理事务。
     """
-    from modules.db import get_setting
     today = datetime.now()
     
     prefix_template = get_setting("auto_order_no", "").strip()
@@ -641,3 +641,38 @@ class OrderService:
                 txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
             txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
         return existing['order_no'] or ""
+
+    # ============================================================
+    # Order Materials
+    # ============================================================
+    @staticmethod
+    def list_order_materials(order_id):
+        if not OrderService.get_order(order_id):
+            raise ValueError('?????')
+        return [dict(row) for row in OrderMaterialRepository.list_by_order(order_id)]
+
+    @staticmethod
+    def add_order_material(order_id, data):
+        if not OrderService.get_order(order_id):
+            raise ValueError('?????')
+        material_id = data.get('material_id')
+        quantity = data.get('quantity') or data.get('quantity_per_unit', 1)
+        process_id = data.get('process_id') or None
+        if not material_id:
+            raise ValueError('?????')
+        with BaseService.transaction() as txn:
+            if OrderMaterialRepository.find_duplicate(order_id, material_id, process_id, db=txn):
+                raise LookupError('???+???????')
+            new_id = OrderMaterialRepository.insert(
+                order_id, material_id, quantity, process_id, 'manual', db=txn
+            )
+            row = OrderMaterialRepository.find_by_id(new_id, db=txn)
+            return dict(row)
+
+    @staticmethod
+    def delete_order_material(order_id, item_id):
+        with BaseService.transaction() as txn:
+            if not OrderMaterialRepository.find_by_id_and_order(item_id, order_id, db=txn):
+                raise ValueError('??????')
+            OrderMaterialRepository.delete(item_id, db=txn)
+

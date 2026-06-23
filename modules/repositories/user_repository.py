@@ -3,8 +3,8 @@
 All SQL for users, user_processes, user_roles, positions, roles, role_groups tables.
 Extracted from user_service.py.
 """
-from modules.services import BaseService
-from modules.services.query_utils import paginate, build_sort_clause
+from modules.db_unit_of_work import BaseService
+from modules.query_utils import paginate, build_sort_clause
 
 
 class UserRepository:
@@ -319,6 +319,63 @@ class UserRepository:
         db.execute("DELETE FROM wage_snapshots WHERE employee_id = ?", (uid,))
         db.execute("DELETE FROM wage_adjustments WHERE user_id = ?", (uid,))
         db.execute("DELETE FROM users WHERE id = ?", (uid,))
+
+
+    # ============================================================
+    # User Detail / Documents
+    # ============================================================
+
+    @staticmethod
+    def get_user_role_names(user_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+    @staticmethod
+    def get_user_assigned_processes(user_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT p.id, p.name FROM user_processes up JOIN processes p ON up.process_id = p.id WHERE up.user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+    @staticmethod
+    def get_user_work_stats(user_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT COUNT(*) as total_records, SUM(quantity) as total_quantity FROM work_records WHERE user_id = ? AND status = 'approved'",
+            (user_id,)
+        ).fetchone()
+
+    @staticmethod
+    def list_user_documents(user_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id, user_id, doc_name, doc_type, file_size, uploaded_by, created_at "
+            "FROM employee_documents WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+
+    @staticmethod
+    def find_user_document(user_id, doc_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT * FROM employee_documents WHERE id = ? AND user_id = ?",
+            (doc_id, user_id)
+        ).fetchone()
+
+    @staticmethod
+    def insert_user_document_txn(user_id, doc_name, doc_type, file_path, file_size, uploaded_by, db):
+        db.execute(
+            "INSERT INTO employee_documents (user_id, doc_name, doc_type, file_path, file_size, uploaded_by) VALUES (?,?,?,?,?,?)",
+            (user_id, doc_name, doc_type, file_path, file_size, uploaded_by)
+        )
+
+    @staticmethod
+    def delete_user_document_txn(doc_id, db):
+        db.execute("DELETE FROM employee_documents WHERE id = ?", (doc_id,))
 
     # ============================================================
     # Transaction: Password & Account

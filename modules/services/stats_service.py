@@ -1,4 +1,4 @@
-﻿"""qr-system - StatsService"""
+"""qr-system - StatsService"""
 from modules.repositories.stats_repository import StatsRepository
 
 
@@ -41,3 +41,7 @@ class StatsService:
     @staticmethod
     def get_worker_detail(user_id, start='', end=''):
         return StatsRepository.get_worker_detail(user_id, start, end)
+
+    @staticmethod
+    def get_material_detail(material_id, start='', end=''):
+        return StatsRepository.get_material_detail(material_id, start, end)

@@ -1,5 +1,5 @@
-﻿"""qr-system - ExportRepository"""
-from modules.services import BaseService
+"""qr-system - ExportRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class ExportRepository:

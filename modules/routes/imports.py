@@ -7,7 +7,6 @@ from datetime import datetime
 from flask import request, jsonify, g
 from werkzeug.utils import secure_filename
 
-from modules.db import get_db
 from modules.app import app
 from modules.services.imports_service import ImportsService
 from modules.middleware.audit import audit_log
@@ -173,7 +172,6 @@ def bulk_import_orders():
     if len(rows) > MAX_IMPORT_ROWS:
         return jsonify({'error': f'Max {MAX_IMPORT_ROWS} rows per import'}), 400
 
-    db = get_db()
     imported = 0
     skipped = 0
     errors = []
@@ -233,7 +231,6 @@ def bulk_import_products():
     if len(rows) > MAX_IMPORT_ROWS:
         return jsonify({'error': f'Max {MAX_IMPORT_ROWS} rows per import'}), 400
 
-    db = get_db()
     imported = 0
     skipped = 0
     errors = []
@@ -280,7 +277,6 @@ def bulk_import_customers():
     if len(rows) > MAX_IMPORT_ROWS:
         return jsonify({'error': f'Max {MAX_IMPORT_ROWS} rows per import'}), 400
 
-    db = get_db()
     imported = 0
     skipped = 0
     errors = []

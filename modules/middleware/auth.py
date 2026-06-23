@@ -1,83 +1,23 @@
 """
 qr-system — 认证中间件：check_auth, check_permission, audit_log, has_permission, get_user_permissions
 """
-import json
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
-import logging
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
 from modules.config import SESSION_TIMEOUT_HOURS, SESSION_IDLE_MINUTES
 from modules.db import get_db, get_setting
-from modules.services import BaseService
+from modules.access_policy import get_user_permissions as _get_user_permissions, has_permission as _has_permission
 
 def has_permission(user: Optional[dict], perm: str) -> bool:
-    """检查用户是否拥有指定权限（含角色组权限继承）
-    - user: g.current_user dict
-    - perm: 如 'orders:edit' 或 '*' (星号需超级管理员)
-    """
-    if not user:
-        return False
-    cached = user.get('_permissions')
-    if cached is not None:
-        if '*' in cached:
-            return True
-        return perm in cached
-    # Fallback: DB query
-    db = get_db()
-    rows = db.execute('''
-        SELECT r.permissions as role_perms, rg.permissions as group_perms
-        FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
-        LEFT JOIN role_groups rg ON r.group_id = rg.id
-        WHERE ur.user_id = ? AND r.status = 'active'
-    ''', (user['id'],)).fetchall()
-    all_perms = set()
-    for row in rows:
-        if row['role_perms']:
-            try:
-                perms = json.loads(row['role_perms'])
-                all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError) as e:
-                logging.getLogger('qr').warning(f'has_permission: invalid role_perms JSON for user {user.get("id")}: {e}')
-        if row['group_perms']:
-            try:
-                perms = json.loads(row['group_perms'])
-                all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError) as e:
-                logging.getLogger('qr').warning(f'has_permission: invalid group_perms JSON for user {user.get("id")}: {e}')
-    if '*' in all_perms:
-        return True
-    return perm in all_perms
+    """???????????????????????"""
+    return _has_permission(user, perm)
+
 
 def get_user_permissions(user: Optional[dict]) -> List[str]:
-    """获取用户所有权限列表（含角色组继承）"""
-    if not user:
-        return []
-    db = get_db()
-    rows = db.execute('''
-        SELECT r.permissions as role_perms, rg.permissions as group_perms
-        FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
-        LEFT JOIN role_groups rg ON r.group_id = rg.id
-        WHERE ur.user_id = ? AND r.status = 'active'
-    ''', (user['id'],)).fetchall()
-    all_perms = set()
-    for row in rows:
-        if row['role_perms']:
-            try:
-                perms = json.loads(row['role_perms'])
-                all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError) as e:
-                logging.getLogger('qr').warning(f'get_user_permissions: invalid role_perms JSON for user {user.get("id")}: {e}')
-        if row['group_perms']:
-            try:
-                perms = json.loads(row['group_perms'])
-                all_perms.update(perms)
-            except (json.JSONDecodeError, TypeError) as e:
-                logging.getLogger('qr').warning(f'get_user_permissions: invalid group_perms JSON for user {user.get("id")}: {e}')
-    return sorted(all_perms)
+    """???????????????????"""
+    return _get_user_permissions(user)
 
 def check_auth(f: Callable) -> Callable:
     @wraps(f)

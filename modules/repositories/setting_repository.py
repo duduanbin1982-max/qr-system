@@ -1,5 +1,5 @@
-﻿"""qr-system - SettingRepository"""
-from modules.services import BaseService
+"""qr-system - SettingRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class SettingRepository:
@@ -8,6 +8,12 @@ class SettingRepository:
     def get_all(db=None):
         db = db or BaseService.db()
         return db.execute("SELECT * FROM system_settings").fetchall()
+
+    @staticmethod
+    def get_value(key, default=None, db=None):
+        db = db or BaseService.db()
+        row = db.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
 
     @staticmethod
     def upsert_txn(key, value, db):

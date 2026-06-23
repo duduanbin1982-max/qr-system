@@ -1,5 +1,5 @@
-﻿"""qr-system - PasswordRepository"""
-from modules.services import BaseService
+"""qr-system - PasswordRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class PasswordRepository:

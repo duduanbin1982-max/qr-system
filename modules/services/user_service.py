@@ -5,6 +5,8 @@ All SQL delegated to UserRepository.
 """
 import bcrypt
 import secrets
+import os
+import uuid
 from modules.services import BaseService
 from modules.repositories.user_repository import UserRepository
 
@@ -483,3 +485,60 @@ class UserService:
         u.pop("password", None)
         u.pop("token", None)
         return u
+
+    @staticmethod
+    def get_user_detail(uid):
+        user = UserService.get_user(uid)
+        db = BaseService.db()
+        user["role_names"] = [row["name"] for row in UserRepository.get_user_role_names(uid, db=db)]
+        user["assigned_processes"] = [dict(row) for row in UserRepository.get_user_assigned_processes(uid, db=db)]
+        stats = UserRepository.get_user_work_stats(uid, db=db)
+        user["work_stats"] = dict(stats) if stats else {}
+        return user
+
+    @staticmethod
+    def list_user_documents(uid):
+        return [dict(row) for row in UserRepository.list_user_documents(uid)]
+
+    @staticmethod
+    def upload_user_document(uid, file_storage, doc_type, uploaded_by, upload_dir):
+        if not UserRepository.find_user_by_id_basic(uid):
+            raise LookupError("User not found")
+        os.makedirs(upload_dir, exist_ok=True)
+        ext = file_storage.filename.rsplit(".", 1)[-1].lower() if "." in file_storage.filename else ""
+        safe_name = str(uid) + "_" + uuid.uuid4().hex
+        if ext:
+            safe_name += "." + ext
+        filepath = os.path.join(upload_dir, safe_name)
+        file_storage.save(filepath)
+        file_size = os.path.getsize(filepath)
+        with BaseService.transaction() as txn:
+            UserRepository.insert_user_document_txn(
+                uid, file_storage.filename, doc_type, safe_name, file_size, uploaded_by, db=txn
+            )
+        return {"filename": file_storage.filename, "size": file_size}
+
+    @staticmethod
+    def get_user_document_file(uid, doc_id, upload_dir):
+        doc = UserRepository.find_user_document(uid, doc_id)
+        if not doc:
+            raise LookupError("Document not found")
+        doc = dict(doc)
+        filepath = os.path.join(upload_dir, doc["file_path"])
+        if not os.path.exists(filepath):
+            raise FileNotFoundError("File not found on disk")
+        return doc, filepath
+
+    @staticmethod
+    def delete_user_document(uid, doc_id, upload_dir):
+        doc = UserRepository.find_user_document(uid, doc_id)
+        if not doc:
+            raise LookupError("Document not found")
+        doc = dict(doc)
+        filepath = os.path.join(upload_dir, doc["file_path"])
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        with BaseService.transaction() as txn:
+            UserRepository.delete_user_document_txn(doc_id, db=txn)
+        return doc
+

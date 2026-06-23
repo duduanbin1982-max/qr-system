@@ -6,7 +6,6 @@ qr-system — 系统设置
 from flask import request, jsonify
 
 from modules.app import app
-from modules.db import get_setting, clear_settings_cache
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
@@ -27,7 +26,7 @@ def get_public_settings():
       - Bearer: []
     """
     return jsonify({
-        'company_name': get_setting('company_name', ''),
+        'company_name': SettingsService.get_value('company_name', ''),
     })
 
 
@@ -64,7 +63,7 @@ def save_settings():
         return jsonify({'error': '保存失败，请重试'}), 500
 
     try:
-        clear_settings_cache()
+        SettingsService.clear_cache()
     except Exception:
         pass
 
@@ -98,7 +97,7 @@ def save_company_info():
         return jsonify({'error': '保存失败，请重试'}), 500
 
     try:
-        clear_settings_cache()
+        SettingsService.clear_cache()
     except Exception:
         pass
 

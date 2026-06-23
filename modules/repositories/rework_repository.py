@@ -3,7 +3,7 @@ qr-system - ReworkRepository
 
 All SQL for rework_records table.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class ReworkRepository:

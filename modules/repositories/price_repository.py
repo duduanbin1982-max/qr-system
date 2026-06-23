@@ -1,7 +1,7 @@
-﻿"""qr-system — PriceRepository（工价数据访问层）
+"""qr-system — PriceRepository（工价数据访问层）
 All raw SQL lives here. Methods accept optional db for transaction sharing.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class PriceRepository:

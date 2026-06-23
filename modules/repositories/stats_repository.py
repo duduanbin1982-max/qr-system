@@ -1,8 +1,8 @@
-﻿"""qr-system - StatsRepository
+"""qr-system - StatsRepository
 
 All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class StatsRepository:
@@ -241,6 +241,28 @@ class StatsRepository:
             "JOIN processes p ON wr.process_id=p.id "
             "WHERE " + w + " GROUP BY o.product_name, pr.model, pr.spec, p.id "
             "ORDER BY o.product_name, pr.model, p.name",
+            params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_material_detail(material_id, start='', end='', db=None):
+        db = db or BaseService.db()
+        where = ["mc.material_id = ?"]
+        params = [material_id]
+        if start:
+            where.append("DATE(mc.created_at) >= ?")
+            params.append(start)
+        if end:
+            where.append("DATE(mc.created_at) <= ?")
+            params.append(end)
+        w = " AND ".join(where)
+        rows = db.execute(
+            "SELECT mc.id, mc.quantity, mc.created_at, o.order_no, o.product_name, "
+            "p.name as process_name FROM material_consumptions mc "
+            "LEFT JOIN orders o ON mc.order_id = o.id "
+            "LEFT JOIN processes p ON mc.process_id = p.id "
+            "WHERE " + w + " ORDER BY mc.created_at DESC LIMIT 200",
             params
         ).fetchall()
         return [dict(r) for r in rows]

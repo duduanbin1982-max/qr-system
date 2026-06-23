@@ -5,9 +5,8 @@ from flask import request, jsonify
 from modules.app import app
 from modules.cache_utils import ttl_cache
 from modules.middleware.rate_limit import rate_limit
-from modules.db import get_setting, get_db, clear_settings_cache
+from modules.services.setting_service import SettingsService
 from modules.middleware.auth import check_auth, check_permission
-from modules.services import BaseService
 from modules.services.board_service import BoardService
 
 BOARD_SESSION_HOURS = 8
@@ -21,10 +20,10 @@ def _hash_token(token):
 
 def _is_board_token_valid():
     """Check if the stored board_token exists and is not expired."""
-    stored_hash = get_setting('board_token', '')
+    stored_hash = SettingsService.get_value('board_token', '')
     if not stored_hash:
         return False, 'Board token not configured'
-    created_at_str = get_setting('board_token_created_at', '')
+    created_at_str = SettingsService.get_value('board_token_created_at', '')
     if created_at_str:
         try:
             created_at = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
@@ -49,16 +48,14 @@ def board_auth():
     if not valid:
         return jsonify({'error': err_msg}), 401
 
-    stored_hash = get_setting('board_token', '')
+    stored_hash = SettingsService.get_value('board_token', '')
     if _hash_token(provided) != stored_hash:
         return jsonify({'error': 'invalid token'}), 401
 
-    db = get_db()
     session_token = secrets.token_hex(32)
     expires_at = (datetime.now() + timedelta(hours=BOARD_SESSION_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
 
-    with BaseService.transaction() as txn:
-        txn.execute("INSERT INTO board_sessions (token, expires_at) VALUES (?, ?)", (session_token, expires_at))
+    BoardService.create_auth_session(session_token, expires_at)
     return jsonify({
         'token': session_token,
         'expires_at': expires_at,
@@ -75,20 +72,8 @@ def board_auth_rotate():
     new_hash = _hash_token(new_token)
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    db = get_db()
-    with BaseService.transaction() as txn:
-        # Store the hash, never the plaintext
-        txn.execute(
-            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token', ?)",
-            (new_hash,)
-        )
-        txn.execute(
-            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('board_token_created_at', ?)",
-            (now_str,)
-        )
-        # Invalidate all existing sessions immediately
-        txn.execute("DELETE FROM board_sessions")
-    clear_settings_cache()
+    BoardService.rotate_auth_token(new_hash, now_str)
+    SettingsService.clear_cache()
 
     return jsonify({
         'board_token': new_token,
@@ -104,7 +89,7 @@ def board_auth_rotate():
 def board_auth_status():
     """Check board_token status (age, expiry, session count)."""
     valid, err_msg = _is_board_token_valid()
-    created_at_str = get_setting('board_token_created_at', '')
+    created_at_str = SettingsService.get_value('board_token_created_at', '')
     age_days = None
     if created_at_str:
         try:
@@ -114,13 +99,10 @@ def board_auth_status():
             import logging
             logging.getLogger("qr.board").warning("Invalid board_token_created_at value: %s", created_at_str)
 
-    db = get_db()
-    active_sessions = db.execute(
-        "SELECT COUNT(*) FROM board_sessions WHERE expires_at > datetime('now','localtime')"
-    ).fetchone()[0]
+    active_sessions = BoardService.count_active_sessions()
 
     return jsonify({
-        'configured': bool(get_setting('board_token', '')),
+        'configured': bool(SettingsService.get_value('board_token', '')),
         'valid': valid,
         'error': None if valid else err_msg,
         'age_days': age_days,
@@ -134,12 +116,7 @@ def board_auth_status():
 def _verify_board_session(token):
     if not token:
         return False
-    db = get_db()
-    row = db.execute(
-        "SELECT id FROM board_sessions WHERE token = ? AND expires_at > datetime('now','localtime')",
-        (token,)
-    ).fetchone()
-    return row is not None
+    return BoardService.verify_session(token)
 
 
 @app.route('/api/dashboard/board', methods=['GET'])
@@ -156,7 +133,7 @@ def dashboard_board():
             if _verify_board_session(auth_header[7:]):
                 authorized = True
     if not authorized:
-        board_configured = bool(get_setting('board_token', ''))
+        board_configured = bool(SettingsService.get_value('board_token', ''))
         msg = 'Unauthorized' if board_configured else 'Board token not configured'
         return jsonify({'error': msg}), 401
 
@@ -189,7 +166,5 @@ def dashboard_board():
 @check_auth
 @check_permission('settings:manage')
 def board_auth_cleanup():
-    db = get_db()
-    with BaseService.transaction() as txn:
-        txn.execute("DELETE FROM board_sessions WHERE expires_at <= datetime('now','localtime')")
+    BoardService.cleanup_expired_sessions()
     return jsonify({'message': 'cleaned'})

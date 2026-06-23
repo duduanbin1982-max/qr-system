@@ -1,4 +1,4 @@
-﻿"""qr-system — ScanHelperService（扫码报工核心数据操作）
+"""qr-system — ScanHelperService（扫码报工核心数据操作）
 CRITICAL FIX: 所有写操作事务化 — 消除 23 个裸 db.commit()，统一使用 BaseService.transaction()
 """
 import logging
@@ -7,6 +7,8 @@ from modules.services import BaseService
 from modules.repositories.scan_repository import ScanRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
+from modules.setting_reader import get_setting
+from modules.access_policy import get_user_process_ids, has_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -105,7 +107,6 @@ class ScanHelperService:
     @staticmethod
     def check_process_order(order_id, current_seq, db=None):
         """Check sequential process order. Returns (None, None) if OK, or (error_json, status_code)."""
-        from modules.db import get_setting
         mode = get_setting("process_order_mode", "sequential")
         if mode == "out_of_order":
             return None, None
@@ -118,7 +119,6 @@ class ScanHelperService:
     @staticmethod
     def check_quantity_limits(order_id, current_seq, current_completed, quantity, order_quantity, db=None):
         """Check quantity limits. Returns (None, None) or (error_json, status_code)."""
-        from modules.db import get_setting
         # Upper limit: previous process completed count
         if get_setting("limit_by_prev_process", "1") == "1" and current_seq > 1:
             prev_op = ScanHelperService.get_prev_order_process(order_id, current_seq, db)
@@ -239,7 +239,6 @@ class ScanHelperService:
 
     @staticmethod
     def check_approval_required(process_id, db=None):
-        from modules.db import get_setting
         # Master switch: if approval_enabled is off, skip all approval checks
         if get_setting("approval_enabled", "1") != "1":
             return None
@@ -445,9 +444,6 @@ class ScanHelperService:
         Returns (error_dict, status_code) or (None, None) on success.
         Also returns validated (quantity, serial_no) after adjustments.
         """
-        from modules.middleware.auth import has_permission
-        from modules.middleware.data_scope import get_user_process_ids
-
         # Admin/inspector accounts can only do rework/scrap
         if has_permission(user, "quality:edit") and report_type == "normal":
             return ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403), None, None

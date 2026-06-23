@@ -1,5 +1,5 @@
-﻿"""qr-system - OrderAttachmentsRepository"""
-from modules.services import BaseService
+"""qr-system - OrderAttachmentsRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class OrderAttachmentsRepository:

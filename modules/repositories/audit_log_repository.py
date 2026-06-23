@@ -2,7 +2,7 @@
 
 All SQL for audit_logs, user_roles, menu_permissions tables.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class AuditLogRepository:

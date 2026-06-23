@@ -161,3 +161,33 @@ class BoardService:
             "overdue_orders": BoardService._board_overdue(db, today, cat_sql, cat_params),
             "worker_stats": BoardService._board_worker_stats(db, today, cat_sql, cat_params),
         }
+
+    # ============================================================
+    # Board Auth Sessions
+    # ============================================================
+    @staticmethod
+    def create_auth_session(token, expires_at):
+        with BaseService.transaction() as txn:
+            BoardRepository.insert_session_txn(token, expires_at, db=txn)
+
+    @staticmethod
+    def rotate_auth_token(token_hash, created_at):
+        with BaseService.transaction() as txn:
+            BoardRepository.upsert_setting_txn('board_token', token_hash, db=txn)
+            BoardRepository.upsert_setting_txn('board_token_created_at', created_at, db=txn)
+            BoardRepository.delete_sessions_txn(db=txn)
+
+    @staticmethod
+    def count_active_sessions():
+        return BoardRepository.count_active_sessions()
+
+    @staticmethod
+    def verify_session(token):
+        if not token:
+            return False
+        return BoardRepository.find_active_session(token) is not None
+
+    @staticmethod
+    def cleanup_expired_sessions():
+        with BaseService.transaction() as txn:
+            BoardRepository.cleanup_expired_sessions_txn(db=txn)

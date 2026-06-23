@@ -1,8 +1,8 @@
-﻿"""qr-system - BoardRepository
+"""qr-system - BoardRepository
 
 All SQL for kanban board data: order counts, output, efficiency, workers.
 """
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class BoardRepository:
@@ -157,3 +157,43 @@ class BoardRepository:
             cat_params
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ============================================================
+    # Board Auth Sessions
+    # ============================================================
+    @staticmethod
+    def insert_session_txn(token, expires_at, db):
+        db.execute("INSERT INTO board_sessions (token, expires_at) VALUES (?, ?)", (token, expires_at))
+
+    @staticmethod
+    def upsert_setting_txn(key, value, db):
+        db.execute(
+            "INSERT INTO system_settings (key, value, updated_at) "
+            "VALUES (?, ?, datetime('now','localtime')) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value)
+        )
+
+    @staticmethod
+    def delete_sessions_txn(db):
+        db.execute("DELETE FROM board_sessions")
+
+    @staticmethod
+    def count_active_sessions(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT COUNT(*) FROM board_sessions WHERE expires_at > datetime('now','localtime')"
+        ).fetchone()[0]
+
+    @staticmethod
+    def find_active_session(token, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id FROM board_sessions WHERE token = ? AND expires_at > datetime('now','localtime')",
+            (token,)
+        ).fetchone()
+
+    @staticmethod
+    def cleanup_expired_sessions_txn(db):
+        db.execute("DELETE FROM board_sessions WHERE expires_at <= datetime('now','localtime')")
+

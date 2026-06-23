@@ -1,5 +1,5 @@
-﻿"""qr-system - ScanQRRepository"""
-from modules.services import BaseService
+"""qr-system - ScanQRRepository"""
+from modules.db_unit_of_work import BaseService
 
 
 class ScanQRRepository:

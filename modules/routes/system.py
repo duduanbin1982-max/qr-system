@@ -1,9 +1,8 @@
-﻿"""qr-system - Admin Backup & System Health Routes (Refactored)"""
+"""qr-system - Admin Backup & System Health Routes (Refactored)"""
 import os, io, zipfile, time
 from datetime import datetime
 from flask import request, jsonify, send_file
 from modules.app import app
-from modules.db import get_db
 from modules.config import DATA_DIR
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
@@ -81,7 +80,6 @@ def create_backup():
 @check_auth
 @check_permission('settings:manage')
 def check_integrity():
-    db = get_db()
     results = []
 
     integrity = SystemService.check_integrity()

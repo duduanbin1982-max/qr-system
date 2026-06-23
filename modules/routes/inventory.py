@@ -5,7 +5,7 @@
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
-from modules.db import get_page_size
+from modules.services.setting_service import SettingsService
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body, parse_pagination

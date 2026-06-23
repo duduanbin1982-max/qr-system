@@ -4,7 +4,7 @@ qr-system - ProductionLineRepository
 All SQL for production_lines table.
 """
 import sqlite3
-from modules.services import BaseService
+from modules.db_unit_of_work import BaseService
 
 
 class ProductionLineRepository:

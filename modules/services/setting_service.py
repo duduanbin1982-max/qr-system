@@ -1,4 +1,4 @@
-﻿"""qr-system - SettingsService (Repository-refactored)"""
+"""qr-system - SettingsService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.setting_repository import SettingRepository
 
@@ -65,6 +65,17 @@ class SettingsService:
     def get_all():
         rows = SettingRepository.get_all()
         return {r["key"]: r["value"] for r in rows if r["key"] not in SENSITIVE_KEYS}
+
+    @staticmethod
+    def get_value(key, default=None):
+        if key not in ALLOWED_KEYS:
+            return default
+        return SettingRepository.get_value(key, default)
+
+    @staticmethod
+    def clear_cache():
+        from modules.setting_reader import clear_settings_cache
+        clear_settings_cache()
 
     @staticmethod
     def save(updates, deleted_keys):

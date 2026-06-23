@@ -1,6 +1,6 @@
-﻿"""qr-system - InventoryRepository"""
-from modules.services import BaseService
-from modules.services.query_utils import paginate, build_sort_clause
+"""qr-system - InventoryRepository"""
+from modules.db_unit_of_work import BaseService
+from modules.query_utils import paginate, build_sort_clause
 
 
 class InventoryRepository:
