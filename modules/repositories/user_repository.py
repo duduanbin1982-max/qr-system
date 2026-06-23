@@ -1,4 +1,4 @@
-﻿"""qr-system - UserRepository
+"""qr-system - UserRepository
 
 All SQL for users, user_processes, user_roles, positions, roles, role_groups tables.
 Extracted from user_service.py.
@@ -48,9 +48,9 @@ class UserRepository:
             where.append("u.status = ?")
             params.append(status)
         if keyword:
-            where.append("(u.username LIKE ? OR u.name LIKE ? OR u.nickname LIKE ? OR u.employee_no LIKE ? OR u.phone LIKE ?)")
+            where.append("(u.username LIKE ? OR u.name LIKE ? OR u.nickname LIKE ? OR u.employee_no LIKE ? OR u.phone LIKE ? OR u.marker LIKE ?)")
             kw = "%" + keyword + "%"
-            params.extend([kw, kw, kw, kw, kw])
+            params.extend([kw, kw, kw, kw, kw, kw])
 
         where_sql = " AND ".join(where)
         total = db.execute(
@@ -59,7 +59,7 @@ class UserRepository:
 
         base_sql = (
             "SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no, "
-            "u.phone, u.process_ids, u.status, u.created_at, "
+            "u.marker, u.phone, u.process_ids, u.status, u.created_at, "
             "(SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, "
             "u.last_active, u.position_id, u.locked_until, "
             "(SELECT r.code FROM user_roles ur2 JOIN roles r ON ur2.role_id = r.id WHERE ur2.user_id = u.id ORDER BY r.level LIMIT 1) as role_code, "
@@ -100,7 +100,7 @@ class UserRepository:
         """Find user by ID with selected fields for update comparison."""
         db = db or BaseService.db()
         return db.execute(
-            "SELECT id, username, name, nickname, email, phone, role, employee_no, group_name, position_id, status "
+            "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, position_id, status "
             "FROM users WHERE id = ?", (uid,)
         ).fetchone()
 
@@ -224,13 +224,13 @@ class UserRepository:
     # ============================================================
 
     @staticmethod
-    def insert_user_txn(username, pw_hash, name, nickname, email, group_name, role, employee_no, phone, position_id, status, db):
+    def insert_user_txn(username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, position_id, status, db):
         """Insert a new user. Returns lastrowid."""
         cur = db.execute(
             "INSERT INTO users (username, password, name, nickname, email, group_name, "
-            "role, employee_no, phone, process_ids, position_id, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (username, pw_hash, name, nickname, email, group_name, role, employee_no, phone, "", position_id or None, status)
+            "role, employee_no, marker, phone, process_ids, position_id, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, "", position_id or None, status)
         )
         return cur.lastrowid
 

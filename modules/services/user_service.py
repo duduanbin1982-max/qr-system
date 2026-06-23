@@ -1,4 +1,4 @@
-﻿"""qr-system - User Service (Repository-pattern refactor)
+"""qr-system - User Service (Repository-pattern refactor)
 
 All business logic (validation, bcrypt, secrets) stays here.
 All SQL delegated to UserRepository.
@@ -111,6 +111,7 @@ class UserService:
                 group_name=data.get("group_name", '员工组'),
                 role=role,
                 employee_no=data.get("employee_no", ""),
+                marker=(data.get("marker") or "").strip(),
                 phone=data.get("phone", ""),
                 position_id=position_id or None,
                 status=data.get("status", "active"),
@@ -185,7 +186,7 @@ class UserService:
         if "employee_no" in data and not data["employee_no"]:
             del data["employee_no"]
         for field in ["name", "nickname", "email", "group_name", "role", "employee_no",
-                       "phone", "status", "position_id", "department_id"]:
+                       "marker", "phone", "status", "position_id", "department_id"]:
             if field in data:
                 sets.append(field + " = ?")
                 params.append(data[field])
@@ -224,7 +225,7 @@ class UserService:
             changed = []
             field_labels = {
                 "name": "Name", "nickname": "Nickname", "email": "Email", "phone": "Phone",
-                "role": "Role", "employee_no": "Employee No", "group_name": "Role Group",
+                "role": "Role", "employee_no": "Employee No", "marker": "Marker", "group_name": "Role Group",
                 "position_id": "Position ID", "status": "Status"
             }
             for field, label in field_labels.items():

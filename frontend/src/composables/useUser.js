@@ -29,7 +29,7 @@ export function useUser() {
   const form = ref({
     username: '', name: '', email: '',
     status: 'active',
-    employee_no: '', phone: '', process_ids: '', password: '',
+    employee_no: '', marker: '', phone: '', process_ids: '', password: '',
     position_id: ''
   })
 
@@ -121,7 +121,7 @@ export function useUser() {
       username: '', name: '', email: '',
       role: 'worker',
       status: 'active',
-      employee_no: '', phone: '', process_ids: '', password: '',
+      employee_no: '', marker: '', phone: '', process_ids: '', password: '',
       position_id: ''
     }
     modalEdit.value = false
@@ -139,6 +139,7 @@ export function useUser() {
       email: u.email || '',
       status: u.status || 'active',
       employee_no: u.employee_no || '',
+      marker: u.marker || '',
       phone: u.phone || '',
       process_ids: u.process_ids || '',
       password: '',

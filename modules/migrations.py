@@ -6,7 +6,7 @@ import sqlite3, json, bcrypt
 from modules.config import DB_PATH, PREDEFINED_ROLES
 
 MIGRATIONS = []
-LATEST_VERSION = 16
+LATEST_VERSION = 19
 
 def migration(version, description):
     def decorator(fn):
@@ -755,6 +755,10 @@ def m001_baseline(db):
         db.execute('ALTER TABLE users ADD COLUMN position_id INTEGER DEFAULT NULL')
     except Exception as e:
         pass
+    try:
+        db.execute('ALTER TABLE users ADD COLUMN marker TEXT DEFAULT ""')
+    except Exception as e:
+        pass
 
     # 暴力破解防护：登录失败计数 + 锁定时间
     try:
@@ -1028,6 +1032,15 @@ def m017_approval_indexes(db):
 @migration(18, "Add index on quality_attachments.inspection_id")
 def m018_quality_attachments_index(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_qa_inspection_id ON quality_attachments(inspection_id)")
+    db.commit()
+
+
+@migration(19, "Add marker column to users")
+def m019_users_marker(db):
+    try:
+        db.execute('ALTER TABLE users ADD COLUMN marker TEXT DEFAULT ""')
+    except Exception:
+        pass
     db.commit()
 
 

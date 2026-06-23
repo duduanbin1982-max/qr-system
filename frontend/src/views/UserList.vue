@@ -13,7 +13,7 @@
         <h3>👷 普通员工管理</h3>
         <div style="display:flex;gap:var(--space-2);align-items:center">
           <div style="position:relative;flex:1;max-width:280px">
-            <input class="form-input" v-model="searchKeyword" @keyup.enter="searchAndLoad" placeholder="🔍 搜索用户名/姓名/工号..." style="padding-left:34px">
+            <input class="form-input" v-model="searchKeyword" @keyup.enter="searchAndLoad" placeholder="🔍 搜索用户名/姓名/工号/标记..." style="padding-left:34px">
             <span v-if="searchKeyword" @click="searchKeyword='';searchAndLoad()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-placeholder);font-size:14px">✕</span>
           </div>
           <button class="btn btn-sm" @click="searchAndLoad" style="background:var(--border-light)">搜索</button>
@@ -30,6 +30,7 @@
                 <th class="col-min-70">姓名</th>
                 <th class="col-min-70">岗位</th>
                 <th class="col-cat">工号</th>
+                <th class="col-min-80">标记</th>
                 <th class="col-min-100">手机号</th>
                 <th class="col-status">状态</th>
                 <th class="col-actions-wide">操作</th>
@@ -42,6 +43,7 @@
                 <td class="fw-500">{{ u.name || '-' }}</td>
                 <td><span class="badge badge-info" style="font-size:var(--text-xs-alt)">{{ getPositionName(u.position_id) }}</span></td>
                 <td>{{ u.employee_no || '-' }}</td>
+                <td><span v-if="u.marker" class="badge badge-info" style="font-size:var(--text-xs-alt)">{{ u.marker }}</span><span v-else>-</span></td>
                 <td class="text-sm">{{ u.phone || '-' }}</td>
                 <td><span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">{{ u.status === 'active' ? '在职' : '停用' }}</span></td>
                 <td class="text-center">
@@ -86,7 +88,9 @@
             <div class="form-col">
               <div class="form-group"><label>工号</label><input class="form-input" v-model="form.employee_no" placeholder="留空自动生成4位顺序号"></div>
             </div>
-
+            <div class="form-col">
+              <div class="form-group"><label>标记</label><input class="form-input" v-model="form.marker" placeholder="如：临时、重点、学徒"></div>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-col">
