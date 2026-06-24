@@ -1,0 +1,316 @@
+<!-- MaterialList.vue -->
+<template>
+<div style="padding:var(--space-6)">
+    <div class="summary-bar">
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ materials.length }}</div><div class="s-label">物料总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val text-danger">{{ lowStock.length }}</div><div class="s-label">低库存预警</div></div></div>
+      <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val">¥{{ totalInventoryValue }}</div><div class="s-label">库存总值</div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>📦 物料管理</h3>
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <span style="font-size:11px;color:var(--text-placeholder)">
+            <span class="abc-badge abc-A" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#ef4444"></span>A 高值
+            <span class="abc-badge abc-B" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#f59e0b"></span>B 中值
+            <span class="abc-badge abc-C" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#10b981"></span>C 低值
+          </span>
+          <input v-model="searchText" placeholder="搜索物料..." style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
+          <select v-model="materialTypeFilter" style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:140px">
+            <option value="">全部材质</option>
+            <option v-for="mt in materialTypeOptions" :key="mt" :value="mt">{{ mt }}</option>
+          </select>
+          <button class="btn btn-primary" @click="openCreate" v-if="canCreate">+ 新增物料</button>
+          <button class="btn" style="background:#0891B2;color:#fff" @click="openSupplierAdd">🏭 供应商管理</button>
+        </div>
+      </div>
+      <table class="data-table" v-if="materials.length">
+        <thead>
+          <tr>
+            <th>名称</th><th>规格</th><th>材质</th><th>单位</th><th>库存量</th><th>单价</th><th>安全库存</th><th>供应商</th><th>库位</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="m in filteredMaterials" :key="m.id" :class="{ 'row-warn': m.quantity <= (m.safe_stock || 0) }">
+            <td>
+              <span :class="'abc-badge abc-' + getAbcClass(m)" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span>
+              <strong>{{ m.name }}</strong>
+            </td>
+            <td>{{ m.spec || '-' }}</td>
+            <td><span style="color:var(--primary);font-size:var(--text-sm)">{{ m.material_type || '-' }}</span></td>
+            <td>{{ m.unit }}</td>
+            <td>
+              <span :style="{color: m.quantity <= (m.safe_stock||0) ? 'var(--danger)' : '#333', fontWeight:'600'}">{{ m.quantity }}</span>
+              <span v-if="m.quantity <= (m.safe_stock||0)" style="color:var(--danger);font-size:var(--text-xs);margin-left:4px">⚠</span>
+            </td>
+            <td>{{ m.unit_price != null ? '¥' + Number(m.unit_price).toFixed(2) : '-' }}</td>
+            <td>{{ m.safe_stock || '-' }}</td>
+            <td><span style="color:var(--teal);font-size:var(--text-xs)">{{ m.supplier_name || '-' }}</span></td>
+            <td>{{ m.location || '-' }}</td>
+            <td style="white-space:nowrap">
+              <button v-if="canEdit" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
+              <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:#e67e22;color:white">消耗</button>
+              <button class="btn btn-sm" @click="openDetail(m)" style="margin-right:4px;background:var(--teal);color:#fff">详情</button>
+              <button class="btn btn-sm" @click="openEdit(m)" v-if="canEdit" style="margin-right:4px">编辑</button>
+              <button class="btn btn-sm" style="background:#fff;color:#e74c3c;border:1px solid #e74c3c" @click="remove(m)" v-if="canDelete">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else style="text-align:center;padding:40px;color:var(--text-placeholder)">暂无物料，点击「新增物料」开始</p>
+    </div>
+
+    <!-- Form Modal -->
+    <div class="modal-overlay" v-if="showForm" >
+      <div class="modal" style="max-width:600px">
+        <div class="modal-header">{{ editing ? '编辑物料' : '新增物料' }}</div>
+        <div class="modal-body">
+          <!-- Low stock warning banner (edit mode only) -->
+          <div v-if="showStockWarning" style="background:var(--danger);color:#fff;padding:10px 14px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:var(--text-sm);display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">&#x26A0;&#xFE0F;</span>
+            <span>当前库存 <b>{{ form.quantity }}</b> {{ form.unit }}，低于安全库存 <b>{{ form.safe_stock }}</b> {{ form.unit }}，差额 <b>{{ Math.abs(stockGap) }}</b> {{ form.unit }}</span>
+          </div>
+          
+          <div class="form-group"><label>名称 *</label><input v-model="form.name" class="form-input" placeholder="物料名称"></div>
+          
+          <div class="form-row">
+            <div class="form-group" style="flex:1"><label>规格</label><input v-model="form.spec" class="form-input" placeholder="规格型号"></div>
+            <div class="form-group" style="flex:1"><label>材质</label>
+              <div>
+                <input v-model="form.material_type" class="form-input" placeholder="Q235B / 304 / 45#钢">
+                <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+                  <span v-for="mt in ['Q235B','Q345B','304','316L','45#','40Cr']" :key="mt" style="font-size:11px;padding:2px 6px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:3px;cursor:pointer;color:var(--text-placeholder)" @click="form.material_type=mt">{{ mt }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>单位</label>
+              <input v-model="form.unit" class="form-input" placeholder="件/kg/m">
+            </div>
+            <div class="form-group" style="flex:1">
+              <label>初始库存</label>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input v-model.number="form.quantity" type="number" class="form-input" step="0.01" style="flex:1">
+                <span style="font-size:var(--text-xs);color:var(--text-placeholder);white-space:nowrap">{{ form.unit }}</span>
+              </div>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label>安全库存</label>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input v-model.number="form.safe_stock" type="number" class="form-input" step="0.01" style="flex:1" :style="{borderColor: stockGap <= 0 && editing ? 'var(--danger)' : ''}">
+                <span v-if="editing" :style="{fontSize:'14px',cursor:'default'}" :title="stockStatus.text">
+                  <span v-if="stockGap > 0" style="color:var(--success)">&#x25CF;</span>
+                  <span v-else-if="stockGap === 0" style="color:#f59e0b">&#x25CF;</span>
+                  <span v-else style="color:var(--danger)">&#x25CF;</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group" style="flex:1"><label>单价 (元)</label><input v-model.number="form.unit_price" type="number" class="form-input" step="0.01" placeholder="0.00"></div>
+            <div class="form-group" style="flex:1"><label>库位</label><input v-model="form.location" class="form-input" placeholder="仓库/货架"></div>
+          </div>
+          
+          <div class="form-group"><label>供应商</label>
+            <div style="display:flex;gap:8px">
+              <select v-model="form.supplier_id" class="form-input" style="flex:1">
+                <option :value="null">-- 无 --</option>
+                <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+              <button type="button" class="btn btn-sm" style="white-space:nowrap;padding:8px 12px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm)" @click="openSupplierAdd">+ 新增</button>
+            </div>
+          </div>
+          
+          <div class="form-group"><label>备注</label><textarea v-model="form.remark" class="form-input" rows="2" placeholder="备注信息"></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showForm=false">取消</button>
+          <button class="btn btn-primary" @click="save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增供应商小弹窗 -->
+    <div class="modal-overlay" v-if="showSupplierForm" >
+      <div class="modal" style="max-width:520px">
+        <div class="modal-header">🏭 供应商管理</div>
+        <div class="modal-body">
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <input v-model="supplierForm.name" class="form-input" placeholder="名称" style="flex:1">
+            <input v-model="supplierForm.contact" class="form-input" placeholder="联系人" style="flex:1">
+            <input v-model="supplierForm.phone" class="form-input" placeholder="电话" style="flex:1">
+          </div>
+          <button class="btn btn-primary btn-sm" @click="addSupplier" style="width:100%;margin-bottom:16px">➕ 新增供应商</button>
+          <div v-if="suppliers.length" style="border-top:1px solid var(--border-light);padding-top:12px">
+            <div style="font-size:13px;color:var(--text-placeholder);margin-bottom:8px">已有供应商 ({{ suppliers.length }})</div>
+            <div v-for="s in suppliers" :key="s.id" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-hover);border-radius:6px;margin-bottom:4px">
+              <div>
+                <span style="font-weight:500">{{ s.name }}</span>
+                <span v-if="s.contact" style="color:var(--text-placeholder);font-size:12px;margin-left:8px">{{ s.contact }}</span>
+                <span v-if="s.phone" style="color:var(--text-placeholder);font-size:12px;margin-left:8px">{{ s.phone }}</span>
+              </div>
+              <button class="btn btn-sm" style="background:var(--danger);color:#fff;padding:4px 10px;font-size:12px" @click="deleteSupplier(s)">删除</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showSupplierForm=false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stock Modal -->
+    <div class="modal-overlay" v-if="showStock" >
+      <div class="modal" style="max-width:400px">
+        <div class="modal-header">出入库 — {{ selectedMaterial?.name }}</div>
+        <div class="modal-body">
+          <p style="margin-bottom:var(--space-4);color:#666">当前库存: <strong>{{ selectedMaterial?.quantity }}</strong> {{ selectedMaterial?.unit }}</p>
+          <div class="form-group"><label>类型</label>
+            <select v-model="stockForm.type" class="form-input">
+              <option value="in">入库 (+)</option>
+              <option value="out">出库 (-)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>数量</label><input v-model.number="stockForm.quantity" type="number" class="form-input" step="0.01" min="0.01"></div>
+          <div class="form-group"><label>操作人</label><input v-model="stockForm.operator_name" class="form-input" placeholder="姓名"></div>
+          <div class="form-group"><label>备注</label><input v-model="stockForm.remark" class="form-input" placeholder="原因/用途"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showStock=false">取消</button>
+          <button class="btn btn-primary" @click="doStock">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div class="modal-overlay" v-if="logs.length" >
+      <div class="modal" style="max-width:600px">
+        <div class="modal-header">出入库记录 — {{ selectedMaterial?.name }}</div>
+        <div class="modal-body">
+          <table class="data-table" style="font-size:var(--text-sm)">
+            <thead><tr><th>类型</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
+            <tbody>
+              <tr v-for="l in logs" :key="l.id">
+                <td><span :style="{color: l.type==='in'?'var(--success)':'var(--danger)',fontWeight:'600'}">{{ l.type==='in' ? '入库' : '出库' }}</span></td>
+                <td>{{ l.type==='in' ? '+' : '-' }}{{ l.quantity }}</td>
+                <td>{{ l.operator_name || '-' }}</td>
+                <td>{{ l.remark || '-' }}</td>
+                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ l.created_at }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="logs=[]">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Consumption Modal -->
+    <div class="modal-overlay" v-if="showConsume" >
+      <div class="modal" style="max-width:600px">
+        <div class="modal-header">物料消耗 — {{ selectedMaterial?.name }} <span style="font-size:var(--text-sm);color:var(--success);margin-left:12px">库存: {{ selectedMaterial?.quantity }} {{ selectedMaterial?.unit }}</span></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>订单关联</label>
+              <div class="combobox">
+                <input v-model="orderSearch" @input="searchOrders" @focus="searchOrders" placeholder="搜索订单号..." class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)">
+                <div v-if="orderDropdown && orderResults.length" class="combobox-dropdown">
+                  <div v-for="o in orderResults" :key="o.id" class="combobox-item" @click="selectOrder(o)">
+                    <span style="font-weight:600;color:var(--primary)">{{ o.order_no }}</span>
+                    <span style="color:var(--text-placeholder);margin-left:8px;font-size:var(--text-xs)">{{ o.product_name }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label>数量 *</label>
+              <input v-model.number="consumeForm.quantity" type="number" class="form-input" step="0.01" min="0.01" placeholder="消耗数量">
+            </div>
+          </div>
+          <div class="form-group"><label>备注</label><input v-model="consumeForm.notes" class="form-input" placeholder="用途说明"></div>
+          <div class="form-group"><label>操作人</label><input v-model="consumeForm.operator_name" class="form-input" placeholder="姓名（留空用当前用户）"></div>
+
+          <div v-if="consumptions.length" style="margin-top:16px;border-top:1px solid var(--bg-hover);padding-top:12px">
+            <label style="font-size:var(--text-sm);font-weight:600;margin-bottom:var(--space-2);display:block">消耗记录</label>
+            <table class="data-table" style="font-size:var(--text-xs)">
+              <thead><tr><th>订单</th><th>产品</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="c in consumptions" :key="c.id">
+                  <td><span style="font-weight:600;color:var(--primary)">{{ c.order_no || '-' }}</span></td>
+                  <td style="color:var(--text-placeholder)">{{ c.product_name || '-' }}</td>
+                  <td style="font-weight:600;color:var(--danger)">-{{ c.quantity }}</td>
+                  <td>{{ c.operator_name || '-' }}</td>
+                  <td style="color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ c.notes || '-' }}</td>
+                  <td style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ fmtDate(c.created_at) }}</td>
+                  <td><button class="btn btn-sm" style="color:var(--danger);font-size:var(--text-xs-alt);padding:var(--space-1) 8px" @click="undoConsume(c)">撤销</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showConsume=false">关闭</button>
+          <button class="btn btn-primary" @click="doConsume">确认消耗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Detail Modal -->
+    <div class="modal-overlay" v-if="showDetail" >
+      <div class="modal" style="max-width:750px">
+        <div class="modal-header">📋 物料详情 — {{ selectedMaterial?.name }}</div>
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:var(--bg-hover);border-radius:var(--radius-md)">
+            <div><span style="color:var(--text-placeholder);font-size:12px">名称</span><div style="font-weight:600">{{ selectedMaterial?.name }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">规格</span><div>{{ selectedMaterial?.spec || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">材质</span><div style="color:var(--primary)">{{ selectedMaterial?.material_type || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">单位</span><div>{{ selectedMaterial?.unit }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">库存量</span><div style="font-weight:600;color:var(--danger)">{{ selectedMaterial?.quantity }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">单价</span><div>¥{{ Number(selectedMaterial?.unit_price || 0).toFixed(2) }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">安全库存</span><div>{{ selectedMaterial?.safe_stock || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">供应商</span><div style="color:var(--teal)">{{ selectedMaterial?.supplier_name || "-" }}</div></div>
+            <div><span style="color:var(--text-placeholder);font-size:12px">库位</span><div>{{ selectedMaterial?.location || "-" }}</div></div>
+          </div>
+          <h4 style="margin-bottom:12px;font-size:14px">📈 消耗趋势</h4>
+          <canvas ref="trendChart" style="max-height:250px;margin-bottom:16px"></canvas>
+          <div v-if="detailConsumptions.length" style="border-top:1px solid var(--bg-hover);padding-top:12px">
+            <h4 style="margin-bottom:8px;font-size:14px">📝 近期消耗记录</h4>
+            <table class="data-table" style="font-size:var(--text-xs)">
+              <thead><tr><th>日期</th><th>订单</th><th>数量</th><th>操作人</th><th>备注</th></tr></thead>
+              <tbody>
+                <tr v-for="c in detailConsumptions" :key="c.id">
+                  <td>{{ fmtDate(c.created_at) }}</td>
+                  <td style="color:var(--primary);font-weight:500">{{ c.order_no || "-" }}</td>
+                  <td style="color:var(--danger);font-weight:600">-{{ c.quantity }}</td>
+                  <td>{{ c.operator_name || "-" }}</td>
+                  <td style="color:var(--text-placeholder)">{{ c.notes || "-" }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showDetail=false">关闭</button>
+        </div>
+      </div>
+    </div>
+</template>
+
+
+<script>
+import { useMaterial } from '@/composables/useMaterial.js'
+
+export default {
+  setup() {
+    return { ...useMaterial() }
+  }
+}
+</script>

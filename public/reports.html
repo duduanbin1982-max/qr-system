@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据分析报表</title>
+    <script src="vue3.global.prod.js"></script>
+    <link rel="stylesheet" href="css/style.css?v=58">
+    <style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif; background: var(--bg-page,#f5f6f8); color: var(--text-secondary,#374151); min-height:100vh; }
+.app { max-width:1600px; margin:0 auto; padding:20px 24px; }
+</style>
+</head>
+<body>
+<div id="app" class="app">
+  <div v-if="loading" style="text-align:center;padding:60px;color:var(--text-placeholder)">&#x23F3; Loading...</div>
+  <reports-page v-else></reports-page>
+</div>
+
+<script type="importmap">
+{ "imports": { "vue": "/js/vendor/vue.esm.js" } }
+</script>
+<script type="module">
+import { createApp, ref, onMounted } from 'vue'
+import ReportsPage from '/js/components/reports/ReportsPage.js?v=7'
+
+const app = createApp({
+  components: { ReportsPage },
+  setup() {
+    const loading = ref(true)
+    onMounted(() => { loading.value = false })
+    return { loading }
+  }
+})
+
+fetch('/components/reports-page.html?v=7')
+  .then(r => r.text())
+  .then(html => {
+    const tpl = document.createElement('template')
+    tpl.id = 'reports-page-template'
+    tpl.innerHTML = html
+    document.body.appendChild(tpl)
+    app.mount('#app')
+  })
+</script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR System API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    html { box-sizing: border-box; overflow-y: scroll; }
+    *, *:before, *:after { box-sizing: inherit; }
+    body { margin: 0; background: #fafafa; }
+    .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js" crossorigin></script>
+  <script nonce="{$ nonce $}">
+    window.onload = function() {
+      SwaggerUIBundle({
+        url: "/api/apispec.json",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        layout: "StandaloneLayout",
+        defaultModelsExpandDepth: -1,
+        docExpansion: "list",
+        filter: true,
+        tryItOutEnabled: true,
+        requestInterceptor: function(req) {
+          // Auto-add token from localStorage if available
+          var token = localStorage.getItem('swagger_token');
+          if (token && !req.headers.Authorization) {
+            req.headers.Authorization = 'Bearer ' + token;
+          }
+          return req;
+        },
+        onComplete: function() {
+          // Add a token input in the topbar
+          var el = document.createElement('div');
+          el.innerHTML = '<span style="margin-right:8px;font-weight:bold;color:#3b4151">Token:</span>' +
+            '<input id="token-input" type="text" placeholder="登录后粘贴 token..." style="width:400px;padding:5px;border:1px solid #ccc;border-radius:3px">' +
+            '<button id="token-save" style="margin-left:4px;padding:5px 12px;background:#49cc90;color:white;border:none;border-radius:3px;cursor:pointer">Authorize</button>' +
+            '<button id="token-clear" style="margin-left:4px;padding:5px 12px;background:#f93e3e;color:white;border:none;border-radius:3px;cursor:pointer">Logout</button>';
+          el.style.cssText = 'position:absolute;top:10px;right:20px;z-index:1000;display:flex;align-items:center;background:white;padding:8px 12px;border-radius:5px;box-shadow:0 1px 3px rgba(0,0,0,0.1)';
+          document.body.appendChild(el);
+          
+          document.getElementById('token-save').addEventListener('click', function() {
+            var t = document.getElementById('token-input').value.trim();
+            if (t) {
+              localStorage.setItem('swagger_token', t);
+              alert('Token saved. Click "Authorize" button and enter: Bearer ' + t);
+            }
+          });
+          document.getElementById('token-clear').addEventListener('click', function() {
+            localStorage.removeItem('swagger_token');
+            document.getElementById('token-input').value = '';
+            alert('Token cleared.');
+          });
+          
+          // Load saved token
+          var saved = localStorage.getItem('swagger_token');
+          if (saved) document.getElementById('token-input').value = saved;
+        }
+      });
+    };
+  </script>
+</body>
+</html>

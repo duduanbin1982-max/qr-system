@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>批量QR码 - 生产管理系统</title>
+<script src="/vue3.global.prod.js"></script>
+<link rel="stylesheet" href="/style.css?v=70">
+<style>
+.qr-container { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
+.qr-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.qr-card { background: #fff; border-radius: 8px; padding: 12px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.1); page-break-inside: avoid; }
+.qr-card img { width: 120px; height: 120px; }
+.qr-card .label { font-size: 12px; color: #374151; margin-top: 4px; word-break: break-all; }
+.qr-card .code { font-size: 11px; color: #6b7280; margin-top: 2px; }
+.qr-card input[type=checkbox] { transform: scale(1.2); cursor: pointer; }
+.qr-actions { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.qr-actions button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.btn-generate { background: #3b82f6; color: #fff; }
+.btn-print { background: #10b981; color: #fff; }
+.btn-select { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.qr-filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+.qr-filters select, .qr-filters input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+@media print {
+  body * { visibility: hidden; }
+  #print-area, #print-area * { visibility: visible; }
+  #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  .qr-card { box-shadow: none; border: 1px solid #e5e7eb; }
+}
+</style>
+</head>
+<body>
+<div id="app" class="qr-container">
+  <div class="qr-header">
+    <h2 style="margin:0;font-size:18px;">🏷️ 批量 QR 码生成</h2>
+    <a href="/" style="color:#3b82f6;text-decoration:none;font-size:13px;">← 返回主页</a>
+  </div>
+
+  <div class="qr-filters">
+    <select v-model="filterStatus" @change="fetchOrders">
+      <option value="">全部状态</option>
+      <option value="pending">待生产</option>
+      <option value="producing">生产中</option>
+      <option value="completed">已完成</option>
+    </select>
+    <input v-model="filterKeyword" placeholder="搜索订单号/产品..." @keyup.enter="fetchOrders" style="width:180px;">
+    <button @click="fetchOrders" style="padding:6px 12px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;">搜索</button>
+    <span style="font-size:12px;color:#6b7280;">共 {{ orders.length }} 条，已选 {{ selectedIds.length }} 条</span>
+  </div>
+
+  <div class="qr-actions">
+    <button class="btn-generate" @click="generateQRCodes" :disabled="selectedIds.length===0">生成QR码 ({{ selectedIds.length }})</button>
+    <button class="btn-select" @click="selectAll">全选</button>
+    <button class="btn-select" @click="clearSelection">取消全选</button>
+    <button class="btn-print" @click="printQRCodes" :disabled="qrCodes.length===0">打印 ({{ qrCodes.length }})</button>
+  </div>
+
+  <div id="print-area">
+    <div class="qr-grid">
+      <div v-for="qr in qrCodes" :key="qr.id" class="qr-card">
+        <img :src="qr.dataUrl" :alt="qr.label" style="width:120px;height:120px;">
+        <div class="label">{{ qr.label }}</div>
+        <div class="code">{{ qr.code }}</div>
+      </div>
+      <div v-if="qrCodes.length===0" style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;">
+        请先选择订单并点击"生成QR码"
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce="{$ nonce $}">
+const { createApp, ref, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const orders = ref([]);
+    const selectedIds = ref([]);
+    const qrCodes = ref([]);
+    const filterStatus = ref('');
+    const filterKeyword = ref('');
+    const allSelected = ref(false);
+
+    async function fetchOrders() {
+      try {
+        const params = new URLSearchParams({ limit: 100 });
+        if (filterStatus.value) params.append('status', filterStatus.value);
+        if (filterKeyword.value) params.append('keyword', filterKeyword.value);
+        const resp = await fetch('/api/orders?' + params, { credentials: 'include' });
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+        orders.value = data.orders || [];
+      } catch(e) { console.error(e); }
+    }
+
+    function toggleOrder(id) {
+      const idx = selectedIds.value.indexOf(id);
+      if (idx >= 0) selectedIds.value.splice(idx, 1);
+      else selectedIds.value.push(id);
+    }
+
+    function selectAll() { selectedIds.value = orders.value.map(o => o.id); }
+    function clearSelection() { selectedIds.value = []; qrCodes.value = []; }
+
+    async function generateQRCodes() {
+      if (selectedIds.value.length === 0) return;
+      qrCodes.value = [];
+      for (const oid of selectedIds.value) {
+        try {
+          const resp = await fetch('/api/scan/qr/' + oid, { credentials: 'include' });
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          if (data.qr_data_url) {
+            qrCodes.value.push({
+              id: oid,
+              dataUrl: data.qr_data_url,
+              label: data.order_no || ('Order #' + oid),
+              code: data.serial_no || ''
+            });
+          }
+        } catch(e) { console.error('QR gen failed for', oid, e); }
+      }
+    }
+
+    function printQRCodes() {
+      window.print();
+    }
+
+    onMounted(fetchOrders);
+
+    return { orders, selectedIds, qrCodes, filterStatus, filterKeyword,
+             fetchOrders, toggleOrder, selectAll, clearSelection,
+             generateQRCodes, printQRCodes };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

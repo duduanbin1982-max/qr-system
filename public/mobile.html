@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1890ff">
+<meta http-equiv="Permissions-Policy" content="camera=(self)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>扫码报工</title>
+<link rel="manifest" href="/manifest.json">
+<script src="jsQR.js"></script>
+<link rel="stylesheet" href="/css/mobile.css?v=4">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="s-login" class="screen login-screen active">
+<div class="login-box">
+<h1>扫码报工</h1><p class="sub">手机端快速报工</p>
+<div class="form-group"><label>用户名</label><input type="text" id="inp-user" placeholder="请输入用户名" autocomplete="off"></div>
+<div class="form-group"><label>密码</label><input type="password" id="inp-pwd" placeholder="请输入密码"></div>
+<button class="btn-login" id="btn-login">登 录</button>
+<div class="login-error" id="login-err"></div>
+</div>
+</div>
+
+<!-- CHANGE PASSWORD -->
+<div id="s-change-pwd" class="screen login-screen">
+<div class="login-box">
+<h1>修改密码</h1><p class="sub">首次登录请修改默认密码</p>
+<div class="form-group"><label>原密码</label><input type="password" id="cp-old" placeholder="请输入原密码"></div>
+<div class="form-group"><label>新密码</label><input type="password" id="cp-new" placeholder="至少6位"></div>
+<div class="form-group"><label>确认新密码</label><input type="password" id="cp-new2" placeholder="再次输入新密码"></div>
+<button class="btn-login" id="btn-cp">确认修改</button>
+<div class="login-error" id="cp-err"></div>
+</div>
+</div>
+
+<!-- MAIN -->
+<div id="s-main" class="screen">
+<div class="top-bar"><span class="top-user" id="top-user">扫码报工</span></div>
+<div class="main-body">
+<div class="hero-area">
+<button class="hero-scan"><span class="hero-icon">📷</span><span class="hero-label">扫码报工</span></button>
+<div class="hero-stats"><span>今日 <strong id="st-today">0</strong> 次</span><span class="stat-sep">·</span><span><strong id="st-qty">0</strong> 件</span></div>
+</div>
+<div class="sub-actions">
+<button class="sub-btn">📸 拍照识别</button>
+<button class="sub-btn">✏️ 手动输入</button>
+</div>
+<div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button>查询</button></div>
+<input type="file" id="photo-input" accept="image/*" style="display:none">
+<div class="recent-section" id="recent-section">
+<div class="recent-title"><span>📋 最近报工</span><span class="refresh-btn" style="font-size:var(--text-xs-alt);color:#bbb;font-weight:400;cursor:pointer">刷新</span></div>
+<div id="recent-list"><div class="empty-recent"><span class="icon">📋</span>暂无记录</div></div>
+</div>
+<div class="bottom-bar"><span class="bottom-link">退出登录</span></div>
+</div>
+</div>
+
+<!-- ORDER -->
+<div id="s-order" class="screen">
+<div class="back-bar">
+<button class="top-btn" style="color:var(--text-primary);background:var(--bg-hover)">← 返回</button>
+<h1 style="font-size:var(--text-lg);color:#333">报工确认</h1><div style="width:60px"></div>
+</div>
+<div class="order-body" id="order-body"></div>
+<div class="action-area">
+<div class="mode-toggle" style="margin-bottom:10px">
+<button class="mode-btn active" id="mode-auto">⚡ 自动报工</button>
+<button class="mode-btn" id="mode-manual">✋ 手动报工</button>
+</div>
+<div class="report-form" id="report-form" style="display:none">
+<div class="report-type-group" style="margin-bottom:10px">
+<div class="report-type-opt active" id="rtype-normal">✅ 正常</div>
+<div class="report-type-opt scrap" id="rtype-scrap">❌ 报废</div>
+<div class="report-type-opt rework" id="rtype-rework">🔧 返修</div>
+</div>
+<div class="rf-row">
+<div class="rf-col"><label>报工数量</label><input type="number" id="rpt-qty" min="1" placeholder="数量"></div>
+</div>
+<div class="rf-row" id="reason-row" style="display:none">
+<div class="rf-col"><label>原因说明</label><input type="text" id="rpt-reason" placeholder="报废/返修原因"></div>
+</div>
+</div>
+<button class="btn-report" id="btn-report">提交报工</button>
+</div>
+</div>
+
+<!-- SUCCESS -->
+<div id="s-ok" class="screen success-screen">
+<div class="success-box">
+<div class="success-icon">✓</div>
+<h2>报工成功!</h2>
+<p id="ok-msg"></p>
+<div class="detail" id="ok-detail"></div>
+<button class="btn-done">继续扫码</button>
+</div>
+</div>
+
+<!-- SCANNER -->
+<div id="s-scan" class="screen scanner-screen">
+<div class="scan-controls">
+<button class="flash-btn off" id="flash-btn" title="闪光灯">⚡</button>
+<button class="close-btn">✕</button>
+</div>
+<video id="cam-video" autoplay playsinline muted></video>
+<canvas id="cam-canvas"></canvas>
+<div class="scan-overlay">
+<div class="scan-box">
+<div class="line"></div>
+<div class="c c1"></div><div class="c c2"></div><div class="c c3"></div><div class="c c4"></div>
+</div>
+<div class="scan-tip">将二维码放入框内自动扫描</div>
+<div class="scan-engine" id="scan-engine"></div>
+</div>
+</div>
+
+<!-- Shared API helper -->
+  <script src="/js/mobile/mobile-api.js?v=1"></script>
+  <script src="/js/mobile/mobile-utils.js?v=26"></script>
+<script src="/js/mobile/mobile-auth.js?v=27"></script>
+<script src="/js/mobile/mobile-scan.js?v=26"></script>
+<script src="/js/mobile/mobile-order.js?v=27"></script>
+<script src="/js/mobile/mobile-init.js?v=26"></script>
+
+
+
+</body>
+</html>

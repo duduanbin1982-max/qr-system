@@ -1,0 +1,27 @@
+"""quality schema definitions."""
+
+quality_schemas = {
+    'quality_inspection': {'additionalProperties': False,
+ 'properties': {'defect_category': {'maxLength': 64, 'type': 'string'},
+                'defect_quantity': {'minimum': 0, 'type': 'integer'},
+                'inspected_at': {'maxLength': 32, 'type': 'string'},
+                'inspection_type': {'enum': ['first_article', 'in_process', 'final'], 'type': 'string'},
+                'notes': {'maxLength': 512, 'type': 'string'},
+                'order_id': {'minimum': 1, 'type': 'integer'},
+                'process_id': {'minimum': 1, 'type': 'integer'},
+                'quantity_checked': {'minimum': 0, 'type': 'integer'},
+                'quantity_failed': {'minimum': 0, 'type': 'integer'},
+                'quantity_passed': {'minimum': 0, 'type': 'integer'}},
+ 'required': ['order_id', 'process_id'],
+ 'type': 'object'},
+    'quality_update': {'additionalProperties': False,
+ 'properties': {'defect_category': {'maxLength': 64, 'type': 'string'},
+                'defect_quantity': {'minimum': 0, 'type': 'integer'},
+                'inspected_at': {'maxLength': 32, 'type': 'string'},
+                'inspection_type': {'enum': ['first_article', 'in_process', 'final'], 'type': 'string'},
+                'notes': {'maxLength': 512, 'type': 'string'},
+                'quantity_checked': {'minimum': 0, 'type': 'integer'},
+                'quantity_failed': {'minimum': 0, 'type': 'integer'},
+                'quantity_passed': {'minimum': 0, 'type': 'integer'}},
+ 'type': 'object'},
+}

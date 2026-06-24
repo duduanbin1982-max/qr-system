@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>质量抽检</title>
+  <link rel="stylesheet" href="/css/inspection.css?v=2">
+</head>
+<body>
+<div class="header">&#128269; 质量抽检</div>
+<div id="info"><div class="loading">查询中...</div></div>
+<div id="msg" class="msg"></div>
+<div id="processSection" style="display:none">
+  <div class="proc-section">
+    <h3>&#128203; 选择抽检工序</h3>
+    <div class="proc-list" id="processList"></div>
+  </div>
+</div>
+<div id="actionArea">
+  <div class="sel">&#128295; 已选工序：<span id="selectedProcess">请先选择上方工序</span></div>
+  <div class="btns">
+    <button class="btn-pass" id="btn-pass" disabled>&#9989; 合格</button>
+    <button class="btn-rework" id="btn-rework" disabled>&#128260; 返修</button>
+    <button class="btn-scrap" id="btn-scrap" disabled>&#10060; 报废</button>
+  </div>
+  <input id="remark" placeholder="备注（选填）">
+</div>
+<script src="/js/mobile/mobile-api.js?v=1"></script>
+  <script src="/js/mobile/inspection.js?v=5"></script>
+</body>
+</html>

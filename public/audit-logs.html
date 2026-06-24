@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>操作日志 - 生产管理系统</title>
+<script src="/vue3.global.prod.js"></script>
+<link rel="stylesheet" href="/style.css?v=70">
+<style>
+.log-container { max-width: 1400px; margin: 20px auto; padding: 0 16px; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.log-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.log-filters input, .log-filters select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+.log-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.log-table th { background: #f3f4f6; padding: 10px 12px; text-align: left; font-size: 13px; color: #374151; border-bottom: 2px solid #e5e7eb; }
+.log-table td { padding: 8px 12px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #4b5563; }
+.log-table tr:hover { background: #f9fafb; }
+.type-tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.type-create { background: #d1fae5; color: #065f46; }
+.type-update { background: #dbeafe; color: #1e40af; }
+.type-delete { background: #fee2e2; color: #991b1b; }
+.type-login { background: #ede9fe; color: #5b21b6; }
+.pagination { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+.pagination button { padding: 6px 14px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+.pagination button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.pagination button:disabled { opacity: .5; cursor: default; }
+.back-link { color: #3b82f6; text-decoration: none; font-size: 13px; }
+.stats-bar { display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px; color: #6b7280; }
+</style>
+</head>
+<body>
+<div id="app" class="log-container">
+  <div class="log-header">
+    <h2 style="margin:0;font-size:18px;">📋 操作日志</h2>
+    <a href="/" class="back-link">← 返回主页</a>
+  </div>
+
+  <div class="stats-bar">
+    <span>共 {{ total }} 条记录</span>
+  </div>
+
+  <div class="log-filters">
+    <select v-model="filters.action" @change="fetchLogs">
+      <option value="">全部操作类型</option>
+      <option value="create">创建</option>
+      <option value="update">更新</option>
+      <option value="delete">删除</option>
+      <option value="login">登录</option>
+      <option value="report">报工</option>
+    </select>
+    <input v-model="filters.keyword" placeholder="搜索关键词..." @keyup.enter="fetchLogs" style="width:200px;">
+    <input v-model="filters.date_from" type="date" @change="fetchLogs" title="开始日期">
+    <input v-model="filters.date_to" type="date" @change="fetchLogs" title="结束日期">
+    <button @click="fetchLogs" style="padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;">搜索</button>
+  </div>
+
+  <table class="log-table">
+    <thead>
+      <tr>
+        <th style="width:60px;">ID</th>
+        <th style="width:100px;">操作类型</th>
+        <th style="width:80px;">用户</th>
+        <th>目标</th>
+        <th>详情</th>
+        <th style="width:150px;">时间</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="log in logs" :key="log.id">
+        <td>{{ log.id }}</td>
+        <td><span :class="'type-tag type-'+getTypeClass(log.action)">{{ log.action }}</span></td>
+        <td>{{ log.user_name || '-' }}</td>
+        <td>{{ log.target_type }}{{ log.target_id ? '#'+log.target_id : '' }}</td>
+        <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ truncate(log.detail, 100) }}</td>
+        <td>{{ log.created_at }}</td>
+      </tr>
+      <tr v-if="logs.length===0">
+        <td colspan="6" style="text-align:center;padding:40px;color:#9ca3af;">暂无日志记录</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="pagination" v-if="totalPages>1">
+    <button @click="goPage(1)" :disabled="page===1">首页</button>
+    <button @click="goPage(page-1)" :disabled="page===1">上一页</button>
+    <button v-for="p in visiblePages" :key="p" @click="goPage(p)" :class="{active:p===page}">{{ p }}</button>
+    <button @click="goPage(page+1)" :disabled="page===totalPages">下一页</button>
+    <button @click="goPage(totalPages)" :disabled="page===totalPages">末页</button>
+  </div>
+</div>
+
+<script nonce="{$ nonce $}">
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const logs = ref([]);
+    const total = ref(0);
+    const page = ref(1);
+    const limit = ref(30);
+    const filters = ref({ action: '', keyword: '', date_from: '', date_to: '' });
+
+    const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)));
+
+    const visiblePages = computed(() => {
+      const pages = [];
+      const tp = totalPages.value;
+      const p = page.value;
+      let start = Math.max(1, p - 2);
+      let end = Math.min(tp, start + 4);
+      if (end - start < 4) start = Math.max(1, end - 4);
+      for (let i = start; i <= end; i++) pages.push(i);
+      return pages;
+    });
+
+    async function fetchLogs() {
+      try {
+        const params = new URLSearchParams({
+          page: page.value, limit: limit.value,
+          action: filters.value.action, keyword: filters.value.keyword,
+        });
+        if (filters.value.date_from) params.append('date_from', filters.value.date_from);
+        if (filters.value.date_to) params.append('date_to', filters.value.date_to);
+
+        const resp = await fetch('/api/logs?' + params, { credentials: 'include' });
+        if (!resp.ok) {
+          if (resp.status === 401) { window.location.href = '/'; return; }
+          throw new Error('Request failed');
+        }
+        const data = await resp.json();
+        logs.value = data.logs || [];
+        total.value = data.total || 0;
+      } catch (e) {
+        console.error('Failed to fetch logs:', e);
+      }
+    }
+
+    function goPage(p) {
+      if (p < 1 || p > totalPages.value) return;
+      page.value = p;
+      fetchLogs();
+    }
+
+    function getTypeClass(action) {
+      if (!action) return '';
+      if (action.includes('create') || action.includes('add')) return 'create';
+      if (action.includes('update') || action.includes('edit')) return 'update';
+      if (action.includes('delete') || action.includes('remove')) return 'delete';
+      if (action.includes('login') || action.includes('auth')) return 'login';
+      return '';
+    }
+
+    function truncate(text, maxLen) {
+      if (!text) return '-';
+      return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
+    }
+
+    onMounted(fetchLogs);
+
+    return { logs, total, page, totalPages, visiblePages, filters, fetchLogs, goPage, getTypeClass, truncate };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
