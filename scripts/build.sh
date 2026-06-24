@@ -7,10 +7,9 @@ echo "=== Building Frontend ==="
 cd frontend && npm run build 2>&1 | tail -3
 cd ..
 
-echo "=== Syncing index-v3.html ==="
+echo "=== Verifying SPA entry ==="
 if [ -f public/static/index.html ]; then
-    cp -f public/static/index.html public/index-v3.html
-    echo "index-v3.html synced"
+    echo "public/static/index.html ready"
 else
     echo "WARNING: public/static/index.html not found!"
 fi

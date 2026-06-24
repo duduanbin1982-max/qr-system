@@ -5,13 +5,15 @@ import os
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from modules.permission_catalog import ACTION_PERMISSION_DEFS, ALL_PERMISSION_CODES
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(PUBLIC_DIR, exist_ok=True)
 
-DB_PATH = os.path.join(DATA_DIR, 'production.db')
+DB_PATH = os.environ.get('DB_PATH') or os.path.join(DATA_DIR, 'production.db')
 SESSION_TIMEOUT_HOURS = 8  # 登录超时时间（小时），0表示永不过期
 SESSION_IDLE_MINUTES = 480  # idle timeout (8 hours)
 
@@ -33,33 +35,7 @@ if not SECRET_KEY:
 # ============================================================
 # Permission System — 权限系统
 # ============================================================
-PERMISSION_DEFS = {
-    'orders':      ('订单', ['view','create','edit','delete']),
-    'customers':   ('客户', ['view','create','edit','delete']),
-    'products':    ('产品', ['view','create','edit','delete']),
-    'processes':   ('工序', ['view','create','edit','delete']),
-    'routes':      ('工艺路线', ['view','create','edit','delete']),
-    'prices':      ('工价', ['view','create','edit','delete']),
-    'users':       ('用户', ['view','create','edit','delete']),
-    'roles':       ('角色', ['view','create','edit','delete']),
-    'role_groups': ('角色组', ['view','create','edit','delete']),
-    'positions':   ('岗位', ['view','create','edit','delete']),
-    'inventory':   ('库存', ['view','create','edit','delete']),
-    'shipments':   ('发货', ['view','create','edit','delete']),
-    'scan':        ('扫码报工', ['view','report']),
-    'stats':       ('统计', ['view','export']),
-    'trace':       ('追溯', ['view']),
-    'approvals':   ('审批', ['view','create','edit']),
-    'reports':     ('报表', ['view']),
-    'dashboard':   ('工作台', ['view']),
-    'board':       ('看板', ['view']),
-    'settings':    ('系统设置', ['manage']),
-    'logs':        ('操作日志', ['view','delete']),
-    'materials':   ('物料', ['view','manage']),
-    'quality':     ('质检', ['view','edit','delete']),
-    'rework':      ('返工', ['view','create','edit']),
-    'schedule':    ('排程', ['view']),
-}
+PERMISSION_DEFS = ACTION_PERMISSION_DEFS
 SYSTEM_MANAGE_PERM = 'settings:manage'
 
 # 预置角色权限配置
@@ -75,7 +51,7 @@ PREDEFINED_ROLES = {
         'name': '普通员工', 'code': 'worker',
         'description': '普通工人，可进行报工操作',
         'group_id': 2, 'level': 1,
-        'permissions': ['scan:view', 'scan:report']
+        'permissions': ['page:scan', 'scan:view', 'scan:report']
     },
     # 以下为新增预置
     'production_manager': {
@@ -83,6 +59,10 @@ PREDEFINED_ROLES = {
         'description': '管理生产订单、工艺和工价',
         'group_id': 2, 'level': 2,
         'permissions': [
+            'page:production', 'page:production.orders', 'page:production.customers',
+            'page:production.materials', 'page:production.trace', 'page:production.approvals',
+            'page:production.quality', 'page:production.rework',
+            'page:scan', 'page:stats', 'page:reports', 'page:inventory', 'page:board',
             'orders:view','orders:create','orders:edit','orders:delete',
             'products:view', 'customers:view',
             'processes:view', 'routes:view','routes:create','routes:edit','routes:delete',
@@ -95,13 +75,17 @@ PREDEFINED_ROLES = {
         'name': '质检员', 'code': 'qc_inspector',
         'description': '质检岗位，扫码报工+追溯+统计',
         'group_id': 2, 'level': 3,
-        'permissions': ['scan:view', 'scan:report', 'trace:view', 'stats:view', 'products:view']
+        'permissions': [
+            'page:scan', 'page:production', 'page:production.trace', 'page:stats',
+            'scan:view', 'scan:report', 'trace:view', 'stats:view', 'products:view'
+        ]
     },
     'warehouse_keeper': {
         'name': '仓库管理员', 'code': 'warehouse_keeper',
         'description': '管理库存和发货',
         'group_id': 2, 'level': 3,
         'permissions': [
+            'page:inventory', 'page:shipments',
             'inventory:view','inventory:create','inventory:edit','inventory:delete',
             'shipments:view','shipments:create','shipments:edit','shipments:delete',
             'products:view',
@@ -119,12 +103,7 @@ GLOBAL_DATA_SCOPE_PERMS = {
 def expand_permissions(perm_list: List[str]) -> List[str]:
     """展开权限列表，['*'] 返回所有权限，否则展开为 'resource:action'"""
     if '*' in perm_list:
-        result = []
-        for res, (_, actions) in PERMISSION_DEFS.items():
-            for act in actions:
-                result.append(f'{res}:{act}')
-        result.append(SYSTEM_MANAGE_PERM)
-        return result
+        return list(ALL_PERMISSION_CODES)
     return perm_list
 
 # ============================================================

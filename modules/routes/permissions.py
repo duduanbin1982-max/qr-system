@@ -4,7 +4,7 @@ from modules.app import app
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
-from modules.config import PERMISSION_DEFS
+from modules.permission_catalog import build_permission_payload
 from modules.services.audit_log_service import AuditLogService
 
 
@@ -14,9 +14,7 @@ from modules.services.audit_log_service import AuditLogService
 @app.route("/api/permissions", methods=["GET"])
 @check_auth
 def list_permissions():
-    perms = [{"code": code, "label": label, "actions": actions}
-             for code, (label, actions) in PERMISSION_DEFS.items()]
-    return jsonify({"permissions": perms})
+    return jsonify(build_permission_payload())
 
 
 # ============================================================

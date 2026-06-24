@@ -341,9 +341,9 @@ class OrderService:
                 if cust:
                     data['customer'] = cust['name']
 
-        # Detect remark change BEFORE entering transaction (TOCTOU-safe: re-check inside txn)
+        # Detect remark change before entering transaction; the old value is fetched again
+        # inside the transaction to avoid relying on the lightweight status query.
         remark_changed = 'remark' in data
-        old_remark = existing['remark'] if remark_changed and existing else None
 
         sets = []
         params = []
@@ -358,7 +358,14 @@ class OrderService:
             if remark_changed and user_id:
                 current = txn.execute('SELECT remark FROM orders WHERE id = ?', (oid,)).fetchone()
                 if current and data['remark'] != (current['remark'] or ''):
-                    OrderService.log_remark_history(oid, old_remark or '', data['remark'], user_id, user_name or '', db=txn)
+                    OrderService.log_remark_history(
+                        oid,
+                        current['remark'] or '',
+                        data['remark'],
+                        user_id,
+                        user_name or '',
+                        db=txn
+                    )
 
             if sets:
                 sets.append("updated_at = datetime('now','localtime')")
@@ -675,4 +682,3 @@ class OrderService:
             if not OrderMaterialRepository.find_by_id_and_order(item_id, order_id, db=txn):
                 raise ValueError('??????')
             OrderMaterialRepository.delete(item_id, db=txn)
-

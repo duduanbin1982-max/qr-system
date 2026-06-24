@@ -4,9 +4,10 @@ Extracted from init_db() - 12 versioned incremental migrations.
 """
 import sqlite3, json, bcrypt
 from modules.config import DB_PATH, PREDEFINED_ROLES
+from modules.permission_catalog import infer_page_permissions
 
 MIGRATIONS = []
-LATEST_VERSION = 19
+LATEST_VERSION = 21
 
 def migration(version, description):
     def decorator(fn):
@@ -14,6 +15,47 @@ def migration(version, description):
         return fn
     return decorator
 
+
+def _ensure_board_sessions_table(db):
+    db.execute('''CREATE TABLE IF NOT EXISTS board_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+
+
+def _ensure_material_planning_tables(db):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS product_bom ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "product_id INTEGER NOT NULL, "
+        "material_id INTEGER NOT NULL, "
+        "quantity_per_unit REAL DEFAULT 1, "
+        "process_id INTEGER DEFAULT NULL, "
+        "created_at TEXT DEFAULT (datetime('now','localtime')), "
+        "FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE, "
+        "FOREIGN KEY (material_id) REFERENCES materials(id), "
+        "FOREIGN KEY (process_id) REFERENCES processes(id), "
+        "UNIQUE(product_id, material_id, process_id)"
+        ")"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS order_materials ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "order_id INTEGER NOT NULL, "
+        "material_id INTEGER NOT NULL, "
+        "quantity_per_unit REAL DEFAULT 1, "
+        "process_id INTEGER DEFAULT NULL, "
+        "source TEXT DEFAULT 'auto', "
+        "created_at TEXT DEFAULT (datetime('now','localtime')), "
+        "FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE, "
+        "FOREIGN KEY (material_id) REFERENCES materials(id), "
+        "FOREIGN KEY (process_id) REFERENCES processes(id)"
+        ")"
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_product ON product_bom(product_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_order_materials_order ON order_materials(order_id)")
 
 
 @migration(1, "Core schema v1-v11: tables, indexes, seed data")
@@ -27,9 +69,7 @@ def m001_baseline(db):
     使用 PRAGMA user_version 跟踪迁移版本。
     仅当版本号落后时才执行新增迁移，避免每次启动全量执行。
     """
-    db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
     
 
     # P3: Add version column for optimistic locking
@@ -133,7 +173,9 @@ def m001_baseline(db):
             remark TEXT DEFAULT '',
             route_id INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now','localtime')),
-            updated_at TEXT DEFAULT (datetime('now','localtime'))
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT DEFAULT NULL,
+            deleted_by INTEGER DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS order_processes (
@@ -150,19 +192,20 @@ def m001_baseline(db):
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS work_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER NOT NULL,
-            process_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            type TEXT DEFAULT 'normal',
-            status TEXT DEFAULT 'pending',  -- pending, approved, rejected
-            quantity INTEGER DEFAULT 0,
-            remark TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            CREATE TABLE IF NOT EXISTS work_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                process_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                type TEXT DEFAULT 'normal',
+                status TEXT DEFAULT 'pending',  -- pending, approved, rejected
+                quantity INTEGER DEFAULT 0,
+                serial_no TEXT DEFAULT '',
+                remark TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+                FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_wr_user_created ON work_records(user_id, created_at);
@@ -696,6 +739,19 @@ def m001_baseline(db):
                   WHERE id = 2 AND (permissions IS NULL OR permissions = '' OR permissions = '""')''',
                (json.dumps(PREDEFINED_ROLES['worker']['permissions']),))
 
+    # 迁移：为旧角色补充 page:* 页面显示权限，保持升级后菜单/Tab 可见。
+    for role in db.execute('SELECT id, permissions FROM roles').fetchall():
+        try:
+            permissions = json.loads(role['permissions'] or '[]')
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(permissions, list) or '*' in permissions:
+            continue
+        merged = list(dict.fromkeys(permissions + infer_page_permissions(permissions)))
+        if merged != permissions:
+            db.execute('UPDATE roles SET permissions = ? WHERE id = ?',
+                       (json.dumps(merged, ensure_ascii=False), role['id']))
+
     # Prevent duplicate processes by enforcing UNIQUE on name
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')
     # Prevent duplicate positions by enforcing UNIQUE on name
@@ -960,31 +1016,16 @@ def m001_baseline(db):
 
 
 
-# ============================================================
-# Migration 13: Board sessions table (moved from routes/board.py to migrations)
-# ============================================================
-try:
-    db.execute('''CREATE TABLE IF NOT EXISTS board_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        token TEXT UNIQUE NOT NULL,
-        expires_at TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )''')
-except Exception as e:
-    pass
+@migration(13, "Create board sessions table")
+def m013_board_sessions(db):
+    _ensure_board_sessions_table(db)
+    db.commit()
 
 
-# Migration 14
-try:
-    db.execute("CREATE TABLE IF NOT EXISTS product_bom (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id), UNIQUE(product_id, material_id, process_id))")
-except Exception as e: pass
-try:
-    db.execute("CREATE TABLE IF NOT EXISTS order_materials (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, material_id INTEGER NOT NULL, quantity_per_unit REAL DEFAULT 1, process_id INTEGER DEFAULT NULL, source TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now','localtime')), FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE, FOREIGN KEY (material_id) REFERENCES materials(id), FOREIGN KEY (process_id) REFERENCES processes(id))")
-except Exception as e: pass
-try:
-    db.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_product ON product_bom(product_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_order_materials_order ON order_materials(order_id)")
-except Exception as e: pass
+@migration(14, "Create product BOM and order material tables")
+def m014_material_planning_tables(db):
+    _ensure_material_planning_tables(db)
+    db.commit()
 
 
 @migration(15, "Add is_builtin column to roles")
@@ -1031,7 +1072,11 @@ def m017_approval_indexes(db):
 
 @migration(18, "Add index on quality_attachments.inspection_id")
 def m018_quality_attachments_index(db):
-    db.execute("CREATE INDEX IF NOT EXISTS idx_qa_inspection_id ON quality_attachments(inspection_id)")
+    exists = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='quality_attachments'"
+    ).fetchone()
+    if exists:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_qa_inspection_id ON quality_attachments(inspection_id)")
     db.commit()
 
 
@@ -1041,6 +1086,29 @@ def m019_users_marker(db):
         db.execute('ALTER TABLE users ADD COLUMN marker TEXT DEFAULT ""')
     except Exception:
         pass
+    db.commit()
+
+
+@migration(20, "Ensure board/material planning tables after legacy migration gap")
+def m020_ensure_legacy_gap_tables(db):
+    _ensure_board_sessions_table(db)
+    _ensure_material_planning_tables(db)
+    db.commit()
+
+
+@migration(21, "Backfill page permissions for existing roles")
+def m021_backfill_page_permissions(db):
+    for role in db.execute('SELECT id, permissions FROM roles').fetchall():
+        try:
+            permissions = json.loads(role['permissions'] or '[]')
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(permissions, list) or '*' in permissions:
+            continue
+        merged = list(dict.fromkeys(permissions + infer_page_permissions(permissions)))
+        if merged != permissions:
+            db.execute('UPDATE roles SET permissions = ? WHERE id = ?',
+                       (json.dumps(merged, ensure_ascii=False), role['id']))
     db.commit()
 
 

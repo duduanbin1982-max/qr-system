@@ -97,33 +97,130 @@ import { auth, restoreSession, logout } from '@/lib/auth.js'
 import { router, navigate, restoreNavState } from '@/lib/router.js'
 import { store, showToast } from '@/lib/store.js'
 import { api } from '@/lib/api.js'
-import { ref, onMounted, computed, reactive, watch, defineAsyncComponent } from 'vue'
+import { usePageAccess, loadPageAccessCatalog } from '@/composables/usePageAccess.js'
+import { ref, onMounted, computed, reactive, defineAsyncComponent, h } from 'vue'
 
-const LoginPage = defineAsyncComponent(() => import('./LoginPage.vue'))
-const DashboardPage = defineAsyncComponent(() => import('./DashboardPage.vue'))
-const CustomerList = defineAsyncComponent(() => import('./CustomerList.vue'))
-const ProductList = defineAsyncComponent(() => import('./ProductList.vue'))
-const UserList = defineAsyncComponent(() => import('./UserList.vue'))
-const ProcessList = defineAsyncComponent(() => import('./ProcessList.vue'))
-const InventoryList = defineAsyncComponent(() => import('./InventoryList.vue'))
-const MaterialList = defineAsyncComponent(() => import('./MaterialList.vue'))
-const OrderList = defineAsyncComponent(() => import('./OrderList.vue'))
-const PriceList = defineAsyncComponent(() => import('./PriceList.vue'))
-const RouteList = defineAsyncComponent(() => import('./RouteList.vue'))
-const ScanReport = defineAsyncComponent(() => import('./ScanReport.vue'))
-const ShipmentList = defineAsyncComponent(() => import('./ShipmentList.vue'))
-const StatsPage = defineAsyncComponent(() => import('./StatsPage.vue'))
-const ReportsPage = defineAsyncComponent(() => import('./ReportsPage.vue'))
-const TracePage = defineAsyncComponent(() => import('./TracePage.vue'))
-const SettingsPage = defineAsyncComponent(() => import('./SettingsPage.vue'))
-const BoardPage = defineAsyncComponent(() => import('./BoardPage.vue'))
-const BasicSettings = defineAsyncComponent(() => import('./BasicSettings.vue'))
-const ProductionSettings = defineAsyncComponent(() => import('./ProductionSettings.vue'))
-const ReworkList = defineAsyncComponent(() => import('./ReworkList.vue'))
-const GanttChart = defineAsyncComponent(() => import('./GanttChart.vue'))
-const ApprovalPage = defineAsyncComponent(() => import('./ApprovalPage.vue'))
-const InspectionList = defineAsyncComponent(() => import('./InspectionList.vue'))
-const WageList = defineAsyncComponent(() => import('./WageList.vue'))
+const CHUNK_LOAD_ERROR_RE = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk [\dA-Za-z_-]+ failed|ChunkLoadError|error loading dynamically imported module/i
+const TRANSIENT_LOAD_ERROR_RE = /fetch|network|timeout|load failed/i
+
+const AsyncPageError = {
+  props: {
+    error: { type: Object, default: null },
+    pageName: { type: String, default: '页面' },
+  },
+  setup(props) {
+    function refreshPage() {
+      window.location.reload()
+    }
+
+    return () => h('div', { style: 'padding:var(--space-6)' }, [
+      h('div', { class: 'card' }, [
+        h('div', { class: 'card-header' }, [
+          h('h3', `${props.pageName}加载失败`)
+        ]),
+        h('div', { class: 'card-body', style: 'display:flex;flex-direction:column;gap:var(--space-3);color:var(--text-secondary)' }, [
+          h('div', '页面资源可能刚更新，或当前网络导致模块未成功加载。'),
+          h('div', { style: 'font-size:var(--text-sm);color:var(--text-placeholder)' }, props.error?.message || '请刷新页面后重试。'),
+          h('div', [
+            h('button', { class: 'btn btn-primary', onClick: refreshPage }, '刷新页面')
+          ])
+        ])
+      ])
+    ])
+  }
+}
+
+const NoPermissionPage = {
+  setup() {
+    const { landingPage } = usePageAccess()
+
+    function goHome() {
+      navigate(landingPage(auth.user))
+    }
+
+    return () => h('div', { style: 'padding:var(--space-6)' }, [
+      h('div', { class: 'card' }, [
+        h('div', { class: 'card-header' }, [
+          h('h3', '无页面访问权限')
+        ]),
+        h('div', { class: 'card-body', style: 'display:flex;flex-direction:column;gap:var(--space-3);color:var(--text-secondary)' }, [
+          h('div', '当前角色未勾选该页面的显示权限，请联系管理员在角色管理中配置 page:* 权限。'),
+          h('div', [
+            h('button', { class: 'btn btn-primary', onClick: goHome }, '返回可访问页面')
+          ])
+        ])
+      ])
+    ])
+  }
+}
+
+function definePageAsyncComponent(pageName, loader) {
+  const reloadKey = `async-page-reload:${pageName}`
+
+  return defineAsyncComponent({
+    loader: async () => {
+      const mod = await loader()
+      try { sessionStorage.removeItem(reloadKey) } catch (_) {}
+      return mod
+    },
+    delay: 120,
+    timeout: 20000,
+    errorComponent: {
+      props: { error: { type: Object, default: null } },
+      setup(props) {
+        return () => h(AsyncPageError, { error: props.error, pageName })
+      }
+    },
+    onError(error, retry, fail, attempts) {
+      const msg = String(error?.message || error || '')
+      const isChunkLoadError = CHUNK_LOAD_ERROR_RE.test(msg)
+      const isTransientLoadError = TRANSIENT_LOAD_ERROR_RE.test(msg)
+
+      try {
+        if (isChunkLoadError && !sessionStorage.getItem(reloadKey)) {
+          sessionStorage.setItem(reloadKey, '1')
+          showToast(`${pageName}资源已更新，正在自动刷新…`, 'warning')
+          window.location.reload()
+          return
+        }
+      } catch (_) {}
+
+      if (isTransientLoadError && attempts < 2) {
+        setTimeout(() => retry(), attempts * 500)
+        return
+      }
+
+      console.error(`[AsyncPage:${pageName}]`, error)
+      fail()
+    }
+  })
+}
+
+const LoginPage = definePageAsyncComponent('登录页', () => import('./LoginPage.vue'))
+const DashboardPage = definePageAsyncComponent('工作台', () => import('./DashboardPage.vue'))
+const CustomerList = definePageAsyncComponent('客户管理', () => import('./CustomerList.vue'))
+const ProductList = definePageAsyncComponent('产品管理', () => import('./ProductList.vue'))
+const UserList = definePageAsyncComponent('员工管理', () => import('./UserList.vue'))
+const ProcessList = definePageAsyncComponent('工序管理', () => import('./ProcessList.vue'))
+const InventoryList = definePageAsyncComponent('库存管理', () => import('./InventoryList.vue'))
+const MaterialList = definePageAsyncComponent('物料管理', () => import('./MaterialList.vue'))
+const OrderList = definePageAsyncComponent('订单管理', () => import('./OrderList.vue'))
+const PriceList = definePageAsyncComponent('工价管理', () => import('./PriceList.vue'))
+const RouteList = definePageAsyncComponent('工序路线', () => import('./RouteList.vue'))
+const ScanReport = definePageAsyncComponent('扫码报工', () => import('./ScanReport.vue'))
+const ShipmentList = definePageAsyncComponent('发货管理', () => import('./ShipmentList.vue'))
+const StatsPage = definePageAsyncComponent('统计报表', () => import('./StatsPage.vue'))
+const ReportsPage = definePageAsyncComponent('数据分析', () => import('./ReportsPage.vue'))
+const TracePage = definePageAsyncComponent('产品追溯', () => import('./TracePage.vue'))
+const SettingsPage = definePageAsyncComponent('系统设置', () => import('./SettingsPage.vue'))
+const BoardPage = definePageAsyncComponent('数据看板', () => import('./BoardPage.vue'))
+const BasicSettings = definePageAsyncComponent('基础设置', () => import('./BasicSettings.vue'))
+const ProductionSettings = definePageAsyncComponent('生产设置', () => import('./ProductionSettings.vue'))
+const ReworkList = definePageAsyncComponent('返工管理', () => import('./ReworkList.vue'))
+const GanttChart = definePageAsyncComponent('生产排程', () => import('./GanttChart.vue'))
+const ApprovalPage = definePageAsyncComponent('审批管理', () => import('./ApprovalPage.vue'))
+const InspectionList = definePageAsyncComponent('质量检验', () => import('./InspectionList.vue'))
+const WageList = definePageAsyncComponent('工资核算', () => import('./WageList.vue'))
 
 // Expose globals for template compatibility
 window.A = { auth, router, store, showToast, navigate, logout, api }
@@ -154,7 +251,8 @@ export default {
     GanttChart,
     ApprovalPage,
     InspectionList,
-    WageList
+    WageList,
+    NoPermissionPage
   },
   setup() {
     const ready = ref(false)
@@ -162,29 +260,10 @@ export default {
     const showSessions = ref(false)
     const sessions = ref([])
     const sessionsLoading = ref(false)
-
-    const sidebarItems = [
-      { page: 'dashboard', icon: '📊', label: '工作台', required: 'dashboard:view' },
-      { page: 'production', icon: '🏭', label: '生产管理', required: 'orders:view' },
-      { page: 'scan', icon: '📱', label: '扫码报工', required: 'scan:view' },
-      { page: 'inventory', icon: '🏗️', label: '库存管理', required: 'inventory:view' },
-      { page: 'shipments', icon: '🚚', label: '发货管理', required: 'shipments:view' },
-      { page: 'stats', icon: '📈', label: '统计报表', required: 'stats:view' },
-      { page: 'reports', icon: '📊', label: '数据分析', required: 'reports:view' },
-      { page: 'wages', icon: '💰', label: '工资核算', required: 'orders:view' },
-      { page: 'basic-settings', icon: '⚙️', label: '基础设置', required: 'settings:manage' },
-      { page: 'settings', icon: '⚙️', label: '系统设置', required: 'settings:manage' },
-    ]
-
-    function hasPerm(perm) {
-      if (!perm) return true
-      const perms = auth.user?.permissions || []
-      if (perms.includes('*')) return true
-      return perms.includes(perm)
-    }
+    const pageAccess = usePageAccess()
 
     const visibleSidebar = computed(() =>
-      sidebarItems.filter(item => hasPerm(item.required))
+      pageAccess.sidebarItems.value.filter(item => pageAccess.canOpen(auth.user, item.page))
     )
 
     function toggleMenu(key) { menuOpen[key] = !menuOpen[key] }
@@ -212,16 +291,24 @@ export default {
         'approvals': 'ApprovalPage', 'settings': 'SettingsPage',
         'basic-settings': 'BasicSettings', 'production': 'ProductionSettings',
         'reports': 'ReportsPage', 'board': 'BoardPage',
+        'no-permission': 'NoPermissionPage',
       }
-      return map[router.page] || 'DashboardPage'
+      if (router.page !== 'login' && router.page !== 'no-permission' && !pageAccess.canOpen(auth.user, router.page)) {
+        return 'NoPermissionPage'
+      }
+      return map[router.page] || 'NoPermissionPage'
     })
 
     onMounted(async () => {
       if (await restoreSession()) {
+        await loadPageAccessCatalog()
         restoreNavState()
         const saved = localStorage.getItem('currentPage')
         if (saved && saved !== 'login') router.page = saved
-        else router.page = 'dashboard'
+        else router.page = pageAccess.landingPage(auth.user)
+        if (!pageAccess.canOpen(auth.user, router.page)) {
+          router.page = pageAccess.landingPage(auth.user)
+        }
       }
       ready.value = true
       store.loading = false

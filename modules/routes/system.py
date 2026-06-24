@@ -3,7 +3,7 @@ import os, io, zipfile, time
 from datetime import datetime
 from flask import request, jsonify, send_file
 from modules.app import app
-from modules.config import DATA_DIR
+from modules.config import DATA_DIR, DB_PATH
 from modules.middleware.audit import audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.services.system_service import SystemService
@@ -19,9 +19,8 @@ def system_health():
     except Exception:
         pass
 
-    db_path = os.path.join(DATA_DIR, 'production.db')
-    if os.path.exists(db_path):
-        db_size = round(os.path.getsize(db_path) / (1024 * 1024), 2)
+    if os.path.exists(DB_PATH):
+        db_size = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
 
     try:
         stat = os.statvfs(DATA_DIR)
@@ -49,7 +48,6 @@ def system_health():
 @check_auth
 @check_permission('settings:manage')
 def create_backup():
-    db_path = os.path.join(DATA_DIR, 'production.db')
     attach_dir = os.path.join(DATA_DIR, 'attachments')
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     zip_name = f'qr_backup_{timestamp}.zip'
@@ -61,8 +59,8 @@ def create_backup():
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        if os.path.exists(db_path):
-            zf.write(db_path, 'production.db')
+        if os.path.exists(DB_PATH):
+            zf.write(DB_PATH, os.path.basename(DB_PATH))
         if os.path.exists(attach_dir):
             for root, dirs, files in os.walk(attach_dir):
                 for fname in files:

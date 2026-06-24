@@ -29,7 +29,9 @@ class TestOrderCRUD:
         resp = client.put(f"/api/orders/{test_order_id}", headers=auth_headers, json={
             "remark": "Updated by test"
         })
-        assert resp.status_code in (200, 500), f"update_order response: {resp.get_json()}" 
+        assert resp.status_code == 200, f"update_order response: {resp.get_json()}"
+        data = resp.get_json()
+        assert data["message"]
 
 
 class TestOrderDeleteFlow:

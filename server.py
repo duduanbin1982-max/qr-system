@@ -63,7 +63,7 @@ import modules.routes.system         # health, backup, integrity checks
 # ============================================================
 @app.route('/')
 def index():
-    resp = make_response(render_template('index-v3.html', nonce=getattr(g, 'csp_nonce', '')))
+    resp = make_response(render_template('static/index.html', nonce=getattr(g, 'csp_nonce', '')))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -80,7 +80,9 @@ def static_files(filename):
         from flask import abort
         abort(404)
     try:
-        if filename.endswith('.html'):
+        if filename in ('index.html', 'index-v3.html'):
+            resp = make_response(render_template('static/index.html', nonce=getattr(g, 'csp_nonce', '')))
+        elif filename.endswith('.html'):
             resp = make_response(render_template(filename, nonce=getattr(g, 'csp_nonce', '')))
         else:
             resp = app.send_static_file(filename)

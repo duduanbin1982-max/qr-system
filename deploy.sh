@@ -26,8 +26,8 @@ else
     echo ">>> Tests SKIPPED"
 fi
 
-echo ">>> Restarting service..."
-systemctl --user restart qr-system.service
+echo ">>> Building frontend and restarting service..."
+bash scripts/build.sh --restart
 sleep 2
 
 echo ">>> Smoke test..."

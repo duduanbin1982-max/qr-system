@@ -7,6 +7,7 @@ import { dashboardApi } from './api/dashboard.js'
 import { ordersApi } from './api/orders.js'
 import { orderAttachmentsApi } from './api/order-attachments.js'
 import { productsApi } from './api/products.js'
+import { materialsApi } from './api/materials.js'
 import { customersApi } from './api/customers.js'
 import { usersApi } from './api/users.js'
 import { processesApi } from './api/processes.js'
@@ -43,6 +44,7 @@ export const api = {
   ...ordersApi,
   ...orderAttachmentsApi,
   ...productsApi,
+  ...materialsApi,
   ...customersApi,
   ...usersApi,
   ...processesApi,

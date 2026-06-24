@@ -2,12 +2,11 @@
 qr-system — Flask 应用实例
 独立模块，解决循环导入问题：所有路由文件和 server.py 都从这里导入 app
 """
-from flask import Flask, request, jsonify, g
-from modules.middleware.rate_limit import apply_global_rate_limit
-import secrets
+from flask import Flask, request, jsonify
 from flasgger import Swagger
 import os
 from dotenv import load_dotenv
+from modules.config import DB_PATH
 
 # Load .env file (production secrets)
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
@@ -26,11 +25,6 @@ _secret = os.environ.get('SECRET_KEY')
 if _secret:
     app.secret_key = _secret
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制请求体最大 16MB
-
-from modules.middleware.error_handler import register_error_handlers
-register_error_handlers(app)
-from modules.middleware.request_tracker import RequestTracker
-RequestTracker(app)
 
 # ============================================================
 # Swagger / OpenAPI 文档
@@ -100,79 +94,8 @@ ENABLE_SWAGGER = os.environ.get('ENABLE_SWAGGER', '').lower() == 'true'
 if ENABLE_SWAGGER:
     swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
-# ============================================================
-# CSP nonce generation (per-request)
-# ============================================================
-@app.before_request
-def generate_csp_nonce():
-    """Generate a unique nonce for each request, used in CSP script-src."""
-    g.csp_nonce = secrets.token_hex(16)
-
-@app.before_request
-def api_version_prefix():
-    """透明支持 /api/v1/ 前缀 → 内部路由不变，未来版本化准备"""
-    if request.path.startswith('/api/v1/'):
-        request.environ['PATH_INFO'] = request.path.replace('/api/v1/', '/api/', 1)
-
-# ============================================================
-# CORS 白名单 + 安全头中间件
-# ============================================================
-ALLOWED_ORIGINS = {
-    # 内网客户端（桌面浏览器）
-    'https://192.168.1.75:3000',
-    'http://192.168.1.75:3000',
-    'http://localhost:3000',
-    # Nginx 反代后的访问地址
-    'https://192.168.1.8',
-    'http://192.168.1.8',
-    # 在此添加更多白名单域名
-}
-
-@app.after_request
-def add_security_headers(response):
-    """统一注入 CORS + 安全头 + 全局限流"""
-    # 全局限流检查（/api/ 路径，排除 health/login）
-    limit_resp = apply_global_rate_limit()
-    if limit_resp is not None:
-        return limit_resp
-    origin = request.headers.get('Origin', '')
-    if origin in ALLOWED_ORIGINS:
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Vary'] = 'Origin'
-    # Strict: no CORS header for non-whitelisted origins (browser will reject)
-    # Same-origin requests (no Origin header) are allowed by browser default
-
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type'
-    response.headers['Access-Control-Max-Age'] = '86400'
-
-    # 标准安全头
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    if request.is_secure or request.headers.get('X-Forwarded-Proto', '') == 'https':
-        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'camera=(self), microphone=(), geolocation=()'
-
-    # Content-Security-Policy（strict mode — nonce-based script execution）
-    csp_nonce = getattr(g, 'csp_nonce', 'fallback')
-    response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; "
-        f"script-src 'self' 'nonce-{csp_nonce}' cdn.jsdelivr.net unpkg.com; "
-        "style-src 'self' 'unsafe-inline' unpkg.com; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self' cdn.jsdelivr.net unpkg.com; "
-        "frame-ancestors 'none'; "
-        "base-uri 'self'; "
-        "form-action 'self'"
-    )
-    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-
-    # API 响应禁止浏览器缓存（防止退出后后退按钮看到敏感数据）
-    if request.path.startswith('/api/'):
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
-
-    return response
+from modules.app_extensions import register_app_extensions
+register_app_extensions(app)
 
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
 @app.route('/api/v1/health', methods=['GET', 'OPTIONS'])
@@ -188,9 +111,8 @@ def health_check():
         db = get_db()
         db.execute('SELECT 1')
         status['db'] = 'connected'
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'production.db')
-        if os.path.exists(db_path):
-            status['db_size_mb'] = round(os.path.getsize(db_path) / (1024 * 1024), 2)
+        if os.path.exists(DB_PATH):
+            status['db_size_mb'] = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
     except Exception as e:
         status['status'] = 'degraded'
         status['db'] = str(e)[:200]

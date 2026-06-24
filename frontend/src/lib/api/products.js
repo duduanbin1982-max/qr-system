@@ -1,24 +1,27 @@
 import { request, buildQuery, uploadFile } from './client.js'
 
+const PRODUCTS_API = '/api/products'
+const ORDERS_API = '/api/orders'
+
 export const productsApi = {
   // ========== 产品 ==========
   listMaterials:   (params) => request('GET', '/api/materials' + buildQuery(params || {})),
   listProcesses:   ()       => request('GET', '/api/processes'),
-  listProducts:     (params) => request('GET', '/api/products' + buildQuery(params)),
-  createProduct:    (data)   => request('POST', '/api/products', data),
-  updateProduct:    (id,data)=> request('PUT',  '/api/products/' + id, data),
-  deleteProduct:    (id)     => request('DELETE', '/api/products/' + id),
-  restoreProduct:   (id)     => request('POST', '/api/products/' + id + '/restore'),
-  purgeProduct:     (id)     => request('DELETE', '/api/products/' + id + '/purge'),
-  uploadProductImport:(formData)=> uploadFile('/api/products/import', formData),
+  listProducts:     (params) => request('GET', PRODUCTS_API + buildQuery(params)),
+  createProduct:    (data)   => request('POST', PRODUCTS_API, data),
+  updateProduct:    (id,data)=> request('PUT',  PRODUCTS_API + '/' + id, data),
+  deleteProduct:    (id)     => request('DELETE', PRODUCTS_API + '/' + id),
+  restoreProduct:   (id)     => request('POST', PRODUCTS_API + '/' + id + '/restore'),
+  purgeProduct:     (id)     => request('DELETE', PRODUCTS_API + '/' + id + '/purge'),
+  uploadProductImport:(formData)=> uploadFile(PRODUCTS_API + '/import', formData),
   // Product attachments
-  listProductBom:  (productId)         => request('GET', '/api/products/' + productId + '/bom'),
-  addProductBom:   (productId, data)   => request('POST', '/api/products/' + productId + '/bom', data),
-  deleteProductBom:(productId, bomId)  => request('DELETE', '/api/products/' + productId + '/bom/' + bomId),
-  listOrderMaterials: (orderId)        => request('GET', '/api/orders/' + orderId + '/materials'),
-  addOrderMaterial:   (orderId, data)  => request('POST', '/api/orders/' + orderId + '/materials', data),
-  deleteOrderMaterial:(orderId, omId)  => request('DELETE', '/api/orders/' + orderId + '/materials/' + omId),
-  listProductAttachments:   (productId)          => request('GET', '/api/products/' + productId + '/attachments'),
-  uploadProductAttachment:  (productId, formData) => uploadFile('/api/products/' + productId + '/attachments', formData),
+  listProductBom:  (productId)         => request('GET', PRODUCTS_API + '/' + productId + '/bom'),
+  addProductBom:   (productId, data)   => request('POST', PRODUCTS_API + '/' + productId + '/bom', data),
+  deleteProductBom:(productId, bomId)  => request('DELETE', PRODUCTS_API + '/' + productId + '/bom/' + bomId),
+  listOrderMaterials: (orderId)        => request('GET', ORDERS_API + '/' + orderId + '/materials'),
+  addOrderMaterial:   (orderId, data)  => request('POST', ORDERS_API + '/' + orderId + '/materials', data),
+  deleteOrderMaterial:(orderId, omId)  => request('DELETE', ORDERS_API + '/' + orderId + '/materials/' + omId),
+  listProductAttachments:   (productId)          => request('GET', PRODUCTS_API + '/' + productId + '/attachments'),
+  uploadProductAttachment:  (productId, formData) => uploadFile(PRODUCTS_API + '/' + productId + '/attachments', formData),
   deleteProductAttachment:  (attachmentId)        => request('DELETE', '/api/product-attachments/' + attachmentId),
 }

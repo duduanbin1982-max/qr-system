@@ -33,3 +33,12 @@ data.db
 ssl_backup/
 server.pid
 *.bak-*
+data/*.db
+data/.settings_cache_*
+backups/
+public/static/
+public/index-v3.html
+qr_system.db
+uploads/
+modules/uploads/
+public/assets/

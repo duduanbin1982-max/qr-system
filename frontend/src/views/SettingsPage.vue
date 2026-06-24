@@ -12,12 +12,15 @@
     </div>
 
     <!-- Dynamic tab content -->
-    <component :is="currentComponent" />
+    <div v-if="!tabs.length" class="card"><div class="card-body">当前角色没有系统设置子页面权限。</div></div>
+    <component v-else :is="currentComponent" />
   </div>
 </template>
 
 <script>
-import { ref, computed } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
+import { auth } from '@/lib/auth.js'
+import { usePageAccess } from '@/composables/usePageAccess.js'
 import CompanyInfo    from './settings/CompanyInfo.vue'
 import AdminUsers     from './settings/AdminUsers.vue'
 import AuditLogs      from './settings/AuditLogs.vue'
@@ -30,21 +33,35 @@ import ApprovalConfig from './settings/ApprovalConfig.vue'
 export default {
   components: { CompanyInfo, AdminUsers, AuditLogs, ProcessConfig, RoleGroups, RoleManage, Positions, ApprovalConfig },
   setup() {
-    const tabs = [
-      { key:'company-info',   label:'\u{1F3E2} \u516C\u53F8\u8D44\u6599',   component: 'CompanyInfo' },
-      { key:'admin-users',    label:'\u{1F465} \u7BA1\u7406\u5458\u7BA1\u7406', component: 'AdminUsers' },
-      { key:'audit-logs',     label:'\u{1F4CB} \u64CD\u4F5C\u65E5\u5FD7',     component: 'AuditLogs' },
-      { key:'process-config', label:'\u2699\uFE0F \u5DE5\u827A\u7BA1\u7406',   component: 'ProcessConfig' },
-      { key:'role-groups',    label:'\u{1F454} \u89D2\u8272\u7EC4',           component: 'RoleGroups' },
-      { key:'role-manage',    label:'\u{1F465} \u89D2\u8272\u7BA1\u7406',     component: 'RoleManage' },
-      { key:'positions',      label:'\u{1F4BC} \u5C97\u4F4D\u7BA1\u7406',     component: 'Positions' },
-      { key:'approval-config',label:'\u2705 \u5BA1\u6279\u914D\u7F6E',         component: 'ApprovalConfig' },
+    const pageAccess = usePageAccess()
+    const allTabs = [
+      { key:'company-info',    page:'company-info',    label:'\u{1F3E2} \u516C\u53F8\u8D44\u6599',   component: 'CompanyInfo' },
+      { key:'admin-users',     page:'admin-users',     label:'\u{1F465} \u7BA1\u7406\u5458\u7BA1\u7406', component: 'AdminUsers' },
+      { key:'audit-logs',      page:'audit-logs',      label:'\u{1F4CB} \u64CD\u4F5C\u65E5\u5FD7',     component: 'AuditLogs' },
+      { key:'process-config',  page:'process-config',  label:'\u2699\uFE0F \u5DE5\u827A\u7BA1\u7406',   component: 'ProcessConfig' },
+      { key:'role-groups',     page:'role-groups',     label:'\u{1F454} \u89D2\u8272\u7EC4',           component: 'RoleGroups' },
+      { key:'role-manage',     page:'role-manage',     label:'\u{1F465} \u89D2\u8272\u7BA1\u7406',     component: 'RoleManage' },
+      { key:'positions',       page:'positions',       label:'\u{1F4BC} \u5C97\u4F4D\u7BA1\u7406',     component: 'Positions' },
+      { key:'approval-config', page:'approval-config', label:'\u2705 \u5BA1\u6279\u914D\u7F6E',         component: 'ApprovalConfig' },
     ]
+    const tabs = computed(() => pageAccess.filterTabs(allTabs, auth.user))
 
-    const activeTab = ref('company-info')
+    const STORAGE_KEY = 'settingsTab'
+    const activeTab = ref(localStorage.getItem(STORAGE_KEY) || 'company-info')
+
+    watchEffect(() => {
+      if (!tabs.value.length) {
+        activeTab.value = ''
+        return
+      }
+      if (!tabs.value.some(t => t.key === activeTab.value)) {
+        activeTab.value = tabs.value[0].key
+      }
+      localStorage.setItem(STORAGE_KEY, activeTab.value)
+    })
 
     const currentComponent = computed(() => {
-      const t = tabs.find(t => t.key === activeTab.value)
+      const t = tabs.value.find(t => t.key === activeTab.value)
       return t ? t.component : 'CompanyInfo'
     })
 

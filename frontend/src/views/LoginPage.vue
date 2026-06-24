@@ -65,6 +65,8 @@
 import { ref } from 'vue'
 import { auth, login, changePassword } from '@/lib/auth.js'
 import { navigate } from '@/lib/router.js'
+import { getLandingPage } from '@/lib/permissions.js'
+import { loadPageAccessCatalog } from '@/composables/usePageAccess.js'
 
 export default {
   setup(props, { emit }) {
@@ -76,28 +78,6 @@ export default {
     const loading = ref(false)
     const showChangePassword = ref(false)
     
-    function getLandingPage() {
-      const perms = auth.user?.permissions || []
-      if (perms.includes('*')) return 'dashboard'
-      const landingOrder = [
-        { page: 'dashboard', perm: 'dashboard:view' },
-        { page: 'production', perm: 'orders:view' },
-        { page: 'scan', perm: 'scan:view' },
-        { page: 'orders', perm: 'orders:view' },
-        { page: 'inventory', perm: 'inventory:view' },
-        { page: 'stats', perm: 'stats:view' },
-        { page: 'board', perm: 'board:view' },
-        { page: 'reports', perm: 'reports:view' },
-        { page: 'wages', perm: 'orders:view' },
-        { page: 'basic-settings', perm: 'settings:manage' },
-        { page: 'settings', perm: 'settings:manage' },
-      ]
-      for (const item of landingOrder) {
-        if (perms.includes(item.perm)) return item.page
-      }
-      return 'scan'
-    }
-
     async function handleSubmit() {
       if (!username.value || !password.value) {
         error.value = '请输入用户名和密码'
@@ -111,7 +91,8 @@ export default {
           showChangePassword.value = true
           error.value = ''
         } else {
-          navigate(getLandingPage())
+          await loadPageAccessCatalog(true)
+          navigate(getLandingPage(auth.user))
         }
       } catch(e) {
         error.value = e.message || '登录失败'
@@ -133,7 +114,8 @@ export default {
       error.value = ''
       try {
         await changePassword(newPassword.value)
-        navigate(getLandingPage())
+        await loadPageAccessCatalog(true)
+        navigate(getLandingPage(auth.user))
       } catch(e) {
         error.value = e.message || '修改密码失败'
       } finally {

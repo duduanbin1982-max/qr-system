@@ -1,16 +1,9 @@
 """qr-system — ScanHelperService（扫码报工核心数据操作）
 CRITICAL FIX: 所有写操作事务化 — 消除 23 个裸 db.commit()，统一使用 BaseService.transaction()
 """
-import logging
-from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.scan_repository import ScanRepository
-from modules.repositories.order_material_repository import OrderMaterialRepository
-from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.setting_reader import get_setting
-from modules.access_policy import get_user_process_ids, has_permission
-
-_logger = logging.getLogger(__name__)
 
 
 class ScanHelperService:
@@ -23,87 +16,56 @@ class ScanHelperService:
         """获取数据库连接：优先使用传入的 db（事务中），否则新建连接。"""
         return db if db is not None else BaseService.db()
 
-    # ======================== 订单查询 ========================
+    # ======================== Order queries ========================
 
     @staticmethod
     def get_order_by_no(order_no, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM orders WHERE order_no = ? AND deleted_at IS NULL", (order_no,)
-        ).fetchone()
+        return ScanRepository.find_order_by_no(order_no, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_order(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
-        ).fetchone()
+        return ScanRepository.get_order(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_order_for_stock(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec FROM orders o LEFT JOIN products p ON o.product_code = p.product_code WHERE o.id = ?",
-            (order_id,)
-        ).fetchone()
+        return ScanRepository.get_order_for_stock(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_order_quantity(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT quantity FROM orders WHERE id = ?", (order_id,)
-        ).fetchone()
+        return ScanRepository.get_order_quantity(order_id, db=ScanHelperService._db(db))
 
-    # ======================== 产品序列号查询 ========================
+    # ======================== Product item queries ========================
 
     @staticmethod
     def get_product_item(serial_no, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM product_items WHERE serial_no = ?", (serial_no,)
-        ).fetchone()
+        return ScanRepository.get_item_by_serial(serial_no, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_product_item_by_position(order_id, position_no, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM product_items WHERE order_id = ? AND position_no = ?",
-            (order_id, position_no)
-        ).fetchone()
+        return ScanRepository.get_item_by_position(order_id, position_no, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_product_items_by_order(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no",
-            (order_id,)
-        ).fetchall()
+        return ScanRepository.get_items_by_order(order_id, db=ScanHelperService._db(db))
 
-    # ======================== 工序相关查询 ========================
+    # ======================== Process queries ========================
 
     @staticmethod
     def get_order_process(order_id, process_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?",
-            (order_id, process_id)
-        ).fetchone()
+        return ScanRepository.get_order_process(order_id, process_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def check_process_in_order(order_id, process_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT id FROM order_processes WHERE order_id = ? AND process_id = ?",
-            (order_id, process_id)
-        ).fetchone()
+        return ScanRepository.find_order_process_id(order_id, process_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_order_processes(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
-            "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? ORDER BY op.seq_order", (order_id,)
-        ).fetchall()
+        return ScanRepository.get_order_processes(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_prev_incomplete_processes(order_id, current_seq, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT op.seq_order, p.name as process_name FROM order_processes op "
-            "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? AND op.seq_order < ? AND (op.completed IS NULL OR op.completed = 0) "
-            "ORDER BY op.seq_order", (order_id, current_seq)
-        ).fetchall()
+        return ScanRepository.get_prev_incomplete_processes(order_id, current_seq, db=ScanHelperService._db(db))
+
     @staticmethod
     def check_process_order(order_id, current_seq, db=None):
         """Check sequential process order. Returns (None, None) if OK, or (error_json, status_code)."""
@@ -119,133 +81,72 @@ class ScanHelperService:
     @staticmethod
     def check_quantity_limits(order_id, current_seq, current_completed, quantity, order_quantity, db=None):
         """Check quantity limits. Returns (None, None) or (error_json, status_code)."""
-        # Upper limit: previous process completed count
         if get_setting("limit_by_prev_process", "1") == "1" and current_seq > 1:
             prev_op = ScanHelperService.get_prev_order_process(order_id, current_seq, db)
             if prev_op:
                 new_completed = (current_completed or 0) + quantity
                 prev_completed = prev_op["completed"] or 0
                 if new_completed > prev_completed:
-                    return {"error": f"报工数量不能超过上道工序({prev_op['process_name']})的累计数量 {prev_completed}"}, 400
-        # Order total limit
+                    return {"error": f"\u62a5\u5de5\u6570\u91cf\u4e0d\u80fd\u8d85\u8fc7\u4e0a\u9053\u5de5\u5e8f({prev_op['process_name']})\u7684\u7d2f\u8ba1\u6570\u91cf {prev_completed}"}, 400
         if get_setting("limit_by_order_qty", "1") == "1":
             new_completed = (current_completed or 0) + quantity
             if new_completed > order_quantity:
-                return {"error": f"报工累计({new_completed})不能超过订单数量({order_quantity})"}, 400
+                return {"error": f"\u62a5\u5de5\u7d2f\u8ba1({new_completed})\u4e0d\u80fd\u8d85\u8fc7\u8ba2\u5355\u6570\u91cf({order_quantity})"}, 400
         return None, None
 
     @staticmethod
     def get_prev_order_process(order_id, current_seq, db=None):
         """Find the actual previous process (max seq_order < current_seq), not seq-1."""
-        return ScanHelperService._db(db).execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
-            "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? AND op.seq_order < ? "
-            "ORDER BY op.seq_order DESC LIMIT 1", (order_id, current_seq)
-        ).fetchone()
+        return ScanRepository.get_prev_order_process(order_id, current_seq, db=ScanHelperService._db(db))
 
     @staticmethod
     def find_next_process(order_id, current_seq, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT op.process_id FROM order_processes op WHERE op.order_id = ? AND op.seq_order > ? "
-            "ORDER BY op.seq_order LIMIT 1", (order_id, current_seq)
-        ).fetchone()
+        return ScanRepository.find_next_process(order_id, current_seq, db=ScanHelperService._db(db))
 
-    # ======================== 报工记录查询 ========================
+    # ======================== Work-record queries ========================
 
     @staticmethod
     def get_last_process_seq(order_id, db=None):
-        row = ScanHelperService._db(db).execute(
-            "SELECT MAX(seq_order) as max_seq FROM order_processes WHERE order_id = ?",
-            (order_id,)
-        ).fetchone()
-        return row["max_seq"] if row else None
+        return ScanRepository.get_last_process_seq(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def is_last_process(order_id, process_id, db=None):
-        d = ScanHelperService._db(db)
-        max_row = d.execute(
-            "SELECT MAX(seq_order) as max_seq FROM order_processes WHERE order_id = ?",
-            (order_id,)
-        ).fetchone()
-        if not max_row or max_row["max_seq"] is None:
-            return False
-        cur_row = d.execute(
-            "SELECT seq_order FROM order_processes WHERE order_id = ? AND process_id = ?",
-            (order_id, process_id)
-        ).fetchone()
-        return cur_row is not None and cur_row["seq_order"] == max_row["max_seq"]
+        return ScanRepository.is_last_process(order_id, process_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_work_records(order_id, db=None, limit=None):
-        d = ScanHelperService._db(db)
-        if limit:
-            return d.execute(
-                "SELECT wr.*, u.name as worker_name FROM work_records wr "
-                "LEFT JOIN users u ON wr.user_id = u.id "
-                "WHERE wr.order_id = ? ORDER BY wr.created_at DESC LIMIT ?", (order_id, limit)
-            ).fetchall()
-        return d.execute(
-            "SELECT wr.*, u.name as worker_name FROM work_records wr "
-            "LEFT JOIN users u ON wr.user_id = u.id "
-            "WHERE wr.order_id = ? ORDER BY wr.created_at DESC", (order_id,)
-        ).fetchall()
+        return ScanRepository.get_work_records(order_id, db=ScanHelperService._db(db), limit=limit)
 
     @staticmethod
-    @staticmethod
     def get_user_order_reports(order_id, user_id, db=None):
-        d = ScanHelperService._db(db)
-        return d.execute(
-            "SELECT id FROM work_records WHERE order_id = ? AND user_id = ? AND type = 'normal'",
-            (order_id, user_id)
-        ).fetchone()
+        return ScanRepository.get_user_order_report(order_id, user_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def get_process_name(process_id, db=None):
-        d = ScanHelperService._db(db)
-        row = d.execute("SELECT name FROM processes WHERE id = ?", (process_id,)).fetchone()
-        return row["name"] if row else "未知工序"
+        return ScanRepository.get_process_name(process_id, db=ScanHelperService._db(db))
 
+    @staticmethod
     def check_duplicate_normal_report(order_id, process_id, serial_no, user_id, db=None):
-        d = ScanHelperService._db(db)
-        if serial_no:
-            return d.execute(
-                "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
-                "AND serial_no = ? AND type = 'normal' AND status != 'rejected'", (order_id, process_id, serial_no)
-            ).fetchone()
-        return d.execute(
-            "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
-            "AND user_id = ? AND type = 'normal' AND status != 'rejected'", (order_id, process_id, user_id)
-        ).fetchone()
-
+        return ScanRepository.find_duplicate_normal_report(
+            order_id, process_id, serial_no, user_id, db=ScanHelperService._db(db)
+        )
 
     @staticmethod
     def check_serial_duplicate_in_order(order_id, serial_no, user_id, db=None):
         """Check if a serial_no has been reported by this user on ANY process in this order."""
-        d = ScanHelperService._db(db)
-        return d.execute(
-            "SELECT id FROM work_records WHERE order_id = ? AND serial_no = ? AND user_id = ? LIMIT 1",
-            (order_id, serial_no, user_id)
-        ).fetchone() is not None
+        return ScanRepository.has_serial_duplicate_in_order(order_id, serial_no, user_id, db=ScanHelperService._db(db))
+
     @staticmethod
     def check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=None):
-        d = ScanHelperService._db(db)
-        return d.execute(
-            "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
-            "AND user_id = ? AND type = ? "
-            "AND created_at > datetime('now', '-10 seconds')",
-            (order_id, process_id, user_id, report_type)
-        ).fetchone()
+        return ScanRepository.find_duplicate_defect_report(
+            order_id, process_id, user_id, report_type, db=ScanHelperService._db(db)
+        )
 
     @staticmethod
     def check_approval_required(process_id, db=None):
-        # Master switch: if approval_enabled is off, skip all approval checks
         if get_setting("approval_enabled", "1") != "1":
             return None
-        return ScanHelperService._db(db).execute(
-            "SELECT id FROM approval_config WHERE process_id = ? AND require_approval = 1",
-            (process_id,)
-        ).fetchone()
+        return ScanRepository.find_approval_config(process_id, db=ScanHelperService._db(db))
 
     # ======================== 报工写入操作（全部接受 db 参数，不自行 commit） ========================
 
@@ -305,9 +206,7 @@ class ScanHelperService:
 
     @staticmethod
     def count_completed_items(order_id, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = 'completed'", (order_id,)
-        ).fetchone()["cnt"]
+        return ScanRepository.count_completed_items(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def complete_order(order_id, db=None):
@@ -363,10 +262,7 @@ class ScanHelperService:
 
     @staticmethod
     def find_inventory_by_model(product_code, db=None):
-        return ScanHelperService._db(db).execute(
-            "SELECT id, product_model, product_name, quantity FROM inventory WHERE product_model = ?",
-            (product_code,)
-        ).fetchone()
+        return ScanRepository.find_inventory_by_model(product_code, db=ScanHelperService._db(db))
 
     @staticmethod
     def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
@@ -387,15 +283,7 @@ class ScanHelperService:
         return cur.lastrowid
     @staticmethod
     def check_inventory_log_dup(order_id, serial_no=None, db=None):
-        d = ScanHelperService._db(db)
-        if serial_no:
-            return d.execute(
-                "SELECT id FROM inventory_logs WHERE order_id = ? AND type = 'in' AND remark LIKE ?",
-                (order_id, "%" + serial_no + "%")
-            ).fetchone()
-        return d.execute(
-            "SELECT id FROM inventory_logs WHERE order_id = ? AND type = 'in'", (order_id,)
-        ).fetchone()
+        return ScanRepository.find_inbound_inventory_log(order_id, serial_no, db=ScanHelperService._db(db))
 
     @staticmethod
     def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
@@ -410,250 +298,6 @@ class ScanHelperService:
             (inv_id, quantity, order_id, order_no, "Order complete auto-inbound", user_id, user_name)
         )
 
-    # ======================== 自动入库 ========================
-
-    @staticmethod
-    def auto_inbound_for_item(order_id, user_id, user_name, serial_no=None, db=None):
-        """Per-item auto-inbound: triggered when a piece completes its last process."""
-        d = ScanHelperService._db(db)
-        try:
-            order_row = ScanHelperService.get_order_for_stock(order_id, db=d)
-            if not order_row or not order_row['product_code']:
-                _logger.info('auto_inbound: order %s has no product_code, skip', order_id)
-                return
-
-            product_code = order_row['product_code']
-            product_name = order_row['product_name'] or product_code
-            inv_id = ScanHelperService.find_or_create_inventory(product_code, product_name, order_id, (order_row["spec"] or "") if order_row else "", db=d)
-
-            dup = ScanHelperService.check_inventory_log_dup(order_id, serial_no, db=d)
-            if dup:
-                _logger.info('auto_inbound: dup detected for order %s item %s, skip', order_id, serial_no)
-                return
-
-            ScanHelperService.stock_in(inv_id, 1, order_id, order_row['order_no'], user_id, user_name, db=d)
-        except Exception as e:
-            _logger.warning('auto_inbound failed: %s', e)
-
-    # ======================== 报工写入（事务化核心） ========================
-
-
-    @staticmethod
-    def validate_report(order_id, process_id, user, quantity, serial_no, report_type):
-        """Shared validation for both desktop and mobile report endpoints.
-        Returns (error_dict, status_code) or (None, None) on success.
-        Also returns validated (quantity, serial_no) after adjustments.
-        """
-        # Admin/inspector accounts can only do rework/scrap
-        if has_permission(user, "quality:edit") and report_type == "normal":
-            return ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403), None, None
-
-        if not order_id or not process_id:
-            return ({"error": "缺少订单或工序信息"}, 400), None, None
-
-        # Serial mode: each item reports individually, quantity always 1
-        has_items = bool(ScanHelperService.get_product_items_by_order(order_id))
-        if has_items and quantity > 1:
-            quantity = 1
-        elif serial_no and quantity > 1:
-            quantity = 1
-
-        # Order existence + scope check
-        order = ScanHelperService.get_order(order_id)
-        if not order:
-            return ({"error": "订单不存在"}, 404), None, None
-        if not ScanHelperService.check_order_scope(order_id, get_user_process_ids(user)):
-            return ({"error": "您没有此订单的报工权限"}, 403), None, None
-
-        # Serial mode guard: serial-mode orders require item QR scan
-        has_items_m = bool(ScanHelperService.get_product_items_by_order(order_id))
-        if has_items_m and not serial_no and not has_permission(user, "quality:view"):
-            return ({"error": "此订单为序列号模式，请扫描工件二维码后再报工"}, 400), None, None
-
-        # Process existence
-        if not ScanHelperService.check_process_in_order(order_id, process_id):
-            return ({"error": "该工序不在订单工艺路线中"}, 400), None, None
-
-        # Cross-process duplicate check (serial)
-        if report_type == "normal" and serial_no and ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user["id"]):
-            return ({"error": "序列号 " + str(serial_no) + " 在此订单中已报工", "can_scrap_rework": True}, 409), None, None
-
-        # Duplicate report check
-        if report_type == "normal":
-            dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user["id"])
-            if dup:
-                msg = "序列号 " + str(serial_no) + " 在此工序已报工" if serial_no else "此工序已报工"
-                return ({"error": msg, "can_scrap_rework": True}, 409), None, None
-        elif report_type in ("scrap", "rework"):
-            if ScanHelperService.check_duplicate_defect_report(order_id, process_id, user["id"], report_type):
-                return ({"error": "请勿重复提交，请稍后再试"}, 409), None, None
-
-        # Process-level permission check
-        user_pids = get_user_process_ids(user)
-        if user_pids is not None and process_id not in user_pids:
-            proc = ScanHelperService._db(None).execute("SELECT name FROM processes WHERE id=?", (process_id,)).fetchone()
-            if proc:
-                return ({"error": "工序「" + proc["name"] + "」不在您的权限范围内"}, 403), None, None
-            return ({"error": "您没有此工序的报工权限"}, 403), None, None
-
-        # Process exists in route
-        current_op = ScanHelperService.get_order_process(order_id, process_id)
-        if order["route_id"] and not current_op:
-            return ({"error": "该工序不在订单工艺路线中"}, 400), None, None
-        current_seq = current_op["seq_order"] if current_op else 0
-
-        # Sequential report check (normal only)
-        if report_type == "normal":
-            err, code = ScanHelperService.check_process_order(order_id, current_seq)
-            if err:
-                return (err, code), None, None
-
-        # Quantity limit check (normal only)
-        if report_type == "normal":
-            err, code = ScanHelperService.check_quantity_limits(
-                order_id, current_seq, current_op["completed"] or 0, quantity, order["quantity"])
-            if err:
-                return (err, code), None, None
-
-        # Serial number: validate item current process matches
-        if serial_no and report_type == "normal":
-            item = ScanHelperService.get_product_item(serial_no)
-            if item and item["current_process_id"] and item["current_process_id"] != process_id:
-                return ({"error": "序列号 " + str(serial_no) + " 不在当前工序，请刷新后再试"}, 400), None, None
-
-        return (None, None), quantity, serial_no
-
-
-    @staticmethod
-    def execute_report_write(report_type, order_id, process_id, user_id, user_name,
-                              quantity, remark, serial_no, need_approval, record_type='normal'):
-        """共享报工写入逻辑。整个方法在事务中执行，全部成功或全部回滚。"""
-        with BaseService.transaction() as db:
-            # === In-transaction re-checks (TOCTOU protection) ===
-            if report_type == "normal":
-                dup = ScanHelperService.check_duplicate_normal_report(order_id, process_id, serial_no, user_id, db=db)
-                if dup:
-                    msg = "序列号 {} 在此工序已报工".format(serial_no) if serial_no else "此工序已报工"
-                    raise ValueError(msg)
-            elif report_type in ("scrap", "rework"):
-                dup = ScanHelperService.check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=db)
-                if dup:
-                    raise ValueError("请勿重复提交缺陷报告")
-            current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
-            if not current_op:
-                raise ValueError("该工序不在订单工艺路线中")
-            # 顺序 & 数量上限检查仅对普通报工生效
-            if report_type == "normal":
-                err, code = ScanHelperService.check_process_order(order_id, current_op.get("seq_order", 0), db=db)
-                if err:
-                    raise ValueError(err.get("error", "工序顺序校验失败，请按工艺路线顺序报工"))
-                order = dict(ScanHelperService.get_order(order_id, db=db) or {})
-                if order:
-                    err2, code2 = ScanHelperService.check_quantity_limits(
-                        order_id, current_op.get("seq_order", 0), current_op.get("completed", 0) or 0, quantity, order.get("quantity", 0), db=db)
-                    if err2:
-                        raise ValueError(err2.get("error", "报工数量超出订单总量限制"))
-            work_status = 'pending' if need_approval else 'approved'
-            quantity_local = 1 if serial_no else quantity
-
-            if report_type == 'normal':
-                wr_id = ScanHelperService.insert_work_record(
-                    order_id, process_id, user_id, report_type, quantity_local, remark, work_status, serial_no, db=db)
-
-                if need_approval:
-                    ScanHelperService.insert_approval_record(wr_id, db=db)
-
-                if work_status == 'approved':
-                    op = ScanHelperService.get_order_process(order_id, process_id, db=db)
-                    if op:
-                        new_completed = (op['completed'] or 0) + quantity_local
-                        ScanHelperService.update_order_process_completed(order_id, process_id, new_completed, db=db)
-
-                    # Auto-create first-article inspection if this is the first work on this process
-                    first_count = db.execute(
-                        "SELECT COUNT(*) FROM work_records WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
-                        (order_id, process_id)
-                    ).fetchone()[0]
-                    if first_count <= 1:
-                        # Check if inspection already exists
-                        existing = db.execute(
-                            "SELECT id FROM quality_inspections WHERE order_id=? AND process_id=? AND inspection_type='first_article'",
-                            (order_id, process_id)
-                        ).fetchone()
-                        if not existing:
-                            try:
-                                from modules.services.quality_service import QualityService
-                                QualityService.create_inspection({
-                                    'order_id': order_id,
-                                    'process_id': process_id,
-                                    'inspection_type': 'first_article',
-                                    'quantity_checked': 1,
-                                    'quantity_passed': 0,
-                                    'quantity_failed': 0,
-                                    'defect_category': '',
-                                    'defect_quantity': 0,
-                                    'notes': '自动创建: 首件报工',
-                                    'inspected_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                }, user_id)
-                            except Exception:
-                                _logger.warning(
-                                    'auto_create_inspection failed: order_id=%s process_id=%s',
-                                    order_id, process_id
-                                )  # Non-critical
-
-                    # Auto-deduct materials via ScanRepository
-                    ScanRepository.deduct_materials_for_process(
-                        order_id, process_id, quantity_local, user_id, user_name, db=db)
-
-                    if not serial_no and op:
-                        order_status = db.execute('SELECT status FROM orders WHERE id = ?', (order_id,)).fetchone()
-                        if order_status and order_status['status'] != 'completed':
-                            if ScanHelperService.is_last_process(order_id, process_id, db=db):
-                                ScanHelperService.auto_inbound_for_item(order_id, user_id, user_name, serial_no=None, db=db)
-
-                if serial_no:
-                    current_op = dict(ScanHelperService.get_order_process(order_id, process_id, db=db) or {})
-                    if current_op:
-                        item = ScanHelperService.get_product_item(serial_no, db=db)
-                        if item:
-                            current_seq = current_op['seq_order']
-                            next_op = ScanHelperService.find_next_process(order_id, current_seq, db=db)
-                            item_version = item['version'] or 1
-                            if next_op:
-                                cur = ScanHelperService.advance_product_item(item['id'], next_op['process_id'], item_version, db=db)
-                                if cur.rowcount == 0:
-                                    raise ValueError(f'序列号 {serial_no} 已被其他操作修改，请刷新后重试')
-                            else:
-                                cur = ScanHelperService.complete_product_item(item['id'], item_version, db=db)
-                                if cur.rowcount == 0:
-                                    raise ValueError(f'序列号 {serial_no} 已被其他操作修改，请刷新后重试')
-                                ScanHelperService.auto_inbound_for_item(order_id, user_id, user_name, serial_no, db=db)
-
-                    ScanHelperService.update_order_completed(order_id, db=db)
-                    order_info = ScanHelperService.get_order_quantity(order_id, db=db)
-                    if order_info:
-                        completed_cnt = ScanHelperService.count_completed_items(order_id, db=db)
-                        if completed_cnt >= order_info['quantity']:
-                            ScanHelperService.complete_order(order_id, db=db)
-
-            elif report_type == 'scrap':
-                reason = remark or ''
-                ScanHelperService.insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=db)
-                op = ScanHelperService.get_order_process(order_id, process_id, db=db)
-                if op:
-                    new_scrapped = (op['scrapped'] or 0) + quantity
-                    ScanHelperService.update_order_process_scrapped(order_id, process_id, new_scrapped, db=db)
-                ScanHelperService.update_order_scrapped(order_id, db=db)
-
-            elif report_type == 'rework':
-                reason = remark or ''
-                ScanHelperService.insert_rework_record(order_id, process_id, user_id, quantity, reason, db=db)
-                op = ScanHelperService.get_order_process(order_id, process_id, db=db)
-                if op:
-                    new_rework = (op['rework'] or 0) + quantity
-                    ScanHelperService.update_order_process_rework(order_id, process_id, new_rework, db=db)
-                ScanHelperService.update_order_rework(order_id, db=db)
-
     # ======================== 权限范围 ========================
 
     @staticmethod
@@ -662,10 +306,4 @@ class ScanHelperService:
             return True
         if not pids:
             return False
-        d = ScanHelperService._db(db)
-        placeholders = ",".join("?" for _ in pids)
-        row = d.execute(
-            f"SELECT 1 FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})",
-            [order_id] + pids
-        ).fetchone()
-        return row is not None
+        return ScanRepository.order_has_process_in_scope(order_id, pids, db=ScanHelperService._db(db))

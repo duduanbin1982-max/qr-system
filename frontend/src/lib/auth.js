@@ -1,6 +1,7 @@
 // ===== QR-System Auth Module (v2 — Cookie-only Token) =====
 import { reactive } from 'vue'
 import { api } from './api.js'
+import { hasPermission } from './permissions.js'
 
 export const auth = reactive({
   user: null,
@@ -15,10 +16,7 @@ export const auth = reactive({
  * Admin users with '*' or isAdmin=true always pass.
  */
 export function can(permission) {
-  if (!auth.user) return false
-  const perms = auth.user.permissions || []
-  if (auth.isAdmin) return true
-  return perms.includes(permission)
+  return hasPermission(auth.user, permission)
 }
 
 /** Login: credentials → httpOnly cookie (server-side) + user info */

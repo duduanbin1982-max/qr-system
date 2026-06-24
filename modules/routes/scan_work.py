@@ -11,6 +11,7 @@ from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.data_scope import get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService
+from modules.services.scan_report_service import ScanReportService
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
 import qrcode as qrcode_lib
@@ -208,7 +209,7 @@ def mobile_scan():
             o_pre = dict(order)
             _qr_mode = (o_pre.get("qr_mode") or "").strip()
             _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
-            if _qr_mode == "serial" or _has_items:
+            if (_qr_mode == "serial" or _has_items) and not has_permission(g.current_user, "quality:view"):
                 return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
         o = dict(order)
@@ -271,17 +272,17 @@ def mobile_report():
         user = g.current_user
 
         # Shared validation
-        (err, code), quantity, serial_no = ScanHelperService.validate_report(
+        (err, code), quantity, serial_no = ScanReportService.validate_report(
             order_id, process_id, user, quantity, serial_no, report_type
         )
         if err:
             return jsonify(err), code
 
         # Approval check
-        need_approval = ScanHelperService.check_approval_required(process_id) is not None
+        need_approval = ScanReportService.check_approval_required(process_id)
 
         # Execute report write
-        ScanHelperService.execute_report_write(report_type, order_id, process_id, user["id"],
+        ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
             user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
 
         try:
@@ -322,17 +323,17 @@ def work_report():
             return jsonify({"error": "quantity must be > 0"}), 400
 
         # Shared validation
-        (err, code), quantity, serial_no = ScanHelperService.validate_report(
+        (err, code), quantity, serial_no = ScanReportService.validate_report(
             order_id, process_id, user, quantity, serial_no, report_type
         )
         if err:
             return jsonify(err), code
 
         # Approval check
-        need_approval = ScanHelperService.check_approval_required(process_id) is not None
+        need_approval = ScanReportService.check_approval_required(process_id)
 
         # Execute report write
-        ScanHelperService.execute_report_write(report_type, order_id, process_id, user["id"],
+        ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
             user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
 
         try:

@@ -107,38 +107,18 @@
             <div class="form-col" style="flex:1"><div class="form-group"><label>备注</label><input class="form-input" v-model="form.remark" placeholder="备注"></div></div>
             <div class="form-col" style="flex:1"><div class="form-group"><label>应收金额</label><input class="form-input" v-model.number="form.receivable_amount" type="number" min="0" step="0.01" placeholder="0.00"></div></div>
           </div>
-          <!-- 出库产品 -->
-          <div style="margin-top:16px;border-top:1px solid var(--border-light);padding-top:12px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
-              <label style="font-weight:600;font-size:var(--text-base)">出库产品</label>
-              <button class="btn btn-default btn-sm" @click="addItem" style="font-size:var(--text-xs);padding:var(--space-1) 12px">+ 添加</button>
-            </div>
-            <div v-if="items.length">
-              <div v-for="(it, idx) in items" :key="idx" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:6px;padding:var(--space-2);background:var(--bg-table-header);border-radius:var(--radius-md);flex-wrap:wrap">
-                <div style="flex:2;min-width:120px;position:relative">
-                  <template v-if="it.inventory_id">
-                    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-xs);cursor:pointer" @click="it._showDrop=true; it._search=''; it.inventory_id=''; it.product_model=''; it.product_name=''; it.unit='件'">
-                      <span><strong>{{ it.product_model }}</strong> <span style="color:var(--text-placeholder)">{{ it.product_name }}</span></span>
-                      <span style="color:var(--primary);font-size:var(--text-2xs)">切换</span>
-                    </div>
-                  </template>
-                  <template v-else>
-                    <input class="form-input" v-model="it._search" placeholder="🔍 输入型号/名称搜索..." @focus="it._showDrop=true" @blur="hideDrop(idx)" style="width:100%;font-size:var(--text-sm);padding:6px 8px">
-                    <div v-if="it._showDrop && filterInv(it._search).length" style="position:absolute;top:100%;left:0;right:0;z-index:50;max-height:200px;overflow-y:auto;background:white;border:1px solid var(--primary);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,0.15)">
-                      <div v-for="inv in filterInv(it._search)" :key="inv.id" @mousedown.prevent="selectInv(idx, inv)" style="padding:6px 10px;font-size:var(--text-xs);cursor:pointer;border-bottom:1px solid var(--bg-hover);display:flex;justify-content:space-between;align-items:center" @mouseenter="inv._hover=true" @mouseleave="inv._hover=false" :style="{background: inv._hover ? 'var(--primary-light)' : 'white'}">
-                        <span><strong>{{ inv.product_model }}</strong> <span style="color:var(--text-placeholder)">[{{ inv.order_no || '-' }}]</span></span>
-                        <span style="color:var(--text-muted)">{{ inv.product_name || '' }} ({{ inv.quantity }})</span>
-                      </div>
-                    </div>
-                    <div v-if="it._showDrop && it._search && !filterInv(it._search).length" style="position:absolute;top:100%;left:0;right:0;z-index:50;background:white;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:12px;text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">无匹配产品</div>
-                  </template>
-                </div>
-                <input class="form-input" v-model.number="it.quantity" type="number" min="1" placeholder="数量" @change="updateReceivable" style="width:60px;font-size:var(--text-xs);text-align:center">
-                <span @click="removeItem(idx)" style="color:var(--danger);cursor:pointer;font-size:var(--text-base)">✕</span>
-              </div>
-            </div>
-            <p v-else style="font-size:var(--text-xs);color:var(--text-placeholder);text-align:center;padding:var(--space-3)">暂未添加出库产品</p>
-          </div>
+          <ShipmentItemsPicker
+            :items="items"
+            :inventory="inventory"
+            @add-item="addItem"
+            @remove-item="removeItem"
+            @search-change="updateItemSearch"
+            @focus-item="focusItem"
+            @blur-item="blurItem"
+            @select-inventory="selectInventory"
+            @quantity-change="updateItemQuantity"
+            @reset-item="resetItem"
+          />
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="showModal=false">取消</button>
@@ -249,277 +229,14 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
-import { api } from '@/lib/api.js'
-import { showToast } from '@/lib/store.js'
-import { auth, can } from '@/lib/auth.js'
+import ShipmentItemsPicker from '@/components/shipments/ShipmentItemsPicker.vue'
+import { useShipment } from '@/composables/useShipment.js'
 
 export default {
+  components: { ShipmentItemsPicker },
   setup() {
-    const shipments = ref([])
-    const loading = ref(true)
-    const saving = ref(false)
-    const total = ref(0)
-    const page = ref(1)
-    const limit = ref(20)
-    const filterStatus = ref('')
-    const searchKeyword = ref('')
-
-    // RBAC
-    const canCreate = computed(() => can('shipments:create'))
-    const canEdit   = computed(() => can('shipments:edit'))
-    const canDelete = computed(() => can('shipments:delete'))
-
-    // 库存下拉
-    const inventory = ref([])
-    const quickOrderId = ref('')
-
-    // 模态框
-    const showModal = ref(false)
-    const modalEdit = ref(false)
-    const modalId = ref(null)
-    const form = ref({ shipment_no:'', customer:'', contact_person:'', contact_phone:'', address:'', remark:'', status:'pending' })
-    const items = ref([]) // [{inventory_id, product_model, product_name, quantity, unit, remark}]
-
-    // 详情模态框
-    const detailShipment = ref(null)
-    const showDetail = ref(false)
-
-    // 收款模态框
-    const showPayModal = ref(false)
-    const payTarget = ref(null)
-    const payAmount = ref(0)
-    const payMethod = ref('')
-    const payDate = ref(new Date().toISOString().slice(0,10))
-    const payRemark = ref('')
-
-    const statusMap = {
-      'pending':   { label:'待出库', cls:'badge-info' },
-      'completed': { label:'已出库', cls:'badge-success' }, 'received': { label:'已签收', cls:'badge-primary' },
-    }
-    const paymentStatusMap = {
-      'unpaid':  { label:'未收款', cls:'badge-info' },
-      'partial': { label:'部分收', cls:'badge-warning' },
-      'paid':    { label:'已收清', cls:'badge-success' },
-    }
-
-    const pendingCount  = ref(0)
-    const completedCount = ref(0)
-    const receivableTotal = computed(() => shipments.value.reduce((s, r) => s + (r.receivable_amount || 0), 0))
-    const paidTotal = computed(() => shipments.value.reduce((s, r) => s + (r.paid_amount || 0), 0))
-    const unpaidTotal = computed(() => receivableTotal.value - paidTotal.value)
-
-    async function load() {
-      loading.value = true
-      try {
-        const params = { page: page.value, limit: limit.value }
-        if (filterStatus.value) params.status = filterStatus.value
-        if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
-        const d = await api.listShipments(params)
-        shipments.value = d.shipments || []
-        total.value = d.total || 0
-        pendingCount.value = d.pending_count ?? 0
-        completedCount.value = d.completed_count ?? 0
-      } catch(e) { showToast(e.message || '加载失败','error') }
-      finally { loading.value = false }
-    }
-
-    async function loadInventory() {
-      try { const d = await api.listInventory(); inventory.value = d.items || [] } catch(e) { showToast('加载库存列表失败', 'warn') }
-    }
-
-    async function openAdd() {
-      form.value = { shipment_no:'', customer:'', contact_person:'', contact_phone:'', address:'', remark:'', status:'pending', material_bill_no:'', receivable_amount:0 }
-      items.value = []
-      modalEdit.value = false; modalId.value = null
-      try { const d = await api.draftShipment(); form.value.shipment_no = d.shipment_no } catch(e) { showToast('自动生成出库单号失败，请手动输入', 'warn') }
-      showModal.value = true
-    }
-
-    async function openEdit(s) {
-      form.value = {
-        shipment_no: s.shipment_no,
-        material_bill_no: s.material_bill_no || '',
-        customer: s.customer || '',
-        contact_person: s.contact_person || '',
-        contact_phone: s.contact_phone || '',
-        address: s.address || '',
-        remark: s.remark || '',
-        status: s.status || 'pending',
-        receivable_amount: s.receivable_amount || 0
-      }
-      items.value = [] // 编辑模式清空明细，防止新建残留
-      modalEdit.value = true; modalId.value = s.id
-      showModal.value = true
-    }
-
-function addItem() { items.value.push({ inventory_id:'', product_model:'', product_name:'', quantity:1, unit:'件', remark:'', _search:'', _showDrop:false }) }
-
-    function removeItem(idx) { items.value.splice(idx, 1); updateReceivable() }
-
-            function selectInv(idx, inv) {
-      items.value[idx].inventory_id = inv.id
-      items.value[idx].product_model = inv.product_model
-      items.value[idx].product_name = inv.product_name || ''
-      items.value[idx].unit = inv.unit || '件'
-      items.value[idx]._showDrop = false
-      items.value[idx]._search = ''
-      updateReceivable()
-    }
-    function hideDrop(idx) {
-      setTimeout(() => { if (items.value[idx]) items.value[idx]._showDrop = false }, 150)
-    }
-    function filterInv(search) {
-      if (!search) return inventory.value
-      const kw = search.toLowerCase()
-      return inventory.value.filter(i =>
-        (i.product_model||'').toLowerCase().includes(kw) ||
-        (i.product_name||'').toLowerCase().includes(kw) ||
-        (i.order_no||'').toLowerCase().includes(kw)
-      )
-    }
-
-    function onInvChange(idx) {
-      const inv = inventory.value.find(i => i.id === items.value[idx].inventory_id)
-      if (inv) {
-        items.value[idx].product_model = inv.product_model
-        items.value[idx].product_name = inv.product_name
-        items.value[idx].unit = inv.unit || '件'
-        // 自动计算应收金额：单价 x 数量
-        updateReceivable()
-      }
-    }
-    function updateReceivable() {
-      let total = 0
-      items.value.forEach(it => {
-        const inv = inventory.value.find(i => i.id === it.inventory_id)
-        if (inv && inv.price) {
-          total += (inv.price || 0) * (it.quantity || 0)
-        }
-      })
-      form.value.receivable_amount = total
-    }
-
-    async function save() {
-      if (saving.value) return
-      if (!modalEdit.value && !items.value.length) { showToast('请添加出库产品','error'); return }
-      saving.value = true
-      try {
-        const data = { ...form.value }
-        if (modalEdit.value) {
-          await api.updateShipment(modalId.value, data)
-          showToast('更新成功')
-        } else {
-          data.items = items.value.filter(i => i.inventory_id)
-          if (!data.items.length) { showToast('请选择出库产品','error'); saving.value = false; return }
-          const result = await api.createShipment(data)
-          if (result.warning) showToast(result.warning, 'warn')
-          else showToast('创建成功')
-        }
-        showModal.value = false
-        await load()
-      } catch(e) { showToast(e.message || '保存失败','error') }
-      finally { saving.value = false }
-    }
-
-    async function del(s) {
-      let impactInfo = ''
-      try {
-        const res = await api.shipmentImpact(s.id)
-        if (res.items > 0) {
-          impactInfo = '（含 ' + res.items + ' 个物品，将自动归还库存）'
-        }
-      } catch(e) { /* non-blocking: proceed with deletion even if impact check fails */ }
-      if (!confirm('确定删除出库单 ' + s.shipment_no + ' 吗？' + impactInfo)) return
-      try { await api.deleteShipment(s.id); showToast('删除成功'); await load() }
-      catch(e) { showToast(e.message || '删除失败','error') }
-    }
-
-    async function viewDetail(s) {
-      try {
-        const d = await api.getShipment(s.id)
-        detailShipment.value = d
-        showDetail.value = true
-      } catch(e) { showToast('加载详情失败','error') }
-    }
-
-    async function doReceive(s) {
-      if (!confirm('确认签收 ' + s.shipment_no + ' 吗？')) return
-      try { await api.receiveShipment(s.id, {receiver: '', receive_date: new Date().toISOString().slice(0,10)}); showToast('已签收'); await load() }
-      catch(e) { showToast(e.message || '签收失败','error') }
-    }
-    function openPayment(s) {
-      payTarget.value = s
-      payAmount.value = (s.receivable_amount || 0) - (s.paid_amount || 0)
-      payMethod.value = ''
-      payDate.value = new Date().toISOString().slice(0,10)
-      payRemark.value = ''
-      showPayModal.value = true
-    }
-    async function doPayment() {
-      if (!payAmount.value || payAmount.value <= 0) { showToast('请输入有效收款金额','error'); return }
-      try {
-        await api.recordPayment(payTarget.value.id, { amount: payAmount.value, method: payMethod.value, remark: payRemark.value })
-        showToast('收款成功')
-        showPayModal.value = false
-        await load()
-      } catch(e) { showToast(e.message || '收款失败','error') }
-    }
-    async function doComplete(s) {
-      if (!confirm('确定完成出库单 ' + s.shipment_no + ' ？将扣减库存。')) return
-      try { await api.completeShipment(s.id); showToast('出库完成'); await load() }
-      catch(e) { showToast(e.message || '出库失败','error') }
-    }
-
-    function prevPage() { if (page.value > 1) { page.value--; load() } }
-    function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
-
-    function exportExcel() {
-      const url = '/api/shipments/export?keyword=' + encodeURIComponent(searchKeyword.value) + '&status=' + encodeURIComponent(filterStatus.value)
-      window.open(url, '_blank')
-    }
-
-    function escapeHtml(str) {
-      if (!str) return ''
-      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
-    }
-
-    function printDeliveryNote(s) {
-      const now = new Date().toLocaleString('zh-CN')
-      const items = s.items || []
-      const totalQty = items.reduce((sum, it) => sum + (it.quantity || 0), 0)
-      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>送货单-${s.shipment_no}</title>
-<style>body{font-family:'SimSun',serif;padding:40px;max-width:700px;margin:0 auto;color:#333}
-h2{text-align:center;font-size:22px;margin-bottom:4px}h4{text-align:center;font-weight:400;color:#666;margin:0 0 24px}
-.row{display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px}
-table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #333;padding:8px 10px;font-size:13px;text-align:center}
-th{background:#f5f5f5}td{text-align:center}.right{text-align:right}.total-row{font-weight:700;font-size:14px}
-.footer{margin-top:40px;display:flex;justify-content:space-between;font-size:14px}
-@media print{body{padding:20px}@page{margin:15mm}}</style></head><body>
-<h2>送 货 单</h2><h4>${now} | 单号: ${s.shipment_no}</h4>
-<div class="row"><span><strong>客户:</strong> ${escapeHtml(s.customer) || '-'}</span><span><strong>联系人:</strong> ${escapeHtml(s.contact_person) || '-'}</span></div>
-<div class="row"><span><strong>电话:</strong> ${escapeHtml(s.contact_phone) || '-'}</span><span><strong>地址:</strong> ${escapeHtml(s.address) || '-'}</span></div>
-${s.remark ? '<p style="font-size:13px;color:#666"><strong>备注:</strong> ' + escapeHtml(s.remark) + '</p>' : ''}
-<table><thead><tr><th>#</th><th>型号</th><th>产品名称</th><th>数量</th><th>单位</th><th>备注</th></tr></thead><tbody>
-${items.map((it, i) => '<tr><td>' + (i+1) + '</td><td>' + (escapeHtml(it.product_model) || '-') + '</td><td>' + (escapeHtml(it.product_name) || '-') + '</td><td>' + it.quantity + '</td><td>' + (it.unit || '件') + '</td><td>' + (escapeHtml(it.remark) || '') + '</td></tr>').join('')}
-<tr class="total-row"><td colspan="3" class="right">合计</td><td>${totalQty}</td><td colspan="2"></td></tr></tbody></table>
-<div class="footer"><span>发货人签字: ___________</span><span>收货人签字: ___________</span></div>
-<script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}</` + `script></body></html>`
-      const w = window.open('', '_blank', 'width=800,height=600')
-      w.document.write(html); w.document.close()
-    }
-
-    onMounted(async () => { await loadInventory(); load() })
-
-    return {
-      shipments, loading, saving, total, page, limit, filterStatus, searchKeyword, statusMap, paymentStatusMap,
-      pendingCount, completedCount, receivableTotal, paidTotal, unpaidTotal, inventory,
-      showModal, modalEdit, form, items, openAdd, openEdit, addItem, removeItem, onInvChange, selectInv, hideDrop, filterInv, save, del,
-      showDetail, detailShipment, viewDetail, doComplete, doReceive, doPayment, openPayment, printDeliveryNote,
-      showPayModal, payTarget, payAmount, payMethod, payDate, payRemark,
-      prevPage, nextPage, load, exportExcel, auth, canCreate, canEdit, canDelete
-    }
-  }
+    return useShipment()
+  },
 }
 </script>
 
