@@ -64,5 +64,16 @@
       "suggestion": 1
     },
     "scope": "entire project: modules, frontend/src, tests (304 tracked source/test files; git unavailable)"
+  },
+  {
+    "date": "2026-06-27T21:43:31+08:00",
+    "mode": "Health Dashboard",
+    "score": 82,
+    "findings": {
+      "critical": 0,
+      "warning": 5,
+      "suggestion": 0
+    },
+    "scope": "server runtime /home/dubin/qr-system at 4cdf7ecb208f49378436e2145c70121f7f9d1e48"
   }
 ]
