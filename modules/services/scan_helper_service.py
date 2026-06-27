@@ -152,57 +152,48 @@ class ScanHelperService:
 
     @staticmethod
     def insert_work_record(order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no, db=None):
-        d = ScanHelperService._db(db)
-        cur = d.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no)
+        return ScanRepository.insert_report_work_record(
+            order_id,
+            process_id,
+            user_id,
+            report_type,
+            quantity,
+            remark,
+            work_status,
+            serial_no,
+            db=ScanHelperService._db(db),
         )
-        return cur.lastrowid
 
     @staticmethod
     def insert_approval_record(wr_id, db=None):
         """插入审批记录，已存在 pending 记录则跳过（防止重复提交）"""
-        d = ScanHelperService._db(db)
-        existing = d.execute(
-            "SELECT id FROM approval_records WHERE work_record_id=? AND status='pending'", (wr_id,)
-        ).fetchone()
-        if existing:
-            return existing['id']
-        cur = d.execute(
-            "INSERT INTO approval_records (work_record_id, status) VALUES (?, 'pending')", (wr_id,)
-        )
-        return cur.lastrowid
+        return ScanRepository.insert_approval_record(wr_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def update_order_process_completed(order_id, process_id, new_completed, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?",
-            (new_completed, order_id, process_id)
+        ScanRepository.update_order_process_completed(
+            order_id,
+            process_id,
+            new_completed,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def advance_product_item(item_id, next_process_id, version, db=None):
-        return ScanHelperService._db(db).execute(
-            "UPDATE product_items SET current_process_id = ?, status = 'in_progress', version = version + 1 "
-            "WHERE id = ? AND version = ?", (next_process_id, item_id, version)
+        return ScanRepository.advance_product_item(
+            item_id,
+            next_process_id,
+            version,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def complete_product_item(item_id, version, db=None):
-        return ScanHelperService._db(db).execute(
-            "UPDATE product_items SET current_process_id = NULL, status = 'completed', "
-            "completed_at = datetime('now','localtime'), version = version + 1 WHERE id = ? AND version = ?",
-            (item_id, version)
-        )
+        return ScanRepository.complete_product_item(item_id, version, db=ScanHelperService._db(db))
 
     @staticmethod
     def update_order_completed(order_id, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = 'completed'), "
-            "updated_at = datetime('now','localtime'), status = 'producing' WHERE id = ?",
-            (order_id, order_id)
-        )
+        ScanRepository.refresh_order_completion(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def count_completed_items(order_id, db=None):
@@ -210,53 +201,57 @@ class ScanHelperService:
 
     @staticmethod
     def complete_order(order_id, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE orders SET status = 'completed', updated_at = datetime('now','localtime') WHERE id = ?", (order_id,)
-        )
+        ScanRepository.complete_order(order_id, db=ScanHelperService._db(db))
 
     # ======================== 废品/返工操作 ========================
 
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
-        ScanHelperService._db(db).execute(
-            "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason)
+        ScanRepository.insert_scrap_record(
+            order_id,
+            process_id,
+            user_id,
+            quantity,
+            reason,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def update_order_process_scrapped(order_id, process_id, new_scrapped, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE order_processes SET scrapped = ? WHERE order_id = ? AND process_id = ?",
-            (new_scrapped, order_id, process_id)
+        ScanRepository.update_order_process_scrapped(
+            order_id,
+            process_id,
+            new_scrapped,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def update_order_scrapped(order_id, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE orders SET scrapped = (SELECT COALESCE(SUM(scrapped),0) FROM order_processes WHERE order_id = ?), "
-            "updated_at = datetime('now','localtime') WHERE id = ?", (order_id, order_id)
-        )
+        ScanRepository.refresh_order_scrapped(order_id, db=ScanHelperService._db(db))
 
     @staticmethod
     def insert_rework_record(order_id, process_id, user_id, quantity, reason, db=None):
-        ScanHelperService._db(db).execute(
-            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason)
+        ScanRepository.insert_rework_record(
+            order_id,
+            process_id,
+            user_id,
+            quantity,
+            reason,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def update_order_process_rework(order_id, process_id, new_rework, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE order_processes SET rework = ? WHERE order_id = ? AND process_id = ?",
-            (new_rework, order_id, process_id)
+        ScanRepository.update_order_process_rework(
+            order_id,
+            process_id,
+            new_rework,
+            db=ScanHelperService._db(db),
         )
 
     @staticmethod
     def update_order_rework(order_id, db=None):
-        ScanHelperService._db(db).execute(
-            "UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), "
-            "updated_at = datetime('now','localtime') WHERE id = ?", (order_id, order_id)
-        )
+        ScanRepository.refresh_order_rework(order_id, db=ScanHelperService._db(db))
 
     # ======================== 库存相关 ========================
 
@@ -267,35 +262,28 @@ class ScanHelperService:
     @staticmethod
     def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
         """Per-order inventory: each order gets its own inventory record, no merging."""
-        d = ScanHelperService._db(db)
-        if order_id:
-            inv = d.execute(
-                "SELECT id FROM inventory WHERE product_model = ? AND order_id = ?",
-                (product_code, order_id)
-            ).fetchone()
-            if inv:
-                return inv["id"]
-        # Always create new per-order record; never reuse unassigned inventory
-        cur = d.execute(
-            "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) VALUES (?, ?, 0, ?, ?)",
-            (product_code, product_name or product_code, order_id, specification or "")
+        return ScanRepository.find_or_create_inventory(
+            product_code,
+            product_name,
+            order_id,
+            specification,
+            db=ScanHelperService._db(db),
         )
-        return cur.lastrowid
+
     @staticmethod
     def check_inventory_log_dup(order_id, serial_no=None, db=None):
         return ScanRepository.find_inbound_inventory_log(order_id, serial_no, db=ScanHelperService._db(db))
 
     @staticmethod
     def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
-        d = ScanHelperService._db(db)
-        d.execute(
-            "UPDATE inventory SET quantity = quantity + ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (quantity, inv_id)
-        )
-        d.execute(
-            "INSERT INTO inventory_logs (inventory_id, type, quantity, order_id, order_no, remark, operator_id, operator_name) "
-            "VALUES (?, 'in', ?, ?, ?, ?, ?, ?)",
-            (inv_id, quantity, order_id, order_no, "Order complete auto-inbound", user_id, user_name)
+        ScanRepository.stock_in(
+            inv_id,
+            quantity,
+            order_id,
+            order_no,
+            user_id,
+            user_name,
+            db=ScanHelperService._db(db),
         )
 
     # ======================== 权限范围 ========================

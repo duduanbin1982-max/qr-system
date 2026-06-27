@@ -44,3 +44,6 @@ modules/uploads/
 public/assets/
 *.csr
 .deployed_commit
+data/*.db-wal
+data/*.db-shm
+data/*.db.bak-*

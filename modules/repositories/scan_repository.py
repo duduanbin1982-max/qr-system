@@ -219,6 +219,76 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
+    def insert_report_work_record(
+        order_id,
+        process_id,
+        user_id,
+        report_type,
+        quantity,
+        remark,
+        work_status,
+        serial_no,
+        db=None,
+    ):
+        db = db or BaseService.db()
+        cur = db.execute(
+            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no),
+        )
+        return cur.lastrowid
+
+    @staticmethod
+    def insert_approval_record(work_record_id, db=None):
+        db = db or BaseService.db()
+        existing = db.execute(
+            "SELECT id FROM approval_records WHERE work_record_id=? AND status='pending'",
+            (work_record_id,),
+        ).fetchone()
+        if existing:
+            return existing["id"]
+        cur = db.execute(
+            "INSERT INTO approval_records (work_record_id, status) VALUES (?, 'pending')",
+            (work_record_id,),
+        )
+        return cur.lastrowid
+
+    @staticmethod
+    def update_order_process_completed(order_id, process_id, completed, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?",
+            (completed, order_id, process_id),
+        )
+
+    @staticmethod
+    def advance_product_item(item_id, next_process_id, version, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "UPDATE product_items SET current_process_id = ?, status = 'in_progress', version = version + 1 "
+            "WHERE id = ? AND version = ?",
+            (next_process_id, item_id, version),
+        )
+
+    @staticmethod
+    def complete_product_item(item_id, version, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "UPDATE product_items SET current_process_id = NULL, status = 'completed', "
+            "completed_at = datetime('now','localtime'), version = version + 1 WHERE id = ? AND version = ?",
+            (item_id, version),
+        )
+
+    @staticmethod
+    def refresh_order_completion(order_id, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = 'completed'), "
+            "updated_at = datetime('now','localtime'), status = 'producing' WHERE id = ?",
+            (order_id, order_id),
+        )
+
+    @staticmethod
     def count_completed_items(order_id, db=None):
         db = db or BaseService.db()
         return db.execute(
@@ -235,6 +305,80 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
+    def complete_order(order_id, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE orders SET status = 'completed', updated_at = datetime('now','localtime') WHERE id = ?",
+            (order_id,),
+        )
+
+    @staticmethod
+    def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
+            (order_id, process_id, user_id, quantity, reason),
+        )
+
+    @staticmethod
+    def update_order_process_scrapped(order_id, process_id, scrapped, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE order_processes SET scrapped = ? WHERE order_id = ? AND process_id = ?",
+            (scrapped, order_id, process_id),
+        )
+
+    @staticmethod
+    def refresh_order_scrapped(order_id, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE orders SET scrapped = (SELECT COALESCE(SUM(scrapped),0) FROM order_processes WHERE order_id = ?), "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (order_id, order_id),
+        )
+
+    @staticmethod
+    def insert_rework_record(order_id, process_id, user_id, quantity, reason, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
+            (order_id, process_id, user_id, quantity, reason),
+        )
+
+    @staticmethod
+    def update_order_process_rework(order_id, process_id, rework, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE order_processes SET rework = ? WHERE order_id = ? AND process_id = ?",
+            (rework, order_id, process_id),
+        )
+
+    @staticmethod
+    def refresh_order_rework(order_id, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (order_id, order_id),
+        )
+
+    @staticmethod
+    def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
+        db = db or BaseService.db()
+        if order_id:
+            inv = db.execute(
+                "SELECT id FROM inventory WHERE product_model = ? AND order_id = ?",
+                (product_code, order_id),
+            ).fetchone()
+            if inv:
+                return inv["id"]
+        cur = db.execute(
+            "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) VALUES (?, ?, 0, ?, ?)",
+            (product_code, product_name or product_code, order_id, specification or ""),
+        )
+        return cur.lastrowid
+
+    @staticmethod
     def find_inbound_inventory_log(order_id, serial_no=None, db=None):
         db = db or BaseService.db()
         if serial_no:
@@ -246,6 +390,19 @@ class ScanRepository:
             "SELECT id FROM inventory_logs WHERE order_id = ? AND type = 'in'",
             (order_id,)
         ).fetchone()
+
+    @staticmethod
+    def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE inventory SET quantity = quantity + ?, updated_at = datetime('now','localtime') WHERE id = ?",
+            (quantity, inv_id),
+        )
+        db.execute(
+            "INSERT INTO inventory_logs (inventory_id, type, quantity, order_id, order_no, remark, operator_id, operator_name) "
+            "VALUES (?, 'in', ?, ?, ?, ?, ?, ?)",
+            (inv_id, quantity, order_id, order_no, "Order complete auto-inbound", user_id, user_name),
+        )
 
     @staticmethod
     def order_has_process_in_scope(order_id, process_ids, db=None):
