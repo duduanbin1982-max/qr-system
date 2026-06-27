@@ -209,6 +209,53 @@ class TestCoreBusinessPaths:
         resp = client.get("/api/inventory?page=1&limit=10", headers=auth_headers)
         assert resp.status_code == 200
 
+    def test_inventory_stock_movement_flow(self, client, auth_headers):
+        """库存迁移到 Repository 后，创建、入库、出库、调整链路应保持可用。"""
+        suffix = __import__("uuid").uuid4().hex[:8].upper()
+        create_resp = client.post(
+            "/api/inventory",
+            json={
+                "product_model": f"TEST-INV-{suffix}",
+                "product_name": "Repository Inventory Fixture",
+                "quantity": 5,
+                "safe_stock": 1,
+                "location": "T-01",
+                "unit": "件",
+            },
+            headers=auth_headers,
+        )
+        assert create_resp.status_code == 200, create_resp.get_json()
+        inventory_id = create_resp.get_json()["id"]
+
+        stock_in_resp = client.post(
+            "/api/inventory/stock-in",
+            json={"inventory_id": inventory_id, "quantity": 3, "remark": "repo-migration"},
+            headers=auth_headers,
+        )
+        assert stock_in_resp.status_code == 200, stock_in_resp.get_json()
+
+        stock_out_resp = client.post(
+            "/api/inventory/stock-out",
+            json={"inventory_id": inventory_id, "quantity": 2, "remark": "repo-migration"},
+            headers=auth_headers,
+        )
+        assert stock_out_resp.status_code == 200, stock_out_resp.get_json()
+
+        adjust_resp = client.post(
+            f"/api/inventory/{inventory_id}/adjust",
+            json={"actual_qty": 4, "remark": "repo-migration"},
+            headers=auth_headers,
+        )
+        assert adjust_resp.status_code == 200, adjust_resp.get_json()
+        assert adjust_resp.get_json()["new_qty"] == 4
+
+        logs_resp = client.get(
+            f"/api/inventory/logs?inventory_id={inventory_id}&limit=10",
+            headers=auth_headers,
+        )
+        assert logs_resp.status_code == 200, logs_resp.get_json()
+        assert logs_resp.get_json()["total"] >= 3
+
     def test_materials_list(self, client, auth_headers):
         """物料列表端点应可访问。"""
         resp = client.get("/api/materials?page=1&limit=10", headers=auth_headers)

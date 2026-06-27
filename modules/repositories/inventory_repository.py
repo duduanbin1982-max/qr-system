@@ -6,6 +6,24 @@ from modules.query_utils import paginate, build_sort_clause
 class InventoryRepository:
 
     @staticmethod
+    def build_item_filters(keyword="", low_stock=False, location=""):
+        clauses = ["1=1"]
+        params = []
+        if keyword:
+            clauses.append(
+                "(i.product_model LIKE ? OR i.product_name LIKE ? OR i.specification LIKE ? "
+                "OR i.location LIKE ? OR i.unit LIKE ? OR i.remark LIKE ? "
+                "OR o.order_no LIKE ? OR o.customer LIKE ?)"
+            )
+            params.extend([f"%{keyword}%"] * 8)
+        if low_stock:
+            clauses.append("i.quantity <= i.safe_stock AND i.safe_stock > 0")
+        if location:
+            clauses.append("i.location = ?")
+            params.append(location)
+        return " AND ".join(clauses), params
+
+    @staticmethod
     def count_items(where_clause, params, db=None):
         db = db or BaseService.db()
         return db.execute(
@@ -79,6 +97,42 @@ class InventoryRepository:
         db.execute("DELETE FROM inventory_logs WHERE inventory_id = ?", (item_id,))
 
     @staticmethod
+    def increase_stock_txn(item_id, quantity, db):
+        return db.execute(
+            'UPDATE inventory SET quantity = quantity + ?, '
+            'updated_at = datetime("now","localtime") WHERE id = ?',
+            (quantity, item_id),
+        )
+
+    @staticmethod
+    def decrease_stock_if_available_txn(item_id, quantity, db):
+        return db.execute(
+            'UPDATE inventory SET quantity = quantity - ?, '
+            'updated_at = datetime("now","localtime") '
+            'WHERE id = ? AND quantity >= ?',
+            (quantity, item_id, quantity),
+        )
+
+    @staticmethod
+    def insert_movement_log_txn(
+        inventory_id,
+        log_type,
+        quantity,
+        order_id=None,
+        order_no="",
+        remark="",
+        operator_id=None,
+        operator_name="",
+        db=None,
+    ):
+        db.execute(
+            "INSERT INTO inventory_logs (inventory_id, type, quantity, "
+            "order_id, order_no, remark, operator_id, operator_name) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (inventory_id, log_type, quantity, order_id, order_no, remark, operator_id, operator_name),
+        )
+
+    @staticmethod
     def insert_log_txn(inventory_id, log_type, quantity, remark, operator_id, operator_name, db):
         db.execute(
             "INSERT INTO inventory_logs (inventory_id, type, quantity, remark, operator_id, operator_name) "
@@ -97,6 +151,14 @@ class InventoryRepository:
     def get_item_quantity(item_id, db=None):
         db = db or BaseService.db()
         return db.execute("SELECT quantity FROM inventory WHERE id = ?", (item_id,)).fetchone()
+
+    @staticmethod
+    def find_adjustment_item(item_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id, quantity, product_model FROM inventory WHERE id=?",
+            (item_id,),
+        ).fetchone()
 
     @staticmethod
     def count_logs(inv_id, type_filter, date_from, date_to, db=None):
@@ -145,6 +207,16 @@ class InventoryRepository:
         return rows
 
     @staticmethod
+    def list_alerts(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT *, (safe_stock - quantity) as shortage "
+            "FROM inventory "
+            "WHERE quantity <= safe_stock AND safe_stock > 0 "
+            "ORDER BY shortage DESC"
+        ).fetchall()
+
+    @staticmethod
     def count_item_logs(item_id, db=None):
         db = db or BaseService.db()
         return db.execute(
@@ -189,3 +261,103 @@ class InventoryRepository:
             "VALUES (?,?,?,?,?,?)",
             (item_id, log_type, diff, log_remark, None, "system")
         )
+
+    @staticmethod
+    def list_abc_rows(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT inv.id, inv.product_model, "
+            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
+            "inv.unit_cost, "
+            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) * inv.unit_cost as out_value "
+            "FROM inventory inv LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
+            "GROUP BY inv.id ORDER BY out_value DESC"
+        ).fetchall()
+
+    @staticmethod
+    def update_category_txn(item_id, category, db):
+        db.execute("UPDATE inventory SET category=? WHERE id=?", (category, item_id))
+
+    @staticmethod
+    def list_turnover_rows(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT inv.id, inv.product_model, inv.product_name, inv.quantity as current_stock, "
+            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
+            "COALESCE(SUM(CASE WHEN il.type='in' THEN il.quantity ELSE 0 END),0) as total_in, "
+            "inv.unit_cost FROM inventory inv "
+            "LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
+            "GROUP BY inv.id ORDER BY total_out DESC"
+        ).fetchall()
+
+    @staticmethod
+    def list_safe_stock_suggestion_rows(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT inv.id, inv.product_model, inv.product_name, inv.safe_stock as current_safe, "
+            "inv.quantity, "
+            "COALESCE(SUM(CASE WHEN il.type='out' AND il.created_at >= date('now','-30 days') "
+            "THEN il.quantity ELSE 0 END),0) as month_out "
+            "FROM inventory inv LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
+            "GROUP BY inv.id"
+        ).fetchall()
+
+    @staticmethod
+    def list_inbound_batches(item_id=None, lot_no=None, db=None):
+        db = db or BaseService.db()
+        clauses = ["type='in'"]
+        params = []
+        if item_id:
+            clauses.append("inventory_id = ?")
+            params.append(item_id)
+        if lot_no:
+            clauses.append("lot_no = ?")
+            params.append(lot_no)
+        return db.execute(
+            "SELECT * FROM inventory_logs WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY created_at DESC LIMIT 100",
+            params,
+        ).fetchall()
+
+    @staticmethod
+    def list_batch_outbound_after(inventory_id, created_at, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT * FROM inventory_logs WHERE inventory_id=? AND type='out' "
+            "AND created_at >= ? ORDER BY created_at",
+            (inventory_id, created_at),
+        ).fetchall()
+
+    @staticmethod
+    def list_locations(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT location, COUNT(*) as item_count, SUM(quantity) as total_qty, "
+            "GROUP_CONCAT(product_model || '(' || quantity || ')', ', ') as items "
+            "FROM inventory WHERE location != '' GROUP BY location ORDER BY location"
+        ).fetchall()
+
+    @staticmethod
+    def update_location_txn(item_id, new_location, db):
+        db.execute(
+            "UPDATE inventory SET location=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (new_location, item_id),
+        )
+
+    @staticmethod
+    def count_inventory_items(db=None):
+        db = db or BaseService.db()
+        return db.execute("SELECT COUNT(*) as cnt FROM inventory").fetchone()["cnt"]
+
+    @staticmethod
+    def count_inventory_items_counted_today(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT COUNT(*) as cnt FROM inventory WHERE last_count_date >= date('now')"
+        ).fetchone()["cnt"]
+
+    @staticmethod
+    def get_count_item(item_id, db=None):
+        db = db or BaseService.db()
+        return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
