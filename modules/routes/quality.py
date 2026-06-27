@@ -2,7 +2,7 @@
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body
@@ -51,10 +51,7 @@ def quality_create():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
-    try:
-        audit_log('quality_create', 'quality_inspection', inspection_id, 'created')
-    except Exception:
-        app.logger.warning('audit_log failed for quality_create: inspection_id=%s', inspection_id)
+    safe_audit_log('quality_create', 'quality_inspection', inspection_id, 'created')
     return jsonify({'ok': True, 'id': inspection_id})
 
 
@@ -68,10 +65,7 @@ def quality_update(inspection_id):
         result = QualityService.update_inspection(inspection_id, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    try:
-        audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
-    except Exception:
-        app.logger.warning('audit_log failed for quality_edit: inspection_id=%s', inspection_id)
+    safe_audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
     return jsonify({'ok': True, 'message': '已更新'})
 
 
@@ -83,10 +77,7 @@ def quality_delete(inspection_id):
         QualityService.delete_inspection(inspection_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
-    except Exception:
-        app.logger.warning('audit_log failed for quality_delete: inspection_id=%s', inspection_id)
+    safe_audit_log('quality_delete', 'quality_inspection', inspection_id, 'deleted')
     return jsonify({'ok': True, 'message': '已删除'})
 
 
@@ -185,7 +176,7 @@ def quality_batch_create():
         return jsonify({'error': '请提供检验项目列表'}), 400
     try:
         result = QualityService.batch_create_inspections(items, g.current_user.get('id'))
-        audit_log('quality_batch', 'quality_inspection', 0, f'created {result["created"]} items')
+        safe_audit_log('quality_batch', 'quality_inspection', 0, f'created {result["created"]} items')
         return jsonify({'ok': True, **result})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
@@ -276,7 +267,7 @@ def inspection_submit():
     data = get_json_body()
     try:
         QualityService.submit_inspection(data, g.current_user.get("id"), g.current_user.get("name", ""))
-        audit_log("create", "inspection", 0, "qc " + data.get("result", "") + " " + data.get("process_name", ""))
+        safe_audit_log("create", "inspection", 0, "qc " + data.get("result", "") + " " + data.get("process_name", ""))
         return jsonify({"message": "ok"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

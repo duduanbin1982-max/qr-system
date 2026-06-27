@@ -47,7 +47,7 @@ export function useRoleManage() {
   }
   async function loadPermissions() {
     try {
-      const d = await api.get('/api/permissions')
+      const d = await api.getPermissions()
       allPermissions.value = d.permissions || []
       permissionTree.value = d.mergedTree || d.merged_tree || d.tree || []
       permissionCodes.value = d.codes || collectTreeCodes(permissionTree.value)

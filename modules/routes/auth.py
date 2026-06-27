@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, get_user_permissions, has_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
@@ -142,6 +142,7 @@ def auth_info():
     u.pop("failed_login_count", None)
     u.pop("locked_until", None)
     u.pop("password_version", None)
+    u["role"] = AuthService.get_user_role_code(u["id"]) or u.get("role", "worker")
     u["permissions"] = get_user_permissions(g.current_user)
     return jsonify({"user": u, "must_change_password": bool(u.get("must_change_password", 0))})
 
@@ -161,5 +162,5 @@ def change_password():
 
     if isinstance(g.current_user, dict):
         g.current_user["must_change_password"] = 0
-    audit_log("change_password", "user", g.current_user["id"])
+    safe_audit_log("change_password", "user", g.current_user["id"])
     return jsonify({"message": "密码修改成功"})

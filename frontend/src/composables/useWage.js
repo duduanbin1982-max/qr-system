@@ -247,8 +247,15 @@ const activeTab = ref("piece")
     const employeeList = ref([])
     const adjNet = computed(() => adjustments.value.reduce((s,a) => s + (a.type=="deduction"?-a.amount:a.amount), 0))
 
+    function isWorkerUser(user) {
+      const roleCode = (user?.role_code || user?.role || '').toLowerCase()
+      if (roleCode === 'worker') return true
+      const roles = Array.isArray(user?.roles) ? user.roles : (Array.isArray(user?.role_items) ? user.role_items : [])
+      return roles.some(role => (role?.code || '').toLowerCase() === 'worker')
+    }
+
     async function loadEmployees() {
-      try { const r = await api.listUsers(); employeeList.value = (r.users || []).filter(u => (u.roles && u.roles.some(r => (r.code || "").toLowerCase() === "worker" || r.is_worker))) }
+      try { const r = await api.listUsers({ role: 'worker', limit: 500 }); employeeList.value = (r.users || []).filter(isWorkerUser) }
       catch(e) { showToast("加载员工列表失败","error") }
     }
     async function loadAdjustments() {

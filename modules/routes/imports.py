@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 
 from modules.app import app
 from modules.services.imports_service import ImportsService
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
 from modules.middleware.helpers import get_json_body
 
@@ -211,7 +211,7 @@ def bulk_import_orders():
             errors.append({'row': i + 1, 'order_no': order_no, 'error': str(e)[:100]})
             skipped += 1
 
-    audit_log('import_orders', detail=f'imported={imported} skipped={skipped}')
+    safe_audit_log('import_orders', detail=f'imported={imported} skipped={skipped}')
     return jsonify({
         'imported': imported,
         'skipped': skipped,
@@ -258,7 +258,7 @@ def bulk_import_products():
             errors.append({'row': i + 1, 'error': str(e)[:100]})
             skipped += 1
 
-    audit_log('import_products', detail=f'imported={imported}')
+    safe_audit_log('import_products', detail=f'imported={imported}')
     return jsonify({
         'imported': imported,
         'errors': errors[:50],
@@ -309,7 +309,7 @@ def bulk_import_customers():
             errors.append({'row': i + 1, 'name': name, 'error': str(e)[:100]})
             skipped += 1
 
-    audit_log('import_customers', detail=f'imported={imported} skipped={skipped}')
+    safe_audit_log('import_customers', detail=f'imported={imported} skipped={skipped}')
     return jsonify({
         'imported': imported,
         'skipped': skipped,

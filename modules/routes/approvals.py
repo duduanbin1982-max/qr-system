@@ -4,7 +4,7 @@ qr-system ? ???????Refactored: SQL ? ApprovalService?
 from flask import request, jsonify, g
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.middleware.validate import validate_json
@@ -41,13 +41,10 @@ def handle_approval(record_id, action):
             approver={'id': g.current_user['id'], 'name': g.current_user['name']},
             comment=data.get('comment', '')
         )
-        try:
-            audit_log(
-                'approve_' + action, 'approval', record_id,
-                f'{g.current_user["name"]} {action} approval {record_id}'
-            )
-        except Exception:
-            pass
+        safe_audit_log(
+            'approve_' + action, 'approval', record_id,
+            f'{g.current_user["name"]} {action} approval {record_id}'
+        )
         return jsonify({'message': '????'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

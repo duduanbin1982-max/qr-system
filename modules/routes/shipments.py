@@ -3,7 +3,7 @@ from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
 from modules.services.setting_service import SettingsService
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.services.shipment_service import ShipmentService
@@ -95,10 +95,7 @@ def create_shipment():
         sid, sno = ShipmentService.create_shipment(data, g.current_user['name'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    try:
-        audit_log('create', 'shipment', sid, f'创建出库单 {sno}')
-    except Exception:
-        pass
+    safe_audit_log('create', 'shipment', sid, f'创建出库单 {sno}')
     return jsonify({'message': '出库单创建成功', 'id': sid, 'shipment_no': sno})
 
 
@@ -152,10 +149,7 @@ def update_shipment(shipment_id):
         ShipmentService.update_shipment(shipment_id, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    try:
-        audit_log('update', 'shipment', shipment_id, '更新出库单')
-    except Exception:
-        pass
+    safe_audit_log('update', 'shipment', shipment_id, '更新出库单')
     return jsonify({'message': '更新成功'})
 
 
@@ -180,10 +174,7 @@ def delete_shipment(shipment_id):
         sno = ShipmentService.delete_shipment(shipment_id, g.current_user)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('delete', 'shipment', shipment_id, f'删除出库单 {sno}')
-    except Exception:
-        pass
+    safe_audit_log('delete', 'shipment', shipment_id, f'删除出库单 {sno}')
     return jsonify({'message': '删除成功'})
 
 
@@ -212,10 +203,7 @@ def complete_shipment(shipment_id):
     except ValueError as e:
         msg = str(e)
         return jsonify({'error': msg}), 409 if '已完成' in msg else (400 if '出库失败' in msg else 404)
-    try:
-        audit_log('complete', 'shipment', shipment_id, '完成出库 ' + sno)
-    except Exception:
-        pass
+    safe_audit_log('complete', 'shipment', shipment_id, '完成出库 ' + sno)
     return jsonify({'message': '出库完成'})
 
 
@@ -276,7 +264,7 @@ def receive_shipment(shipment_id):
             receiver=data.get("receiver", ""),
             receive_date=data.get("receive_date", "")
         )
-        audit_log("receive", "shipment", shipment_id, "签收 " + sno)
+        safe_audit_log("receive", "shipment", shipment_id, "签收 " + sno)
         return jsonify({"message": "签收成功", "shipment_no": sno})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -293,7 +281,7 @@ def record_shipment_payment(shipment_id):
             method=data.get("method", ""),
             remark=data.get("remark", "")
         )
-        audit_log("payment", "shipment", shipment_id, f"收款 {data.get('amount',0)} {sno}")
+        safe_audit_log("payment", "shipment", shipment_id, f"收款 {data.get('amount',0)} {sno}")
         return jsonify({"message": "收款成功", "shipment_no": sno})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

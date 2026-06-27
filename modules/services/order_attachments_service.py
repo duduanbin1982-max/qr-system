@@ -25,6 +25,13 @@ class OrderAttachmentsService:
         return OrderAttachmentsRepository.find_by_id(attachment_id)
 
     @staticmethod
+    def get_attachment_file(attachment_id):
+        row = OrderAttachmentsRepository.find_with_meta(attachment_id)
+        if not row:
+            raise ValueError("Attachment not found")
+        return row
+
+    @staticmethod
     def delete_attachment(attachment_id):
         row = OrderAttachmentsRepository.find_with_meta(attachment_id)
         if not row:

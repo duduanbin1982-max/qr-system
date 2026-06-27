@@ -1,4 +1,4 @@
-import { request, buildQuery, uploadFile } from './client.js'
+import { request } from './client.js'
 
 export const rolesApi = {
   // ========== 角色 ==========
@@ -10,4 +10,5 @@ export const rolesApi = {
   createRole:       (data)   => request('POST', '/api/roles', data),
   updateRole:       (id,data)=> request('PUT',  '/api/roles/' + id, data),
   deleteRole:       (id)     => request('DELETE', '/api/roles/' + id),
+  getPermissions:   ()       => request('GET', '/api/permissions'),
 }

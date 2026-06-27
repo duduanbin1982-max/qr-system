@@ -5,11 +5,11 @@ from modules.db_unit_of_work import BaseService
 class NotificationRepository:
 
     @staticmethod
-    def list_unread(user_id, db=None):
+    def list_unread(user_id, limit=50, db=None):
         db = db or BaseService.db()
         return db.execute(
-            "SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC LIMIT 50",
-            (user_id,)
+            "SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit)
         ).fetchall()
 
     @staticmethod

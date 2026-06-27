@@ -74,10 +74,25 @@ const orders = ref([])
       try { const d = await api.listOrderMaterials(orderId); orderMaterials.value = d.materials || [] } catch(e) { orderMaterials.value = [] }
     }
     async function loadMaterialOptions() {
-      try { const d = await api.listMaterials(); materialOptions.value = d.materials || [] } catch(e) {}
+      try {
+        const d = await api.listMaterials()
+        materialOptions.value = d.materials || []
+      } catch(e) {
+        materialOptions.value = []
+        showToast(e.message || '加载物料选项失败', 'error')
+      }
     }
     async function loadProcessOptions() {
-      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) orderMatForm.value.process_id = xl.id; else if (processOptions.value.length > 0) orderMatForm.value.process_id = processOptions.value[0].id } catch(e) {}
+      try {
+        const d = await api.listProcesses()
+        processOptions.value = d.items || d.processes || []
+        const xl = processOptions.value.find(p => p.name === '下料')
+        if (xl) orderMatForm.value.process_id = xl.id
+        else if (processOptions.value.length > 0) orderMatForm.value.process_id = processOptions.value[0].id
+      } catch(e) {
+        processOptions.value = []
+        showToast(e.message || '加载工序选项失败', 'error')
+      }
     }
     async function addOrderMaterial() {
       if (!orderMatForm.value.material_id) { showToast('请选择物料', 'error'); return }
@@ -287,7 +302,7 @@ const orders = ref([])
 
     function downloadAttachment(attachmentId) {
       // httpOnly cookie handles auth automatically
-      window.open('/api/attachments/' + attachmentId + '/download', '_blank')
+      window.open(api.downloadAttachment(attachmentId), '_blank')
     }
 
     function getFileIcon(fileType) {

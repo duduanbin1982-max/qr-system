@@ -1,37 +1,18 @@
-import { computed, ref } from 'vue'
-import { api } from '@/lib/api.js'
+import { computed } from 'vue'
 import {
-  applyPermissionCatalog,
   canOpenPage,
   filterAllowedTabs,
   getLandingPage,
   getSidebarItems,
-  resetPermissionCatalog,
 } from '@/lib/permissions.js'
+import {
+  catalogLoaded,
+  catalogLoading,
+  catalogVersion,
+  loadPageAccessCatalog,
+} from '@/lib/permissionCatalog.js'
 
-const catalogVersion = ref(0)
-const catalogLoaded = ref(false)
-const catalogLoading = ref(false)
-
-export async function loadPageAccessCatalog(force = false) {
-  if (catalogLoading.value) return catalogLoaded.value
-  if (catalogLoaded.value && !force) return true
-  catalogLoading.value = true
-  try {
-    const payload = await api.get('/api/permissions')
-    applyPermissionCatalog(payload)
-    catalogLoaded.value = true
-    catalogVersion.value += 1
-    return true
-  } catch (_) {
-    resetPermissionCatalog()
-    catalogLoaded.value = false
-    catalogVersion.value += 1
-    return false
-  } finally {
-    catalogLoading.value = false
-  }
-}
+export { loadPageAccessCatalog } from '@/lib/permissionCatalog.js'
 
 export function usePageAccess() {
   const sidebarItems = computed(() => {

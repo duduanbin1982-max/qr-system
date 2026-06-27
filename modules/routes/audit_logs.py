@@ -2,7 +2,7 @@
 """
 from flask import request, jsonify
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.services.audit_log_service import AuditLogService
@@ -34,5 +34,5 @@ def clear_logs():
     if not isinstance(days, int) or days < 1 or days > 3650:
         return jsonify({"error": "days must be 1-3650"}), 400
     count = AuditLogService.clear_logs(days)
-    audit_log("clear_logs", detail=f"deleted {count} logs older than {days} days")
+    safe_audit_log("clear_logs", detail=f"deleted {count} logs older than {days} days")
     return jsonify({"message": f"Cleared {count} logs", "deleted": count})

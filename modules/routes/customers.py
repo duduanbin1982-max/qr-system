@@ -7,7 +7,7 @@ qr-system — 客户管理（路由层）
 from flask import request, jsonify
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
@@ -89,10 +89,7 @@ def create_customer():
         cid = CustomerService.create_customer(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    try:
-        audit_log('create_customer', 'customer', cid, data.get('name', ''))
-    except Exception:
-        pass
+    safe_audit_log('create_customer', 'customer', cid, data.get('name', ''))
     return jsonify({'message': '创建成功', 'id': cid})
 
 
@@ -144,10 +141,7 @@ def update_customer(cid):
         CustomerService.update_customer(cid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    try:
-        audit_log('update_customer', 'customer', cid, str(data))
-    except Exception:
-        pass
+    safe_audit_log('update_customer', 'customer', cid, str(data))
     return jsonify({'message': '更新成功'})
 
 
@@ -179,10 +173,7 @@ def delete_customer(cid):
         CustomerService.delete_customer(cid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('delete_customer', 'customer', cid)
-    except Exception:
-        pass
+    safe_audit_log('delete_customer', 'customer', cid)
     return jsonify({'message': '删除成功'})
 
 

@@ -6,8 +6,8 @@ from modules.repositories.notification_repository import NotificationRepository
 class NotificationService:
 
     @staticmethod
-    def list_unread(user_id):
-        rows = NotificationRepository.list_unread(user_id)
+    def list_unread(user_id, limit=50):
+        rows = NotificationRepository.list_unread(user_id, limit=limit)
         return [dict(r) for r in rows]
 
     @staticmethod

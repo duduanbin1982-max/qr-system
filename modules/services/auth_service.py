@@ -105,9 +105,18 @@ class AuthService:
     def get_user_role_code(user_id, db=None):
         row = AuthService._db(db).execute(
             "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? ORDER BY r.level LIMIT 1", (user_id,)
+            "WHERE ur.user_id = ? "
+            "ORDER BY CASE WHEN r.code = 'admin' THEN 0 WHEN r.code <> 'worker' THEN 1 ELSE 2 END, r.level, r.id "
+            "LIMIT 1",
+            (user_id,)
         ).fetchone()
-        return row['code'] if row else 'worker'
+        if row:
+            return row['code']
+        fallback = AuthService._db(db).execute(
+            "SELECT role FROM users WHERE id = ? LIMIT 1",
+            (user_id,)
+        ).fetchone()
+        return fallback['role'] if fallback else 'worker'
 
     @staticmethod
     def logout(user_id, token, db=None):

@@ -63,15 +63,14 @@ class ReworkService:
             status=status, search=search, date_from=date_from, date_to=date_to,
             worker_id=worker_id, process_id=process_id
         )
+        items = [dict(item) for item in items]
 
         wb = Workbook()
         ws = wb.active
         ws.title = "Rework Records"
         headers = ["Order No", "Product", "Customer", "Process", "Worker",
                    "Quantity", "Reason", "Status", "Result", "Created", "Completed"]
-        for col_idx, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col_idx, value=h)
-            style_header(cell)
+        style_header(ws, headers)
 
         for row_idx, item in enumerate(items, 2):
             vals = [
@@ -89,12 +88,13 @@ class ReworkService:
             ]
             for col_idx, val in enumerate(vals, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=val)
-                CELL_ALIGN(cell)
-                THIN_BORDER(cell)
+                cell.alignment = CELL_ALIGN
+                cell.border = THIN_BORDER
 
         auto_width(ws)
         output = BytesIO()
         wb.save(output)
+        output.seek(0)
         return output
 
     @staticmethod
@@ -102,6 +102,7 @@ class ReworkService:
         rw = ReworkRepository.find_by_id(rework_id)
         if not rw:
             raise ValueError("rework record not found")
+        rw = dict(rw)
         if rw["status"] == "completed":
             raise ValueError("rework already completed")
 
@@ -168,6 +169,7 @@ class ReworkService:
                     if not rw:
                         errors.append({"id": rid, "error": "rework record not found"})
                         continue
+                    rw = dict(rw)
                     if rw["status"] == "completed":
                         errors.append({"id": rid, "error": "rework already completed"})
                         continue
@@ -181,7 +183,9 @@ class ReworkService:
                             d2 = datetime.now()
                             duration = round((d2 - d1).total_seconds() / 3600, 1)
                         except Exception:
-                            pass
+                            logging.getLogger(__name__).debug(
+                                "rework duration calc failed: rework_id=%s", rid
+                            )
 
                     ReworkRepository.complete_rework_txn(
                         rid, reason_final, user_id, result, result_remark, duration, db=txn
@@ -202,7 +206,10 @@ class ReworkService:
                             "inspected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         }, user_id)
                     except Exception:
-                        pass
+                        logging.getLogger(__name__).warning(
+                            "auto_create_inspection on rework batch complete failed: rework_id=%s",
+                            rid,
+                        )
 
                     completed += 1
                 except ValueError as e:

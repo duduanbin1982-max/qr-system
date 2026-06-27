@@ -52,7 +52,9 @@ export function usePositions() {
         showToast(impactMsg.trim(), 'warn')
         return
       }
-    } catch(e) {}
+    } catch(e) {
+      showToast(e.message || '检查岗位使用情况失败，将继续删除确认', 'warn')
+    }
     if (!confirm('确定删除该岗位？')) return
     try { await api.deletePosition(pid); showToast('删除成功'); loadPositions() }
     catch(e) { showToast(e.message,'error') }

@@ -6,7 +6,7 @@ qr-system — 系统设置
 from flask import request, jsonify
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.services.setting_service import SettingsService, ALLOWED_KEYS
@@ -67,13 +67,10 @@ def save_settings():
     except Exception:
         pass
 
-    try:
-        parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
-        if deleted_keys:
-            parts.append(f'_deleted={",".join(deleted_keys[:20])}')
-        audit_log('save_settings', detail=', '.join(parts)[:1900])
-    except Exception:
-        pass
+    parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
+    if deleted_keys:
+        parts.append(f'_deleted={",".join(deleted_keys[:20])}')
+    safe_audit_log('save_settings', detail=', '.join(parts)[:1900])
     return jsonify({'message': '保存成功'})
 
 
@@ -101,11 +98,8 @@ def save_company_info():
     except Exception:
         pass
 
-    try:
-        parts = [f'{k}={str(v)[:80]}' for k, v in filtered.items()]
-        audit_log('save_company_info', detail=', '.join(parts)[:1900])
-    except Exception:
-        pass
+    parts = [f'{k}={str(v)[:80]}' for k, v in filtered.items()]
+    safe_audit_log('save_company_info', detail=', '.join(parts)[:1900])
     return jsonify({'message': '保存成功'})
 
 # ============================================================

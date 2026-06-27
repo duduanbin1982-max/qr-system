@@ -132,6 +132,7 @@ def reports_product_process_matrix():
         return jsonify(ReportsService.product_process_matrix(
             start=request.args.get('start', ''),
             end=request.args.get('end', ''),
+            product_code=request.args.get('product_code', ''),
         ))
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')

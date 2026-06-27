@@ -12,7 +12,7 @@ from modules.app import app
 from modules.services.setting_service import SettingsService
 from modules.services.email_reports_service import EmailReportsService
 from modules.services.smtp_crypto import decrypt_smtp_password
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 
 def _get_smtp_config():
@@ -126,7 +126,7 @@ def send_daily_report():
     body = _build_daily_report()
     ok, err = _send_email(f'Daily Production Report - {datetime.now().strftime("%Y-%m-%d")}', body)
     if ok:
-        audit_log('send_report', detail='daily report email sent')
+        safe_audit_log('send_report', detail='daily report email sent')
         return jsonify({'message': 'Daily report sent'})
     return jsonify({'error': f'Failed to send: {err}'}), 500
 
@@ -166,6 +166,6 @@ def send_weekly_report():
 
     ok, err = _send_email(f'Weekly Production Report - {week_start} to {week_end}', html)
     if ok:
-        audit_log('send_report', detail='weekly report email sent')
+        safe_audit_log('send_report', detail='weekly report email sent')
         return jsonify({'message': 'Weekly report sent'})
     return jsonify({'error': f'Failed to send: {err}'}), 500

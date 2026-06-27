@@ -13,4 +13,5 @@ export const TABS = [
   { k: 'worker',    l: '👷 工人效率' },
   { k: 'order',     l: '📋 订单分析' },
   { k: 'model',     l: '📐 型号分布' },
+  { k: 'matrix',    l: '🏷️ 产品工序矩阵' },
 ];

@@ -3,7 +3,7 @@ qr-system - production schedule routes (Refactored: SQL -> Service/Repository)
 """
 from flask import jsonify, request
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
@@ -38,8 +38,8 @@ def schedule_update_order(order_id):
             return jsonify({"error": "plan start and end dates required"}), 400
 
         ScheduleService.update_order_schedule(order_id, plan_start, plan_end, production_line_id)
-        audit_log("update_schedule", "order", order_id,
-                  f"plan: {plan_start} ~ {plan_end}")
+        safe_audit_log("update_schedule", "order", order_id,
+                       f"plan: {plan_start} ~ {plan_end}")
         return jsonify({"ok": True, "message": "schedule updated"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
@@ -64,8 +64,8 @@ def schedule_batch_shift():
             return jsonify({"error": "max 30 days offset"}), 400
 
         count = ScheduleService.batch_shift(ids, days)
-        audit_log("batch_shift_schedule", "orders", 0,
-                  f"shifted {count} orders by {days} days")
+        safe_audit_log("batch_shift_schedule", "orders", 0,
+                       f"shifted {count} orders by {days} days")
         return jsonify({"ok": True, "count": count, "message": f"shifted {count} orders by {days} days"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

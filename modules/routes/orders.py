@@ -1,7 +1,7 @@
 """qr-system — 订单管理路由 (Refactored: all SQL → OrderService)"""
 from flask import request, jsonify, g
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.data_scope import get_user_process_ids
@@ -53,10 +53,7 @@ def create_order():
     data = get_json_body()
     try:
         order_id, _order_no = OrderService.create_order(data)
-        try:
-            audit_log('create_order', 'order', order_id, data.get('order_no', ''))
-        except Exception as e:
-            app.logger.warning("audit_log failed: %s", e)
+        safe_audit_log('create_order', 'order', order_id, data.get('order_no', ''))
         return jsonify({'message': '创建成功', 'id': order_id})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -93,10 +90,7 @@ def delete_order(oid):
     try:
         user_id = g.current_user['id']
         OrderService.soft_delete_order(oid, user_id)
-        try:
-            audit_log('delete_order', 'order', oid, '')
-        except Exception as e:
-            app.logger.warning("audit_log failed: %s", e)
+        safe_audit_log('delete_order', 'order', oid, '')
         return jsonify({'message': '已移入回收站'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -344,4 +338,3 @@ def delete_order_material(order_id, item_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     return jsonify({"message": "???"})
-

@@ -11,8 +11,8 @@
     </div>
   </div>
 
-  <!-- Filter Bar: worker & quality -->
-  <div v-if="tab==='worker' || tab==='quality'" class="card" style="margin-bottom:var(--space-4)">
+  <!-- Filter Bar: worker & quality & matrix -->
+  <div v-if="tab==='worker' || tab==='quality' || tab==='matrix'" class="card" style="margin-bottom:var(--space-4)">
     <div class="card-header">
       <h3>{{ TABS.find(t=>t.k===tab)?.l || '' }}</h3>
       <div style="display:flex;gap:var(--space-2);align-items:center">
@@ -36,6 +36,7 @@
   <OrderTab v-if="tab==='order'" />
   <ReworkTab v-if="tab==='rework'" />
   <ModelTab v-if="tab==='model'" />
+  <MatrixTab v-if="tab==='matrix'" :start="reportStart" :end="reportEnd" :productCode="filterProduct" :key="matrixKey" />
 </div>
 </template>
 
@@ -51,15 +52,16 @@ import QualityTab from './reports/QualityTab.vue'
 import OrderTab from './reports/OrderTab.vue'
 import ReworkTab from './reports/ReworkTab.vue'
 import ModelTab from './reports/ModelTab.vue'
+import MatrixTab from './reports/MatrixTab.vue'
 
 export default {
-  components: { DashboardTab, TrendTab, WorkerTab, QualityTab, OrderTab, ReworkTab, ModelTab },
+  components: { DashboardTab, TrendTab, WorkerTab, QualityTab, OrderTab, ReworkTab, ModelTab, MatrixTab },
   setup() {
     const tab = ref('dashboard')
     const reportStart = ref(''); const reportEnd = ref('')
     const filterProduct = ref(''); const productOptions = ref([])
-    const workerKey = ref(0); const qualityKey = ref(0); const reworkKey = ref(0)
-    const keyMap = { worker: workerKey, quality: qualityKey, rework: reworkKey }
+    const workerKey = ref(0); const qualityKey = ref(0); const reworkKey = ref(0); const matrixKey = ref(0)
+    const keyMap = { worker: workerKey, quality: qualityKey, rework: reworkKey, matrix: matrixKey }
 
     function initDates() {
       const now = new Date()
@@ -82,7 +84,7 @@ export default {
 
     onMounted(() => { initDates(); loadProducts() })
 
-    return { tab, TABS, reportStart, reportEnd, filterProduct, productOptions, workerKey, qualityKey, reworkKey, switchTab, loadCurrent }
+    return { tab, TABS, reportStart, reportEnd, filterProduct, productOptions, workerKey, qualityKey, reworkKey, matrixKey, switchTab, loadCurrent }
   }
 }
 </script>

@@ -4,7 +4,7 @@ qr-system ? ???????Refactored: all SQL ? MaterialService?
 from flask import request, jsonify, g
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.error_handler import handle_unexpected_error
@@ -37,10 +37,7 @@ def create_material():
     data = get_json_body()
     try:
         mid = MaterialService.create_material(data)
-        try:
-            audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
-        except Exception:
-            pass
+        safe_audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
         return jsonify({'message': 'created', 'id': mid})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -56,10 +53,7 @@ def update_material(mid):
     data = get_json_body()
     try:
         MaterialService.update_material(mid, data)
-        try:
-            audit_log('update', 'material', mid, 'material updated')
-        except Exception:
-            pass
+        safe_audit_log('update', 'material', mid, 'material updated')
         return jsonify({'message': 'updated'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -83,11 +77,7 @@ def material_impact(mid):
 def delete_material(mid):
     try:
         MaterialService.delete_material(mid)
-        # Get name for audit log ? re-fetch not needed since delete_material validates first
-        try:
-            audit_log('delete', 'material', mid, f'deleted material {mid}')
-        except Exception:
-            pass
+        safe_audit_log('delete', 'material', mid, f'deleted material {mid}')
         return jsonify({'message': 'deleted'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '???' in str(e) else 409
@@ -123,10 +113,7 @@ def material_stock(mid):
     operator_name = data.get('operator_name', '').strip()
     try:
         new_qty = MaterialService.stock_change(mid, change_type, quantity, remark, operator_name)
-        try:
-            audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
-        except Exception:
-            pass
+        safe_audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
         return jsonify({'ok': True, 'new_quantity': new_qty})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -167,10 +154,7 @@ def create_consumption(mid):
             mid, order_id, process_id, quantity,
             notes=notes, operator_name=uname, user_id=uid
         )
-        try:
-            audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
-        except Exception:
-            pass
+        safe_audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
         return jsonify({'ok': True, 'new_quantity': new_qty})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -184,10 +168,7 @@ def create_consumption(mid):
 def delete_consumption(cid):
     try:
         MaterialService.delete_consumption(cid)
-        try:
-            audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
-        except Exception:
-            pass
+        safe_audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
         return jsonify({'ok': True, 'message': '?????'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
@@ -220,10 +201,7 @@ def create_supplier():
     data = get_json_body()
     try:
         sid = SupplierService.create_supplier(data)
-        try:
-            audit_log('create', 'supplier', sid, f"supplier: {data.get('name', '').strip()}")
-        except Exception:
-            pass
+        safe_audit_log('create', 'supplier', sid, f"supplier: {data.get('name', '').strip()}")
         return jsonify({'ok': True, 'id': sid, 'message': '??????'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -239,10 +217,7 @@ def update_supplier(sid):
     data = get_json_body()
     try:
         SupplierService.update_supplier(sid, data)
-        try:
-            audit_log('update', 'supplier', sid, 'supplier updated')
-        except Exception:
-            pass
+        safe_audit_log('update', 'supplier', sid, 'supplier updated')
         return jsonify({'ok': True, 'message': '???'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -256,10 +231,7 @@ def update_supplier(sid):
 def delete_supplier(sid):
     try:
         SupplierService.delete_supplier(sid)
-        try:
-            audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')
-        except Exception:
-            pass
+        safe_audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')
         return jsonify({'ok': True, 'message': '???'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '???' in str(e) else 409

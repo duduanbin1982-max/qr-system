@@ -1,7 +1,7 @@
 """qr-system — User Roles & Permission Matrix Routes"""
 from flask import request, jsonify, g
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.services.audit_log_service import AuditLogService
@@ -26,7 +26,7 @@ def set_user_roles(uid):
         AuditLogService.set_user_roles(uid, data.get("role_ids", []))
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-    audit_log("set_user_roles", "user", uid, f"roles={data.get('role_ids', [])}")
+    safe_audit_log("set_user_roles", "user", uid, f"roles={data.get('role_ids', [])}")
     return jsonify({"message": "角色分配成功"})
 
 
@@ -92,5 +92,5 @@ def batch_set_roles():
         return jsonify({"error": str(e)}), 400
     except Exception:
         return jsonify({"error": "批量操作失败，请重试"}), 400
-    audit_log("batch_set_roles", "users", 0, f"users={user_ids} roles={role_ids} action={act}")
+    safe_audit_log("batch_set_roles", "users", 0, f"users={user_ids} roles={role_ids} action={act}")
     return jsonify({"message": f"已为 {len(user_ids)} 个用户{('分配' if act!='remove' else '移除')}角色"})

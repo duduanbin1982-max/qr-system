@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import request, jsonify, send_file, g
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 from modules.middleware.helpers import get_json_body
@@ -56,10 +56,7 @@ def save_route_prices(route_id):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     msg = f'保存成功（新增 {created} 条，更新 {updated} 条）'
-    try:
-        audit_log('save_route_prices', 'process_route', route_id, msg)
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('save_route_prices', 'process_route', route_id, msg)
     return jsonify({'message': msg, 'created': created, 'updated': updated})
 
 # ============================================================
@@ -270,4 +267,3 @@ def position_wage_summary():
 def wage_prediction():
     months = request.args.get("months", 6, type=int)
     return jsonify(WageService.wage_prediction(months=min(months, 24)))
-

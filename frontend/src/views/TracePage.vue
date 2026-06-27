@@ -16,7 +16,7 @@
             <span v-if="searching">⏳ 查询中...</span>
             <span v-else>🔍 追溯</span>
           </button>
-          <button v-if="result" class="btn" style="padding:var(--space-3) 20px;font-size:15px;white-space:nowrap;background:#fff;border:1px solid var(--border-light)" onclick="window.print()">🖨 打印报告</button>
+          <button v-if="result" class="btn" style="padding:var(--space-3) 20px;font-size:15px;white-space:nowrap;background:#fff;border:1px solid var(--border-light)" @click="printReport">🖨 打印报告</button>
         </div>
         <!-- Trace history -->
         <div v-if="traceHistory.length" style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -311,6 +311,10 @@ const traceHistory = ref(_history)
       return mins + 'min'
     }
 
+    function printReport() {
+      window.print()
+    }
+
     async function doTrace() {
       const code = traceCode.value.trim()
       if (!code) { showToast(traceMode.value==='serial'?'请输入产品序列号':'请输入订单号','error'); return }
@@ -329,7 +333,7 @@ const traceHistory = ref(_history)
       }
     }
 
-    return { traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff }
+    return { traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff, printReport }
   }
 }
 </script>

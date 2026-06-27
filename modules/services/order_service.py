@@ -5,15 +5,18 @@ qr-system — 订单管理 Service 层
 从 routes/orders.py 提取全部业务逻辑。
 """
 import json
+import logging
 from datetime import datetime, timedelta
 from modules.services import BaseService
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
-from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
+from modules.services.order_material_snapshot_service import OrderMaterialSnapshotService
+from modules.services.order_process_sync_service import OrderProcessSyncService
 from modules.setting_reader import get_setting
 
 # Extracted constants — Brooks R4 fix
+_logger = logging.getLogger(__name__)
 
 
 
@@ -69,32 +72,8 @@ class OrderService:
 
     @staticmethod
     def _assign_processes(db, order_id, route_id=None, process_ids=None):
-        """为订单分配工序（从路线或全局工序或指定ID列表）"""
-        if route_id and not process_ids:
-            route_items = db.execute(
-                "SELECT pri.process_id, pri.seq_order, pri.required_audit "
-                "FROM process_route_items pri WHERE pri.route_id = ? ORDER BY pri.seq_order",
-                (route_id,)
-            ).fetchall()
-            for item in route_items:
-                db.execute(
-                    "INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) "
-                    "VALUES (?,?,?,?)",
-                    (order_id, item['process_id'], item['seq_order'], item['required_audit'])
-                )
-        else:
-            if not process_ids:
-                procs = db.execute(
-                    "SELECT id, seq_order FROM processes WHERE status = 'active' ORDER BY seq_order"
-                ).fetchall()
-                process_ids = [p['id'] for p in procs]
-            for pid in process_ids:
-                proc = db.execute("SELECT seq_order FROM processes WHERE id = ?", (pid,)).fetchone()
-                if proc:
-                    db.execute(
-                        "INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)",
-                        (order_id, pid, proc['seq_order'])
-                    )
+        """Backward-compatible wrapper for order process assignment."""
+        OrderProcessSyncService.assign_processes(db, order_id, route_id, process_ids)
 
     # ============================================================
     # 查询
@@ -164,7 +143,8 @@ class OrderService:
             o = dict(row)
             try:
                 o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
-            except Exception:
+            except (TypeError, json.JSONDecodeError):
+                _logger.warning("invalid order extra_fields: order_id=%s", o.get("id"))
                 o['extra_fields'] = {}
             if not (o.get('product_code') or '').strip():
                 o['product_code'] = o['extra_fields'].get('product_code', '') \
@@ -262,33 +242,8 @@ class OrderService:
             order_id = cur.lastrowid
             OrderService._assign_processes(txn, order_id, route_id, process_ids)
 
-            # Auto-copy product BOM to order materials (inside transaction)
-            # Resolve product_id from product_code if not already present
-            product_id = data.get('product_id')
-            if not product_id:
-                pc = data.get('product_code', '')
-                if pc:
-                    prod_row = txn.execute('SELECT id FROM products WHERE product_code = ? AND deleted_at IS NULL', (pc,)).fetchone()
-                    if prod_row:
-                        product_id = prod_row['id']
-            # BOM debug log removed for production
-            if product_id:
-                bom_rows = list(ProductBomRepository.list_by_product(product_id, db=txn))
-            else:
-                bom_rows = []
-            # BOM debug log removed for production
-            for bom in bom_rows:
-                try:
-                    OrderMaterialRepository.insert(
-                        order_id,
-                        bom['material_id'],
-                        bom['quantity_per_unit'],
-                        (bom['process_id'] if bom['process_id'] else None),
-                        'auto',
-                        db=txn
-                    )
-                except Exception as _e:
-                    pass  # INSERT FAILED (ignored)
+            product_id = OrderMaterialSnapshotService.resolve_product_id(data, txn)
+            OrderMaterialSnapshotService.copy_product_bom(order_id, product_id, txn)
 
         return order_id, order_no
 
@@ -373,27 +328,7 @@ class OrderService:
                 txn.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
 
             if 'process_ids' in data:
-                new_pids = sorted(set(int(pid) for pid in data["process_ids"]))
-                existing_procs = txn.execute(
-                    'SELECT process_id FROM order_processes WHERE order_id = ?', (oid,)
-                ).fetchall()
-                existing_map = {r['process_id'] for r in existing_procs}
-                remove_ids = [pid for pid in existing_map if pid not in new_pids]
-                if remove_ids:
-                    placeholders = ','.join('?' for _ in remove_ids)
-                    txn.execute(
-                        f'DELETE FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})',
-                        [oid] + remove_ids
-                    )
-                for pid in new_pids:
-                    if pid in existing_map:
-                        continue
-                    proc = txn.execute('SELECT seq_order FROM processes WHERE id = ?', (pid,)).fetchone()
-                    if proc:
-                        txn.execute(
-                            'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                            (oid, pid, proc['seq_order'])
-                        )
+                OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
 
         return True
 

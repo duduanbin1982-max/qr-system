@@ -324,10 +324,24 @@ const products = ref([])
     }
 
     async function loadMaterialOptions() {
-      try { const d = await api.listMaterials(); materialOptions.value = d.materials || [] } catch(e) {}
+      try {
+        const d = await api.listMaterials()
+        materialOptions.value = d.materials || []
+      } catch(e) {
+        materialOptions.value = []
+        showToast(e.message || '加载物料选项失败', 'error')
+      }
     }
     async function loadProcessOptions() {
-      try { const d = await api.listProcesses(); processOptions.value = d.items || d.processes || []; const xl = processOptions.value.find(p => p.name === '下料'); if (xl) bomForm.value.process_id = xl.id } catch(e) {}
+      try {
+        const d = await api.listProcesses()
+        processOptions.value = d.items || d.processes || []
+        const xl = processOptions.value.find(p => p.name === '下料')
+        if (xl) bomForm.value.process_id = xl.id
+      } catch(e) {
+        processOptions.value = []
+        showToast(e.message || '加载工序选项失败', 'error')
+      }
     }
     async function loadProductBom(pid) {
       try { const d = await api.listProductBom(pid); productBom.value = d.bom || [] } catch(e) { productBom.value = [] }

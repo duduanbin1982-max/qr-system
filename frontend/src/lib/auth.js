@@ -2,6 +2,7 @@
 import { reactive } from 'vue'
 import { api } from './api.js'
 import { hasPermission } from './permissions.js'
+import { loadPageAccessCatalog, resetPageAccessCatalog } from './permissionCatalog.js'
 
 export const auth = reactive({
   user: null,
@@ -19,11 +20,18 @@ export function can(permission) {
   return hasPermission(auth.user, permission)
 }
 
+async function loadPermissionCatalog() {
+  return loadPageAccessCatalog(true)
+}
+
 /** Login: credentials → httpOnly cookie (server-side) + user info */
 export async function login(username, password) {
   const d = await api.login({ username, password })
   const u = d.user || d
   const mustChange = d.must_change_password === true
+  if (!mustChange) {
+    await loadPermissionCatalog()
+  }
   auth.user = u
   auth.isAdmin = !!(u.permissions && u.permissions.includes('*'))
   auth.isLoggedIn = !mustChange  // 需改密时不算已登录
@@ -36,6 +44,7 @@ export async function login(username, password) {
 /** Logout: clear server session + local state */
 export async function logout() {
   try { await api.logout() } catch (_) { /* best-effort */ }
+  resetPageAccessCatalog()
   auth.user = null
   auth.isAdmin = false
   auth.isLoggedIn = false
@@ -49,6 +58,7 @@ export async function restoreSession() {
   try {
     const d = await api.authInfo()
     if (d && d.user) {
+      await loadPermissionCatalog()
       auth.user = d.user
       auth.isAdmin = !!(d.user.permissions && d.user.permissions.includes('*'))
       auth.mustChangePassword = d.must_change_password === true
@@ -86,6 +96,7 @@ export async function changePassword(newPassword) {
   }
   const d = await api.changePassword({ new_password: newPassword })
   if (d.error) throw new Error(d.error)
+  await loadPermissionCatalog()
   auth.mustChangePassword = false
   auth.isLoggedIn = true
   return d

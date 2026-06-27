@@ -186,13 +186,15 @@ class ReportsRepository:
     def fetch_product_process_matrix(where_clause, params, db=None):
         db = db or BaseService.db()
         return db.execute(
-            "SELECT p.product_code, p.product_name, p.model, pr.name as process_name, "
+            "SELECT p.product_code, p.product_name, p.model, p.spec, "
+            "pr.id as process_id, pr.name as process_name, pr.seq_order, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output "
             "FROM products p "
             "JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
             "JOIN work_records wr ON wr.order_id=o.id AND " + where_clause + " "
             "JOIN processes pr ON wr.process_id=pr.id "
-            "GROUP BY p.product_code, pr.name ORDER BY p.product_code, pr.name",
+            "GROUP BY p.product_code, p.product_name, p.model, p.spec, pr.id, pr.name, pr.seq_order "
+            "ORDER BY p.product_code, pr.seq_order, pr.name",
             params
         ).fetchall()
 

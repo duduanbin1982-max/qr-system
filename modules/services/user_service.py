@@ -4,11 +4,14 @@ All business logic (validation, bcrypt, secrets) stays here.
 All SQL delegated to UserRepository.
 """
 import bcrypt
+import logging
 import secrets
 import os
 import uuid
 from modules.services import BaseService
 from modules.repositories.user_repository import UserRepository
+
+_logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -58,18 +61,25 @@ class UserService:
         db = BaseService.db()
 
         # Resolve role from DB (supports custom roles)
-        role = data.get("role", "worker")
         role_id = data.get("role_id")
-        if not role_id and role:
-            role_row = UserRepository.find_role_by_code(role, db=db)
+        role_code = (data.get("role") or "").strip()
+        if role_id:
+            role_code = UserRepository.find_role_code_by_id(role_id, db=db)
+            if not role_code:
+                raise ValueError("Specified role does not exist")
+        else:
+            if not role_code:
+                role_code = "worker"
+            role_row = UserRepository.find_role_by_code(role_code, db=db)
             if not role_row:
                 role_row = UserRepository.find_role_by_code("worker", db=db)
+                role_code = "worker"
             role_id = role_row[0] if role_row else 2
         if not role_id:
             role_id = 2
 
         # Only admins can create admin users
-        if role_id == 1:
+        if role_code == "admin":
             caller_id = data.get("_caller_user_id")
             if not caller_id:
                 raise ValueError("Only administrators can create admin accounts")
@@ -111,7 +121,7 @@ class UserService:
                 nickname=data.get("nickname", ""),
                 email=data.get("email", ""),
                 group_name=data.get("group_name", '员工组'),
-                role=role,
+                role=role_code,
                 employee_no=data.get("employee_no", ""),
                 marker=(data.get("marker") or "").strip(),
                 phone=data.get("phone", ""),
@@ -151,30 +161,32 @@ class UserService:
         # Process validation
         UserService._validate_process_ids(data)
 
-        old_role = existing["role"]
+        old_role = UserRepository.get_primary_role_code(uid, db=db) or existing["role"]
 
         # Compute new_role_id
         new_role_id = None
+        new_role_code = None
         if ("role" in data and data["role"] != old_role) or ("role_id" in data):
             new_role_id = data.get("role_id")
-            if not new_role_id:
-                new_role_id = UserRepository.find_role_id_by_code(
-                    data.get("role", "worker"), db=db
-                )
+            if new_role_id:
+                new_role_code = UserRepository.find_role_code_by_id(new_role_id, db=db)
+                if not new_role_code:
+                    raise ValueError("Specified role does not exist")
+            else:
+                new_role_code = (data.get("role") or "worker").strip() or "worker"
+                new_role_id = UserRepository.find_role_id_by_code(new_role_code, db=db)
+                if not new_role_id:
+                    raise ValueError("Specified role does not exist")
             gn_row = UserRepository.get_role_group_name(new_role_id, db=db)
             if gn_row:
                 data["group_name"] = gn_row[0]
+            data["role"] = new_role_code
 
-        # Only admins can promote to admin role
+        # Only admins can change roles, cannot change own role
         new_role_id_for_check = new_role_id
         if not new_role_id_for_check and "role" in data:
             new_role_id_for_check = UserRepository.find_role_id_by_code(data["role"], db=db)
         old_role_id_for_check = UserRepository.find_role_id_by_code(old_role, db=db)
-        if new_role_id_for_check == 1 and old_role_id_for_check != 1:
-            if not UserRepository.check_admin_role(current_user_id, db=db):
-                raise ValueError("Only administrators can promote users to admin role")
-
-        # Only admins can change roles, cannot change own role
         if new_role_id_for_check is not None and new_role_id_for_check != old_role_id_for_check:
             if current_user_id is None:
                 raise ValueError("Only administrators can change roles")
@@ -212,7 +224,7 @@ class UserService:
 
             if new_role_id is not None:
                 # Prevent downgrading last admin
-                if new_role_id != 1:
+                if new_role_code != "admin":
                     remaining = UserRepository.count_admin_roles_excluding(uid, db=txn)
                     if remaining == 0:
                         remaining2 = UserRepository.count_admin_users_excluding(uid, db=txn)
@@ -243,8 +255,8 @@ class UserService:
                     current_user_id, "update_user", "user", uid, detail, db=db
                 )
                 db.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning("update_user audit log failed: user_id=%s error=%s", uid, exc)
 
         return True
 
@@ -541,4 +553,3 @@ class UserService:
         with BaseService.transaction() as txn:
             UserRepository.delete_user_document_txn(doc_id, db=txn)
         return doc
-

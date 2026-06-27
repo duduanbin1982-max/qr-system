@@ -98,6 +98,7 @@ class ProcessRouteService:
 
         processes = data.get("processes")
         category = data.get("category", route["category"])
+        sync_summary = {"synced_orders": 0, "skipped_orders": 0}
 
         with BaseService.transaction() as txn:
             RouteRepository.update_route_txn(new_name, data.get("description", route["description"]), category, rid, db=txn)
@@ -116,6 +117,17 @@ class ProcessRouteService:
                     RouteRepository.insert_route_item_txn(
                         rid, pid, idx, p.get("required_audit", 0), db=txn
                     )
+                route_items = RouteRepository.find_route_items_ordered(rid, db=txn)
+                orders = RouteRepository.find_orders_using_route_txn(rid, db=txn)
+                for order in orders:
+                    order_id = order["id"]
+                    existing_cnt = RouteRepository.count_work_records_for_order_txn(order_id, db=txn)
+                    if existing_cnt > 0:
+                        sync_summary["skipped_orders"] += 1
+                        continue
+                    RouteRepository.replace_order_processes_txn(order_id, route_items, db=txn)
+                    sync_summary["synced_orders"] += 1
+        return sync_summary
 
     @staticmethod
     def delete_route(rid):
@@ -163,10 +175,5 @@ class ProcessRouteService:
                 raise ValueError("该订单已有 " + str(existing_cnt) + " 条报工记录，无法重新应用路线")
 
             RouteRepository.update_order_route_txn(rid, order_id, db=txn)
-            RouteRepository.delete_order_processes_txn(order_id, db=txn)
             items = RouteRepository.find_route_items_ordered(rid, db=txn)
-            for item in items:
-                RouteRepository.insert_order_process_txn(
-                    order_id, item["process_id"], item["seq_order"], item["required_audit"], db=txn
-                )
-            return len(items)
+            return RouteRepository.replace_order_processes_txn(order_id, items, db=txn)

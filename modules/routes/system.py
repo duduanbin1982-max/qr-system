@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import request, jsonify, send_file
 from modules.app import app
 from modules.config import DATA_DIR, DB_PATH
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.services.system_service import SystemService
 
@@ -70,7 +70,7 @@ def create_backup():
         zf.writestr('backup_info.txt', f'Backup created: {timestamp}\nSystem: QR Production System v2.0\n')
 
     buf.seek(0)
-    audit_log('system_backup', detail=f'backup_{timestamp}.zip')
+    safe_audit_log('system_backup', detail=f'backup_{timestamp}.zip')
     return send_file(buf, mimetype='application/zip', as_attachment=True, download_name=zip_name)
 
 
@@ -87,5 +87,5 @@ def check_integrity():
     results.extend(orphan_result['checks'])
     all_clean = orphan_result['all_clean']
 
-    audit_log('integrity_check', detail=f'clean={all_clean}')
+    safe_audit_log('integrity_check', detail=f'clean={all_clean}')
     return jsonify({'all_clean': all_clean, 'checks': results})

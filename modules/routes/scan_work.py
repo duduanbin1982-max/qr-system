@@ -1,9 +1,9 @@
 """qr-system - Scan work report routes (desktop + mobile) — Service-layer refactored"""
-import base64, json, logging
+import base64, json
 from datetime import datetime
 from flask import request, jsonify, g, send_file
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
 from modules.middleware.rate_limit import rate_limit
 from modules.middleware.validate import validate_json
@@ -11,6 +11,7 @@ from modules.middleware.helpers import get_json_body
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.data_scope import get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService
+from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
@@ -158,100 +159,8 @@ def mobile_scan():
     """扫码获取订单信息（移动端）"""
     try:
         data = get_json_body()
-        code = data.get("code", "").strip()
-        if not code:
-            qr_text = data.get("qr_text", "").strip()
-            if qr_text:
-                code = qr_text
-        if not code:
-            return jsonify({"error": "请扫描二维码"}), 400
-
-        parsed = None
-        try:
-            parsed = json.loads(code)
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        order_id = None
-        serial_no = None
-        if parsed and isinstance(parsed, dict):
-            order_id = parsed.get("order_id")
-            serial_no = parsed.get("serial_no")
-
-        order = None
-        item_info = None
-
-        if order_id:
-            order = ScanHelperService.get_order(order_id)
-        if not order:
-            order = ScanHelperService.get_order_by_no(code)
-
-        if serial_no and not item_info:
-            item = ScanHelperService.get_product_item(serial_no)
-            if item:
-                item_info = dict(item)
-                if not order:
-                    order = ScanHelperService.get_order(item["order_id"])
-
-        # Fallback: if code is a plain-text serial number, look it up directly
-        if not order:
-            item = ScanHelperService.get_product_item(code)
-            if item:
-                item_info = dict(item)
-                serial_no = code
-                order = ScanHelperService.get_order(item["order_id"])
-
-        if not order:
-            return jsonify({"error": f"未找到订单或产品: {code}"}), 404
-
-        # QR模式校验：序列号模式订单拒绝订单号扫描
-        if not serial_no:
-            o_pre = dict(order)
-            _qr_mode = (o_pre.get("qr_mode") or "").strip()
-            _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
-            if (_qr_mode == "serial" or _has_items) and not has_permission(g.current_user, "quality:view"):
-                return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
-
-        o = dict(order)
-        if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
-            return jsonify({"error": "您无权查看此订单"}), 403
-
-        o["processes"] = [dict(p) for p in ScanHelperService.get_order_processes(o["id"])]
-        o["records"] = [dict(r) for r in ScanHelperService.get_work_records(o["id"], limit=20)]
-        # Compute current process (first incomplete one)
-        o["current_process"] = None
-        for proc in o["processes"]:
-            if proc.get("status") != "completed":
-                proc_completed = proc.get("completed") or 0
-                o["current_process"] = {
-                    "process_id": proc["process_id"],
-                    "process_name": proc.get("process_name", ""),
-                    "completed": proc_completed,
-                    "total": proc.get("total_quantity", o.get("quantity", 0)),
-                }
-                break
-
-        # Serial-number mode: override current_process with item's actual process
-        if serial_no and item_info and item_info.get("current_process_id"):
-            item_pid = item_info["current_process_id"]
-            for proc in o["processes"]:
-                if proc["process_id"] == item_pid:
-                    proc_completed = proc.get("completed") or 0
-                    o["current_process"] = {
-                        "process_id": proc["process_id"],
-                        "process_name": proc.get("process_name", ""),
-                        "completed": proc_completed,
-                        "total": proc.get("total_quantity", o.get("quantity", 0)),
-                    }
-                    break
-
-        if item_info:
-            try:
-                item_info["qr_data"] = json.loads(item_info.get("qr_content") or "{}")
-            except (json.JSONDecodeError, TypeError):
-                item_info["qr_data"] = {}
-            return jsonify({"order": o, "item": item_info})
-        return jsonify({"order": o})
+        payload, status = MobileScanService.scan(data, g.current_user)
+        return jsonify(payload), status
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
 
@@ -285,14 +194,12 @@ def mobile_report():
         ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
             user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
 
-        try:
-            audit_log("report_" + report_type, "order", order_id,
-                      "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "audit_log failed for report_%s: order_id=%s process_id=%s",
-                report_type, order_id, process_id
-            )
+        safe_audit_log(
+            "report_" + report_type,
+            "order",
+            order_id,
+            "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type
+        )
         return jsonify({"message": "report OK"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
@@ -336,14 +243,12 @@ def work_report():
         ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
             user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
 
-        try:
-            audit_log("report_" + report_type, "order", order_id,
-                      "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type)
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "audit_log failed for report_%s: order_id=%s process_id=%s",
-                report_type, order_id, process_id
-            )
+        safe_audit_log(
+            "report_" + report_type,
+            "order",
+            order_id,
+            "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type
+        )
 
         return jsonify({"message": "report OK"})
     except ValueError as e:

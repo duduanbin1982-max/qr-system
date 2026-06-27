@@ -5,7 +5,7 @@ qr-system — 岗位管理（路由层）
 """
 from flask import request, jsonify
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.middleware.validate import validate_json
@@ -53,10 +53,7 @@ def create_position():
         pos_id = PositionService.create_position(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    try:
-        audit_log('create_position', 'position', pos_id, data.get('name', ''))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('create_position', 'position', pos_id, data.get('name', ''))
     return jsonify({'message': '创建成功', 'id': pos_id})
 
 
@@ -82,10 +79,7 @@ def update_position(pos_id):
     except ValueError as e:
         code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
         return jsonify({'error': str(e)}), code
-    try:
-        audit_log('update_position', 'position', pos_id, data.get('name', ''))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('update_position', 'position', pos_id, data.get('name', ''))
     return jsonify({'message': '更新成功'})
 
 
@@ -118,8 +112,5 @@ def delete_position(pos_id):
         name = PositionService.delete_position(pos_id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('delete_position', 'position', pos_id, name)
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('delete_position', 'position', pos_id, name)
     return jsonify({'message': '删除成功'})

@@ -42,3 +42,5 @@ qr_system.db
 uploads/
 modules/uploads/
 public/assets/
+*.csr
+.deployed_commit

@@ -67,6 +67,7 @@ class QualityService:
         qi = QualityRepository.find_by_id(inspection_id)
         if not qi:
             raise ValueError("record not found")
+        qi = dict(qi)
 
         inspection_type = data.get("inspection_type", qi["inspection_type"])
         if inspection_type not in INSPECTION_TYPES:
@@ -104,6 +105,15 @@ class QualityService:
     @staticmethod
     def get_stats():
         return QualityRepository.get_stats()
+
+    @staticmethod
+    def get_templates():
+        return [
+            {"type": "first_article", "name": "首件检验", "default_checked": 1},
+            {"type": "in_process", "name": "过程检验", "default_checked": 1},
+            {"type": "final", "name": "终检", "default_checked": 1},
+            {"type": "rework_check", "name": "返工复检", "default_checked": 1},
+        ]
 
     @staticmethod
     def defect_pareto(date_from="", date_to=""):
@@ -171,6 +181,7 @@ class QualityService:
             inspection_type=inspection_type, result=result, search=search,
             date_from=date_from, date_to=date_to
         )
+        items = [dict(item) for item in items]
 
         wb = Workbook()
         ws = wb.active

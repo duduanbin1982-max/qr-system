@@ -66,7 +66,6 @@ import { ref } from 'vue'
 import { auth, login, changePassword } from '@/lib/auth.js'
 import { navigate } from '@/lib/router.js'
 import { getLandingPage } from '@/lib/permissions.js'
-import { loadPageAccessCatalog } from '@/composables/usePageAccess.js'
 
 export default {
   setup(props, { emit }) {
@@ -91,7 +90,6 @@ export default {
           showChangePassword.value = true
           error.value = ''
         } else {
-          await loadPageAccessCatalog(true)
           navigate(getLandingPage(auth.user))
         }
       } catch(e) {
@@ -114,7 +112,6 @@ export default {
       error.value = ''
       try {
         await changePassword(newPassword.value)
-        await loadPageAccessCatalog(true)
         navigate(getLandingPage(auth.user))
       } catch(e) {
         error.value = e.message || '修改密码失败'

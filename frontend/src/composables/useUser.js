@@ -53,13 +53,13 @@ export function useUser() {
   }
 
   async function load() {
-    loading.value = true
-    try {
-      const [userData, posData, procData] = await Promise.all([
+      loading.value = true
+      try {
+        const [userData, posData, procData] = await Promise.all([
         api.listUsers({ page: page.value, limit: pageSize, keyword: searchKeyword.value, role: 'worker' }),
-        api.listPositions(),
-        api.listProcesses()
-      ])
+          api.listPositions(),
+          api.listProcesses()
+        ])
       users.value = userData.users || []
       total.value = userData.total || 0
       positions.value = posData.positions || []
@@ -160,13 +160,14 @@ export function useUser() {
       showToast('用户名和姓名不能为空', 'error')
       return
     }
-    saving.value = true
-    try {
-      const data = { ...form.value }
-      if (!data.password) delete data.password
-      if (!data.email) delete data.email
-      if (!data.phone) delete data.phone
-      if (!data.employee_no) delete data.employee_no
+      saving.value = true
+      try {
+        const data = { ...form.value }
+      data.role = data.role || 'worker'
+        if (!data.password) delete data.password
+        if (!data.email) delete data.email
+        if (!data.phone) delete data.phone
+        if (!data.employee_no) delete data.employee_no
       if (!data.process_ids) delete data.process_ids
       if (data.position_id === '' || data.position_id === null || data.position_id === undefined) {
         delete data.position_id

@@ -3,6 +3,7 @@
 All SQL for users, user_processes, user_roles, positions, roles, role_groups tables.
 Extracted from user_service.py.
 """
+import json
 from modules.db_unit_of_work import BaseService
 from modules.query_utils import paginate, build_sort_clause
 
@@ -34,16 +35,40 @@ class UserRepository:
     def list_users(page=1, limit=20, role_filter="", role_not="", keyword="", status="", db=None):
         """Paginated user list with filters. Returns {users, total, page, limit}."""
         db = db or BaseService.db()
+        role_summary_cte = (
+            "WITH role_summary AS ("
+            "SELECT u.id AS user_id, "
+            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) = 'worker' THEN 1 ELSE 0 END), 0) AS has_worker_role, "
+            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) <> 'worker' THEN 1 ELSE 0 END), 0) AS has_non_worker_role, "
+            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) = 'admin' THEN 1 ELSE 0 END), 0) AS has_admin_role, "
+            "COUNT(ur.role_id) AS role_count, "
+            "COALESCE((SELECT r2.code FROM user_roles ur2 JOIN roles r2 ON ur2.role_id = r2.id "
+            "WHERE ur2.user_id = u.id "
+            "ORDER BY CASE WHEN r2.code = 'admin' THEN 0 WHEN r2.code <> 'worker' THEN 1 ELSE 2 END, r2.level, r2.id "
+            "LIMIT 1), u.role) AS role_code "
+            "FROM users u "
+            "LEFT JOIN user_roles ur ON ur.user_id = u.id "
+            "LEFT JOIN roles r ON ur.role_id = r.id "
+            "GROUP BY u.id"
+            ") "
+        )
+
         where = ["1=1"]
         params = []
         if role_filter:
-            where.append("u.role = ?")
-            params.append(role_filter)
+            if role_filter == "worker":
+                where.append("rs.has_worker_role = 1 AND rs.has_non_worker_role = 0")
+            elif role_filter == "admin":
+                where.append("rs.has_admin_role = 1")
+            else:
+                where.append("(rs.role_code = ? OR (rs.role_count = 0 AND u.role = ?))")
+                params.extend([role_filter, role_filter])
         if role_not:
-            where.append("u.role != ?")
-            params.append(role_not)
-        if role_filter != 'admin' and not role_not:
-            where.append("u.username != 'admin'")
+            if role_not == "worker":
+                where.append("rs.has_non_worker_role = 1")
+            else:
+                where.append("(rs.role_code != ? AND NOT (rs.role_count = 0 AND u.role = ?))")
+                params.extend([role_not, role_not])
         if status:
             where.append("u.status = ?")
             params.append(status)
@@ -53,25 +78,57 @@ class UserRepository:
             params.extend([kw, kw, kw, kw, kw, kw])
 
         where_sql = " AND ".join(where)
-        total = db.execute(
-            "SELECT COUNT(*) FROM users u WHERE " + where_sql, params
-        ).fetchone()[0]
+        count_sql = (
+            role_summary_cte
+            + "SELECT COUNT(*) "
+            + "FROM users u JOIN role_summary rs ON rs.user_id = u.id "
+            + "WHERE "
+            + where_sql
+        )
+        total = db.execute(count_sql, params).fetchone()[0]
 
         base_sql = (
-            "SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no, "
+            role_summary_cte
+            + "SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no, "
             "u.marker, u.phone, u.process_ids, u.status, u.created_at, "
             "(SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, "
             "u.last_active, u.position_id, u.locked_until, "
-            "(SELECT r.code FROM user_roles ur2 JOIN roles r ON ur2.role_id = r.id WHERE ur2.user_id = u.id ORDER BY r.level LIMIT 1) as role_code, "
-            "(SELECT COUNT(*) FROM user_roles ur2 WHERE ur2.user_id = u.id AND ur2.role_id = 1) > 0 as has_admin_role "
-            "FROM users u WHERE " + where_sql + " "
+            "rs.role_code, rs.has_admin_role, rs.has_worker_role, rs.has_non_worker_role, rs.role_count, "
+            "COALESCE((SELECT json_group_array(json_object('id', r2.id, 'name', r2.name, 'code', r2.code, 'level', r2.level, 'group_name', rg2.name)) "
+            "FROM user_roles ur2 JOIN roles r2 ON ur2.role_id = r2.id "
+            "LEFT JOIN role_groups rg2 ON r2.group_id = rg2.id "
+            "WHERE ur2.user_id = u.id), '[]') AS role_items "
+            "FROM users u JOIN role_summary rs ON rs.user_id = u.id "
+            "WHERE " + where_sql + " "
             + build_sort_clause("u.id", {"u.id": "u.id"}, default="u.id")
         )
         paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
         rows = db.execute(paginated_sql, all_params).fetchall()
+        users = []
+        for row in rows:
+            user = dict(row)
+            raw_role_items = user.pop("role_items", "[]")
+            try:
+                parsed_roles = json.loads(raw_role_items or "[]")
+                user["roles"] = parsed_roles if isinstance(parsed_roles, list) else []
+            except Exception:
+                user["roles"] = []
+            if "role_code" not in user or not user["role_code"]:
+                user["role_code"] = user.get("role") or "worker"
+            user["is_worker_user"] = bool(user.get("has_worker_role")) and not bool(user.get("has_non_worker_role"))
+            user["is_admin_user"] = bool(user.get("has_admin_role"))
+            if not user.get("roles"):
+                fallback_role = user.get("role_code") or user.get("role")
+                if fallback_role:
+                    user["roles"] = [{
+                        "code": fallback_role,
+                        "name": fallback_role,
+                        "id": None,
+                    }]
+            users.append(user)
 
         return {
-            "users": [dict(r) for r in rows],
+            "users": users,
             "total": total,
             "page": page,
             "limit": size
@@ -129,11 +186,20 @@ class UserRepository:
         return db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
 
     @staticmethod
+    def find_role_code_by_id(role_id, db=None):
+        """Find role code by role ID. Returns string or None."""
+        db = db or BaseService.db()
+        row = db.execute("SELECT code FROM roles WHERE id = ? LIMIT 1", (role_id,)).fetchone()
+        return row["code"] if row else None
+
+    @staticmethod
     def check_admin_role(user_id, db=None):
-        """Check if user has admin role (role_id=1). Returns row or None."""
+        """Check if user has admin role. Returns row or None."""
         db = db or BaseService.db()
         return db.execute(
-            "SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = 1", (user_id,)
+            "SELECT 1 FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
+            "WHERE ur.user_id = ? AND r.code = 'admin' LIMIT 1",
+            (user_id,)
         ).fetchone()
 
     @staticmethod
@@ -149,14 +215,18 @@ class UserRepository:
     def count_admin_roles(db=None):
         """Count total users with admin role."""
         db = db or BaseService.db()
-        return db.execute("SELECT COUNT(*) FROM user_roles WHERE role_id = 1").fetchone()[0]
+        return db.execute(
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'admin'"
+        ).fetchone()[0]
 
     @staticmethod
     def count_admin_roles_excluding(user_id, db=None):
         """Count admin roles excluding a specific user."""
         db = db or BaseService.db()
         return db.execute(
-            "SELECT COUNT(*) FROM user_roles WHERE role_id = 1 AND user_id != ?", (user_id,)
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
+            "WHERE r.code = 'admin' AND ur.user_id != ?",
+            (user_id,)
         ).fetchone()[0]
 
     @staticmethod
@@ -164,7 +234,8 @@ class UserRepository:
         """Count admin users (by role column) excluding one."""
         db = db or BaseService.db()
         return db.execute(
-            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?", (user_id,)
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?",
+            (user_id,)
         ).fetchone()[0]
 
     @staticmethod
@@ -173,7 +244,8 @@ class UserRepository:
         db = db or BaseService.db()
         placeholders = ",".join("?" for _ in ids)
         return db.execute(
-            "SELECT COUNT(*) FROM user_roles WHERE role_id = 1 AND user_id IN (" + placeholders + ")",
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
+            "WHERE r.code = 'admin' AND ur.user_id IN (" + placeholders + ")",
             ids
         ).fetchone()[0]
 
@@ -183,6 +255,22 @@ class UserRepository:
         db = db or BaseService.db()
         row = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
         return row[0] if row else None
+
+    @staticmethod
+    def get_primary_role_code(user_id, db=None):
+        """Get the display/primary role code for a user."""
+        db = db or BaseService.db()
+        row = db.execute(
+            "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
+            "WHERE ur.user_id = ? "
+            "ORDER BY CASE WHEN r.code = 'admin' THEN 0 WHEN r.code <> 'worker' THEN 1 ELSE 2 END, r.level, r.id "
+            "LIMIT 1",
+            (user_id,)
+        ).fetchone()
+        if row:
+            return row["code"]
+        row = db.execute("SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+        return row["role"] if row else None
 
     # ============================================================
     # Position Queries
@@ -240,7 +328,7 @@ class UserRepository:
         cur = db.execute(
             "INSERT INTO users (username, password, name, nickname, email, group_name, role, employee_no, phone, position_id, status, department_id) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (username, pw_hash, name, nickname, email, "???", role, employee_no, phone, position_id, "active")
+            (username, pw_hash, name, nickname, email, "员工组", role, employee_no, phone, position_id, "active", None)
         )
         return cur.lastrowid
 

@@ -6,6 +6,9 @@ SQL 已迁移至 modules.repositories.customer_repository。
 """
 from modules.services import BaseService
 from modules.repositories.customer_repository import CustomerRepository
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 class CustomerService:
@@ -110,7 +113,8 @@ class CustomerService:
             o = dict(row)
             try:
                 o["extra_fields"] = json.loads(o.get("extra_fields") or "{}")
-            except Exception:
+            except (TypeError, json.JSONDecodeError):
+                _logger.warning("invalid customer order extra_fields: order_id=%s", o.get("id"))
                 o["extra_fields"] = {}
             procs = CustomerRepository.get_order_processes(o["id"], db=db)
             o["processes"] = [dict(p) for p in procs]

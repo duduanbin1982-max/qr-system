@@ -4,7 +4,7 @@ qr-system ? ???????Refactored: SQL ? ReworkService?
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.services.rework_service import ReworkService
@@ -50,7 +50,7 @@ def rework_create():
             quantity=data['quantity'],
             reason=data.get('reason', '')
         )
-        audit_log('rework_create', 'rework', rework_id, f'order={data["order_id"]}')
+        safe_audit_log('rework_create', 'rework', rework_id, f'order={data["order_id"]}')
         return jsonify({'ok': True, 'id': rework_id, 'message': '返工记录已创建'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -72,7 +72,7 @@ def rework_batch_complete():
             ids, data.get('reason', ''), user.get('id'),
             data.get('result', 'ok'), data.get('result_remark', '')
         )
-        audit_log('rework_batch', 'rework', 0, f'completed {result["completed"]} items')
+        safe_audit_log('rework_batch', 'rework', 0, f'completed {result["completed"]} items')
         return jsonify({'ok': True, 'completed': result['completed'], 'errors': result['errors']})
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
@@ -152,7 +152,7 @@ def rework_update(rework_id):
         if 'reason' not in data:
             return jsonify({'error': '缺少必填字段: reason'}), 400
         ReworkService.update_rework(rework_id, data['reason'])
-        audit_log('rework_edit', 'rework', rework_id, 'reason updated')
+        safe_audit_log('rework_edit', 'rework', rework_id, 'reason updated')
         return jsonify({'ok': True})
     except ValueError as e:
         msg = str(e)
@@ -174,7 +174,7 @@ def rework_complete(rework_id):
             user.get('id'), data.get('result', ''),
             data.get('result_remark', '')
         )
-        audit_log('rework_complete', 'rework', rework_id, 'completed')
+        safe_audit_log('rework_complete', 'rework', rework_id, 'completed')
         return jsonify({'ok': True, 'message': '????'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

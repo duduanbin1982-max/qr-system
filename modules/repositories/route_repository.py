@@ -90,6 +90,12 @@ class RouteRepository:
         ).fetchone()
 
     @staticmethod
+    def find_orders_using_route_txn(rid, db):
+        return db.execute(
+            "SELECT id FROM orders WHERE deleted_at IS NULL AND route_id = ? ORDER BY id", (rid,)
+        ).fetchall()
+
+    @staticmethod
     def count_products_using_route(rid, db=None):
         db = db or BaseService.db()
         return db.execute(
@@ -137,3 +143,12 @@ class RouteRepository:
             "VALUES (?, ?, ?, ?)",
             (order_id, process_id, seq_order, required_audit)
         )
+
+    @staticmethod
+    def replace_order_processes_txn(order_id, route_items, db):
+        RouteRepository.delete_order_processes_txn(order_id, db=db)
+        for item in route_items:
+            RouteRepository.insert_order_process_txn(
+                order_id, item["process_id"], item["seq_order"], item["required_audit"], db=db
+            )
+        return len(route_items)

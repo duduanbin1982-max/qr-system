@@ -36,7 +36,7 @@ class OrderAttachmentsRepository:
     def find_with_meta(attachment_id, db=None):
         db = db or BaseService.db()
         return db.execute(
-            "SELECT order_id, file_name, file_path FROM order_attachments WHERE id = ?",
+            "SELECT order_id, file_name, file_type, file_path FROM order_attachments WHERE id = ?",
             (attachment_id,)
         ).fetchone()
 

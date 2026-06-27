@@ -6,7 +6,7 @@ qr-system — 工序管理（路由层）
 from flask import request, jsonify
 
 from modules.app import app
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body
 from modules.middleware.validate import validate_json
@@ -71,10 +71,7 @@ def create_process():
         pid = ProcessService.create_process(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('create_process', 'process', pid, data.get('name', ''))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('create_process', 'process', pid, data.get('name', ''))
     return jsonify({'message': '添加成功', 'id': pid})
 
 
@@ -99,10 +96,7 @@ def update_process(pid):
         ProcessService.update_process(pid, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
-    try:
-        audit_log('update_process', 'process', pid, str(data))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('update_process', 'process', pid, str(data))
     return jsonify({'message': '更新成功'})
 
 
@@ -142,9 +136,6 @@ def delete_process(pid):
             return jsonify({'error': msg}), 409
         else:
             return jsonify({'error': msg}), 400
-    try:
-        audit_log('delete_process', 'process', pid,
-                  f'name={result.get("name","")} impact={result.get("impact",{})}')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('delete_process', 'process', pid,
+                   f'name={result.get("name","")} impact={result.get("impact",{})}')
     return jsonify({'message': '删除成功', 'impact': result.get('impact', {})})

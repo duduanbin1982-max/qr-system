@@ -6,7 +6,7 @@ from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.app import app
 from modules.services.setting_service import SettingsService
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.middleware.validate import validate_json
@@ -79,10 +79,7 @@ def create_inventory():
         item_id = InventoryService.create_item(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
     return jsonify({'message': '创建成功', 'id': item_id})
 
 
@@ -123,10 +120,7 @@ def update_inventory(id):
         InventoryService.update_item(id, data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
-    try:
-        audit_log('update_inventory', 'inventory', id)
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('update_inventory', 'inventory', id)
     return jsonify({'message': '更新成功'})
 
 
@@ -151,10 +145,7 @@ def delete_inventory(id):
         InventoryService.delete_item(id)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('delete_inventory', 'inventory', id)
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('delete_inventory', 'inventory', id)
     return jsonify({'message': '删除成功'})
 
 
@@ -196,10 +187,7 @@ def stock_in():
         InventoryService.stock_in(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
     return jsonify({'message': '入库成功'})
 
 
@@ -244,10 +232,7 @@ def stock_out():
     except ValueError as e:
         code = 400 if '不足' in str(e) else 404
         return jsonify({'error': str(e)}), code
-    try:
-        audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
-    except Exception as e:
-        app.logger.warning('audit_log failed: %s', e)
+    safe_audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
     return jsonify({'message': '出库成功'})
 
 
@@ -316,7 +301,7 @@ def inventory_adjust(id):
             operator_name=user.get('name', user.get('username', '')),
             remark=remark
         )
-        audit_log('inventory_adjust', 'inventory', id, f'qty adjusted')
+        safe_audit_log('inventory_adjust', 'inventory', id, f'qty adjusted')
         return jsonify({'ok': True, **result})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

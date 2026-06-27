@@ -20,5 +20,49 @@
       "suggestion": 0
     },
     "scope": "full project (152 modules, 8 test files, 48 tables)"
+  },
+  {
+    "date": "2026-06-24T00:00:00+08:00",
+    "mode": "health",
+    "score": 89,
+    "findings": {
+      "critical": 2,
+      "warning": 2,
+      "suggestion": 1
+    },
+    "scope": "full project (162 Python files, 117 frontend files, 10 test files)"
+  },
+  {
+    "date": "2026-06-24T00:00:00+08:00",
+    "mode": "architecture",
+    "score": 91,
+    "findings": {
+      "critical": 0,
+      "warning": 3,
+      "suggestion": 0
+    },
+    "scope": "full project (backend modules, frontend source, tests; import-graph scan + sampled hotspot reads)"
+  },
+  {
+    "date": "2026-06-24",
+    "mode": "Architecture Audit",
+    "score": 63,
+    "findings": {
+      "critical": 1,
+      "warning": 4,
+      "suggestion": 2
+    },
+    "scope": "entire project: Flask backend modules, Vue frontend src, tests, scripts/config sampled"
+  },
+  {
+    "date": "2026-06-26T19:08:15.416059+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 72,
+    "findings": {
+      "critical": 2,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "entire project: modules, frontend/src, tests (304 tracked source/test files; git unavailable)"
   }
 ]

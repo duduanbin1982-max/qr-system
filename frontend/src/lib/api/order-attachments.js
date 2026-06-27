@@ -1,9 +1,10 @@
-import { request, buildQuery, uploadFile } from './client.js'
+import { request, uploadFile } from './client.js'
+
+const ORDER_ATTACHMENTS_API = '/api/order-attachments'
 
 export const orderAttachmentsApi = {
-  // ========== 订单附件 ==========
-  listOrderAttachments: (orderId)             => request('GET', '/api/orders/' + orderId + '/attachments'),
-  uploadOrderAttachment:(orderId, formData)   => uploadFile('/api/orders/' + orderId + '/attachments', formData),
-  downloadAttachment:  (attachmentId)          => '/api/attachments/' + attachmentId + '/download',
-  deleteAttachment:    (attachmentId)          => request('DELETE', '/api/attachments/' + attachmentId),
+  listOrderAttachments: (orderId)           => request('GET', '/api/orders/' + orderId + '/attachments'),
+  uploadOrderAttachment: (orderId, formData) => uploadFile('/api/orders/' + orderId + '/attachments', formData),
+  downloadAttachment: (attachmentId)        => ORDER_ATTACHMENTS_API + '/' + attachmentId + '/download',
+  deleteAttachment: (attachmentId)          => request('DELETE', ORDER_ATTACHMENTS_API + '/' + attachmentId),
 }

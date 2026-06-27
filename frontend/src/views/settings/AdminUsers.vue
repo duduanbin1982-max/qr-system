@@ -44,7 +44,7 @@
                       <button class="o-abtn edit" @click="openEditAdmin(u)">✏️</button>
                       <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--success-light);color:var(--success)" @click="restoreAdminUser(u.id)" title="恢复">🔄</button>
                       <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--danger-light);color:var(--danger)" @click="permanentDeleteAdminUser(u.id)" title="彻底删除">💀</button>
-                      <button v-if="u.username!=='admin' && u.status!=='deleted'" class="o-abtn del" @click="deleteAdminUser(u.id)">🗑️</button>
+                      <button v-if="u.status!=='deleted'" class="o-abtn del" @click="deleteAdminUser(u.id)">🗑️</button>
                     </td>
                   </tr>
                 </tbody>

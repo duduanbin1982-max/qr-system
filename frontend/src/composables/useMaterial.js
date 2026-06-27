@@ -224,7 +224,13 @@ export function useMaterial() {
   }
 
   async function loadSuppliers() {
-    try { const d = await api.listSuppliers(); suppliers.value = d.suppliers || [] } catch (e) {}
+    try {
+      const d = await api.listSuppliers()
+      suppliers.value = d.suppliers || []
+    } catch (e) {
+      suppliers.value = []
+      showToast(e.message || '加载供应商失败', 'error')
+    }
   }
 
   function openSupplierAdd() {

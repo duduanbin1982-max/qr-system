@@ -7,7 +7,7 @@ from flask import request, jsonify, g, send_file
 
 from modules.app import app
 from modules.services.setting_service import SettingsService
-from modules.middleware.audit import audit_log
+from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission
 from modules.middleware.validate import validate_json
 import os
@@ -43,10 +43,7 @@ def create_user():
     except ValueError as e:
         code = 409 if '已存在' in str(e) else 400
         return jsonify({'error': str(e)}), code
-    try:
-        audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
-    except Exception:
-        pass
+    safe_audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
     return jsonify({'message': '添加成功', 'id': uid, 'password': password if password else ''})
 
 
@@ -66,10 +63,7 @@ def update_user(uid):
     audit_data.pop('password', None)
     if has_pwd:
         audit_data['password_changed'] = True
-    try:
-        audit_log('update_user', 'user', uid, str(audit_data))
-    except Exception:
-        pass
+    safe_audit_log('update_user', 'user', uid, str(audit_data))
     return jsonify({'message': '更新成功'})
 
 # P0-1: Soft-delete restore + permanent delete
@@ -81,10 +75,7 @@ def user_restore_api(uid):
         UserService.restore_user(uid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('restore_user', 'user', uid)
-    except Exception:
-        pass
+    safe_audit_log('restore_user', 'user', uid)
     return jsonify({'message': 'user restored'})
 
 @app.route('/api/users/<int:uid>/permanent', methods=['DELETE'])
@@ -95,10 +86,7 @@ def user_permanent_delete_api(uid):
         UserService.permanent_delete_user(uid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('permanent_delete_user', 'user', uid)
-    except Exception:
-        pass
+    safe_audit_log('permanent_delete_user', 'user', uid)
     return jsonify({'message': 'user permanently deleted'})
 
 
@@ -110,10 +98,7 @@ def delete_user(uid):
         UserService.delete_user(uid, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('delete_user', 'user', uid)
-    except Exception:
-        pass
+    safe_audit_log('delete_user', 'user', uid)
     return jsonify({'message': '删除成功'})
 
 
@@ -126,10 +111,7 @@ def reset_password(uid):
         new_pw = UserService.reset_password(uid, data.get('password'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('reset_password', 'user', uid)
-    except Exception:
-        pass
+    safe_audit_log('reset_password', 'user', uid)
     return jsonify({'message': '密码已重置'})
 
 
@@ -141,10 +123,7 @@ def unlock_user(uid):
         UserService.unlock_user(uid)
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    try:
-        audit_log('unlock_user', 'user', uid)
-    except Exception:
-        pass
+    safe_audit_log('unlock_user', 'user', uid)
     return jsonify({'message': '账户已解锁'})
 
 @app.route('/api/users/batch-delete', methods=['POST'])
@@ -160,10 +139,7 @@ def batch_delete_users():
         deleted = UserService.batch_delete_users(ids, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('batch_delete_users', 'user', 0, f'deleted {deleted} users: {ids[:10]}')
-    except Exception:
-        pass
+    safe_audit_log('batch_delete_users', 'user', 0, f'deleted {deleted} users: {ids[:10]}')
     return jsonify({'message': f'成功删除 {deleted} 个用户', 'deleted': deleted})
 
 
@@ -188,10 +164,7 @@ def import_users():
     finally:
         if _os.path.exists(tmp.name):
             _os.unlink(tmp.name)
-    try:
-        audit_log('import_users', 'user', 0, f'imported {result.get("success",0)} users')
-    except Exception:
-        pass
+    safe_audit_log('import_users', 'user', 0, f'imported {result.get("success",0)} users')
     return jsonify(result)
 
 @app.route('/api/users/export', methods=['GET'])
@@ -240,10 +213,7 @@ def batch_update_status():
         count = UserService.batch_update_status(ids, status, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    try:
-        audit_log('batch_update_status', 'user', 0, f'updated {count} users to {status}')
-    except Exception:
-        pass
+    safe_audit_log('batch_update_status', 'user', 0, f'updated {count} users to {status}')
     return jsonify({'message': f'updated {count} users', 'updated': count})
 
 
@@ -277,10 +247,7 @@ def upload_user_document(uid):
         )
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
-    try:
-        audit_log("upload_document", "user", uid, f"Uploaded: {result['filename']}")
-    except Exception:
-        pass
+    safe_audit_log("upload_document", "user", uid, f"Uploaded: {result['filename']}")
     return jsonify({"message": "Upload success", "filename": result["filename"], "size": result["size"]})
 
 @app.route("/api/users/<int:uid>/documents/<int:doc_id>", methods=["GET"])
@@ -305,8 +272,5 @@ def delete_user_document(uid, doc_id):
         doc = UserService.delete_user_document(uid, doc_id, UPLOAD_DIR)
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
-    try:
-        audit_log("delete_document", "user", uid, f"Deleted: {doc['doc_name']}")
-    except Exception:
-        pass
+    safe_audit_log("delete_document", "user", uid, f"Deleted: {doc['doc_name']}")
     return jsonify({"message": "Document deleted"})

@@ -287,7 +287,9 @@ export default {
         if (res.used_orders > 0) {
           impactMsg = '\n\n' + res.used_orders + ' 个订单正在使用此路线'
         }
-      } catch(e) {}
+      } catch(e) {
+        showToast(e.message || '检查路线使用情况失败，将继续删除确认', 'warn')
+      }
       if (!confirm('确定删除路线 "' + r.name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
       try { await api.deleteProcessRoute(r.id); showToast('删除成功'); await load() }
       catch(e) { showToast(e.message || '删除失败', 'error') }
