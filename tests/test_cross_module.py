@@ -181,7 +181,7 @@ class TestCrossModuleIntegration:
         trace_response = client.get(f"/api/trace/{order_no}", headers=auth_headers)
         assert trace_response.status_code in (200, 404)
 
-    def test_snapshots_adjustments_and_shipments(self, client, auth_headers, worker_auth_headers):
+    def test_wage_snapshot_adjustment_and_trend_flow(self, client, auth_headers, worker_auth_headers):
         route_id, process_ids = _seed_route_bundle(client)
         order_id, _order_no = _create_order(client, auth_headers, route_id)
 
@@ -248,8 +248,14 @@ class TestCrossModuleIntegration:
         )
         assert position_response.status_code == 200
 
+    def test_inventory_endpoint_contract(self, client, auth_headers):
         inventory_response = client.get("/api/inventory", headers=auth_headers)
-        assert inventory_response.status_code == 200
 
+        assert inventory_response.status_code == 200, inventory_response.get_json()
+        assert isinstance(inventory_response.get_json(), dict)
+
+    def test_shipments_endpoint_contract(self, client, auth_headers):
         shipments_response = client.get("/api/shipments", headers=auth_headers)
-        assert shipments_response.status_code == 200
+
+        assert shipments_response.status_code == 200, shipments_response.get_json()
+        assert isinstance(shipments_response.get_json(), dict)

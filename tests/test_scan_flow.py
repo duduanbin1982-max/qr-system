@@ -1,5 +1,13 @@
 """Core scan-to-report flow integration tests"""
 import json, time, pytest
+from modules.db import get_db
+
+
+def _order_no_for(client, order_id):
+    with client.application.app_context():
+        row = get_db().execute("SELECT order_no FROM orders WHERE id = ?", (order_id,)).fetchone()
+    assert row is not None, f"Missing fixture order {order_id}"
+    return row["order_no"]
 
 
 class TestScanWorkFlow:
@@ -38,7 +46,7 @@ class TestScanWorkFlow:
             "serial_no": f"SN-{int(time.time())}",
             "report_type": "normal"
         })
-        assert report_resp.status_code in (200, 201)
+        assert report_resp.status_code == 200, report_resp.get_json()
 
     def test_qr_code_generation(self, client, auth_headers):
         """POST /api/qrcode/batch — generate QR codes."""
@@ -53,9 +61,8 @@ class TestScanWorkFlow:
         """GET /api/processes — list active processes."""
         resp = client.get("/api/processes", headers=auth_headers)
         assert resp.status_code == 200
-        if resp.status_code == 200:
-            data = resp.get_json()
-            assert "items" in data or "processes" in data
+        data = resp.get_json()
+        assert "items" in data or "processes" in data
 
 
 class TestScanEdgeCases:
@@ -77,7 +84,7 @@ class TestScanEdgeCases:
             "code": "NONEXISTENT-99999",
             "type": "order_no"
         })
-        assert resp.status_code in (200, 404, 400)
+        assert resp.status_code in (400, 404), resp.get_json()
 
     def test_mobile_decode_invalid(self, client, auth_headers):
         """Mobile decode with garbage input should not crash."""
@@ -91,14 +98,15 @@ class TestScanReportVerification:
         resp = client.get("/api/trace/26061201", headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_work_records_list(self, client, auth_headers):
-        resp = client.get("/api/report/history?limit=5", headers=auth_headers)
-        assert resp.status_code in (200, 404)
+    def test_work_records_list(self, client, auth_headers, test_order_id):
+        resp = client.get(f"/api/orders/{test_order_id}/work-records", headers=auth_headers)
+        assert resp.status_code == 200, resp.get_json()
+        assert "work_records" in resp.get_json()
 
     def test_wage_endpoint(self, client, auth_headers):
         resp = client.get("/api/wages", headers=auth_headers)
-        if resp.status_code == 200:
-            assert isinstance(resp.get_json(), (dict, list))
+        assert resp.status_code == 200, resp.get_json()
+        assert isinstance(resp.get_json(), (dict, list))
 
     def test_all_stats_healthy(self, client, auth_headers):
         endpoints = [
@@ -118,19 +126,19 @@ class TestMaterialIntegrity:
 
     def test_materials_have_safe_stock(self, client, auth_headers):
         resp = client.get("/api/materials", headers=auth_headers)
-        if resp.status_code == 200:
-            data = resp.get_json()
-            items = data.get("items", data.get("materials", []))
-            for item in items:
-                assert "safe_stock" in item or "quantity" in item
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        items = data.get("items", data.get("materials", []))
+        for item in items:
+            assert "safe_stock" in item or "quantity" in item
 
     def test_order_has_product_code(self, client, auth_headers):
         resp = client.get("/api/orders?limit=5", headers=auth_headers)
-        if resp.status_code == 200:
-            data = resp.get_json()
-            items = data.get("items", [])
-            for item in items:
-                assert "product_code" in item or "product_name" in item
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        items = data.get("items", [])
+        for item in items:
+            assert "product_code" in item or "product_name" in item
 
 
 class TestCoreBusinessPaths:
@@ -140,29 +148,28 @@ class TestCoreBusinessPaths:
         """验证：报工记录产生后，工资核算接口可查询。"""
         # 1. 查询工资核算
         wage_resp = client.get("/api/wages", headers=auth_headers)
-        assert wage_resp.status_code in (200, 403), f"Wages: {wage_resp.status_code}"
+        assert wage_resp.status_code == 200, wage_resp.get_json()
 
         # 2. 查询工序列表（报工必需）
         proc_resp = client.get("/api/processes", headers=auth_headers)
-        assert proc_resp.status_code in (200, 403), f"Processes: {proc_resp.status_code}"
+        assert proc_resp.status_code == 200, proc_resp.get_json()
 
     def test_order_lifecycle_integrity(self, client, auth_headers):
         """验证：订单创建后 product_items 自动生成。"""
         resp = client.get("/api/orders?limit=5", headers=auth_headers)
-        if resp.status_code == 200:
-            data = resp.get_json()
-            items = data.get("items", [])
-            for order in items:
-                assert "order_no" in order
-                assert "product_code" in order or "product_name" in order
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        items = data.get("items", [])
+        for order in items:
+            assert "order_no" in order
+            assert "product_code" in order or "product_name" in order
 
     def test_material_deduction_enabled(self, client, auth_headers):
         """验证：auto_deduct_material 配置存在且可读。"""
         resp = client.get("/api/settings", headers=auth_headers)
-        if resp.status_code == 200:
-            data = resp.get_json()
-            # Settings should be accessible
-            assert isinstance(data, (dict, list))
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        assert isinstance(data, (dict, list))
 
     def test_inventory_stock_tracking(self, client, auth_headers):
         """验证：库存出入库记录完整性。"""
@@ -194,7 +201,7 @@ class TestRepositoryIntegration:
         assert resp.status_code == 200
 
 
-class TestCoreBusinessPaths:
+class TestCoreBusinessRepositoryPaths:
     """核心业务路径：扫码→报工→工资→物料→库存"""
 
     def test_wage_endpoint_returns_data(self, client, auth_headers, test_order_id):
@@ -275,8 +282,7 @@ class TestCoreBusinessPaths:
     def test_order_progress_after_create(self, client, auth_headers, test_order_id):
         """创建订单后订单进度应可查询。"""
         resp = client.get(f"/api/orders/{test_order_id}/workpiece-progress", headers=auth_headers)
-        # May be 200 or 404 if no product_items yet
-        assert resp.status_code in (200, 404)
+        assert resp.status_code == 200, resp.get_json()
 
 
 class TestMaterialDeduction:
@@ -285,6 +291,6 @@ class TestMaterialDeduction:
     def test_auto_deduct_setting(self, client, auth_headers):
         """auto_deduct_material 设置项应可读。"""
         resp = client.get("/api/settings", headers=auth_headers)
-        if resp.status_code == 200:
-            data = resp.get_json()
-            assert isinstance(data, (dict, list))
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        assert isinstance(data, (dict, list))

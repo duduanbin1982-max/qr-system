@@ -8,7 +8,6 @@ import tempfile
 import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PRODUCTION_DB = os.path.join(PROJECT_ROOT, "data", "production.db")
 TEST_DB = os.path.join(tempfile.gettempdir(), f"qr_test_{os.getpid()}.db")
 TEST_TEMPLATE_DB = os.path.join(tempfile.gettempdir(), f"qr_test_template_{os.getpid()}.db")
 SCRUB_USERNAMES = ("testrunner", "testworker")
@@ -37,17 +36,18 @@ def _remove_sqlite_artifacts(path):
             os.remove(candidate)
 
 
-def _backup_database(source_path, dest_path):
+def _create_schema_database(dest_path):
     _remove_sqlite_artifacts(dest_path)
-    source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
-    dest = sqlite3.connect(dest_path)
+    from modules.migrations import run_migrations
+
+    conn = sqlite3.connect(dest_path)
+    conn.row_factory = sqlite3.Row
     try:
-        source.backup(dest)
-        dest.execute("PRAGMA journal_mode=DELETE")
-        dest.commit()
+        run_migrations(conn)
+        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.commit()
     finally:
-        dest.close()
-        source.close()
+        conn.close()
 
 
 def _table_columns(conn):
@@ -194,7 +194,7 @@ def _scrub_fixture_artifacts(conn):
 
 
 def _prepare_template_db():
-    _backup_database(PRODUCTION_DB, TEST_TEMPLATE_DB)
+    _create_schema_database(TEST_TEMPLATE_DB)
     conn = sqlite3.connect(TEST_TEMPLATE_DB)
     try:
         _scrub_runtime_state(conn)
