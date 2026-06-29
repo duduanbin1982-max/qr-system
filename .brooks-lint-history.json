@@ -108,5 +108,16 @@
       "suggestion": 1
     },
     "scope": "192.168.1.8:/home/dubin/qr-system HEAD 3a9f4ef; deployed marker 89eee77"
+  },
+  {
+    "date": "2026-06-29T22:42:55",
+    "mode": "Full Sweep",
+    "score": 92,
+    "findings": {
+      "critical": 0,
+      "warning": 3,
+      "suggestion": 2
+    },
+    "scope": "remote production repository /home/dubin/qr-system; route coupling, migration compatibility, service long-method cleanup"
   }
 ]
