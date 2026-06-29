@@ -55,7 +55,7 @@ class OrderRepository:
         ).fetchone() is not None
 
     @staticmethod
-    def list_all(where_sql, params, page, limit, db=None):
+    def list_all(where_sql, params, page, limit, db=None, order_by='o.created_at DESC, o.id DESC'):
         """分页列表（where_sql 不含 WHERE 关键字，调用方负责拼接）。"""
         db = db or BaseService.db()
         total = db.execute(
@@ -68,10 +68,49 @@ class OrderRepository:
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
             WHERE {where_sql}
-            ORDER BY o.created_at DESC, o.id DESC
+            ORDER BY {order_by}
             LIMIT ? OFFSET ?
         ''', params + [limit, offset]).fetchall()
         return rows, total
+
+    @staticmethod
+    def list_processes_for_orders(order_ids, db=None):
+        db = db or BaseService.db()
+        if not order_ids:
+            return []
+        placeholders = ','.join('?' for _ in order_ids)
+        sql = """
+            SELECT op.*, p.name as process_name
+            FROM order_processes op JOIN processes p ON op.process_id = p.id
+            WHERE op.order_id IN ({})
+            ORDER BY op.order_id, op.seq_order
+        """.format(placeholders)
+        return db.execute(sql, list(order_ids)).fetchall()
+
+    @staticmethod
+    def find_customer_name(customer_id, db=None):
+        db = db or BaseService.db()
+        row = db.execute('SELECT name FROM customers WHERE id = ?', (customer_id,)).fetchone()
+        return row['name'] if row else None
+
+    @staticmethod
+    def find_order_remark(order_id, db=None):
+        db = db or BaseService.db()
+        return db.execute('SELECT remark FROM orders WHERE id = ?', (order_id,)).fetchone()
+
+    @staticmethod
+    def update_fields(order_id, set_clauses, params, db=None):
+        db = db or BaseService.db()
+        db.execute('UPDATE orders SET ' + ', '.join(set_clauses) + ' WHERE id = ?', list(params) + [order_id])
+
+    @staticmethod
+    def mark_deleted(order_id, deleted_by=None, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, "
+            "pre_delete_status = status, status = 'cancelled' WHERE id = ?",
+            (deleted_by, order_id)
+        )
 
     @staticmethod
     def count_by_status(where_sql, params, db=None):
@@ -234,6 +273,47 @@ class OrderRepository:
         return count
 
     @staticmethod
+    def list_order_process_ids(order_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            'SELECT process_id FROM order_processes WHERE order_id = ?',
+            (order_id,)
+        ).fetchall()
+
+    @staticmethod
+    def delete_order_processes(order_id, process_ids, db=None):
+        db = db or BaseService.db()
+        if not process_ids:
+            return
+        placeholders = ','.join('?' for _ in process_ids)
+        db.execute(
+            f'DELETE FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})',
+            [order_id] + list(process_ids)
+        )
+
+    @staticmethod
+    def find_process_seq_order(process_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            'SELECT seq_order FROM processes WHERE id = ?',
+            (process_id,)
+        ).fetchone()
+
+    @staticmethod
+    def insert_order_process(order_id, process_id, seq_order, required_audit=None, db=None):
+        db = db or BaseService.db()
+        if required_audit is None:
+            db.execute(
+                'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
+                (order_id, process_id, seq_order)
+            )
+            return
+        db.execute(
+            'INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) VALUES (?,?,?,?)',
+            (order_id, process_id, seq_order, required_audit)
+        )
+
+    @staticmethod
     def assign_all_active_processes(order_id, db=None):
         db = db or BaseService.db()
         procs = db.execute(
@@ -287,6 +367,37 @@ class OrderRepository:
             WHERE s.order_id = ?
             ORDER BY s.created_at DESC
         ''', (order_id,)).fetchall()
+
+    @staticmethod
+    def get_shipments_by_product_code(product_code, db=None):
+        db = db or BaseService.db()
+        return db.execute("""
+            SELECT DISTINCT s.*,
+                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
+            FROM shipments s
+            JOIN shipment_items si ON si.shipment_id = s.id
+            JOIN inventory i ON si.inventory_id = i.id
+            WHERE i.product_model = ?
+            ORDER BY s.created_at DESC
+        """, (product_code,)).fetchall()
+
+    @staticmethod
+    def get_workpiece_progress_rows(order_id, db=None):
+        db = db or BaseService.db()
+        items = db.execute(
+            "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
+        ).fetchall()
+        processes = db.execute(
+            "SELECT op.*, p.name as process_name FROM order_processes op "
+            "JOIN processes p ON p.id = op.process_id WHERE op.order_id = ? ORDER BY op.seq_order",
+            (order_id,)
+        ).fetchall()
+        work_records = db.execute(
+            "SELECT wr.serial_no, wr.process_id, wr.status, wr.created_at "
+            "FROM work_records wr WHERE wr.order_id = ? AND wr.serial_no IS NOT NULL AND wr.serial_no != ''",
+            (order_id,)
+        ).fetchall()
+        return items, processes, work_records
 
     # ============================================================
     # 订单号生成

@@ -75,5 +75,16 @@
       "suggestion": 0
     },
     "scope": "server runtime /home/dubin/qr-system at 4cdf7ecb208f49378436e2145c70121f7f9d1e48"
+  },
+  {
+    "date": "2026-06-29T00:27:54",
+    "mode": "Architecture Audit",
+    "score": 75,
+    "findings": {
+      "critical": 1,
+      "warning": 3,
+      "suggestion": 0
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system HEAD 94e96f5 full backend/frontend architecture"
   }
 ]

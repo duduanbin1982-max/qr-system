@@ -87,6 +87,23 @@ class ReportsRepository:
             params + item_params
         ).fetchone()
 
+    @staticmethod
+    def fetch_quality_inspection_by_process(where_clause, params, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT p.name, COUNT(*) as total_inspections, "
+            "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
+            "COALESCE(SUM(CASE WHEN qi.result IN('fail','partial') THEN 1 ELSE 0 END),0) as fail_count, "
+            "COALESCE(SUM(CASE WHEN qi.result='scrap' THEN 1 ELSE 0 END),0) as scrap_count, "
+            "COALESCE(SUM(CASE WHEN qi.result='rework' THEN 1 ELSE 0 END),0) as rework_count "
+            "FROM quality_inspections qi "
+            "JOIN processes p ON qi.process_id = p.id "
+            "JOIN orders o ON qi.order_id = o.id AND o.deleted_at IS NULL "
+            "WHERE " + where_clause + " "
+            "GROUP BY p.name ORDER BY total_inspections DESC",
+            params
+        ).fetchall()
+
     # ========== product_report ==========
     @staticmethod
     def fetch_product_report(where_clause, params, pi_w, sr_w, wr_w, item_params, db=None):
@@ -179,6 +196,26 @@ class ReportsRepository:
             "FROM shipments s WHERE " + where_clause + " "
             "GROUP BY month ORDER BY month ASC",
             params
+        ).fetchall()
+
+    # ========== order_analysis ==========
+    @staticmethod
+    def fetch_order_status_distribution(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT o.status, COUNT(*) as count, COALESCE(SUM(o.quantity),0) as qty, "
+            "COALESCE(SUM(o.completed),0) as done FROM orders o WHERE o.deleted_at IS NULL "
+            "GROUP BY o.status ORDER BY COUNT(*) DESC"
+        ).fetchall()
+
+    @staticmethod
+    def fetch_order_monthly_trend(db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT substr(o.created_at,1,7) as month, COUNT(*) as count, "
+            "COALESCE(SUM(o.quantity),0) as total_qty, COALESCE(SUM(o.completed),0) as total_done "
+            "FROM orders o WHERE o.deleted_at IS NULL AND o.created_at>=date('now','-12 months') "
+            "GROUP BY substr(o.created_at,1,7) ORDER BY month ASC"
         ).fetchall()
 
     # ========== product_process_matrix ==========

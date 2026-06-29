@@ -83,7 +83,6 @@ class OrderService:
     def list_orders(page=1, limit=DEFAULT_PAGE_SIZE, status='', keyword='', customer='',
                     data_scope_pids=None):
         """分页查询订单列表（含数据权限过滤）。"""
-        db = BaseService.db()
         where = ['o.deleted_at IS NULL']
         params = []
         if status:
@@ -96,7 +95,6 @@ class OrderService:
             where.append('o.customer LIKE ?')
             params.append(f'%{customer}%')
 
-        # 数据权限
         if data_scope_pids is not None:
             if not data_scope_pids:
                 return {'orders': [], 'total': 0, 'page': page, 'limit': limit,
@@ -108,57 +106,31 @@ class OrderService:
             params.extend(data_scope_pids)
 
         where_sql = ' AND '.join(where)
-
-        total = db.execute(
-            f"SELECT COUNT(*) FROM orders o WHERE {where_sql}", params
-        ).fetchone()[0]
-
-        base_sql = f'''
-            SELECT o.*, pr.name as route_name, c.name as customer_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE {where_sql}
-            ORDER BY o.order_no DESC
-        '''
-        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
-        rows = db.execute(paginated_sql, all_params).fetchall()
-
-        order_ids = [row['id'] for row in rows]
+        size = min(max(limit, 1), MAX_PAGE_LIMIT)
+        rows, total = OrderRepository.list_all(
+            where_sql, params, page, size, order_by='o.order_no DESC'
+        )
         all_procs = {}
-        if order_ids:
-            placeholders = ','.join('?' for _ in order_ids)
-            procs = db.execute(f'''
-                SELECT op.*, p.name as process_name
-                FROM order_processes op JOIN processes p ON op.process_id = p.id
-                WHERE op.order_id IN ({placeholders})
-                ORDER BY op.order_id, op.seq_order
-            ''', order_ids).fetchall()
-            for p in procs:
-                oid = p['order_id']
-                all_procs.setdefault(oid, []).append(dict(p))
+        for process in OrderRepository.list_processes_for_orders([row['id'] for row in rows]):
+            all_procs.setdefault(process['order_id'], []).append(dict(process))
 
         result = []
         for row in rows:
-            o = dict(row)
+            order = dict(row)
             try:
-                o['extra_fields'] = json.loads(o.get('extra_fields') or '{}')
+                order['extra_fields'] = json.loads(order.get('extra_fields') or '{}')
             except (TypeError, json.JSONDecodeError):
-                _logger.warning("invalid order extra_fields: order_id=%s", o.get("id"))
-                o['extra_fields'] = {}
-            if not (o.get('product_code') or '').strip():
-                o['product_code'] = o['extra_fields'].get('product_code', '') \
-                    if isinstance(o['extra_fields'], dict) else ''
-            o['processes'] = all_procs.get(o['id'], [])
-            result.append(o)
+                _logger.warning("invalid order extra_fields: order_id=%s", order.get("id"))
+                order['extra_fields'] = {}
+            if not (order.get('product_code') or '').strip():
+                order['product_code'] = (
+                    order['extra_fields'].get('product_code', '')
+                    if isinstance(order['extra_fields'], dict) else ''
+                )
+            order['processes'] = all_procs.get(order['id'], [])
+            result.append(order)
 
-        # 状态统计
-        status_counts = db.execute(
-            f"SELECT o.status, COUNT(*) as cnt FROM orders o WHERE {where_sql} GROUP BY o.status",
-            params
-        ).fetchall()
-        counts = {r['status']: r['cnt'] for r in status_counts}
-
+        counts = {row['status']: row['cnt'] for row in OrderRepository.count_by_status(where_sql, params)}
         return {
             'orders': result, 'total': total, 'page': page, 'limit': size,
             'pending': counts.get('pending', 0),
@@ -204,10 +176,9 @@ class OrderService:
         customer_id = data.get('customer_id')
         customer = (data.get('customer') or '').strip()
         if not customer and customer_id:
-            db = BaseService.db()
-            cust_row = db.execute('SELECT name FROM customers WHERE id = ?', (customer_id,)).fetchone()
-            if cust_row:
-                customer = cust_row['name']
+            customer_name = OrderRepository.find_customer_name(customer_id)
+            if customer_name:
+                customer = customer_name
 
         extra = {k: v for k, v in data.items()
                  if k not in ('order_no', 'customer', 'customer_id', 'product_name',
@@ -291,10 +262,9 @@ class OrderService:
         # customer_id → name lookup
         if 'customer_id' in data and data['customer_id']:
             if not (data.get('customer') or '').strip():
-                cust = db.execute('SELECT name FROM customers WHERE id = ?',
-                                  (data['customer_id'],)).fetchone()
-                if cust:
-                    data['customer'] = cust['name']
+                customer_name = OrderRepository.find_customer_name(data['customer_id'])
+                if customer_name:
+                    data['customer'] = customer_name
 
         # Detect remark change before entering transaction; the old value is fetched again
         # inside the transaction to avoid relying on the lightweight status query.
@@ -311,7 +281,7 @@ class OrderService:
         with BaseService.transaction() as txn:
             # TOCTOU-safe remark history: re-read inside transaction
             if remark_changed and user_id:
-                current = txn.execute('SELECT remark FROM orders WHERE id = ?', (oid,)).fetchone()
+                current = OrderRepository.find_order_remark(oid, db=txn)
                 if current and data['remark'] != (current['remark'] or ''):
                     OrderService.log_remark_history(
                         oid,
@@ -324,8 +294,7 @@ class OrderService:
 
             if sets:
                 sets.append("updated_at = datetime('now','localtime')")
-                params.append(oid)
-                txn.execute(f'UPDATE orders SET {", ".join(sets)} WHERE id = ?', params)
+                OrderRepository.update_fields(oid, sets, params, db=txn)
 
             if 'process_ids' in data:
                 OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
@@ -354,10 +323,7 @@ class OrderService:
             raise ValueError('订单已在回收站中')
 
         with BaseService.transaction() as txn:
-            txn.execute(
-                "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, pre_delete_status = status, status = 'cancelled' WHERE id = ?",
-                (deleted_by, oid)
-            )
+            OrderRepository.mark_deleted(oid, deleted_by=deleted_by, db=txn)
 
         return existing['order_no']
 
@@ -368,29 +334,16 @@ class OrderService:
     @staticmethod
     def get_work_records(oid):
         """获取订单关联的报工/返工/报废记录。"""
-        db = BaseService.db()
         order = OrderRepository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
 
-        def _fetch(table, rec_type):
-            allowed = {"work_records": "work_records", "scrap_records": "scrap_records", "rework_records": "rework_records"}
-            tbl = allowed.get(table, "work_records")
-            return db.execute(
-                "SELECT r.*, u.name as worker_name, p.name as process_name, ? as record_type "
-                "FROM " + tbl + " r "
-                "JOIN users u ON r.user_id = u.id "
-                "JOIN processes p ON r.process_id = p.id "
-                "WHERE r.order_id = ? "
-                "ORDER BY r.created_at DESC",
-                (rec_type, oid)).fetchall()
-
-        normal = _fetch('work_records', 'normal')
-        scrap = _fetch('scrap_records', 'scrap')
-        rework = _fetch('rework_records', 'rework')
-
-        all_records = [dict(r) for r in list(normal) + list(scrap) + list(rework)]
-        all_records.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        grouped_records = OrderRepository.get_work_records(oid)
+        normal = grouped_records['work']
+        scrap = grouped_records['scrap']
+        rework = grouped_records['rework']
+        all_records = normal + scrap + rework
+        all_records.sort(key=lambda record: record.get('created_at', ''), reverse=True)
 
         return {
             'order_id': oid,
@@ -400,7 +353,7 @@ class OrderService:
                 'normal_count': len(normal),
                 'scrap_count': len(scrap),
                 'rework_count': len(rework),
-                'total_quantity': sum(r.get('quantity', 0) for r in normal)
+                'total_quantity': sum(record.get('quantity', 0) for record in normal)
             }
         }
 
@@ -411,21 +364,10 @@ class OrderService:
     @staticmethod
     def get_shipments(oid):
         """获取订单关联产品的发货记录。"""
-        db = BaseService.db()
         order = OrderRepository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
-
-        shipments = db.execute('''
-            SELECT DISTINCT s.*,
-                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
-            FROM shipments s
-            JOIN shipment_items si ON si.shipment_id = s.id
-            JOIN inventory i ON si.inventory_id = i.id
-            WHERE i.product_model = ?
-            ORDER BY s.created_at DESC
-        ''', (order['product_code'],)).fetchall()
-
+        shipments = OrderRepository.get_shipments_by_product_code(order['product_code'])
         return {
             'order_id': oid,
             'order_no': order['order_no'],
@@ -474,58 +416,32 @@ class OrderService:
     @staticmethod
     def get_workpiece_progress(order_id):
         """获取工件报工进度"""
-        db = BaseService.db()
         order = OrderRepository.find_by_id(order_id)
         if not order:
             raise ValueError("订单不存在")
-        items = db.execute(
-            "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
-        ).fetchall()
-        processes = db.execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
-            "JOIN processes p ON p.id = op.process_id WHERE op.order_id = ? ORDER BY op.seq_order",
-            (order_id,)
-        ).fetchall()
-        work_records = db.execute(
-            "SELECT wr.serial_no, wr.process_id, wr.status, wr.created_at "
-            "FROM work_records wr WHERE wr.order_id = ? AND wr.serial_no IS NOT NULL AND wr.serial_no != ''",
-            (order_id,)
-        ).fetchall()
+        items, processes, work_records = OrderRepository.get_workpiece_progress_rows(order_id)
         record_map = {}
-        for r in work_records:
-            sn = r["serial_no"]
-            if sn not in record_map:
-                record_map[sn] = {}
-            record_map[sn][r["process_id"]] = {"status": r["status"], "completed_at": r["created_at"]}
+        for record in work_records:
+            serial_no = record["serial_no"]
+            record_map.setdefault(serial_no, {})[record["process_id"]] = {
+                "status": record["status"],
+                "completed_at": record["created_at"],
+            }
         return {
             "order": dict(order),
-            "items": [dict(i) for i in items],
-            "processes": [dict(p) for p in processes],
+            "items": [dict(item) for item in items],
+            "processes": [dict(process) for process in processes],
             "record_map": record_map,
         }
 
     @staticmethod
     def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE):
         """分页查询回收站订单。"""
-        db = BaseService.db()
         page = max(page, 1)
         limit = min(max(limit, 1), 200)
-
-        total = db.execute(
-            'SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL'
-        ).fetchone()[0]
-
-        rows = db.execute('''
-            SELECT o.*, u.name as deleted_by_name
-            FROM orders o
-            LEFT JOIN users u ON o.deleted_by = u.id
-            WHERE o.deleted_at IS NOT NULL
-            ORDER BY o.deleted_at DESC
-            LIMIT ? OFFSET ?
-        ''', (limit, (page - 1) * limit)).fetchall()
-
+        rows, total = OrderRepository.list_trash(page, limit)
         return {
-            'orders': [dict(r) for r in rows],
+            'orders': [dict(row) for row in rows],
             'total': total,
             'page': page,
             'limit': limit
@@ -543,10 +459,7 @@ class OrderService:
 
         old_status = existing['pre_delete_status'] or 'pending'
         with BaseService.transaction() as txn:
-            txn.execute(
-                "UPDATE orders SET deleted_at = NULL, deleted_by = NULL, status = ? WHERE id = ?",
-                (old_status, oid)
-            )
+            OrderRepository.restore(oid, old_status, db=txn)
         return existing['order_no']
 
     @staticmethod

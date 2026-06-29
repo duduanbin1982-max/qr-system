@@ -2,8 +2,7 @@
 
 import json
 
-from modules.middleware.auth import has_permission
-from modules.middleware.data_scope import get_user_process_ids
+from modules.access_policy import has_permission, get_user_process_ids
 from modules.services.scan_helper_service import ScanHelperService
 
 

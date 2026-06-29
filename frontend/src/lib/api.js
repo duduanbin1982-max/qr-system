@@ -37,32 +37,49 @@ const httpApi = {
   del:    (url)         => request('DELETE', url),
 }
 
-export const api = {
-  ...httpApi,
-  ...authApi,
-  ...dashboardApi,
-  ...ordersApi,
-  ...orderAttachmentsApi,
-  ...productsApi,
-  ...materialsApi,
-  ...customersApi,
-  ...usersApi,
-  ...processesApi,
-  ...processRoutesApi,
-  ...pricingApi,
-  ...wagesApi,
-  ...inventoryApi,
-  ...shipmentsApi,
-  ...scanApi,
-  ...qrcodeApi,
-  ...statsApi,
-  ...traceApi,
-  ...approvalsApi,
-  ...settingsApi,
-  ...positionsApi,
-  ...rolesApi,
-  ...logsApi,
-  ...qualityApi,
-  ...reworkApi,
-  ...productionApi
+const apiModules = [
+  httpApi,
+  authApi,
+  dashboardApi,
+  ordersApi,
+  orderAttachmentsApi,
+  productsApi,
+  materialsApi,
+  customersApi,
+  usersApi,
+  processesApi,
+  processRoutesApi,
+  pricingApi,
+  wagesApi,
+  inventoryApi,
+  shipmentsApi,
+  scanApi,
+  qrcodeApi,
+  statsApi,
+  traceApi,
+  approvalsApi,
+  settingsApi,
+  positionsApi,
+  rolesApi,
+  logsApi,
+  qualityApi,
+  reworkApi,
+  productionApi,
+]
+
+function mergeApiModules(modules) {
+  const merged = {}
+  const owners = new Map()
+  for (const moduleApi of modules) {
+    for (const [key, value] of Object.entries(moduleApi)) {
+      if (Object.prototype.hasOwnProperty.call(merged, key)) {
+        throw new Error(`Duplicate api facade key: ${key} (${owners.get(key)} vs apiModules)`)
+      }
+      owners.set(key, 'apiModules')
+      merged[key] = value
+    }
+  }
+  return merged
 }
+
+export const api = mergeApiModules(apiModules)
