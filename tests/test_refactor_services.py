@@ -41,7 +41,7 @@ def test_order_process_assignment_uses_route_items_when_route_selected():
 
     assert _assigned_processes(db) == [
         {"order_id": 1, "process_id": 10, "seq_order": 1, "required_audit": 1}
-    ]
+    ], "route assignment should preserve required_audit from route items"
 
 
 def test_order_process_assignment_falls_back_to_active_processes():
@@ -55,16 +55,16 @@ def test_order_process_assignment_falls_back_to_active_processes():
 
     assert _assigned_processes(db) == [
         {"order_id": 1, "process_id": 20, "seq_order": 2, "required_audit": 0}
-    ]
+    ], "fallback assignment should include only active processes"
 
 def test_mobile_scan_extract_code_prefers_code_then_qr_text():
-    assert MobileScanService._extract_code({"code": " A ", "qr_text": "B"}) == "A"
-    assert MobileScanService._extract_code({"code": "", "qr_text": " B "}) == "B"
+    assert MobileScanService._extract_code({"code": " A ", "qr_text": "B"}) == "A", "explicit code should win over qr_text"
+    assert MobileScanService._extract_code({"code": "", "qr_text": " B "}) == "B", "qr_text should be trimmed when code is blank"
 
 
 def test_mobile_scan_parse_code_ignores_plain_text():
-    assert MobileScanService._parse_code("plain-serial") is None
+    assert MobileScanService._parse_code("plain-serial") is None, "plain serial text should not be treated as JSON QR payload"
     assert MobileScanService._parse_code('{"order_id": 1, "serial_no": "SN1"}') == {
         "order_id": 1,
         "serial_no": "SN1",
-    }
+    }, "JSON QR payload should parse into a dict"

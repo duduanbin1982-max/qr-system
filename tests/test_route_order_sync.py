@@ -77,7 +77,7 @@ def test_route_update_syncs_unreported_order_processes(client, auth_headers):
     route_id, route_name, process_ids = _seed_route(client)
     order_id = _create_order_with_route(client, auth_headers, route_id)
 
-    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)], "new order should copy the route's initial process list"
 
     response = client.put(
         f"/api/process-routes/{route_id}",
@@ -94,9 +94,9 @@ def test_route_update_syncs_unreported_order_processes(client, auth_headers):
     )
 
     assert response.status_code == 200, response.get_json()
-    assert response.get_json()["synced_orders"] == 1
-    assert response.get_json()["skipped_orders"] == 0
-    assert _order_processes(client, order_id) == [(process_ids[2], 1), (process_ids[0], 0)]
+    assert response.get_json()["synced_orders"] == 1, response.get_json()
+    assert response.get_json()["skipped_orders"] == 0, response.get_json()
+    assert _order_processes(client, order_id) == [(process_ids[2], 1), (process_ids[0], 0)], "unreported order should sync to the updated route"
 
 
 def test_route_update_skips_orders_with_work_records(client, auth_headers):
@@ -131,6 +131,6 @@ def test_route_update_skips_orders_with_work_records(client, auth_headers):
     )
 
     assert response.status_code == 200, response.get_json()
-    assert response.get_json()["synced_orders"] == 0
-    assert response.get_json()["skipped_orders"] == 1
-    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+    assert response.get_json()["synced_orders"] == 0, response.get_json()
+    assert response.get_json()["skipped_orders"] == 1, response.get_json()
+    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)], "reported order should keep its original process list"

@@ -124,5 +124,5 @@ def test_backend_modules_have_no_import_cycles():
     graph, known_modules = _dependency_graph()
     cycles = _strongly_connected_components(graph, known_modules)
 
-    assert cycles == []
+    assert cycles == [], f"backend import graph contains cycles: {cycles}"
 

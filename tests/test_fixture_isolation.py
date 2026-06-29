@@ -23,7 +23,7 @@ def test_template_snapshot_excludes_historical_test_artifacts():
             ("Fixture Route %", "cross module fixture"),
         ).fetchone()[0]
 
-    assert order_count == 0
-    assert user_count == 0
-    assert process_count == 0
-    assert route_count == 0
+    assert order_count == 0, f"template DB leaked {order_count} historical test orders"
+    assert user_count == 0, f"template DB leaked {user_count} historical test users"
+    assert process_count == 0, f"template DB leaked {process_count} historical test processes"
+    assert route_count == 0, f"template DB leaked {route_count} historical test routes"

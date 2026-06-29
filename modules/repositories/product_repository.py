@@ -22,11 +22,28 @@ class ProductRepository:
         ).fetchone()
 
     @staticmethod
+    def find_active_identity(pid, db=None):
+        """按 ID 查询未删除产品的删除影响检查字段。"""
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id, product_name, product_code FROM products WHERE id = ? AND deleted_at IS NULL",
+            (pid,)
+        ).fetchone()
+
+    @staticmethod
     def find_by_code(product_code, db=None):
         """按 product_code 查询产品（含 deleted_at 状态）。"""
         db = db or BaseService.db()
         return db.execute(
             "SELECT id, deleted_at FROM products WHERE product_code = ?", (product_code,)
+        ).fetchone()
+
+    @staticmethod
+    def find_active_id_by_code(product_code, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id FROM products WHERE product_code = ? AND deleted_at IS NULL",
+            (product_code,)
         ).fetchone()
 
     @staticmethod

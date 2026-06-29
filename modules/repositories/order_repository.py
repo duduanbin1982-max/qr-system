@@ -55,6 +55,14 @@ class OrderRepository:
         ).fetchone() is not None
 
     @staticmethod
+    def find_latest_order_no_with_prefix(prefix, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT order_no FROM orders WHERE order_no LIKE ? ORDER BY id DESC LIMIT 1",
+            (prefix + '%',)
+        ).fetchone()
+
+    @staticmethod
     def list_all(where_sql, params, page, limit, db=None, order_by='o.created_at DESC, o.id DESC'):
         """分页列表（where_sql 不含 WHERE 关键字，调用方负责拼接）。"""
         db = db or BaseService.db()
@@ -99,6 +107,15 @@ class OrderRepository:
         return db.execute('SELECT remark FROM orders WHERE id = ?', (order_id,)).fetchone()
 
     @staticmethod
+    def insert_remark_history(order_id, old_remark, new_remark, user_id, user_name, db=None):
+        db = db or BaseService.db()
+        db.execute(
+            "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
+            "VALUES (?,?,?,?,?)",
+            (order_id, old_remark, new_remark, user_id, user_name)
+        )
+
+    @staticmethod
     def update_fields(order_id, set_clauses, params, db=None):
         db = db or BaseService.db()
         db.execute('UPDATE orders SET ' + ', '.join(set_clauses) + ' WHERE id = ?', list(params) + [order_id])
@@ -141,6 +158,22 @@ class OrderRepository:
     # ============================================================
     # 写操作
     # ============================================================
+
+    @staticmethod
+    def insert_from_order_form(data, db=None):
+        db = db or BaseService.db()
+        cur = db.execute("""
+            INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
+                plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
+        """, (
+            data["order_no"], data.get("customer", ""), data.get("customer_id"),
+            data.get("product_name", ""), data.get("quantity", 0),
+            data.get("plan_start", ""), data.get("plan_end", ""), data.get("deadline", ""),
+            data.get("extra_fields", "{}"), data.get("remark", ""), data.get("route_id"),
+            data.get("product_code", ""), data.get("production_line_id")
+        ))
+        return cur.lastrowid
 
     @staticmethod
     def insert(data, db=None):
@@ -224,6 +257,13 @@ class OrderRepository:
             db.execute(f'DELETE FROM {tbl} WHERE order_id = ?', (order_id,))
         db.execute('DELETE FROM orders WHERE id = ?', (order_id,))
         return order['order_no']
+
+    @staticmethod
+    def purge_with_children(order_id, child_tables, db=None):
+        db = db or BaseService.db()
+        for table in child_tables:
+            db.execute(f"DELETE FROM {table} WHERE order_id = ?", (order_id,))
+        db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
 
     # ============================================================
     # 关联数据

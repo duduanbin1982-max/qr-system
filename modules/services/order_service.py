@@ -24,44 +24,36 @@ _logger = logging.getLogger(__name__)
 # 订单号生成（模块级工具函数，含事务锁防竞态）
 # ============================================================
 
-def _generate_order_no(db):
-    """自动生成订单号：前缀 + 2位顺序号。
-    
-    前缀从 system_settings.auto_order_no 读取，支持占位符 YYYY/YY/MM/DD。
-    如果未配置，默认使用 YYMMDD 格式。
-    调用方必须在外层管理事务。
-    """
-    today = datetime.now()
-    
+def _order_no_prefix(today):
     prefix_template = get_setting("auto_order_no", "").strip()
-    if prefix_template:
-        prefix = prefix_template.replace("YYYY", today.strftime("%Y")) \
-                                .replace("YY", today.strftime("%y")) \
-                                .replace("MM", today.strftime("%m")) \
-                                .replace("DD", today.strftime("%d"))
-    else:
-        prefix = today.strftime('%y%m%d')
-    
-    row = db.execute(
-        "SELECT order_no FROM orders WHERE order_no LIKE ? ORDER BY id DESC LIMIT 1",
-        (prefix + '%',)
-    ).fetchone()
-    if row:
-        try:
-            suffix = row['order_no'][len(prefix):]
-            seq = int(suffix) + 1
-        except (ValueError, IndexError):
-            seq = 1
-    else:
-        seq = 1
+    if not prefix_template:
+        return today.strftime('%y%m%d')
+    return (prefix_template.replace("YYYY", today.strftime("%Y"))
+                           .replace("YY", today.strftime("%y"))
+                           .replace("MM", today.strftime("%m"))
+                           .replace("DD", today.strftime("%d")))
+
+
+def _next_order_sequence(prefix, db):
+    row = OrderRepository.find_latest_order_no_with_prefix(prefix, db=db)
+    if not row:
+        return 1
+    try:
+        return int(row['order_no'][len(prefix):]) + 1
+    except (ValueError, IndexError):
+        return 1
+
+
+def _generate_order_no(db):
+    """自动生成订单号：前缀 + 2位顺序号。调用方必须在外层管理事务。"""
+    prefix = _order_no_prefix(datetime.now())
+    seq = _next_order_sequence(prefix, db)
     for _ in range(100):
         order_no = prefix + str(seq).zfill(2)
-        existing = db.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
-        if not existing:
+        if not OrderRepository.exists_by_order_no(order_no, db=db):
             return order_no
         seq += 1
     raise RuntimeError(f'订单号生成失败：前缀{prefix}下所有序号已用尽')
-
 
 class OrderService:
     """订单管理业务逻辑。"""
@@ -74,6 +66,40 @@ class OrderService:
     def _assign_processes(db, order_id, route_id=None, process_ids=None):
         """Backward-compatible wrapper for order process assignment."""
         OrderProcessSyncService.assign_processes(db, order_id, route_id, process_ids)
+
+    @staticmethod
+    def _resolve_customer_name(customer_id, customer):
+        customer = (customer or '').strip()
+        if customer or not customer_id:
+            return customer
+        return OrderRepository.find_customer_name(customer_id) or customer
+
+    @staticmethod
+    def _create_order_extra(data):
+        core_fields = {
+            'order_no', 'customer', 'customer_id', 'product_name', 'quantity',
+            'plan_start', 'plan_end', 'deadline', 'remark', 'process_ids',
+            'route_id', 'production_line_id'
+        }
+        return {key: value for key, value in data.items() if key not in core_fields}
+
+    @staticmethod
+    def _build_create_payload(data, order_no, customer, customer_id, route_id, extra):
+        return {
+            "order_no": order_no,
+            "customer": customer,
+            "customer_id": customer_id if customer_id else None,
+            "product_name": data.get('product_name', ''),
+            "quantity": data.get('quantity', 0),
+            "plan_start": data.get('plan_start', '') or datetime.now().strftime('%Y-%m-%d'),
+            "plan_end": data.get('plan_end', '') or (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
+            "deadline": data.get('deadline', ''),
+            "extra_fields": json.dumps(extra, ensure_ascii=False),
+            "remark": data.get('remark', ''),
+            "route_id": route_id if route_id else None,
+            "product_code": data.get('product_code', ''),
+            "production_line_id": data.get('production_line_id'),
+        }
 
     # ============================================================
     # 查询
@@ -174,43 +200,24 @@ class OrderService:
 
         route_id = data.get('route_id')
         customer_id = data.get('customer_id')
-        customer = (data.get('customer') or '').strip()
-        if not customer and customer_id:
-            customer_name = OrderRepository.find_customer_name(customer_id)
-            if customer_name:
-                customer = customer_name
-
-        extra = {k: v for k, v in data.items()
-                 if k not in ('order_no', 'customer', 'customer_id', 'product_name',
-                              'quantity', 'plan_start', 'plan_end', 'deadline', 'remark',
-                              'process_ids', 'route_id', 'production_line_id')}
-
+        customer = OrderService._resolve_customer_name(customer_id, data.get('customer'))
+        extra = OrderService._create_order_extra(data)
         process_ids = data.get('process_ids', [])
 
         with BaseService.transaction() as txn:
             # 冲突检查 + 自动重试（最多5次）
             for _ in range(5):
-                existing = txn.execute('SELECT id FROM orders WHERE order_no = ?', (order_no,)).fetchone()
+                existing = OrderRepository.exists_by_order_no(order_no, db=txn)
                 if not existing:
                     break
                 order_no = _generate_order_no(txn)
             else:
                 raise ValueError('订单号冲突，请重试（已重试5次）')
 
-            cur = txn.execute('''
-                INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
-                    plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
-            ''', (
-                order_no, customer, customer_id if customer_id else None,
-                data.get('product_name', ''), data.get('quantity', 0),
-                data.get('plan_start', '') or datetime.now().strftime('%Y-%m-%d'), data.get('plan_end', '') or (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
-                data.get('deadline', ''), json.dumps(extra, ensure_ascii=False),
-                data.get('remark', ''), route_id if route_id else None,
-                data.get('product_code', ''),
-                data.get('production_line_id')
-            ))
-            order_id = cur.lastrowid
+            payload = OrderService._build_create_payload(
+                data, order_no, customer, customer_id, route_id, extra
+            )
+            order_id = OrderRepository.insert_from_order_form(payload, db=txn)
             OrderService._assign_processes(txn, order_id, route_id, process_ids)
 
             product_id = OrderMaterialSnapshotService.resolve_product_id(data, txn)
@@ -390,18 +397,10 @@ class OrderService:
     def log_remark_history(oid, old_remark, new_remark, user_id, user_name, db=None):
         """记录备注变更历史。当 db 参数传入时复用已有事务连接。"""
         if db is not None:
-            db.execute(
-                "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
-                "VALUES (?,?,?,?,?)",
-                (oid, old_remark, new_remark, user_id, user_name)
-            )
+            OrderRepository.insert_remark_history(oid, old_remark, new_remark, user_id, user_name, db=db)
         else:
             with BaseService.transaction() as txn:
-                txn.execute(
-                    "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
-                    "VALUES (?,?,?,?,?)",
-                    (oid, old_remark, new_remark, user_id, user_name)
-                )
+                OrderRepository.insert_remark_history(oid, old_remark, new_remark, user_id, user_name, db=txn)
 
     @staticmethod
     def soft_delete_order(oid, user_id):
@@ -491,10 +490,7 @@ class OrderService:
             "quality_inspections"
         ]
         with BaseService.transaction() as txn:
-            for tbl in _PURGE_CHILD_TABLES:
-                # Table names are from hardcoded whitelist, safe from SQL injection
-                txn.execute(f"DELETE FROM {tbl} WHERE order_id = ?", (oid,))
-            txn.execute("DELETE FROM orders WHERE id = ?", (oid,))
+            OrderRepository.purge_with_children(oid, _PURGE_CHILD_TABLES, db=txn)
         return existing['order_no'] or ""
 
     # ============================================================

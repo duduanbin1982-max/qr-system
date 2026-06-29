@@ -182,11 +182,7 @@ class ProductService:
     # 删除
     @staticmethod
     def check_product_impact(pid):
-        db = BaseService.db()
-        prod = db.execute(
-            "SELECT id, product_name, product_code FROM products WHERE id = ? AND deleted_at IS NULL",
-            (pid,)
-        ).fetchone()
+        prod = ProductRepository.find_active_identity(pid)
         if not prod:
             raise ValueError("Product not found")
         used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])

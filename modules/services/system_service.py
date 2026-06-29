@@ -20,7 +20,7 @@ class SystemService:
         all_clean = True
         for label, sql in checks:
             try:
-                cnt = db.execute(sql).fetchone()[0]
+                cnt = SystemRepository.count_orphans(sql, db=db)
                 ok = cnt == 0
                 results.append({"check": label, "pass": ok, "orphans": cnt})
                 if not ok: all_clean = False
@@ -33,28 +33,22 @@ class SystemService:
     @staticmethod
     def ping():
         """数据库连通性检查"""
-        db = BaseService.db()
-        db.execute("SELECT 1")
-        return True
+        return SystemRepository.ping()
 
     @staticmethod
     def get_db_stats():
         db = BaseService.db()
         tables = []
-        for row in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchall():
-            cnt = db.execute(f'SELECT COUNT(*) FROM "{row["name"]}"').fetchone()[0]
+        for row in SystemRepository.get_tables(db=db):
+            cnt = SystemRepository.count_table(row["name"], db=db)
             tables.append({"name": row["name"], "count": cnt})
         return tables
 
     @staticmethod
     def vacuum():
-        db = BaseService.db()
-        db.execute("VACUUM")
+        SystemRepository.vacuum()
 
     @staticmethod
     def check_integrity():
-        db = BaseService.db()
-        ok = db.execute("PRAGMA integrity_check").fetchone()
+        ok = SystemRepository.check_integrity()
         return list(ok) if ok else ["unknown"]

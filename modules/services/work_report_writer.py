@@ -211,19 +211,11 @@ class WorkReportWriter:
 
     @staticmethod
     def _create_first_article_if_needed(order_id, process_id, user_id, db):
-        first_count = db.execute(
-            "SELECT COUNT(*) FROM work_records "
-            "WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
-            (order_id, process_id),
-        ).fetchone()[0]
+        first_count = ScanRepository.count_approved_normal_work_records(order_id, process_id, db=db)
         if first_count > 1:
             return
 
-        existing = db.execute(
-            "SELECT id FROM quality_inspections "
-            "WHERE order_id=? AND process_id=? AND inspection_type='first_article'",
-            (order_id, process_id),
-        ).fetchone()
+        existing = ScanRepository.find_first_article_inspection(order_id, process_id, db=db)
         if existing:
             return
 
@@ -251,10 +243,7 @@ class WorkReportWriter:
 
     @staticmethod
     def _auto_inbound_last_non_serial(helper, order_id, process_id, user_id, user_name, db):
-        order_status = db.execute(
-            "SELECT status FROM orders WHERE id = ?",
-            (order_id,),
-        ).fetchone()
+        order_status = ScanRepository.find_order_status(order_id, db=db)
         if order_status and order_status["status"] != "completed":
             if helper.is_last_process(order_id, process_id, db=db):
                 InventoryAutoInboundService.auto_inbound_for_item(

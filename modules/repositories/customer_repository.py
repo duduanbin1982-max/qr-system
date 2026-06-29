@@ -59,6 +59,24 @@ class CustomerRepository:
         return rows, total
 
     @staticmethod
+    def list_with_order_stats(where_sql, params, page, limit, db=None):
+        """分页列表，附带活跃订单数和最近下单时间。where_sql 不含 WHERE 关键字。"""
+        db = db or BaseService.db()
+        total = db.execute(
+            f"SELECT COUNT(*) FROM customers c WHERE {where_sql}", params
+        ).fetchone()[0]
+        offset = (page - 1) * limit
+        rows = db.execute(
+            "SELECT c.*, COUNT(o.id) as order_count, MAX(o.created_at) as last_order_date "
+            "FROM customers c "
+            "LEFT JOIN orders o ON o.customer_id = c.id AND o.deleted_at IS NULL "
+            f"WHERE {where_sql} "
+            "GROUP BY c.id ORDER BY c.id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset]
+        ).fetchall()
+        return rows, total
+
+    @staticmethod
     def count_active_orders(customer_id, db=None):
         """统计某客户的活跃（非软删除）订单数。"""
         db = db or BaseService.db()

@@ -1,4 +1,5 @@
 """Validation use case for scan work reports."""
+from modules.repositories.scan_repository import ScanRepository
 from modules.access_policy import get_user_process_ids, has_permission
 
 
@@ -161,10 +162,7 @@ class ScanValidationService:
         if user_process_ids is None or process_id in user_process_ids:
             return None
 
-        proc = ScanHelperService._db(None).execute(
-            "SELECT name FROM processes WHERE id=?",
-            (process_id,),
-        ).fetchone()
+        proc = ScanRepository.find_process_name(process_id)
         if proc:
             return ({"error": "工序「" + proc["name"] + "」不在您的权限范围内"}, 403)
         return ({"error": "您没有此工序的报工权限"}, 403)

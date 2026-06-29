@@ -5,6 +5,17 @@ from modules.db_unit_of_work import BaseService
 class SystemRepository:
 
     @staticmethod
+    def count_orphans(sql, db=None):
+        db = db or BaseService.db()
+        return db.execute(sql).fetchone()[0]
+
+    @staticmethod
+    def ping(db=None):
+        db = db or BaseService.db()
+        db.execute("SELECT 1")
+        return True
+
+    @staticmethod
     def get_tables(db=None):
         db = db or BaseService.db()
         return db.execute(

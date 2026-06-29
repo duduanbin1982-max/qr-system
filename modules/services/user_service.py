@@ -28,6 +28,155 @@ class UserService:
                 data["process_ids"] = ",".join(filtered) if filtered else ""
                 data["_valid_process_ids"] = [int(x) for x in filtered] if filtered else []
 
+    @staticmethod
+    def _validate_username(username, name):
+        if not username or not name:
+            raise ValueError("Username and name cannot be empty")
+        if len(username) < 2 or len(username) > 32:
+            raise ValueError("Username must be 2-32 characters")
+        if not all(char.isalnum() or char in "_-." for char in username):
+            raise ValueError("Username can only contain letters, digits, underscores, hyphens and dots")
+
+    @staticmethod
+    def _resolve_role(data, db):
+        role_id = data.get("role_id")
+        role_code = (data.get("role") or "").strip()
+        if role_id:
+            role_code = UserRepository.find_role_code_by_id(role_id, db=db)
+            if not role_code:
+                raise ValueError("Specified role does not exist")
+            return role_id, role_code
+        if not role_code:
+            role_code = "worker"
+        role_row = UserRepository.find_role_by_code(role_code, db=db)
+        if not role_row:
+            role_row = UserRepository.find_role_by_code("worker", db=db)
+            role_code = "worker"
+        return (role_row[0] if role_row else 2), role_code
+
+    @staticmethod
+    def _ensure_admin_creator(role_code, caller_id, db):
+        if role_code != "admin":
+            return
+        if not caller_id or not UserRepository.check_admin_role(caller_id, db=db):
+            raise ValueError("Only administrators can create admin accounts")
+
+    @staticmethod
+    def _next_employee_no(data, db):
+        employee_no = (data.get("employee_no") or "").strip()
+        if employee_no:
+            return employee_no
+        next_no = UserRepository.get_next_employee_no(db=db)
+        employee_no = str(next_no).zfill(4)
+        while UserRepository.check_employee_no_exists(employee_no, db=db):
+            next_no += 1
+            employee_no = str(next_no).zfill(4)
+        return employee_no
+
+    @staticmethod
+    def _hash_or_generate_password(data):
+        raw_pw = (data.get("password") or "").strip() or secrets.token_urlsafe(8)
+        if data.get("password") and len(raw_pw) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return raw_pw, bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+    @staticmethod
+    def _resolve_update_role(uid, data, old_role, current_user_id, db):
+        new_role_id = None
+        new_role_code = None
+        if ("role" in data and data["role"] != old_role) or ("role_id" in data):
+            new_role_id = data.get("role_id")
+            if new_role_id:
+                new_role_code = UserRepository.find_role_code_by_id(new_role_id, db=db)
+                if not new_role_code:
+                    raise ValueError("Specified role does not exist")
+            else:
+                new_role_code = (data.get("role") or "worker").strip() or "worker"
+                new_role_id = UserRepository.find_role_id_by_code(new_role_code, db=db)
+                if not new_role_id:
+                    raise ValueError("Specified role does not exist")
+            group_row = UserRepository.get_role_group_name(new_role_id, db=db)
+            if group_row:
+                data["group_name"] = group_row[0]
+            data["role"] = new_role_code
+
+        new_role_id_for_check = new_role_id
+        if not new_role_id_for_check and "role" in data:
+            new_role_id_for_check = UserRepository.find_role_id_by_code(data["role"], db=db)
+        old_role_id_for_check = UserRepository.find_role_id_by_code(old_role, db=db)
+        if new_role_id_for_check is not None and new_role_id_for_check != old_role_id_for_check:
+            if current_user_id is None:
+                raise ValueError("Only administrators can change roles")
+            if current_user_id == uid:
+                raise ValueError("Cannot change your own role")
+            if not UserRepository.check_admin_role(current_user_id, db=db):
+                raise ValueError("Only administrators can change roles")
+        return new_role_id, new_role_code
+
+    @staticmethod
+    def _build_update_fields(data):
+        if "employee_no" in data and not data["employee_no"]:
+            del data["employee_no"]
+        sets = []
+        params = []
+        for field in ["name", "nickname", "email", "group_name", "role", "employee_no",
+                      "marker", "phone", "status", "position_id", "department_id"]:
+            if field in data:
+                sets.append(field + " = ?")
+                params.append(data[field])
+        if "password" in data and data["password"]:
+            sets.append("password = ?")
+            params.append(bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt(rounds=12)).decode())
+        if not sets:
+            raise ValueError("No update fields provided")
+        return sets, params
+
+    @staticmethod
+    def _sync_user_processes(uid, data, txn):
+        if "process_ids" not in data and "_valid_process_ids" not in data:
+            return
+        UserRepository.delete_user_processes_txn(uid, db=txn)
+        valid_pids = data.get("_valid_process_ids", [])
+        if not valid_pids and data.get("process_ids"):
+            valid_pids = [int(x.strip()) for x in data["process_ids"].split(",") if x.strip()]
+        for pid in valid_pids:
+            UserRepository.insert_user_process_txn(uid, pid, db=txn)
+
+    @staticmethod
+    def _apply_role_update(uid, old_role, new_role_id, new_role_code, txn):
+        if new_role_id is None:
+            return
+        if new_role_code != "admin":
+            remaining = UserRepository.count_admin_roles_excluding(uid, db=txn)
+            if remaining == 0:
+                remaining_users = UserRepository.count_admin_users_excluding(uid, db=txn)
+                if remaining_users == 0:
+                    raise ValueError("Cannot remove the last administrator")
+        old_role_id = UserRepository.find_role_id_by_code(old_role, db=txn) or 2
+        UserRepository.delete_user_role_txn(uid, old_role_id, db=txn)
+        UserRepository.insert_user_role_txn(uid, new_role_id, db=txn)
+
+    @staticmethod
+    def _audit_user_update(uid, data, existing, current_user_id, db):
+        changed = []
+        field_labels = {
+            "name": "Name", "nickname": "Nickname", "email": "Email", "phone": "Phone",
+            "role": "Role", "employee_no": "Employee No", "marker": "Marker", "group_name": "Role Group",
+            "position_id": "Position ID", "status": "Status"
+        }
+        for field, label in field_labels.items():
+            old_val = existing[field] if field in existing.keys() else None
+            new_val = data.get(field)
+            if new_val is not None and str(old_val) != str(new_val):
+                changed.append(label + ": " + str(old_val) + " -> " + str(new_val))
+        if "password" in data and data["password"]:
+            changed.append("Password: changed")
+        if changed:
+            UserRepository.insert_audit_log_txn(
+                current_user_id, "update_user", "user", uid, "; ".join(changed), db=db
+            )
+            db.commit()
+
     # ============================================================
     # Query
     # ============================================================
@@ -51,40 +200,11 @@ class UserService:
         name = data.get("name", "").strip()
         if not name and data.get("role") == "admin":
             name = username
-        if not username or not name:
-            raise ValueError("Username and name cannot be empty")
-        if len(username) < 2 or len(username) > 32:
-            raise ValueError("Username must be 2-32 characters")
-        if not all(c.isalnum() or c in "_-." for c in username):
-            raise ValueError("Username can only contain letters, digits, underscores, hyphens and dots")
+        UserService._validate_username(username, name)
 
         db = BaseService.db()
-
-        # Resolve role from DB (supports custom roles)
-        role_id = data.get("role_id")
-        role_code = (data.get("role") or "").strip()
-        if role_id:
-            role_code = UserRepository.find_role_code_by_id(role_id, db=db)
-            if not role_code:
-                raise ValueError("Specified role does not exist")
-        else:
-            if not role_code:
-                role_code = "worker"
-            role_row = UserRepository.find_role_by_code(role_code, db=db)
-            if not role_row:
-                role_row = UserRepository.find_role_by_code("worker", db=db)
-                role_code = "worker"
-            role_id = role_row[0] if role_row else 2
-        if not role_id:
-            role_id = 2
-
-        # Only admins can create admin users
-        if role_code == "admin":
-            caller_id = data.get("_caller_user_id")
-            if not caller_id:
-                raise ValueError("Only administrators can create admin accounts")
-            if not UserRepository.check_admin_role(caller_id, db=db):
-                raise ValueError("Only administrators can create admin accounts")
+        role_id, role_code = UserService._resolve_role(data, db)
+        UserService._ensure_admin_creator(role_code, data.get("_caller_user_id"), db)
 
         # Uniqueness check
         if UserRepository.find_user_by_username(username, db=db):
@@ -99,21 +219,8 @@ class UserService:
         # Process validation
         UserService._validate_process_ids(data)
 
-        # Employee number - auto-generate 4-digit if not provided
-        employee_no = (data.get("employee_no") or "").strip()
-        if not employee_no:
-            next_no = UserRepository.get_next_employee_no(db=db)
-            employee_no = str(next_no).zfill(4)
-            while UserRepository.check_employee_no_exists(employee_no, db=db):
-                next_no += 1
-                employee_no = str(next_no).zfill(4)
-        data["employee_no"] = employee_no
-
-        # Password
-        raw_pw = (data.get("password") or "").strip() or secrets.token_urlsafe(8)
-        if data.get("password") and len(raw_pw) < 6:
-            raise ValueError("Password must be at least 6 characters")
-        pw = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+        data["employee_no"] = UserService._next_employee_no(data, db)
+        raw_pw, pw = UserService._hash_or_generate_password(data)
 
         with BaseService.transaction() as txn:
             uid = UserRepository.insert_user_txn(
@@ -162,99 +269,19 @@ class UserService:
         UserService._validate_process_ids(data)
 
         old_role = UserRepository.get_primary_role_code(uid, db=db) or existing["role"]
-
-        # Compute new_role_id
-        new_role_id = None
-        new_role_code = None
-        if ("role" in data and data["role"] != old_role) or ("role_id" in data):
-            new_role_id = data.get("role_id")
-            if new_role_id:
-                new_role_code = UserRepository.find_role_code_by_id(new_role_id, db=db)
-                if not new_role_code:
-                    raise ValueError("Specified role does not exist")
-            else:
-                new_role_code = (data.get("role") or "worker").strip() or "worker"
-                new_role_id = UserRepository.find_role_id_by_code(new_role_code, db=db)
-                if not new_role_id:
-                    raise ValueError("Specified role does not exist")
-            gn_row = UserRepository.get_role_group_name(new_role_id, db=db)
-            if gn_row:
-                data["group_name"] = gn_row[0]
-            data["role"] = new_role_code
-
-        # Only admins can change roles, cannot change own role
-        new_role_id_for_check = new_role_id
-        if not new_role_id_for_check and "role" in data:
-            new_role_id_for_check = UserRepository.find_role_id_by_code(data["role"], db=db)
-        old_role_id_for_check = UserRepository.find_role_id_by_code(old_role, db=db)
-        if new_role_id_for_check is not None and new_role_id_for_check != old_role_id_for_check:
-            if current_user_id is None:
-                raise ValueError("Only administrators can change roles")
-            if current_user_id == uid:
-                raise ValueError("Cannot change your own role")
-            if not UserRepository.check_admin_role(current_user_id, db=db):
-                raise ValueError("Only administrators can change roles")
-
-        sets = []
-        params = []
-        if "employee_no" in data and not data["employee_no"]:
-            del data["employee_no"]
-        for field in ["name", "nickname", "email", "group_name", "role", "employee_no",
-                       "marker", "phone", "status", "position_id", "department_id"]:
-            if field in data:
-                sets.append(field + " = ?")
-                params.append(data[field])
-        if "password" in data and data["password"]:
-            sets.append("password = ?")
-            params.append(bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt(rounds=12)).decode())
-        if not sets:
-            raise ValueError("No update fields provided")
+        new_role_id, new_role_code = UserService._resolve_update_role(
+            uid, data, old_role, current_user_id, db
+        )
+        sets, params = UserService._build_update_fields(data)
 
         with BaseService.transaction() as txn:
-            # Sync process assignments
-            if "process_ids" in data or "_valid_process_ids" in data:
-                UserRepository.delete_user_processes_txn(uid, db=txn)
-                valid_pids = data.get("_valid_process_ids", [])
-                if not valid_pids and data.get("process_ids"):
-                    valid_pids = [int(x.strip()) for x in data["process_ids"].split(",") if x.strip()]
-                for pid in valid_pids:
-                    UserRepository.insert_user_process_txn(uid, pid, db=txn)
-
+            UserService._sync_user_processes(uid, data, txn)
             UserRepository.update_user_txn(uid, ", ".join(sets), params, db=txn)
-
-            if new_role_id is not None:
-                # Prevent downgrading last admin
-                if new_role_code != "admin":
-                    remaining = UserRepository.count_admin_roles_excluding(uid, db=txn)
-                    if remaining == 0:
-                        remaining2 = UserRepository.count_admin_users_excluding(uid, db=txn)
-                        if remaining2 == 0:
-                            raise ValueError("Cannot remove the last administrator")
-                old_role_id = UserRepository.find_role_id_by_code(old_role, db=txn) or 2
-                UserRepository.delete_user_role_txn(uid, old_role_id, db=txn)
-                UserRepository.insert_user_role_txn(uid, new_role_id, db=txn)
+            UserService._apply_role_update(uid, old_role, new_role_id, new_role_code, txn)
 
         # Audit field changes
         try:
-            changed = []
-            field_labels = {
-                "name": "Name", "nickname": "Nickname", "email": "Email", "phone": "Phone",
-                "role": "Role", "employee_no": "Employee No", "marker": "Marker", "group_name": "Role Group",
-                "position_id": "Position ID", "status": "Status"
-            }
-            for field, label in field_labels.items():
-                old_val = existing[field] if field in existing.keys() else None
-                new_val = data.get(field)
-                if new_val is not None and str(old_val) != str(new_val):
-                    changed.append(label + ": " + str(old_val) + " -> " + str(new_val))
-            if "password" in data and data["password"]:
-                changed.append("Password: changed")
-            if changed:
-                detail = "; ".join(changed)
-                UserRepository.insert_audit_log_txn(
-                    current_user_id, "update_user", "user", uid, detail, db=db
-                )
-                db.commit()
+            UserService._audit_user_update(uid, data, existing, current_user_id, db)
         except Exception as exc:
             _logger.warning("update_user audit log failed: user_id=%s error=%s", uid, exc)
 

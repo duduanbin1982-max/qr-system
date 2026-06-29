@@ -1,4 +1,4 @@
-﻿"""
+"""
 qr-system — 客户管理 Service 层
 
 从 routes/customers.py 提取全部业务逻辑。
@@ -25,9 +25,7 @@ class CustomerService:
         if tag:
             where += " AND c.tags LIKE ?"
             params.append(f"%{tag}%")
-        total = db.execute(f"SELECT COUNT(*) FROM customers c WHERE {where}", params).fetchone()[0]
-        offset = (page - 1) * limit
-        rows = db.execute(f"SELECT c.*, COUNT(o.id) as order_count, MAX(o.created_at) as last_order_date FROM customers c LEFT JOIN orders o ON o.customer_id = c.id AND o.deleted_at IS NULL WHERE {where} GROUP BY c.id ORDER BY c.id DESC LIMIT ? OFFSET ?", params + [limit, offset]).fetchall()
+        rows, total = CustomerRepository.list_with_order_stats(where, params, page, limit, db=db)
         return {"customers": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod

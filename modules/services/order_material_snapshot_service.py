@@ -4,6 +4,7 @@ import sqlite3
 
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
+from modules.repositories.product_repository import ProductRepository
 
 
 class OrderMaterialSnapshotService:
@@ -17,10 +18,7 @@ class OrderMaterialSnapshotService:
         product_code = data.get("product_code", "")
         if not product_code:
             return None
-        product = db.execute(
-            "SELECT id FROM products WHERE product_code = ? AND deleted_at IS NULL",
-            (product_code,),
-        ).fetchone()
+        product = ProductRepository.find_active_id_by_code(product_code, db=db)
         return product["id"] if product else None
 
     @staticmethod

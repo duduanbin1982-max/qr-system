@@ -485,3 +485,31 @@ class ScanRepository:
             (order_id,)
         ).fetchall()
         return len(items)
+
+    @staticmethod
+    def find_process_name(process_id, db=None):
+        db = db or BaseService.db()
+        return db.execute("SELECT name FROM processes WHERE id=?", (process_id,)).fetchone()
+
+    @staticmethod
+    def count_approved_normal_work_records(order_id, process_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT COUNT(*) FROM work_records "
+            "WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
+            (order_id, process_id),
+        ).fetchone()[0]
+
+    @staticmethod
+    def find_first_article_inspection(order_id, process_id, db=None):
+        db = db or BaseService.db()
+        return db.execute(
+            "SELECT id FROM quality_inspections "
+            "WHERE order_id=? AND process_id=? AND inspection_type='first_article'",
+            (order_id, process_id),
+        ).fetchone()
+
+    @staticmethod
+    def find_order_status(order_id, db=None):
+        db = db or BaseService.db()
+        return db.execute("SELECT status FROM orders WHERE id = ?", (order_id,)).fetchone()
