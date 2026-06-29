@@ -78,8 +78,11 @@ class StatsRepository:
         db = db or BaseService.db()
         where_clause, params = StatsRepository._daily_where(date, product_code)
         rows = db.execute(
-            "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, "
-            "o.order_no, o.product_name, p.name as process_name, p.id as process_id, "
+            "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, "
+            "o.order_no, o.qr_mode, "
+            "CASE WHEN o.qr_mode = 'serial' AND COALESCE(wr.serial_no, '') != '' "
+            "THEN wr.serial_no ELSE o.order_no END as display_order_no, "
+            "o.product_name, p.name as process_name, p.id as process_id, "
             "u.id as user_id, u.name as worker_name, u.employee_no "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "

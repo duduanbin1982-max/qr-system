@@ -27,10 +27,10 @@
     <div class="card">
       <div class="card-header"><h3>📝 报工明细 ({{ dailyRecords.length }})</h3></div>
       <div class="card-body"><div class="table-wrap"><table v-if="dailyRecords.length" class="data-table" style="font-size:var(--text-xs)">
-        <thead><tr><th>时间</th><th>订单号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>类型</th></tr></thead>
+        <thead><tr><th>时间</th><th>订单号/序列号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>类型</th></tr></thead>
         <tbody><tr v-for="r in dailyRecords" :key="r.id">
           <td style="font-size:var(--text-xs-alt);white-space:nowrap">{{ r.created_at }}</td>
-          <td><code style="font-size:var(--text-xs-alt)">{{ r.order_no }}</code></td>
+          <td><code style="font-size:var(--text-xs-alt)">{{ r.display_order_no || r.order_no }}</code></td>
           <td>{{ r.product_name }}</td><td>{{ r.process_name }}</td>
           <td>{{ r.worker_name }}<span v-if="r.employee_no" style="color:var(--text-placeholder);font-size:var(--text-2xs)"> #{{ r.employee_no }}</span></td>
           <td style="text-align:center;font-weight:600">{{ r.quantity }}</td>
@@ -83,8 +83,8 @@ export default {
 
     function exportDetailCsv() {
       if (!dailyRecords.value.length) { showToast('没有数据可导出', 'warning'); return }
-      const data = [['时间','订单号','产品','工序','工人','工号','数量','类型']]
-      dailyRecords.value.forEach(r => data.push([r.created_at, r.order_no, r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.type==='normal'?'正常':r.type==='scrap'?'报废':'返工']))
+      const data = [['时间','订单号/序列号','产品','工序','工人','工号','数量','类型']]
+      dailyRecords.value.forEach(r => data.push([r.created_at, r.display_order_no || r.order_no, r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.type==='normal'?'正常':r.type==='scrap'?'报废':'返工']))
       exportCSV(data, '日报表_报工明细_' + (props.date || ''))
     }
 
