@@ -1,15 +1,12 @@
-﻿"""qr-system — 认证路由：登录、登出、用户信息（Service 层重构版）
+"""qr-system — 认证路由：登录、登出、用户信息（Service 层重构版）
 所有 DB 操作委托给 AuthService，路由仅处理 HTTP 层面逻辑。
 """
 import secrets
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
+from modules.route_decorators import app, get_json_body, safe_audit_log, validate_json
 from modules.middleware.auth import check_auth, get_user_permissions, has_permission
-from modules.middleware.validate import validate_json
-from modules.middleware.helpers import get_json_body
 from modules.constants import SECONDS_PER_DAY, SECONDS_PER_WEEK
 from modules.services.auth_service import AuthService
 

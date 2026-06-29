@@ -5,10 +5,13 @@ qr-system — 系统设置
 """
 from flask import request, jsonify
 
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.helpers import get_json_body
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    safe_audit_log,
+)
 from modules.services.setting_service import SettingsService, ALLOWED_KEYS
 
 @app.route('/api/settings/public', methods=['GET'])

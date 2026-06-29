@@ -1,11 +1,15 @@
 """qr-system — 出库管理（路由层）"""
 from flask import request, jsonify, g, send_file
 from datetime import datetime
-from modules.app import app
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    parse_pagination,
+    safe_audit_log,
+)
 from modules.services.setting_service import SettingsService
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.helpers import get_json_body, parse_pagination
 from modules.services.shipment_service import ShipmentService
 
 

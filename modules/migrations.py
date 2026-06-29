@@ -34,8 +34,7 @@ def _add_column_if_missing(db, table, column, definition):
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _ensure_current_schema_compat(db):
-    table_sql = [
+_COMPAT_TABLE_SQL = [
         """CREATE TABLE IF NOT EXISTS departments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
@@ -151,10 +150,8 @@ def _ensure_current_schema_compat(db):
             FOREIGN KEY (employee_id) REFERENCES users(id)
         )""",
     ]
-    for sql in table_sql:
-        db.execute(sql)
 
-    columns = {
+_COMPAT_COLUMNS = {
         'customers': [('tags', 'TEXT DEFAULT ""')],
         'inventory': [('order_id', 'INTEGER'), ('category', 'TEXT DEFAULT ""'), ('unit_cost', 'REAL DEFAULT 0'), ('last_count_date', 'TEXT DEFAULT ""'), ('reserved', 'INTEGER DEFAULT 0')],
         'materials': [('material_type', 'TEXT DEFAULT ""')],
@@ -174,17 +171,26 @@ def _ensure_current_schema_compat(db):
         'system_settings': [('updated_at', "TEXT DEFAULT ''")],
         'users': [('deleted_at', 'TEXT DEFAULT NULL'), ('department_id', 'INTEGER')],
     }
-    for table, table_columns in columns.items():
+
+def _ensure_compat_tables(db):
+    for sql in _COMPAT_TABLE_SQL:
+        db.execute(sql)
+
+def _ensure_compat_columns(db):
+    for table, table_columns in _COMPAT_COLUMNS.items():
         for column, definition in table_columns:
             try:
                 _add_column_if_missing(db, table, column, definition)
             except sqlite3.OperationalError:
                 pass
+
+def _ensure_current_schema_compat(db):
+    _ensure_compat_tables(db)
+    _ensure_compat_columns(db)
     db.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_wage_snapshots_employee_month '
         'ON wage_snapshots(employee_id, year_month)'
     )
-
 
 def _ensure_material_planning_tables(db):
     db.execute(

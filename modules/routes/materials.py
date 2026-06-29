@@ -3,12 +3,15 @@ qr-system ? ???????Refactored: all SQL ? MaterialService?
 """
 from flask import request, jsonify, g
 
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.validate import validate_json
-from modules.middleware.error_handler import handle_unexpected_error
-from modules.middleware.helpers import get_json_body
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    handle_unexpected_error,
+    safe_audit_log,
+    validate_json,
+)
 from modules.services.material_service import MaterialService, SupplierService, MaterialNotFoundError
 
 

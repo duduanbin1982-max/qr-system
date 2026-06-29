@@ -16,6 +16,18 @@ from modules.repositories.product_bom_repository import ProductBomRepository
 import openpyxl
 
 MAX_IMPORT_ROWS = 5000
+PRODUCT_IMPORT_FIELD_ALIASES = {
+    '产品名称': 'product_name', '名称': 'product_name',
+    '型号': 'model',
+    '规格': 'spec',
+    '款式': 'style', '样式': 'style',
+    '上开档': 'upper_opening', '上开档尺寸': 'upper_opening',
+    '板厚': 'plate_thickness', '厚度': 'plate_thickness',
+    '分类': 'category', '类别': 'category',
+    '重量': 'weight', '重量(kg)': 'weight',
+    '单价': 'price', '单价(元)': 'price',
+    '描述': 'description', '备注': 'description', '说明': 'description',
+}
 
 class ProductService:
     """产品管理业务逻辑。所有方法为静态方法，接受纯数据参数。"""
@@ -239,126 +251,100 @@ class ProductService:
     # ============================================================
 
     @staticmethod
-    def import_products(filepath):
-        """
-        从 .xlsx 文件批量导入产品。
-
-        Args:
-            filepath: 临时 xlsx 文件路径
-
-        Returns:
-            dict: {success, skipped, errors}
-
-        Raises:
-            ValueError: 文件解析失败或无数据
-        """
+    def _read_product_import_rows(filepath):
         try:
             wb = openpyxl.load_workbook(filepath, read_only=True)
-            ws = wb.active
-            rows = []
-            for row in ws.iter_rows(min_row=1, values_only=False):
-                row_data = {}
-                for cell in row:
-                    if cell.value is not None:
-                        col_letter = cell.column_letter
-                        row_data[col_letter] = str(cell.value).strip() if cell.value else ''
-                if row_data:
-                    rows.append(row_data)
-                    if len(rows) > MAX_IMPORT_ROWS:
-                        break
-            wb.close()
+            try:
+                rows = []
+                for row in wb.active.iter_rows(min_row=1, values_only=False):
+                    row_data = {}
+                    for cell in row:
+                        if cell.value is not None:
+                            row_data[cell.column_letter] = str(cell.value).strip() if cell.value else ''
+                    if row_data:
+                        rows.append(row_data)
+                        if len(rows) > MAX_IMPORT_ROWS:
+                            break
+                return rows
+            finally:
+                wb.close()
         except Exception as e:
             raise ValueError(f'文件解析失败: {e}')
 
-        if not rows:
-            raise ValueError('文件中没有数据')
-
-        header = rows[0]
-        field_aliases = {
-            '产品名称': 'product_name', '名称': 'product_name',
-            '型号': 'model',
-            '规格': 'spec',
-            '款式': 'style', '样式': 'style',
-            '上开档': 'upper_opening', '上开档尺寸': 'upper_opening',
-            '板厚': 'plate_thickness', '厚度': 'plate_thickness',
-            '分类': 'category', '类别': 'category',
-            '重量': 'weight', '重量(kg)': 'weight',
-            '单价': 'price', '单价(元)': 'price',
-            '描述': 'description', '备注': 'description', '说明': 'description',
-        }
-
+    @staticmethod
+    def _map_product_import_columns(header):
         col_map = {}
         for col_letter, cell_val in header.items():
             hdr = str(cell_val).strip()
-            if hdr in field_aliases:
-                col_map[col_letter] = field_aliases[hdr]
-
+            if hdr in PRODUCT_IMPORT_FIELD_ALIASES:
+                col_map[col_letter] = PRODUCT_IMPORT_FIELD_ALIASES[hdr]
         if 'product_name' not in col_map.values():
             raise ValueError('表头需包含「产品名称」列')
+        return col_map
 
-        success = 0
-        skipped = 0
-        errors = []
+    @staticmethod
+    def _product_import_row_data(row, col_map):
+        product_data = {}
+        for col_letter, field in col_map.items():
+            val = row.get(col_letter, '')
+            product_data[field] = str(val).strip() if val else ''
+        return product_data
 
-        with BaseService.transaction() as txn:
-            for i, row in enumerate(rows[1:], start=2):
-                product_data = {}
-                for col_letter, field in col_map.items():
-                    val = row.get(col_letter, '')
-                    product_data[field] = str(val).strip() if val else ''
+    @staticmethod
+    def _product_import_payload(product_data):
+        name = product_data.get('product_name', '')
+        model = product_data.get('model', '').strip()
+        spec = product_data.get('spec', '')
+        upper = product_data.get('upper_opening', '')
+        thickness = product_data.get('plate_thickness', '')
+        style = product_data.get('style', '')
+        product_code = generate_product_code(
+            name, model, spec, upper, thickness, style,
+            lower_opening=product_data.get('lower_opening', ''),
+            category=product_data.get('category', '结构件')
+        )
+        return {
+            'product_name': name,
+            'model': model or product_code,
+            'product_code': product_code,
+            'spec': spec,
+            'style': style,
+            'upper_opening': upper,
+            'lower_opening': product_data.get('lower_opening', ''),
+            'plate_thickness': thickness,
+            'category': product_data.get('category', '结构件') or '结构件',
+            'weight': float(product_data.get('weight') or 0),
+            'price': float(product_data.get('price') or 0),
+            'description': product_data.get('description', ''),
+        }
 
-                name = product_data.get('product_name', '')
-                if not name:
-                    skipped += 1
-                    errors.append(f'第{i}行：产品名称为空，跳过')
-                    continue
+    @staticmethod
+    def _import_product_row(row_index, row, col_map, txn):
+        product_data = ProductService._product_import_row_data(row, col_map)
+        name = product_data.get('product_name', '')
+        if not name:
+            return False, f'第{row_index}行：产品名称为空，跳过'
 
-                model = product_data.get('model', '').strip()
-                spec = product_data.get('spec', '')
-                upper = product_data.get('upper_opening', '')
-                thickness = product_data.get('plate_thickness', '')
-                style = product_data.get('style', '')
-                product_code = generate_product_code(name, model, spec, upper, thickness, style, lower_opening=product_data.get('lower_opening', ''), category=product_data.get('category', '结构件'))
-                # Auto-generate model from product_code when not provided
-                if not model:
-                    model = product_code
+        payload = ProductService._product_import_payload(product_data)
+        product_code = payload['product_code']
+        existing = ProductRepository.find_by_code(product_code, db=txn)
+        if existing:
+            if existing.get("deleted_at"):
+                return False, f'第{row_index}行：{product_code}({name})的编码与已删除产品重复，请先联系管理员恢复'
+            return False, f'第{row_index}行：{product_code}({name})已存在，跳过'
 
-                existing = ProductRepository.find_by_code(product_code, db=txn)
-                if existing:
-                    skipped += 1
-                    if existing.get("deleted_at"):
-                        errors.append(f'第{i}行：{product_code}({name})的编码与已删除产品重复，请先联系管理员恢复')
-                    else:
-                        errors.append(f'第{i}行：{product_code}({name})已存在，跳过')
-                    continue
+        try:
+            ProductRepository.insert(payload, db=txn)
+            return True, None
+        except Exception as e:
+            return False, f'第{row_index}行：入库失败 - {e}'
 
-                try:
-                    ProductRepository.insert({
-                        'product_name': name,
-                        'model': model,
-                        'product_code': product_code,
-                        'spec': spec,
-                        'style': style,
-                        'upper_opening': upper,
-                        'lower_opening': product_data.get('lower_opening', ''),
-                        'plate_thickness': thickness,
-                        'category': product_data.get('category', '结构件') or '结构件',
-                        'weight': float(product_data.get('weight') or 0),
-                        'price': float(product_data.get('price') or 0),
-                        'description': product_data.get('description', ''),
-                    }, db=txn)
-                    success += 1
-                except Exception as e:
-                    skipped += 1
-                    errors.append(f'第{i}行：入库失败 - {e}')
-
-        # Categorize errors for better diagnostics
+    @staticmethod
+    def _product_import_result(success, skipped, errors, col_map):
         empty_name = sum(1 for e in errors if '产品名称为空' in e)
         duplicate = sum(1 for e in errors if '已存在' in e)
         db_error = len(errors) - empty_name - duplicate
-        
         summary = f'空名称:{empty_name} 重复:{duplicate} 其他:{db_error}'
-        # Include first 3 actual error details
         sample_errors = [e for e in errors if '入库失败' in e][:3]
         error_detail = ' | '.join(sample_errors) if sample_errors else ''
         return {
@@ -370,6 +356,29 @@ class ProductService:
             'message': f'导入完成：成功{success}条，跳过{skipped}条 | {summary}'
             + (f' | 详情: {error_detail}' if error_detail else '')
         }
+
+    @staticmethod
+    def import_products(filepath):
+        """Import products from an .xlsx file."""
+        rows = ProductService._read_product_import_rows(filepath)
+        if not rows:
+            raise ValueError('文件中没有数据')
+
+        col_map = ProductService._map_product_import_columns(rows[0])
+        success = 0
+        skipped = 0
+        errors = []
+
+        with BaseService.transaction() as txn:
+            for row_index, row in enumerate(rows[1:], start=2):
+                created, error = ProductService._import_product_row(row_index, row, col_map, txn)
+                if created:
+                    success += 1
+                else:
+                    skipped += 1
+                    errors.append(error)
+
+        return ProductService._product_import_result(success, skipped, errors, col_map)
 
     # ============================================================
     # 附件 — 列表

@@ -1,8 +1,6 @@
 # P3-14: Department/Team Hierarchy Management
 from flask import request, jsonify
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
+from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.services.department_service import DepartmentService
 
 

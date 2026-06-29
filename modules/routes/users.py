@@ -5,13 +5,16 @@ qr-system — 用户管理
 """
 from flask import request, jsonify, g, send_file
 
-from modules.app import app
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    safe_audit_log,
+    validate_json,
+)
 from modules.services.setting_service import SettingsService
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.validate import validate_json
 import os
-from modules.middleware.helpers import get_json_body
 from modules.services.user_service import UserService
 
 

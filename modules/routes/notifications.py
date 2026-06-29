@@ -1,7 +1,6 @@
-﻿"""qr-system - Notifications Routes（Refactored）"""
+"""qr-system - Notifications Routes（Refactored）"""
 from flask import request, jsonify, g
-from modules.app import app
-from modules.middleware.auth import check_auth
+from modules.route_decorators import app, check_auth
 from modules.services.notification_service import NotificationService
 
 

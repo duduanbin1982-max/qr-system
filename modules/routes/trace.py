@@ -2,9 +2,7 @@
 qr-system ? ???????Refactored: SQL ? TraceService?
 """
 from flask import jsonify
-from modules.app import app
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.error_handler import handle_unexpected_error
+from modules.route_decorators import app, check_auth, check_permission, handle_unexpected_error
 from modules.services.trace_service import TraceService
 
 

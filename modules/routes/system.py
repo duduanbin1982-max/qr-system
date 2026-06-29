@@ -2,10 +2,8 @@
 import os, io, zipfile, time
 from datetime import datetime
 from flask import request, jsonify, send_file
-from modules.app import app
+from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.config import DATA_DIR, DB_PATH
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
 from modules.services.system_service import SystemService
 
 

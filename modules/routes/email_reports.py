@@ -8,12 +8,10 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from flask import request, jsonify, g
 
-from modules.app import app
+from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.services.setting_service import SettingsService
 from modules.services.email_reports_service import EmailReportsService
 from modules.services.smtp_crypto import decrypt_smtp_password
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
 
 def _get_smtp_config():
     """Get SMTP config from system_settings with defaults."""

@@ -13,6 +13,13 @@ from modules.repositories.user_repository import UserRepository
 
 _logger = logging.getLogger(__name__)
 
+USER_IMPORT_FIELDS = [
+    "username", "name", "employee_no", "phone", "email", "nickname",
+    "position_name", "role", "password", "process_names",
+]
+USER_IMPORT_FIELD_MAP = {field: field for field in USER_IMPORT_FIELDS}
+USER_IMPORT_EN_MAP = {field.lower(): field for field in USER_IMPORT_FIELDS}
+
 
 class UserService:
     """User management business logic. All methods are static."""
@@ -407,101 +414,120 @@ class UserService:
     # ============================================================
 
     @staticmethod
-    def import_users(filepath):
-        """Import users from .xlsx file. Returns {success, skipped, errors}."""
+    def _open_user_import_workbook(filepath):
         import openpyxl
+
         wb = openpyxl.load_workbook(filepath)
-        ws = wb.active
-        headers = [cell.value for cell in ws[1]]
-        field_map = {
-            "username": "username", "name": "name", "employee_no": "employee_no",
-            "phone": "phone", "email": "email", "nickname": "nickname",
-            "position_name": "position_name", "role": "role", "password": "password",
-            "process_names": "process_names",
-        }
-        en_map = {k.lower(): k for k in ["username","name","employee_no","phone","email","nickname","position_name","role","password","process_names"]}
+        return wb, wb.active
 
+    @staticmethod
+    def _map_user_import_columns(headers):
         col_map = {}
-        for i, h in enumerate(headers):
-            if h is None:
+        for index, header in enumerate(headers):
+            if header is None:
                 continue
-            h_str = str(h).strip()
-            if h_str in field_map:
-                col_map[i] = field_map[h_str]
-            elif h_str.lower() in en_map:
-                col_map[i] = en_map[h_str.lower()]
-
+            header_text = str(header).strip()
+            if header_text in USER_IMPORT_FIELD_MAP:
+                col_map[index] = USER_IMPORT_FIELD_MAP[header_text]
+            elif header_text.lower() in USER_IMPORT_EN_MAP:
+                col_map[index] = USER_IMPORT_EN_MAP[header_text.lower()]
         if not col_map:
             raise ValueError("No valid column headers found")
+        return col_map
 
-        db = BaseService.db()
-        pos_rows = UserRepository.get_active_positions(db=db)
-        pos_map = {r["name"]: r["id"] for r in pos_rows}
+    @staticmethod
+    def _user_import_row_data(row, col_map):
+        row_data = {}
+        for col_idx, field in col_map.items():
+            val = row[col_idx] if col_idx < len(row) else None
+            row_data[field] = str(val).strip() if val is not None else ""
+        return row_data
 
-        success = 0
-        skipped = 0
-        errors = []
+    @staticmethod
+    def _normalize_user_import_identity(row_idx, row_data):
+        username = row_data.get("username", "")
+        name = row_data.get("name", "")
+        if not username and not name:
+            return None, None, "Row " + str(row_idx) + ": empty username and name"
+        return username or name, name or username, None
 
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            try:
-                row_data = {}
-                for col_idx, field in col_map.items():
-                    val = row[col_idx] if col_idx < len(row) else None
-                    row_data[field] = str(val).strip() if val is not None else ""
+    @staticmethod
+    def _resolve_user_import_position(row_data, pos_map):
+        pos_name = row_data.get("position_name", "")
+        return pos_map.get(pos_name) if pos_name else None
 
-                username = row_data.get("username", "")
-                name = row_data.get("name", "")
-                if not username and not name:
+    @staticmethod
+    def _resolve_user_import_role(row_data, db):
+        role = row_data.get("role", "worker")
+        role_row = UserRepository.find_role_by_code(role, db=db)
+        return role, role_row[0] if role_row else 2
+
+    @staticmethod
+    def _next_import_employee_no(row_data, db):
+        employee_no = row_data.get("employee_no", "")
+        if employee_no:
+            return employee_no
+        next_no = UserRepository.get_next_employee_no(db=db)
+        return str(next_no).zfill(4)
+
+    @staticmethod
+    def _insert_import_user(row_data, username, name, position_id, role, role_id):
+        raw_pw = row_data.get("password", "") or secrets.token_urlsafe(8)
+        pw_hash = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+        with BaseService.transaction() as txn:
+            uid = UserRepository.insert_user_import_txn(
+                username=username, pw_hash=pw_hash, name=name,
+                nickname=row_data.get("nickname", ""),
+                email=row_data.get("email", ""),
+                role=role, employee_no=row_data.get("employee_no", ""),
+                phone=row_data.get("phone", ""),
+                position_id=position_id, db=txn
+            )
+            UserRepository.insert_user_role_txn(uid, role_id, db=txn)
+
+    @staticmethod
+    def _import_user_row(row_idx, row, col_map, pos_map, db):
+        row_data = UserService._user_import_row_data(row, col_map)
+        username, name, identity_error = UserService._normalize_user_import_identity(row_idx, row_data)
+        if identity_error:
+            return False, identity_error
+        if UserRepository.find_user_by_username(username, db=db):
+            return False, "Row " + str(row_idx) + ": username " + username + " already exists"
+
+        position_id = UserService._resolve_user_import_position(row_data, pos_map)
+        role, role_id = UserService._resolve_user_import_role(row_data, db)
+        row_data["employee_no"] = UserService._next_import_employee_no(row_data, db)
+        UserService._insert_import_user(row_data, username, name, position_id, role, role_id)
+        return True, None
+
+    @staticmethod
+    def import_users(filepath):
+        """Import users from .xlsx file. Returns {success, skipped, errors}."""
+        wb, ws = UserService._open_user_import_workbook(filepath)
+        try:
+            headers = [cell.value for cell in ws[1]]
+            col_map = UserService._map_user_import_columns(headers)
+            db = BaseService.db()
+            pos_rows = UserRepository.get_active_positions(db=db)
+            pos_map = {r["name"]: r["id"] for r in pos_rows}
+
+            success = 0
+            skipped = 0
+            errors = []
+            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                try:
+                    created, error = UserService._import_user_row(row_idx, row, col_map, pos_map, db)
+                    if created:
+                        success += 1
+                    else:
+                        skipped += 1
+                        errors.append(error)
+                except Exception as e:
                     skipped += 1
-                    errors.append("Row " + str(row_idx) + ": empty username and name")
-                    continue
-                if not username:
-                    username = name
-                if not name:
-                    name = username
+                    errors.append("Row " + str(row_idx) + ": " + str(e)[:80])
+        finally:
+            wb.close()
 
-                # Check duplicate
-                if UserRepository.find_user_by_username(username, db=db):
-                    skipped += 1
-                    errors.append("Row " + str(row_idx) + ": username " + username + " already exists")
-                    continue
-
-                # Resolve position
-                pos_name = row_data.get("position_name", "")
-                position_id = pos_map.get(pos_name) if pos_name else None
-
-                # Resolve role
-                role = row_data.get("role", "worker")
-                role_row = UserRepository.find_role_by_code(role, db=db)
-                role_id = role_row[0] if role_row else 2
-
-                # Auto employee_no
-                employee_no = row_data.get("employee_no", "")
-                if not employee_no:
-                    next_no = UserRepository.get_next_employee_no(db=db)
-                    employee_no = str(next_no).zfill(4)
-
-                # Password
-                raw_pw = row_data.get("password", "") or secrets.token_urlsafe(8)
-                pw_hash = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-                with BaseService.transaction() as txn:
-                    uid = UserRepository.insert_user_import_txn(
-                        username=username, pw_hash=pw_hash, name=name,
-                        nickname=row_data.get("nickname", ""),
-                        email=row_data.get("email", ""),
-                        role=role, employee_no=employee_no,
-                        phone=row_data.get("phone", ""),
-                        position_id=position_id, db=txn
-                    )
-                    UserRepository.insert_user_role_txn(uid, role_id, db=txn)
-
-                success += 1
-            except Exception as e:
-                skipped += 1
-                errors.append("Row " + str(row_idx) + ": " + str(e)[:80])
-
-        wb.close()
         return {
             "success": success,
             "skipped": skipped,

@@ -1,8 +1,7 @@
-﻿"""qr-system - Personal Stats (Refactored)"""
+"""qr-system - Personal Stats (Refactored)"""
 from flask import request, jsonify, g
 from datetime import datetime, timedelta
-from modules.app import app
-from modules.middleware.auth import check_auth
+from modules.route_decorators import app, check_auth
 from modules.services.personal_stats_service import PersonalStatsService
 
 

@@ -4,11 +4,14 @@ qr-system — 岗位管理（路由层）
 注：Swagger docstring 仅供文档参考。
 """
 from flask import request, jsonify
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.helpers import get_json_body
-from modules.middleware.validate import validate_json
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    safe_audit_log,
+    validate_json,
+)
 from modules.services.position_service import PositionService
 
 

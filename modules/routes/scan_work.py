@@ -2,14 +2,18 @@
 import base64, json
 from datetime import datetime
 from flask import request, jsonify, g, send_file
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission, has_permission
-from modules.middleware.rate_limit import rate_limit
-from modules.middleware.validate import validate_json
-from modules.middleware.helpers import get_json_body
-from modules.middleware.error_handler import handle_unexpected_error
-from modules.middleware.data_scope import get_user_process_ids
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    get_user_process_ids,
+    handle_unexpected_error,
+    has_permission,
+    rate_limit,
+    safe_audit_log,
+    validate_json,
+)
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService

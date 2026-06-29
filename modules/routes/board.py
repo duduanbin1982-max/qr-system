@@ -2,11 +2,9 @@
 import secrets, hashlib
 from datetime import datetime, timedelta
 from flask import request, jsonify
-from modules.app import app
+from modules.route_decorators import app, check_auth, check_permission, rate_limit
 from modules.cache_utils import ttl_cache
-from modules.middleware.rate_limit import rate_limit
 from modules.services.setting_service import SettingsService
-from modules.middleware.auth import check_auth, check_permission
 from modules.services.board_service import BoardService
 
 BOARD_SESSION_HOURS = 8

@@ -229,43 +229,9 @@ from factories import (
 
 app.teardown_appcontext(close_db)
 
-import modules.routes.approvals
-import modules.routes.audit_logs
-import modules.routes.auth
-import modules.routes.board
-import modules.routes.customers
-import modules.routes.dashboard
-import modules.routes.email_reports
-import modules.routes.exports
-import modules.routes.imports
-import modules.routes.inventory
-import modules.routes.materials
-import modules.routes.notifications
-import modules.routes.order_attachments
-import modules.routes.order_notes
-import modules.routes.orders
-import modules.routes.password_security
-import modules.routes.permissions
-import modules.routes.personal_stats
-import modules.routes.positions
-import modules.routes.prices
-import modules.routes.process_routes
-import modules.routes.processes
-import modules.routes.products
-import modules.routes.progress
-import modules.routes.quality
-import modules.routes.reports
-import modules.routes.rework
-import modules.routes.roles
-import modules.routes.scan_qr
-import modules.routes.scan_work
-import modules.routes.schedule
-import modules.routes.settings
-import modules.routes.shipments
-import modules.routes.stats
-import modules.routes.trace
-import modules.routes.user_roles
-import modules.routes.users
+from modules.routes.registry import register_routes
+
+register_routes()
 
 
 @pytest.fixture(autouse=True)

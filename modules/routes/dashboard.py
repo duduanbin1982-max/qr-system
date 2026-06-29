@@ -1,8 +1,7 @@
-﻿"""qr-system - Dashboard Routes (Refactored)"""
+"""qr-system - Dashboard Routes (Refactored)"""
 from flask import jsonify, request, g
-from modules.app import app
+from modules.route_decorators import app, check_auth, check_permission
 from modules.cache_utils import ttl_cache
-from modules.middleware.auth import check_auth, check_permission
 from modules.services.dashboard_service import DashboardService
 
 

@@ -1,7 +1,6 @@
-﻿"""qr-system - Export API Routes（Refactored）"""
+"""qr-system - Export API Routes（Refactored）"""
 from flask import request, jsonify, send_file
-from modules.app import app
-from modules.middleware.auth import check_auth, check_permission
+from modules.route_decorators import app, check_auth, check_permission
 from modules.export_utils import export_orders_to_excel, export_work_records_to_excel
 from modules.services.export_service import ExportService
 import io

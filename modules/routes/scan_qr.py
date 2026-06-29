@@ -3,11 +3,14 @@ qr-system - QR code generation routes
 """
 import base64, json
 from flask import request, jsonify, g, send_file
-from modules.app import app
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.helpers import get_json_body
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    handle_unexpected_error,
+)
 from modules.services.scan_qr_service import ScanQRService
-from modules.middleware.error_handler import handle_unexpected_error
 import qrcode as qrcode_lib
 from io import BytesIO
 import json as _json

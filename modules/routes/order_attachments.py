@@ -4,10 +4,13 @@ from io import BytesIO
 
 from flask import request, jsonify, g, send_file
 
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.data_scope import get_user_process_ids
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_user_process_ids,
+    safe_audit_log,
+)
 from modules.services.order_attachments_service import OrderAttachmentsService
 from modules.services.scan_helper_service import ScanHelperService
 from werkzeug.utils import secure_filename

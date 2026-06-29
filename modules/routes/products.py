@@ -9,13 +9,16 @@ import os        # for import_products temp file cleanup
 import tempfile  # for import_products temp file
 from io import BytesIO  # for attachment download
 from flask import request, jsonify, send_file, make_response, g
-from modules.app import app
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    safe_audit_log,
+    validate_json,
+)
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
 from werkzeug.utils import secure_filename
-from modules.middleware.helpers import get_json_body
-from modules.middleware.validate import validate_json
 from modules.services.product_service import ProductService
 from modules.services.setting_service import SettingsService
 

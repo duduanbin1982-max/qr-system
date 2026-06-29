@@ -1,9 +1,7 @@
 """qr-system - Reports Routes (Refactored)"""
 from datetime import datetime, timedelta
 from flask import request, jsonify
-from modules.app import app
-from modules.middleware.auth import check_auth, check_permission
-from modules.middleware.error_handler import handle_unexpected_error
+from modules.route_decorators import app, check_auth, check_permission, handle_unexpected_error
 from modules.services.reports_service import ReportsService
 from modules.cache_utils import ttl_cache
 

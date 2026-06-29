@@ -7,11 +7,15 @@ from datetime import datetime
 from flask import request, jsonify, g
 from werkzeug.utils import secure_filename
 
-from modules.app import app
+from modules.route_decorators import (
+    app,
+    check_auth,
+    check_permission,
+    get_json_body,
+    has_permission,
+    safe_audit_log,
+)
 from modules.services.imports_service import ImportsService
-from modules.middleware.audit import safe_audit_log
-from modules.middleware.auth import check_auth, check_permission, has_permission
-from modules.middleware.helpers import get_json_body
 
 try:
     import openpyxl

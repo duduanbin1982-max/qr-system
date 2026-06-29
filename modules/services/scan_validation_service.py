@@ -7,72 +7,47 @@ class ScanValidationService:
     """Validates desktop and mobile scan report submissions."""
 
     @staticmethod
-    def validate_report(order_id, process_id, user, quantity, serial_no, report_type):
-        """Return ((error, status), quantity, serial_no) for scan report validation."""
+    def _initial_report_context(order_id, process_id, user, quantity, serial_no, report_type):
         from modules.services.scan_helper_service import ScanHelperService
 
         if has_permission(user, "quality:edit") and report_type == "normal":
-            return ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403), None, None
-
+            return None, quantity, ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403)
         if not order_id or not process_id:
-            return ({"error": "缺少订单或工序信息"}, 400), None, None
-
+            return None, quantity, ({"error": "缺少订单或工序信息"}, 400)
         if ScanValidationService._is_serial_quantity(order_id, quantity, serial_no):
             quantity = 1
-
         order = ScanHelperService.get_order(order_id)
         if not order:
-            return ({"error": "订单不存在"}, 404), None, None
+            return None, quantity, ({"error": "订单不存在"}, 404)
+        return order, quantity, None
 
-        user_process_ids = get_user_process_ids(user)
-        scope_error = ScanValidationService._validate_order_scope(
-            order_id,
-            user_process_ids,
+    @staticmethod
+    def _report_preflight_error(order_id, process_id, user, serial_no, report_type, user_process_ids):
+        checks = (
+            ScanValidationService._validate_order_scope(order_id, user_process_ids),
+            ScanValidationService._validate_required_item_scan(order_id, user, serial_no),
+            ScanValidationService._validate_process_membership(order_id, process_id),
+            ScanValidationService._validate_duplicates(
+                order_id, process_id, user["id"], serial_no, report_type
+            ),
+            ScanValidationService._validate_process_permission(process_id, user_process_ids),
         )
-        if scope_error:
-            return scope_error, None, None
+        return next((error for error in checks if error), None)
 
-        item_scan_error = ScanValidationService._validate_required_item_scan(
-            order_id,
-            user,
-            serial_no,
-        )
-        if item_scan_error:
-            return item_scan_error, None, None
-
-        process_error = ScanValidationService._validate_process_membership(order_id, process_id)
-        if process_error:
-            return process_error, None, None
-
-        duplicate_error = ScanValidationService._validate_duplicates(
-            order_id,
-            process_id,
-            user["id"],
-            serial_no,
-            report_type,
-        )
-        if duplicate_error:
-            return duplicate_error, None, None
-
-        permission_error = ScanValidationService._validate_process_permission(
-            process_id,
-            user_process_ids,
-        )
-        if permission_error:
-            return permission_error, None, None
-
+    @staticmethod
+    def _report_route_error(order, order_id, process_id, quantity, report_type):
         current_op, route_error = ScanValidationService._validate_route_process(
             order,
             order_id,
             process_id,
         )
         if route_error:
-            return route_error, None, None
+            return current_op, route_error
 
         current_seq = current_op["seq_order"] if current_op else 0
         sequencing_error = ScanValidationService._validate_sequence(order_id, current_seq, report_type)
         if sequencing_error:
-            return sequencing_error, None, None
+            return current_op, sequencing_error
 
         quantity_error = ScanValidationService._validate_quantity(
             order_id,
@@ -82,8 +57,29 @@ class ScanValidationService:
             order,
             report_type,
         )
-        if quantity_error:
-            return quantity_error, None, None
+        return current_op, quantity_error
+
+    @staticmethod
+    def validate_report(order_id, process_id, user, quantity, serial_no, report_type):
+        """Return ((error, status), quantity, serial_no) for scan report validation."""
+        order, quantity, initial_error = ScanValidationService._initial_report_context(
+            order_id, process_id, user, quantity, serial_no, report_type
+        )
+        if initial_error:
+            return initial_error, None, None
+
+        user_process_ids = get_user_process_ids(user)
+        preflight_error = ScanValidationService._report_preflight_error(
+            order_id, process_id, user, serial_no, report_type, user_process_ids
+        )
+        if preflight_error:
+            return preflight_error, None, None
+
+        _, route_error = ScanValidationService._report_route_error(
+            order, order_id, process_id, quantity, report_type
+        )
+        if route_error:
+            return route_error, None, None
 
         serial_error = ScanValidationService._validate_serial_process(
             process_id,
