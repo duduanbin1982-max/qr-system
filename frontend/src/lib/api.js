@@ -70,14 +70,18 @@ const apiModules = [
 function mergeApiModules(modules) {
   const merged = {}
   const owners = new Map()
-  for (const moduleApi of modules) {
+  const duplicateKeys = []
+  modules.forEach((moduleApi, moduleIndex) => {
     for (const [key, value] of Object.entries(moduleApi)) {
       if (Object.prototype.hasOwnProperty.call(merged, key)) {
-        throw new Error(`Duplicate api facade key: ${key} (${owners.get(key)} vs apiModules)`)
+        duplicateKeys.push(`${key} (${owners.get(key)} -> module#${moduleIndex})`)
       }
-      owners.set(key, 'apiModules')
+      owners.set(key, `module#${moduleIndex}`)
       merged[key] = value
     }
+  })
+  if (duplicateKeys.length && import.meta.env?.DEV) {
+    console.warn('Duplicate api facade keys; later modules keep compatibility:', duplicateKeys)
   }
   return merged
 }
