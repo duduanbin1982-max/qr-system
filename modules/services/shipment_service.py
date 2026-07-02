@@ -1,5 +1,8 @@
 """qr-system — 出库管理 Service 层（Repository-refactored）"""
 from datetime import datetime
+from io import BytesIO
+
+from modules.export_utils import auto_width, style_header, CELL_ALIGN, THIN_BORDER
 from modules.services import BaseService
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.shipment_repository import ShipmentRepository
@@ -329,6 +332,50 @@ class ShipmentService:
     def get_customer_history(customer, limit=50):
         rows = ShipmentRepository.find_shipments_by_customer(customer, limit)
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def export_shipments(keyword="", status=""):
+        result = ShipmentService.list_shipments(keyword=keyword, status=status, page=1, limit=99999)
+        items = result.get("shipments", [])
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "发货清单"
+        headers = [
+            "出库单号", "客户", "联系人", "电话", "地址", "状态", "总数量",
+            "物流公司", "运单号", "应收金额", "已收金额", "收款状态", "备注", "创建时间", "完成时间"
+        ]
+        style_header(ws, headers)
+        status_map = {"pending": "待出库", "partial": "部分出库", "completed": "已出库", "cancelled": "已取消"}
+        payment_status_map = {"unpaid": "未收款", "partial": "部分收", "paid": "已收清"}
+        for row_idx, item in enumerate(items, 2):
+            values = [
+                item.get("shipment_no", ""),
+                item.get("customer", ""),
+                item.get("contact_person", ""),
+                item.get("contact_phone", ""),
+                item.get("address", ""),
+                status_map.get(item.get("status", ""), item.get("status", "")),
+                item.get("total_quantity", 0),
+                item.get("logistics_company", ""),
+                item.get("tracking_no", ""),
+                item.get("receivable_amount", 0),
+                item.get("paid_amount", 0),
+                payment_status_map.get(item.get("payment_status", ""), item.get("payment_status", "") or "未收款"),
+                item.get("remark", ""),
+                (item.get("created_at") or "")[:19],
+                (item.get("completed_at") or "")[:19],
+            ]
+            for col_idx, value in enumerate(values, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.border = THIN_BORDER
+                cell.alignment = CELL_ALIGN
+        auto_width(ws)
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output
 
     @staticmethod
     def _update_order_delivery_status(txn, shipment_id):

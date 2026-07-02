@@ -8,6 +8,9 @@ import logging
 import secrets
 import os
 import uuid
+from io import BytesIO
+
+from openpyxl import Workbook
 from modules.services import BaseService
 from modules.repositories.user_repository import UserRepository
 
@@ -550,6 +553,30 @@ class UserService:
         u.pop("password", None)
         u.pop("token", None)
         return u
+
+    @staticmethod
+    def export_users(role_filter="", keyword="", status=""):
+        data = UserService.list_users(1, 9999, role_filter=role_filter, keyword=keyword, status=status)
+        users = data.get("users", [])
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Users"
+        ws.append(["用户名", "姓名", "员工编号", "电话", "邮箱", "岗位", "角色", "状态"])
+        for user in users:
+            ws.append([
+                user.get("username", ""),
+                user.get("name", ""),
+                user.get("employee_no", ""),
+                user.get("phone", ""),
+                user.get("email", ""),
+                user.get("position_name", ""),
+                "管理员" if user.get("role") == "admin" else "员工",
+                "正常" if user.get("status") == "active" else "已删除" if user.get("status") == "deleted" else "禁用",
+            ])
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output
 
     @staticmethod
     def get_user_detail(uid):

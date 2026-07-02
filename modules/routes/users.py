@@ -174,27 +174,16 @@ def import_users():
 @check_auth
 @check_permission('users:view')
 def export_users():
-    import openpyxl, io
     role_filter = request.args.get('role', '').strip()
     keyword = request.args.get('keyword', '').strip()
     status = request.args.get('status', '').strip()
-    data = UserService.list_users(1, 9999, role_filter=role_filter, keyword=keyword, status=status)
-    users = data.get('users', [])
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Users'
-    ws.append(['???', '??', '??', '???', '??', '??', '??', '??'])
-    for u in users:
-        ws.append([u.get('username',''), u.get('name',''), u.get('employee_no',''),
-                   u.get('phone',''), u.get('email',''), u.get('position_name',''),
-                   '???' if u.get('role')=='admin' else '??',
-                   '??' if u.get('status')=='active' else '???' if u.get('status')=='deleted' else '??'])
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return send_file(output,
+    output = UserService.export_users(role_filter=role_filter, keyword=keyword, status=status)
+    return send_file(
+        output,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True, download_name='users_export.xlsx')
+        as_attachment=True,
+        download_name='users_export.xlsx',
+    )
 
 @app.route('/api/users/<int:uid>/detail', methods=['GET'])
 @check_auth

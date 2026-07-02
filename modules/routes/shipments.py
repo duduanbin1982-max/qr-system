@@ -351,28 +351,12 @@ def customer_shipment_history():
 @check_auth
 @check_permission("shipments:view")
 def export_shipments():
-    from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
-    from openpyxl import Workbook
-    from io import BytesIO
     keyword = request.args.get("keyword", "")
     status = request.args.get("status", "")
-    result = ShipmentService.list_shipments(keyword=keyword, status=status, page=1, limit=99999)
-    items = result.get("shipments", [])
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "发货清单"
-    headers = ["出库单号", "客户", "联系人", "电话", "地址", "状态", "总数量", "物流公司", "运单号", "应收金额", "已收金额", "收款状态", "备注", "创建时间", "完成时间"]
-    style_header(ws, headers)
-    status_map = {"pending": "待出库", "partial": "部分出库", "completed": "已出库", "cancelled": "已取消"}
-    for row_idx, item in enumerate(items, 2):
-        pay_map = {"unpaid":"未收款","partial":"部分收","paid":"已收清"}
-        vals = [item.get("shipment_no",""), item.get("customer",""), item.get("contact_person",""), item.get("contact_phone",""), item.get("address",""), status_map.get(item.get("status",""), item.get("status","")), item.get("total_quantity",0), item.get("logistics_company",""), item.get("tracking_no",""), item.get("receivable_amount",0), item.get("paid_amount",0), pay_map.get(item.get("payment_status",""), item.get("payment_status","") or "未收款"), item.get("remark",""), (item.get("created_at") or "")[:19], (item.get("completed_at") or "")[:19]]
-        for col_idx, val in enumerate(vals, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=val)
-            cell.border = THIN_BORDER
-            cell.alignment = CELL_ALIGN
-    auto_width(ws)
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"shipments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+    output = ShipmentService.export_shipments(keyword=keyword, status=status)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"shipments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+    )
