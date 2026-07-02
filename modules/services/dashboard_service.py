@@ -1,4 +1,4 @@
-﻿"""qr-system -- DashboardService (Repository pattern)"""
+"""qr-system -- DashboardService (Repository pattern)"""
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.dashboard_repository import DashboardRepository

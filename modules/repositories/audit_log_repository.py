@@ -2,7 +2,7 @@
 
 All SQL for audit_logs, user_roles, menu_permissions tables.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class AuditLogRepository:
@@ -13,7 +13,7 @@ class AuditLogRepository:
     # ============================================================
     @staticmethod
     def list_logs(page=1, limit=50, action="", keyword="", user_id=None, category="", date_from="", date_to="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = ["1=1"]
         params = []
         if action:
@@ -51,7 +51,7 @@ class AuditLogRepository:
     # ============================================================
     @staticmethod
     def get_user_roles(uid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT r.*, rg.name as group_name "
             "FROM user_roles ur "
@@ -71,7 +71,7 @@ class AuditLogRepository:
 
     @staticmethod
     def validate_role_ids(role_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         placeholders = ",".join("?" for _ in role_ids)
         valid = {r[0] for r in db.execute(
             "SELECT id FROM roles WHERE id IN (" + placeholders + ")", role_ids
@@ -98,14 +98,14 @@ class AuditLogRepository:
     # ============================================================
     @staticmethod
     def get_active_users(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, username, name, nickname, role, status FROM users WHERE status='active' ORDER BY id"
         ).fetchall()
 
     @staticmethod
     def get_user_role_mappings(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT ur.user_id, ur.role_id, r.name as role_name, r.code as role_code, "
             "r.permissions, r.status as role_status "
@@ -114,7 +114,7 @@ class AuditLogRepository:
 
     @staticmethod
     def get_all_roles(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, name, code, permissions, status, level FROM roles ORDER BY level"
         ).fetchall()
@@ -124,7 +124,7 @@ class AuditLogRepository:
     # ============================================================
     @staticmethod
     def list_menu_permissions(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT * FROM menu_permissions ORDER BY sort_order ASC, id ASC"
         ).fetchall()
@@ -132,7 +132,7 @@ class AuditLogRepository:
 
     @staticmethod
     def find_menu_by_page(page, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM menu_permissions WHERE page = ?", (page,)
         ).fetchone()

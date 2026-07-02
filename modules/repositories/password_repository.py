@@ -1,12 +1,12 @@
 """qr-system - PasswordRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class PasswordRepository:
 
     @staticmethod
     def find_active_user(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, username, status FROM users WHERE id = ?", (user_id,)
         ).fetchone()

@@ -28,6 +28,7 @@ import { logsApi } from './api/logs.js'
 import { qualityApi } from './api/quality.js'
 import { reworkApi } from './api/rework.js'
 import { productionApi } from './api/production.js'
+import { performanceApi } from './api/performance.js'
 
 const httpApi = {
   get:    (url)         => request('GET', url),
@@ -65,6 +66,7 @@ const apiModules = [
   qualityApi,
   reworkApi,
   productionApi,
+  performanceApi,
 ]
 
 function mergeApiModules(modules) {

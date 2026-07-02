@@ -1,4 +1,4 @@
-﻿"""
+"""
 qr-system — 工序路线管理 Service 层（Repository-refactored）
 
 从 routes/process_routes.py 提取全部业务逻辑。

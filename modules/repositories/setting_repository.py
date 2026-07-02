@@ -1,17 +1,17 @@
 """qr-system - SettingRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class SettingRepository:
 
     @staticmethod
     def get_all(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM system_settings").fetchall()
 
     @staticmethod
     def get_value(key, default=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
 

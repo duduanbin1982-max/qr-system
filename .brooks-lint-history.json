@@ -119,5 +119,38 @@
       "suggestion": 2
     },
     "scope": "remote production repository /home/dubin/qr-system; route coupling, migration compatibility, service long-method cleanup"
+  },
+  {
+    "date": "2026-07-01T10:17:37+08:00",
+    "mode": "PR Review",
+    "score": 73,
+    "findings": {
+      "critical": 0,
+      "warning": 3,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system performance module: services/repositories/routes/frontend/mobile/tests"
+  },
+  {
+    "date": "2026-07-01T21:09:12",
+    "mode": "PR Review",
+    "score": 69,
+    "findings": {
+      "critical": 0,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "??????: frontend/src/views/PerformancePage.vue, frontend/src/composables/usePerformancePageData.js, frontend/src/views/performance/*, frontend/src/lib/api/performance.js, modules/routes/performance.py, modules/routes/handoff_reviews.py, modules/services/performance_service.py, modules/services/performance_scoring_policy.py, modules/services/handoff_review_service.py, modules/repositories/performance_repository.py, modules/repositories/handoff_review_repository.py, tests/test_performance_contracts.py"
+  },
+  {
+    "date": "2026-07-02T00:01:22+08:00",
+    "mode": "Architecture Audit",
+    "score": 66,
+    "findings": {
+      "critical": 0,
+      "warning": 6,
+      "suggestion": 2
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system running qr-system.service; deployed_commit 8ccacc5; dirty worktree audited"
   }
 ]

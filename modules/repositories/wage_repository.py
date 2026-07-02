@@ -1,7 +1,7 @@
 """
 qr-system — WageRepository（工资核算数据访问层）
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class WageRepository:
@@ -20,7 +20,7 @@ class WageRepository:
 
     @staticmethod
     def get_worker_role_code(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute(
             "SELECT COALESCE((SELECT value FROM system_settings WHERE key='worker_role_code'), 'worker')"
         ).fetchone()
@@ -29,7 +29,7 @@ class WageRepository:
     @staticmethod
     def get_worker_wage_summary(user_where, user_params, p1_params, p2_params, db=None):
         """按工人统计报工汇总（含工资估算）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         query = ("""SELECT u.id as user_id, u.name as employee_name, u.employee_no,
             COUNT(DISTINCT DATE(wr.created_at)) as work_days,
             COUNT(wr.id) as record_count,
@@ -49,7 +49,7 @@ class WageRepository:
     @staticmethod
     def get_worker_paged(user_where, user_params, db=None, page=1, limit=50):
         """分页查询工人列表（含岗位名）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             "SELECT COUNT(*) FROM users u WHERE " + user_where, user_params
         ).fetchone()[0]
@@ -63,7 +63,7 @@ class WageRepository:
 
     @classmethod
     def get_worker_paged_by_role(cls, employee_id="", db=None, page=1, limit=50):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         user_where = (
             "u.status = 'active' "
             "AND u.id IN ("
@@ -79,7 +79,7 @@ class WageRepository:
 
     @classmethod
     def get_wage_rows_for_workers(cls, wr_where, wr_params, user_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if not user_ids:
             return []
         placeholders = ",".join(["?" for _ in user_ids])
@@ -109,7 +109,7 @@ class WageRepository:
 
     @classmethod
     def get_daily_report_rows(cls, date, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         query = (
             """
             SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name,
@@ -132,14 +132,14 @@ class WageRepository:
 
     @staticmethod
     def count_active_orders(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL AND status != 'cancelled'"
         ).fetchone()[0]
 
     @staticmethod
     def get_production_orders(page=1, limit=50, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             """
             SELECT o.*, COALESCE(o.completed, 0) as done_qty,
@@ -153,7 +153,7 @@ class WageRepository:
 
     @staticmethod
     def get_production_processes(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             """
             SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
@@ -176,7 +176,7 @@ class WageRepository:
 
     @classmethod
     def get_monthly_summary(cls, year_month, page=1, limit=100, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         month_start = year_month + "-01"
         unit_price = cls._unit_price_expr()
         rows = db.execute(
@@ -228,7 +228,7 @@ class WageRepository:
 
     @classmethod
     def get_process_wage_summary(cls, year_month, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         month_start = year_month + "-01"
         return db.execute(
             """
@@ -254,7 +254,7 @@ class WageRepository:
 
     @staticmethod
     def upsert_snapshot(employee, year_month, details_json, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "INSERT INTO wage_snapshots (employee_id,employee_name,employee_no,year_month,total_quantity,total_wage,rework_wage,details_json,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'draft',datetime('now','localtime')) ON CONFLICT(employee_id,year_month) DO UPDATE SET total_quantity=excluded.total_quantity,total_wage=excluded.total_wage,rework_wage=excluded.rework_wage,details_json=excluded.details_json,updated_at=datetime('now','localtime')",
             (
@@ -271,7 +271,7 @@ class WageRepository:
 
     @staticmethod
     def lock_snapshots(year_month, locked_by="system", notes="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE wage_snapshots SET status='locked',locked_at=datetime('now','localtime'),locked_by=?,notes=? WHERE year_month=? AND status='draft'",
             (locked_by, notes, year_month),
@@ -280,7 +280,7 @@ class WageRepository:
 
     @staticmethod
     def list_snapshots(year_month, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM wage_snapshots WHERE year_month=? ORDER BY total_wage DESC",
             (year_month,),
@@ -288,7 +288,7 @@ class WageRepository:
 
     @staticmethod
     def confirm_snapshots(year_month, confirmed_by="system", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE wage_snapshots SET status='confirmed',confirmed_at=datetime('now','localtime'),confirmed_by=? WHERE year_month=? AND status IN ('draft','locked')",
             (confirmed_by, year_month),
@@ -297,7 +297,7 @@ class WageRepository:
 
     @staticmethod
     def get_snapshot_status_rows(year_month, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT status, COUNT(*) as cnt, SUM(total_wage) as total_wage FROM wage_snapshots WHERE year_month=? GROUP BY status",
             (year_month,),
@@ -305,7 +305,7 @@ class WageRepository:
 
     @staticmethod
     def list_adjustments(user_id=None, year_month=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = []
         params = []
         if user_id:
@@ -322,7 +322,7 @@ class WageRepository:
 
     @staticmethod
     def find_adjustment_id(user_id, year_month, adj_type, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM wage_adjustments WHERE user_id=? AND year_month=? AND type=?",
             (user_id, year_month, adj_type),
@@ -330,7 +330,7 @@ class WageRepository:
 
     @staticmethod
     def update_adjustment(adj_id, amount, reason, created_by, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE wage_adjustments SET amount=?, reason=?, created_by=? WHERE id=?",
             (amount, reason or "", created_by, adj_id),
@@ -338,7 +338,7 @@ class WageRepository:
 
     @staticmethod
     def insert_adjustment(user_id, year_month, adj_type, amount, reason, created_by, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "INSERT INTO wage_adjustments (user_id, year_month, type, amount, reason, created_by) VALUES (?,?,?,?,?,?)",
             (user_id, year_month, adj_type, amount, reason or "", created_by),
@@ -347,13 +347,13 @@ class WageRepository:
 
     @staticmethod
     def delete_adjustment(adj_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute("DELETE FROM wage_adjustments WHERE id=?", (adj_id,))
         return db.total_changes
 
     @staticmethod
     def get_adjustments_total_rows(user_id, year_month, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT type, SUM(amount) as total FROM wage_adjustments WHERE user_id=? AND year_month=? GROUP BY type",
             (user_id, year_month),
@@ -361,7 +361,7 @@ class WageRepository:
 
     @staticmethod
     def get_wage_trend_snapshots(months=12, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT year_month, SUM(total_wage) as total_wage, SUM(total_quantity) as total_quantity, COUNT(DISTINCT employee_id) as employee_count FROM wage_snapshots WHERE status IN ('draft','locked','confirmed') GROUP BY year_month ORDER BY year_month DESC LIMIT ?",
             (months,),
@@ -369,7 +369,7 @@ class WageRepository:
 
     @classmethod
     def get_live_wage_trends(cls, months=12, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT strftime('%Y-%m', wr.created_at) as year_month, "
             "COALESCE(SUM(wr.quantity),0) as total_quantity, "
@@ -388,7 +388,7 @@ class WageRepository:
 
     @classmethod
     def get_position_summary(cls, year_month, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         month_start = year_month + "-01"
         return db.execute(
             "SELECT COALESCE(pos.name, '未分配') as position_name, COUNT(DISTINCT wr.user_id) as employee_count, "
@@ -408,7 +408,7 @@ class WageRepository:
     @staticmethod
     def get_order_wages(start, end, db=None):
         """按订单统计工资汇总。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         date_filter = ""
         params = []
         if start:
@@ -430,7 +430,7 @@ class WageRepository:
     @staticmethod
     def get_process_breakdown(order_id, db=None):
         """获取订单工序完成情况。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             """SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
                (SELECT COUNT(*) FROM product_items pi WHERE pi.order_id=op.order_id) as total_items
@@ -443,7 +443,7 @@ class WageRepository:
     @staticmethod
     def get_daily_summary(start, end, db=None):
         """日报工汇总。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         date_filter = ""
         params = []
         if start:
@@ -466,7 +466,7 @@ class WageRepository:
     @staticmethod
     def get_process_summary(start, end, db=None):
         """按工序统计报工汇总。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         date_filter = ""
         params = []
         if start:

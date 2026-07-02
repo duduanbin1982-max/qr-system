@@ -1,4 +1,4 @@
-﻿"""qr-system - ExportService (Repository-refactored)"""
+"""qr-system - ExportService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.export_repository import ExportRepository
 

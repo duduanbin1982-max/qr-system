@@ -1,4 +1,4 @@
-﻿"""qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
+"""qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
 import json
 from modules.services import BaseService
 from modules.repositories.wage_repository import WageRepository

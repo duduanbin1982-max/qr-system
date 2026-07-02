@@ -1,4 +1,4 @@
-﻿"""qr-system - OrderAttachmentsService"""
+"""qr-system - OrderAttachmentsService"""
 import os
 from modules.services import BaseService
 from modules.repositories.order_attachments_repository import OrderAttachmentsRepository

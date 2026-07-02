@@ -1,7 +1,7 @@
 """qr-system — PriceRepository（工价数据访问层）
 All raw SQL lives here. Methods accept optional db for transaction sharing.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class PriceRepository:
@@ -9,7 +9,7 @@ class PriceRepository:
 
     @staticmethod
     def find_route_items(category='', db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cat_clause = ''
         cat_params = []
         if category:
@@ -29,7 +29,7 @@ class PriceRepository:
 
     @staticmethod
     def find_active_route_prices(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT rp.*, p.category FROM route_prices rp '
             'JOIN processes p ON rp.process_id = p.id WHERE rp.status = \'active\''
@@ -37,14 +37,14 @@ class PriceRepository:
 
     @staticmethod
     def find_process_route_by_id(route_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT * FROM process_routes WHERE id = ?', (route_id,)
         ).fetchone()
 
     @staticmethod
     def find_route_steps(route_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT pri.seq_order, pri.process_id, p.name as process_name, p.category, '
             'rp.id as price_id, rp.unit_price, rp.effective_date, rp.remark '
@@ -58,7 +58,7 @@ class PriceRepository:
 
     @staticmethod
     def find_valid_route_processes(route_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             'SELECT process_id FROM process_route_items WHERE route_id = ?', (route_id,)
         ).fetchall()
@@ -66,7 +66,7 @@ class PriceRepository:
 
     @staticmethod
     def find_route_price(route_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT id, unit_price, effective_date, remark FROM route_prices '
             'WHERE route_id = ? AND process_id = ?',
@@ -76,7 +76,7 @@ class PriceRepository:
     @staticmethod
     def insert_route_price_history(route_id, process_id, old_price, new_price,
                                    effective_date, remark, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             'INSERT INTO route_price_history '
             '(route_id, process_id, old_price, new_price, effective_date, remark) '
@@ -86,7 +86,7 @@ class PriceRepository:
 
     @staticmethod
     def update_route_price(price_id, unit_price, effective_date, remark, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             'UPDATE route_prices SET unit_price = ?, effective_date = ?, remark = ?, '
             'updated_at = datetime("now","localtime") WHERE id = ?',
@@ -95,7 +95,7 @@ class PriceRepository:
 
     @staticmethod
     def insert_route_price(route_id, process_id, unit_price, effective_date, remark, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             'INSERT INTO route_prices (route_id, process_id, unit_price, '
             'effective_date, remark, status) VALUES (?, ?, ?, ?, ?, \'active\')',
@@ -104,7 +104,7 @@ class PriceRepository:
 
     @staticmethod
     def get_route_price_history(route_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT h.*, p.name as process_name "
             "FROM route_price_history h "

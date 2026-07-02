@@ -1,7 +1,7 @@
 """
 qr-system — ScanRepository（扫码报工数据访问层）
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ScanRepository:
@@ -9,7 +9,7 @@ class ScanRepository:
 
     @staticmethod
     def find_order_by_no(order_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM orders WHERE order_no = ? AND deleted_at IS NULL",
             (order_no,)
@@ -17,7 +17,7 @@ class ScanRepository:
 
     @staticmethod
     def get_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL",
             (order_id,)
@@ -25,7 +25,7 @@ class ScanRepository:
 
     @staticmethod
     def get_order_for_stock(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec "
             "FROM orders o LEFT JOIN products p ON o.product_code = p.product_code "
@@ -35,7 +35,7 @@ class ScanRepository:
 
     @staticmethod
     def get_order_quantity(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT quantity FROM orders WHERE id = ?",
             (order_id,)
@@ -43,7 +43,7 @@ class ScanRepository:
 
     @staticmethod
     def get_order_processes(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             """SELECT op.*, p.name as process_name
                FROM order_processes op
@@ -54,14 +54,14 @@ class ScanRepository:
 
     @staticmethod
     def get_item_by_serial(serial_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM product_items WHERE serial_no = ?", (serial_no,)
         ).fetchone()
 
     @staticmethod
     def get_item_by_position(order_id, position_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM product_items WHERE order_id = ? AND position_no = ?",
             (order_id, position_no)
@@ -69,7 +69,7 @@ class ScanRepository:
 
     @staticmethod
     def get_items_by_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no",
             (order_id,)
@@ -77,7 +77,7 @@ class ScanRepository:
 
     @staticmethod
     def get_order_process(order_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM order_processes WHERE order_id = ? AND process_id = ?",
             (order_id, process_id)
@@ -85,7 +85,7 @@ class ScanRepository:
 
     @staticmethod
     def find_order_process_id(order_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM order_processes WHERE order_id = ? AND process_id = ?",
             (order_id, process_id)
@@ -93,7 +93,7 @@ class ScanRepository:
 
     @staticmethod
     def get_prev_incomplete_processes(order_id, current_seq, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT op.seq_order, p.name as process_name FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
@@ -104,7 +104,7 @@ class ScanRepository:
 
     @staticmethod
     def get_prev_order_process(order_id, current_seq, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT op.*, p.name as process_name FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
@@ -115,7 +115,7 @@ class ScanRepository:
 
     @staticmethod
     def find_next_process(order_id, current_seq, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT op.process_id FROM order_processes op WHERE op.order_id = ? AND op.seq_order > ? "
             "ORDER BY op.seq_order LIMIT 1",
@@ -124,7 +124,7 @@ class ScanRepository:
 
     @staticmethod
     def get_last_process_seq(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute(
             "SELECT MAX(seq_order) as max_seq FROM order_processes WHERE order_id = ?",
             (order_id,)
@@ -133,7 +133,7 @@ class ScanRepository:
 
     @staticmethod
     def is_last_process(order_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         max_row = db.execute(
             "SELECT MAX(seq_order) as max_seq FROM order_processes WHERE order_id = ?",
             (order_id,)
@@ -148,7 +148,7 @@ class ScanRepository:
 
     @staticmethod
     def get_work_records(order_id, db=None, limit=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if limit:
             return db.execute(
                 "SELECT wr.*, u.name as worker_name FROM work_records wr "
@@ -165,7 +165,7 @@ class ScanRepository:
 
     @staticmethod
     def get_user_order_report(order_id, user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM work_records WHERE order_id = ? AND user_id = ? AND type = 'normal'",
             (order_id, user_id)
@@ -173,13 +173,13 @@ class ScanRepository:
 
     @staticmethod
     def get_process_name(process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute("SELECT name FROM processes WHERE id = ?", (process_id,)).fetchone()
         return row["name"] if row else "\u672a\u77e5\u5de5\u5e8f"
 
     @staticmethod
     def find_duplicate_normal_report(order_id, process_id, serial_no, user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if serial_no:
             return db.execute(
                 "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
@@ -194,7 +194,7 @@ class ScanRepository:
 
     @staticmethod
     def has_serial_duplicate_in_order(order_id, serial_no, user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM work_records WHERE order_id = ? AND serial_no = ? AND user_id = ? LIMIT 1",
             (order_id, serial_no, user_id)
@@ -202,7 +202,7 @@ class ScanRepository:
 
     @staticmethod
     def find_duplicate_defect_report(order_id, process_id, user_id, report_type, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM work_records WHERE order_id = ? AND process_id = ? "
             "AND user_id = ? AND type = ? "
@@ -212,7 +212,7 @@ class ScanRepository:
 
     @staticmethod
     def find_approval_config(process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM approval_config WHERE process_id = ? AND require_approval = 1",
             (process_id,)
@@ -230,7 +230,7 @@ class ScanRepository:
         serial_no,
         db=None,
     ):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cur = db.execute(
             "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) "
             "VALUES (?,?,?,?,?,?,?,?)",
@@ -240,7 +240,7 @@ class ScanRepository:
 
     @staticmethod
     def insert_approval_record(work_record_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         existing = db.execute(
             "SELECT id FROM approval_records WHERE work_record_id=? AND status='pending'",
             (work_record_id,),
@@ -255,15 +255,20 @@ class ScanRepository:
 
     @staticmethod
     def update_order_process_completed(order_id, process_id, completed, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
-            "UPDATE order_processes SET completed = ? WHERE order_id = ? AND process_id = ?",
-            (completed, order_id, process_id),
+            "UPDATE order_processes SET completed = ?, "
+            "status = CASE "
+            "WHEN ? >= (SELECT quantity FROM orders WHERE id = ?) THEN 'completed' "
+            "WHEN ? > 0 THEN 'in_progress' "
+            "ELSE status END "
+            "WHERE order_id = ? AND process_id = ?",
+            (completed, completed, order_id, completed, order_id, process_id),
         )
 
     @staticmethod
     def advance_product_item(item_id, next_process_id, version, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "UPDATE product_items SET current_process_id = ?, status = 'in_progress', version = version + 1 "
             "WHERE id = ? AND version = ?",
@@ -272,7 +277,7 @@ class ScanRepository:
 
     @staticmethod
     def complete_product_item(item_id, version, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "UPDATE product_items SET current_process_id = NULL, status = 'completed', "
             "completed_at = datetime('now','localtime'), version = version + 1 WHERE id = ? AND version = ?",
@@ -281,7 +286,7 @@ class ScanRepository:
 
     @staticmethod
     def refresh_order_completion(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = 'completed'), "
             "updated_at = datetime('now','localtime'), status = 'producing' WHERE id = ?",
@@ -290,7 +295,7 @@ class ScanRepository:
 
     @staticmethod
     def count_completed_items(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as cnt FROM product_items WHERE order_id = ? AND status = 'completed'",
             (order_id,)
@@ -298,7 +303,7 @@ class ScanRepository:
 
     @staticmethod
     def find_inventory_by_model(product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, product_model, product_name, quantity FROM inventory WHERE product_model = ?",
             (product_code,)
@@ -306,7 +311,7 @@ class ScanRepository:
 
     @staticmethod
     def complete_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE orders SET status = 'completed', updated_at = datetime('now','localtime') WHERE id = ?",
             (order_id,),
@@ -314,7 +319,7 @@ class ScanRepository:
 
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
             (order_id, process_id, user_id, quantity, reason),
@@ -322,7 +327,7 @@ class ScanRepository:
 
     @staticmethod
     def update_order_process_scrapped(order_id, process_id, scrapped, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE order_processes SET scrapped = ? WHERE order_id = ? AND process_id = ?",
             (scrapped, order_id, process_id),
@@ -330,7 +335,7 @@ class ScanRepository:
 
     @staticmethod
     def refresh_order_scrapped(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE orders SET scrapped = (SELECT COALESCE(SUM(scrapped),0) FROM order_processes WHERE order_id = ?), "
             "updated_at = datetime('now','localtime') WHERE id = ?",
@@ -339,7 +344,7 @@ class ScanRepository:
 
     @staticmethod
     def insert_rework_record(order_id, process_id, user_id, quantity, reason, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
             (order_id, process_id, user_id, quantity, reason),
@@ -347,7 +352,7 @@ class ScanRepository:
 
     @staticmethod
     def update_order_process_rework(order_id, process_id, rework, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE order_processes SET rework = ? WHERE order_id = ? AND process_id = ?",
             (rework, order_id, process_id),
@@ -355,7 +360,7 @@ class ScanRepository:
 
     @staticmethod
     def refresh_order_rework(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE orders SET rework = (SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?), "
             "updated_at = datetime('now','localtime') WHERE id = ?",
@@ -364,7 +369,7 @@ class ScanRepository:
 
     @staticmethod
     def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if order_id:
             inv = db.execute(
                 "SELECT id FROM inventory WHERE product_model = ? AND order_id = ?",
@@ -380,7 +385,7 @@ class ScanRepository:
 
     @staticmethod
     def find_inbound_inventory_log(order_id, serial_no=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if serial_no:
             return db.execute(
                 "SELECT id FROM inventory_logs WHERE order_id = ? AND type = 'in' AND remark LIKE ?",
@@ -393,7 +398,7 @@ class ScanRepository:
 
     @staticmethod
     def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE inventory SET quantity = quantity + ?, updated_at = datetime('now','localtime') WHERE id = ?",
             (quantity, inv_id),
@@ -406,7 +411,7 @@ class ScanRepository:
 
     @staticmethod
     def order_has_process_in_scope(order_id, process_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         placeholders = ",".join("?" for _ in process_ids)
         row = db.execute(
             f"SELECT 1 FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})",
@@ -416,7 +421,7 @@ class ScanRepository:
 
     @staticmethod
     def insert_work_record(data, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cur = db.execute(
             """INSERT INTO work_records
                (order_id, process_id, user_id, serial_no, quantity, type, status, remark)
@@ -431,7 +436,7 @@ class ScanRepository:
     @staticmethod
     def deduct_materials_for_process(order_id, process_id, quantity, user_id, user_name, db=None):
         """自动扣减工序物料：从 order_materials 或 product_bom 扣除库存并记录消耗。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         from modules.repositories.order_material_repository import OrderMaterialRepository
         from modules.repositories.product_bom_repository import ProductBomRepository
 
@@ -479,7 +484,7 @@ class ScanRepository:
     @staticmethod
     def auto_inbound_item(order_id, db=None):
         """自动入库：检查订单最后一道工序是否全部完成。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         items = db.execute(
             "SELECT * FROM product_items WHERE order_id = ? AND status = 'in_progress'",
             (order_id,)
@@ -488,12 +493,12 @@ class ScanRepository:
 
     @staticmethod
     def find_process_name(process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT name FROM processes WHERE id=?", (process_id,)).fetchone()
 
     @staticmethod
     def count_approved_normal_work_records(order_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM work_records "
             "WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
@@ -502,7 +507,7 @@ class ScanRepository:
 
     @staticmethod
     def find_first_article_inspection(order_id, process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM quality_inspections "
             "WHERE order_id=? AND process_id=? AND inspection_type='first_article'",
@@ -511,5 +516,5 @@ class ScanRepository:
 
     @staticmethod
     def find_order_status(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT status FROM orders WHERE id = ?", (order_id,)).fetchone()

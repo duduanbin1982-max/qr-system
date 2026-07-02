@@ -1,4 +1,4 @@
-﻿"""qr-system - PasswordService"""
+"""qr-system - PasswordService"""
 import bcrypt
 from modules.services import BaseService
 from modules.repositories.password_repository import PasswordRepository

@@ -54,11 +54,18 @@ class MobileScanService:
     @staticmethod
     def _current_process(order_data, item_info):
         for proc in order_data["processes"]:
-            if proc.get("status") != "completed":
+            if not MobileScanService._is_process_completed(proc, order_data):
                 return MobileScanService._process_summary(proc, order_data)
         if item_info and item_info.get("current_process_id"):
             return MobileScanService._current_process_for_item(order_data, item_info)
         return None
+
+    @staticmethod
+    def _is_process_completed(proc, order_data):
+        if proc.get("status") == "completed":
+            return True
+        total = proc.get("total_quantity", order_data.get("quantity", 0)) or 0
+        return total > 0 and (proc.get("completed") or 0) >= total
 
     @staticmethod
     def _current_process_for_item(order_data, item_info):

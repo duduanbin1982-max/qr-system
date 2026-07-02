@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """DB Growth Monitor — logs size daily, alerts on rapid growth."""
 import os, json, time
 from datetime import datetime

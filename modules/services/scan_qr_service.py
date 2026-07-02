@@ -1,4 +1,4 @@
-﻿"""qr-system - ScanQRService (Repository-refactored)"""
+"""qr-system - ScanQRService (Repository-refactored)"""
 import json
 from modules.services import BaseService
 from modules.repositories.scan_qr_repository import ScanQRRepository

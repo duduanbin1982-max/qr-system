@@ -4,7 +4,7 @@ qr-system - ProductionLineRepository
 All SQL for production_lines table.
 """
 import sqlite3
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ProductionLineRepository:
@@ -12,21 +12,21 @@ class ProductionLineRepository:
 
     @staticmethod
     def find_all(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM production_lines ORDER BY name"
         ).fetchall()
 
     @staticmethod
     def find_by_id(line_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM production_lines WHERE id = ?", (line_id,)
         ).fetchone()
 
     @staticmethod
     def insert(name, capacity_per_day, remark, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         try:
             cur = db.execute(
                 "INSERT INTO production_lines (name, capacity_per_day, remark) VALUES (?, ?, ?)",
@@ -38,7 +38,7 @@ class ProductionLineRepository:
 
     @staticmethod
     def update(line_id, name, capacity_per_day, remark, status, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         existing = db.execute(
             "SELECT id FROM production_lines WHERE id = ?", (line_id,)
         ).fetchone()
@@ -51,7 +51,7 @@ class ProductionLineRepository:
 
     @staticmethod
     def delete(line_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         used = db.execute(
             "SELECT COUNT(*) FROM orders WHERE production_line_id = ? AND deleted_at IS NULL",
             (line_id,)

@@ -1,12 +1,12 @@
 """qr-system - OrderAttachmentsRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class OrderAttachmentsRepository:
 
     @staticmethod
     def list_by_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM order_attachments WHERE order_id = ? ORDER BY id DESC",
             (order_id,)
@@ -27,14 +27,14 @@ class OrderAttachmentsRepository:
 
     @staticmethod
     def find_by_id(attachment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT order_id FROM order_attachments WHERE id = ?", (attachment_id,)
         ).fetchone()
 
     @staticmethod
     def find_with_meta(attachment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT order_id, file_name, file_type, file_path FROM order_attachments WHERE id = ?",
             (attachment_id,)

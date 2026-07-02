@@ -4,7 +4,7 @@ qr-system - QualityRepository
 All SQL for quality_inspections and quality_attachments tables.
 """
 from datetime import datetime
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class QualityRepository:
@@ -18,7 +18,7 @@ class QualityRepository:
     def list_inspections(order_id=None, process_id=None, inspection_type="",
                          result="", search="", date_from="", date_to="",
                          page=1, per_page=20, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
 
@@ -77,7 +77,7 @@ class QualityRepository:
     @staticmethod
     def find_all_for_export(order_id=None, process_id=None, inspection_type="",
                             result="", search="", date_from="", date_to="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
         if order_id:
@@ -114,14 +114,14 @@ class QualityRepository:
 
     @staticmethod
     def find_by_id(inspection_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM quality_inspections WHERE id = ?", (inspection_id,)
         ).fetchone()
 
     @staticmethod
     def check_order_exists(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, deleted_at FROM orders WHERE id = ?", (order_id,)
         ).fetchone()
@@ -165,7 +165,7 @@ class QualityRepository:
 
     @staticmethod
     def get_stats(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         today = datetime.now().strftime("%Y-%m-%d")
         agg = db.execute(
             "SELECT COUNT(*) as total, "
@@ -183,7 +183,7 @@ class QualityRepository:
 
     @staticmethod
     def defect_pareto(date_from="", date_to="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
         if date_from:
@@ -214,7 +214,7 @@ class QualityRepository:
 
     @staticmethod
     def spc_p_chart(order_id=None, process_id=None, date_from="", date_to="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
         if order_id:
@@ -253,7 +253,7 @@ class QualityRepository:
 
     @staticmethod
     def inspector_performance(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT u.id, u.name, COUNT(*) as inspection_count, "
             "COALESCE(SUM(qi.quantity_checked),0) as total_checked, "
@@ -267,7 +267,7 @@ class QualityRepository:
 
     @staticmethod
     def supplier_quality(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT c.id as customer_id, c.name as customer_name, "
             "COUNT(*) as inspection_count, "
@@ -284,7 +284,7 @@ class QualityRepository:
 
     @staticmethod
     def pass_rate_trend(weeks=6, start="", end="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if start or end:
             where_parts = []
             params = []
@@ -322,7 +322,7 @@ class QualityRepository:
 
     @staticmethod
     def list_attachments(inspection_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, file_name, file_type, file_size, uploaded_by, created_at "
             "FROM quality_attachments WHERE inspection_id = ? ORDER BY id DESC",
@@ -340,7 +340,7 @@ class QualityRepository:
 
     @staticmethod
     def find_attachment_by_id(att_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM quality_attachments WHERE id = ?", (att_id,)
         ).fetchone()
@@ -398,7 +398,7 @@ class QualityRepository:
 
     @staticmethod
     def list_inspections_simple(keyword="", page=1, limit=20, result="", db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
         if keyword:
@@ -425,7 +425,7 @@ class QualityRepository:
 
     @staticmethod
     def get_mobile_inspection_stats(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute("SELECT COUNT(*) FROM quality_inspections").fetchone()[0]
         pass_count = db.execute(
             "SELECT COUNT(*) FROM quality_inspections WHERE result='pass'"

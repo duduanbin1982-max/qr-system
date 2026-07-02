@@ -4,7 +4,7 @@ qr-system — ProductRepository（数据访问层）
 Brooks R6 fix: 将所有 products / product_attachments 表 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 class ProductRepository:
     """产品数据访问 — 所有 products / product_attachments 表 CRUD 集中管理。"""
@@ -16,7 +16,7 @@ class ProductRepository:
     @staticmethod
     def find_by_id(pid, db=None):
         """按 ID 查询产品。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM products WHERE id = ?", (pid,)
         ).fetchone()
@@ -24,7 +24,7 @@ class ProductRepository:
     @staticmethod
     def find_active_identity(pid, db=None):
         """按 ID 查询未删除产品的删除影响检查字段。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, product_name, product_code FROM products WHERE id = ? AND deleted_at IS NULL",
             (pid,)
@@ -33,14 +33,14 @@ class ProductRepository:
     @staticmethod
     def find_by_code(product_code, db=None):
         """按 product_code 查询产品（含 deleted_at 状态）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, deleted_at FROM products WHERE product_code = ?", (product_code,)
         ).fetchone()
 
     @staticmethod
     def find_active_id_by_code(product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM products WHERE product_code = ? AND deleted_at IS NULL",
             (product_code,)
@@ -49,7 +49,7 @@ class ProductRepository:
     @staticmethod
     def find_by_code_exclude(product_code, exclude_id, db=None):
         """按 product_code 查询，排除指定 ID（用于更新时的唯一性检查）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM products WHERE product_code = ? AND id != ? AND deleted_at IS NULL",
             (product_code, exclude_id)
@@ -58,7 +58,7 @@ class ProductRepository:
     @staticmethod
     def exists_by_code(product_code, db=None):
         """检查 product_code 是否存在（用于导入去重，排除已软删除产品）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM products WHERE product_code = ? AND deleted_at IS NULL", (product_code,)
         ).fetchone() is not None
@@ -66,7 +66,7 @@ class ProductRepository:
     @staticmethod
     def get_product_code(pid, db=None):
         """获取产品的 product_code。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute(
             "SELECT product_code FROM products WHERE id = ?", (pid,)
         ).fetchone()
@@ -79,7 +79,7 @@ class ProductRepository:
     @staticmethod
     def list_with_attachments(where_sql, params, page, limit, db=None):
         """分页列表（含附件计数和缩略图），where_sql 不含 WHERE 关键字。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             f"SELECT COUNT(*) FROM products WHERE {where_sql}", params
         ).fetchone()[0]
@@ -106,7 +106,7 @@ class ProductRepository:
     @staticmethod
     def list_search(q, limit, db=None):
         """快速搜索产品，返回 id/product_name/product_code/category 等。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if q:
             return db.execute(
                 "SELECT id, product_name, product_code, category, model, spec, style, "
@@ -126,7 +126,7 @@ class ProductRepository:
     @staticmethod
     def count_by_product_code_in_orders(product_code, db=None):
         """统计该 product_code 在 orders 表中的使用次数。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE product_code = ?", (product_code,)
         ).fetchone()[0]
@@ -134,7 +134,7 @@ class ProductRepository:
     @staticmethod
     def find_with_fields(pid, db=None):
         """按 ID 查询产品（仅关键字段，用于更新前获取旧值）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, product_name, IFNULL(model,'') as model, "
             "IFNULL(spec,'') as spec, IFNULL(style,'') as style, "
@@ -150,7 +150,7 @@ class ProductRepository:
     @staticmethod
     def insert(data, db=None):
         """插入新产品，返回 product_id。需要外层事务管理。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cur = db.execute("""
             INSERT INTO products (product_name, model, product_code, spec, style,
                 upper_opening, lower_opening, plate_thickness, category, weight, price,
@@ -177,7 +177,7 @@ class ProductRepository:
     @staticmethod
     def update(pid, set_clauses, params, db=None):
         """UPDATE products SET ... WHERE id = ?。调用方自行构建 set_clauses 和 params。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         params.append(pid)
         db.execute(
             f"UPDATE products SET {', '.join(set_clauses)} WHERE id = ?", params
@@ -186,7 +186,7 @@ class ProductRepository:
     @staticmethod
     def update_product_code(pid, product_code, db=None):
         """单独更新 product_code。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE products SET product_code = ? WHERE id = ?", (product_code, pid)
         )
@@ -194,14 +194,14 @@ class ProductRepository:
     @staticmethod
     def soft_delete(pid, db=None):
         """软删除产品。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE products SET deleted_at = datetime('now','localtime') WHERE id = ?", (pid,)
         )
     @staticmethod
     def restore(pid, db=None):
         """恢复已软删除的产品。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE products SET deleted_at = NULL WHERE id = ?", (pid,)
         )
@@ -209,7 +209,7 @@ class ProductRepository:
     @staticmethod
     def hard_delete(pid, db=None):
         """物理删除产品（先删附件，再删产品）。仅用于回收站中已确认无引用的产品。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute("DELETE FROM product_attachments WHERE product_id = ?", (pid,))
         db.execute("DELETE FROM products WHERE id = ?", (pid,))
 
@@ -220,7 +220,7 @@ class ProductRepository:
     @staticmethod
     def list_attachments(product_id, db=None):
         """获取产品附件列表（含上传者姓名）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT a.id, a.product_id, a.file_name, a.file_type, a.file_size,
                    a.created_at, u.name as uploaded_by_name
@@ -233,7 +233,7 @@ class ProductRepository:
     @staticmethod
     def insert_attachment(product_id, file_name, file_type, file_size, file_data, uploaded_by, db=None):
         """插入附件记录。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute("""
             INSERT INTO product_attachments
                 (product_id, file_name, file_type, file_size, file_data, uploaded_by)
@@ -243,7 +243,7 @@ class ProductRepository:
     @staticmethod
     def find_attachment(attachment_id, db=None):
         """按 ID 查询附件。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM product_attachments WHERE id = ?", (attachment_id,)
         ).fetchone()
@@ -251,7 +251,7 @@ class ProductRepository:
     @staticmethod
     def delete_attachment(attachment_id, db=None):
         """删除附件记录。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "DELETE FROM product_attachments WHERE id = ?", (attachment_id,)
         )

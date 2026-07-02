@@ -1,4 +1,4 @@
-﻿"""qr-system - AuditLogService"""
+"""qr-system - AuditLogService"""
 from modules.services import BaseService
 from modules.repositories.audit_log_repository import AuditLogRepository
 

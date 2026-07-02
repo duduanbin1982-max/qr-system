@@ -1,4 +1,4 @@
-﻿"""qr-system - OrderNotesService"""
+"""qr-system - OrderNotesService"""
 from modules.services import BaseService
 from modules.repositories.order_notes_repository import OrderNotesRepository
 

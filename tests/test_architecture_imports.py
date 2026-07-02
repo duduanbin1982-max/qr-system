@@ -126,3 +126,45 @@ def test_backend_modules_have_no_import_cycles():
 
     assert cycles == [], f"backend import graph contains cycles: {cycles}"
 
+def test_source_files_do_not_have_utf8_bom():
+    bom_files = [
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in _source_files()
+        if path.read_bytes().startswith(b"\xef\xbb\xbf")
+    ]
+
+    assert bom_files == [], f"source files must be plain UTF-8 without BOM: {bom_files}"
+
+
+def test_repositories_do_not_depend_on_service_db_helper():
+    violations = []
+    repository_root = PROJECT_ROOT / "modules" / "repositories"
+    for path in sorted(repository_root.glob("*.py")):
+        if path.name in {"__init__.py", "context.py"}:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                imported_names = {alias.name for alias in node.names}
+                if module == "modules.db_unit_of_work" and "BaseService" in imported_names:
+                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+                if module == "modules.services" or module.startswith("modules.services."):
+                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert violations == [], f"repositories must depend on repository/context seams, not services: {violations}"
+
+def test_services_do_not_import_sqlite_driver_directly():
+    violations = []
+    service_root = PROJECT_ROOT / "modules" / "services"
+    for path in sorted(service_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(alias.name == "sqlite3" for alias in node.names):
+                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+            elif isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
+                violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
+

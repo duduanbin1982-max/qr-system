@@ -1,12 +1,12 @@
 """qr-system - EmailReportsRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class EmailReportsRepository:
 
     @staticmethod
     def get_daily_order_stats(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             "SELECT COUNT(*) FROM orders WHERE date(created_at)=? AND deleted_at IS NULL", (today,)
         ).fetchone()[0]
@@ -20,7 +20,7 @@ class EmailReportsRepository:
 
     @staticmethod
     def get_daily_work_records(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         wr_sum = db.execute(
             "SELECT COUNT(*) as records, COALESCE(SUM(quantity),0) as qty, COUNT(DISTINCT user_id) as workers "
             "FROM work_records WHERE date(created_at)=?", (today,)
@@ -39,7 +39,7 @@ class EmailReportsRepository:
 
     @staticmethod
     def get_weekly_order_stats(week_start, week_end, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             "SELECT COUNT(*) FROM orders WHERE date(created_at) BETWEEN ? AND ? AND deleted_at IS NULL",
             (week_start, week_end)
@@ -52,7 +52,7 @@ class EmailReportsRepository:
 
     @staticmethod
     def get_weekly_work_records(week_start, week_end, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         wr_sum = db.execute(
             "SELECT COUNT(*) as records, COALESCE(SUM(quantity),0) as qty, COUNT(DISTINCT user_id) as workers "
             "FROM work_records WHERE date(created_at) BETWEEN ? AND ?", (week_start, week_end)

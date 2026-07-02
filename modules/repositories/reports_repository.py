@@ -1,5 +1,5 @@
 """qr-system — ReportsRepository（报表数据访问层）"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ReportsRepository:
@@ -8,7 +8,7 @@ class ReportsRepository:
     # ========== production_trend ==========
     @staticmethod
     def fetch_production_trend(start_date, end_date, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT dates.d as date, "
             "COALESCE(COUNT(DISTINCT CASE WHEN pi.status='completed' THEN pi.id END),0) as output, "
@@ -26,7 +26,7 @@ class ReportsRepository:
     # ========== worker_efficiency ==========
     @staticmethod
     def fetch_worker_efficiency(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT u.id, u.name, u.employee_no, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
@@ -42,7 +42,7 @@ class ReportsRepository:
     # ========== quality_analysis ==========
     @staticmethod
     def fetch_quality_by_process(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.id, p.name, p.category, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
@@ -55,7 +55,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_quality_by_product(where_clause, params, pi_w, sr_w, wr_w, item_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
             "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
@@ -75,7 +75,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_quality_summary(where_clause, params, pi_w, item_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT p.id) as product_count, "
             "COUNT(DISTINCT o.id) as order_count, "
@@ -89,7 +89,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_quality_inspection_by_process(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.name, COUNT(*) as total_inspections, "
             "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
@@ -107,7 +107,7 @@ class ReportsRepository:
     # ========== product_report ==========
     @staticmethod
     def fetch_product_report(where_clause, params, pi_w, sr_w, wr_w, item_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
             "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
@@ -127,7 +127,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_product_report_summary(where_clause, params, pi_w, item_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT p.id) as product_count, "
             "COUNT(DISTINCT o.id) as order_count, "
@@ -142,7 +142,7 @@ class ReportsRepository:
     # ========== material_usage ==========
     @staticmethod
     def fetch_material_usage(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT m.id, m.name, m.spec, m.material_type, m.unit, "
             "m.quantity as stock_qty, m.safe_stock, "
@@ -156,7 +156,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_material_usage_summary(date_w, date_p, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         extra = (" AND " + date_w) if date_w else ""
         return db.execute(
             "SELECT COUNT(DISTINCT m.id) as material_count, "
@@ -169,7 +169,7 @@ class ReportsRepository:
     # ========== shipment_stats ==========
     @staticmethod
     def fetch_shipment_by_status(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT s.status, COUNT(*) as count, COALESCE(SUM(s.total_quantity),0) as total_qty "
             "FROM shipments s WHERE " + where_clause + " GROUP BY s.status ORDER BY count DESC",
@@ -178,7 +178,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_shipment_by_customer(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT s.customer, COUNT(*) as shipment_count, "
             "COALESCE(SUM(s.total_quantity),0) as total_qty "
@@ -189,7 +189,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_shipment_monthly_trend(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT substr(s.created_at,1,7) as month, COUNT(*) as count, "
             "COALESCE(SUM(s.total_quantity),0) as total_qty "
@@ -201,7 +201,7 @@ class ReportsRepository:
     # ========== order_analysis ==========
     @staticmethod
     def fetch_order_status_distribution(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT o.status, COUNT(*) as count, COALESCE(SUM(o.quantity),0) as qty, "
             "COALESCE(SUM(o.completed),0) as done FROM orders o WHERE o.deleted_at IS NULL "
@@ -210,7 +210,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_order_monthly_trend(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT substr(o.created_at,1,7) as month, COUNT(*) as count, "
             "COALESCE(SUM(o.quantity),0) as total_qty, COALESCE(SUM(o.completed),0) as total_done "
@@ -221,7 +221,7 @@ class ReportsRepository:
     # ========== product_process_matrix ==========
     @staticmethod
     def fetch_product_process_matrix(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.product_code, p.product_name, p.model, p.spec, "
             "pr.id as process_id, pr.name as process_name, pr.seq_order, "
@@ -238,7 +238,7 @@ class ReportsRepository:
     # ========== model_process_stats ==========
     @staticmethod
     def fetch_model_process_stats(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.model, pr.name as process_name, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
@@ -254,7 +254,7 @@ class ReportsRepository:
     # ========== product_process_stats ==========
     @staticmethod
     def fetch_product_process_proc_names(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT DISTINCT pr.name FROM processes pr "
             "JOIN work_records wr ON wr.process_id=pr.id "
@@ -264,7 +264,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_product_process_matrix_data(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.product_code, p.product_name, p.model, p.spec, p.category, "
             "pr.name as process_name, "
@@ -281,7 +281,7 @@ class ReportsRepository:
     # ========== customer_stats ==========
     @staticmethod
     def fetch_customer_stats(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COALESCE(c.name, o.customer) as customer_name, "
             "COUNT(DISTINCT o.id) as order_count, SUM(o.quantity) as total_qty, "
@@ -295,7 +295,7 @@ class ReportsRepository:
     # ========== production_line_stats ==========
     @staticmethod
     def fetch_production_line_stats(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT pl.id as line_id, pl.name as line_name, "
             "COUNT(DISTINCT o.id) as order_count, SUM(o.quantity) as total_qty, "
@@ -310,7 +310,7 @@ class ReportsRepository:
     # ========== monthly_summary ==========
     @staticmethod
     def fetch_monthly_summary_this(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT o.id) as orders, "
             "COALESCE(SUM(o.quantity),0) as total_qty, "
@@ -321,7 +321,7 @@ class ReportsRepository:
 
     @staticmethod
     def fetch_monthly_summary_last(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT o.id) as orders, "
             "COALESCE(SUM(o.quantity),0) as total_qty, "
@@ -333,63 +333,63 @@ class ReportsRepository:
     # ========== KPI methods ==========
     @staticmethod
     def kpi_active_orders(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL AND status IN ('pending','producing','paused')"
         ).fetchone()[0]
 
     @staticmethod
     def kpi_completed_month(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL AND status='completed' AND substr(updated_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0]
 
     @staticmethod
     def kpi_output_month(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status='completed' AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_scrap_total(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status IN ('completed','scrapped') AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_scrap_count(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status='scrapped' AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_active_workers(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr JOIN orders o ON wr.order_id=o.id WHERE o.deleted_at IS NULL AND wr.status='approved' AND DATE(wr.created_at)=date('now')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_pending_shipments(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM shipments WHERE status='pending'"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_low_stock(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM materials WHERE safe_stock > 0 AND quantity <= safe_stock"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_weekly_trend(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT dates.d as date, "
             "COALESCE(COUNT(DISTINCT pi.id),0) as output "

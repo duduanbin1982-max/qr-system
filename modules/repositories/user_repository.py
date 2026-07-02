@@ -4,7 +4,7 @@ All SQL for users, user_processes, user_roles, positions, roles, role_groups tab
 Extracted from user_service.py.
 """
 import json
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 from modules.query_utils import paginate, build_sort_clause
 
 
@@ -17,7 +17,7 @@ class UserRepository:
     @staticmethod
     def validate_process_ids(process_ids, db=None):
         """Return set of valid process IDs from the given list."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if not process_ids:
             return set()
         placeholders = ",".join("?" for _ in process_ids)
@@ -34,7 +34,7 @@ class UserRepository:
     @staticmethod
     def list_users(page=1, limit=20, role_filter="", role_not="", keyword="", status="", db=None):
         """Paginated user list with filters. Returns {users, total, page, limit}."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         role_summary_cte = (
             "WITH role_summary AS ("
             "SELECT u.id AS user_id, "
@@ -137,25 +137,25 @@ class UserRepository:
     @staticmethod
     def find_user_by_username(username, db=None):
         """Find user by username. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
 
     @staticmethod
     def find_user_by_id_basic(uid, db=None):
         """Find user by ID, returns row with id + username only."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id, username FROM users WHERE id = ?", (uid,)).fetchone()
 
     @staticmethod
     def find_user_by_id_full(uid, db=None):
         """Find user by ID, returns full row (includes password)."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
 
     @staticmethod
     def find_user_by_id_for_update(uid, db=None):
         """Find user by ID with selected fields for update comparison."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, position_id, status "
             "FROM users WHERE id = ?", (uid,)
@@ -164,13 +164,13 @@ class UserRepository:
     @staticmethod
     def find_user_status(uid, db=None):
         """Find user id + status only."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id, status FROM users WHERE id = ?", (uid,)).fetchone()
 
     @staticmethod
     def find_deleted_user(uid, db=None):
         """Find soft-deleted user. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, username FROM users WHERE id = ? AND status = 'deleted'", (uid,)
         ).fetchone()
@@ -182,20 +182,20 @@ class UserRepository:
     @staticmethod
     def find_role_by_code(code, db=None):
         """Find role row by code. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
 
     @staticmethod
     def find_role_code_by_id(role_id, db=None):
         """Find role code by role ID. Returns string or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute("SELECT code FROM roles WHERE id = ? LIMIT 1", (role_id,)).fetchone()
         return row["code"] if row else None
 
     @staticmethod
     def check_admin_role(user_id, db=None):
         """Check if user has admin role. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT 1 FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
             "WHERE ur.user_id = ? AND r.code = 'admin' LIMIT 1",
@@ -205,7 +205,7 @@ class UserRepository:
     @staticmethod
     def get_role_group_name(role_id, db=None):
         """Get role group name for a role. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT rg.name FROM roles r JOIN role_groups rg ON r.group_id = rg.id WHERE r.id = ?",
             (role_id,)
@@ -214,7 +214,7 @@ class UserRepository:
     @staticmethod
     def count_admin_roles(db=None):
         """Count total users with admin role."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'admin'"
         ).fetchone()[0]
@@ -222,7 +222,7 @@ class UserRepository:
     @staticmethod
     def count_admin_roles_excluding(user_id, db=None):
         """Count admin roles excluding a specific user."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
             "WHERE r.code = 'admin' AND ur.user_id != ?",
@@ -232,7 +232,7 @@ class UserRepository:
     @staticmethod
     def count_admin_users_excluding(user_id, db=None):
         """Count admin users (by role column) excluding one."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?",
             (user_id,)
@@ -241,7 +241,7 @@ class UserRepository:
     @staticmethod
     def count_admin_roles_in_ids(ids, db=None):
         """Count how many of the given user IDs have admin role."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         placeholders = ",".join("?" for _ in ids)
         return db.execute(
             "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
@@ -252,14 +252,14 @@ class UserRepository:
     @staticmethod
     def find_role_id_by_code(code, db=None):
         """Find role ID by old role column value. Returns int or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
         return row[0] if row else None
 
     @staticmethod
     def get_primary_role_code(user_id, db=None):
         """Get the display/primary role code for a user."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute(
             "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
             "WHERE ur.user_id = ? "
@@ -279,13 +279,13 @@ class UserRepository:
     @staticmethod
     def find_position_by_id(position_id, db=None):
         """Find position by ID. Returns row or None."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM positions WHERE id = ?", (position_id,)).fetchone()
 
     @staticmethod
     def get_active_positions(db=None):
         """Get all active positions (id, name)."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id, name FROM positions WHERE status='active'").fetchall()
 
     # ============================================================
@@ -295,7 +295,7 @@ class UserRepository:
     @staticmethod
     def get_next_employee_no(db=None):
         """Get next auto-generated employee number."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         last = db.execute(
             "SELECT MAX(CAST(employee_no AS INTEGER)) as max_no FROM users WHERE employee_no GLOB '[0-9]*'"
         ).fetchone()
@@ -304,7 +304,7 @@ class UserRepository:
     @staticmethod
     def check_employee_no_exists(employee_no, db=None):
         """Check if an employee_no already exists."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT 1 FROM users WHERE employee_no = ?", (employee_no,)).fetchone() is not None
 
     # ============================================================
@@ -415,7 +415,7 @@ class UserRepository:
 
     @staticmethod
     def get_user_role_names(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ?",
             (user_id,)
@@ -423,7 +423,7 @@ class UserRepository:
 
     @staticmethod
     def get_user_assigned_processes(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT p.id, p.name FROM user_processes up JOIN processes p ON up.process_id = p.id WHERE up.user_id = ?",
             (user_id,)
@@ -431,7 +431,7 @@ class UserRepository:
 
     @staticmethod
     def get_user_work_stats(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as total_records, SUM(quantity) as total_quantity FROM work_records WHERE user_id = ? AND status = 'approved'",
             (user_id,)
@@ -439,7 +439,7 @@ class UserRepository:
 
     @staticmethod
     def list_user_documents(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, user_id, doc_name, doc_type, file_size, uploaded_by, created_at "
             "FROM employee_documents WHERE user_id = ? ORDER BY created_at DESC",
@@ -448,7 +448,7 @@ class UserRepository:
 
     @staticmethod
     def find_user_document(user_id, doc_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM employee_documents WHERE id = ? AND user_id = ?",
             (doc_id, user_id)

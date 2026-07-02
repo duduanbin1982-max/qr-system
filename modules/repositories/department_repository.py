@@ -1,11 +1,11 @@
 """Department repository."""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class DepartmentRepository:
     @staticmethod
     def list_active(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, name, description, parent_id, sort_order, status, created_at "
             "FROM departments WHERE status='active' ORDER BY sort_order"
@@ -13,19 +13,19 @@ class DepartmentRepository:
 
     @staticmethod
     def find_by_id(dep_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM departments WHERE id = ?", (dep_id,)).fetchone()
 
     @staticmethod
     def find_active_by_id(dep_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM departments WHERE id = ? AND status='active'", (dep_id,)
         ).fetchone()
 
     @staticmethod
     def find_by_name(name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM departments WHERE name = ?", (name,)).fetchone()
 
     @staticmethod

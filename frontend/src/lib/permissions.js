@@ -7,6 +7,7 @@ export const SIDEBAR_ITEMS = [
   { page: 'stats', icon: '📈', label: '统计报表', permission: 'page:stats' },
   { page: 'reports', icon: '📊', label: '数据分析', permission: 'page:reports' },
   { page: 'wages', icon: '💰', label: '工资核算', permission: 'page:wages' },
+  { page: 'performance', icon: '🎯', label: '绩效管理', permission: 'page:performance' },
   { page: 'basic-settings', icon: '⚙️', label: '基础设置', permission: 'page:basic-settings' },
   { page: 'settings', icon: '⚙️', label: '系统设置', permission: 'page:settings' },
 ]
@@ -28,6 +29,7 @@ export const PAGE_RULES = {
   stats: { permission: 'page:stats', label: '统计报表' },
   reports: { permission: 'page:reports', label: '数据分析' },
   wages: { permission: 'page:wages', label: '工资核算' },
+  performance: { permission: 'page:performance', label: '绩效管理' },
   board: { permission: 'page:board', label: '数据看板' },
   'basic-settings': { permission: 'page:basic-settings', label: '基础设置' },
   users: { permission: 'page:basic-settings.users', label: '员工管理', parent: 'basic-settings' },
@@ -71,6 +73,7 @@ export const ACTION_PAGE_MAP = {
   stats: ['page:stats'],
   reports: ['page:reports'],
   wages: ['page:wages'],
+  performance: ['page:performance'],
   board: ['page:board'],
   users: ['page:basic-settings', 'page:basic-settings.users'],
   processes: ['page:basic-settings', 'page:basic-settings.processes'],

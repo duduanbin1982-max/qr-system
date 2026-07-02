@@ -1,4 +1,4 @@
-﻿"""
+"""
 qr-system — 角色组 + 角色管理 Service 层（Repository-refactored）
 """
 import json

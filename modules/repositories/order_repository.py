@@ -4,7 +4,7 @@ qr-system — OrderRepository（数据访问层）
 Brooks R6 fix: 将所有 orders 表 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class OrderRepository:
@@ -17,7 +17,7 @@ class OrderRepository:
     @staticmethod
     def find_by_id(order_id, db=None, include_deleted=False):
         """按 ID 查询订单（含关联的客户名、路线名）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(f'''
             SELECT o.*, pr.name as route_name, c.name as customer_name
             FROM orders o
@@ -33,7 +33,7 @@ class OrderRepository:
     @staticmethod
     def find_status_by_id(order_id, db=None):
         """轻量查询 — 仅返回 id, status, deleted_at，用于状态校验。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, status, deleted_at FROM orders WHERE id = ?", (order_id,)
         ).fetchone()
@@ -41,7 +41,7 @@ class OrderRepository:
 
     @staticmethod
     def find_by_order_no(order_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT * FROM orders WHERE order_no = ? AND deleted_at IS NULL',
             (order_no,)
@@ -49,14 +49,14 @@ class OrderRepository:
 
     @staticmethod
     def exists_by_order_no(order_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT id FROM orders WHERE order_no = ?', (order_no,)
         ).fetchone() is not None
 
     @staticmethod
     def find_latest_order_no_with_prefix(prefix, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT order_no FROM orders WHERE order_no LIKE ? ORDER BY id DESC LIMIT 1",
             (prefix + '%',)
@@ -65,7 +65,7 @@ class OrderRepository:
     @staticmethod
     def list_all(where_sql, params, page, limit, db=None, order_by='o.created_at DESC, o.id DESC'):
         """分页列表（where_sql 不含 WHERE 关键字，调用方负责拼接）。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             f'SELECT COUNT(*) FROM orders o WHERE {where_sql}', params
         ).fetchone()[0]
@@ -83,7 +83,7 @@ class OrderRepository:
 
     @staticmethod
     def list_processes_for_orders(order_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if not order_ids:
             return []
         placeholders = ','.join('?' for _ in order_ids)
@@ -97,18 +97,18 @@ class OrderRepository:
 
     @staticmethod
     def find_customer_name(customer_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute('SELECT name FROM customers WHERE id = ?', (customer_id,)).fetchone()
         return row['name'] if row else None
 
     @staticmethod
     def find_order_remark(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('SELECT remark FROM orders WHERE id = ?', (order_id,)).fetchone()
 
     @staticmethod
     def insert_remark_history(order_id, old_remark, new_remark, user_id, user_name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "INSERT INTO order_remark_history (order_id, old_remark, new_remark, user_id, user_name) "
             "VALUES (?,?,?,?,?)",
@@ -117,12 +117,12 @@ class OrderRepository:
 
     @staticmethod
     def update_fields(order_id, set_clauses, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute('UPDATE orders SET ' + ', '.join(set_clauses) + ' WHERE id = ?', list(params) + [order_id])
 
     @staticmethod
     def mark_deleted(order_id, deleted_by=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE orders SET deleted_at = datetime('now','localtime'), deleted_by = ?, "
             "pre_delete_status = status, status = 'cancelled' WHERE id = ?",
@@ -132,7 +132,7 @@ class OrderRepository:
     @staticmethod
     def count_by_status(where_sql, params, db=None):
         """按状态统计订单数。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             f'SELECT o.status, COUNT(*) as cnt FROM orders o WHERE {where_sql} GROUP BY o.status',
             params
@@ -140,7 +140,7 @@ class OrderRepository:
 
     @staticmethod
     def list_trash(page, limit, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             'SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL'
         ).fetchone()[0]
@@ -161,7 +161,7 @@ class OrderRepository:
 
     @staticmethod
     def insert_from_order_form(data, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cur = db.execute("""
             INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
                 plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
@@ -178,7 +178,7 @@ class OrderRepository:
     @staticmethod
     def insert(data, db=None):
         """插入新订单，返回 order_id。需要外层事务管理。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         cur = db.execute('''
             INSERT INTO orders (order_no, customer, customer_id, product_name,
                 product_code, model, spec, style, upper_opening, plate_thickness,
@@ -208,7 +208,7 @@ class OrderRepository:
     @staticmethod
     def update(order_id, set_clauses, params, db=None):
         """UPDATE orders SET ... WHERE id = ?。调用方自行构建 set_clauses 和 params。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         params.append(order_id)
         db.execute(
             f'UPDATE orders SET {", ".join(set_clauses)} WHERE id = ?', params
@@ -216,7 +216,7 @@ class OrderRepository:
 
     @staticmethod
     def soft_delete(order_id, deleted_by, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         now = db.execute("SELECT datetime('now','localtime')").fetchone()[0]
         db.execute(
             "UPDATE orders SET deleted_at = ?, deleted_by = ?, status = 'cancelled' WHERE id = ?",
@@ -230,13 +230,13 @@ class OrderRepository:
         # Also restore cascade
     @staticmethod
     def soft_restore(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute("UPDATE work_records SET status='approved' WHERE order_id=? AND status='deleted'", (order_id,))
         db.execute("UPDATE product_items SET status='active' WHERE order_id=? AND status='deleted'", (order_id,))
 
     @staticmethod
     def restore(order_id, prev_status, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             'UPDATE orders SET deleted_at = NULL, deleted_by = NULL, status = ? WHERE id = ?',
             (prev_status, order_id)
@@ -245,7 +245,7 @@ class OrderRepository:
     @staticmethod
     def purge(order_id, db=None):
         """硬删除订单及其所有关联数据。返回 order_no。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         order = db.execute(
             'SELECT id, order_no FROM orders WHERE id = ?', (order_id,)
         ).fetchone()
@@ -260,7 +260,7 @@ class OrderRepository:
 
     @staticmethod
     def purge_with_children(order_id, child_tables, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         for table in child_tables:
             db.execute(f"DELETE FROM {table} WHERE order_id = ?", (order_id,))
         db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
@@ -271,7 +271,7 @@ class OrderRepository:
 
     @staticmethod
     def get_processes(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT op.*, p.name as process_name
             FROM order_processes op
@@ -282,7 +282,7 @@ class OrderRepository:
 
     @staticmethod
     def assign_processes_from_route(order_id, route_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         route_items = db.execute(
             'SELECT process_id, seq_order, required_audit '
             'FROM process_route_items WHERE route_id = ? ORDER BY seq_order',
@@ -298,7 +298,7 @@ class OrderRepository:
 
     @staticmethod
     def assign_processes_from_list(order_id, process_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         count = 0
         for pid in process_ids:
             proc = db.execute(
@@ -314,7 +314,7 @@ class OrderRepository:
 
     @staticmethod
     def list_order_process_ids(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT process_id FROM order_processes WHERE order_id = ?',
             (order_id,)
@@ -322,7 +322,7 @@ class OrderRepository:
 
     @staticmethod
     def delete_order_processes(order_id, process_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if not process_ids:
             return
         placeholders = ','.join('?' for _ in process_ids)
@@ -333,7 +333,7 @@ class OrderRepository:
 
     @staticmethod
     def find_process_seq_order(process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             'SELECT seq_order FROM processes WHERE id = ?',
             (process_id,)
@@ -341,7 +341,7 @@ class OrderRepository:
 
     @staticmethod
     def insert_order_process(order_id, process_id, seq_order, required_audit=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if required_audit is None:
             db.execute(
                 'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
@@ -355,7 +355,7 @@ class OrderRepository:
 
     @staticmethod
     def assign_all_active_processes(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         procs = db.execute(
             "SELECT id, seq_order FROM processes WHERE status = 'active' ORDER BY seq_order"
         ).fetchall()
@@ -371,7 +371,7 @@ class OrderRepository:
     @staticmethod
     def remove_processes_except(order_id, keep_ids, db=None):
         """删除不在 keep_ids 中的工序关联。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         if not keep_ids:
             db.execute('DELETE FROM order_processes WHERE order_id = ?', (order_id,))
             return
@@ -384,7 +384,7 @@ class OrderRepository:
     @staticmethod
     def get_work_records(order_id, db=None):
         """获取订单的所有报工/报废/返工记录。"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         result = {'work': [], 'scrap': [], 'rework': []}
         for table, key in [('work_records', 'work'), ('scrap_records', 'scrap'), ('rework_records', 'rework')]:
             result[key] = [dict(r) for r in db.execute(f'''
@@ -399,7 +399,7 @@ class OrderRepository:
 
     @staticmethod
     def get_shipments(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT DISTINCT s.*,
                    (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
@@ -410,7 +410,7 @@ class OrderRepository:
 
     @staticmethod
     def get_shipments_by_product_code(product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT DISTINCT s.*,
                    (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
@@ -423,7 +423,7 @@ class OrderRepository:
 
     @staticmethod
     def get_workpiece_progress_rows(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         items = db.execute(
             "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
         ).fetchall()
@@ -447,7 +447,7 @@ class OrderRepository:
     def generate_order_no(db=None):
         """生成 YYMMDD + 2位顺序号。需要外层事务管理。"""
         from datetime import datetime
-        db = db or BaseService.db()
+        db = resolve_db(db)
         today = datetime.now()
         prefix = today.strftime('%y%m%d')
         row = db.execute(

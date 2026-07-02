@@ -2,7 +2,7 @@
 
 All SQL for kanban board data: order counts, output, efficiency, workers.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class BoardRepository:
@@ -25,7 +25,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_order_counts(cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         base = ("FROM orders o LEFT JOIN products p ON o.product_code = p.product_code "
                 "WHERE o.deleted_at IS NULL" + cat_sql)
         total = db.execute("SELECT COUNT(DISTINCT o.id) " + base, cat_params).fetchone()[0]
@@ -38,7 +38,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_today_output(today, cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         base = ("FROM work_records wr JOIN orders o ON wr.order_id = o.id "
                 "LEFT JOIN products p ON o.product_code = p.product_code "
                 "WHERE date(wr.created_at) = ? AND o.deleted_at IS NULL" + cat_sql)
@@ -53,7 +53,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_recent_work(cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT wr.*, o.order_no, p.name as process_name, u.name as worker_name "
             "FROM work_records wr LEFT JOIN orders o ON wr.order_id = o.id "
@@ -70,7 +70,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_orders_in_progress(cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT o.*, COALESCE(c.name, o.customer) as customer_name "
             "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id "
@@ -92,7 +92,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_process_efficiency(cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT o.id as order_id, o.order_no, o.product_name, o.quantity, o.completed, "
             "COUNT(op.id) as total_processes, "
@@ -110,7 +110,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_overdue_orders(today, cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
             "CAST(julianday('now','localtime') - julianday(o.plan_end) AS INTEGER) as overdue_days "
@@ -127,7 +127,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_worker_stats_today(today, cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT u.name as worker_name, COUNT(wr.id) as report_count, "
             "COALESCE(SUM(wr.quantity),0) as output, "
@@ -147,7 +147,7 @@ class BoardRepository:
     # ============================================================
     @staticmethod
     def get_monthly_completion(cat_sql, cat_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT substr(o.created_at,1,7) as month, COUNT(*) as total, "
             "SUM(CASE WHEN o.status='completed' THEN 1 ELSE 0 END) as completed "
@@ -180,14 +180,14 @@ class BoardRepository:
 
     @staticmethod
     def count_active_sessions(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM board_sessions WHERE expires_at > datetime('now','localtime')"
         ).fetchone()[0]
 
     @staticmethod
     def find_active_session(token, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM board_sessions WHERE token = ? AND expires_at > datetime('now','localtime')",
             (token,)

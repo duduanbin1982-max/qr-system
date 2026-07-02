@@ -45,6 +45,8 @@ var api = {
   decodeQR: function(code) { return apiRequest("GET", "/mobile/decode/" + code); },
   mobileScan: function(data) { return apiRequest("POST", "/mobile/scan", data); },
   mobileReport: function(data) { return apiRequest("POST", "/mobile/report", data); },
+  handoffPending: function(params) { return apiRequest("GET", "/handoff-reviews/pending?" + params); },
+  createHandoffReview: function(data) { return apiRequest("POST", "/handoff-reviews", data); },
   report: function(data) { return apiRequest("POST", "/report", data); },
 
   // 质量检验

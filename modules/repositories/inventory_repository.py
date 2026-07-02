@@ -1,5 +1,5 @@
 """qr-system - InventoryRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 from modules.query_utils import paginate, build_sort_clause
 
 
@@ -25,7 +25,7 @@ class InventoryRepository:
 
     @staticmethod
     def count_items(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
             "LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE "
@@ -34,7 +34,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_items_paginated(where_clause, params, page, limit, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         base_sql = (
             "SELECT i.*, o.order_no, o.customer, p.price, "
             "CASE WHEN i.quantity <= i.safe_stock AND i.safe_stock > 0 "
@@ -77,12 +77,12 @@ class InventoryRepository:
 
     @staticmethod
     def find_item_by_id(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
 
     @staticmethod
     def find_item_for_delete(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT product_model, product_name, quantity FROM inventory WHERE id = ?",
             (item_id,)
@@ -149,12 +149,12 @@ class InventoryRepository:
 
     @staticmethod
     def get_item_quantity(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT quantity FROM inventory WHERE id = ?", (item_id,)).fetchone()
 
     @staticmethod
     def find_adjustment_item(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, quantity, product_model FROM inventory WHERE id=?",
             (item_id,),
@@ -162,7 +162,7 @@ class InventoryRepository:
 
     @staticmethod
     def count_logs(inv_id, type_filter, date_from, date_to, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = ["1=1"]
         params = []
         if inv_id:
@@ -182,7 +182,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_logs(inv_id, type_filter, date_from, date_to, page, limit, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = ["1=1"]
         params = []
         if inv_id:
@@ -208,7 +208,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_alerts(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT *, (safe_stock - quantity) as shortage "
             "FROM inventory "
@@ -218,14 +218,14 @@ class InventoryRepository:
 
     @staticmethod
     def count_item_logs(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM inventory_logs WHERE inventory_id = ?", (item_id,)
         ).fetchone()[0]
 
     @staticmethod
     def count_linked_orders(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders o JOIN inventory i ON i.order_id = o.id "
             "WHERE i.id = ? AND o.deleted_at IS NULL", (item_id,)
@@ -233,7 +233,7 @@ class InventoryRepository:
 
     @staticmethod
     def get_inventory_stats(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
             "COALESCE(SUM(CASE WHEN quantity <= safe_stock AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
@@ -242,7 +242,7 @@ class InventoryRepository:
 
     @staticmethod
     def get_today_stats(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COALESCE(SUM(CASE WHEN type='in' THEN quantity ELSE 0 END),0) as today_in, "
             "COALESCE(SUM(CASE WHEN type='out' THEN quantity ELSE 0 END),0) as today_out "
@@ -264,7 +264,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_abc_rows(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT inv.id, inv.product_model, "
             "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
@@ -280,7 +280,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_turnover_rows(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT inv.id, inv.product_model, inv.product_name, inv.quantity as current_stock, "
             "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
@@ -292,7 +292,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_safe_stock_suggestion_rows(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT inv.id, inv.product_model, inv.product_name, inv.safe_stock as current_safe, "
             "inv.quantity, "
@@ -304,7 +304,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_inbound_batches(item_id=None, lot_no=None, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         clauses = ["type='in'"]
         params = []
         if item_id:
@@ -322,7 +322,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_batch_outbound_after(inventory_id, created_at, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM inventory_logs WHERE inventory_id=? AND type='out' "
             "AND created_at >= ? ORDER BY created_at",
@@ -331,7 +331,7 @@ class InventoryRepository:
 
     @staticmethod
     def list_locations(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT location, COUNT(*) as item_count, SUM(quantity) as total_qty, "
             "GROUP_CONCAT(product_model || '(' || quantity || ')', ', ') as items "
@@ -347,17 +347,17 @@ class InventoryRepository:
 
     @staticmethod
     def count_inventory_items(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT COUNT(*) as cnt FROM inventory").fetchone()["cnt"]
 
     @staticmethod
     def count_inventory_items_counted_today(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as cnt FROM inventory WHERE last_count_date >= date('now')"
         ).fetchone()["cnt"]
 
     @staticmethod
     def get_count_item(item_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()

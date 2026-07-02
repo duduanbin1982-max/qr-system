@@ -1,12 +1,12 @@
 """qr-system - NotificationRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class NotificationRepository:
 
     @staticmethod
     def list_unread(user_id, limit=50, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC LIMIT ?",
             (user_id, limit)
@@ -14,7 +14,7 @@ class NotificationRepository:
 
     @staticmethod
     def list_all(user_id, page=1, limit=20, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         total = db.execute(
             "SELECT COUNT(*) FROM notifications WHERE user_id = ?", (user_id,)
         ).fetchone()[0]
@@ -37,7 +37,7 @@ class NotificationRepository:
 
     @staticmethod
     def unread_count(user_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0", (user_id,)
         ).fetchone()[0]

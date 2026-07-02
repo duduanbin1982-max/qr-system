@@ -3,7 +3,7 @@ qr-system - ScheduleRepository
 
 All SQL for schedule/gantt operations.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ScheduleRepository:
@@ -12,7 +12,7 @@ class ScheduleRepository:
     @staticmethod
     def find_scheduled_orders(limit=200, offset=0, db=None):
         """Get orders with plan_start set, with pagination."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT o.id, o.order_no, o.product_name, o.product_code, o.plan_start,
                    o.plan_end, o.production_line_id, o.deadline, o.status, o.quantity,
@@ -31,7 +31,7 @@ class ScheduleRepository:
 
     @staticmethod
     def count_scheduled_orders(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT COUNT(*) FROM orders
             WHERE plan_start IS NOT NULL AND plan_start != '' AND deleted_at IS NULL
@@ -39,7 +39,7 @@ class ScheduleRepository:
 
     @staticmethod
     def find_order_by_id(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
         ).fetchone()

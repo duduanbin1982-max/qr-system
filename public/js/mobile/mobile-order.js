@@ -173,16 +173,81 @@ function doReport() {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.error) { toast(d.error); btn.disabled = false; updateReportBtn(); return; }
-    const qty = body.quantity || 1;
-    const label = reportType === 'normal' ? '正常报工' : reportType === 'scrap' ? '报废' : '返修';
-    $('ok-msg').textContent = (curOrder.order_no || '') + ' · ' + (curOrder.current_process && curOrder.current_process.process_name || '');
-    $('ok-detail').innerHTML =
-      '<div>📦 订单: ' + esc(curOrder.order_no || '') + '</div>' +
-      '<div>⚙️ 工序: ' + esc(curOrder.current_process && curOrder.current_process.process_name || '') + '</div>' +
-      '<div>📊 数量: ' + qty + ' 件</div>' +
-      '<div>🏷️ 类型: ' + label + '</div>' +
-      '<div>👤 操作人: ' + esc(d.worker ? d.worker.name : (user() ? user().name : '未知')) + '</div>';
-    show('ok');
+    showReportSuccess(body, d);
+    maybeOpenHandoffReview(body);
   })
   .catch(function() { toast('网络异常'); btn.disabled = false; updateReportBtn(); });
+}
+
+function showReportSuccess(body, response) {
+  const qty = body.quantity || 1;
+  const label = reportType === 'normal' ? '正常报工' : reportType === 'scrap' ? '报废' : '返修';
+  $('ok-msg').textContent = (curOrder.order_no || '') + ' · ' + (curOrder.current_process && curOrder.current_process.process_name || '');
+  $('ok-detail').innerHTML =
+    '<div>📦 订单: ' + esc(curOrder.order_no || '') + '</div>' +
+    '<div>⚙️ 工序: ' + esc(curOrder.current_process && curOrder.current_process.process_name || '') + '</div>' +
+    '<div>📊 数量: ' + qty + ' 件</div>' +
+    '<div>🏷️ 类型: ' + label + '</div>' +
+    '<div>👤 操作人: ' + esc(response.worker ? response.worker.name : (user() ? user().name : '未知')) + '</div>';
+  show('ok');
+}
+
+function maybeOpenHandoffReview(body) {
+  if (body.report_type !== 'normal' || !curOrder || !curProcId) return;
+  var params = 'order_id=' + encodeURIComponent(curOrder.id) +
+    '&to_process_id=' + encodeURIComponent(curProcId) +
+    '&serial_no=' + encodeURIComponent(curSerial || '');
+  api.handoffPending(params)
+    .then(function(ctx) {
+      if (!ctx || !ctx.required) return;
+      handoffContext = ctx;
+      handoffRating = 5;
+      setHandoffRating(5);
+      $('handoff-title').textContent = '请评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量';
+      $('handoff-issue').value = '';
+      $('handoff-comment').value = '';
+      $('handoff-modal').classList.add('active');
+    })
+    .catch(function(e) { console.log('handoff pending skipped:', e && e.message); });
+}
+
+function setHandoffRating(score) {
+  handoffRating = score || 5;
+  var stars = document.querySelectorAll('#handoff-stars button');
+  for (var i = 0; i < stars.length; i++) {
+    var s = parseInt(stars[i].getAttribute('data-score')) || 0;
+    stars[i].classList.toggle('active', s <= handoffRating);
+  }
+}
+
+function closeHandoffModal() {
+  var modal = $('handoff-modal');
+  if (modal) modal.classList.remove('active');
+  handoffContext = null;
+}
+
+function submitHandoffReview() {
+  if (!handoffContext) { closeHandoffModal(); return; }
+  var issue = ($('handoff-issue').value || '').trim();
+  var comment = ($('handoff-comment').value || '').trim();
+  if (handoffRating <= 2 && !issue && !comment) {
+    toast('低分评价请填写问题类型或备注');
+    return;
+  }
+  $('handoff-submit').disabled = true;
+  api.createHandoffReview({
+    order_id: handoffContext.order_id,
+    to_process_id: handoffContext.to_process_id,
+    serial_no: handoffContext.serial_no || '',
+    rating: handoffRating,
+    issue_type: issue,
+    comment: comment
+  }).then(function(res) {
+    toast(res.status === 'pending' ? '评价已提交，等待主管确认' : '交接评价已提交');
+    closeHandoffModal();
+  }).catch(function(e) {
+    toast(e.message || '评价提交失败');
+  }).finally(function() {
+    $('handoff-submit').disabled = false;
+  });
 }

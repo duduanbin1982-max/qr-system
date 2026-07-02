@@ -1,5 +1,6 @@
 """Core scan-to-report flow integration tests"""
 import json, time, pytest
+import uuid
 from modules.db import get_db
 
 
@@ -8,6 +9,35 @@ def _order_no_for(client, order_id):
         row = get_db().execute("SELECT order_no FROM orders WHERE id = ?", (order_id,)).fetchone()
     assert row is not None, f"Missing fixture order {order_id}"
     return row["order_no"]
+
+
+def _seed_order_mode_two_step_order(client):
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        process_ids = []
+        for seq_order, name in enumerate((f"Fixture OrderMode A {suffix}", f"Fixture OrderMode B {suffix}"), start=1):
+            cursor = db.execute(
+                "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+                "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
+                (name, seq_order),
+            )
+            process_ids.append(cursor.lastrowid)
+
+        order_no = f"TEST-ORDER-MODE-{suffix}"
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
+            "VALUES (?, 'Test Customer', 'Cross Module Product', ?, 5, 'producing', '')",
+            (order_no, f"XMOD-OM-{suffix}"),
+        ).lastrowid
+        for seq_order, process_id in enumerate(process_ids, start=1):
+            db.execute(
+                "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+                "VALUES (?, ?, ?, 'pending', 0, 0, 0)",
+                (order_id, process_id, seq_order),
+            )
+        db.commit()
+        return order_id, order_no, process_ids
 
 
 class TestScanWorkFlow:
@@ -28,6 +58,31 @@ class TestScanWorkFlow:
             "type": "order_no"
         })
         assert resp.status_code in (200, 404)
+
+
+    def test_order_mode_mobile_scan_advances_after_process_completed(self, client, worker_auth_headers):
+        """Order-mode mobile scan should move to next process after current process reaches order quantity."""
+        order_id, order_no, process_ids = _seed_order_mode_two_step_order(client)
+
+        first_scan = client.post("/api/mobile/scan", headers=worker_auth_headers, json={"code": order_no})
+        assert first_scan.status_code == 200, first_scan.get_json()
+        assert first_scan.get_json()["order"]["current_process"]["process_id"] == process_ids[0]
+
+        report = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_ids[0],
+                "quantity": 5,
+                "report_type": "normal",
+            },
+        )
+        assert report.status_code in (200, 201), report.get_json()
+
+        next_scan = client.post("/api/mobile/scan", headers=worker_auth_headers, json={"code": order_no})
+        assert next_scan.status_code == 200, next_scan.get_json()
+        assert next_scan.get_json()["order"]["current_process"]["process_id"] == process_ids[1]
 
     def test_work_report_submit(self, client, auth_headers, worker_auth_headers, test_order_id):
         """POST /api/report — submit a work report."""

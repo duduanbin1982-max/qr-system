@@ -1,7 +1,7 @@
 """Simple TTL cache for route responses."""
 import time
 from functools import wraps
-from flask import jsonify, g
+from flask import jsonify, g, request
 
 _cache_store = {}
 MAX_CACHE_SIZE = 100
@@ -20,15 +20,24 @@ def _get_user_key():
     except Exception:
         return '0'
 
+
+def _get_request_key():
+    """Build a cache key that includes path and query parameters."""
+    try:
+        return f"{request.method}:{request.path}:{request.query_string.decode('utf-8')}"
+    except RuntimeError:
+        return "no-request"
+
 def ttl_cache(ttl_seconds=30):
     """Decorator: cache Flask JSON response for ttl_seconds.
     Only caches 2xx responses; error responses (4xx/5xx) are never cached.
-    Cache key includes user ID for per-user isolation."""
+    Cache key includes user ID and request query for per-user/query isolation."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             uid = _get_user_key()
-            cache_key = f"{func.__name__}:{uid}:{args}:{kwargs}"
+            req_key = _get_request_key()
+            cache_key = f"{func.__name__}:{uid}:{req_key}:{args}:{kwargs}"
             now = time.time()
             if cache_key in _cache_store:
                 data, timestamp = _cache_store[cache_key]

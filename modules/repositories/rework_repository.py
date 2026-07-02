@@ -3,7 +3,7 @@ qr-system - ReworkRepository
 
 All SQL for rework_records table.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ReworkRepository:
@@ -13,7 +13,7 @@ class ReworkRepository:
     def list_rework(status="", search="", date_from="", date_to="",
                     page=1, per_page=50, worker_id=None, process_id=None, db=None):
         """List rework records with filters and pagination using static SQL."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
 
@@ -71,21 +71,21 @@ class ReworkRepository:
 
     @staticmethod
     def find_by_id(rework_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM rework_records WHERE id = ?", (rework_id,)
         ).fetchone()
 
     @staticmethod
     def find_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
     @staticmethod
     def find_process(process_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, name FROM processes WHERE id = ?", (process_id,)
         ).fetchone()
@@ -118,7 +118,7 @@ class ReworkRepository:
 
     @staticmethod
     def update_reason(rework_id, reason, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         db.execute(
             "UPDATE rework_records SET reason = ? WHERE id = ?", (reason, rework_id)
         )
@@ -136,7 +136,7 @@ class ReworkRepository:
     @staticmethod
     def get_stats(db=None):
         from datetime import datetime, timedelta
-        db = db or BaseService.db()
+        db = resolve_db(db)
         today = datetime.now().strftime("%Y-%m-%d")
         now = datetime.now()
         week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
@@ -184,7 +184,7 @@ class ReworkRepository:
 
     @staticmethod
     def rework_trend(period="week", months=3, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         months_val = -abs(months)
         if period == "week":
             rows = db.execute(
@@ -209,7 +209,7 @@ class ReworkRepository:
 
     @staticmethod
     def top_rework_processes(top_n=5, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT p.name as process_name, COUNT(*) as rework_count, "
             "COALESCE(SUM(rw.quantity),0) as rework_qty "
@@ -242,7 +242,7 @@ class ReworkRepository:
 
     @staticmethod
     def worker_rework_stats(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         rows = db.execute(
             "SELECT u.name as worker_name, u.id as worker_id, "
             "COUNT(*) as rework_count, "
@@ -284,7 +284,7 @@ class ReworkRepository:
     def find_all_for_export(status="", search="", date_from="", date_to="",
                             worker_id=None, process_id=None, db=None):
         """Get all matching rework records for export (no pagination)."""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_parts = []
         params = []
 

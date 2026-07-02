@@ -1,4 +1,4 @@
-﻿"""qr-system - NotificationService"""
+"""qr-system - NotificationService"""
 from modules.services import BaseService
 from modules.repositories.notification_repository import NotificationRepository
 

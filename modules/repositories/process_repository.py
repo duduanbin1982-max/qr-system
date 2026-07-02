@@ -1,12 +1,12 @@
 """qr-system - ProcessRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ProcessRepository:
 
     @staticmethod
     def list_all(conditions, params, sort_by, sort_dir, limit, offset, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         sql = ("SELECT id, name AS process_name, description, category, "
                "seq_order, status, created_at FROM processes")
         if conditions:
@@ -19,7 +19,7 @@ class ProcessRepository:
 
     @staticmethod
     def count_all(conditions, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         sql = "SELECT COUNT(*) FROM processes"
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
@@ -27,24 +27,24 @@ class ProcessRepository:
 
     @staticmethod
     def get_category_counts(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return {r["category"]: r["cnt"] for r in db.execute(
             "SELECT category, COUNT(*) as cnt FROM processes GROUP BY category"
         ).fetchall()}
 
     @staticmethod
     def find_by_name(name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM processes WHERE name = ?", (name,)).fetchone()
 
     @staticmethod
     def find_by_id(pid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id, name FROM processes WHERE id = ?", (pid,)).fetchone()
 
     @staticmethod
     def get_max_seq(category, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COALESCE(MAX(seq_order),0) FROM processes WHERE category = ?",
             (category,)
@@ -61,7 +61,7 @@ class ProcessRepository:
 
     @staticmethod
     def find_duplicate_name(name, exclude_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM processes WHERE name = ? AND id != ?", (name, exclude_id)
         ).fetchone()
@@ -79,7 +79,7 @@ class ProcessRepository:
 
     @staticmethod
     def check_impact(pid, tables, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         parts = [
             "SELECT '" + t + "' as tbl, COUNT(*) as cnt FROM " + t + " WHERE process_id = ?"
             for t in tables

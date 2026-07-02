@@ -1,0 +1,51 @@
+import re
+from pathlib import Path
+
+from modules.permission_catalog import (
+    ACTION_PERMISSION_DEFS,
+    PAGE_OPERATION_BINDINGS,
+    PAGE_PERMISSION_CODES,
+    SIDEBAR_ITEMS,
+    build_permission_payload,
+    infer_page_permissions,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_permission_payload_contains_all_canonical_page_codes():
+    payload = build_permission_payload()
+
+    assert set(PAGE_PERMISSION_CODES).issubset(set(payload["codes"]))
+    assert {item["code"] for item in SIDEBAR_ITEMS}.issubset(set(payload["codes"]))
+    assert payload["pages"]
+    assert payload["sidebar"]
+    assert payload["mergedTree"]
+
+
+def test_page_operation_bindings_reference_known_pages_and_resources():
+    page_codes = set(PAGE_PERMISSION_CODES)
+    resources = set(ACTION_PERMISSION_DEFS)
+    violations = []
+
+    for page_code, bound_resources in PAGE_OPERATION_BINDINGS.items():
+        if page_code not in page_codes:
+            violations.append(f"unknown page {page_code}")
+        for resource in bound_resources:
+            if resource not in resources:
+                violations.append(f"unknown resource {resource} for {page_code}")
+
+    assert violations == []
+
+
+def test_business_permissions_infer_page_permissions():
+    assert infer_page_permissions(["performance:view"]) == ["page:performance"]
+    assert "page:settings.admin-users" in infer_page_permissions(["users:admin"])
+
+
+def test_frontend_fallback_page_codes_cover_backend_catalog():
+    frontend_permissions = (PROJECT_ROOT / "frontend" / "src" / "lib" / "permissions.js").read_text(encoding="utf-8")
+    frontend_page_codes = set(re.findall(r"permission:\s*['\"](page:[^'\"]+)['\"]", frontend_permissions))
+
+    assert set(PAGE_PERMISSION_CODES).issubset(frontend_page_codes)

@@ -1,5 +1,5 @@
 """qr-system — RouteRepository（工序路线数据访问层）"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class RouteRepository:
@@ -7,12 +7,12 @@ class RouteRepository:
 
     @staticmethod
     def list_routes_query(sql, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(sql, params).fetchall()
 
     @staticmethod
     def count_routes(conditions, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         count_sql = "SELECT COUNT(*) FROM process_routes"
         if conditions:
             count_sql += " WHERE " + " AND ".join(conditions)
@@ -20,7 +20,7 @@ class RouteRepository:
 
     @staticmethod
     def list_route_items(route_ids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         placeholders = ",".join("?" for _ in route_ids)
         return db.execute(
             "SELECT pri.*, p.name as process_name, p.category as category "
@@ -33,7 +33,7 @@ class RouteRepository:
 
     @staticmethod
     def find_route_by_name(name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM process_routes WHERE name = ?", (name,)).fetchone()
 
     @staticmethod
@@ -55,7 +55,7 @@ class RouteRepository:
 
     @staticmethod
     def find_existing_process_ids(pids, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         placeholders = ",".join("?" for _ in pids)
         return db.execute(
             "SELECT id FROM processes WHERE id IN (" + placeholders + ")", pids
@@ -63,7 +63,7 @@ class RouteRepository:
 
     @staticmethod
     def find_route_by_id(rid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM process_routes WHERE id = ?", (rid,)).fetchone()
 
     @staticmethod
@@ -84,7 +84,7 @@ class RouteRepository:
 
     @staticmethod
     def count_orders_using_route(rid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as cnt FROM orders WHERE deleted_at IS NULL AND route_id = ?", (rid,)
         ).fetchone()
@@ -97,26 +97,26 @@ class RouteRepository:
 
     @staticmethod
     def count_products_using_route(rid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as cnt FROM products WHERE deleted_at IS NULL AND route_id = ?", (rid,)
         ).fetchone()
 
     @staticmethod
     def find_route_name(rid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id, name FROM process_routes WHERE id = ?", (rid,)).fetchone()
 
     @staticmethod
     def check_order_exists(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
     @staticmethod
     def find_route_items_ordered(rid, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM process_route_items WHERE route_id = ? ORDER BY seq_order", (rid,)
         ).fetchall()

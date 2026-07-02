@@ -1,4 +1,4 @@
-﻿"""qr-system - ProgressService"""
+"""qr-system - ProgressService"""
 from modules.services import BaseService
 from modules.repositories.progress_repository import ProgressRepository
 

@@ -3,7 +3,7 @@ qr-system ? TraceRepository???????
 
 ???????? ? product_items / work_records / rework_records / shipments ???????
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 class TraceRepository:
     """?????????"""
@@ -11,7 +11,7 @@ class TraceRepository:
     @staticmethod
     def find_product_item_by_serial(serial_no, db=None):
         """?????????????+??????"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT pi.*,
                    o.order_no, o.product_name, o.quantity as order_quantity,
@@ -26,7 +26,7 @@ class TraceRepository:
     @staticmethod
     def find_work_records_by_order(order_id, db=None):
         """???ID??????????+???????"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT wr.id, wr.quantity, wr.status, wr.type, wr.remark, wr.created_at,
                    p.name as process_name, u.name as worker_name
@@ -40,7 +40,7 @@ class TraceRepository:
     @staticmethod
     def find_rework_records_by_order(order_id, db=None):
         """???ID??????????+???????"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT rr.id, rr.quantity, rr.reason, rr.status, rr.created_at,
                    rr.completed_at,
@@ -54,7 +54,7 @@ class TraceRepository:
 
     @staticmethod
     def find_work_records_by_serial(serial_no, order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute('''
             SELECT wr.id, wr.quantity, wr.status, wr.type, wr.remark, wr.created_at,
                    p.name as process_name, u.name as worker_name
@@ -67,7 +67,7 @@ class TraceRepository:
 
     @staticmethod
     def find_shipments_by_order_id(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT DISTINCT s.id, s.shipment_no, s.customer, s.status,
                    s.total_quantity, s.completed_at
@@ -81,7 +81,7 @@ class TraceRepository:
     @staticmethod
     def find_order_by_no(order_no, db=None):
         """按订单号查订单"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT o.*, COALESCE(c.name, o.customer) as customer
             FROM orders o
@@ -92,7 +92,7 @@ class TraceRepository:
     @staticmethod
     def find_product_items_by_order(order_id, db=None):
         """查订单下全部产品项"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT * FROM product_items
             WHERE order_id = ?
@@ -102,7 +102,7 @@ class TraceRepository:
     @staticmethod
     def find_material_consumptions_by_order(order_id, db=None):
         """查订单物料消耗"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT mc.id, mc.quantity, mc.notes, mc.operator_name, mc.created_at,
                    m.name as material_name, m.spec as material_spec,
@@ -117,7 +117,7 @@ class TraceRepository:
     @staticmethod
     def find_quality_inspections_by_order(order_id, db=None):
         """查订单质检记录"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT qi.id, qi.inspection_type, qi.quantity_checked, qi.quantity_passed,
                    qi.quantity_failed, qi.result, qi.notes, qi.inspected_at, qi.created_at,
@@ -133,7 +133,7 @@ class TraceRepository:
     @staticmethod
     def find_inventory_logs_by_order(order_id, db=None):
         """查订单入库记录"""
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT il.id, il.type, il.quantity, il.remark, il.operator_name, il.created_at
             FROM inventory_logs il

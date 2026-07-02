@@ -1,6 +1,5 @@
-﻿"""qr-system - ProcessService (Repository-refactored)"""
+"""qr-system - ProcessService (Repository-refactored)"""
 import re
-import sqlite3
 from modules.services import BaseService
 from modules.repositories.process_repository import ProcessRepository
 
@@ -66,14 +65,11 @@ class ProcessService:
         if seq_order is None:
             seq_order = ProcessRepository.get_max_seq(category) + 1
 
-        try:
-            with BaseService.transaction() as txn:
-                return ProcessRepository.insert_txn(
-                    name, data.get("description", ""), category,
-                    seq_order, data.get("status", "active"), db=txn
-                )
-        except sqlite3.IntegrityError:
-            raise ValueError("Process '" + name + "' already exists")
+        with BaseService.transaction() as txn:
+            return ProcessRepository.insert_txn(
+                name, data.get("description", ""), category,
+                seq_order, data.get("status", "active"), db=txn
+            )
 
     @staticmethod
     def update_process(pid, data):
@@ -109,11 +105,8 @@ class ProcessService:
 
         sets.append('updated_at = datetime("now","localtime")')
 
-        try:
-            with BaseService.transaction() as txn:
-                ProcessRepository.update_txn(", ".join(sets), params, pid, db=txn)
-        except sqlite3.IntegrityError:
-            raise ValueError("Process name already exists")
+        with BaseService.transaction() as txn:
+            ProcessRepository.update_txn(", ".join(sets), params, pid, db=txn)
 
     @staticmethod
     def check_impact(pid):

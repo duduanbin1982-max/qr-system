@@ -221,6 +221,7 @@ const GanttChart = definePageAsyncComponent('生产排程', () => import('./Gant
 const ApprovalPage = definePageAsyncComponent('审批管理', () => import('./ApprovalPage.vue'))
 const InspectionList = definePageAsyncComponent('质量检验', () => import('./InspectionList.vue'))
 const WageList = definePageAsyncComponent('工资核算', () => import('./WageList.vue'))
+const PerformancePage = definePageAsyncComponent('绩效管理', () => import('./PerformancePage.vue'))
 
 // Expose globals for template compatibility
 window.A = { auth, router, store, showToast, navigate, logout, api }
@@ -252,6 +253,7 @@ export default {
     ApprovalPage,
     InspectionList,
     WageList,
+    PerformancePage,
     NoPermissionPage
   },
   setup() {
@@ -283,7 +285,7 @@ export default {
         'machining-processes': 'ProcessList', 'inventory': 'InventoryList',
         'materials': 'MaterialList', 'schedule': 'GanttChart',
         'rework': 'ReworkList', 'quality': 'InspectionList',
-        'wages': 'WageList', 'prices': 'PriceList',
+        'wages': 'WageList', 'performance': 'PerformancePage', 'prices': 'PriceList',
         'all-prices': 'PriceList', 'structure-prices': 'PriceList',
         'machining-prices': 'PriceList', 'routes': 'RouteList',
         'scan': 'ScanReport', 'shipments': 'ShipmentList',

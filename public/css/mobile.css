@@ -252,3 +252,20 @@ input,textarea,select{font-size:19px !important}
 .scan-flash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(82,196,26,.25);z-index:200;pointer-events:none;transition:opacity .4s ease}
 /* Empty state */
 .empty-recent .icon{font-size:32px;margin-bottom:8px;display:block;opacity:.4}
+﻿
+/* Handoff quality review */
+.handoff-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:none;align-items:center;justify-content:center;padding:18px}
+.handoff-modal.active{display:flex}
+.handoff-box{width:100%;max-width:360px;background:#fff;border-radius:18px;padding:20px 18px;box-shadow:0 10px 36px rgba(0,0,0,.22)}
+.handoff-box h3{font-size:20px;margin:0 0 8px;color:var(--text-primary)}
+.handoff-title{font-size:14px;color:var(--text-muted);line-height:1.45;margin:0 0 14px}
+.handoff-stars{display:flex;justify-content:center;gap:8px;margin:8px 0 14px}
+.handoff-stars button{border:none;background:transparent;font-size:34px;color:#ddd;line-height:1;cursor:pointer;padding:0 2px}
+.handoff-stars button.active{color:#f59e0b;text-shadow:0 1px 2px rgba(0,0,0,.12)}
+.handoff-box select,.handoff-box textarea{width:100%;border:1px solid var(--border-input);border-radius:10px;padding:10px 12px;font-size:16px;background:#fff;outline:none;margin-bottom:10px}
+.handoff-box textarea{resize:none;line-height:1.4}
+.handoff-actions{display:flex;gap:10px;margin-top:4px}
+.handoff-actions button{flex:1;border:none;border-radius:10px;padding:12px 10px;font-size:16px;font-weight:600;cursor:pointer}
+.handoff-secondary{background:var(--bg-hover);color:var(--text-muted)}
+.handoff-primary{background:var(--primary);color:#fff}
+.handoff-primary:disabled{opacity:.6;cursor:not-allowed}

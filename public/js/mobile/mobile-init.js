@@ -64,6 +64,16 @@
   _el = document.getElementById('btn-report');
   if (_el) _el.addEventListener('click', doReport);
   
+
+  var _stars = document.querySelectorAll('#handoff-stars button');
+  for (var _si = 0; _si < _stars.length; _si++) {
+    _stars[_si].addEventListener('click', function() { setHandoffRating(parseInt(this.getAttribute('data-score')) || 5); });
+  }
+  _el = document.getElementById('handoff-skip');
+  if (_el) _el.addEventListener('click', closeHandoffModal);
+  _el = document.getElementById('handoff-submit');
+  if (_el) _el.addEventListener('click', submitHandoffReview);
+
   _el = document.querySelector('.btn-done');
   if (_el) _el.addEventListener('click', goMain);
   

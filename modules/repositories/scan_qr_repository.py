@@ -1,26 +1,26 @@
 """qr-system - ScanQRRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ScanQRRepository:
 
     @staticmethod
     def find_order_by_no(order_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM orders WHERE order_no = ? AND deleted_at IS NULL", (order_no,)
         ).fetchone()
 
     @staticmethod
     def find_order_by_id(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
     @staticmethod
     def find_order_for_qr(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT order_no, product_name, product_code, quantity FROM orders WHERE id = ? AND deleted_at IS NULL",
             (order_id,)
@@ -28,7 +28,7 @@ class ScanQRRepository:
 
     @staticmethod
     def find_items_by_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
         ).fetchall()
@@ -43,7 +43,7 @@ class ScanQRRepository:
 
     @staticmethod
     def find_product_code(product_name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         row = db.execute(
             "SELECT product_code FROM products WHERE product_name = ? LIMIT 1", (product_name,)
         ).fetchone()

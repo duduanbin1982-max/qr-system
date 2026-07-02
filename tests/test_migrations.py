@@ -23,3 +23,8 @@ def test_run_migrations_uses_supplied_connection():
         assert "order_materials" in table_names
     finally:
         db.close()
+
+def test_latest_version_matches_highest_registered_migration():
+    from modules import migrations
+
+    assert migrations.LATEST_VERSION == max(version for version, _, _ in migrations.MIGRATIONS)

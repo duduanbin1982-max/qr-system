@@ -42,6 +42,7 @@ ACTION_PERMISSION_DEFS = {
     "rework": ("返工", ["view", "create", "edit"]),
     "schedule": ("生产排程", ["view"]),
     "wages": ("工资核算", ["view", "edit"]),
+    "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
 }
 
 
@@ -54,6 +55,7 @@ SIDEBAR_ITEMS = [
     {"page": "stats", "code": "page:stats", "icon": "📈", "label": "统计报表"},
     {"page": "reports", "code": "page:reports", "icon": "📊", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "icon": "💰", "label": "工资核算"},
+    {"page": "performance", "code": "page:performance", "icon": "🎯", "label": "绩效管理"},
     {"page": "basic-settings", "code": "page:basic-settings", "icon": "⚙️", "label": "基础设置"},
     {"page": "settings", "code": "page:settings", "icon": "⚙️", "label": "系统设置"},
 ]
@@ -82,6 +84,7 @@ PAGE_RULES = [
     {"page": "stats", "code": "page:stats", "label": "统计报表"},
     {"page": "reports", "code": "page:reports", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "label": "工资核算"},
+    {"page": "performance", "code": "page:performance", "label": "绩效管理"},
     {"page": "board", "code": "page:board", "label": "数据看板"},
     {
         "page": "basic-settings",
@@ -129,6 +132,7 @@ ACTION_PAGE_MAP = {
     "stats": ["page:stats"],
     "reports": ["page:reports"],
     "wages": ["page:wages"],
+    "performance": ["page:performance"],
     "board": ["page:board"],
     "users": ["page:basic-settings", "page:basic-settings.users"],
     "processes": ["page:basic-settings", "page:basic-settings.processes"],
@@ -168,6 +172,7 @@ PAGE_OPERATION_BINDINGS = {
     "page:stats": ["stats"],
     "page:reports": ["reports"],
     "page:wages": ["wages"],
+    "page:performance": ["performance"],
     "page:board": ["board"],
     "page:basic-settings.users": ["users"],
     "page:basic-settings.processes": ["processes"],
@@ -333,3 +338,20 @@ def infer_page_permissions(permission_codes):
         if code == "users:admin":
             inferred.update(["page:settings", "page:settings.admin-users"])
     return [code for code in PAGE_PERMISSION_CODES if code in inferred]
+
+DEFAULT_ROLE_PERMISSION_ADDITIONS = {
+    "production_manager": [
+        "page:performance",
+        "performance:view",
+        "performance:create",
+        "performance:edit",
+        "performance:export",
+    ],
+    "qc_inspector": ["page:performance", "performance:view"],
+    "warehouse_keeper": ["page:performance", "performance:view"],
+}
+
+
+def default_role_permission_additions(role_code):
+    permissions = DEFAULT_ROLE_PERMISSION_ADDITIONS.get(role_code, [])
+    return list(dict.fromkeys(permissions + infer_page_permissions(permissions)))

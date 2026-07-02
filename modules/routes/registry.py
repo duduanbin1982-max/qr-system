@@ -43,6 +43,8 @@ ROUTE_MODULES = (
     "modules.routes.personal_stats",  # personal mobile stats
     "modules.routes.email_reports",  # email reports
     "modules.routes.progress",  # process progress + delivery alerts
+    "modules.routes.performance",  # performance evaluation + improvement workflow
+    "modules.routes.handoff_reviews",  # process handoff quality review
     "modules.routes.system",  # health, backup, integrity checks
 )
 

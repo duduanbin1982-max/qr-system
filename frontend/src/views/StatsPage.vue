@@ -62,10 +62,21 @@ import CustomerTab from './stats/CustomerTab.vue'
 export default {
   components: { DailyTab, WorkerTab, ScrapTab, ProgressTab, ProductTab, ShipmentTab, MaterialTab, ModelProcessTab, CustomerTab },
   setup() {
+    function local(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') }
+
+    function defaultDateRange() {
+      const now = new Date()
+      return {
+        end: local(now),
+        start: local(new Date(now - 30*86400000)),
+      }
+    }
+
+    const initialDates = defaultDateRange()
     const tab = ref('daily')
     const loading = ref(false)
-    const reportStart = ref('')
-    const reportEnd = ref('')
+    const reportStart = ref(initialDates.start)
+    const reportEnd = ref(initialDates.end)
     const filterProduct = ref('')
     const productOptions = ref([])
     const queryKey = ref(0)
@@ -76,14 +87,6 @@ export default {
       const t = TABS.find(x => x.k === tab.value)
       return t ? t.l : ''
     })
-
-    function local(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') }
-
-    function initDates() {
-      const now = new Date()
-      reportEnd.value = local(now)
-      reportStart.value = local(new Date(now - 30*86400000))
-    }
 
     function setQuickDate(preset) {
       const now = new Date()
@@ -134,7 +137,7 @@ export default {
       queryKey.value++
     }
 
-    onMounted(() => { initDates(); loadProducts() })
+    onMounted(loadProducts)
 
     return {
       TABS, tab, loading, reportStart, reportEnd, filterProduct, productOptions,

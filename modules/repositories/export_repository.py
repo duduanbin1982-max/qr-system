@@ -1,12 +1,12 @@
 """qr-system - ExportRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ExportRepository:
 
     @staticmethod
     def get_orders_export(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT o.id, o.order_no, c.name as customer, o.product_name, "
             "o.quantity, o.status, o.plan_start, o.plan_end, o.deadline, o.created_at "
@@ -16,7 +16,7 @@ class ExportRepository:
 
     @staticmethod
     def get_work_records_export(order_id, date_from, date_to, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         query = (
             "SELECT wr.id, o.order_no, p.name as process_name, u.name as worker_name, "
             "wr.serial_no, wr.quantity, wr.type, wr.remark, wr.created_at "

@@ -1,19 +1,19 @@
 """qr-system - ProgressRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ProgressRepository:
 
     @staticmethod
     def find_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT * FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
     @staticmethod
     def list_processes(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT op.*, p.name as process_name FROM order_processes op "
             "JOIN processes p ON p.id = op.process_id "
@@ -22,7 +22,7 @@ class ProgressRepository:
 
     @staticmethod
     def count_overdue(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deadline < DATE('now') "
             "AND status NOT IN ('completed','cancelled') AND deleted_at IS NULL"
@@ -30,7 +30,7 @@ class ProgressRepository:
 
     @staticmethod
     def count_near_due(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM orders WHERE deadline BETWEEN DATE('now') "
             "AND DATE('now','+3 days') AND status NOT IN ('completed','cancelled') "

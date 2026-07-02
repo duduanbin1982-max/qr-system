@@ -1,4 +1,4 @@
-﻿"""qr-system — 出库管理 Service 层（Repository-refactored）"""
+"""qr-system — 出库管理 Service 层（Repository-refactored）"""
 from datetime import datetime
 from modules.services import BaseService
 from modules.services.query_utils import paginate, build_sort_clause

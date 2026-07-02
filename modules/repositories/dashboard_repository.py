@@ -1,7 +1,7 @@
 """qr-system — DashboardRepository（看板数据访问层）
 All raw SQL lives here. Methods accept optional db for transaction sharing.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class DashboardRepository:
@@ -9,7 +9,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_order_stats(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT
                 COUNT(*) as total_orders,
@@ -21,7 +21,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_work_record_daily_stats(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("""
             SELECT
                 COALESCE(SUM(CASE WHEN DATE(created_at)=? THEN quantity ELSE 0 END),0) as today_output,
@@ -32,7 +32,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_low_stock_items(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT product_model, product_name, quantity, safe_stock "
             "FROM inventory WHERE safe_stock > 0 AND quantity <= safe_stock LIMIT 10"
@@ -40,14 +40,14 @@ class DashboardRepository:
 
     @staticmethod
     def get_pending_approvals_count(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM approval_records WHERE status='pending'"
         ).fetchone()[0]
 
     @staticmethod
     def get_locked_users_count(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM users WHERE locked_until IS NOT NULL "
             "AND locked_until > datetime('now','localtime')"
@@ -55,7 +55,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_today_failed_logins(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=0",
             (today,)
@@ -63,7 +63,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_today_success_logins(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM login_logs WHERE DATE(created_at)=? AND success=1",
             (today,)
@@ -71,7 +71,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_suspicious_ips_count(today, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT ip_address) FROM login_logs "
             "WHERE DATE(created_at)=? AND ip_address NOT IN "
@@ -81,7 +81,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_recent_work_records(limit=10, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT wr.*, COALESCE(o.order_no,'-') as order_no, "
             "p.name as process_name, u.name as worker_name "
@@ -95,21 +95,21 @@ class DashboardRepository:
 
     @staticmethod
     def get_company_name(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT value FROM system_settings WHERE key='company_name'"
         ).fetchone()
 
     @staticmethod
     def get_delivery_warning_setting(db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT value FROM system_settings WHERE key='delivery_warning_days'"
         ).fetchone()
 
     @staticmethod
     def get_overdue_orders(today, limit=5, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
             "CAST(julianday('now','localtime') - julianday(o.plan_end) AS INTEGER) as overdue_days "
@@ -122,7 +122,7 @@ class DashboardRepository:
 
     @staticmethod
     def get_approaching_orders(today, warning_days, limit=5, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT o.*, COALESCE(c.name, o.customer) as customer_name, "
             "CAST(julianday(o.plan_end) - julianday('now','localtime') AS INTEGER) as days_left "

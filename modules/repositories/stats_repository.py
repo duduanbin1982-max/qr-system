@@ -2,7 +2,7 @@
 
 All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class StatsRepository:
@@ -75,7 +75,7 @@ class StatsRepository:
     # ============================================================
     @staticmethod
     def get_daily_records(date, product_code, limit, offset, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code)
         rows = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, "
@@ -96,7 +96,7 @@ class StatsRepository:
 
     @staticmethod
     def get_daily_summary(date, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code)
         rows = db.execute(
             "SELECT p.id, p.name, COUNT(*) as record_count, "
@@ -115,7 +115,7 @@ class StatsRepository:
 
     @staticmethod
     def get_daily_count(date, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code)
         return db.execute(
             "SELECT COUNT(*) FROM work_records wr "
@@ -129,7 +129,7 @@ class StatsRepository:
     # ============================================================
     @staticmethod
     def get_scrap_records(start, end, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         w, params = StatsRepository._scrap_where(start, end, product_code)
         rows = db.execute(
             "SELECT sr.id, sr.created_at, sr.quantity, sr.reason, "
@@ -146,7 +146,7 @@ class StatsRepository:
 
     @staticmethod
     def get_scrap_summary(start, end, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         w, params = StatsRepository._scrap_where(start, end, product_code)
         return dict(db.execute(
             "SELECT COUNT(*) as total_records, "
@@ -160,7 +160,7 @@ class StatsRepository:
 
     @staticmethod
     def get_scrap_by_process(start, end, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         w, params = StatsRepository._scrap_where(start, end, product_code)
         rows = db.execute(
             "SELECT p.name, COUNT(*) as cnt, COALESCE(SUM(sr.quantity),0) as qty "
@@ -178,7 +178,7 @@ class StatsRepository:
     # ============================================================
     @staticmethod
     def get_order_progress(start, end, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         w, params = StatsRepository._order_progress_where(start, end, product_code)
         rows = db.execute(
             "SELECT o.id, o.order_no, o.product_name, "
@@ -198,7 +198,7 @@ class StatsRepository:
     # ============================================================
     @staticmethod
     def get_worker_stats(sort_by, sort_dir, start, end, product_code, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         allowed = {"quantity": "total_output", "name": "name", "scrap": "total_scrap", "rework": "total_rework"}
         col = allowed.get(sort_by, "total_output")
         direction = "DESC" if sort_dir == "desc" else "ASC"
@@ -222,7 +222,7 @@ class StatsRepository:
 
     @staticmethod
     def get_worker_detail(user_id, start, end, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = ["wr.user_id=?", "wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = [user_id]
         if start:
@@ -250,7 +250,7 @@ class StatsRepository:
 
     @staticmethod
     def get_material_detail(material_id, start='', end='', db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         where = ["mc.material_id = ?"]
         params = [material_id]
         if start:

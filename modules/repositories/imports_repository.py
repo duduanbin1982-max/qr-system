@@ -1,12 +1,12 @@
 """qr-system - ImportsRepository"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ImportsRepository:
 
     @staticmethod
     def check_order_exists(order_no, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM orders WHERE order_no = ?", (order_no,)).fetchone()
 
     @staticmethod
@@ -33,7 +33,7 @@ class ImportsRepository:
 
     @staticmethod
     def check_customer_exists(name, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM customers WHERE name = ?", (name,)).fetchone()
 
     @staticmethod

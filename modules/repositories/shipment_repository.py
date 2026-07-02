@@ -1,5 +1,5 @@
 """qr-system — ShipmentRepository（出库管理数据访问层）"""
-from modules.db_unit_of_work import BaseService
+from modules.repositories.context import resolve_db
 
 
 class ShipmentRepository:
@@ -8,7 +8,7 @@ class ShipmentRepository:
     # ========== generate_no ==========
     @staticmethod
     def max_seq_for_date(prefix, today, prefix_len, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT MAX(CAST(SUBSTR(shipment_no, ?) AS INTEGER)) as max_seq FROM shipments WHERE shipment_no LIKE ?",
             (prefix_len, prefix + today + "-%")
@@ -17,14 +17,14 @@ class ShipmentRepository:
     # ========== list_shipments ==========
     @staticmethod
     def count_shipments(where_clause, params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM shipments WHERE " + where_clause, params
         ).fetchone()[0]
 
     @staticmethod
     def list_shipments_paginated(paginated_sql, all_params, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(paginated_sql, all_params).fetchall()
 
     # ========== create_shipment (transaction) ==========
@@ -88,12 +88,12 @@ class ShipmentRepository:
     # ========== get_shipment_detail ==========
     @staticmethod
     def find_shipment_by_id(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM shipments WHERE id = ?", (shipment_id,)).fetchone()
 
     @staticmethod
     def find_shipment_items(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT si.*, COALESCE(i.product_model, si.product_model) as product_model, "
             "COALESCE(i.product_name, si.product_name) as product_name "
@@ -201,7 +201,7 @@ class ShipmentRepository:
     # ========== get_order_stock ==========
     @staticmethod
     def find_order_for_stock(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, order_no, customer, product_name, product_code FROM orders WHERE id = ?",
             (order_id,)
@@ -209,7 +209,7 @@ class ShipmentRepository:
 
     @staticmethod
     def find_inventory_by_order(order_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT i.id as inventory_id, i.product_model, i.product_name, i.specification, "
             "i.quantity, i.unit, i.order_id FROM inventory i "
@@ -220,7 +220,7 @@ class ShipmentRepository:
     # ========== inventory validation ==========
     @staticmethod
     def find_inventory_for_validation(inventory_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT quantity, product_model, product_name FROM inventory WHERE id = ?",
             (inventory_id,)
@@ -229,7 +229,7 @@ class ShipmentRepository:
     # ========== get_stats ==========
     @staticmethod
     def fetch_shipment_stats(today, month_start, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as total, "
             "COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) as pending, "
@@ -251,7 +251,7 @@ class ShipmentRepository:
     # ========== get_impact ==========
     @staticmethod
     def find_shipment_for_impact(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT id, shipment_no, status, customer, total_quantity FROM shipments WHERE id = ?",
             (shipment_id,)
@@ -259,7 +259,7 @@ class ShipmentRepository:
 
     @staticmethod
     def count_shipment_items_impact(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as qty FROM shipment_items WHERE shipment_id = ?",
             (shipment_id,)
@@ -267,7 +267,7 @@ class ShipmentRepository:
 
     @staticmethod
     def count_distinct_inventory(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(DISTINCT inventory_id) FROM shipment_items WHERE shipment_id = ?",
             (shipment_id,)
@@ -276,7 +276,7 @@ class ShipmentRepository:
     # ========== get_customer_history ==========
     @staticmethod
     def find_shipments_by_customer(customer, limit, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute(
             "SELECT s.*, COALESCE(si.item_count,0) as item_count FROM shipments s "
             "LEFT JOIN (SELECT shipment_id, COUNT(*) as item_count FROM shipment_items GROUP BY shipment_id) si "
@@ -316,10 +316,10 @@ class ShipmentRepository:
     # ========== existence check ==========
     @staticmethod
     def shipment_exists(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT id FROM shipments WHERE id = ?", (shipment_id,)).fetchone()
 
     @staticmethod
     def shipment_items_exist(shipment_id, db=None):
-        db = db or BaseService.db()
+        db = resolve_db(db)
         return db.execute("SELECT * FROM shipment_items WHERE shipment_id = ?", (shipment_id,)).fetchall()

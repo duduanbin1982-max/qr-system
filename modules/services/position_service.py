@@ -1,4 +1,4 @@
-﻿"""
+"""
 qr-system — 岗位管理 Service 层 (Repository pattern)
 """
 from modules.services import BaseService
@@ -36,15 +36,11 @@ class PositionService:
             invalid = [str(pid) for pid in process_ids if pid not in valid]
             if invalid:
                 raise ValueError('无效工序ID: ' + ', '.join(invalid))
-        import sqlite3
         with BaseService.transaction() as txn:
             if PositionRepository.find_position_by_name(name, db=txn):
                 raise ValueError('岗位名称【' + name + '】已存在')
-            try:
-                cur = PositionRepository.insert_position(
-                    name, data.get('description', ''), data.get('status', 'active'), db=txn)
-            except sqlite3.IntegrityError:
-                raise ValueError('岗位名称【' + name + '】已存在')
+            cur = PositionRepository.insert_position(
+                name, data.get('description', ''), data.get('status', 'active'), db=txn)
             pos_id = cur.lastrowid
             for pid in process_ids:
                 PositionRepository.insert_position_process(pos_id, pid, db=txn)

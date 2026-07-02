@@ -1,4 +1,4 @@
-﻿"""qr-system - EmailReportsService (Repository-refactored)"""
+"""qr-system - EmailReportsService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.email_reports_repository import EmailReportsRepository
 

@@ -1,4 +1,4 @@
-﻿"""qr-system — 工价管理 Service 层 (Repository pattern)"""
+"""qr-system — 工价管理 Service 层 (Repository pattern)"""
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.price_repository import PriceRepository

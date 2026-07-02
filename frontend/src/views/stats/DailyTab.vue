@@ -30,7 +30,7 @@
         <thead><tr><th>时间</th><th>订单号/序列号</th><th>产品</th><th>工序</th><th>工人</th><th style="text-align:center">数量</th><th>类型</th></tr></thead>
         <tbody><tr v-for="r in dailyRecords" :key="r.id">
           <td style="font-size:var(--text-xs-alt);white-space:nowrap">{{ r.created_at }}</td>
-          <td><code style="font-size:var(--text-xs-alt)">{{ r.display_order_no || r.order_no }}</code></td>
+          <td><code style="font-size:var(--text-xs-alt)">{{ displayWorkNo(r) }}</code></td>
           <td>{{ r.product_name }}</td><td>{{ r.process_name }}</td>
           <td>{{ r.worker_name }}<span v-if="r.employee_no" style="color:var(--text-placeholder);font-size:var(--text-2xs)"> #{{ r.employee_no }}</span></td>
           <td style="text-align:center;font-weight:600">{{ r.quantity }}</td>
@@ -41,7 +41,7 @@
   </div>
 </template>
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
@@ -60,18 +60,30 @@ export default {
       return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
     }
 
+    function todayLocal() {
+      const d = new Date()
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+    }
+
     async function loadDaily() {
-      const d = props.date || new Date().toISOString().slice(0, 10)
+      const d = props.date || todayLocal()
       if (!isValidDate(d)) {
         showToast('日期格式无效', 'warning')
+        loading.value = false
         return
       }
+      loading.value = true
       try {
         const params = { date: d }
         if (props.productCode) params.product_code = props.productCode
         const res = await api.dailyStats(params)
         dailyRecords.value = res.records || []; dailySummary.value = res.summary || []
       } catch (e) { showToast(e.message, 'error') } finally { loading.value = false }
+    }
+
+    function displayWorkNo(record) {
+      if (record.qr_mode === 'serial' && record.serial_no) return record.serial_no
+      return record.display_order_no || record.order_no
     }
 
     function exportSummaryCsv() {
@@ -84,12 +96,12 @@ export default {
     function exportDetailCsv() {
       if (!dailyRecords.value.length) { showToast('没有数据可导出', 'warning'); return }
       const data = [['时间','订单号/序列号','产品','工序','工人','工号','数量','类型']]
-      dailyRecords.value.forEach(r => data.push([r.created_at, r.display_order_no || r.order_no, r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.type==='normal'?'正常':r.type==='scrap'?'报废':'返工']))
+      dailyRecords.value.forEach(r => data.push([r.created_at, displayWorkNo(r), r.product_name, r.process_name, r.worker_name, r.employee_no||'', r.quantity, r.type==='normal'?'正常':r.type==='scrap'?'报废':'返工']))
       exportCSV(data, '日报表_报工明细_' + (props.date || ''))
     }
 
-    onMounted(loadDaily)
-    return { dailyRecords, dailySummary, loading, loadDaily, exportSummaryCsv, exportDetailCsv, canExport }
+    watch(() => [props.date, props.productCode], loadDaily, { immediate: true })
+    return { dailyRecords, dailySummary, loading, loadDaily, displayWorkNo, exportSummaryCsv, exportDetailCsv, canExport }
   }
 }
 </script>

@@ -1,4 +1,4 @@
-﻿"""qr-system - PersonalStatsService"""
+"""qr-system - PersonalStatsService"""
 from datetime import datetime, timedelta
 from modules.services import BaseService
 from modules.repositories.personal_stats_repository import PersonalStatsRepository

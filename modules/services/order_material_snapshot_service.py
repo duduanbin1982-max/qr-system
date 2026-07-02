@@ -1,7 +1,5 @@
 """Order material snapshot helpers."""
 
-import sqlite3
-
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.product_repository import ProductRepository
@@ -28,23 +26,21 @@ class OrderMaterialSnapshotService:
         copied = 0
         for bom in ProductBomRepository.list_by_product(product_id, db=db):
             process_id = bom["process_id"] if bom["process_id"] else None
-            try:
-                OrderMaterialRepository.insert(
-                    order_id,
-                    bom["material_id"],
-                    bom["quantity_per_unit"],
-                    process_id,
-                    "auto",
-                    db=db,
-                )
-                copied += 1
-            except sqlite3.IntegrityError:
-                duplicate = OrderMaterialRepository.find_duplicate(
-                    order_id,
-                    bom["material_id"],
-                    process_id,
-                    db=db,
-                )
-                if not duplicate:
-                    raise
+            duplicate = OrderMaterialRepository.find_duplicate(
+                order_id,
+                bom["material_id"],
+                process_id,
+                db=db,
+            )
+            if duplicate:
+                continue
+            OrderMaterialRepository.insert(
+                order_id,
+                bom["material_id"],
+                bom["quantity_per_unit"],
+                process_id,
+                "auto",
+                db=db,
+            )
+            copied += 1
         return copied
