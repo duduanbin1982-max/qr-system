@@ -6,16 +6,9 @@ function processCode(code) {
   // 数字编码(N前缀) → 通过 decode API 还原为 JSON
   if (/^N\d{10,}$/.test(code)) {
     toast('解码中...');
-    fetch(API + '/mobile/decode/' + code, {
-      credentials: 'same-origin',
-      headers: { 'Authorization': 'Bearer ' + token() }
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.error) { toast(d.error); show('main'); return; }
-      doScan(d.code);
-    })
-    .catch(function() { toast('二维码数据解码失败，请确认二维码有效'); show('main'); });
+    api.decodeQR(code)
+    .then(function(d) { doScan(d.code); })
+    .catch(function(e) { toast((e && e.message) || '二维码数据解码失败，请确认二维码有效'); show('main'); });
     return;
   }
   doScan(code);
@@ -23,15 +16,8 @@ function processCode(code) {
 
 function doScan(code) {
   toast('查询中...');
-  fetch(API + '/mobile/scan', {
-    credentials: 'same-origin',
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
-    body: JSON.stringify({ code: code })
-  })
-  .then(function(r) { return r.json(); })
+  api.mobileScan({ code: code })
   .then(function(d) {
-    if (d.error) { toast(d.error); show('main'); return; }
     if (d.item) { d.order.item = d.item; }
 
     // -- 管理员/质检员扫码 → 重定向到抽检页面 --
@@ -67,7 +53,7 @@ function doScan(code) {
       updateReportBtn();
     }
   })
-  .catch(function(e) { console.log('scan auth fail — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast('网络异常'); show('main'); });
+  .catch(function(e) { console.log('scan failed — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast((e && e.message) || '网络异常'); show('main'); });
 }
 
 // ═══════════════════════════════════════════
@@ -164,19 +150,12 @@ function doReport() {
   }
   if (curSerial) body.serial_no = curSerial;
 
-  fetch(API + '/mobile/report', {
-    credentials: 'same-origin',
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
-    body: JSON.stringify(body)
-  })
-  .then(function(r) { return r.json(); })
+  api.mobileReport(body)
   .then(function(d) {
-    if (d.error) { toast(d.error); btn.disabled = false; updateReportBtn(); return; }
     showReportSuccess(body, d);
     maybeOpenHandoffReview(body);
   })
-  .catch(function() { toast('网络异常'); btn.disabled = false; updateReportBtn(); });
+  .catch(function(e) { toast((e && e.message) || '网络异常'); btn.disabled = false; updateReportBtn(); });
 }
 
 function showReportSuccess(body, response) {

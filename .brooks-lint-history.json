@@ -152,5 +152,16 @@
       "suggestion": 2
     },
     "scope": "192.168.1.8:/home/dubin/qr-system running qr-system.service; deployed_commit 8ccacc5; dirty worktree audited"
+  },
+  {
+    "date": "2026-07-02T20:11:23+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 70,
+    "findings": {
+      "critical": 1,
+      "warning": 5,
+      "suggestion": 2
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 4f9aebe; entire project modules, frontend/src, public mobile/static pages, tests"
   }
 ]

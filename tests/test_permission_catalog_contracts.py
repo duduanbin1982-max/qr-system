@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 from modules.permission_catalog import (
@@ -44,8 +43,21 @@ def test_business_permissions_infer_page_permissions():
     assert "page:settings.admin-users" in infer_page_permissions(["users:admin"])
 
 
-def test_frontend_fallback_page_codes_cover_backend_catalog():
-    frontend_permissions = (PROJECT_ROOT / "frontend" / "src" / "lib" / "permissions.js").read_text(encoding="utf-8")
-    frontend_page_codes = set(re.findall(r"permission:\s*['\"](page:[^'\"]+)['\"]", frontend_permissions))
+def test_frontend_fallback_catalog_is_generated_from_backend_catalog():
+    from scripts.export_permission_catalog import render_catalog
 
-    assert set(PAGE_PERMISSION_CODES).issubset(frontend_page_codes)
+    generated = (
+        PROJECT_ROOT / "frontend" / "src" / "lib" / "permissionFallback.generated.js"
+    ).read_text(encoding="utf-8")
+
+    assert generated == render_catalog()
+
+
+def test_frontend_permissions_module_uses_generated_fallback_catalog():
+    frontend_permissions = (
+        PROJECT_ROOT / "frontend" / "src" / "lib" / "permissions.js"
+    ).read_text(encoding="utf-8")
+
+    assert "permissionFallback.generated.js" in frontend_permissions
+    assert "export const SIDEBAR_ITEMS = [" not in frontend_permissions
+    assert "export const ACTION_PAGE_MAP = {" not in frontend_permissions

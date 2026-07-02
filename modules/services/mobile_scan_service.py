@@ -3,6 +3,7 @@
 import json
 
 from modules.access_policy import has_permission, get_user_process_ids
+from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.scan_helper_service import ScanHelperService
 
 
@@ -11,45 +12,16 @@ class MobileScanService:
 
     @staticmethod
     def _extract_code(data):
-        code = (data.get("code") or "").strip()
-        if code:
-            return code
-        return (data.get("qr_text") or "").strip()
+        return MobileScanResolver.extract_code(data)
 
     @staticmethod
     def _parse_code(code):
-        try:
-            parsed = json.loads(code)
-        except (json.JSONDecodeError, TypeError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
+        return MobileScanResolver.parse_code(code)
 
     @staticmethod
     def _resolve_target(code):
-        parsed = MobileScanService._parse_code(code)
-        order_id = parsed.get("order_id") if parsed else None
-        serial_no = parsed.get("serial_no") if parsed else None
-
-        order = ScanHelperService.get_order(order_id) if order_id else None
-        item_info = None
-        if not order:
-            order = ScanHelperService.get_order_by_no(code)
-
-        if serial_no:
-            item = ScanHelperService.get_product_item(serial_no)
-            if item:
-                item_info = dict(item)
-                if not order:
-                    order = ScanHelperService.get_order(item["order_id"])
-
-        if not order:
-            item = ScanHelperService.get_product_item(code)
-            if item:
-                item_info = dict(item)
-                serial_no = code
-                order = ScanHelperService.get_order(item["order_id"])
-
-        return order, item_info, serial_no
+        target = MobileScanResolver.resolve(code)
+        return target.order, target.item_info, target.serial_no
 
     @staticmethod
     def _current_process(order_data, item_info):

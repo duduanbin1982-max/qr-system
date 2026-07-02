@@ -1,5 +1,6 @@
 import sqlite3
 
+from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.order_process_sync_service import OrderProcessSyncService
 
@@ -56,6 +57,12 @@ def test_order_process_assignment_falls_back_to_active_processes():
     assert _assigned_processes(db) == [
         {"order_id": 1, "process_id": 20, "seq_order": 2, "required_audit": 0}
     ], "fallback assignment should include only active processes"
+
+
+def test_mobile_scan_resolver_exposes_code_parsing_seam():
+    assert MobileScanResolver.extract_code({"code": " A ", "qr_text": "B"}) == "A"
+    assert MobileScanResolver.parse_code('{"order_id": 1}') == {"order_id": 1}
+
 
 def test_mobile_scan_extract_code_prefers_code_then_qr_text():
     assert MobileScanService._extract_code({"code": " A ", "qr_text": "B"}) == "A", "explicit code should win over qr_text"

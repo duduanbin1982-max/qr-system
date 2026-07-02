@@ -6,8 +6,7 @@
   // Restore session if user was previously logged in (sessionStorage + valid cookie)
   if (user()) {
     // Verify cookie is still valid with a lightweight API call
-    fetch(API + '/auth/info', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-      .then(function(r) { return r.json(); })
+    api.authInfo()
       .then(function(d) {
         if (d && d.user) { goMain(); }
         else { doLogout(); }

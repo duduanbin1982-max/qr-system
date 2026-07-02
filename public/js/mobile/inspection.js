@@ -69,7 +69,6 @@
       }
     }
 
-    var token = getToken();
     var data = {
       process_id: selectedProcessId,
       order_id: orderData.id,
@@ -84,20 +83,8 @@
 
     enableButtons(false);
 
-    fetch(API + '/inspection/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify(data)
-    })
-    .then(function(r) {
-      if (!r.ok) {
-        return r.json().then(function(d) { throw new Error(d.error || '提交失败(' + r.status + ')'); })
-          .catch(function(e) { if (e.message) throw e; throw new Error('提交失败(' + r.status + ')'); });
-      }
-      return r.json();
-    })
+    api.submitInspection(data)
     .then(function(d) {
-      if (d.error) { throw new Error(d.error); }
       var label = result === 'pass' ? '合格' : result === 'rework' ? '返修' : '报废';
       showMsg('已提交: ' + label, 'success');
       enableButtons(true);
@@ -132,24 +119,8 @@
 
     document.getElementById('info').innerHTML = '<div class="loading">查询中...</div>';
 
-    fetch(API + '/mobile/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ code: code })
-    })
-    .then(function(r) {
-      if (!r.ok) {
-        return r.json().then(function(d) {
-          throw new Error(d.error || '服务器错误(' + r.status + ')');
-        }).catch(function(e) {
-          if (e.message && e.message.indexOf('服务器错误') === 0) throw e;
-          throw new Error('服务器错误(' + r.status + ')');
-        });
-      }
-      return r.json();
-    })
+    api.mobileScan({ code: code })
     .then(function(d) {
-      if (d.error) { throw new Error(d.error); }
       if (!d.order) { throw new Error('未获取到订单信息'); }
       orderData = d.order;
 

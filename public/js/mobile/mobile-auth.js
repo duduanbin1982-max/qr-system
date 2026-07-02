@@ -4,24 +4,13 @@
 // ═══════════════════════════════════════════
 
 var _loginBusy = false;
-// W3: Token expiry check — auto-logout on 401
-function _checkAuth(r) {
-  if (r.status === 401) { doLogout(); toast('登录已过期，请重新登录', 3000); return true; }
-  return false;
-}
 function doLogin() {
   const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
   if (_loginBusy) return;
   if (!u || !p) { toast('请输入用户名和密码'); return; }
   const btn = $('btn-login');
   btn.disabled = true; btn.innerHTML = '<span class=\"spin\"></span>登录中...';
-  fetch(API + '/auth/login', {
-    credentials: 'same-origin',
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: u, password: p })
-  })
-  .then(function(r) { return r.json(); })
+  api.login({ username: u, password: p })
   .then(function(d) {
     btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false;
     if (d.error) { $('login-err').textContent = d.error; return; }
@@ -34,15 +23,11 @@ function doLogin() {
     }
     goMain();
   })
-  .catch(function() { $('login-err').textContent = '网络错误'; btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false; });
+  .catch(function(e) { $('login-err').textContent = (e && e.message) || '网络错误'; btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false; });
 }
 
 function doLogout() {
-  fetch(API + '/auth/logout', {
-    credentials: 'same-origin',
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token() }
-  }).catch(function() {});
+  api.logout().catch(function() {});
   window.__qr_user = null;
   try { sessionStorage.clear(); } catch(e) {}
   show('login');
@@ -70,8 +55,7 @@ function toggleManual() {
 }
 
 function loadStats() {
-  fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-    .then(function(r) { if (_checkAuth(r)) return null; return r.json(); })
+  api.personalStats()
     .then(function(d) {
       if (!d) return;
       if (d && d.today) {
@@ -83,8 +67,7 @@ function loadStats() {
 }
 
 function loadRecent() {
-  fetch(API + '/personal/stats', { credentials: 'same-origin', headers: { 'Authorization': 'Bearer ' + token() } })
-    .then(function(r) { if (_checkAuth(r)) return null; return r.json(); })
+  api.personalStats()
     .then(function(d) {
       const list = d.recent_records || [];
       const el = $('recent-list');
@@ -135,17 +118,11 @@ function doChangePassword() {
   if (newPw !== newPw2) { errEl.textContent = '两次密码不一致'; return; }
   var btn = $('btn-cp');
   btn.disabled = true; btn.textContent = '修改中...';
-  fetch(API + '/auth/change-password', {
-    credentials: 'same-origin',
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
-    body: JSON.stringify({ old_password: oldPw, new_password: newPw })
-  })
-  .then(function(r) { return r.json(); })
+  api.changePassword({ old_password: oldPw, new_password: newPw })
   .then(function(d) {
     btn.disabled = false; btn.textContent = '确认修改';
     if (d.error) { errEl.textContent = d.error; return; }
     goMain();
   })
-  .catch(function() { errEl.textContent = '网络错误'; btn.disabled = false; btn.textContent = '确认修改'; });
+  .catch(function(e) { errEl.textContent = (e && e.message) || '网络错误'; btn.disabled = false; btn.textContent = '确认修改'; });
 }
