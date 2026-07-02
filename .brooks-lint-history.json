@@ -163,5 +163,16 @@
       "suggestion": 2
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 4f9aebe; entire project modules, frontend/src, public mobile/static pages, tests"
+  },
+  {
+    "date": "2026-07-02T22:48:42+08:00",
+    "mode": "Architecture Audit",
+    "score": 78,
+    "findings": {
+      "critical": 0,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system running HEAD ac0ac67 deployed ac0ac67; full backend/frontend architecture import scan + hotspot reads"
   }
 ]
