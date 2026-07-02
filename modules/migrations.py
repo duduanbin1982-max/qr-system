@@ -6,6 +6,7 @@ import sqlite3, json, bcrypt
 from modules.config import DB_PATH, PREDEFINED_ROLES
 from modules.permission_catalog import infer_page_permissions, default_role_permission_additions
 from modules.migration_schema_compat import ensure_current_schema_compat
+from modules.migration_materials import ensure_material_planning_tables
 
 MIGRATIONS = []
 LATEST_VERSION = 26
@@ -35,38 +36,6 @@ def _add_column_if_missing(db, table, column, definition):
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-
-def _ensure_material_planning_tables(db):
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS product_bom ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "product_id INTEGER NOT NULL, "
-        "material_id INTEGER NOT NULL, "
-        "quantity_per_unit REAL DEFAULT 1, "
-        "process_id INTEGER DEFAULT NULL, "
-        "created_at TEXT DEFAULT (datetime('now','localtime')), "
-        "FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE, "
-        "FOREIGN KEY (material_id) REFERENCES materials(id), "
-        "FOREIGN KEY (process_id) REFERENCES processes(id), "
-        "UNIQUE(product_id, material_id, process_id)"
-        ")"
-    )
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS order_materials ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "order_id INTEGER NOT NULL, "
-        "material_id INTEGER NOT NULL, "
-        "quantity_per_unit REAL DEFAULT 1, "
-        "process_id INTEGER DEFAULT NULL, "
-        "source TEXT DEFAULT 'auto', "
-        "created_at TEXT DEFAULT (datetime('now','localtime')), "
-        "FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE, "
-        "FOREIGN KEY (material_id) REFERENCES materials(id), "
-        "FOREIGN KEY (process_id) REFERENCES processes(id)"
-        ")"
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_product ON product_bom(product_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_order_materials_order ON order_materials(order_id)")
 
 
 @migration(1, "Core schema v1-v11: tables, indexes, seed data")
@@ -1038,7 +1007,7 @@ def m013_board_sessions(db):
 
 @migration(14, "Create product BOM and order material tables")
 def m014_material_planning_tables(db):
-    _ensure_material_planning_tables(db)
+    ensure_material_planning_tables(db)
     db.commit()
 
 
@@ -1106,7 +1075,7 @@ def m019_users_marker(db):
 @migration(20, "Ensure board/material planning tables after legacy migration gap")
 def m020_ensure_legacy_gap_tables(db):
     _ensure_board_sessions_table(db)
-    _ensure_material_planning_tables(db)
+    ensure_material_planning_tables(db)
     db.commit()
 
 

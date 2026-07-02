@@ -48,3 +48,29 @@ def test_schema_compat_helper_creates_expected_compat_tables():
         assert any(row[1] == "deleted_at" for row in db.execute("PRAGMA table_info(users)"))
     finally:
         db.close()
+
+def test_material_migration_helper_creates_material_planning_tables():
+    from modules.migration_materials import ensure_material_planning_tables
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        ensure_material_planning_tables(db)
+        table_names = {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "product_bom" in table_names
+        assert "order_materials" in table_names
+        index_names = {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        assert "idx_product_bom_product" in index_names
+        assert "idx_order_materials_order" in index_names
+    finally:
+        db.close()
