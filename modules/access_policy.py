@@ -1,65 +1,78 @@
-"""Shared access policy helpers used by middleware and services."""
+"""Pure access policy calculations shared by middleware and services."""
 import json
 import logging
-from typing import List, Optional
-
-from modules.config import GLOBAL_DATA_SCOPE_PERMS
-from modules.repositories.access_policy_repository import AccessPolicyRepository
+from typing import Iterable, List, Optional, Sequence, Set
 
 
-def get_user_permissions(user: Optional[dict]) -> List[str]:
-    if not user:
+def _row_value(row, key):
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        if hasattr(row, "get"):
+            return row.get(key)
+        return getattr(row, key, None)
+
+
+def collect_permission_codes(permission_rows: Iterable, user_id=None, logger=None) -> List[str]:
+    logger = logger or logging.getLogger("qr")
+    permissions: Set[str] = set()
+    for row in permission_rows or []:
+        for column in ("role_perms", "group_perms"):
+            raw_value = _row_value(row, column)
+            if not raw_value:
+                continue
+            try:
+                parsed = json.loads(raw_value)
+            except (json.JSONDecodeError, TypeError) as exc:
+                logger.warning(
+                    "access_policy: invalid %s JSON for user %s: %s",
+                    column,
+                    user_id,
+                    exc,
+                )
+                continue
+            if isinstance(parsed, list):
+                permissions.update(str(item) for item in parsed if item)
+    return sorted(permissions)
+
+
+def has_permission_code(permissions: Sequence[str], perm: str) -> bool:
+    permission_set = set(permissions or [])
+    return "*" in permission_set or perm in permission_set
+
+
+def parse_process_ids(process_ids_text: str) -> List[int]:
+    text = (process_ids_text or "").strip()
+    if not text:
         return []
-    cached = user.get('_permissions')
-    if cached is not None:
-        return sorted(cached)
-    rows = AccessPolicyRepository.get_permission_rows(user['id'])
-    all_perms = set()
-    for row in rows:
-        for column in ('role_perms', 'group_perms'):
-            if row[column]:
-                try:
-                    all_perms.update(json.loads(row[column]))
-                except (json.JSONDecodeError, TypeError) as exc:
-                    logging.getLogger('qr').warning(
-                        'access_policy: invalid %s JSON for user %s: %s',
-                        column, user.get('id'), exc
-                    )
-    return sorted(all_perms)
+    return [int(item.strip()) for item in text.split(",") if item.strip()]
 
 
-def has_permission(user: Optional[dict], perm: str) -> bool:
-    if not user:
-        return False
-    perms = set(get_user_permissions(user))
-    return '*' in perms or perm in perms
-
-
-def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
-    if not user:
-        return None
-
+def resolve_process_scope(
+    position_process_rows: Iterable,
+    explicit_process_rows: Iterable,
+    *,
+    has_position_scope: bool,
+    has_explicit_process_scope: bool,
+    permissions: Sequence[str],
+    global_data_scope_permissions: Set[str],
+) -> Optional[List[int]]:
     allowed = set()
-    position_id = user.get('position_id')
-    if position_id:
-        for row in AccessPolicyRepository.list_position_process_ids(position_id):
-            allowed.add(row['process_id'])
-
-    process_ids_text = (user.get('process_ids') or '').strip()
-    if process_ids_text:
-        try:
-            process_ids = [int(item.strip()) for item in process_ids_text.split(',') if item.strip()]
-            for row in AccessPolicyRepository.list_existing_process_ids(process_ids):
-                allowed.add(row['id'])
-        except (ValueError, TypeError):
-            pass
+    for row in position_process_rows or []:
+        process_id = _row_value(row, "process_id")
+        if process_id is not None:
+            allowed.add(process_id)
+    for row in explicit_process_rows or []:
+        process_id = _row_value(row, "id")
+        if process_id is not None:
+            allowed.add(process_id)
 
     if allowed:
         return sorted(allowed)
-    if position_id or process_ids_text:
+    if has_position_scope or has_explicit_process_scope:
         return []
 
-    perms = set(get_user_permissions(user))
-    if perms and (perms & GLOBAL_DATA_SCOPE_PERMS or '*' in perms):
+    permission_set = set(permissions or [])
+    if permission_set and (permission_set & set(global_data_scope_permissions) or "*" in permission_set):
         return None
     return []

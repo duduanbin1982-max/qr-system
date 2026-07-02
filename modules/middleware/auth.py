@@ -8,7 +8,7 @@ from flask import request, jsonify, g
 
 from modules.config import SESSION_TIMEOUT_HOURS, SESSION_IDLE_MINUTES
 from modules.db import get_db, get_setting
-from modules.access_policy import get_user_permissions as _get_user_permissions, has_permission as _has_permission
+from modules.services.access_policy_service import get_user_permissions as _get_user_permissions, has_permission as _has_permission
 
 def has_permission(user: Optional[dict], perm: str) -> bool:
     """???????????????????????"""

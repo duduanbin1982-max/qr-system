@@ -2,7 +2,7 @@
 
 import json
 
-from modules.access_policy import has_permission, get_user_process_ids
+from modules.services.access_policy_service import has_permission, get_user_process_ids
 from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.scan_helper_service import ScanHelperService
 

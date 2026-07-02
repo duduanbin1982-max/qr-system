@@ -168,3 +168,15 @@ def test_services_do_not_import_sqlite_driver_directly():
 
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
 
+def test_access_policy_core_has_no_repository_dependency():
+    path = PROJECT_ROOT / "modules" / "access_policy.py"
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("modules.repositories"):
+            violations.append(node.module)
+        elif isinstance(node, ast.Import):
+            violations.extend(alias.name for alias in node.names if alias.name.startswith("modules.repositories"))
+
+    assert violations == []
+

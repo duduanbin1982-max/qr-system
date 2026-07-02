@@ -2,7 +2,7 @@
 qr-system ? ????????????+?????????
 """
 from typing import List, Optional, Tuple
-from modules.access_policy import get_user_process_ids as _get_user_process_ids
+from modules.services.access_policy_service import get_user_process_ids as _get_user_process_ids
 
 
 def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:

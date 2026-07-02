@@ -1,6 +1,6 @@
 """Validation use case for scan work reports."""
 from modules.repositories.scan_repository import ScanRepository
-from modules.access_policy import get_user_process_ids, has_permission
+from modules.services.access_policy_service import get_user_process_ids, has_permission
 
 
 class ScanValidationService:
