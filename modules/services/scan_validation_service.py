@@ -1,6 +1,7 @@
 """Validation use case for scan work reports."""
 from modules.repositories.scan_repository import ScanRepository
 from modules.services.access_policy_service import get_user_process_ids, has_permission
+from modules.services.scan_report_policy import ScanReportPolicy
 
 
 class ScanValidationService:
@@ -10,12 +11,20 @@ class ScanValidationService:
     def _initial_report_context(order_id, process_id, user, quantity, serial_no, report_type):
         from modules.services.scan_helper_service import ScanHelperService
 
-        if has_permission(user, "quality:edit") and report_type == "normal":
-            return None, quantity, ({"error": "质检/管理员账号只能进行返工/报废操作，不能正常报工"}, 403)
-        if not order_id or not process_id:
-            return None, quantity, ({"error": "缺少订单或工序信息"}, 400)
-        if ScanValidationService._is_serial_quantity(order_id, quantity, serial_no):
-            quantity = 1
+        account_error = ScanReportPolicy.quality_account_normal_report_error(
+            has_permission(user, "quality:edit"),
+            report_type,
+        )
+        if account_error:
+            return None, quantity, account_error
+        identity_error = ScanReportPolicy.report_identity_error(order_id, process_id)
+        if identity_error:
+            return None, quantity, identity_error
+        quantity = ScanReportPolicy.normalized_quantity(
+            ScanValidationService._order_has_items(order_id),
+            quantity,
+            serial_no,
+        )
         order = ScanHelperService.get_order(order_id)
         if not order:
             return None, quantity, ({"error": "订单不存在"}, 404)
@@ -92,11 +101,10 @@ class ScanValidationService:
         return (None, None), quantity, serial_no
 
     @staticmethod
-    def _is_serial_quantity(order_id, quantity, serial_no):
+    def _order_has_items(order_id):
         from modules.services.scan_helper_service import ScanHelperService
 
-        has_items = bool(ScanHelperService.get_product_items_by_order(order_id))
-        return (has_items or serial_no) and quantity > 1
+        return bool(ScanHelperService.get_product_items_by_order(order_id))
 
     @staticmethod
     def _validate_order_scope(order_id, user_process_ids):
@@ -111,9 +119,11 @@ class ScanValidationService:
         from modules.services.scan_helper_service import ScanHelperService
 
         has_items = bool(ScanHelperService.get_product_items_by_order(order_id))
-        if has_items and not serial_no and not has_permission(user, "quality:view"):
-            return ({"error": "此订单为序列号模式，请扫描工件二维码后再报工"}, 400)
-        return None
+        return ScanReportPolicy.required_serial_error(
+            has_items,
+            serial_no,
+            has_permission(user, "quality:view"),
+        )
 
     @staticmethod
     def _validate_process_membership(order_id, process_id):
@@ -128,26 +138,28 @@ class ScanValidationService:
         from modules.services.scan_helper_service import ScanHelperService
 
         if report_type == "normal" and serial_no:
-            if ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user_id):
-                return (
-                    {"error": "序列号 " + str(serial_no) + " 在此订单中已报工", "can_scrap_rework": True},
-                    409,
-                )
+            error = ScanReportPolicy.duplicate_serial_order_error(
+                ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user_id),
+                serial_no,
+            )
+            if error:
+                return error
 
         if report_type == "normal":
-            dup = ScanHelperService.check_duplicate_normal_report(
-                order_id,
-                process_id,
+            return ScanReportPolicy.duplicate_normal_report_error(
+                ScanHelperService.check_duplicate_normal_report(
+                    order_id,
+                    process_id,
+                    serial_no,
+                    user_id,
+                ),
                 serial_no,
-                user_id,
             )
-            if dup:
-                msg = "序列号 " + str(serial_no) + " 在此工序已报工" if serial_no else "此工序已报工"
-                return ({"error": msg, "can_scrap_rework": True}, 409)
 
         if report_type in ("scrap", "rework"):
-            if ScanHelperService.check_duplicate_defect_report(order_id, process_id, user_id, report_type):
-                return ({"error": "请勿重复提交，请稍后再试"}, 409)
+            return ScanReportPolicy.duplicate_defect_report_error(
+                ScanHelperService.check_duplicate_defect_report(order_id, process_id, user_id, report_type)
+            )
 
         return None
 
@@ -207,6 +219,4 @@ class ScanValidationService:
         if not serial_no or report_type != "normal":
             return None
         item = ScanHelperService.get_product_item(serial_no)
-        if item and item["current_process_id"] and item["current_process_id"] != process_id:
-            return ({"error": "序列号 " + str(serial_no) + " 不在当前工序，请刷新后再试"}, 400)
-        return None
+        return ScanReportPolicy.serial_current_process_error(item, process_id, serial_no)
