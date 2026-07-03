@@ -25,7 +25,7 @@ class ScheduleRepository:
             LEFT JOIN production_lines pl ON o.production_line_id = pl.id
             WHERE o.plan_start IS NOT NULL AND o.plan_start != ''
               AND o.deleted_at IS NULL
-            ORDER BY o.plan_start, o.order_no
+            ORDER BY o.order_no DESC, o.id DESC
             LIMIT ? OFFSET ?
         """, (limit, offset)).fetchall()
 
