@@ -47,6 +47,10 @@ function doScan(code) {
       $("rpt-qty").disabled = false;
       $("rpt-qty").title = "";
     }
+    if (openHandoffReview(d.handoff_pending)) {
+      updateReportBtn();
+      return;
+    }
     if (reportMode === 'auto') {
       setTimeout(function() { doReport(); }, 1200);
     } else {
@@ -153,7 +157,7 @@ function doReport() {
   api.mobileReport(body)
   .then(function(d) {
     showReportSuccess(body, d);
-    maybeOpenHandoffReview(body);
+    maybeOpenHandoffReview(body, d && d.handoff_pending);
   })
   .catch(function(e) { toast((e && e.message) || '网络异常'); btn.disabled = false; updateReportBtn(); });
 }
@@ -171,23 +175,30 @@ function showReportSuccess(body, response) {
   show('ok');
 }
 
-function maybeOpenHandoffReview(body) {
+function openHandoffReview(ctx) {
+  if (!ctx || !ctx.required) return false;
+  handoffContext = ctx;
+  handoffRating = 5;
+  setHandoffRating(5);
+  $('handoff-title').textContent = '请评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量';
+  $('handoff-issue').value = '';
+  $('handoff-comment').value = '';
+  $('handoff-modal').classList.add('active');
+  return true;
+}
+
+function maybeOpenHandoffReview(body, pendingContext) {
   if (body.report_type !== 'normal' || !curOrder || !curProcId) return;
+  if (openHandoffReview(pendingContext)) return;
   var params = 'order_id=' + encodeURIComponent(curOrder.id) +
-    '&to_process_id=' + encodeURIComponent(curProcId) +
-    '&serial_no=' + encodeURIComponent(curSerial || '');
+    '&to_process_id=' + encodeURIComponent(body.process_id || curProcId) +
+    '&serial_no=' + encodeURIComponent(body.serial_no || curSerial || '');
   api.handoffPending(params)
-    .then(function(ctx) {
-      if (!ctx || !ctx.required) return;
-      handoffContext = ctx;
-      handoffRating = 5;
-      setHandoffRating(5);
-      $('handoff-title').textContent = '请评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量';
-      $('handoff-issue').value = '';
-      $('handoff-comment').value = '';
-      $('handoff-modal').classList.add('active');
-    })
-    .catch(function(e) { console.log('handoff pending skipped:', e && e.message); });
+    .then(function(ctx) { openHandoffReview(ctx); })
+    .catch(function(e) {
+      console.warn('handoff pending failed:', e && e.message);
+      toast((e && e.message) || '交接评价检查失败，请稍后重试');
+    });
 }
 
 function setHandoffRating(score) {

@@ -18,6 +18,12 @@ class HandoffReviewService:
 
     @staticmethod
     def pending_context(order_id, to_process_id, evaluator_user_id, serial_no=""):
+        if not order_id or not to_process_id or not evaluator_user_id:
+            return {"required": False, "reason": "缺少交接评价上下文"}
+        order_id = int(order_id)
+        to_process_id = int(to_process_id)
+        evaluator_user_id = int(evaluator_user_id)
+        serial_no = (serial_no or "").strip()
         prev = HandoffReviewRepository.previous_process(order_id, to_process_id)
         if not prev:
             return {"required": False, "reason": "首道工序无需交接评价"}
@@ -49,6 +55,19 @@ class HandoffReviewService:
             "source_work_record_id": work["id"],
             "quantity": work["quantity"] or 1,
         }
+
+    @staticmethod
+    def pending_latest_evaluator_work(order_id, evaluator_user_id, serial_no=""):
+        if not order_id or not evaluator_user_id:
+            return {"required": False, "reason": "缺少交接评价上下文"}
+        work = HandoffReviewRepository.latest_evaluator_work(
+            int(order_id), int(evaluator_user_id), (serial_no or "").strip()
+        )
+        if not work:
+            return {"required": False, "reason": "未找到当前操作员已完成的正常报工记录"}
+        return HandoffReviewService.pending_context(
+            int(order_id), int(work["process_id"]), int(evaluator_user_id), (serial_no or "").strip()
+        )
 
     @staticmethod
     def create_review(data, current_user):

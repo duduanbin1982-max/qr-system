@@ -5,6 +5,7 @@ import json
 from modules.services.access_policy_service import has_permission, get_user_process_ids
 from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.scan_helper_service import ScanHelperService
+from modules.services.handoff_review_service import HandoffReviewService
 
 
 class MobileScanService:
@@ -67,6 +68,17 @@ class MobileScanService:
         return item_info
 
     @staticmethod
+    def _handoff_pending_for_scan(order_id, user, serial_no):
+        if not user or not user.get("id"):
+            return {"required": False, "reason": "未登录"}
+        try:
+            return HandoffReviewService.pending_latest_evaluator_work(
+                order_id, user.get("id"), serial_no or ""
+            )
+        except Exception as exc:
+            return {"required": False, "reason": f"交接评价检查失败: {exc}"}
+
+    @staticmethod
     def scan(data, user):
         code = MobileScanService._extract_code(data)
         if not code:
@@ -99,9 +111,14 @@ class MobileScanService:
         else:
             order_data["current_process"] = MobileScanService._current_process(order_data, item_info)
 
+        handoff_pending = MobileScanService._handoff_pending_for_scan(
+            order_data["id"], user, serial_no or ""
+        )
+
         if item_info:
             return {
                 "order": order_data,
                 "item": MobileScanService._attach_item_qr_data(item_info),
+                "handoff_pending": handoff_pending,
             }, 200
-        return {"order": order_data}, 200
+        return {"order": order_data, "handoff_pending": handoff_pending}, 200

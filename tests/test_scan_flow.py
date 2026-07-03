@@ -2,6 +2,7 @@
 import json, time, pytest
 import uuid
 from modules.db import get_db
+from factories import WORKER_HASH, ensure_user
 
 
 def _order_no_for(client, order_id):
@@ -38,6 +39,75 @@ def _seed_order_mode_two_step_order(client):
             )
         db.commit()
         return order_id, order_no, process_ids
+
+
+def _seed_serial_handoff_order(client):
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        previous_user_id = ensure_user(
+            db,
+            f"handoffprev_{suffix.lower()}",
+            WORKER_HASH,
+            "Handoff Previous Worker",
+            "worker",
+            f"TEST-HANDOFF-PREV-{suffix}",
+            "worker-group",
+        )
+        current_user = db.execute(
+            "SELECT id FROM users WHERE username = 'testworker'"
+        ).fetchone()
+        assert current_user is not None
+
+        process_ids = []
+        for seq_order, name in enumerate(
+            (
+                f"Fixture Handoff A {suffix}",
+                f"Fixture Handoff B {suffix}",
+                f"Fixture Handoff C {suffix}",
+            ),
+            start=1,
+        ):
+            cursor = db.execute(
+                "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+                "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
+                (name, seq_order),
+            )
+            process_ids.append(cursor.lastrowid)
+
+        order_no = f"TEST-HANDOFF-{suffix}"
+        serial_no = f"TEST-HANDOFF-{suffix}-001"
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
+            "VALUES (?, 'Test Customer', 'Cross Module Product', ?, 1, 'producing', 'serial')",
+            (order_no, f"XMOD-HO-{suffix}"),
+        ).lastrowid
+        for index, process_id in enumerate(process_ids):
+            completed = 1 if index == 0 else 0
+            status = 'completed' if index == 0 else 'pending'
+            db.execute(
+                "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+                "VALUES (?, ?, ?, ?, ?, 0, 0)",
+                (order_id, process_id, index + 1, status, completed),
+            )
+        db.execute(
+            "INSERT INTO product_items (serial_no, order_id, order_no, position_no, qr_content, status, current_process_id) "
+            "VALUES (?, ?, ?, 1, ?, 'in_progress', ?)",
+            (
+                serial_no,
+                order_id,
+                order_no,
+                json.dumps({"order_id": order_id, "serial_no": serial_no}),
+                process_ids[1],
+            ),
+        )
+        db.execute(
+            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, serial_no, status, created_at) "
+            "VALUES (?, ?, ?, 'normal', 1, ?, 'approved', datetime('now','localtime'))",
+            (order_id, process_ids[0], previous_user_id, serial_no),
+        )
+        db.commit()
+        return order_id, order_no, serial_no, process_ids, current_user["id"], previous_user_id
 
 
 class TestScanWorkFlow:
@@ -83,6 +153,56 @@ class TestScanWorkFlow:
         next_scan = client.post("/api/mobile/scan", headers=worker_auth_headers, json={"code": order_no})
         assert next_scan.status_code == 200, next_scan.get_json()
         assert next_scan.get_json()["order"]["current_process"]["process_id"] == process_ids[1]
+
+    def test_mobile_report_returns_handoff_pending_for_previous_serial_process(self, client, worker_auth_headers):
+        order_id, _, serial_no, process_ids, current_user_id, previous_user_id = _seed_serial_handoff_order(client)
+
+        report = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_ids[1],
+                "quantity": 1,
+                "serial_no": serial_no,
+                "report_type": "normal",
+            },
+        )
+
+        assert report.status_code == 200, report.get_json()
+        pending = report.get_json()["handoff_pending"]
+        assert pending["required"] is True
+        assert pending["from_process_id"] == process_ids[0]
+        assert pending["to_process_id"] == process_ids[1]
+        assert pending["from_user_id"] == previous_user_id
+        assert pending["from_user_id"] != current_user_id
+
+    def test_mobile_scan_reopens_unsubmitted_handoff_after_serial_advances(self, client, worker_auth_headers):
+        order_id, _, serial_no, process_ids, _, _ = _seed_serial_handoff_order(client)
+
+        report = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_ids[1],
+                "quantity": 1,
+                "serial_no": serial_no,
+                "report_type": "normal",
+            },
+        )
+        assert report.status_code == 200, report.get_json()
+
+        scan = client.post("/api/mobile/scan", headers=worker_auth_headers, json={"code": serial_no})
+
+        assert scan.status_code == 200, scan.get_json()
+        payload = scan.get_json()
+        assert payload["order"]["current_process"]["process_id"] == process_ids[2]
+        pending = payload["handoff_pending"]
+        assert pending["required"] is True
+        assert pending["from_process_id"] == process_ids[0]
+        assert pending["to_process_id"] == process_ids[1]
+        assert pending["serial_no"] == serial_no
 
     def test_work_report_submit(self, client, auth_headers, worker_auth_headers, test_order_id):
         """POST /api/report — submit a work report."""

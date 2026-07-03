@@ -56,6 +56,24 @@ class HandoffReviewRepository:
         ).fetchone()
 
     @staticmethod
+    def latest_evaluator_work(order_id, evaluator_user_id, serial_no="", db=None):
+        db = resolve_db(db)
+        params = [order_id, evaluator_user_id]
+        serial_clause = ""
+        if serial_no:
+            serial_clause = " AND wr.serial_no = ?"
+            params.append(serial_no)
+        return db.execute(
+            "SELECT wr.* "
+            "FROM work_records wr "
+            "WHERE wr.order_id = ? AND wr.user_id = ? "
+            "AND wr.type = 'normal' AND wr.status = 'approved' "
+            + serial_clause +
+            " ORDER BY wr.created_at DESC, wr.id DESC LIMIT 1",
+            tuple(params),
+        ).fetchone()
+
+    @staticmethod
     def existing_review(order_id, from_process_id, to_process_id, evaluator_user_id, serial_no="", db=None):
         db = resolve_db(db)
         if serial_no:
