@@ -78,21 +78,58 @@ class StatsRepository:
         db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code)
         rows = db.execute(
-            "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, "
-            "o.order_no, o.qr_mode, "
+            "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, wr.remark, "
+            "wr.order_id, wr.process_id, "
+            "o.order_no, o.qr_mode, o.customer, o.product_code, "
             "CASE WHEN o.qr_mode = 'serial' AND COALESCE(wr.serial_no, '') != '' "
             "THEN wr.serial_no ELSE o.order_no END as display_order_no, "
-            "o.product_name, p.name as process_name, p.id as process_id, "
-            "u.id as user_id, u.name as worker_name, u.employee_no "
+            "COALESCE(NULLIF(o.product_name, ''), prod.product_name, '') as product_name, "
+            "COALESCE(prod.model, '') as product_model, "
+            "COALESCE(prod.spec, '') as product_spec, "
+            "COALESCE(prod.category, '') as product_category, "
+            "COALESCE(route.name, '') as route_name, "
+            "p.name as process_name, p.id as process_id, "
+            "u.id as user_id, u.name as worker_name, u.employee_no, COALESCE(u.group_name, '') as group_name, "
+            "COALESCE(dept.name, '') as department_name, COALESCE(pos.name, '') as position_name, "
+            "COALESCE((SELECT qi.result FROM quality_inspections qi "
+            "WHERE qi.order_id=wr.order_id AND qi.process_id=wr.process_id "
+            "ORDER BY qi.inspected_at DESC, qi.id DESC LIMIT 1), '') as quality_result, "
+            "COALESCE((SELECT qi.score_total FROM quality_inspections qi "
+            "WHERE qi.order_id=wr.order_id AND qi.process_id=wr.process_id "
+            "ORDER BY qi.inspected_at DESC, qi.id DESC LIMIT 1), 0) as quality_score "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
             "JOIN users u ON wr.user_id=u.id "
+            "LEFT JOIN products prod ON prod.product_code=o.product_code AND COALESCE(o.product_code, '') != '' "
+            "LEFT JOIN process_routes route ON route.id=o.route_id "
+            "LEFT JOIN departments dept ON dept.id=u.department_id "
+            "LEFT JOIN positions pos ON pos.id=u.position_id "
             "WHERE " + where_clause
-            + " ORDER BY wr.created_at DESC LIMIT ? OFFSET ?",
+            + " ORDER BY u.name COLLATE NOCASE ASC, u.employee_no ASC, wr.created_at ASC, wr.id ASC LIMIT ? OFFSET ?",
             params + [limit, offset]
         ).fetchall()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_daily_totals(date, product_code, db=None):
+        db = resolve_db(db)
+        where_clause, params = StatsRepository._daily_where(date, product_code)
+        row = db.execute(
+            "SELECT COUNT(*) as record_count, "
+            "COALESCE(SUM(wr.quantity),0) as total_quantity, "
+            "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as normal_quantity, "
+            "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap_quantity, "
+            "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework_quantity, "
+            "COUNT(DISTINCT wr.user_id) as worker_count, "
+            "COUNT(DISTINCT wr.order_id) as order_count, "
+            "COUNT(DISTINCT COALESCE(NULLIF(o.product_code, ''), o.product_name)) as product_count "
+            "FROM work_records wr "
+            "JOIN orders o ON wr.order_id=o.id "
+            "WHERE " + where_clause,
+            params
+        ).fetchone()
+        return dict(row) if row else {}
 
     @staticmethod
     def get_daily_summary(date, product_code, db=None):

@@ -25,6 +25,7 @@ def _insert_daily_record(
     qr_mode,
     serial_no,
     created_at=None,
+    quantity=1,
 ):
     product_code = f"XMOD-{uuid.uuid4().hex[:6].upper()}"
     cursor = db.execute(
@@ -41,15 +42,16 @@ def _insert_daily_record(
     if created_at is None:
         db.execute(
             "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no, created_at) "
-            "VALUES (?, ?, ?, 'normal', 1, 'daily display contract', 'approved', ?, datetime('now','localtime'))",
-            (order_id, process_id, user_id, serial_no),
+            "VALUES (?, ?, ?, 'normal', ?, 'daily display contract', 'approved', ?, datetime('now','localtime'))",
+            (order_id, process_id, user_id, quantity, serial_no),
         )
     else:
         db.execute(
             "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no, created_at) "
-            "VALUES (?, ?, ?, 'normal', 1, 'daily display contract', 'approved', ?, ?)",
-            (order_id, process_id, user_id, serial_no, created_at),
+            "VALUES (?, ?, ?, 'normal', ?, 'daily display contract', 'approved', ?, ?)",
+            (order_id, process_id, user_id, quantity, serial_no, created_at),
         )
+    return order_id, product_code
 
 
 def test_daily_records_display_order_number_or_serial(client, auth_headers):
@@ -75,6 +77,69 @@ def test_daily_records_display_order_number_or_serial(client, auth_headers):
     assert by_order[order_no]["serial_no"] == ""
     assert by_order[serial_order_no]["display_order_no"] == serial_no
     assert by_order[serial_order_no]["serial_no"] == serial_no
+
+
+def test_daily_records_are_grouped_by_employee_and_include_product_info(client, auth_headers):
+    first_order_no = f"TEST-DAILY-{uuid.uuid4().hex[:8].upper()}"
+    second_order_no = f"TEST-DAILY-{uuid.uuid4().hex[:8].upper()}"
+
+    with client.application.app_context():
+        db = get_db()
+        process_id = _active_process_id(db)
+        user = db.execute("SELECT id FROM users WHERE username = 'testrunner'").fetchone()
+        user_id = user["id"]
+        _, first_product_code = _insert_daily_record(
+            db,
+            process_id,
+            user_id,
+            first_order_no,
+            "",
+            "",
+            "2026-06-30 08:00:00",
+            quantity=2,
+        )
+        _, second_product_code = _insert_daily_record(
+            db,
+            process_id,
+            user_id,
+            second_order_no,
+            "",
+            "",
+            "2026-06-30 09:00:00",
+            quantity=3,
+        )
+        db.commit()
+
+    response = client.get("/api/stats/daily?date=2026-06-30&per_page=5000", headers=auth_headers)
+
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()
+    by_order = {row["order_no"]: row for row in data["records"]}
+    assert by_order[first_order_no]["product_code"] == first_product_code
+    assert by_order[second_order_no]["product_code"] == second_product_code
+    assert "product_model" in by_order[first_order_no]
+    assert "customer" in by_order[first_order_no]
+    assert "route_name" in by_order[first_order_no]
+
+    matching_groups = [
+        group for group in data["employee_groups"]
+        if {row["order_no"] for row in group["records"]} >= {first_order_no, second_order_no}
+    ]
+    assert len(matching_groups) == 1
+    group = matching_groups[0]
+    assert group["record_count"] == 2
+    assert group["total_quantity"] == 5
+    assert group["normal_quantity"] == 5
+    assert group["order_count"] == 2
+    assert group["product_count"] == 2
+    assert [row["order_no"] for row in group["records"]] == [first_order_no, second_order_no]
+
+    totals = data["summary_totals"]
+    assert totals["record_count"] >= 2
+    assert totals["total_quantity"] >= 5
+    assert totals["worker_count"] >= 1
+    assert totals["order_count"] >= 2
+    assert totals["product_count"] >= 2
 
 
 def test_daily_records_cache_isolated_by_query_string(client, auth_headers):
