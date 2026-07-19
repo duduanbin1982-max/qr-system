@@ -39,55 +39,63 @@ const httpApi = {
   del:    (url)         => request('DELETE', url),
 }
 
-const apiModules = [
-  httpApi,
-  authApi,
-  dashboardApi,
-  ordersApi,
-  orderAttachmentsApi,
-  productsApi,
-  materialsApi,
-  customersApi,
-  usersApi,
-  processesApi,
-  processRoutesApi,
-  pricingApi,
-  wagesApi,
-  inventoryApi,
-  shipmentsApi,
-  scanApi,
-  qrcodeApi,
-  statsApi,
-  traceApi,
-  approvalsApi,
-  settingsApi,
-  positionsApi,
-  rolesApi,
-  logsApi,
-  qualityApi,
-  reworkApi,
-  productionApi,
-  performanceApi,
-  workTimeApi,
-]
+export const apiNamespaces = Object.freeze({
+  http: httpApi,
+  auth: authApi,
+  dashboard: dashboardApi,
+  orders: ordersApi,
+  orderAttachments: orderAttachmentsApi,
+  products: productsApi,
+  materials: materialsApi,
+  customers: customersApi,
+  users: usersApi,
+  processes: processesApi,
+  processRoutes: processRoutesApi,
+  pricing: pricingApi,
+  wages: wagesApi,
+  inventory: inventoryApi,
+  shipments: shipmentsApi,
+  scan: scanApi,
+  qrcode: qrcodeApi,
+  stats: statsApi,
+  trace: traceApi,
+  approvals: approvalsApi,
+  settings: settingsApi,
+  positions: positionsApi,
+  roles: rolesApi,
+  logs: logsApi,
+  quality: qualityApi,
+  rework: reworkApi,
+  production: productionApi,
+  performance: performanceApi,
+  workTime: workTimeApi,
+})
 
-function mergeApiModules(modules) {
+function mergeApiModules(namespaces) {
   const merged = {}
   const owners = new Map()
   const duplicateKeys = []
-  modules.forEach((moduleApi, moduleIndex) => {
+  Object.entries(namespaces).forEach(([namespace, moduleApi]) => {
     for (const [key, value] of Object.entries(moduleApi)) {
       if (Object.prototype.hasOwnProperty.call(merged, key)) {
-        duplicateKeys.push(`${key} (${owners.get(key)} -> module#${moduleIndex})`)
+        duplicateKeys.push(`${key} (${owners.get(key)} -> ${namespace})`)
       }
-      owners.set(key, `module#${moduleIndex}`)
+      owners.set(key, namespace)
       merged[key] = value
     }
   })
-  if (duplicateKeys.length && import.meta.env?.DEV) {
-    console.warn('Duplicate api facade keys; later modules keep compatibility:', duplicateKeys)
+  if (duplicateKeys.length) {
+    throw new Error(`Duplicate API facade methods: ${duplicateKeys.join(', ')}`)
   }
   return merged
 }
 
-export const api = mergeApiModules(apiModules)
+const compatibilityApi = mergeApiModules(apiNamespaces)
+if (Object.prototype.hasOwnProperty.call(compatibilityApi, 'domains')) {
+  throw new Error('API compatibility method "domains" collides with the namespace root')
+}
+
+export const api = Object.freeze({
+  ...compatibilityApi,
+  domains: apiNamespaces,
+})

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "check:api": "node scripts/check-api-facade.mjs",
+    "build": "npm run check:api && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -4,8 +4,6 @@ const PRODUCTS_API = '/api/products'
 const ORDERS_API = '/api/orders'
 
 export const productsApi = {
-  listMaterials: (params) => request('GET', '/api/materials' + buildQuery(params || {})),
-  listProcesses: () => request('GET', '/api/processes'),
   listProducts: (params) => request('GET', PRODUCTS_API + buildQuery(params)),
   createProduct: (data) => request('POST', PRODUCTS_API, data),
   updateProduct: (id, data) => request('PUT', PRODUCTS_API + '/' + id, data),
