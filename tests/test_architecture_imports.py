@@ -1,4 +1,5 @@
 import ast
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -154,6 +155,25 @@ def test_repositories_do_not_depend_on_service_db_helper():
 
     assert violations == [], f"repositories must depend on repository/context seams, not services: {violations}"
 
+
+def test_repositories_do_not_depend_on_other_repositories():
+    violations = []
+    repository_root = PROJECT_ROOT / "modules" / "repositories"
+    for path in sorted(repository_root.glob("*.py")):
+        if path.name in {"__init__.py", "context.py"}:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = node.module or ""
+            if module.startswith("modules.repositories.") and module != "modules.repositories.context":
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT).as_posix()} -> {module}"
+                )
+
+    assert violations == [], f"repositories must not depend on peer repositories: {violations}"
+
 def test_services_do_not_import_sqlite_driver_directly():
     violations = []
     service_root = PROJECT_ROOT / "modules" / "services"
@@ -168,6 +188,35 @@ def test_services_do_not_import_sqlite_driver_directly():
 
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
 
+
+def test_services_do_not_embed_sql_statements():
+    sql_pattern = re.compile(
+        r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",
+        re.IGNORECASE | re.DOTALL,
+    )
+    violations = []
+    for path in sorted((PROJECT_ROOT / "modules" / "services").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if sql_pattern.search(node.value):
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
+                    )
+
+    assert violations == [], f"service layer must pass business filters, not SQL: {violations}"
+
+
+def test_shipment_repository_only_owns_shipment_tables():
+    path = PROJECT_ROOT / "modules" / "repositories" / "shipment_repository.py"
+    source = path.read_text(encoding="utf-8", errors="replace").upper()
+    forbidden = (
+        "FROM ORDERS", "UPDATE ORDERS", "FROM INVENTORY", "UPDATE INVENTORY",
+        "INSERT INTO INVENTORY", "FROM PRODUCTS", "UPDATE PRODUCTS",
+    )
+
+    assert not [token for token in forbidden if token in source]
+
 def test_access_policy_core_has_no_repository_dependency():
     path = PROJECT_ROOT / "modules" / "access_policy.py"
     tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -179,4 +228,3 @@ def test_access_policy_core_has_no_repository_dependency():
             violations.extend(alias.name for alias in node.names if alias.name.startswith("modules.repositories"))
 
     assert violations == []
-

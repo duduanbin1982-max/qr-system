@@ -410,9 +410,9 @@ def test_work_time_daily_stats_and_performance_metrics_include_approved_records(
     assert work_time_summary["effective_minutes"] >= 60
     assert work_time_summary["efficiency"] > 0
 
-    from modules.repositories.performance_repository import PerformanceRepository
+    from modules.services.performance_service import PerformanceService
     with client.application.app_context():
-        metrics = PerformanceRepository.worker_month_metrics(ids["user_id"], "2026-01")
+        metrics = PerformanceService.worker_month_metrics(ids["user_id"], "2026-01")
     assert metrics["work_time_record_count"] >= 1
     assert metrics["work_time_effective_minutes"] >= 60
     assert metrics["work_time_efficiency"] > 0

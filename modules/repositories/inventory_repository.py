@@ -81,6 +81,16 @@ class InventoryRepository:
         return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
 
     @staticmethod
+    def list_available_by_order(order_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id AS inventory_id, product_model, product_name, specification, "
+            "quantity, unit, order_id FROM inventory "
+            "WHERE order_id = ? AND quantity > 0",
+            (order_id,),
+        ).fetchall()
+
+    @staticmethod
     def find_item_for_delete(item_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -111,6 +121,22 @@ class InventoryRepository:
             'updated_at = datetime("now","localtime") '
             'WHERE id = ? AND quantity >= ?',
             (quantity, item_id, quantity),
+        )
+
+    @staticmethod
+    def reserve_stock_txn(item_id, quantity, db):
+        return db.execute(
+            "UPDATE inventory SET reserved = reserved + ?, "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (quantity, item_id),
+        )
+
+    @staticmethod
+    def release_reserved_stock_txn(item_id, quantity, db):
+        return db.execute(
+            "UPDATE inventory SET reserved = MAX(0, reserved - ?), "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (quantity, item_id),
         )
 
     @staticmethod

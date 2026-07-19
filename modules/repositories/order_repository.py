@@ -38,6 +38,15 @@ class OrderRepository:
             "SELECT id, status, deleted_at FROM orders WHERE id = ?", (order_id,)
         ).fetchone()
 
+    @staticmethod
+    def update_delivery_status(order_id, status, db=None):
+        db = resolve_db(db)
+        db.execute(
+            "UPDATE orders SET delivery_status = ?, "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (status, order_id),
+        )
+
 
     @staticmethod
     def find_by_order_no(order_no, db=None):
@@ -80,6 +89,55 @@ class OrderRepository:
             LIMIT ? OFFSET ?
         ''', params + [limit, offset]).fetchall()
         return rows, total
+
+    @staticmethod
+    def list_filtered(keyword="", customer="", status="", data_scope_pids=None,
+                      archive="active", page=1, limit=20, db=None):
+        base_where = ["o.deleted_at IS NULL"]
+        base_params = []
+        if keyword:
+            base_where.append(
+                "(o.order_no LIKE ? OR o.product_name LIKE ? OR "
+                "o.product_code LIKE ? OR o.customer LIKE ?)"
+            )
+            base_params.extend([f"%{keyword}%"] * 4)
+        if customer:
+            base_where.append("o.customer LIKE ?")
+            base_params.append(f"%{customer}%")
+        if data_scope_pids is not None:
+            if not data_scope_pids:
+                return [], 0, {}, archive or "active"
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            base_where.append(
+                f"o.id IN (SELECT order_id FROM order_processes "
+                f"WHERE process_id IN ({placeholders}))"
+            )
+            base_params.extend(data_scope_pids)
+
+        where = list(base_where)
+        params = list(base_params)
+        archive = (archive or "active").strip().lower()
+        if status:
+            where.append("o.status = ?")
+            params.append(status)
+        elif archive == "completed":
+            where.append("o.status = ?")
+            params.append("completed")
+        elif archive != "all":
+            archive = "active"
+            where.append("o.status != ?")
+            params.append("completed")
+
+        rows, total = OrderRepository.list_all(
+            " AND ".join(where), params, page, limit, db=db, order_by="o.order_no DESC"
+        )
+        counts = {
+            row["status"]: row["cnt"]
+            for row in OrderRepository.count_by_status(
+                " AND ".join(base_where), base_params, db=db
+            )
+        }
+        return rows, total, counts, archive
 
     @staticmethod
     def list_completion_focus_orders(limit=80, db=None):
@@ -363,6 +421,26 @@ class OrderRepository:
     def update_fields(order_id, set_clauses, params, db=None):
         db = resolve_db(db)
         db.execute('UPDATE orders SET ' + ', '.join(set_clauses) + ' WHERE id = ?', list(params) + [order_id])
+
+    @staticmethod
+    def update_form_fields(order_id, changes, db=None):
+        db = resolve_db(db)
+        allowed = (
+            "order_no", "customer", "customer_id", "product_name", "product_code",
+            "quantity", "plan_start", "plan_end", "deadline", "remark", "status",
+            "route_id", "production_line_id",
+        )
+        fields = [field for field in allowed if field in changes]
+        if not fields:
+            return 0
+        params = [changes[field] if changes[field] is not None else None for field in fields]
+        cursor = db.execute(
+            "UPDATE orders SET "
+            + ", ".join(f"{field} = ?" for field in fields)
+            + ", updated_at = datetime('now','localtime') WHERE id = ?",
+            params + [order_id],
+        )
+        return cursor.rowcount
 
     @staticmethod
     def mark_deleted(order_id, deleted_by=None, db=None):

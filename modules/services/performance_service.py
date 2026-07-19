@@ -3,6 +3,7 @@ from datetime import datetime
 
 from modules.services import BaseService
 from modules.repositories.performance_repository import PerformanceRepository
+from modules.repositories.work_time_repository import WorkTimeRepository
 from modules.services.handoff_review_service import HandoffReviewService
 from modules.services.performance_scoring_policy import PerformanceScoringPolicy
 
@@ -21,6 +22,20 @@ class PerformanceService:
     @staticmethod
     def rules():
         return PerformanceService.scoring_policy.rules()
+
+    @staticmethod
+    def worker_month_metrics(user_id, year_month, db=None):
+        return {
+            **PerformanceRepository.worker_month_metrics(user_id, year_month, db),
+            **WorkTimeRepository.approved_user_month_metrics(user_id, year_month, db),
+        }
+
+    @staticmethod
+    def work_record_count(year_month, db=None):
+        return (
+            PerformanceRepository.work_record_count(year_month, db)
+            + WorkTimeRepository.approved_month_record_count(year_month, db)
+        )
 
     @staticmethod
     def resolve_display_month(requested_month, latest_score_month, requested_score_count):
@@ -48,9 +63,9 @@ class PerformanceService:
             "display_month": display_month,
             "latest_score_month": latest_score_month,
             "current_month_score_count": current_score_count,
-            "current_month_work_record_count": PerformanceRepository.work_record_count(current_month),
+            "current_month_work_record_count": PerformanceService.work_record_count(current_month),
             "requested_month_score_count": requested_score_count,
-            "requested_month_work_record_count": PerformanceRepository.work_record_count(requested_month),
+            "requested_month_work_record_count": PerformanceService.work_record_count(requested_month),
             "months": PerformanceRepository.list_score_months(),
         }
 
@@ -69,7 +84,7 @@ class PerformanceService:
         metrics_by_user = {}
         max_output_by_position = {}
         for worker in workers:
-            metrics = PerformanceRepository.worker_month_metrics(worker["id"], year_month)
+            metrics = PerformanceService.worker_month_metrics(worker["id"], year_month)
             metrics_by_user[worker["id"]] = metrics
             position_key = PerformanceService._position_group_key(worker)
             max_output_by_position[position_key] = max(

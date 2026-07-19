@@ -1,8 +1,6 @@
 """qr-system — 工价管理 Service 层 (Repository pattern)"""
-from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.price_repository import PriceRepository
-from modules.services.query_utils import paginate, build_sort_clause
 
 
 class RoutePriceService:
@@ -97,10 +95,3 @@ class RoutePriceService:
         """获取某路线的工价变更历史"""
         rows = PriceRepository.get_route_price_history(route_id)
         return {"history": [dict(r) for r in rows]}
-
-    @staticmethod
-    def active_price_join():
-        """统一的 route_prices 生效条件 JOIN 子句"""
-        return ("LEFT JOIN route_prices rp ON o.route_id = rp.route_id "
-                "AND wr.process_id = rp.process_id AND rp.status = 'active' "
-                "AND rp.effective_date <= date('now','localtime')")

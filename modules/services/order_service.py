@@ -109,47 +109,15 @@ class OrderService:
     def list_orders(page=1, limit=DEFAULT_PAGE_SIZE, status='', keyword='', customer='',
                     data_scope_pids=None, archive='active'):
         """分页查询订单列表（含数据权限过滤）。"""
-        base_where = ['o.deleted_at IS NULL']
-        base_params = []
-        if keyword:
-            base_where.append('(o.order_no LIKE ? OR o.product_name LIKE ? OR o.product_code LIKE ? OR o.customer LIKE ?)')
-            base_params.extend([f'%{keyword}%'] * 4)
-        if customer:
-            base_where.append('o.customer LIKE ?')
-            base_params.append(f'%{customer}%')
-
-        if data_scope_pids is not None:
-            if not data_scope_pids:
-                return {'orders': [], 'total': 0, 'page': page, 'limit': limit,
-                        'pending': 0, 'producing': 0, 'completed': 0,
-                        'archive': archive or 'active'}
-            placeholders = ','.join('?' for _ in data_scope_pids)
-            base_where.append(
-                f"o.id IN (SELECT order_id FROM order_processes WHERE process_id IN ({placeholders}))"
-            )
-            base_params.extend(data_scope_pids)
-
-        where = list(base_where)
-        params = list(base_params)
-        archive = (archive or 'active').strip().lower()
-        if status:
-            where.append('o.status = ?')
-            params.append(status)
-        elif archive == 'completed':
-            where.append('o.status = ?')
-            params.append('completed')
-        elif archive == 'all':
-            pass
-        else:
-            archive = 'active'
-            where.append('o.status != ?')
-            params.append('completed')
-
-        where_sql = ' AND '.join(where)
-        count_where_sql = ' AND '.join(base_where)
         size = min(max(limit, 1), MAX_PAGE_LIMIT)
-        rows, total = OrderRepository.list_all(
-            where_sql, params, page, size, order_by='o.order_no DESC'
+        rows, total, counts, archive = OrderRepository.list_filtered(
+            keyword=keyword,
+            customer=customer,
+            status=status,
+            data_scope_pids=data_scope_pids,
+            archive=archive,
+            page=page,
+            limit=size,
         )
         all_procs = {}
         for process in OrderRepository.list_processes_for_orders([row['id'] for row in rows]):
@@ -171,7 +139,6 @@ class OrderService:
             order['processes'] = all_procs.get(order['id'], [])
             result.append(order)
 
-        counts = {row['status']: row['cnt'] for row in OrderRepository.count_by_status(count_where_sql, base_params)}
         return {
             'orders': result, 'total': total, 'page': page, 'limit': size,
             'pending': counts.get('pending', 0),
@@ -270,7 +237,6 @@ class OrderService:
             ValueError: 订单不存在 / 状态转换非法
             RuntimeError: 数据库错误
         """
-        db = BaseService.db()
         existing = OrderRepository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
@@ -299,14 +265,6 @@ class OrderService:
         # inside the transaction to avoid relying on the lightweight status query.
         remark_changed = 'remark' in data
 
-        sets = []
-        params = []
-        for field in ['order_no', 'customer', 'customer_id', 'product_name', 'product_code',
-                       'quantity', 'plan_start', 'plan_end', 'deadline', 'remark', 'status', 'route_id', 'production_line_id']:
-            if field in data:
-                sets.append(f'{field} = ?')
-                params.append(data[field] if data[field] is not None else None)
-
         with BaseService.transaction() as txn:
             # TOCTOU-safe remark history: re-read inside transaction
             if remark_changed and user_id:
@@ -321,9 +279,7 @@ class OrderService:
                         db=txn
                     )
 
-            if sets:
-                sets.append("updated_at = datetime('now','localtime')")
-                OrderRepository.update_fields(oid, sets, params, db=txn)
+            OrderRepository.update_form_fields(oid, data, db=txn)
 
             if 'process_ids' in data:
                 OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])

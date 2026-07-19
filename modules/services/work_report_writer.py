@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime
 
+from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
 from modules.repositories.scan_repository import ScanRepository
 from modules.services import BaseService
 from modules.services.inventory_auto_inbound_service import InventoryAutoInboundService
@@ -190,7 +191,7 @@ class WorkReportWriter:
             user_id,
             db,
         )
-        ScanRepository.deduct_materials_for_process(
+        MaterialConsumptionRepository.deduct_for_process(
             order_id,
             process_id,
             quantity_local,

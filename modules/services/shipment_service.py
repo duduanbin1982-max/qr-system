@@ -4,7 +4,8 @@ from io import BytesIO
 
 from modules.export_utils import auto_width, style_header, CELL_ALIGN, THIN_BORDER
 from modules.services import BaseService
-from modules.services.query_utils import paginate, build_sort_clause
+from modules.repositories.inventory_repository import InventoryRepository
+from modules.repositories.order_repository import OrderRepository
 from modules.repositories.shipment_repository import ShipmentRepository
 
 
@@ -28,35 +29,14 @@ class ShipmentService:
 
     @staticmethod
     def list_shipments(keyword="", status="", page=1, limit=20, sort_by="created_at", sort_dir="desc"):
-        where = "1=1"
-        params = []
-        if keyword:
-            where += " AND (shipment_no LIKE ? OR customer LIKE ?)"
-            params.extend(["%" + keyword + "%", "%" + keyword + "%"])
-        if status:
-            where += " AND status = ?"
-            params.append(status)
-
-        total = ShipmentRepository.count_shipments(where, params)
-
-        sort_clause = build_sort_clause(
-            sort_by,
-            {"created_at": "s.created_at", "customer": "s.customer", "status": "s.status", "total_quantity": "s.total_quantity"},
-            default="s.created_at"
+        rows, total, size = ShipmentRepository.list_shipments(
+            keyword=keyword,
+            status=status,
+            page=page,
+            limit=limit,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
-        base_sql = (
-            "SELECT s.*, COALESCE(si.item_count, 0) as item_count, "
-            "COALESCE(si.product_codes, '') as product_codes "
-            "FROM shipments s "
-            "LEFT JOIN ("
-            "SELECT shipment_id, COUNT(*) as item_count, "
-            "GROUP_CONCAT(DISTINCT NULLIF(product_code, '')) as product_codes "
-            "FROM shipment_items GROUP BY shipment_id"
-            ") si ON si.shipment_id = s.id "
-            "WHERE " + where + " " + sort_clause
-        )
-        paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
-        rows = ShipmentRepository.list_shipments_paginated(paginated_sql, all_params)
         return {"shipments": [dict(r) for r in rows], "total": total, "page": page, "limit": size}
 
     @staticmethod
@@ -73,9 +53,8 @@ class ShipmentService:
         total_qty = sum(item.get("quantity", 0) for item in items)
 
         # 库存校验
-        db = BaseService.db()
         for item in items:
-            inv = ShipmentRepository.find_inventory_for_validation(item.get("inventory_id", 0))
+            inv = InventoryRepository.find_item_by_id(item.get("inventory_id", 0))
             if not inv:
                 raise ValueError("库存记录不存在 (ID:" + str(item.get("inventory_id")) + ")")
             if inv["quantity"] < item.get("quantity", 0):
@@ -99,19 +78,20 @@ class ShipmentService:
             order_id = data.get("order_id") or (items[0].get("order_id") if items else None)
             order_no_val = data.get("order_no", "")
             if order_id and not order_no_val:
-                order_no_val = ShipmentRepository.find_order_no_txn(order_id, db=txn)
+                order = OrderRepository.find_by_id(order_id, db=txn)
+                order_no_val = order["order_no"] if order else ""
 
             for item in items:
                 item_order_id = item.get("order_id") or order_id
                 item_order_no = item.get("order_no") or order_no_val
                 if item_order_id and not item_order_no:
-                    item_order_no = ShipmentRepository.find_order_no_txn(item_order_id, db=txn)
+                    item_order = OrderRepository.find_by_id(item_order_id, db=txn)
+                    item_order_no = item_order["order_no"] if item_order else ""
                 product_code = item.get("product_code", "")
                 if not product_code:
-                    inv_row = ShipmentRepository.find_inventory_model_txn(item.get("inventory_id", 0), db=txn)
+                    inv_row = InventoryRepository.find_item_by_id(item.get("inventory_id", 0), db=txn)
                     if inv_row:
-                        prod_code = ShipmentRepository.find_product_code_by_model_txn(inv_row["product_model"], db=txn)
-                        product_code = prod_code if prod_code else inv_row["product_model"]
+                        product_code = inv_row["product_model"]
                     else:
                         product_code = item.get("product_model", "")
                 ShipmentRepository.insert_shipment_item_txn(
@@ -124,7 +104,9 @@ class ShipmentService:
 
             if data.get("deduction_mode") == "on_create":
                 for item in items:
-                    ShipmentRepository.reserve_inventory_txn(item.get("inventory_id", 0), item.get("quantity", 0), db=txn)
+                    InventoryRepository.reserve_stock_txn(
+                        item.get("inventory_id", 0), item.get("quantity", 0), db=txn
+                    )
                 ShipmentRepository.mark_reserved_txn(shipment_id, db=txn)
 
             return shipment_id, shipment_no
@@ -144,19 +126,20 @@ class ShipmentService:
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
             raise ValueError("出库单不存在")
-        fields = ["customer", "contact_person", "contact_phone", "address", "remark", "status", "receivable_amount", "payment_status"]
-        updates = []
-        params = []
-        for f in fields:
-            if f in data:
-                if f == "status" and data[f] == "completed" and row["status"] != "completed":
+        fields = {
+            "customer", "contact_person", "contact_phone", "address", "remark",
+            "status", "receivable_amount", "payment_status",
+        }
+        changes = {}
+        for field in fields:
+            if field in data:
+                if field == "status" and data[field] == "completed" and row["status"] != "completed":
                     raise ValueError("请使用「完成出库」按钮完成出库")
-                updates.append(f + " = ?")
-                params.append(data[f])
-        if not updates:
+                changes[field] = data[field]
+        if not changes:
             raise ValueError("没有需要更新的字段")
         with BaseService.transaction() as txn:
-            ShipmentRepository.update_shipment_fields_txn(", ".join(updates), params, shipment_id, db=txn)
+            ShipmentRepository.update_shipment_fields_txn(shipment_id, changes, db=txn)
 
     @staticmethod
     def delete_shipment(shipment_id, current_user):
@@ -167,11 +150,12 @@ class ShipmentService:
             if row["status"] == "completed":
                 items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
                 for item in items:
-                    ShipmentRepository.return_inventory_txn(item["inventory_id"], item["quantity"], db=txn)
+                    InventoryRepository.increase_stock_txn(item["inventory_id"], item["quantity"], db=txn)
                     remark = "删除出库单 " + row["shipment_no"] + " - 归还库存"
-                    ShipmentRepository.insert_inventory_log_txn(
-                        item["inventory_id"], "in", item["quantity"], row["shipment_no"],
-                        remark, current_user["id"], current_user["name"], db=txn
+                    InventoryRepository.insert_movement_log_txn(
+                        item["inventory_id"], "in", item["quantity"],
+                        order_id=item["order_id"], order_no=row["shipment_no"], remark=remark,
+                        operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
                     )
             ShipmentRepository.delete_shipment_items_txn(shipment_id, db=txn)
             ShipmentRepository.delete_shipment_txn(shipment_id, db=txn)
@@ -192,19 +176,24 @@ class ShipmentService:
         with BaseService.transaction() as txn:
             if row["reserved_at"]:
                 for item in items:
-                    ShipmentRepository.release_reserved_txn(item["inventory_id"], item["quantity"], db=txn)
+                    InventoryRepository.release_reserved_stock_txn(
+                        item["inventory_id"], item["quantity"], db=txn
+                    )
             for item in items:
-                cur = ShipmentRepository.deduct_inventory_txn(item["inventory_id"], item["quantity"], db=txn)
+                cur = InventoryRepository.decrease_stock_if_available_txn(
+                    item["inventory_id"], item["quantity"], db=txn
+                )
                 if cur.rowcount == 0:
-                    inv = ShipmentRepository.find_inventory_for_deduct_txn(item["inventory_id"], db=txn)
+                    inv = InventoryRepository.find_item_by_id(item["inventory_id"], db=txn)
                     current = inv["quantity"] if inv else 0
                     model = inv["product_model"] if inv else (item["product_model"] or "?")
                     raise ValueError(model + " " + (item["product_name"] or "") + ": 库存不足 (库存" + str(current) + "，需" + str(item["quantity"]) + ")")
                 item_order_no = item["order_no"] if item["order_no"] else sn
                 remark = "出库单 " + sn + " 出库 " + str(item["quantity"]) + " " + (item["unit"] or "件")
-                ShipmentRepository.insert_inventory_log_txn(
-                    item["inventory_id"], "out", item["quantity"], item_order_no,
-                    remark, current_user["id"], current_user["name"], db=txn
+                InventoryRepository.insert_movement_log_txn(
+                    item["inventory_id"], "out", item["quantity"],
+                    order_id=item["order_id"], order_no=item_order_no, remark=remark,
+                    operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
                 )
             ShipmentRepository.complete_shipment_txn(shipment_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), db=txn)
             ShipmentService._update_order_delivery_status(txn, shipment_id)
@@ -290,25 +279,28 @@ class ShipmentService:
             if row["reserved_at"]:
                 items_rel = ShipmentRepository.release_reserved_for_shipment_txn(shipment_id, db=txn)
                 for item in items_rel:
-                    ShipmentRepository.release_reserved_txn(item["inventory_id"], item["quantity"], db=txn)
+                    InventoryRepository.release_reserved_stock_txn(
+                        item["inventory_id"], item["quantity"], db=txn
+                    )
             if row["status"] == "completed":
                 items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
                 for item in items:
-                    ShipmentRepository.return_inventory_txn(item["inventory_id"], item["quantity"], db=txn)
-                    ShipmentRepository.insert_inventory_log_txn(
-                        item["inventory_id"], "in", item["quantity"], row["shipment_no"],
-                        "取消出库单 " + row["shipment_no"] + " - 归还库存",
-                        current_user["id"], current_user["name"], db=txn
+                    InventoryRepository.increase_stock_txn(item["inventory_id"], item["quantity"], db=txn)
+                    InventoryRepository.insert_movement_log_txn(
+                        item["inventory_id"], "in", item["quantity"],
+                        order_id=item["order_id"], order_no=row["shipment_no"],
+                        remark="取消出库单 " + row["shipment_no"] + " - 归还库存",
+                        operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
                     )
             ShipmentRepository.cancel_shipment_txn(shipment_id, db=txn)
         return row["shipment_no"]
 
     @staticmethod
     def get_order_stock(order_id):
-        order = ShipmentRepository.find_order_for_stock(order_id)
+        order = OrderRepository.find_by_id(order_id)
         if not order:
             raise ValueError("订单不存在")
-        items = ShipmentRepository.find_inventory_by_order(order_id)
+        items = InventoryRepository.list_available_by_order(order_id)
         return {"order": dict(order), "items": [dict(it) for it in items]}
 
     @staticmethod
@@ -387,8 +379,9 @@ class ShipmentService:
         for item in items:
             if item["order_id"]:
                 shipped_qty = ShipmentRepository.sum_shipped_qty_txn(item["order_id"], db=txn)
-                total_qty = ShipmentRepository.find_order_quantity_txn(item["order_id"], db=txn)
+                order = OrderRepository.find_by_id(item["order_id"], db=txn)
+                total_qty = order["quantity"] if order else 0
                 if total_qty:
                     status = "全部发货" if shipped_qty >= total_qty else ("部分发货" if shipped_qty > 0 else None)
                     if status:
-                        ShipmentRepository.update_order_delivery_status_txn(item["order_id"], status, db=txn)
+                        OrderRepository.update_delivery_status(item["order_id"], status, db=txn)

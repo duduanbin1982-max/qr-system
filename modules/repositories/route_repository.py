@@ -6,17 +6,33 @@ class RouteRepository:
     """工序路线数据访问 — 封装所有路线 SQL 查询。"""
 
     @staticmethod
+    def list_routes(category="", search="", limit=None, offset=0, db=None):
+        db = resolve_db(db)
+        conditions = []
+        params = []
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if search:
+            conditions.append('name LIKE ? ESCAPE "\\"')
+            safe_search = search.replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{safe_search}%")
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = db.execute(
+            "SELECT COUNT(*) FROM process_routes" + where_sql, params
+        ).fetchone()[0]
+        sql = "SELECT * FROM process_routes" + where_sql + " ORDER BY created_at DESC"
+        query_params = list(params)
+        if limit:
+            size = max(1, min(int(limit), 200))
+            sql += " LIMIT ? OFFSET ?"
+            query_params.extend([size, offset])
+        return db.execute(sql, query_params).fetchall(), total
+
+    @staticmethod
     def list_routes_query(sql, params, db=None):
         db = resolve_db(db)
         return db.execute(sql, params).fetchall()
-
-    @staticmethod
-    def count_routes(conditions, params, db=None):
-        db = resolve_db(db)
-        count_sql = "SELECT COUNT(*) FROM process_routes"
-        if conditions:
-            count_sql += " WHERE " + " AND ".join(conditions)
-        return db.execute(count_sql, params).fetchone()[0]
 
     @staticmethod
     def list_route_items(route_ids, db=None):

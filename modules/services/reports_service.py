@@ -4,22 +4,8 @@ import logging
 from modules.repositories.reports_repository import ReportsRepository
 
 _logger = logging.getLogger(__name__)
-_ACTIVE_ORDERS = "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)"
 
 PROCESS_ORDER = ["下料", "铆接", "焊接", "抛丸", "打磨", "镗孔", "喷漆"]
-# SECURITY: All $where variables are built from trusted string constants only.
-
-
-def _build_date_filter(start, end, prefix="wr"):
-    where = []
-    params = []
-    if start:
-        where.append(f"DATE({prefix}.created_at) >= ?")
-        params.append(start)
-    if end:
-        where.append(f"DATE({prefix}.created_at) <= ?")
-        params.append(end)
-    return " AND ".join(where) if where else "", params
 
 
 def _calc_defect_rate(items):
@@ -43,16 +29,7 @@ class ReportsService:
 
     @staticmethod
     def worker_efficiency(start="", end="", product_code=""):
-        date_w, date_p = _build_date_filter(start, end)
-        where = [_ACTIVE_ORDERS, "wr.status = 'approved'"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        if product_code:
-            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
-        w = " AND ".join(where)
-        workers = ReportsRepository.fetch_worker_efficiency(w, params)
+        workers = ReportsRepository.worker_efficiency(start, end, product_code)
         result = []
         for w in workers:
             d = dict(w)
@@ -65,16 +42,7 @@ class ReportsService:
 
     @staticmethod
     def quality_analysis(start="", end="", product_code=""):
-        date_w, date_p = _build_date_filter(start, end)
-        where = [_ACTIVE_ORDERS, 'wr.status = "approved"']
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        if product_code:
-            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
-        w = " AND ".join(where)
-        by_process = ReportsRepository.fetch_quality_by_process(w, params)
+        by_process = ReportsRepository.quality_by_process(start, end, product_code)
         result = {"by_process": _calc_defect_rate(by_process)}
         try:
             from modules.services.quality_service import QualityService
@@ -109,19 +77,9 @@ class ReportsService:
         except Exception as exc:
             _logger.warning("quality supplier_quality report failed: %s", exc)
         try:
-            qi_where = ["1=1"]
-            qi_params = []
-            if start:
-                qi_where.append("DATE(qi.inspected_at) >= ?")
-                qi_params.append(start)
-            if end:
-                qi_where.append("DATE(qi.inspected_at) <= ?")
-                qi_params.append(end)
-            if product_code:
-                qi_where.append("qi.product_code = ?")
-                qi_params.append(product_code)
-            qi_w = " AND ".join(qi_where)
-            qi_by_process = ReportsRepository.fetch_quality_inspection_by_process(qi_w, qi_params)
+            qi_by_process = ReportsRepository.quality_inspection_by_process(
+                start, end, product_code
+            )
             result["qi_by_process"] = [dict(r) for r in qi_by_process]
         except Exception as exc:
             _logger.warning("quality inspection by-process report failed: %s", exc)
@@ -137,44 +95,14 @@ class ReportsService:
 
     @staticmethod
     def product_stats(start="", end="", product_code=""):
-        where = ["o.deleted_at IS NULL"]
-        params = []
-        if start:
-            where.append("DATE(o.created_at) >= ?"); params.append(start)
-        if end:
-            where.append("DATE(o.created_at) <= ?"); params.append(end)
-        if product_code:
-            where.append("o.product_code = ?"); params.append(product_code)
-        w = " AND ".join(where)
-        item_w = ""
-        item_extra = []
-        if start:
-            item_w += " AND DATE(pi.completed_at) >= ?"
-            item_extra.append(start)
-        if end:
-            item_w += " AND DATE(pi.completed_at) <= ?"
-            item_extra.append(end)
-        sr_w = (" AND DATE(sr.created_at) >= ?" if start else "") + (" AND DATE(sr.created_at) <= ?" if end else "")
-        wr_w = (" AND DATE(wr.created_at) >= ?" if start else "") + (" AND DATE(wr.created_at) <= ?" if end else "")
-        by_product = ReportsRepository.fetch_product_report(w, params, item_w, sr_w, wr_w, item_extra)
-        summary = ReportsRepository.fetch_product_report_summary(w, params, item_w, item_extra)
+        by_product, summary = ReportsRepository.product_report(start, end, product_code)
         return {
             "by_product": [dict(r) for r in by_product],
             "summary": dict(summary) if summary else {},
         }
     @staticmethod
     def material_usage(start="", end="", product_code=""):
-        date_w, date_p = _build_date_filter(start, end, prefix="mc")
-        where = ["1=1"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        if product_code:
-            where.append("mc.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
-        w = " AND ".join(where)
-        by_material = ReportsRepository.fetch_material_usage(w, params)
-        summary = ReportsRepository.fetch_material_usage_summary(date_w, date_p)
+        by_material, summary = ReportsRepository.material_usage(start, end, product_code)
         return {
             "by_material": [dict(r) for r in by_material],
             "summary": dict(summary) if summary else {},
@@ -182,18 +110,9 @@ class ReportsService:
 
     @staticmethod
     def shipment_stats(start="", end="", product_code=""):
-        date_w, date_p = _build_date_filter(start, end, prefix="s")
-        where = ["1=1"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        if product_code:
-            where.append("s.id IN (SELECT si.shipment_id FROM shipment_items si JOIN orders o ON si.order_id=o.id WHERE o.product_code = ?)")
-            params.append(product_code)
-        w = " AND ".join(where)
-        by_status = ReportsRepository.fetch_shipment_by_status(w, params)
-        by_customer = ReportsRepository.fetch_shipment_by_customer(w, params)
-        monthly = ReportsRepository.fetch_shipment_monthly_trend(w + " AND s.created_at>=date('now','-12 months')", params)
+        by_status, by_customer, monthly = ReportsRepository.shipment_stats(
+            start, end, product_code
+        )
         return {
             "by_status": [dict(r) for r in by_status],
             "by_customer": [dict(r) for r in by_customer],
@@ -203,16 +122,7 @@ class ReportsService:
     @staticmethod
     def product_process_matrix(start="", end="", product_code=""):
         """Product x Process cross-tab matrix for heatmap visualization."""
-        date_w, date_p = _build_date_filter(start, end)
-        where = ["wr.status = 'approved'", "o.deleted_at IS NULL"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        if product_code:
-            where.append("p.product_code = ?")
-            params.append(product_code)
-        w = " AND ".join(where)
-        rows = ReportsRepository.fetch_product_process_matrix(w, params)
+        rows = ReportsRepository.product_process_matrix(start, end, product_code)
         products = {}
         processes = {}
         for r in rows:
@@ -254,13 +164,7 @@ class ReportsService:
     @staticmethod
     def model_process_stats(start="", end=""):
         """Aggregate output by model + process."""
-        date_w, date_p = _build_date_filter(start, end)
-        where = ["wr.status = 'approved'", "o.deleted_at IS NULL"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        w = " AND ".join(where)
-        rows = ReportsRepository.fetch_model_process_stats(w, params)
+        rows = ReportsRepository.model_process_stats(start, end)
         result = {}
         for r in rows:
             model = r["model"] or "-"
@@ -274,17 +178,8 @@ class ReportsService:
     @staticmethod
     def product_process_stats(start="", end=""):
         """Per-product process breakdown with flat process list for matrix display."""
-        date_w, date_p = _build_date_filter(start, end)
-        where = ["wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
-        params = list(date_p)
-        if date_w:
-            where.append(date_w)
-        w = " AND ".join(where)
-        # Get all distinct processes first (sorted by custom order)
-        all_procs = ReportsRepository.fetch_product_process_proc_names(w, params)
+        all_procs, rows = ReportsRepository.product_process_stats(start, end)
         proc_names = sorted([r["name"] for r in all_procs], key=lambda n: PROCESS_ORDER.index(n) if n in PROCESS_ORDER else 999)
-        # Get product-process matrix
-        rows = ReportsRepository.fetch_product_process_matrix_data(w, params)
         # Build response: products array with data dict keyed by process name
         prod_map = {}
         for r in rows:
@@ -303,26 +198,12 @@ class ReportsService:
 
     @staticmethod
     def customer_stats(start="", end=""):
-        where = ["o.deleted_at IS NULL"]
-        params = []
-        if start:
-            where.append("DATE(o.created_at) >= ?"); params.append(start)
-        if end:
-            where.append("DATE(o.created_at) <= ?"); params.append(end)
-        w = " AND ".join(where)
-        rows = ReportsRepository.fetch_customer_stats(w, params)
+        rows = ReportsRepository.customer_stats(start, end)
         return [dict(r) for r in rows]
 
     @staticmethod
     def production_line_stats(start="", end=""):
-        where = ["o.deleted_at IS NULL"]
-        params = []
-        if start:
-            where.append("DATE(o.created_at) >= ?"); params.append(start)
-        if end:
-            where.append("DATE(o.created_at) <= ?"); params.append(end)
-        w = " AND ".join(where)
-        rows = ReportsRepository.fetch_production_line_stats(w, params)
+        rows = ReportsRepository.production_line_stats(start, end)
         return [dict(r) for r in rows]
 
     @staticmethod

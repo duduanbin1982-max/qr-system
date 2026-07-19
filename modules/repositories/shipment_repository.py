@@ -1,4 +1,6 @@
 """qr-system — ShipmentRepository（出库管理数据访问层）"""
+from modules.constants import MAX_PAGE_LIMIT
+from modules.query_utils import paginate
 from modules.repositories.context import resolve_db
 
 
@@ -16,16 +18,41 @@ class ShipmentRepository:
 
     # ========== list_shipments ==========
     @staticmethod
-    def count_shipments(where_clause, params, db=None):
+    def list_shipments(keyword="", status="", page=1, limit=20, sort_by="created_at", sort_dir="desc", db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT COUNT(*) FROM shipments WHERE " + where_clause, params
+        where = ["1=1"]
+        params = []
+        if keyword:
+            where.append("(s.shipment_no LIKE ? OR s.customer LIKE ?)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        if status:
+            where.append("s.status = ?")
+            params.append(status)
+        where_sql = " AND ".join(where)
+        total = db.execute(
+            "SELECT COUNT(*) FROM shipments s WHERE " + where_sql, params
         ).fetchone()[0]
-
-    @staticmethod
-    def list_shipments_paginated(paginated_sql, all_params, db=None):
-        db = resolve_db(db)
-        return db.execute(paginated_sql, all_params).fetchall()
+        allowed_sort = {
+            "created_at": "s.created_at",
+            "customer": "s.customer",
+            "status": "s.status",
+            "total_quantity": "s.total_quantity",
+        }
+        sort_column = allowed_sort.get(sort_by, "s.created_at")
+        direction = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
+        sql = (
+            "SELECT s.*, COALESCE(si.item_count, 0) AS item_count, "
+            "COALESCE(si.product_codes, '') AS product_codes FROM shipments s "
+            "LEFT JOIN (SELECT shipment_id, COUNT(*) AS item_count, "
+            "GROUP_CONCAT(DISTINCT NULLIF(product_code, '')) AS product_codes "
+            "FROM shipment_items GROUP BY shipment_id) si ON si.shipment_id = s.id "
+            f"WHERE {where_sql} ORDER BY {sort_column} {direction}"
+        )
+        paginated_sql, all_params, size, _ = paginate(
+            sql, params, page=page, page_size=limit, max_page_size=MAX_PAGE_LIMIT
+        )
+        rows = db.execute(paginated_sql, all_params).fetchall()
+        return rows, total, size
 
     # ========== create_shipment (transaction) ==========
     @staticmethod
@@ -42,11 +69,6 @@ class ShipmentRepository:
         return cur.lastrowid
 
     @staticmethod
-    def find_order_no_txn(order_id, db):
-        row = db.execute("SELECT order_no FROM orders WHERE id = ?", (order_id,)).fetchone()
-        return row["order_no"] if row else ""
-
-    @staticmethod
     def insert_shipment_item_txn(shipment_id, inventory_id, product_model, product_name,
                                   quantity, unit, remark, order_id, product_code, order_no, db):
         db.execute(
@@ -58,13 +80,6 @@ class ShipmentRepository:
         )
 
     @staticmethod
-    def reserve_inventory_txn(inventory_id, quantity, db):
-        db.execute(
-            "UPDATE inventory SET reserved = reserved + ? WHERE id = ?",
-            (quantity, inventory_id)
-        )
-
-    @staticmethod
     def mark_reserved_txn(shipment_id, db):
         db.execute(
             "UPDATE shipments SET reserved_at = datetime('now','localtime') WHERE id = ?",
@@ -72,19 +87,6 @@ class ShipmentRepository:
         )
 
     @staticmethod
-    def find_product_code_by_model_txn(product_model, db):
-        row = db.execute(
-            "SELECT product_code FROM products WHERE product_code = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1",
-            (product_model,)
-        ).fetchone()
-        return row["product_code"] if row else None
-
-    @staticmethod
-    def find_inventory_model_txn(inventory_id, db):
-        return db.execute(
-            "SELECT product_model FROM inventory WHERE id = ?", (inventory_id,)
-        ).fetchone()
-
     # ========== get_shipment_detail ==========
     @staticmethod
     def find_shipment_by_id(shipment_id, db=None):
@@ -104,28 +106,25 @@ class ShipmentRepository:
 
     # ========== update_shipment ==========
     @staticmethod
-    def update_shipment_fields_txn(updates_clause, params, shipment_id, db):
-        db.execute(
-            "UPDATE shipments SET " + updates_clause + " WHERE id = ?",
-            params + [shipment_id]
+    def update_shipment_fields_txn(shipment_id, changes, db):
+        allowed = {
+            "customer", "contact_person", "contact_phone", "address", "remark",
+            "status", "receivable_amount", "payment_status",
+        }
+        fields = [field for field in changes if field in allowed]
+        if not fields:
+            return 0
+        params = [changes[field] for field in fields]
+        cursor = db.execute(
+            "UPDATE shipments SET " + ", ".join(f"{field} = ?" for field in fields) + " WHERE id = ?",
+            params + [shipment_id],
         )
+        return cursor.rowcount
 
     # ========== delete_shipment ==========
     @staticmethod
     def find_shipment_items_for_delete_txn(shipment_id, db):
         return db.execute("SELECT * FROM shipment_items WHERE shipment_id = ?", (shipment_id,)).fetchall()
-
-    @staticmethod
-    def return_inventory_txn(inventory_id, quantity, db):
-        db.execute("UPDATE inventory SET quantity = quantity + ? WHERE id = ?", (quantity, inventory_id))
-
-    @staticmethod
-    def insert_inventory_log_txn(inventory_id, log_type, quantity, order_no, remark, operator_id, operator_name, db):
-        db.execute(
-            "INSERT INTO inventory_logs (inventory_id, type, quantity, order_no, "
-            "remark, operator_id, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (inventory_id, log_type, quantity, order_no, remark, operator_id, operator_name)
-        )
 
     @staticmethod
     def delete_shipment_items_txn(shipment_id, db):
@@ -136,24 +135,6 @@ class ShipmentRepository:
         db.execute("DELETE FROM shipments WHERE id = ?", (shipment_id,))
 
     # ========== complete_shipment ==========
-    @staticmethod
-    def release_reserved_txn(inventory_id, quantity, db):
-        db.execute("UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE id = ?", (quantity, inventory_id))
-
-    @staticmethod
-    def deduct_inventory_txn(inventory_id, quantity, db):
-        return db.execute(
-            "UPDATE inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?",
-            (quantity, inventory_id, quantity)
-        )
-
-    @staticmethod
-    def find_inventory_for_deduct_txn(inventory_id, db):
-        return db.execute(
-            "SELECT quantity, product_model, product_name FROM inventory WHERE id = ?",
-            (inventory_id,)
-        ).fetchone()
-
     @staticmethod
     def complete_shipment_txn(shipment_id, completed_at, db):
         db.execute(
@@ -197,34 +178,6 @@ class ShipmentRepository:
             "UPDATE shipments SET status='cancelled', cancelled_at=datetime('now','localtime') WHERE id=?",
             (shipment_id,)
         )
-
-    # ========== get_order_stock ==========
-    @staticmethod
-    def find_order_for_stock(order_id, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT id, order_no, customer, product_name, product_code FROM orders WHERE id = ?",
-            (order_id,)
-        ).fetchone()
-
-    @staticmethod
-    def find_inventory_by_order(order_id, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT i.id as inventory_id, i.product_model, i.product_name, i.specification, "
-            "i.quantity, i.unit, i.order_id FROM inventory i "
-            "WHERE i.order_id = ? AND i.quantity > 0",
-            (order_id,)
-        ).fetchall()
-
-    # ========== inventory validation ==========
-    @staticmethod
-    def find_inventory_for_validation(inventory_id, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT quantity, product_model, product_name FROM inventory WHERE id = ?",
-            (inventory_id,)
-        ).fetchone()
 
     # ========== get_stats ==========
     @staticmethod
@@ -302,17 +255,6 @@ class ShipmentRepository:
         return row["shipped_qty"] if row else 0
 
     @staticmethod
-    def find_order_quantity_txn(order_id, db):
-        row = db.execute("SELECT quantity FROM orders WHERE id = ?", (order_id,)).fetchone()
-        return row["quantity"] if row else 0
-
-    @staticmethod
-    def update_order_delivery_status_txn(order_id, status, db):
-        db.execute(
-            "UPDATE orders SET delivery_status = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (status, order_id)
-        )
-
     # ========== existence check ==========
     @staticmethod
     def shipment_exists(shipment_id, db=None):

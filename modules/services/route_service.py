@@ -13,29 +13,7 @@ class ProcessRouteService:
     @staticmethod
     def list_routes(category="", search="", limit=None, offset=0):
         """获取所有工序路线（含工序明细，批量预取避免 N+1）。"""
-        sql = "SELECT * FROM process_routes"
-        params = []
-        conditions = []
-        if category:
-            conditions.append("category = ?")
-            params.append(category)
-        if search:
-            conditions.append("name LIKE ? ESCAPE \"\\\"")
-            safe_search = search.replace("%", "\\%").replace("_", "\\_")
-            params.append("%" + safe_search + "%")
-        if conditions:
-            sql += " WHERE " + " AND ".join(conditions)
-        sql += " ORDER BY created_at DESC"
-
-        if limit:
-            limit = max(1, min(int(limit), 200))
-            total = RouteRepository.count_routes(conditions, params)
-            sql += " LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
-            rows = RouteRepository.list_routes_query(sql, params)
-        else:
-            rows = RouteRepository.list_routes_query(sql, params)
-            total = len(rows)
+        rows, total = RouteRepository.list_routes(category, search, limit, offset)
 
         items_by_route = {}
         if rows:

@@ -5,6 +5,155 @@ from modules.repositories.context import resolve_db
 class ReportsRepository:
     """报表数据访问 — 封装所有报表 SQL 查询。"""
 
+    @staticmethod
+    def _date_filter(start, end, prefix, field="created_at"):
+        where = []
+        params = []
+        if start:
+            where.append(f"DATE({prefix}.{field}) >= ?")
+            params.append(start)
+        if end:
+            where.append(f"DATE({prefix}.{field}) <= ?")
+            params.append(end)
+        return where, params
+
+    @staticmethod
+    def worker_efficiency(start="", end="", product_code="", db=None):
+        where = [
+            "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)",
+            "wr.status = 'approved'",
+        ]
+        date_where, params = ReportsRepository._date_filter(start, end, "wr")
+        where.extend(date_where)
+        if product_code:
+            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
+        return ReportsRepository.fetch_worker_efficiency(" AND ".join(where), params, db=db)
+
+    @staticmethod
+    def quality_by_process(start="", end="", product_code="", db=None):
+        where = [
+            "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)",
+            "wr.status = 'approved'",
+        ]
+        date_where, params = ReportsRepository._date_filter(start, end, "wr")
+        where.extend(date_where)
+        if product_code:
+            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
+        return ReportsRepository.fetch_quality_by_process(" AND ".join(where), params, db=db)
+
+    @staticmethod
+    def quality_inspection_by_process(start="", end="", product_code="", db=None):
+        where = ["1=1"]
+        date_where, params = ReportsRepository._date_filter(start, end, "qi", "inspected_at")
+        where.extend(date_where)
+        if product_code:
+            where.append("qi.product_code = ?")
+            params.append(product_code)
+        return ReportsRepository.fetch_quality_inspection_by_process(
+            " AND ".join(where), params, db=db
+        )
+
+    @staticmethod
+    def product_report(start="", end="", product_code="", db=None):
+        where = ["o.deleted_at IS NULL"]
+        order_dates, params = ReportsRepository._date_filter(start, end, "o")
+        where.extend(order_dates)
+        if product_code:
+            where.append("o.product_code = ?")
+            params.append(product_code)
+        item_dates, item_params = ReportsRepository._date_filter(start, end, "pi", "completed_at")
+        scrap_dates, _ = ReportsRepository._date_filter(start, end, "sr")
+        work_dates, _ = ReportsRepository._date_filter(start, end, "wr")
+        item_where = "".join(f" AND {condition}" for condition in item_dates)
+        scrap_where = "".join(f" AND {condition}" for condition in scrap_dates)
+        work_where = "".join(f" AND {condition}" for condition in work_dates)
+        where_sql = " AND ".join(where)
+        return (
+            ReportsRepository.fetch_product_report(
+                where_sql, params, item_where, scrap_where, work_where, item_params, db=db
+            ),
+            ReportsRepository.fetch_product_report_summary(
+                where_sql, params, item_where, item_params, db=db
+            ),
+        )
+
+    @staticmethod
+    def material_usage(start="", end="", product_code="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "mc")
+        where = ["1=1", *date_where]
+        if product_code:
+            where.append("mc.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
+            params.append(product_code)
+        date_sql = " AND ".join(date_where)
+        date_params = params[:len(date_where)]
+        return (
+            ReportsRepository.fetch_material_usage(" AND ".join(where), params, db=db),
+            ReportsRepository.fetch_material_usage_summary(date_sql, date_params, db=db),
+        )
+
+    @staticmethod
+    def shipment_stats(start="", end="", product_code="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "s")
+        where = ["1=1", *date_where]
+        if product_code:
+            where.append(
+                "s.id IN (SELECT si.shipment_id FROM shipment_items si "
+                "JOIN orders o ON si.order_id=o.id WHERE o.product_code = ?)"
+            )
+            params.append(product_code)
+        where_sql = " AND ".join(where)
+        return (
+            ReportsRepository.fetch_shipment_by_status(where_sql, params, db=db),
+            ReportsRepository.fetch_shipment_by_customer(where_sql, params, db=db),
+            ReportsRepository.fetch_shipment_monthly_trend(
+                where_sql + " AND s.created_at>=date('now','-12 months')", params, db=db
+            ),
+        )
+
+    @staticmethod
+    def product_process_matrix(start="", end="", product_code="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "wr")
+        where = ["wr.status = 'approved'", "o.deleted_at IS NULL", *date_where]
+        if product_code:
+            where.append("p.product_code = ?")
+            params.append(product_code)
+        return ReportsRepository.fetch_product_process_matrix(" AND ".join(where), params, db=db)
+
+    @staticmethod
+    def model_process_stats(start="", end="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "wr")
+        where = ["wr.status = 'approved'", "o.deleted_at IS NULL", *date_where]
+        return ReportsRepository.fetch_model_process_stats(" AND ".join(where), params, db=db)
+
+    @staticmethod
+    def product_process_stats(start="", end="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "wr")
+        where = [
+            "wr.status = 'approved'", "o.deleted_at IS NULL",
+            "o.status != 'cancelled'", *date_where,
+        ]
+        where_sql = " AND ".join(where)
+        return (
+            ReportsRepository.fetch_product_process_proc_names(where_sql, params, db=db),
+            ReportsRepository.fetch_product_process_matrix_data(where_sql, params, db=db),
+        )
+
+    @staticmethod
+    def customer_stats(start="", end="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "o")
+        return ReportsRepository.fetch_customer_stats(
+            " AND ".join(["o.deleted_at IS NULL", *date_where]), params, db=db
+        )
+
+    @staticmethod
+    def production_line_stats(start="", end="", db=None):
+        date_where, params = ReportsRepository._date_filter(start, end, "o")
+        return ReportsRepository.fetch_production_line_stats(
+            " AND ".join(["o.deleted_at IS NULL", *date_where]), params, db=db
+        )
+
     # ========== production_trend ==========
     @staticmethod
     def fetch_production_trend(start_date, end_date, db=None):

@@ -2,7 +2,6 @@
 import json
 
 from modules.repositories.context import resolve_db
-from modules.repositories.work_time_repository import WorkTimeRepository
 
 
 class PerformanceRepository:
@@ -132,14 +131,12 @@ class PerformanceRepository:
         rework = PerformanceRepository.rework_record_metrics(user_id, year_month, db)
         inspection = PerformanceRepository.inspection_metrics(user_id, year_month, db)
         plans = PerformanceRepository.improvement_plan_metrics(user_id, year_month, db)
-        work_time = WorkTimeRepository.approved_user_month_metrics(user_id, year_month, db)
         return {
             **work,
             "scrap_qty": work["scrap_qty"] + scrap["scrap_qty"],
             "rework_qty": work["rework_qty"] + rework["rework_qty"],
             **inspection,
             **plans,
-            **work_time,
         }
 
     @staticmethod
@@ -262,7 +259,7 @@ class PerformanceRepository:
             "WHERE status = 'approved' AND created_at LIKE ?",
             (year_month + "%",),
         ).fetchone()
-        return int(row["total"] or 0) + WorkTimeRepository.approved_month_record_count(year_month, db)
+        return int(row["total"] or 0)
 
     @staticmethod
     def list_score_months(limit=12, db=None):
