@@ -2,50 +2,27 @@
 
 from datetime import datetime
 
+from modules.domain.work_time import (
+    REVIEW_STATUSES,
+    WorkTimeRecordPolicy,
+    to_float,
+    to_int,
+)
 from modules.services import BaseService
 from modules.repositories.work_time_repository import WorkTimeRepository
 
 
 STANDARD_STATUSES = {"active", "inactive"}
-RECORD_STATUSES = {"running", "completed", "abnormal"}
-REVIEW_STATUSES = {"pending", "approved", "rejected"}
 
 
 class WorkTimeService:
     @staticmethod
     def _to_int(value, default=None):
-        if value in (None, ""):
-            return default
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
+        return to_int(value, default)
 
     @staticmethod
     def _to_float(value, default=0.0):
-        if value in (None, ""):
-            return float(default)
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return float(default)
-        return number
-
-    @staticmethod
-    def _to_datetime(value):
-        if not value:
-            return None
-        text = str(value).strip().replace("T", " ")
-        for fmt, length in (
-            ("%Y-%m-%d %H:%M:%S", 19),
-            ("%Y-%m-%d %H:%M", 16),
-            ("%Y-%m-%d", 10),
-        ):
-            try:
-                return datetime.strptime(text[:length], fmt)
-            except ValueError:
-                continue
-        raise ValueError("时间格式不正确")
+        return to_float(value, default)
 
     @staticmethod
     def _now_text():
@@ -247,16 +224,7 @@ class WorkTimeService:
         return WorkTimeRepository.list_records(filters or {}, page, per_page)
 
     @staticmethod
-    def _standard_total_minutes(standard, quantity):
-        if not standard:
-            return 0
-        setup = WorkTimeService._to_float(standard["setup_minutes"], 0)
-        unit = WorkTimeService._to_float(standard["standard_minutes_per_unit"], 0)
-        factor = WorkTimeService._to_float(standard["difficulty_factor"], 1)
-        return round(setup + unit * max(int(quantity or 1), 1) * factor, 2)
-
-    @staticmethod
-    def normalize_record(data, creator_id):
+    def _resolve_record_context(data):
         process_id = WorkTimeService._to_int(data.get("process_id"))
         user_id = WorkTimeService._to_int(data.get("user_id"))
         if not process_id:
@@ -295,26 +263,6 @@ class WorkTimeService:
             if not WorkTimeRepository.find_route_process(route_id, process_id):
                 raise ValueError("所选工序不属于该工序路线")
 
-        quantity = max(WorkTimeService._to_int(data.get("quantity"), 1) or 1, 1)
-        start_time = (data.get("start_time") or WorkTimeService._now_text()).strip().replace("T", " ")
-        end_time = (data.get("end_time") or "").strip().replace("T", " ")
-        status = (data.get("status") or ("completed" if end_time else "running")).strip()
-        if status not in RECORD_STATUSES:
-            raise ValueError("工时流水状态不正确")
-        if status == "completed" and not end_time:
-            end_time = WorkTimeService._now_text()
-
-        start_dt = WorkTimeService._to_datetime(start_time)
-        end_dt = WorkTimeService._to_datetime(end_time) if end_time else None
-        pause_minutes = max(WorkTimeService._to_float(data.get("pause_minutes"), 0), 0)
-        actual_minutes = WorkTimeService._to_float(data.get("actual_minutes"), 0)
-        if start_dt and end_dt:
-            if end_dt < start_dt:
-                raise ValueError("结束时间不能早于开始时间")
-            actual_minutes = round(max((end_dt - start_dt).total_seconds() / 60 - pause_minutes, 0), 2)
-        effective_minutes = WorkTimeService._to_float(data.get("effective_minutes"), actual_minutes)
-        effective_minutes = round(max(effective_minutes, 0), 2)
-
         standard_id = WorkTimeService._to_int(data.get("standard_id"))
         standard = WorkTimeRepository.find_standard(standard_id) if standard_id else None
         if standard_id and not standard:
@@ -326,51 +274,28 @@ class WorkTimeService:
                 process_id=process_id,
             )
             standard_id = standard["id"] if standard else None
-        standard_missing = 0 if standard else 1
-        standard_minutes = WorkTimeService._to_float(data.get("standard_minutes"), 0)
-        if standard_minutes <= 0:
-            standard_minutes = WorkTimeService._standard_total_minutes(standard, quantity)
-
-        abnormal_reason = (data.get("abnormal_reason") or "").strip()
-        review_status = (data.get("review_status") or "").strip()
-        if not review_status:
-            review_status = "pending" if status in {"running", "abnormal"} or abnormal_reason else "approved"
-        if review_status not in REVIEW_STATUSES:
-            raise ValueError("审核状态不正确")
-        if abnormal_reason and status == "completed":
-            status = "abnormal"
-            review_status = "pending"
-
         return {
             "order_id": order_id,
             "order_no": order_no,
-            "serial_no": (data.get("serial_no") or "").strip(),
             "route_id": route_id,
             "route_name": route_name,
             "product_code": product_code,
             "product_name": product_name,
-            "standard_missing": standard_missing,
+            "standard_missing": 0 if standard else 1,
             "process_id": process_id,
             "process_name": process["name"],
             "user_id": user_id,
             "user_name": user["name"],
             "standard_id": standard_id,
-            "source_work_record_id": WorkTimeService._to_int(data.get("source_work_record_id")),
-            "quantity": quantity,
-            "standard_minutes": round(standard_minutes, 2),
-            "start_time": start_time,
-            "end_time": end_time,
-            "pause_minutes": round(pause_minutes, 2),
-            "actual_minutes": actual_minutes,
-            "effective_minutes": effective_minutes,
-            "status": status,
-            "abnormal_reason": abnormal_reason,
-            "review_status": review_status,
-            "reviewed_by": creator_id if review_status == "approved" else None,
-            "reviewed_at": WorkTimeService._now_text() if review_status == "approved" else "",
-            "review_note": (data.get("review_note") or "").strip(),
-            "created_by": creator_id,
+            "standard": standard,
         }
+
+    @staticmethod
+    def normalize_record(data, creator_id):
+        context = WorkTimeService._resolve_record_context(data)
+        return WorkTimeRecordPolicy.normalize(
+            data, context, creator_id, WorkTimeService._now_text()
+        )
 
     @staticmethod
     def create_record(data, creator_id):

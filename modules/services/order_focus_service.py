@@ -2,6 +2,7 @@
 
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.setting_repository import SettingRepository
+from modules.domain.order_focus import OrderFocusPolicy
 from modules.services import BaseService
 from modules.services.access_policy_service import has_permission
 from modules.services.order_progress_analyzer import OrderProgressAnalyzer
@@ -195,29 +196,17 @@ class OrderFocusService:
 
     @staticmethod
     def _first_backlog_process(process_stats):
-        for stat in process_stats or []:
-            if stat.get("backlog", 0) > 0:
-                return stat
-        return None
+        return OrderFocusPolicy.first_backlog_process(process_stats)
 
     @staticmethod
     def _focus_type(summary, analysis, completion_pct):
-        if summary.get("completed_workpieces", 0) and completion_pct >= OrderFocusService.tail_percent():
-            return "tail"
-        if summary.get("stuck_workpieces", 0):
-            return "stuck"
-        if summary.get("in_progress_workpieces", 0) or summary.get("completed_workpieces", 0):
-            return "partial"
-        return "pending"
+        return OrderFocusPolicy.focus_type(
+            summary, completion_pct, OrderFocusService.tail_percent()
+        )
 
     @staticmethod
     def _focus_label(focus_type):
-        return {
-            "tail": "尾数清理",
-            "stuck": "滞留卡点",
-            "partial": "部分完工",
-            "pending": "待集中启动",
-        }.get(focus_type, "待处理")
+        return OrderFocusPolicy.focus_label(focus_type)
 
     @staticmethod
     def board(limit=80):
@@ -232,113 +221,38 @@ class OrderFocusService:
             }
 
         rows = []
+        tail_percent = OrderFocusService.tail_percent()
         active_exceptions = {
             row["order_id"]: dict(row)
             for row in OrderRepository.list_active_completion_focus_exceptions()
         }
-        for order in OrderRepository.list_completion_focus_orders(limit=limit):
+        for order_row in OrderRepository.list_completion_focus_orders(limit=limit):
+            order = dict(order_row)
             try:
                 progress = OrderProgressAnalyzer.analyze(order["id"])
             except Exception:
                 continue
             summary = progress.get("summary", {})
-            analysis = progress.get("analysis", {})
-            total = summary.get("total_workpieces") or progress.get("quantity") or order["quantity"] or 0
-            completed = summary.get("completed_workpieces", 0)
-            if not summary.get("total_workpieces"):
-                completed = min(order["completed"] or 0, total)
-                process_stats = []
-                for process in OrderRepository.get_processes(order["id"]):
-                    process_completed = min(process["completed"] or 0, total)
-                    process_stats.append({
-                        "process_id": process["process_id"],
-                        "process_name": process["process_name"],
-                        "seq_order": process["seq_order"],
-                        "completed": process_completed,
-                        "current": 0,
-                        "pending": max(total - process_completed, 0),
-                        "stuck": 0,
-                        "backlog": max(total - process_completed, 0),
-                        "total": total,
-                        "completion_pct": round(process_completed / max(total, 1) * 100, 1),
-                    })
-                summary = {
-                    **summary,
-                    "total_workpieces": total,
-                    "completed_workpieces": completed,
-                    "remaining_workpieces": max(total - completed, 0),
-                    "in_progress_workpieces": 0,
-                    "pending_workpieces": max(total - completed, 0),
-                    "stuck_workpieces": 0,
-                    "process_stats": process_stats,
-                    "overall_progress_pct": round(completed / max(total, 1) * 100, 1),
-                }
-            remaining = summary.get("remaining_workpieces", 0)
-            if not total or remaining <= 0:
-                continue
-
-            completed = summary.get("completed_workpieces", completed)
-            completion_pct = round(completed / max(total, 1) * 100, 1)
-            bottlenecks = analysis.get("bottlenecks") or []
-            bottleneck = bottlenecks[0] if bottlenecks else OrderFocusService._first_backlog_process(
-                summary.get("process_stats")
+            fallback_processes = (
+                [] if summary.get("total_workpieces") else
+                [dict(process) for process in OrderRepository.get_processes(order["id"])]
             )
-            focus_type = OrderFocusService._focus_type(summary, analysis, completion_pct)
-            exception = active_exceptions.get(order["id"])
-            if exception:
-                focus_type = "exception"
-            rows.append({
-                "order_id": progress.get("order_id"),
-                "order_no": progress.get("order_no"),
-                "product_name": progress.get("product_name"),
-                "product_code": order["product_code"] or "",
-                "customer": order["customer_name"] or order["customer"] or "",
-                "route_name": progress.get("route_name") or order["route_name"] or "",
-                "quantity": progress.get("quantity"),
-                "created_at": order["created_at"] or "",
-                "deadline": progress.get("deadline") or "",
-                "completed_workpieces": completed,
-                "remaining_workpieces": remaining,
-                "in_progress_workpieces": summary.get("in_progress_workpieces", 0),
-                "pending_workpieces": summary.get("pending_workpieces", 0),
-                "stuck_workpieces": summary.get("stuck_workpieces", 0),
-                "completion_pct": completion_pct,
-                "overall_progress_pct": summary.get("overall_progress_pct", 0),
-                "focus_type": focus_type,
-                "focus_label": "例外放行" if exception else OrderFocusService._focus_label(focus_type),
-                "is_exception": bool(exception),
-                "exception": exception,
-                "exception_reason": exception.get("reason") if exception else "",
-                "exception_expires_at": exception.get("expires_at") if exception else "",
-                "priority_process_id": bottleneck.get("process_id") if bottleneck else None,
-                "priority_process_name": bottleneck.get("process_name") if bottleneck else "",
-                "priority_backlog": bottleneck.get("backlog", 0) if bottleneck else 0,
-                "priority_stuck": bottleneck.get("stuck", 0) if bottleneck else 0,
-                "risk_level": (analysis.get("deadline_risk") or {}).get("level", "low"),
-                "risk_reason": (analysis.get("deadline_risk") or {}).get("reason", ""),
-                "recommendations": analysis.get("recommendations", [])[:3],
-            })
+            item = OrderFocusPolicy.board_item(
+                progress,
+                order,
+                active_exceptions.get(order["id"]),
+                tail_percent,
+                fallback_processes,
+            )
+            if item:
+                rows.append(item)
 
-        rows.sort(key=lambda item: (
-            item["created_at"] or "",
-            1 if item["is_exception"] else 0,
-            0 if item["focus_type"] == "tail" else 1,
-            -item["completion_pct"],
-            item["order_id"] or 0,
-        ))
-        summary = {
-            "total": len(rows),
-            "tail": sum(1 for item in rows if item["focus_type"] == "tail"),
-            "stuck": sum(1 for item in rows if item["stuck_workpieces"] > 0),
-            "partial": sum(1 for item in rows if item["focus_type"] == "partial"),
-            "pending": sum(1 for item in rows if item["focus_type"] == "pending"),
-            "exception": sum(1 for item in rows if item["is_exception"]),
-        }
+        rows.sort(key=OrderFocusPolicy.sort_key)
         return {
             "enabled": True,
             "config": config,
-            "tail_percent": OrderFocusService.tail_percent(),
-            "summary": summary,
+            "tail_percent": tail_percent,
+            "summary": OrderFocusPolicy.summarize(rows),
             "items": rows,
             "exceptions": list(active_exceptions.values()),
         }
@@ -361,32 +275,11 @@ class OrderFocusService:
         if not priority:
             return None
 
-        backlog = int(priority["backlog"] or 0)
         hard = OrderFocusService.hard_block_enabled()
         bypass_allowed = OrderFocusService.can_bypass(user)
-        blocking = hard and not bypass_allowed
-        message = (
-            f"集中完工{'强拦截' if blocking else '提示'}：同路线/同产品存在更早下达订单"
-            f"「{priority['order_no']}」的「{priority['process_name']}」还剩 {backlog} 件。"
-            + (
-                "请先完成前序订单，或联系班组长/管理员设置例外后再报工。"
-                if blocking else
-                "当前订单允许继续报工，但建议先按班组排程完成前序订单尾数。"
-            )
+        return OrderFocusPolicy.priority_warning(
+            dict(priority), OrderFocusService.mode(), hard, bypass_allowed
         )
-        return {
-            "enabled": True,
-            "mode": OrderFocusService.mode(),
-            "blocking": blocking,
-            "bypass_allowed": bypass_allowed,
-            "severity": "danger" if blocking else "warning",
-            "message": message,
-            "recommended_order_id": priority["id"],
-            "recommended_order_no": priority["order_no"],
-            "recommended_process_id": priority["process_id"],
-            "recommended_process_name": priority["process_name"],
-            "recommended_backlog": backlog,
-        }
 
     @staticmethod
     def scan_priority_warning(order_data, current_process, user=None):
