@@ -14,11 +14,13 @@ from modules.order_focus_config import (
 )
 
 MIGRATIONS = []
-LATEST_VERSION = 29
+LATEST_VERSION = 0
 
 def migration(version, description):
     def decorator(fn):
+        global LATEST_VERSION
         MIGRATIONS.append((version, description, fn))
+        LATEST_VERSION = max(LATEST_VERSION, version)
         return fn
     return decorator
 

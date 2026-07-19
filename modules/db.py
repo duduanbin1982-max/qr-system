@@ -11,7 +11,7 @@ import time
 from flask import g
 
 from modules.config import DB_PATH, PREDEFINED_ROLES
-from modules.migrations import run_migrations, LATEST_VERSION
+from modules.migrations import run_migrations
 
 # 缓存系统设置（避免每次查询）
 _settings_cache = None
@@ -90,10 +90,6 @@ def init_db() -> None:
     db.row_factory = sqlite3.Row
     try:
         db.execute("PRAGMA journal_mode=WAL")
-        current_version = db.execute("PRAGMA user_version").fetchone()[0]
-        if current_version >= LATEST_VERSION:
-            db.close()
-            return
         run_migrations(db)
     finally:
         db.close()
