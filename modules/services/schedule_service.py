@@ -7,10 +7,27 @@ from modules.repositories.schedule_repository import ScheduleRepository
 
 
 class ScheduleService:
+    VALID_SCOPES = {"active", "completed", "all"}
+
     @staticmethod
-    def get_gantt_data(limit=200, offset=0):
-        rows = ScheduleRepository.find_scheduled_orders(limit=limit, offset=offset)
-        total = ScheduleRepository.count_scheduled_orders()
+    def _normalize_scope(schedule_scope):
+        return schedule_scope if schedule_scope in ScheduleService.VALID_SCOPES else "active"
+
+    @staticmethod
+    def _is_completed_order(order):
+        if not order:
+            return False
+        quantity = order["quantity"] or 0
+        completed = order["completed"] or 0
+        return order["status"] == "completed" or (quantity > 0 and completed >= quantity)
+
+    @staticmethod
+    def get_gantt_data(limit=200, offset=0, schedule_scope="active"):
+        schedule_scope = ScheduleService._normalize_scope(schedule_scope)
+        rows = ScheduleRepository.find_scheduled_orders(
+            limit=limit, offset=offset, schedule_scope=schedule_scope
+        )
+        total = ScheduleRepository.count_scheduled_orders(schedule_scope=schedule_scope)
 
         orders = []
         min_date = None
@@ -31,6 +48,8 @@ class ScheduleService:
             elif end and end <= two_days_later and progress < 60:
                 risk = "warning"
 
+            is_completed = bool(r["is_completed"])
+
             orders.append({
                 "id": r["id"], "order_no": r["order_no"],
                 "deadline": r["deadline"],
@@ -39,8 +58,10 @@ class ScheduleService:
                 "product_code": r["product_code"],
                 "customer_name": r["customer_name"],
                 "plan_start": start, "plan_end": end,
-                "status": r["status"], "quantity": r["quantity"],
+                "status": "completed" if is_completed else r["status"],
+                "quantity": r["quantity"],
                 "completed": r["completed"],
+                "is_completed": is_completed,
                 "progress": progress,
                 "risk": risk,
                 "production_line": r["production_line"],
@@ -70,7 +91,8 @@ class ScheduleService:
         return {
             "ok": True, "orders": orders,
             "min_date": min_date, "max_date": max_date,
-            "total": total, "limit": limit, "offset": offset
+            "total": total, "limit": limit, "offset": offset,
+            "schedule_scope": schedule_scope
         }
 
     @staticmethod
@@ -79,6 +101,8 @@ class ScheduleService:
         order = ScheduleRepository.find_order_by_id(order_id)
         if not order:
             raise ValueError("order not found")
+        if ScheduleService._is_completed_order(order):
+            raise ValueError("已完成订单排程只读，不能调整")
 
         with BaseService.transaction() as txn:
             ScheduleRepository.update_order_schedule_txn(

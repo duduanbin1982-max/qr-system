@@ -52,6 +52,7 @@ class ApprovalService:
         record = ApprovalRepository.find_by_id(record_id)
         if not record:
             raise ValueError('???????')
+        record = dict(record)
         if record['status'] != 'pending':
             raise ValueError('???????')
 
@@ -63,6 +64,7 @@ class ApprovalService:
             wr = ApprovalRepository.find_work_record(record['work_record_id'])
             if not wr:
                 raise ValueError('???????')
+            wr = dict(wr)
             if wr['status'] == 'approved':
                 raise ValueError('??????????????????')
 
@@ -70,6 +72,7 @@ class ApprovalService:
             order = ApprovalRepository.find_order(wr['order_id'])
             if not order or order['deleted_at'] is not None:
                 raise ValueError('???????')
+            order = dict(order)
             if order['completed'] + wr['quantity'] > order['quantity']:
                 raise ValueError(
                     f'?????????({order["completed"]}+{wr["quantity"]})'
@@ -79,6 +82,7 @@ class ApprovalService:
             # Multi-level approval
             current_level = record.get('current_level', 1) or 1
             cfg_row = ApprovalRepository.find_approval_config(wr.get('process_id'))
+            cfg_row = dict(cfg_row) if cfg_row else None
             max_level = cfg_row['approval_level'] if cfg_row else 1
 
             if current_level >= max_level:

@@ -13,6 +13,7 @@ const orders = ref([])
     const page = ref(1)
     const limit = ref(20)
     const filterStatus = ref('')
+    const archiveFilter = ref('active')
     const searchKeyword = ref('')
     const filterCustomer = ref('')
 
@@ -35,7 +36,18 @@ const orders = ref([])
     // ===== 申请返工 =====
 
     // 申请返工
-    function openRework(o) { reworkOrder.value = o; reworkForm.value = { process_id: "", quantity: 1, reason: "" }; showReworkModal.value = true }
+    function isCompletedOrder(o) {
+      return (o?.status || '') === 'completed'
+    }
+    function completedReadonlyToast() {
+      showToast('已完成订单已归档，只读，请先重新打开订单', 'error')
+    }
+    function openRework(o) {
+      if (isCompletedOrder(o)) { completedReadonlyToast(); return }
+      reworkOrder.value = o
+      reworkForm.value = { process_id: "", quantity: 1, reason: "" }
+      showReworkModal.value = true
+    }
     async function submitRework() {
       const o = reworkOrder.value
       const f = reworkForm.value
@@ -58,6 +70,13 @@ const orders = ref([])
     const progressOrder = ref(null)
     const progressLoading = ref(false)
     const progressData = ref(null)
+    const showCompletionFocus = ref(false)
+    const completionFocusLoading = ref(false)
+    const completionFocusData = ref({ summary: {}, items: [] })
+    const completionFocusConfig = ref({ mode: 'soft', tail_percent: 70, reason_options: [], mode_options: [] })
+    const showFocusExceptionModal = ref(false)
+    const focusExceptionOrder = ref(null)
+    const focusExceptionForm = ref({ reason: '缺料', detail: '', expires_at: '' })
 
     const form = ref({
       order_no:'', customer:'', customer_id:null, product_name:'', product_code:'',
@@ -241,6 +260,35 @@ const orders = ref([])
       if (!o.quantity || !o.scrapped) return 0
       return Math.round(o.scrapped / o.quantity * 100)
     }
+    function riskLabel(level) {
+      return ({
+        none: '无风险',
+        low: '低',
+        medium: '中',
+        high: '高',
+        overdue: '已延期'
+      })[level] || '低'
+    }
+    function formatHours(value) {
+      if (value === null || value === undefined || value === '') return '-'
+      const hours = Number(value)
+      if (!Number.isFinite(hours)) return '-'
+      if (hours < 24) return `${hours.toFixed(1)} 小时`
+      return `${(hours / 24).toFixed(1)} 天`
+    }
+    function completionFocusModeOptions() {
+      const options = completionFocusConfig.value.mode_options || []
+      if (options.length) return options
+      return [
+        { value: 'off', label: '\u5173\u95ed', button_class: 'btn-primary' },
+        { value: 'soft', label: '\u8f6f\u63d0\u793a', button_class: 'btn-warning' },
+        { value: 'hard', label: '\u5f3a\u62e6\u622a', button_class: 'btn-danger' },
+      ]
+    }
+    function completionFocusModeLabel(mode) {
+      const option = completionFocusModeOptions().find(item => item.value === mode)
+      return option ? option.label : (mode || '')
+    }
     function isOverdue(o) {
       if (!o.plan_end) return false;
       const today = new Date(); today.setHours(0,0,0,0);
@@ -274,6 +322,12 @@ const orders = ref([])
     }
 
     async function handleAttachmentUpload(orderId, event) {
+      const order = orders.value.find(item => item.id === orderId)
+      if (isCompletedOrder(order)) {
+        completedReadonlyToast()
+        event.target.value = ''
+        return
+      }
       const file = event.target.files?.[0]
       if (!file) return
       const formData = new FormData()
@@ -290,6 +344,8 @@ const orders = ref([])
     }
 
     async function delAttachment(attachmentId, orderId) {
+      const order = orders.value.find(item => item.id === orderId)
+      if (isCompletedOrder(order)) { completedReadonlyToast(); return }
       if (!confirm('确定删除此附件吗？')) return
       try {
         await api.deleteAttachment(attachmentId)
@@ -336,7 +392,7 @@ const orders = ref([])
     async function load() {
       loading.value = true
       try {
-        const params = { page: page.value, limit: limit.value }
+        const params = { page: page.value, limit: limit.value, archive: archiveFilter.value }
         if (filterStatus.value) params.status = filterStatus.value
         if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
         if (filterCustomer.value.trim()) params.customer = filterCustomer.value.trim()
@@ -356,6 +412,8 @@ const orders = ref([])
 
     let _searchTimer = null
     function searchAndLoad() { page.value = 1; load() }
+    function archiveChange() { page.value = 1; load() }
+    function statusChange() { page.value = 1; load() }
     function debouncedSearch() {
       if (_searchTimer) clearTimeout(_searchTimer)
       _searchTimer = setTimeout(() => { page.value = 1; load() }, 300)
@@ -402,6 +460,7 @@ const orders = ref([])
     }
 
     function openEdit(o) {
+      if (isCompletedOrder(o)) { completedReadonlyToast(); return }
       form.value = {
         order_no: o.order_no || '',
         customer: o.customer || '',
@@ -458,8 +517,22 @@ const orders = ref([])
     }
 
     async function del(o) {
+      if (isCompletedOrder(o)) { completedReadonlyToast(); return }
       if (!confirm('确定将订单 ' + o.order_no + ' 移入回收站吗？\n30天后可从回收站彻底删除。')) return
       try { await api.deleteOrder(o.id); showToast('已移至回收站'); await load() } catch(e) { showToast(e.message || '删除失败', 'error') }
+    }
+
+    async function reopenOrder(o) {
+      const reason = window.prompt('请输入重新打开订单的原因：', '')
+      if (reason === null) return
+      if (!reason.trim()) { showToast('请填写重新打开原因', 'error'); return }
+      try {
+        await api.reopenOrder(o.id, { reason: reason.trim(), status: 'producing' })
+        showToast('订单已重新打开')
+        await load()
+      } catch(e) {
+        showToast(e.message || '重新打开失败', 'error')
+      }
     }
 
     // ===== 回收站 =====
@@ -507,6 +580,79 @@ const orders = ref([])
       }
     }
 
+    async function openCompletionFocus() {
+      showCompletionFocus.value = true
+      completionFocusLoading.value = true
+      try {
+        try {
+          completionFocusConfig.value = await api.getCompletionFocusConfig()
+        } catch(e) {}
+        completionFocusData.value = await api.getCompletionFocus({ limit: 120 })
+        if (completionFocusData.value.config) completionFocusConfig.value = completionFocusData.value.config
+      } catch(e) {
+        completionFocusData.value = { summary: {}, items: [] }
+        showToast(e.message || '加载集中完工看板失败', 'error')
+      } finally {
+        completionFocusLoading.value = false
+      }
+    }
+
+    async function setCompletionFocusMode(mode) {
+      try {
+        const res = await api.saveCompletionFocusConfig({
+          mode,
+          tail_percent: completionFocusConfig.value.tail_percent || 70
+        })
+        completionFocusConfig.value = res.config || { ...completionFocusConfig.value, mode }
+        showToast('集中完工模式已切换为：' + completionFocusModeLabel(mode))
+        await openCompletionFocus()
+      } catch(e) {
+        showToast(e.message || '保存集中完工模式失败', 'error')
+      }
+    }
+
+    function openFocusException(item) {
+      focusExceptionOrder.value = item
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      tomorrow.setMinutes(tomorrow.getMinutes() - tomorrow.getTimezoneOffset())
+      focusExceptionForm.value = {
+        reason: (completionFocusConfig.value.reason_options || ['缺料'])[0] || '缺料',
+        detail: '',
+        expires_at: tomorrow.toISOString().slice(0, 16)
+      }
+      showFocusExceptionModal.value = true
+    }
+
+    async function saveFocusException() {
+      const order = focusExceptionOrder.value
+      if (!order) return
+      if (!focusExceptionForm.value.reason) { showToast('请选择例外原因', 'error'); return }
+      try {
+        await api.createCompletionFocusException(order.order_id, {
+          ...focusExceptionForm.value,
+          expires_at: (focusExceptionForm.value.expires_at || '').replace('T', ' ')
+        })
+        showToast('已设置例外订单')
+        showFocusExceptionModal.value = false
+        await openCompletionFocus()
+      } catch(e) {
+        showToast(e.message || '设置例外失败', 'error')
+      }
+    }
+
+    async function cancelFocusException(item) {
+      const id = item?.exception?.id
+      if (!id) return
+      if (!confirm('确认取消该订单的集中完工例外？')) return
+      try {
+        await api.cancelCompletionFocusException(id, { reason: '手动取消' })
+        showToast('已取消例外')
+        await openCompletionFocus()
+      } catch(e) {
+        showToast(e.message || '取消例外失败', 'error')
+      }
+    }
+
 
     function prevPage() { if (page.value > 1) { page.value--; load() } }
     function nextPage() { if (page.value * limit.value < total.value) { page.value++; load() } }
@@ -514,9 +660,10 @@ const orders = ref([])
     onMounted(async () => { await loadDropdownData(); load() })
 
     return {
-      orders, loading, total, page, limit, filterStatus, searchKeyword, filterCustomer,
+      orders, loading, total, page, limit, filterStatus, archiveFilter, searchKeyword, filterCustomer,
       expandedId, toggleExpand, toggleExpandAndLoad, pct, scrapPct, isOverdue, statusMap,
       pendingCount, producingCount, completedCount,
+      riskLabel, formatHours,
       // 下拉数据
       customers, products, processRoutes, productionLines,
       // 工序路线搜索 Combobox
@@ -527,7 +674,8 @@ const orders = ref([])
       onCustomerChange,
       // 模态框
       showModal, modalEdit, form,
-      openAdd, openEdit, save, del, prevPage, nextPage, load, searchAndLoad, debouncedSearch, customerChange, auth,
+      openAdd, openEdit, save, del, reopenOrder, prevPage, nextPage, load, searchAndLoad,
+      debouncedSearch, archiveChange, statusChange, customerChange, auth,
       // 产品搜索 Combobox (修复)
       productSearch, showProductDropdown, productSearchResults, recentProducts, productCursor,
       onProductSearchFocus, onProductSearchInput, moveProductCursor, selectProductByEnter,
@@ -541,10 +689,14 @@ const orders = ref([])
       showTrash, trashOrders, trashTotal, trashPage, trashPageSize, loadTrash, restoreOrder, permanentDelete,
       // 工件进度看板
       progressOrder, progressLoading, progressData, openProgress,
+      showCompletionFocus, completionFocusLoading, completionFocusData, completionFocusConfig,
+      showFocusExceptionModal, focusExceptionOrder, focusExceptionForm,
+      openCompletionFocus, setCompletionFocusMode, completionFocusModeOptions, completionFocusModeLabel,
+      openFocusException, saveFocusException, cancelFocusException,
       // 订单物料配方
       orderMaterials, orderMatForm, materialOptions, processOptions,
       loadOrderMaterials, addOrderMaterial, removeOrderMaterial, loadMaterialOptions, loadProcessOptions,
       // 申请返工
-      showReworkModal, reworkOrder, reworkForm, openRework, submitRework
+      showReworkModal, reworkOrder, reworkForm, openRework, submitRework, isCompletedOrder
     }
 }

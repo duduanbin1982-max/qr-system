@@ -1,5 +1,17 @@
 """quality schema definitions."""
 
+_quality_score_properties = {
+    'score_total': {'minimum': 0, 'maximum': 100, 'type': 'number'},
+    'score_detail': {'type': 'object'},
+    'score_detail_json': {'type': 'string'},
+    'defect_level': {'enum': ['', 'minor', 'general', 'severe', 'critical'], 'type': 'string'},
+    'defect_items': {'type': 'array'},
+    'defect_items_json': {'type': 'string'},
+    'suggested_result': {'enum': ['', 'pass', 'rework', 'scrap'], 'type': 'string'},
+    'final_result': {'enum': ['', 'pass', 'rework', 'scrap'], 'type': 'string'},
+    'override_reason': {'maxLength': 512, 'type': 'string'},
+}
+
 quality_schemas = {
     'quality_inspection': {'additionalProperties': False,
  'properties': {'defect_category': {'maxLength': 64, 'type': 'string'},
@@ -11,7 +23,8 @@ quality_schemas = {
                 'process_id': {'minimum': 1, 'type': 'integer'},
                 'quantity_checked': {'minimum': 0, 'type': 'integer'},
                 'quantity_failed': {'minimum': 0, 'type': 'integer'},
-                'quantity_passed': {'minimum': 0, 'type': 'integer'}},
+                'quantity_passed': {'minimum': 0, 'type': 'integer'},
+                **_quality_score_properties},
  'required': ['order_id', 'process_id'],
  'type': 'object'},
     'quality_update': {'additionalProperties': False,
@@ -22,6 +35,7 @@ quality_schemas = {
                 'notes': {'maxLength': 512, 'type': 'string'},
                 'quantity_checked': {'minimum': 0, 'type': 'integer'},
                 'quantity_failed': {'minimum': 0, 'type': 'integer'},
-                'quantity_passed': {'minimum': 0, 'type': 'integer'}},
+                'quantity_passed': {'minimum': 0, 'type': 'integer'},
+                **_quality_score_properties},
  'type': 'object'},
 }

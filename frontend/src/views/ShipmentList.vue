@@ -30,39 +30,56 @@
       </div>
       <div class="card-body">
         <div class="table-wrap">
-          <table v-if="shipments.length" class="data-table" style="min-width:1000px;table-layout:fixed">
+          <table v-if="shipments.length" class="data-table shipment-table">
+            <colgroup>
+              <col class="col-expand">
+              <col class="col-shipment-no">
+              <col class="col-customer">
+              <col class="col-product-code">
+              <col class="col-contact">
+              <col class="col-count">
+              <col class="col-qty">
+              <col class="col-status">
+              <col class="col-logistics">
+              <col class="col-money">
+              <col class="col-money">
+              <col class="col-pay-status">
+              <col class="col-actions">
+            </colgroup>
             <thead>
               <tr>
-                <th style="width:32px"></th>
-                <th style="width:11%">出库单号</th>
-                <th style="width:10%">客户</th>
-                <th style="width:9%">联系人</th>
-                <th style="width:7%;text-align:center">物品数</th>
-                <th style="width:6%;text-align:center">总量</th>
-                <th style="width:8%;text-align:center;white-space:nowrap">状态</th>
-                <th style="width:10%">物流单号</th>
-                <th style="width:8%;text-align:center">应收</th>
-                <th style="width:8%;text-align:center">已收</th>
+                <th></th>
+                <th>出库单号</th>
+                <th>客户</th>
+                <th>产品编码</th>
+                <th>联系人</th>
+                <th class="center-cell">物品数</th>
+                <th class="center-cell">总量</th>
+                <th class="center-cell nowrap-cell">状态</th>
+                <th>物流单号</th>
+                <th class="center-cell">应收</th>
+                <th class="center-cell">已收</th>
                 <th class="pay-status-th">收款状态</th>
-                <th style="width:auto;min-width:180px;text-align:center">操作</th>
+                <th class="operation-th">操作</th>
               </tr>
             </thead>
             <tbody>
               <template v-for="s in shipments" :key="s.id">
                 <tr @click="viewDetail(s)" style="cursor:pointer">
-                  <td style="text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">▶</td>
-                  <td><code style="font-size:var(--text-xs);font-weight:600">{{ s.shipment_no }}</code></td>
-                  <td style="font-weight:500">{{ s.customer || '-' }}</td>
-                  <td>{{ s.contact_person || '-' }}</td>
-                  <td style="text-align:center">{{ s.item_count || 0 }}</td>
-                  <td style="text-align:center;font-weight:600">{{ s.total_quantity }}</td>
-                  <td style="text-align:center"><span class="badge" :class="statusMap[s.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[s.status]?.label||s.status }}</span></td>
-                  <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ s.tracking_no || '-' }}<span v-if="s.logistics_company" style="color:var(--text-muted)"> / {{ s.logistics_company }}</span></td>
-                  <td style="text-align:center">{{ s.receivable_amount || '-' }}</td>
-                  <td style="text-align:center;font-weight:600" :style="{color: (s.paid_amount||0) >= (s.receivable_amount||0) ? 'var(--success)' : 'inherit'}">{{ s.paid_amount || '-' }}</td>
+                  <td class="expand-cell">▶</td>
+                  <td class="shipment-no-cell"><code>{{ s.shipment_no }}</code></td>
+                  <td class="customer-cell ellipsis-cell" :title="s.customer || ''">{{ s.customer || '-' }}</td>
+                  <td class="product-code-cell" :title="s.product_codes || ''"><code>{{ s.product_codes || '-' }}</code></td>
+                  <td class="ellipsis-cell" :title="s.contact_person || ''">{{ s.contact_person || '-' }}</td>
+                  <td class="center-cell">{{ s.item_count || 0 }}</td>
+                  <td class="center-cell strong-cell">{{ s.total_quantity }}</td>
+                  <td class="center-cell"><span class="badge" :class="statusMap[s.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[s.status]?.label||s.status }}</span></td>
+                  <td class="logistics-cell" :title="[s.tracking_no, s.logistics_company].filter(Boolean).join(' / ')">{{ s.tracking_no || '-' }}<span v-if="s.logistics_company" style="color:var(--text-muted)"> / {{ s.logistics_company }}</span></td>
+                  <td class="center-cell">{{ s.receivable_amount || '-' }}</td>
+                  <td class="center-cell strong-cell" :style="{color: (s.paid_amount||0) >= (s.receivable_amount||0) ? 'var(--success)' : 'inherit'}">{{ s.paid_amount || '-' }}</td>
                   <td class="pay-status-td"><span class="badge" :class="paymentStatusMap[s.payment_status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt);white-space:nowrap">{{ paymentStatusMap[s.payment_status]?.label||s.payment_status||'未收款' }}</span></td>
-                  <td style="text-align:center">
-                    <div class="o-actions" style="justify-content:center;gap:4px;overflow:visible;flex-wrap:wrap" @click.stop>
+                  <td class="operation-cell">
+                    <div class="o-actions shipment-actions" @click.stop>
                       <span v-if="s.status==='pending'" class="action-slot" style="min-width:112px"><button class="btn btn-success btn-sm" @click="doComplete(s)" style="font-size:var(--text-xs-alt);padding:var(--space-1) 8px">✅完成</button></span>
                       <template v-else>
                         <span class="action-slot"><button v-if="s.status==='completed'" class="btn btn-primary btn-sm" @click="doReceive(s)" style="font-size:var(--text-xs-alt);padding:var(--space-1) 8px">📬签收</button></span>
@@ -241,7 +258,32 @@ export default {
 </script>
 
 <style scoped>
-.pay-status-th { width:9%; text-align:center; white-space:nowrap; }
-.pay-status-td { text-align:center; }
+.shipment-table { min-width:1500px; table-layout:fixed; }
+.shipment-table th, .shipment-table td { vertical-align:middle; }
+.col-expand { width:36px; }
+.col-shipment-no { width:150px; }
+.col-customer { width:150px; }
+.col-product-code { width:220px; }
+.col-contact { width:120px; }
+.col-count { width:80px; }
+.col-qty { width:80px; }
+.col-status { width:100px; }
+.col-logistics { width:190px; }
+.col-money { width:100px; }
+.col-pay-status { width:110px; }
+.col-actions { width:240px; }
+.center-cell { text-align:center; }
+.nowrap-cell, .shipment-no-cell, .operation-th, .operation-cell { white-space:nowrap; }
+.strong-cell { font-weight:600; }
+.expand-cell { text-align:center; font-size:var(--text-xs); color:var(--text-placeholder); }
+.shipment-no-cell code { font-size:var(--text-xs); font-weight:600; }
+.customer-cell { font-weight:500; }
+.ellipsis-cell, .product-code-cell, .logistics-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.product-code-cell code { font-size:var(--text-xs); color:var(--primary); font-weight:600; }
+.logistics-cell { font-size:var(--text-sm); color:var(--text-placeholder); }
+.pay-status-th, .pay-status-td { text-align:center; white-space:nowrap; }
+.operation-th, .operation-cell { position:sticky; right:0; z-index:2; text-align:center; background:var(--bg-card, var(--bg-primary)); box-shadow:-8px 0 12px rgba(15, 23, 42, .06); }
+.operation-th { z-index:3; background:var(--bg-table-header, var(--bg-hover)); }
+.shipment-actions { justify-content:center; gap:4px; overflow:visible; flex-wrap:nowrap; }
 .action-slot { display:inline-flex; align-items:center; justify-content:center; min-width:56px; height:28px; }
 </style>

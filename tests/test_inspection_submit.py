@@ -151,6 +151,83 @@ class TestInspectionSubmitEdgeCases:
             })
             assert resp.status_code == 200, f"result={result} failed: {resp.get_json()}"
 
+    def test_submit_with_quality_score_payload(self, client, auth_headers, test_order_id):
+        """提交抽检评分后应保存总分、建议判定和最终判定"""
+        scan_resp = client.post("/api/mobile/scan", headers=auth_headers, json={
+            "code": json.dumps({"order_id": test_order_id})
+        })
+        if scan_resp.status_code != 200:
+            pytest.skip("No order data available")
+
+        processes = scan_resp.get_json()["order"].get("processes", [])
+        if not processes:
+            pytest.skip("No processes")
+        proc = processes[0]
+        score_detail = {
+            "dimension_accuracy": {"score": 24, "max": 30},
+            "process_conformance": {"score": 20, "max": 25},
+            "appearance_quality": {"score": 16, "max": 20},
+            "function_impact": {"score": 13, "max": 15},
+            "documentation_other": {"score": 9, "max": 10},
+        }
+
+        resp = client.post("/api/inspection/submit", headers=auth_headers, json={
+            "order_id": test_order_id,
+            "order_no": "TEST-SCORE-001",
+            "product_code": "TEST-CODE",
+            "process_id": proc["process_id"],
+            "process_name": proc.get("process_name", proc.get("name", "")),
+            "result": "rework",
+            "score_detail": score_detail,
+            "defect_level": "general",
+            "defect_items": [{"level": "general", "description": "孔位偏差"}],
+            "remark": "scoring regression test",
+        })
+        assert resp.status_code == 200, resp.get_json()
+
+        list_resp = client.get(
+            f"/api/quality/inspections?order_id={test_order_id}&limit=50",
+            headers=auth_headers
+        )
+        assert list_resp.status_code == 200
+        record = next(
+            item for item in list_resp.get_json()["items"]
+            if item.get("order_no") == "TEST-SCORE-001"
+        )
+        assert record["score_total"] == 82
+        assert record["suggested_result"] == "rework"
+        assert record["final_result"] == "rework"
+        assert record["result"] == "rework"
+        assert record["defect_level"] == "general"
+
+    def test_submit_score_override_requires_reason(self, client, auth_headers, test_order_id):
+        """评分建议合格但最终改为报废时必须填写改判原因"""
+        scan_resp = client.post("/api/mobile/scan", headers=auth_headers, json={
+            "code": json.dumps({"order_id": test_order_id})
+        })
+        if scan_resp.status_code != 200:
+            pytest.skip("No order data available")
+
+        processes = scan_resp.get_json()["order"].get("processes", [])
+        if not processes:
+            pytest.skip("No processes")
+        proc = processes[0]
+
+        resp = client.post("/api/inspection/submit", headers=auth_headers, json={
+            "order_id": test_order_id,
+            "order_no": "TEST-SCORE-OVERRIDE",
+            "product_code": "TEST-CODE",
+            "process_id": proc["process_id"],
+            "process_name": proc.get("process_name", proc.get("name", "")),
+            "result": "scrap",
+            "score_total": 100,
+            "score_detail": {},
+            "defect_level": "",
+            "remark": "missing override reason",
+        })
+        assert resp.status_code == 400
+        assert "原因" in resp.get_json()["error"]
+
 
 class TestQualityInspectionRecordIntegrity:
     """验证 quality_inspections 记录完整性"""

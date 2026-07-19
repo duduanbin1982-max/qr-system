@@ -9,7 +9,9 @@ class FakeAccessPolicyRepository:
     permission_rows = []
     position_rows = []
     existing_rows = []
+    user_process_rows = []
     requested_process_ids = None
+    requested_user_id = None
 
     @staticmethod
     def get_permission_rows(user_id):
@@ -23,6 +25,11 @@ class FakeAccessPolicyRepository:
     def list_existing_process_ids(process_ids):
         FakeAccessPolicyRepository.requested_process_ids = process_ids
         return FakeAccessPolicyRepository.existing_rows
+
+    @staticmethod
+    def list_user_process_ids(user_id):
+        FakeAccessPolicyRepository.requested_user_id = user_id
+        return FakeAccessPolicyRepository.user_process_rows
 
 
 def test_collect_permission_codes_merges_role_and_group_permissions(caplog):
@@ -62,7 +69,9 @@ def test_access_policy_service_uses_repository_only_in_service_layer(monkeypatch
     ]
     FakeAccessPolicyRepository.position_rows = []
     FakeAccessPolicyRepository.existing_rows = [{"id": 12}]
+    FakeAccessPolicyRepository.user_process_rows = []
     FakeAccessPolicyRepository.requested_process_ids = None
+    FakeAccessPolicyRepository.requested_user_id = None
     monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
 
     user = {"id": 9, "process_ids": "12,99"}
@@ -71,12 +80,28 @@ def test_access_policy_service_uses_repository_only_in_service_layer(monkeypatch
     assert AccessPolicyService.has_permission(user, "quality:view") is True
     assert AccessPolicyService.get_user_process_ids(user) == [12]
     assert FakeAccessPolicyRepository.requested_process_ids == [12, 99]
+    assert FakeAccessPolicyRepository.requested_user_id == 9
+
+
+def test_access_policy_service_merges_user_processes_junction(monkeypatch):
+    FakeAccessPolicyRepository.permission_rows = []
+    FakeAccessPolicyRepository.position_rows = [{"process_id": 3}]
+    FakeAccessPolicyRepository.existing_rows = []
+    FakeAccessPolicyRepository.user_process_rows = [{"id": 12}]
+    FakeAccessPolicyRepository.requested_user_id = None
+    monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
+
+    user = {"id": 9, "process_ids": "", "position_id": 2}
+
+    assert AccessPolicyService.get_user_process_ids(user) == [3, 12]
+    assert FakeAccessPolicyRepository.requested_user_id == 9
 
 
 def test_access_policy_service_returns_global_scope_for_global_permission(monkeypatch):
     FakeAccessPolicyRepository.permission_rows = [{"role_perms": '["reports:view"]', "group_perms": "[]"}]
     FakeAccessPolicyRepository.position_rows = []
     FakeAccessPolicyRepository.existing_rows = []
+    FakeAccessPolicyRepository.user_process_rows = []
     monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
     monkeypatch.setattr(access_policy_module, "GLOBAL_DATA_SCOPE_PERMS", {"reports:view"})
 

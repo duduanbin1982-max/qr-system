@@ -2,6 +2,7 @@
 import json
 
 from modules.repositories.context import resolve_db
+from modules.repositories.work_time_repository import WorkTimeRepository
 
 
 class PerformanceRepository:
@@ -52,12 +53,56 @@ class PerformanceRepository:
         return {"scrap_qty": int(row["scrap_qty"] or 0)}
 
     @staticmethod
+    def rework_record_metrics(user_id, year_month, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT COALESCE(SUM(quantity),0) AS rework_qty "
+            "FROM rework_records WHERE user_id = ? AND created_at LIKE ?",
+            (user_id, year_month + "%"),
+        ).fetchone()
+        return {"rework_qty": int(row["rework_qty"] or 0)}
+
+    @staticmethod
     def inspection_metrics(user_id, year_month, db=None):
         db = resolve_db(db)
         row = db.execute(
-            "SELECT COALESCE(SUM(quantity_failed),0) AS failed_qty "
-            "FROM quality_inspections WHERE inspector_id = ? AND inspected_at LIKE ?",
-            (user_id, year_month + "%"),
+            "SELECT COALESCE(SUM(qi.quantity_failed),0) AS failed_qty "
+            "FROM quality_inspections qi "
+            "WHERE qi.quantity_failed > 0 "
+            "AND COALESCE(qi.inspected_at, qi.created_at, '') LIKE ? "
+            "AND ("
+            "  EXISTS ("
+            "    SELECT 1 FROM work_records wr "
+            "    WHERE wr.order_id = qi.order_id "
+            "    AND wr.process_id = qi.process_id "
+            "    AND wr.user_id = ? "
+            "    AND wr.type = 'normal' "
+            "    AND wr.status = 'approved' "
+            "    AND COALESCE(wr.serial_no, '') <> '' "
+            "    AND COALESCE(qi.serial_no, '') <> '' "
+            "    AND wr.serial_no = qi.serial_no"
+            "  ) "
+            "  OR ("
+            "    COALESCE(qi.serial_no, '') = '' "
+            "    AND ("
+            "      SELECT COUNT(DISTINCT wr_unique.user_id) "
+            "      FROM work_records wr_unique "
+            "      WHERE wr_unique.order_id = qi.order_id "
+            "      AND wr_unique.process_id = qi.process_id "
+            "      AND wr_unique.type = 'normal' "
+            "      AND wr_unique.status = 'approved'"
+            "    ) = 1 "
+            "    AND EXISTS ("
+            "      SELECT 1 FROM work_records wr_single "
+            "      WHERE wr_single.order_id = qi.order_id "
+            "      AND wr_single.process_id = qi.process_id "
+            "      AND wr_single.user_id = ? "
+            "      AND wr_single.type = 'normal' "
+            "      AND wr_single.status = 'approved'"
+            "    )"
+            "  )"
+            ")",
+            (year_month + "%", user_id, user_id),
         ).fetchone()
         return {"inspection_failed_qty": int(row["failed_qty"] or 0)}
 
@@ -84,13 +129,17 @@ class PerformanceRepository:
         db = resolve_db(db)
         work = PerformanceRepository.work_record_metrics(user_id, year_month, db)
         scrap = PerformanceRepository.scrap_record_metrics(user_id, year_month, db)
+        rework = PerformanceRepository.rework_record_metrics(user_id, year_month, db)
         inspection = PerformanceRepository.inspection_metrics(user_id, year_month, db)
         plans = PerformanceRepository.improvement_plan_metrics(user_id, year_month, db)
+        work_time = WorkTimeRepository.approved_user_month_metrics(user_id, year_month, db)
         return {
             **work,
             "scrap_qty": work["scrap_qty"] + scrap["scrap_qty"],
+            "rework_qty": work["rework_qty"] + rework["rework_qty"],
             **inspection,
             **plans,
+            **work_time,
         }
 
     @staticmethod
@@ -170,16 +219,31 @@ class PerformanceRepository:
     @staticmethod
     def update_ranks(year_month, db):
         rows = db.execute(
-            "SELECT id, total_score FROM performance_scores WHERE year_month = ? "
-            "ORDER BY total_score DESC, output_qty DESC, id ASC",
+            "SELECT ps.id, ps.total_score, ps.output_qty, ps.score_details, u.position_id "
+            "FROM performance_scores ps JOIN users u ON ps.user_id = u.id "
+            "WHERE ps.year_month = ?",
             (year_month,),
         ).fetchall()
-        total = len(rows)
-        for index, row in enumerate(rows, 1):
-            db.execute(
-                "UPDATE performance_scores SET rank_no = ?, rank_total = ? WHERE id = ?",
-                (index, total, row["id"]),
+        groups = {}
+        for row in rows:
+            groups.setdefault(row["position_id"] or 0, []).append(row)
+        for group_rows in groups.values():
+            ranked_rows = sorted(
+                group_rows,
+                key=lambda row: (-(row["total_score"] or 0), -(row["output_qty"] or 0), row["id"]),
             )
+            total = len(ranked_rows)
+            for index, row in enumerate(ranked_rows, 1):
+                try:
+                    score_details = json.loads(row["score_details"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    score_details = {}
+                score_details["position_rank_no"] = index
+                score_details["position_rank_total"] = total
+                db.execute(
+                    "UPDATE performance_scores SET rank_no = ?, rank_total = ?, score_details = ? WHERE id = ?",
+                    (index, total, json.dumps(score_details, ensure_ascii=False), row["id"]),
+                )
 
     @staticmethod
     def latest_score_month(db=None):
@@ -198,7 +262,7 @@ class PerformanceRepository:
             "WHERE status = 'approved' AND created_at LIKE ?",
             (year_month + "%",),
         ).fetchone()
-        return int(row["total"] or 0)
+        return int(row["total"] or 0) + WorkTimeRepository.approved_month_record_count(year_month, db)
 
     @staticmethod
     def list_score_months(limit=12, db=None):
@@ -211,13 +275,32 @@ class PerformanceRepository:
         return [dict(row) for row in rows]
 
     @staticmethod
-    def list_scores(year_month, warning_level="", search="", page=1, per_page=50, db=None):
+    def _apply_position_filter(where, params, position_id):
+        if position_id == "__unassigned__":
+            where.append("u.position_id IS NULL")
+        elif position_id not in (None, ""):
+            where.append("u.position_id = ?")
+            params.append(int(position_id))
+
+    @staticmethod
+    def _decode_score_details(item):
+        try:
+            item["score_details"] = json.loads(item.get("score_details") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            item["score_details"] = {}
+        if not item.get("position_name"):
+            item["position_name"] = item["score_details"].get("position_name", "未设置岗位")
+        return item
+
+    @staticmethod
+    def list_scores(year_month, warning_level="", search="", position_id="", page=1, per_page=50, db=None):
         db = resolve_db(db)
         where = ["ps.year_month = ?"]
         params = [year_month]
         if warning_level:
             where.append("ps.warning_level = ?")
             params.append(warning_level)
+        PerformanceRepository._apply_position_filter(where, params, position_id)
         if search:
             where.append("(u.name LIKE ? OR u.employee_no LIKE ?)")
             like = f"%{search}%"
@@ -229,39 +312,54 @@ class PerformanceRepository:
         ).fetchone()[0]
         offset = (page - 1) * per_page
         rows = db.execute(
-            "SELECT ps.*, u.name AS user_name, u.employee_no, u.role, "
+            "SELECT ps.*, u.name AS user_name, u.employee_no, u.role, u.position_id, "
             "COALESCE(p.name, '') AS position_name, COALESCE(d.name, '') AS department_name, "
             "reviewer.name AS reviewer_name "
             "FROM performance_scores ps JOIN users u ON ps.user_id = u.id "
             "LEFT JOIN positions p ON u.position_id = p.id "
             "LEFT JOIN departments d ON u.department_id = d.id "
             "LEFT JOIN users reviewer ON ps.reviewed_by = reviewer.id "
-            "WHERE " + where_clause + " ORDER BY ps.total_score DESC, ps.output_qty DESC LIMIT ? OFFSET ?",
+            "WHERE " + where_clause + " ORDER BY COALESCE(p.name, '未设置岗位'), ps.rank_no ASC, ps.total_score DESC, ps.output_qty DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
-        items = []
-        for row in rows:
-            item = dict(row)
-            try:
-                item["score_details"] = json.loads(item.get("score_details") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                item["score_details"] = {}
-            items.append(item)
+        items = [PerformanceRepository._decode_score_details(dict(row)) for row in rows]
         return {"items": items, "total": total, "page": page, "per_page": per_page}
 
     @staticmethod
-    def summary(year_month, db=None):
+    def summary(year_month, position_id="", db=None):
         db = resolve_db(db)
+        where = ["ps.year_month = ?"]
+        params = [year_month]
+        PerformanceRepository._apply_position_filter(where, params, position_id)
         row = db.execute(
-            "SELECT COUNT(*) AS total, ROUND(AVG(total_score),1) AS avg_score, "
-            "SUM(CASE WHEN warning_level='green' THEN 1 ELSE 0 END) AS green, "
-            "SUM(CASE WHEN warning_level='yellow' THEN 1 ELSE 0 END) AS yellow, "
-            "SUM(CASE WHEN warning_level='orange' THEN 1 ELSE 0 END) AS orange, "
-            "SUM(CASE WHEN warning_level='red' THEN 1 ELSE 0 END) AS red "
-            "FROM performance_scores WHERE year_month = ?",
-            (year_month,),
+            "SELECT COUNT(*) AS total, ROUND(AVG(ps.total_score),1) AS avg_score, "
+            "SUM(CASE WHEN ps.warning_level='green' THEN 1 ELSE 0 END) AS green, "
+            "SUM(CASE WHEN ps.warning_level='yellow' THEN 1 ELSE 0 END) AS yellow, "
+            "SUM(CASE WHEN ps.warning_level='orange' THEN 1 ELSE 0 END) AS orange, "
+            "SUM(CASE WHEN ps.warning_level='red' THEN 1 ELSE 0 END) AS red "
+            "FROM performance_scores ps JOIN users u ON ps.user_id = u.id WHERE " + " AND ".join(where),
+            params,
         ).fetchone()
         return dict(row) if row else {}
+
+    @staticmethod
+    def score_positions(year_month, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT u.position_id AS id, COALESCE(p.name, '未设置岗位') AS name, COUNT(*) AS employee_count "
+            "FROM performance_scores ps JOIN users u ON ps.user_id = u.id "
+            "LEFT JOIN positions p ON u.position_id = p.id "
+            "WHERE ps.year_month = ? "
+            "GROUP BY u.position_id, COALESCE(p.name, '未设置岗位') "
+            "ORDER BY CASE WHEN u.position_id IS NULL THEN 1 ELSE 0 END, name",
+            (year_month,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["id"] = "__unassigned__" if item.get("id") is None else item["id"]
+            result.append(item)
+        return result
 
     @staticmethod
     def create_plan(data, db):

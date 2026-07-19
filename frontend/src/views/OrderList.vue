@@ -12,7 +12,12 @@
       <div class="card-header">
         <h3>📋 订单管理</h3>
         <div class="filter-bar">
-          <select class="filter-select" v-model="filterStatus">
+          <select class="filter-select" v-model="archiveFilter" @change="archiveChange">
+            <option value="active">未完成订单</option>
+            <option value="completed">已完成订单</option>
+            <option value="all">全部订单</option>
+          </select>
+          <select class="filter-select" v-model="filterStatus" @change="statusChange">
             <option value="">全部状态</option>
             <option value="pending">待生产</option>
             <option value="producing">生产中</option>
@@ -29,6 +34,7 @@
             <input v-model="searchKeyword" placeholder="搜索订单号/产品/客户..." @input="debouncedSearch" @keyup.enter="searchAndLoad">
           </div>
           <button class="btn btn-default btn-sm" @click="searchAndLoad">搜索</button>
+          <button class="btn btn-warning btn-sm" @click="openCompletionFocus">🎯 集中完工</button>
           <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
           <button class="btn btn-sm trash-btn" @click="showTrash=true;loadTrash()">🗑️ 回收站</button>
         </div>
@@ -71,10 +77,11 @@
                   <td style="text-align:center">
                     <div class="o-actions" style="justify-content:center" @click.stop>
                       <span class="o-abtn" style="color:var(--primary-accent)" @click="openProgress(o)" title="工件进度">📊</span>
-                      <span class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
+                      <span v-if="!isCompletedOrder(o)" class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
                       <span class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
-                      <span class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
-                      <span class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
+                      <span v-if="!isCompletedOrder(o)" class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
+                      <span v-if="!isCompletedOrder(o)" class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
+                      <span v-else class="o-abtn" style="color:var(--primary)" @click="reopenOrder(o)" title="重新打开">🔓</span>
                     </div>
                   </td>
                 </tr>
@@ -97,10 +104,11 @@
                     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-light)">
                       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)">
                         <span style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary)">📎 附件 ({{ getAttachments(o.id).length }})</span>
-                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
+                        <label v-if="!isCompletedOrder(o)" style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
                           + 上传
                           <input type="file" ref="uploadInputRef" style="display:none" @change="handleAttachmentUpload(o.id, $event)" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.zip,.rar">
                         </label>
+                        <span v-else style="font-size:var(--text-xs);color:var(--text-placeholder)">已归档只读</span>
                       </div>
                       <div v-if="isAttachmentsLoading(o.id)" style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">⏳ 加载中...</div>
                       <div v-else-if="getAttachments(o.id).length" style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
@@ -111,7 +119,7 @@
                             <span @click.stop="downloadAttachment(att.id)" style="color:var(--primary);cursor:pointer;font-weight:500;display:block;overflow:hidden;text-overflow:ellipsis;max-width:200px" :title="att.file_name">{{ att.file_name }}</span>
                             <span style="font-size:var(--text-2xs);color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }} · {{ att.created_at?.slice(0,16) }}</span>
                           </div>
-                          <span @click.stop="delAttachment(att.id, o.id)" title="删除" style="cursor:pointer;opacity:0.5;font-size:var(--text-base);flex-shrink:0">🗑️</span>
+                          <span v-if="!isCompletedOrder(o)" @click.stop="delAttachment(att.id, o.id)" title="删除" style="cursor:pointer;opacity:0.5;font-size:var(--text-base);flex-shrink:0">🗑️</span>
                         </div>
                       </div>
                       <div v-else style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">暂无附件</div>
@@ -294,6 +302,133 @@
       </div>
     </div>
 
+    <!-- 集中完工看板 -->
+    <div v-if="showCompletionFocus" class="modal-overlay" >
+      <div class="modal" style="max-width:1100px;width:96%">
+        <div class="modal-header">
+          <span>🎯 集中完工看板 — 先下达先收尾</span>
+          <span class="modal-close" @click="showCompletionFocus=false">&times;</span>
+        </div>
+        <div class="modal-body" style="max-height:72vh;overflow:auto">
+          <div v-if="completionFocusLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
+          <div v-else>
+            <div class="summary-bar" style="margin-bottom:var(--space-4);flex-wrap:wrap">
+              <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ completionFocusData.summary?.total || 0 }}</div><div class="s-label">未完工订单</div></div></div>
+              <div class="summary-item"><span class="s-icon">🏁</span><div><div class="s-val text-success">{{ completionFocusData.summary?.tail || 0 }}</div><div class="s-label">尾数清理</div></div></div>
+              <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" style="color:var(--danger)">{{ completionFocusData.summary?.stuck || 0 }}</div><div class="s-label">存在滞留</div></div></div>
+              <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val" style="color:var(--warning)">{{ completionFocusData.summary?.partial || 0 }}</div><div class="s-label">部分完工</div></div></div>
+              <div class="summary-item"><span class="s-icon">🟦</span><div><div class="s-val" style="color:var(--primary)">{{ completionFocusData.summary?.exception || 0 }}</div><div class="s-label">例外订单</div></div></div>
+            </div>
+            <div class="focus-control-bar">
+              <div>
+                <div style="font-weight:700;margin-bottom:4px">当前模式：{{ completionFocusModeLabel(completionFocusConfig.mode) }}</div>
+                <div style="font-size:var(--text-xs);color:var(--text-placeholder)">关闭=不提示不拦截；软提示=提示但允许；强拦截=普通员工不可继续报工。</div>
+              </div>
+              <div class="focus-mode-buttons">
+                <button
+                  v-for="option in completionFocusModeOptions()"
+                  :key="option.value"
+                  class="btn btn-sm"
+                  :class="completionFocusConfig.mode===option.value ? (option.button_class || 'btn-primary') : 'btn-default'"
+                  @click="setCompletionFocusMode(option.value)"
+                >{{ option.label }}</button>
+              </div>
+            </div>
+            <div class="focus-rule-note">
+              管控原则：同路线/同产品下，移动端扫码优先提示或拦截后下达订单；例外订单在有效期内不参与强拦截优先级判断。
+            </div>
+            <table v-if="completionFocusData.items?.length" class="data-table focus-table">
+              <thead>
+                <tr><th>优先级</th><th>订单</th><th>产品/路线</th><th>进度</th><th>优先处理工序</th><th>交期风险</th><th>建议</th><th>例外/操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in completionFocusData.items" :key="item.order_id">
+                  <td style="text-align:center">
+                    <div class="focus-rank">#{{ idx + 1 }}</div>
+                    <div class="focus-label" :class="'focus-' + item.focus_type">{{ item.focus_label }}</div>
+                  </td>
+                  <td>
+                    <code>{{ item.order_no }}</code>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder)">下达：{{ item.created_at?.slice(0,16) || '-' }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder)">客户：{{ item.customer || '-' }}</div>
+                  </td>
+                  <td>
+                    <div>{{ item.product_name }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ item.product_code || '-' }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--primary)">路线：{{ item.route_name || '-' }}</div>
+                  </td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div class="progress-bar" style="height:7px;flex:1;background:var(--border-light);border-radius:4px;overflow:hidden">
+                        <div :style="{width:item.completion_pct+'%',height:'100%',background:item.completion_pct>=70?'var(--success)':'var(--primary)'}"></div>
+                      </div>
+                      <span style="font-size:var(--text-xs);white-space:nowrap">{{ item.completion_pct }}%</span>
+                    </div>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:4px">
+                      已完成 {{ item.completed_workpieces }} / 剩余 {{ item.remaining_workpieces }}，滞留 {{ item.stuck_workpieces }}
+                    </div>
+                  </td>
+                  <td>
+                    <div style="font-weight:600">{{ item.priority_process_name || '-' }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder)">积压 {{ item.priority_backlog || 0 }} 件，滞留 {{ item.priority_stuck || 0 }} 件</div>
+                  </td>
+                  <td>
+                    <span class="badge" :class="item.risk_level==='overdue'||item.risk_level==='high'?'badge-danger':item.risk_level==='medium'?'badge-warning':'badge-success'">
+                      {{ riskLabel(item.risk_level) }}
+                    </span>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:4px">交期：{{ item.deadline || '-' }}</div>
+                  </td>
+                  <td style="font-size:var(--text-xs);color:var(--text-secondary);line-height:1.5">
+                    <div v-for="tip in (item.recommendations || []).slice(0,2)" :key="tip">• {{ tip }}</div>
+                  </td>
+                  <td style="font-size:var(--text-xs);min-width:110px">
+                    <div v-if="item.is_exception" style="margin-bottom:6px">
+                      <span class="focus-label focus-exception">例外：{{ item.exception_reason }}</span>
+                      <div style="color:var(--text-placeholder);margin-top:4px">到期：{{ item.exception_expires_at || '长期' }}</div>
+                    </div>
+                    <button v-if="!item.is_exception" class="btn btn-sm btn-default" @click="openFocusException(item)">设为例外</button>
+                    <button v-else class="btn btn-sm btn-danger" @click="cancelFocusException(item)">取消例外</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else style="text-align:center;padding:28px;color:var(--text-placeholder)">当前没有需要集中完工管控的订单</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 集中完工例外弹窗 -->
+    <div v-if="showFocusExceptionModal" class="modal-overlay" >
+      <div class="modal" style="max-width:460px;width:95%">
+        <div class="modal-header">
+          <span>🟦 设置例外订单 — {{ focusExceptionOrder?.order_no || '' }}</span>
+          <span class="modal-close" @click="showFocusExceptionModal=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>例外原因 *</label>
+            <select class="form-input" v-model="focusExceptionForm.reason">
+              <option v-for="reason in completionFocusConfig.reason_options" :key="reason" :value="reason">{{ reason }}</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>有效期 *</label>
+            <input class="form-input" type="datetime-local" v-model="focusExceptionForm.expires_at">
+          </div>
+          <div class="form-group">
+            <label>说明</label>
+            <textarea class="form-input" rows="3" v-model="focusExceptionForm.detail" placeholder="如：缺料待采购、设备维修预计明天恢复、客户急单插单等"></textarea>
+          </div>
+          <div class="focus-rule-note">例外有效期内，该订单不会作为强拦截的优先订单；到期后自动恢复管控。</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showFocusExceptionModal=false">取消</button>
+          <button class="btn btn-primary" @click="saveFocusException">保存例外</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 申请返工弹窗 -->
     <div v-if="showReworkModal" class="modal-overlay" >
       <div class="modal" style="max-width:450px;width:95%">
@@ -428,7 +563,42 @@
               <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ progressData.summary.completed_workpieces }}</div><div class="s-label">已完成</div></div></div>
               <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val" style="color:var(--warning)">{{ progressData.summary.in_progress_workpieces }}</div><div class="s-label">进行中</div></div></div>
               <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val text-muted">{{ progressData.summary.pending_workpieces }}</div><div class="s-label">待产</div></div></div>
+              <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" style="color:var(--danger)">{{ progressData.summary.stuck_workpieces || 0 }}</div><div class="s-label">滞留</div></div></div>
               <div class="summary-item"><span class="s-icon">📈</span><div><div class="s-val" style="color:var(--primary-accent)">{{ progressData.summary.overall_progress_pct }}%</div><div class="s-label">总进度</div></div></div>
+              <div class="summary-item"><span class="s-icon">⏱️</span><div><div class="s-val">{{ progressData.summary.estimated_remaining_hours ?? '-' }}</div><div class="s-label">剩余工时</div></div></div>
+            </div>
+            <div v-if="progressData.analysis" class="progress-risk-panel">
+              <div class="progress-risk-card" :class="'risk-' + (progressData.analysis.deadline_risk?.level || 'low')">
+                <div style="display:flex;justify-content:space-between;gap:var(--space-3);align-items:flex-start">
+                  <div>
+                    <div style="font-weight:700;margin-bottom:4px">交期风险：{{ riskLabel(progressData.analysis.deadline_risk?.level) }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-secondary)">{{ progressData.analysis.deadline_risk?.reason }}</div>
+                  </div>
+                  <div style="font-size:var(--text-xs);text-align:right;color:var(--text-placeholder);white-space:nowrap">
+                    <div>交期：{{ progressData.analysis.deadline_risk?.deadline || '-' }}</div>
+                    <div>剩余：{{ progressData.analysis.deadline_risk?.days_remaining ?? '-' }} 天</div>
+                  </div>
+                </div>
+              </div>
+              <div class="progress-advice" v-if="progressData.analysis.recommendations?.length">
+                <div style="font-weight:600;margin-bottom:6px">处理建议</div>
+                <div v-for="(tip, idx) in progressData.analysis.recommendations" :key="idx" class="progress-advice-item">{{ tip }}</div>
+              </div>
+              <div v-if="progressData.analysis.stuck_items?.length" style="margin-bottom:var(--space-4)">
+                <div style="font-weight:600;font-size:var(--text-sm);margin-bottom:var(--space-2)">卡点工件清单（超过 {{ progressData.analysis.stuck_threshold_hours }} 小时未推进）</div>
+                <table class="data-table" style="font-size:var(--text-xs)">
+                  <thead><tr><th>工件</th><th>卡点工序</th><th>滞留</th><th>剩余工序</th><th>上一道完成</th></tr></thead>
+                  <tbody>
+                    <tr v-for="item in progressData.analysis.stuck_items.slice(0, 10)" :key="item.serial_no || item.position_no">
+                      <td><code>{{ item.serial_no || ('#' + item.position_no) }}</code></td>
+                      <td>{{ item.blocking_process_name || '-' }}</td>
+                      <td style="color:var(--danger);font-weight:600">{{ formatHours(item.wait_hours) }}</td>
+                      <td>{{ item.remaining_steps }}</td>
+                      <td style="color:var(--text-placeholder)">{{ item.last_completed_at || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
             <div style="margin-bottom:var(--space-4)">
               <div style="font-weight:600;font-size:var(--text-sm);margin-bottom:var(--space-2)">各工序完成情况</div>

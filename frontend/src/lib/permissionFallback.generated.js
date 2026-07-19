@@ -55,6 +55,12 @@ export const SIDEBAR_ITEMS = [
     "label": "绩效管理"
   },
   {
+    "page": "work-time",
+    "code": "page:work-time",
+    "icon": "⏱️",
+    "label": "工时管理"
+  },
+  {
     "page": "basic-settings",
     "code": "page:basic-settings",
     "icon": "⚙️",
@@ -154,6 +160,11 @@ export const PAGE_RULE_TREE = [
     "page": "performance",
     "code": "page:performance",
     "label": "绩效管理"
+  },
+  {
+    "page": "work-time",
+    "code": "page:work-time",
+    "label": "工时管理"
   },
   {
     "page": "board",
@@ -296,6 +307,9 @@ export const ACTION_PAGE_MAP = {
   ],
   "performance": [
     "page:performance"
+  ],
+  "work_time": [
+    "page:work-time"
   ],
   "board": [
     "page:board"

@@ -1,5 +1,6 @@
 """qr-system - StatsService"""
 from modules.repositories.stats_repository import StatsRepository
+from modules.repositories.work_time_repository import WorkTimeRepository
 
 
 class StatsService:
@@ -101,10 +102,12 @@ class StatsService:
         summary = StatsRepository.get_daily_summary(date, product_code)
         total = StatsRepository.get_daily_count(date, product_code)
         totals = StatsService._daily_totals(date, product_code, records)
+        work_time_summary = WorkTimeRepository.daily_summary(date, product_code)
         return {
             "records": records,
             "summary": summary,
             "summary_totals": totals,
+            "work_time_summary": work_time_summary,
             "employee_groups": StatsService._daily_employee_groups(records),
             "total": total,
             "page": page,

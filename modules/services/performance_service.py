@@ -55,22 +55,44 @@ class PerformanceService:
         }
 
     @staticmethod
+    def _position_group_key(worker):
+        return worker.get("position_id") or 0
+
+    @staticmethod
+    def _position_group_name(worker):
+        return worker.get("position_name") or "未设置岗位"
+
+    @staticmethod
     def generate_month(year_month=None):
         year_month = year_month or PerformanceService.current_month()
         workers = [dict(row) for row in PerformanceRepository.eligible_workers()]
         metrics_by_user = {}
-        max_output = 0
+        max_output_by_position = {}
         for worker in workers:
             metrics = PerformanceRepository.worker_month_metrics(worker["id"], year_month)
             metrics_by_user[worker["id"]] = metrics
-            max_output = max(max_output, metrics["output_qty"])
+            position_key = PerformanceService._position_group_key(worker)
+            max_output_by_position[position_key] = max(
+                max_output_by_position.get(position_key, 0),
+                metrics["output_qty"],
+            )
         handoff_metrics = HandoffReviewService.monthly_metrics(year_month)
         with BaseService.transaction() as db:
             for worker in workers:
                 metrics = metrics_by_user[worker["id"]]
                 review = PerformanceRepository.get_review(worker["id"], year_month, db) or {}
                 handoff = handoff_metrics.get(worker["id"], {})
-                score = PerformanceService._score_worker(metrics, max_output, review, handoff)
+                position_key = PerformanceService._position_group_key(worker)
+                position_max_output = max_output_by_position.get(position_key, 0)
+                score = PerformanceService._score_worker(metrics, position_max_output, review, handoff)
+                score_details = score.get("score_details", {})
+                score_details.update({
+                    "scoring_scope": "position",
+                    "position_id": worker.get("position_id"),
+                    "position_name": PerformanceService._position_group_name(worker),
+                    "position_max_output": position_max_output,
+                })
+                score["score_details"] = score_details
                 PerformanceRepository.upsert_score({
                     "user_id": worker["id"],
                     "year_month": year_month,
@@ -83,10 +105,13 @@ class PerformanceService:
         return {"ok": True, "year_month": year_month, "generated": len(workers)}
 
     @staticmethod
-    def list_scores(year_month=None, warning_level="", search="", page=1, per_page=50):
+    def list_scores(year_month=None, warning_level="", search="", position_id="", page=1, per_page=50):
         year_month = year_month or PerformanceService.current_month()
-        result = PerformanceRepository.list_scores(year_month, warning_level, search, page, per_page)
-        result["summary"] = PerformanceRepository.summary(year_month)
+        result = PerformanceRepository.list_scores(year_month, warning_level, search, position_id, page, per_page)
+        result["summary"] = PerformanceRepository.summary(year_month, position_id)
+        result["all_summary"] = PerformanceRepository.summary(year_month)
+        result["position_options"] = PerformanceRepository.score_positions(year_month)
+        result["position_id"] = position_id
         result["year_month"] = year_month
         return result
 

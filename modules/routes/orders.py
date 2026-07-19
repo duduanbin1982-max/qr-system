@@ -10,6 +10,7 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.order_service import OrderService
+from modules.services.order_focus_service import OrderFocusService
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.setting_service import SettingsService
 
@@ -32,10 +33,11 @@ def list_orders():
     status = request.args.get('status', '')
     keyword = request.args.get('keyword', '')
     customer = request.args.get('customer', '')
+    archive = request.args.get('archive', 'active')
     pids = get_user_process_ids(g.current_user)
     result = OrderService.list_orders(
         page=page, limit=limit, status=status, keyword=keyword,
-        customer=customer, data_scope_pids=pids
+        customer=customer, data_scope_pids=pids, archive=archive
     )
     return jsonify(result)
 
@@ -108,6 +110,23 @@ def restore_order(oid):
     try:
         order_no = OrderService.restore_order(oid)
         return jsonify({'message': f'订单 {order_no} 已恢复'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/orders/<int:oid>/reopen', methods=['POST'])
+@check_auth
+@check_permission('orders:edit')
+def reopen_order(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({"error": "无权限访问此订单"}), 403
+    data = get_json_body()
+    reason = (data.get('reason') or '').strip()
+    status = data.get('status', 'producing')
+    try:
+        result = OrderService.reopen_order(oid, reason, status=status)
+        safe_audit_log('reopen_order', 'order', oid, f"status={result['status']}; reason={reason}")
+        return jsonify({'message': '订单已重新打开', 'status': result['status']})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -198,108 +217,85 @@ def batch_create_orders():
         return jsonify({'error': str(e)}), 400
 
 
+@app.route('/api/orders/completion-focus', methods=['GET'])
+@check_auth
+@check_permission('orders:view')
+def completion_focus_board():
+    limit = min(max(request.args.get('limit', 80, type=int), 1), 200)
+    try:
+        return jsonify(OrderFocusService.board(limit=limit))
+    except Exception as e:
+        return jsonify({'error': '加载集中完工看板失败: ' + str(e)}), 500
+
+
+@app.route('/api/orders/completion-focus/config', methods=['GET'])
+@check_auth
+@check_permission('orders:view')
+def completion_focus_config():
+    return jsonify(OrderFocusService.config())
+
+
+@app.route('/api/orders/completion-focus/config', methods=['POST'])
+@check_auth
+@check_permission('orders:edit')
+def save_completion_focus_config():
+    try:
+        config = OrderFocusService.save_config(get_json_body())
+        safe_audit_log('completion_focus_config', 'system', 0, str(config))
+        return jsonify({'message': '集中完工管控配置已保存', 'config': config})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': '保存集中完工配置失败: ' + str(e)}), 500
+
+
+@app.route('/api/orders/<int:order_id>/completion-focus-exception', methods=['POST'])
+@check_auth
+@check_permission('orders:edit')
+def create_completion_focus_exception(order_id):
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}), 403
+    try:
+        exception = OrderFocusService.create_exception(order_id, get_json_body(), g.current_user)
+        safe_audit_log(
+            'completion_focus_exception_create',
+            'order',
+            order_id,
+            f"{exception['reason']} until {exception.get('expires_at','')}"
+        )
+        return jsonify({'message': '已设置集中完工例外', 'exception': exception})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': '设置集中完工例外失败: ' + str(e)}), 500
+
+
+@app.route('/api/orders/completion-focus-exceptions/<int:exception_id>', methods=['DELETE'])
+@check_auth
+@check_permission('orders:edit')
+def cancel_completion_focus_exception(exception_id):
+    data = get_json_body() if request.data else {}
+    try:
+        OrderFocusService.cancel_exception(exception_id, g.current_user, (data.get('reason') or '').strip())
+        safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
+        return jsonify({'message': '已取消集中完工例外'})
+    except Exception as e:
+        return jsonify({'error': '取消集中完工例外失败: ' + str(e)}), 500
+
+
 @app.route('/api/orders/<int:order_id>/workpiece-progress', methods=['GET'])
 @check_auth
 @check_permission('orders:view')
 def workpiece_progress(order_id):
     if not _check_order_data_scope(order_id):
         return jsonify({"error": "无权限访问此订单"}), 403
-    """返回订单每个工件×每道工序的进度矩阵"""
+    """返回订单工件进度、卡点和交期风险分析。"""
     try:
-        progress = OrderService.get_workpiece_progress(order_id)
+        return jsonify(OrderService.get_workpiece_progress(order_id))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     except Exception as e:
         return jsonify({'error': '加载工件进度失败: ' + str(e)}), 500
-
-    order = progress['order']
-    items = progress['items']
-    processes = progress['processes']
-    record_map = progress['record_map']
-
-    progress = []
-    for item in items:
-        sn = item['serial_no']
-        steps = []
-        current_found = False
-        for proc in processes:
-            pid = proc['process_id']
-            rec = record_map.get(sn, {}).get(pid)
-            if rec:
-                step_status = 'completed'
-                step_time = rec['completed_at']
-            elif current_found and proc['process_id'] == item['current_process_id']:
-                step_status = 'current'
-                step_time = None
-            elif not current_found and item['current_process_id'] and proc['process_id'] == item['current_process_id']:
-                step_status = 'current'
-                step_time = None
-                current_found = True
-            elif item['status'] == 'completed':
-                step_status = 'completed'
-                step_time = dict(item).get('completed_at')
-            else:
-                step_status = 'pending'
-                step_time = None
-            steps.append({
-                'process_id': pid,
-                'process_name': proc['process_name'],
-                'seq_order': proc['seq_order'],
-                'status': step_status,
-                'completed_at': step_time,
-            })
-
-        all_completed = all(s['status'] == 'completed' for s in steps)
-        workpiece_status = 'completed' if all_completed else (
-            'in_progress' if any(s['status'] in ('completed', 'current') for s in steps) else 'pending'
-        )
-        progress.append({
-            'serial_no': sn,
-            'position_no': item['position_no'],
-            'current_process_id': item['current_process_id'],
-            'status': workpiece_status,
-            'steps': steps,
-        })
-
-    total_items = len(items)
-    total_steps = len(processes)
-    completed_items = sum(1 for p in progress if p['status'] == 'completed')
-    in_progress_items = sum(1 for p in progress if p['status'] == 'in_progress')
-
-    summary = {
-        'total_workpieces': total_items,
-        'completed_workpieces': completed_items,
-        'in_progress_workpieces': in_progress_items,
-        'pending_workpieces': total_items - completed_items - in_progress_items,
-        'total_processes': total_steps,
-        'overall_progress_pct': round(
-            sum(1 for p in progress for s in p['steps'] if s['status'] == 'completed')
-            / max(total_items * total_steps, 1) * 100, 1
-        ),
-        'process_stats': [
-            {
-                'process_id': proc['process_id'],
-                'process_name': proc['process_name'],
-                'seq_order': proc['seq_order'],
-                'completed': sum(1 for p in progress
-                    for s in p['steps']
-                    if s['process_id'] == proc['process_id'] and s['status'] == 'completed'
-                ),
-                'total': total_items,
-            }
-            for proc in processes
-        ],
-    }
-
-    return jsonify({
-        'order_id': order_id,
-        'order_no': order['order_no'],
-        'product_name': order['product_name'],
-        'quantity': order['quantity'],
-        'progress': progress,
-        'summary': summary,
-        'processes': [{'process_id': p['process_id'], 'name': p['process_name'], 'seq_order': p['seq_order']} for p in processes],
-    })
 
 # ═══════════════════════════════════════════
 #  Order Materials (订单物料配方)

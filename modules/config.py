@@ -63,12 +63,14 @@ PREDEFINED_ROLES = {
             'page:production.materials', 'page:production.trace', 'page:production.approvals',
             'page:production.quality', 'page:production.rework',
             'page:scan', 'page:stats', 'page:reports', 'page:inventory', 'page:board',
+            'page:work-time',
             'orders:view','orders:create','orders:edit','orders:delete',
             'products:view', 'customers:view',
             'processes:view', 'routes:view','routes:create','routes:edit','routes:delete',
             'prices:view','prices:create','prices:edit','prices:delete',
             'scan:view', 'scan:report', 'stats:view', 'trace:view', 'reports:view', 'board:view',
             'approvals:view', 'approvals:edit','inventory:view','materials:view','quality:view','rework:view','rework:create','rework:edit',
+            'work_time:view','work_time:create','work_time:edit','work_time:audit','work_time:export',
         ]
     },
     'qc_inspector': {
@@ -97,7 +99,7 @@ PREDEFINED_ROLES = {
 GLOBAL_DATA_SCOPE_PERMS = {
     "orders:view", "stats:view", "inventory:view", "*",
     "shipments:view", "reports:view", "dashboard:view",
-    "scan:view", "scan:report",
+    "scan:view", "scan:report", "work_time:view",
 }
 
 def expand_permissions(perm_list: List[str]) -> List[str]:

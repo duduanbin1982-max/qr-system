@@ -1738,6 +1738,30 @@ textarea:focus-visible {
 .wp-badge.completed { background: var(--success-lighter); color: var(--success-dark); border: 1px solid var(--success-light); }
 .wp-badge.in-progress { background: var(--warning-lighter); color: var(--warning-dark); border: 1px solid var(--warning-light); }
 .wp-badge.pending { background: var(--border-light); color: var(--text-secondary); border: 1px solid var(--border); }
+.progress-risk-panel { margin-bottom: var(--space-4); }
+.progress-risk-card { padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-light); margin-bottom: var(--space-3); background: var(--bg-table-header); }
+.progress-risk-card.risk-none,
+.progress-risk-card.risk-low { background: var(--success-lighter); border-color: var(--success-light); }
+.progress-risk-card.risk-medium { background: var(--warning-lighter); border-color: var(--warning-light); }
+.progress-risk-card.risk-high,
+.progress-risk-card.risk-overdue { background: var(--danger-lighter, #fff0f0); border-color: var(--danger-light, #fecaca); }
+.progress-advice { padding: 10px 12px; border-radius: var(--radius-md); background: var(--primary-lighter); margin-bottom: var(--space-3); font-size: var(--text-sm); }
+.progress-advice-item { color: var(--text-secondary); line-height: 1.6; }
+.progress-advice-item::before { content: "• "; color: var(--primary); font-weight: 700; }
+.btn-warning { background: var(--warning); color: #fff; border: none; }
+.btn-warning:hover { background: var(--warning-dark); }
+.btn-danger { background: var(--danger); color: #fff; border: none; }
+.btn-danger:hover { background: var(--danger-dark); }
+.focus-control-bar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: 12px 14px; border-radius: var(--radius-md); background: var(--bg-table-header); margin-bottom: var(--space-3); border: 1px solid var(--border-light); }
+.focus-mode-buttons { display: flex; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }
+.focus-rule-note { padding: 10px 12px; border-radius: var(--radius-md); background: var(--warning-lighter); color: var(--warning-dark); font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.focus-table .focus-rank { font-weight: 700; color: var(--primary); }
+.focus-label { display: inline-block; margin-top: 4px; padding: 2px 7px; border-radius: 999px; font-size: var(--text-2xs); white-space: nowrap; }
+.focus-label.focus-tail { background: var(--success-lighter); color: var(--success-dark); }
+.focus-label.focus-stuck { background: var(--danger-lighter, #fff0f0); color: var(--danger); }
+.focus-label.focus-partial { background: var(--warning-lighter); color: var(--warning-dark); }
+.focus-label.focus-pending { background: var(--bg-hover); color: var(--text-secondary); }
+.focus-label.focus-exception { background: var(--primary-lighter); color: var(--primary); }
 
 /* 过滤栏 */
 .filter-bar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }

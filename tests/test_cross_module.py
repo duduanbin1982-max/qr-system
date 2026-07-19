@@ -259,3 +259,43 @@ class TestCrossModuleIntegration:
 
         assert shipments_response.status_code == 200, shipments_response.get_json()
         assert isinstance(shipments_response.get_json(), dict)
+
+
+    def test_shipments_endpoint_includes_product_codes(self, client, auth_headers):
+        suffix = uuid.uuid4().hex[:6].upper()
+        shipment_no = f"TEST-SHIP-{suffix}"
+        first_code = f"XMOD-SHIP-{suffix}"
+        second_code = f"XMOD-SHIP-B-{suffix}"
+        with client.application.app_context():
+            db = get_db()
+            first_inventory_id = db.execute(
+                "INSERT INTO inventory (product_model, product_name, quantity, unit) VALUES (?, 'Fixture Product A', 10, '件')",
+                (first_code,),
+            ).lastrowid
+            second_inventory_id = db.execute(
+                "INSERT INTO inventory (product_model, product_name, quantity, unit) VALUES (?, 'Fixture Product B', 10, '件')",
+                (second_code,),
+            ).lastrowid
+            shipment_id = db.execute(
+                "INSERT INTO shipments (shipment_no, customer, contact_person, status, total_quantity, created_by) "
+                "VALUES (?, 'Shipment Code Customer', 'Fixture Contact', 'pending', 3, 'pytest')",
+                (shipment_no,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO shipment_items (shipment_id, inventory_id, product_model, product_name, quantity, unit, product_code) "
+                "VALUES (?, ?, 'Fixture Model A', 'Fixture Product A', 1, '件', ?)",
+                (shipment_id, first_inventory_id, first_code),
+            )
+            db.execute(
+                "INSERT INTO shipment_items (shipment_id, inventory_id, product_model, product_name, quantity, unit, product_code) "
+                "VALUES (?, ?, 'Fixture Model B', 'Fixture Product B', 2, '件', ?)",
+                (shipment_id, second_inventory_id, second_code),
+            )
+            db.commit()
+
+        response = client.get(f"/api/shipments?keyword={shipment_no}", headers=auth_headers)
+
+        assert response.status_code == 200, response.get_json()
+        row = next(item for item in response.get_json()["shipments"] if item["shipment_no"] == shipment_no)
+        assert first_code in row["product_codes"]
+        assert second_code in row["product_codes"]

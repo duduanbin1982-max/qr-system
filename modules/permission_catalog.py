@@ -13,6 +13,7 @@ ACTION_LABELS = {
     "export": "导出",
     "report": "报工",
     "admin": "管理员",
+    "audit": "审核",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -43,6 +44,7 @@ ACTION_PERMISSION_DEFS = {
     "schedule": ("生产排程", ["view"]),
     "wages": ("工资核算", ["view", "edit"]),
     "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
+    "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
 }
 
 
@@ -56,6 +58,7 @@ SIDEBAR_ITEMS = [
     {"page": "reports", "code": "page:reports", "icon": "📊", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "icon": "💰", "label": "工资核算"},
     {"page": "performance", "code": "page:performance", "icon": "🎯", "label": "绩效管理"},
+    {"page": "work-time", "code": "page:work-time", "icon": "⏱️", "label": "工时管理"},
     {"page": "basic-settings", "code": "page:basic-settings", "icon": "⚙️", "label": "基础设置"},
     {"page": "settings", "code": "page:settings", "icon": "⚙️", "label": "系统设置"},
 ]
@@ -85,6 +88,7 @@ PAGE_RULES = [
     {"page": "reports", "code": "page:reports", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "label": "工资核算"},
     {"page": "performance", "code": "page:performance", "label": "绩效管理"},
+    {"page": "work-time", "code": "page:work-time", "label": "工时管理"},
     {"page": "board", "code": "page:board", "label": "数据看板"},
     {
         "page": "basic-settings",
@@ -133,6 +137,7 @@ ACTION_PAGE_MAP = {
     "reports": ["page:reports"],
     "wages": ["page:wages"],
     "performance": ["page:performance"],
+    "work_time": ["page:work-time"],
     "board": ["page:board"],
     "users": ["page:basic-settings", "page:basic-settings.users"],
     "processes": ["page:basic-settings", "page:basic-settings.processes"],
@@ -173,6 +178,7 @@ PAGE_OPERATION_BINDINGS = {
     "page:reports": ["reports"],
     "page:wages": ["wages"],
     "page:performance": ["performance"],
+    "page:work-time": ["work_time"],
     "page:board": ["board"],
     "page:basic-settings.users": ["users"],
     "page:basic-settings.processes": ["processes"],
@@ -346,6 +352,12 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
         "performance:create",
         "performance:edit",
         "performance:export",
+        "page:work-time",
+        "work_time:view",
+        "work_time:create",
+        "work_time:edit",
+        "work_time:audit",
+        "work_time:export",
     ],
     "qc_inspector": ["page:performance", "performance:view"],
     "warehouse_keeper": ["page:performance", "performance:view"],

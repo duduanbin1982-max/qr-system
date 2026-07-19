@@ -1,11 +1,11 @@
 // Service Worker - QR System PWA v3
-const CACHE_NAME = "qr-system-v3.3";
+const CACHE_NAME = "qr-system-v3.5";
 // Pre-cache only immutable/large assets (NOT HTML)
 const ASSETS = [
   "/offline.html",
   "/jsQR.js",
   "/style.css",
-  "/css/mobile.css?v=3",
+  "/css/mobile.css?v=9",
   "/manifest.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -63,6 +63,24 @@ self.addEventListener("fetch", function(event) {
         return caches.match(event.request).then(function(cached) {
           return cached || caches.match("/offline.html");
         });
+      })
+    );
+    return;
+  }
+
+  // Mobile business JS: network-first to avoid stale scan/report logic
+  if (url.pathname.startsWith("/js/mobile/")) {
+    event.respondWith(
+      fetch(event.request).then(function(response) {
+        if (response && response.status === 200) {
+          var clone = response.clone();
+          caches.open(CACHE_NAME).then(function(cache) {
+            cache.put(event.request, clone);
+          });
+        }
+        return response;
+      }).catch(function() {
+        return caches.match(event.request);
       })
     );
     return;

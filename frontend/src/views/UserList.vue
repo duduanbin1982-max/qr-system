@@ -29,6 +29,7 @@
                 <th class="col-min-80">用户名</th>
                 <th class="col-min-70">姓名</th>
                 <th class="col-min-70">岗位</th>
+                <th class="col-min-160">员工可报工序</th>
                 <th class="col-cat">工号</th>
                 <th class="col-min-80">标记</th>
                 <th class="col-min-100">手机号</th>
@@ -42,6 +43,15 @@
                 <td><code style="font-size:var(--text-xs)">{{ u.username }}</code></td>
                 <td class="fw-500">{{ u.name || '-' }}</td>
                 <td><span class="badge badge-info" style="font-size:var(--text-xs-alt)">{{ getPositionName(u.position_id) }}</span></td>
+                <td>
+                  <div v-if="getWorkProcesses(u).length" style="display:flex;flex-wrap:wrap;gap:4px;max-width:260px">
+                    <span v-for="process in getWorkProcesses(u).slice(0, 4)" :key="process.source + '-' + process.id" class="badge" :class="process.source === '岗位' ? 'badge-success' : 'badge-info'" style="font-size:var(--text-xs-alt)" :title="process.source + '工序'">
+                      {{ process.name }}
+                    </span>
+                    <span v-if="getWorkProcesses(u).length > 4" class="badge badge-info" style="font-size:var(--text-xs-alt)" :title="getWorkProcessTitle(u)">+{{ getWorkProcesses(u).length - 4 }}</span>
+                  </div>
+                  <span v-else style="color:var(--text-placeholder);font-size:var(--text-xs)">未设置</span>
+                </td>
                 <td>{{ u.employee_no || '-' }}</td>
                 <td><span v-if="u.marker" class="badge badge-info" style="font-size:var(--text-xs-alt)">{{ u.marker }}</span><span v-else>-</span></td>
                 <td class="text-sm">{{ u.phone || '-' }}</td>

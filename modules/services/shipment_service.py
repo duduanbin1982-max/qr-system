@@ -45,10 +45,14 @@ class ShipmentService:
             default="s.created_at"
         )
         base_sql = (
-            "SELECT s.*, COALESCE(si.item_count, 0) as item_count "
+            "SELECT s.*, COALESCE(si.item_count, 0) as item_count, "
+            "COALESCE(si.product_codes, '') as product_codes "
             "FROM shipments s "
-            "LEFT JOIN (SELECT shipment_id, COUNT(*) as item_count FROM shipment_items GROUP BY shipment_id) si "
-            "ON si.shipment_id = s.id "
+            "LEFT JOIN ("
+            "SELECT shipment_id, COUNT(*) as item_count, "
+            "GROUP_CONCAT(DISTINCT NULLIF(product_code, '')) as product_codes "
+            "FROM shipment_items GROUP BY shipment_id"
+            ") si ON si.shipment_id = s.id "
             "WHERE " + where + " " + sort_clause
         )
         paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)

@@ -6,16 +6,18 @@
         <table v-if="scores.length" class="data-table" style="font-size:var(--text-sm)">
           <thead>
             <tr>
-              <th>排名</th><th>员工</th><th>工号</th><th>产量</th><th>报工</th><th>质量扣项</th>
+              <th>岗位</th><th>岗位排名</th><th>员工</th><th>工号</th><th>产量</th><th>岗位最高产量</th><th>报工</th><th>质量扣项</th>
               <th>产量</th><th>质量</th><th>交付</th><th>纪律</th><th>改进</th><th>总分</th><th>预警</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in scores" :key="row.id">
+              <td>{{ positionName(row) }}</td>
               <td>{{ row.rank_no }}/{{ row.rank_total }}</td>
               <td style="font-weight:600">{{ row.user_name }}</td>
               <td>{{ row.employee_no || '-' }}</td>
               <td>{{ row.output_qty }}</td>
+              <td>{{ positionMaxOutput(row) }}</td>
               <td>{{ row.report_count }}</td>
               <td>{{ badQty(row) }}</td>
               <td>{{ row.output_score }}</td>
@@ -50,5 +52,13 @@ export default {
     badQty: { type: Function, required: true },
   },
   emits: ['detail', 'review', 'plan'],
+  methods: {
+    positionName(row) {
+      return row.position_name || row.score_details?.position_name || '未设置岗位'
+    },
+    positionMaxOutput(row) {
+      return row.score_details?.position_max_output ?? row.score_details?.max_output ?? 0
+    },
+  },
 }
 </script>

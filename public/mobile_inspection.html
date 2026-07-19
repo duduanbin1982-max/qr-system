@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>质量抽检</title>
-  <link rel="stylesheet" href="/css/inspection.css?v=2">
+  <link rel="stylesheet" href="/css/inspection.css?v=3">
 </head>
 <body>
 <div class="header">&#128269; 质量抽检</div>
@@ -18,6 +18,29 @@
 </div>
 <div id="actionArea">
   <div class="sel">&#128295; 已选工序：<span id="selectedProcess">请先选择上方工序</span></div>
+  <div class="score-panel" id="scorePanel">
+    <div class="score-title">质量评分（100分）</div>
+    <div class="score-row"><label>尺寸精度 <b>30</b></label><input class="score-input" data-score-key="dimension_accuracy" type="number" min="0" max="30" step="1" value="30"></div>
+    <div class="score-row"><label>孔位/工艺符合度 <b>25</b></label><input class="score-input" data-score-key="process_conformance" type="number" min="0" max="25" step="1" value="25"></div>
+    <div class="score-row"><label>外观质量 <b>20</b></label><input class="score-input" data-score-key="appearance_quality" type="number" min="0" max="20" step="1" value="20"></div>
+    <div class="score-row"><label>装配/功能影响 <b>15</b></label><input class="score-input" data-score-key="function_impact" type="number" min="0" max="15" step="1" value="15"></div>
+    <div class="score-row"><label>标识/资料/其他 <b>10</b></label><input class="score-input" data-score-key="documentation_other" type="number" min="0" max="10" step="1" value="10"></div>
+    <div class="score-meta">
+      <label>缺陷等级
+        <select id="defectLevel">
+          <option value="">无</option>
+          <option value="minor">轻微</option>
+          <option value="general">一般</option>
+          <option value="severe">严重</option>
+          <option value="critical">致命</option>
+        </select>
+      </label>
+      <div class="score-total">总分：<span id="scoreTotal">100</span></div>
+    </div>
+    <div class="score-suggest">系统建议：<span id="suggestedResult">合格</span></div>
+    <input id="overrideReason" style="display:none" placeholder="最终判定与系统建议不一致，请填写原因">
+    <textarea id="defectDesc" rows="2" placeholder="缺陷说明（可选）"></textarea>
+  </div>
   <div class="btns">
     <button class="btn-pass" id="btn-pass" disabled>&#9989; 合格</button>
     <button class="btn-rework" id="btn-rework" disabled>&#128260; 返修</button>
@@ -26,6 +49,6 @@
   <input id="remark" placeholder="备注（选填）">
 </div>
 <script src="/js/mobile/mobile-api.js?v=3"></script>
-  <script src="/js/mobile/inspection.js?v=6"></script>
+  <script src="/js/mobile/inspection.js?v=7"></script>
 </body>
 </html>

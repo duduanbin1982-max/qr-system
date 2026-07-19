@@ -5,6 +5,13 @@
   var selectedProcessId = null;
   var scanMode = 'order'; // 'serial' or 'order'
   var scanSerialNo = '';
+  var SCORE_ITEMS = [
+    { key: 'dimension_accuracy', label: '尺寸精度', max: 30 },
+    { key: 'process_conformance', label: '孔位/工艺符合度', max: 25 },
+    { key: 'appearance_quality', label: '外观质量', max: 20 },
+    { key: 'function_impact', label: '装配/功能影响', max: 15 },
+    { key: 'documentation_other', label: '标识/资料/其他', max: 10 }
+  ];
 
   function getToken() {
     // Try sessionStorage first (set by mobile-order.js redirect), then cookie
@@ -43,6 +50,59 @@
     document.getElementById('btn-scrap').disabled = !enable;
   }
 
+  function resultLabel(result) {
+    return result === 'pass' ? '合格' : result === 'rework' ? '返修' : result === 'scrap' ? '报废' : '-';
+  }
+
+  function clampNumber(value, min, max) {
+    var n = Number(value);
+    if (!isFinite(n)) n = max;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function readScorePayload(finalResult) {
+    var detail = {};
+    var total = 0;
+    SCORE_ITEMS.forEach(function(item) {
+      var input = document.querySelector('[data-score-key="' + item.key + '"]');
+      var score = clampNumber(input ? input.value : item.max, 0, item.max);
+      if (input) input.value = score;
+      total += score;
+      detail[item.key] = { label: item.label, max: item.max, score: score };
+    });
+    total = Math.round(total * 10) / 10;
+    var defectLevel = document.getElementById('defectLevel').value || '';
+    var suggested = defectLevel === 'critical' ? 'scrap' : (total >= 85 ? 'pass' : (total >= 60 ? 'rework' : 'scrap'));
+    var overrideReason = (document.getElementById('overrideReason').value || '').trim();
+    var defectDesc = (document.getElementById('defectDesc').value || '').trim();
+    var finalValue = finalResult || suggested;
+    if (finalValue !== suggested && !overrideReason) {
+      document.getElementById('overrideReason').style.display = 'block';
+      throw new Error('最终判定与系统建议不一致，请填写原因');
+    }
+    return {
+      score_total: total,
+      score_detail: detail,
+      defect_level: defectLevel,
+      defect_items: defectDesc ? [{ level: defectLevel, description: defectDesc }] : [],
+      suggested_result: suggested,
+      final_result: finalValue,
+      override_reason: overrideReason,
+      notes: defectDesc
+    };
+  }
+
+  function updateScoreSuggestion() {
+    try {
+      var payload = readScorePayload(null);
+      document.getElementById('scoreTotal').textContent = payload.score_total;
+      document.getElementById('suggestedResult').textContent = resultLabel(payload.suggested_result);
+      document.getElementById('overrideReason').style.display = 'none';
+    } catch(e) {
+      document.getElementById('scoreTotal').textContent = '-';
+    }
+  }
+
   function selectProcess(el) {
     var items = document.querySelectorAll('.proc-item');
     items.forEach(function(item) { item.classList.remove('selected'); });
@@ -69,6 +129,14 @@
       }
     }
 
+    var scoring;
+    try {
+      scoring = readScorePayload(result);
+    } catch(e) {
+      showMsg(e.message, 'error');
+      return;
+    }
+
     var data = {
       process_id: selectedProcessId,
       order_id: orderData.id,
@@ -80,6 +148,7 @@
       serial_no: scanSerialNo,
       remark: document.getElementById('remark').value || ''
     };
+    Object.keys(scoring).forEach(function(key) { data[key] = scoring[key]; });
 
     enableButtons(false);
 
@@ -116,6 +185,11 @@
     document.getElementById('btn-pass').addEventListener('click', function() { submitResult('pass'); });
     document.getElementById('btn-rework').addEventListener('click', function() { submitResult('rework'); });
     document.getElementById('btn-scrap').addEventListener('click', function() { submitResult('scrap'); });
+    document.querySelectorAll('.score-input').forEach(function(input) {
+      input.addEventListener('input', updateScoreSuggestion);
+    });
+    document.getElementById('defectLevel').addEventListener('change', updateScoreSuggestion);
+    updateScoreSuggestion();
 
     document.getElementById('info').innerHTML = '<div class="loading">查询中...</div>';
 

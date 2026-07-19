@@ -12,12 +12,19 @@
     <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) 20px;border-bottom:1px solid var(--bg-hover)">
       <h3 style="font-size:var(--text-lg);font-weight:700;margin:0">📅 生产排程</h3>
       <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
-        <select v-model="statusFilter" class="form-input" style="width:120px;padding:6px 10px;font-size:var(--text-sm)">
-          <option value="all">全部状态</option>
-          <option value="pending">待生产</option>
-          <option value="producing">生产中</option>
-          <option value="completed">已完成</option>
-        </select>
+        <div style="display:flex;gap:4px;background:var(--bg-hover);padding:3px;border-radius:999px">
+          <button
+            v-for="tab in [
+              { key: 'active', label: '进行中' },
+              { key: 'completed', label: '已完成' },
+              { key: 'all', label: '全部' }
+            ]"
+            :key="tab.key"
+            type="button"
+            class="btn btn-sm"
+            :style="{padding:'4px 12px',borderRadius:'999px',background:scheduleScope===tab.key?'var(--primary)':'transparent',color:scheduleScope===tab.key?'#fff':'var(--text-secondary)',boxShadow:'none'}"
+            @click="setScheduleScope(tab.key)">{{ tab.label }}</button>
+        </div>
         <select v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
           <option value="">全部产线</option>
           <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
@@ -69,7 +76,7 @@
             <div style="min-width:360px;max-width:360px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
               <!-- 第一行：复选框 + 订单号 + 客户 + 状态 + 交期 -->
               <div style="display:flex;align-items:center;gap:10px">
-                <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" @change="toggleOrder(order.id)" style="width:18px;flex-shrink:0">
+                <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" :disabled="isCompleted(order)" @change="toggleOrder(order)" style="width:18px;flex-shrink:0" :title="isCompleted(order) ? '已完成订单只读，不参与批量调整' : ''">
                 <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:85px;text-align:left" :title="order.order_no">{{ order.order_no }}</span>
                 <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80px;text-align:left" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
                 <span :style="{flexShrink:0,fontSize:'12px',padding:'1px 6px',borderRadius:'3px',textAlign:'left',minWidth:'56px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
@@ -99,7 +106,7 @@
                 :style="{position:'absolute',left:barLeft(order)+'px',top:'12px',
                   width:barWidth(order)+'px',height:'28px',
                   background:barColor(order.status),borderRadius:'6px',
-                  cursor: canEdit ? 'col-resize' : 'default',
+                  cursor: canAdjustOrder(order) ? 'col-resize' : 'default',
                   display:'flex',alignItems:'center',justifyContent:'center',
                   color:'#fff',fontSize:'10px',fontWeight:600,
                   boxShadow: isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line) ? '0 0 0 2px var(--danger), 0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.15)',zIndex:1,
@@ -108,7 +115,7 @@
                 }"
                 @mousedown="onBarMouseDown($event, order)"
                 @dblclick="editOrderDates(order)"
-                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line) ? ' ⚠️产能超载' : '')" >
+                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
                 <span v-if="order.quantity" style="margin-right:4px">{{ order.completed_qty||0 }}/{{ order.quantity }}</span>
                 {{ order.production_line || statusLabel(order.status) }}
               </div>

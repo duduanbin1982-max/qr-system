@@ -23,6 +23,7 @@ def performance_scores():
             year_month=request.args.get('year_month', ''),
             warning_level=request.args.get('warning_level', ''),
             search=request.args.get('search', ''),
+            position_id=request.args.get('position_id', ''),
             page=request.args.get('page', 1, type=int),
             per_page=request.args.get('per_page', 50, type=int),
         )

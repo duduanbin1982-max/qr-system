@@ -1,5 +1,122 @@
 """Order management specific tests — covers all 12 endpoints"""
-import json, time, pytest
+import json, time, pytest, uuid
+from factories import TEST_HASH, TEST_PASS, ensure_user
+
+
+def _set_order_status(client, order_id, status):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET status = ?, deleted_at = NULL WHERE id = ?",
+            (status, order_id),
+        )
+        db.commit()
+
+
+def _order_no(client, order_id):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        row = get_db().execute(
+            "SELECT order_no FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()
+        return row["order_no"]
+
+
+def _first_process_id(client, order_id):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        row = get_db().execute(
+            "SELECT process_id FROM order_processes WHERE order_id = ? ORDER BY seq_order LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        return row["process_id"]
+
+
+def _listed_order_ids(response):
+    return {order["id"] for order in response.get_json()["orders"]}
+
+def _focus_event_count(client, event_type, order_id=None):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        params = [event_type]
+        where = "event_type = ?"
+        if order_id is not None:
+            where += " AND order_id = ?"
+            params.append(order_id)
+        row = get_db().execute(
+            f"SELECT COUNT(*) AS cnt FROM order_completion_focus_events WHERE {where}",
+            params,
+        ).fetchone()
+        return row["cnt"]
+
+
+def _login_headers(client, username, password):
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json() or {}
+    token = data.get("user", {}).get("token", "") if "user" in data else data.get("token", "")
+    assert token
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _seed_completion_focus_pair(client, lead_username=None):
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        from modules.db import get_db
+
+        db = get_db()
+        cursor = db.execute(
+            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+            "VALUES (?, 'pytest fixture process', 'fixture', 1, 'active', datetime('now','localtime'))",
+            (f"Fixture Focus Process {suffix}",),
+        )
+        process_id = cursor.lastrowid
+        product_code = f"XMOD-FOCUS-{suffix}"
+        earlier_order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode, created_at) "
+            "VALUES (?, 'Test Customer', 'Cross Module Product', ?, 5, 'producing', '', '2026-01-01 08:00:00')",
+            (f"TEST-FOCUS-EARLY-{suffix}", product_code),
+        ).lastrowid
+        later_order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode, created_at) "
+            "VALUES (?, 'Test Customer', 'Cross Module Product', ?, 5, 'producing', '', '2026-01-02 08:00:00')",
+            (f"TEST-FOCUS-LATE-{suffix}", product_code),
+        ).lastrowid
+        for order_id in (earlier_order_id, later_order_id):
+            db.execute(
+                "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+                "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
+                (order_id, process_id),
+            )
+        worker = db.execute("SELECT id FROM users WHERE username = 'testworker'").fetchone()
+        assert worker is not None
+        db.execute(
+            "INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?, ?)",
+            (worker["id"], process_id),
+        )
+        if lead_username:
+            lead_user_id = ensure_user(
+                db,
+                lead_username,
+                TEST_HASH,
+                "Focus Lead",
+                "production_manager",
+                f"TEST-FOCUS-LEAD-{suffix}",
+                "manager-group",
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?, ?)",
+                (lead_user_id, process_id),
+            )
+        db.commit()
+    return later_order_id, process_id
+
 
 
 class TestOrderCRUD:
@@ -32,6 +149,88 @@ class TestOrderCRUD:
         assert resp.status_code == 200, f"update_order response: {resp.get_json()}"
         data = resp.get_json()
         assert data["message"]
+
+    def test_completed_orders_are_archived_by_default(self, client, auth_headers, test_order_id):
+        _set_order_status(client, test_order_id, "completed")
+        order_no = _order_no(client, test_order_id)
+
+        active_resp = client.get(f"/api/orders?keyword={order_no}&limit=200", headers=auth_headers)
+        assert active_resp.status_code == 200
+        assert test_order_id not in _listed_order_ids(active_resp)
+
+        completed_resp = client.get(
+            f"/api/orders?archive=completed&keyword={order_no}&limit=200",
+            headers=auth_headers,
+        )
+        assert completed_resp.status_code == 200
+        assert test_order_id in _listed_order_ids(completed_resp)
+
+        all_resp = client.get(
+            f"/api/orders?archive=all&keyword={order_no}&limit=200",
+            headers=auth_headers,
+        )
+        assert all_resp.status_code == 200
+        assert test_order_id in _listed_order_ids(all_resp)
+
+        status_resp = client.get(
+            f"/api/orders?status=completed&keyword={order_no}&limit=200",
+            headers=auth_headers,
+        )
+        assert status_resp.status_code == 200
+        assert test_order_id in _listed_order_ids(status_resp)
+
+    def test_completed_order_is_readonly_until_reopened(self, client, auth_headers, test_order_id):
+        _set_order_status(client, test_order_id, "completed")
+
+        update_resp = client.put(
+            f"/api/orders/{test_order_id}",
+            headers=auth_headers,
+            json={"remark": "should be blocked"},
+        )
+        assert update_resp.status_code == 400
+        assert "已完成订单已归档" in update_resp.get_json()["error"]
+
+        delete_resp = client.delete(f"/api/orders/{test_order_id}", headers=auth_headers)
+        assert delete_resp.status_code == 400
+        assert "已完成订单已归档" in delete_resp.get_json()["error"]
+
+        reopen_resp = client.post(
+            f"/api/orders/{test_order_id}/reopen",
+            headers=auth_headers,
+            json={"reason": "fixture reopen"},
+        )
+        assert reopen_resp.status_code == 200, reopen_resp.get_json()
+        assert reopen_resp.get_json()["status"] == "producing"
+
+        order_no = _order_no(client, test_order_id)
+        active_resp = client.get(f"/api/orders?keyword={order_no}", headers=auth_headers)
+        assert test_order_id in _listed_order_ids(active_resp)
+
+    def test_completed_order_blocks_mobile_scan_and_report(self, client, auth_headers, worker_auth_headers, test_order_id):
+        _set_order_status(client, test_order_id, "completed")
+        order_no = _order_no(client, test_order_id)
+        process_id = _first_process_id(client, test_order_id)
+
+        scan_resp = client.post(
+            "/api/mobile/scan",
+            headers=auth_headers,
+            json={"code": order_no},
+        )
+        assert scan_resp.status_code == 400
+        assert "已完成并归档" in scan_resp.get_json()["error"]
+
+        report_resp = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": test_order_id,
+                "process_id": process_id,
+                "quantity": 1,
+                "report_type": "normal",
+            },
+        )
+        assert report_resp.status_code == 409
+        assert "已完成并归档" in report_resp.get_json()["error"]
 
 
 class TestOrderDeleteFlow:
@@ -72,3 +271,110 @@ class TestOrderEdgeCases:
     def test_workpiece_progress(self, client, auth_headers, test_order_id):
         resp = client.get(f"/api/orders/{test_order_id}/workpiece-progress", headers=auth_headers)
         assert resp.status_code == 200
+        data = resp.get_json()
+        assert "summary" in data
+        assert "analysis" in data
+        assert "deadline_risk" in data["analysis"]
+        assert "recommendations" in data["analysis"]
+        assert "process_stats" in data["summary"]
+
+    def test_completion_focus_board_contract(self, client, auth_headers, test_order_id):
+        resp = client.get("/api/orders/completion-focus", headers=auth_headers)
+        assert resp.status_code == 200, resp.get_json()
+        data = resp.get_json()
+        assert data["enabled"] is True
+        assert "summary" in data
+        assert "items" in data
+        if data["items"]:
+            item = data["items"][0]
+            assert "order_no" in item
+            assert "focus_label" in item
+            assert "priority_process_name" in item
+
+    def test_completion_focus_hard_blocks_worker_mobile_report(self, client, auth_headers, worker_auth_headers):
+        order_id, process_id = _seed_completion_focus_pair(client)
+        save_resp = client.post(
+            "/api/orders/completion-focus/config",
+            headers=auth_headers,
+            json={"mode": "hard", "tail_percent": 70},
+        )
+        assert save_resp.status_code == 200, save_resp.get_json()
+
+        report_resp = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_id,
+                "quantity": 1,
+                "report_type": "normal",
+            },
+        )
+        assert report_resp.status_code == 409, report_resp.get_json()
+        data = report_resp.get_json()
+        warning = data["completion_focus_warning"]
+        assert warning["blocking"] is True
+        assert warning["recommended_order_no"].startswith("TEST-FOCUS-EARLY-")
+        assert _focus_event_count(client, "scan_blocked", order_id) == 1
+
+    def test_completion_focus_hard_allows_bypass_user_mobile_report(self, client, auth_headers, worker_auth_headers):
+        lead_username = f"focuslead_{uuid.uuid4().hex[:6]}"
+        order_id, process_id = _seed_completion_focus_pair(client, lead_username=lead_username)
+        lead_headers = _login_headers(client, lead_username, TEST_PASS)
+        save_resp = client.post(
+            "/api/orders/completion-focus/config",
+            headers=auth_headers,
+            json={"mode": "hard", "tail_percent": 70},
+        )
+        assert save_resp.status_code == 200, save_resp.get_json()
+
+        report_resp = client.post(
+            "/api/mobile/report",
+            headers=lead_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_id,
+                "quantity": 1,
+                "report_type": "normal",
+            },
+        )
+        assert report_resp.status_code == 200, report_resp.get_json()
+        assert _focus_event_count(client, "scan_bypassed", order_id) == 1
+
+    def test_completion_focus_config_and_exception(self, client, auth_headers, test_order_id):
+        cfg_resp = client.get("/api/orders/completion-focus/config", headers=auth_headers)
+        assert cfg_resp.status_code == 200, cfg_resp.get_json()
+        cfg = cfg_resp.get_json()
+        assert cfg["mode"] in ("off", "soft", "hard")
+        assert {item["value"] for item in cfg["mode_options"]} == {"off", "soft", "hard"}
+
+        save_resp = client.post(
+            "/api/orders/completion-focus/config",
+            headers=auth_headers,
+            json={"mode": "hard", "tail_percent": 75},
+        )
+        assert save_resp.status_code == 200, save_resp.get_json()
+        assert save_resp.get_json()["config"]["mode"] == "hard"
+
+        ex_resp = client.post(
+            f"/api/orders/{test_order_id}/completion-focus-exception",
+            headers=auth_headers,
+            json={"reason": "缺料", "detail": "fixture", "expires_at": "2099-01-01 00:00"},
+        )
+        assert ex_resp.status_code == 200, ex_resp.get_json()
+        exception_id = ex_resp.get_json()["exception"]["id"]
+        assert _focus_event_count(client, "exception_created", test_order_id) == 1
+
+        board_resp = client.get("/api/orders/completion-focus", headers=auth_headers)
+        assert board_resp.status_code == 200, board_resp.get_json()
+        board = board_resp.get_json()
+        assert board["summary"]["exception"] >= 1
+        assert any(item["order_id"] == test_order_id and item["is_exception"] for item in board["items"])
+
+        cancel_resp = client.delete(
+            f"/api/orders/completion-focus-exceptions/{exception_id}",
+            headers=auth_headers,
+            json={"reason": "fixture cancel"},
+        )
+        assert cancel_resp.status_code == 200, cancel_resp.get_json()
+        assert _focus_event_count(client, "exception_cancelled", test_order_id) == 1

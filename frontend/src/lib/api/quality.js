@@ -10,6 +10,7 @@ export const qualityApi = {
   defectCategories: ()       => request('GET', '/api/quality/defect-categories'),
   defectPareto:     (params) => request('GET', '/api/quality/defect-pareto' + buildQuery(params)),
   inspectionTemplates: ()     => request('GET', '/api/quality/inspection-templates'),
+  qualityScoreTemplate: ()    => request('GET', '/api/quality/score-template'),
   batchInspections:   (data)  => request('POST', '/api/quality/inspections/batch', data),
   listQAttachments:   (iid)   => request('GET', '/api/quality/inspections/' + iid + '/attachments'),
   uploadQAttachment:  (iid, formData) => uploadFile('/api/quality/inspections/' + iid + '/attachments', formData),

@@ -3,7 +3,7 @@ import { request, buildQuery, uploadFile } from './client.js'
 export const productionApi = {
   // ========== 产线 ==========
   listProductionLines: ()     => request('GET', '/api/production-lines'),
-  getScheduleGantt:   ()       => request('GET', '/api/schedule/gantt'),
+  getScheduleGantt:   (params) => request('GET', '/api/schedule/gantt' + buildQuery(params)),
   updateScheduleOrder:(id,data)=> request('PUT', '/api/schedule/order/' + id, data),
   batchShiftSchedule: (data)   => request('POST', '/api/schedule/batch-shift', data),
   createProductionLine:(data)  => request('POST', '/api/production-lines', data),

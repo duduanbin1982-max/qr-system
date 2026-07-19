@@ -169,6 +169,13 @@ def quality_templates():
     return jsonify({'ok': True, 'templates': QualityService.get_templates()})
 
 
+@app.route('/api/quality/score-template', methods=['GET'])
+@check_auth
+@check_permission('quality:view')
+def quality_score_template():
+    return jsonify({'ok': True, **QualityService.get_score_template()})
+
+
 @app.route('/api/quality/inspections/batch', methods=['POST'])
 @check_auth
 @check_permission('quality:edit')

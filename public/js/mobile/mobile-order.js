@@ -19,6 +19,9 @@ function doScan(code) {
   api.mobileScan({ code: code })
   .then(function(d) {
     if (d.item) { d.order.item = d.item; }
+    if (d.completion_focus_warning && d.order) {
+      d.order.completion_focus_warning = d.completion_focus_warning;
+    }
 
     // -- 管理员/质检员扫码 → 重定向到抽检页面 --
     var _u = user();
@@ -47,11 +50,23 @@ function doScan(code) {
       $("rpt-qty").disabled = false;
       $("rpt-qty").title = "";
     }
-    if (openHandoffReview(d.handoff_pending)) {
+    if (openHandoffReview(d.handoff_pending, {
+      afterClose: function(action) {
+        if (typeof show === 'function') show('order');
+        updateReportBtn();
+        if (action === 'skipped') {
+          toast('已稍后评价，系统会在下次扫码继续提醒', 2400);
+        }
+      }
+    })) {
       updateReportBtn();
       return;
     }
-    if (reportMode === 'auto') {
+    if (d.completion_focus_warning) {
+      switchMode('manual');
+      toast(d.completion_focus_warning.blocking ? '集中完工强拦截：请先处理前序订单' : '存在更早订单应优先收尾，已切换为手动确认', 3200);
+      updateReportBtn();
+    } else if (reportMode === 'auto') {
       setTimeout(function() { doReport(); }, 1200);
     } else {
       updateReportBtn();
@@ -73,6 +88,22 @@ function renderOrder(o) {
   h += '<div class="row"><span>产品</span><span>' + esc(o.product_name || '') + '</span></div>';
   h += '<div class="row"><span>客户</span><span>' + esc(o.customer || '') + '</span></div>';
   h += '<div class="row"><span>数量</span><span>' + qty + ' 件</span></div></div>';
+
+  if (o.completion_focus_warning && o.completion_focus_warning.message) {
+    var isBlocked = !!o.completion_focus_warning.blocking;
+    h += '<div class="focus-warning-card' + (isBlocked ? ' blocked' : '') + '">';
+    h += '<div class="fw-title">🎯 ' + (isBlocked ? '集中完工强拦截' : '集中完工提示') + '</div>';
+    h += '<div class="fw-msg">' + esc(o.completion_focus_warning.message) + '</div>';
+    if (o.completion_focus_warning.recommended_order_no) {
+      h += '<div class="fw-meta">建议优先订单：' + esc(o.completion_focus_warning.recommended_order_no) +
+        ' · ' + esc(o.completion_focus_warning.recommended_process_name || '') +
+        ' · 剩余 ' + (o.completion_focus_warning.recommended_backlog || 0) + ' 件</div>';
+    }
+    if (isBlocked) {
+      h += '<div class="fw-meta">如确需插单，请联系管理员/生产主管在订单管理中设置例外订单。</div>';
+    }
+    h += '</div>';
+  }
 
   if (o.item) {
     curSerial = o.item.serial_no;
@@ -122,6 +153,12 @@ function setReportType(type) {
 
 function updateReportBtn() {
   const btn = $('btn-report');
+  if (curOrder && curOrder.completion_focus_warning && curOrder.completion_focus_warning.blocking) {
+    btn.disabled = true;
+    btn.textContent = '集中完工强拦截：请先处理前序订单';
+    btn.className = 'btn-report blocked';
+    return;
+  }
   var qty = parseInt($('rpt-qty').value) || 0;
   if (qty <= 0) { btn.disabled = true; btn.textContent = '已完成全部报工'; return; }
   const label = reportType === 'normal' ? '正常' : reportType === 'scrap' ? '报废' : '返修';
@@ -156,10 +193,34 @@ function doReport() {
 
   api.mobileReport(body)
   .then(function(d) {
-    showReportSuccess(body, d);
-    maybeOpenHandoffReview(body, d && d.handoff_pending);
+    handleReportHandoffReview(body, d || {});
   })
   .catch(function(e) { toast((e && e.message) || '网络异常'); btn.disabled = false; updateReportBtn(); });
+}
+
+function handleReportHandoffReview(body, response) {
+  var finishReport = function() { showReportSuccess(body, response || {}); };
+  if (body.report_type !== 'normal' || !curOrder || !curProcId) {
+    finishReport();
+    return;
+  }
+  if (openHandoffReview(response && response.handoff_pending, { afterClose: finishReport })) {
+    return;
+  }
+  var params = 'order_id=' + encodeURIComponent(curOrder.id) +
+    '&to_process_id=' + encodeURIComponent(body.process_id || curProcId) +
+    '&serial_no=' + encodeURIComponent(body.serial_no || curSerial || '');
+  api.handoffPending(params)
+    .then(function(ctx) {
+      if (!openHandoffReview(ctx, { afterClose: finishReport })) {
+        finishReport();
+      }
+    })
+    .catch(function(e) {
+      console.warn('handoff pending failed:', e && e.message);
+      toast('交接评价检查失败，本次先完成报工', 2400);
+      finishReport();
+    });
 }
 
 function showReportSuccess(body, response) {
@@ -175,15 +236,27 @@ function showReportSuccess(body, response) {
   show('ok');
 }
 
-function openHandoffReview(ctx) {
+function openHandoffReview(ctx, options) {
   if (!ctx || !ctx.required) return false;
+  var modal = $('handoff-modal');
+  if (!modal) return false;
+  options = options || {};
   handoffContext = ctx;
+  handoffAfterClose = (typeof options.afterClose === 'function') ? options.afterClose : null;
   handoffRating = 5;
   setHandoffRating(5);
-  $('handoff-title').textContent = '请评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量';
+  var serialLabel = ctx.serial_no ? '（工件：' + ctx.serial_no + '）' : '（订单模式）';
+  $('handoff-title').textContent = '请先评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量 ' + serialLabel;
   $('handoff-issue').value = '';
   $('handoff-comment').value = '';
-  $('handoff-modal').classList.add('active');
+  $('handoff-submit').disabled = false;
+  var skipBtn = $('handoff-skip');
+  if (skipBtn) skipBtn.textContent = '稍后评价';
+  var reportBtn = $('btn-report');
+  if (reportBtn) reportBtn.disabled = true;
+  if (typeof show === 'function') show('handoff');
+  modal.classList.add('active');
+  toast('请先完成上一工序交接评价', 1800);
   return true;
 }
 
@@ -210,10 +283,25 @@ function setHandoffRating(score) {
   }
 }
 
-function closeHandoffModal() {
+function closeHandoffModal(action) {
   var modal = $('handoff-modal');
   if (modal) modal.classList.remove('active');
+  var callback = handoffAfterClose;
+  var result = (typeof action === 'string') ? action : 'closed';
   handoffContext = null;
+  handoffAfterClose = null;
+  if (callback) {
+    setTimeout(function() { callback(result); }, 0);
+    return;
+  }
+  if (curOrder && typeof show === 'function') {
+    show('order');
+  } else if (typeof show === 'function') {
+    show('main');
+  }
+  if (typeof updateReportBtn === 'function') {
+    updateReportBtn();
+  }
 }
 
 function submitHandoffReview() {
@@ -234,7 +322,7 @@ function submitHandoffReview() {
     comment: comment
   }).then(function(res) {
     toast(res.status === 'pending' ? '评价已提交，等待主管确认' : '交接评价已提交');
-    closeHandoffModal();
+    closeHandoffModal('submitted');
   }).catch(function(e) {
     toast(e.message || '评价提交失败');
   }).finally(function() {

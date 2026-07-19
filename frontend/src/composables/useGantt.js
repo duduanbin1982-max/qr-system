@@ -48,25 +48,35 @@ export function useGantt() {
   const orders = ref([])
   const loading = ref(true)
   const dayWidth = ref(38)
-  const statusFilter = ref('all')
+  const scheduleScope = ref('active')
   const wsFilter = ref('')
 
   const canEdit = computed(() => can('schedule:edit'))
   const canCreate = computed(() => can('schedule:create'))
 
+  function isCompleted(order) {
+    if (!order) return false
+    const quantity = order.quantity || 0
+    const completed = order.completed_qty || order.completed || 0
+    return order.is_completed || order.status === 'completed' || (quantity > 0 && completed >= quantity)
+  }
+
+  function canAdjustOrder(order) {
+    return canEdit.value && !isCompleted(order)
+  }
+
   const stats = computed(() => {
     const all = orders.value
     return {
       total: all.length,
-      producing: all.filter(o => o.status === 'producing').length,
-      pending: all.filter(o => o.status === 'pending').length,
-      completed: all.filter(o => o.status === 'completed').length,
+      producing: all.filter(o => o.status === 'producing' && !isCompleted(o)).length,
+      pending: all.filter(o => o.status === 'pending' && !isCompleted(o)).length,
+      completed: all.filter(o => isCompleted(o)).length,
     }
   })
 
   const filteredOrders = computed(() => {
     let arr = orders.value
-    if (statusFilter.value !== 'all') arr = arr.filter(o => o.status === statusFilter.value)
     if (wsFilter.value) arr = arr.filter(o => (o.production_line || '') === wsFilter.value)
     return arr
   })
@@ -150,7 +160,7 @@ export function useGantt() {
   let _dragSnapshot = null
 
   function onBarMouseDown(e, order) {
-    if (!canEdit.value) return
+    if (!canAdjustOrder(order)) return
     const bar = e.currentTarget
     const rect = bar.getBoundingClientRect()
     const offsetX = e.clientX - rect.left
@@ -241,7 +251,7 @@ export function useGantt() {
   const editForm = ref({ plan_start: '', plan_end: '', production_line_id: '' })
 
   function editOrderDates(order) {
-    if (!canEdit.value) return
+    if (!canAdjustOrder(order)) return
     dragTarget.value = order
     editForm.value = { plan_start: order.plan_start || '', plan_end: order.plan_end || '', production_line_id: order.production_line_id || '' }
     showEditModal.value = true
@@ -307,20 +317,26 @@ export function useGantt() {
 
   function toggleAll() {
     allSelected.value = !allSelected.value
-    selectedOrderIds.value = allSelected.value ? filteredOrders.value.map(o => o.id) : []
+    selectedOrderIds.value = allSelected.value
+      ? filteredOrders.value.filter(o => !isCompleted(o)).map(o => o.id)
+      : []
   }
 
-  function toggleOrder(id) {
+  function toggleOrder(order) {
+    if (isCompleted(order)) return
+    const id = typeof order === 'object' ? order.id : order
     const idx = selectedOrderIds.value.indexOf(id)
     if (idx >= 0) selectedOrderIds.value.splice(idx, 1)
     else selectedOrderIds.value.push(id)
   }
 
   async function batchShift(direction) {
-    if (!selectedOrderIds.value.length) { showToast('请先选择订单', 'warning'); return }
+    const editableIds = new Set(filteredOrders.value.filter(o => !isCompleted(o)).map(o => o.id))
+    const orderIds = selectedOrderIds.value.filter(id => editableIds.has(id))
+    if (!orderIds.length) { showToast('请先选择未完成订单', 'warning'); return }
     const days = batchDays.value * (direction === 'right' ? 1 : -1)
     try {
-      const r = await api.batchShiftSchedule({ order_ids: selectedOrderIds.value, days })
+      const r = await api.batchShiftSchedule({ order_ids: orderIds, days })
       showToast(r.message || ('已偏移 ' + r.count + ' 个订单'))
       selectedOrderIds.value = []
       allSelected.value = false
@@ -332,10 +348,18 @@ export function useGantt() {
   async function load() {
     loading.value = true
     try {
-      const r = await api.getScheduleGantt()
+      const r = await api.getScheduleGantt({ status: scheduleScope.value })
       if (r.ok !== false) { orders.value = r.orders || []; dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' } }
     } catch (e) { showToast('加载排程失败', 'error') }
     finally { loading.value = false }
+  }
+
+  async function setScheduleScope(scope) {
+    if (scheduleScope.value === scope) return
+    scheduleScope.value = scope
+    selectedOrderIds.value = []
+    allSelected.value = false
+    await load()
   }
 
   function onKeyDown(e) {
@@ -344,11 +368,13 @@ export function useGantt() {
 
   // ── Shortcuts ──
   async function shiftDays(dir, big) {
-    if (!selectedOrderIds.value.length) return
+    const editableIds = new Set(filteredOrders.value.filter(o => !isCompleted(o)).map(o => o.id))
+    const orderIds = selectedOrderIds.value.filter(id => editableIds.has(id))
+    if (!orderIds.length) return
     const days = big ? 7 : 1
     const shiftVal = days * dir
     try {
-      const r = await api.batchShiftSchedule({ order_ids: [...selectedOrderIds.value], days: shiftVal })
+      const r = await api.batchShiftSchedule({ order_ids: orderIds, days: shiftVal })
       showToast(r.message || ('Shifted ' + (r.count || 0) + ' orders'))
       selectedOrderIds.value = []
       await load()
@@ -370,9 +396,9 @@ export function useGantt() {
   }
 
   _instance = {
-    orders, stats, loading, dayWidth, statusFilter, wsFilter,
+    orders, stats, loading, dayWidth, scheduleScope, setScheduleScope, wsFilter,
     filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut,
-    snapLeft, snapRight, dragTarget, dragPreviewLeft, dragPreviewWidth, onBarMouseDown,
+    isCompleted, canAdjustOrder, snapLeft, snapRight, dragTarget, dragPreviewLeft, dragPreviewWidth, onBarMouseDown,
     showEditModal, editForm, editOrderDates, saveEditDates, undoLastDrag,
     productionLines, showLineMgr, lineForm, addLine, delLine,
     selectedOrderIds, batchDays, batchShift, allSelected, toggleAll, toggleOrder,

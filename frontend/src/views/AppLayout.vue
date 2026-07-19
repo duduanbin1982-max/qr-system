@@ -222,6 +222,7 @@ const ApprovalPage = definePageAsyncComponent('审批管理', () => import('./Ap
 const InspectionList = definePageAsyncComponent('质量检验', () => import('./InspectionList.vue'))
 const WageList = definePageAsyncComponent('工资核算', () => import('./WageList.vue'))
 const PerformancePage = definePageAsyncComponent('绩效管理', () => import('./PerformancePage.vue'))
+const WorkTimePage = definePageAsyncComponent('工时管理', () => import('./WorkTimePage.vue'))
 
 // Expose globals for template compatibility
 window.A = { auth, router, store, showToast, navigate, logout, api }
@@ -254,6 +255,7 @@ export default {
     InspectionList,
     WageList,
     PerformancePage,
+    WorkTimePage,
     NoPermissionPage
   },
   setup() {
@@ -285,7 +287,7 @@ export default {
         'machining-processes': 'ProcessList', 'inventory': 'InventoryList',
         'materials': 'MaterialList', 'schedule': 'GanttChart',
         'rework': 'ReworkList', 'quality': 'InspectionList',
-        'wages': 'WageList', 'performance': 'PerformancePage', 'prices': 'PriceList',
+        'wages': 'WageList', 'performance': 'PerformancePage', 'work-time': 'WorkTimePage', 'prices': 'PriceList',
         'all-prices': 'PriceList', 'structure-prices': 'PriceList',
         'machining-prices': 'PriceList', 'routes': 'RouteList',
         'scan': 'ScanReport', 'shipments': 'ShipmentList',

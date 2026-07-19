@@ -3,6 +3,7 @@
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🔍</span><div><div class="s-val">{{ stats.total }}</div><div class="s-label">抽检总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ stats.avg_score || 0 }}</div><div class="s-label">平均分</div></div></div>
       <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ stats.pass }}</div><div class="s-label">合格</div></div></div>
       <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val text-warning">{{ stats.rework }}</div><div class="s-label">返修</div></div></div>
       <div class="summary-item"><span class="s-icon">❌</span><div><div class="s-val text-danger">{{ stats.scrap }}</div><div class="s-label">报废</div></div></div>
@@ -27,14 +28,17 @@
         <div class="table-wrap">
           <table v-if="items.length" class="data-table" style="min-width:800px">
             <thead><tr>
-              <th>订单号</th><th>产品编码</th><th>工序</th><th>判定</th><th>返修工序</th><th>质检员</th><th>备注</th><th>时间</th><th style="width:60px;text-align:center">操作</th>
+              <th>订单号</th><th>产品编码</th><th>工序</th><th>判定</th><th>评分</th><th>缺陷等级</th><th>建议</th><th>返修工序</th><th>质检员</th><th>备注</th><th>时间</th><th style="width:60px;text-align:center">操作</th>
             </tr></thead>
             <tbody>
               <tr v-for="r in items" :key="r.id">
                 <td><code>{{ r.order_no || '-' }}</code></td>
                 <td><code style="font-size:var(--text-xs-alt)">{{ r.product_code || '-' }}</code></td>
                 <td>{{ r.process_name }}</td>
-                <td><span class="badge" :class="r.result==='pass'?'badge-success':r.result==='rework'?'badge-warning':'badge-danger'">{{ r.result==='pass'?'合格':r.result==='rework'?'返修':'报废' }}</span></td>
+                <td><span class="badge" :class="resultClass(r.result)">{{ resultLabel(r.result) }}</span></td>
+                <td><b :style="{color:(r.score_total||0) >= 85 ? 'var(--success)' : (r.score_total||0) >= 60 ? 'var(--warning)' : 'var(--danger)'}">{{ r.score_total || '-' }}</b></td>
+                <td>{{ defectLevelLabel(r.defect_level) }}</td>
+                <td><span v-if="r.suggested_result" class="badge" :class="resultClass(r.suggested_result)">{{ resultLabel(r.suggested_result) }}</span><span v-else>-</span></td>
                 <td>{{ r.rework_process || '-' }}</td>
                 <td>{{ r.inspector_name || '-' }}</td>
                 <td style="font-size:var(--text-xs);max-width:120px;overflow:hidden;text-overflow:ellipsis">{{ r.remark || '-' }}</td>
@@ -57,7 +61,7 @@ import { showToast } from '@/lib/store.js'
 export default {
   setup() {
     const items = ref([])
-    const stats = ref({ total:0, pass:0, rework:0, scrap:0 })
+    const stats = ref({ total:0, pass:0, rework:0, scrap:0, avg_score:0 })
     const keyword = ref('')
     const filterResult = ref('')
 
@@ -82,6 +86,19 @@ export default {
       window.open('/api/quality/inspections/export?' + qs.join('&'), '_blank')
     }
 
+    function resultLabel(result) {
+      return result === 'pass' ? '合格' : result === 'rework' ? '返修' : result === 'scrap' ? '报废' : (result || '-')
+    }
+
+    function resultClass(result) {
+      return result === 'pass' ? 'badge-success' : result === 'rework' ? 'badge-warning' : 'badge-danger'
+    }
+
+    function defectLevelLabel(level) {
+      const map = { minor:'轻微', general:'一般', severe:'严重', critical:'致命' }
+      return map[level] || '-'
+    }
+
         async function del(r) {
       if (!confirm('确定删除抽检记录吗？')) return
       try { await api.deleteInspection(r.id); showToast('删除成功'); await load(); await loadStats() }
@@ -89,7 +106,7 @@ export default {
     }
 
     onMounted(() => { load(); loadStats() })
-    return { items, stats, keyword, filterResult, load, exportExcel, del }
+    return { items, stats, keyword, filterResult, load, exportExcel, del, resultLabel, resultClass, defectLevelLabel }
   }
 }
 </script>

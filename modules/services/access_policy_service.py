@@ -52,12 +52,14 @@ class AccessPolicyService:
                 process_ids = []
             if process_ids:
                 explicit_rows = AccessPolicyRepository.list_existing_process_ids(process_ids)
+        user_process_rows = AccessPolicyRepository.list_user_process_ids(user["id"])
+        explicit_rows = list(explicit_rows) + list(user_process_rows)
 
         return resolve_process_scope(
             position_rows,
             explicit_rows,
             has_position_scope=bool(position_id),
-            has_explicit_process_scope=bool(process_ids_text),
+            has_explicit_process_scope=bool(process_ids_text or user_process_rows),
             permissions=AccessPolicyService.get_user_permissions(user),
             global_data_scope_permissions=set(GLOBAL_DATA_SCOPE_PERMS),
         )

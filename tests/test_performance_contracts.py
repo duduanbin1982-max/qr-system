@@ -122,6 +122,140 @@ def test_performance_review_inputs_recalculate_scores(client, auth_headers):
     assert "未按现场规范扫码" in after["warning_reason"]
 
 
+def test_rework_records_affect_performance_quality_score(client, auth_headers):
+    year_month = "2026-09"
+    with client.application.app_context():
+        db = get_db()
+        user_id = ensure_user(db, "perfrework", WORKER_HASH, "绩效返工员工", "worker", "TEST-PERF-REWORK")
+        process_id = db.execute("SELECT id FROM processes WHERE status='active' ORDER BY id LIMIT 1").fetchone()["id"]
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status) "
+            "VALUES ('TEST-PERF-REWORK-001', 'Test Customer', 'Cross Module Product', 'XMOD-PERF-RW', 20, 'producing')"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
+            "VALUES (?, ?, ?, 'normal', 10, 'approved', '2026-09-10 08:00:00')",
+            (order_id, process_id, user_id),
+        )
+        db.execute(
+            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason, created_at) "
+            "VALUES (?, ?, ?, 3, '返工计分测试', '2026-09-10 09:00:00')",
+            (order_id, process_id, user_id),
+        )
+        db.commit()
+
+    generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
+    assert generate.status_code == 200, generate.get_json()
+
+    payload = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers).get_json()
+    row = next(item for item in payload["items"] if item["user_id"] == user_id)
+    assert row["rework_qty"] == 3
+    assert row["score_details"]["bad_qty"] == 3
+    assert row["quality_score"] < 30
+    assert "质量扣项3件" in row["warning_reason"]
+
+
+def test_performance_scores_are_grouped_by_position_for_output_and_ranking(client, auth_headers):
+    year_month = "2026-11"
+    with client.application.app_context():
+        db = get_db()
+        welding_position = db.execute(
+            "INSERT INTO positions (name, description, status) VALUES ('绩效焊接岗位', 'pytest fixture process', 'active')"
+        ).lastrowid
+        assembly_position = db.execute(
+            "INSERT INTO positions (name, description, status) VALUES ('绩效装配岗位', 'pytest fixture process', 'active')"
+        ).lastrowid
+        welding_low = ensure_user(db, "perfweldlow", WORKER_HASH, "绩效焊接低产", "worker", "TEST-PERF-WELD-L")
+        welding_high = ensure_user(db, "perfweldhigh", WORKER_HASH, "绩效焊接高产", "worker", "TEST-PERF-WELD-H")
+        assembly_worker = ensure_user(db, "perfassembly", WORKER_HASH, "绩效装配员工", "worker", "TEST-PERF-ASM")
+        db.execute("UPDATE users SET position_id = ? WHERE id IN (?, ?)", (welding_position, welding_low, welding_high))
+        db.execute("UPDATE users SET position_id = ? WHERE id = ?", (assembly_position, assembly_worker))
+        process_id = db.execute("SELECT id FROM processes WHERE status='active' ORDER BY id LIMIT 1").fetchone()["id"]
+        for order_no, user_id, quantity in [
+            ("TEST-PERF-POS-WL", welding_low, 5),
+            ("TEST-PERF-POS-WH", welding_high, 10),
+            ("TEST-PERF-POS-ASM", assembly_worker, 2),
+        ]:
+            order_id = db.execute(
+                "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status) "
+                "VALUES (?, 'Test Customer', 'Cross Module Product', 'XMOD-PERF-POS', 20, 'producing')",
+                (order_no,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
+                "VALUES (?, ?, ?, 'normal', ?, 'approved', '2026-11-10 08:00:00')",
+                (order_id, process_id, user_id, quantity),
+            )
+        db.commit()
+
+    generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
+    assert generate.status_code == 200, generate.get_json()
+
+    payload = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers).get_json()
+    rows = {item["user_id"]: item for item in payload["items"]}
+    assert rows[welding_low]["score_details"]["position_max_output"] == 10
+    assert rows[welding_high]["score_details"]["position_max_output"] == 10
+    assert rows[assembly_worker]["score_details"]["position_max_output"] == 2
+    assert rows[assembly_worker]["output_score"] == 35
+    assert rows[welding_low]["output_score"] < rows[welding_high]["output_score"]
+    assert rows[assembly_worker]["rank_no"] == 1
+    assert rows[assembly_worker]["rank_total"] == 1
+    assert rows[welding_high]["rank_no"] == 1
+    assert rows[welding_high]["rank_total"] == 2
+
+    filtered = client.get(
+        f"/api/performance/scores?year_month={year_month}&position_id={welding_position}",
+        headers=auth_headers,
+    ).get_json()
+    assert filtered["summary"]["total"] == 2
+    assert filtered["all_summary"]["total"] >= 3
+    assert {item["user_id"] for item in filtered["items"]} == {welding_low, welding_high}
+    assert any(option["id"] == welding_position for option in filtered["position_options"])
+
+
+
+def test_inspection_failures_are_attributed_to_actual_worker_not_inspector(client, auth_headers):
+    year_month = "2026-10"
+    serial_no = "TEST-PERF-QC-001-001"
+    with client.application.app_context():
+        db = get_db()
+        worker_id = ensure_user(db, "perfqcworker", WORKER_HASH, "绩效抽检员工", "worker", "TEST-PERF-QC-W")
+        inspector_id = ensure_user(db, "perfqcinspector", WORKER_HASH, "绩效抽检员", "qc_inspector", "TEST-PERF-QC-I")
+        process_id = db.execute("SELECT id FROM processes WHERE status='active' ORDER BY id LIMIT 1").fetchone()["id"]
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
+            "VALUES ('TEST-PERF-QC-001', 'Test Customer', 'Cross Module Product', 'XMOD-PERF-QC', 1, 'producing', 'serial')"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
+            (order_id, process_id),
+        )
+        db.execute(
+            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, serial_no, created_at) "
+            "VALUES (?, ?, ?, 'normal', 1, 'approved', ?, '2026-10-10 08:00:00')",
+            (order_id, process_id, worker_id, serial_no),
+        )
+        db.execute(
+            "INSERT INTO quality_inspections ("
+            "order_id, process_id, inspection_type, inspector_id, quantity_checked, quantity_passed, "
+            "quantity_failed, result, serial_no, inspected_at"
+            ") VALUES (?, ?, 'in_process', ?, 1, 0, 1, 'fail', ?, '2026-10-10 09:00:00')",
+            (order_id, process_id, inspector_id, serial_no),
+        )
+        db.commit()
+
+    generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
+    assert generate.status_code == 200, generate.get_json()
+
+    payload = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers).get_json()
+    worker_row = next(item for item in payload["items"] if item["user_id"] == worker_id)
+    assert worker_row["inspection_failed_qty"] == 1
+    assert worker_row["score_details"]["bad_qty"] == 1
+    assert worker_row["quality_score"] < 30
+    assert all(item["user_id"] != inspector_id for item in payload["items"])
+
+
 
 def test_handoff_review_from_next_process_affects_performance(client, auth_headers):
     year_month = PerformanceService.current_month()

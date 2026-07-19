@@ -69,7 +69,7 @@
     _stars[_si].addEventListener('click', function() { setHandoffRating(parseInt(this.getAttribute('data-score')) || 5); });
   }
   _el = document.getElementById('handoff-skip');
-  if (_el) _el.addEventListener('click', closeHandoffModal);
+  if (_el) _el.addEventListener('click', function() { closeHandoffModal('skipped'); });
   _el = document.getElementById('handoff-submit');
   if (_el) _el.addEventListener('click', submitHandoffReview);
 

@@ -132,13 +132,18 @@ class QualityRepository:
             "INSERT INTO quality_inspections "
             "(order_id, process_id, inspection_type, inspector_id, quantity_checked, "
             "quantity_passed, quantity_failed, result, defect_category, defect_quantity, "
-            "notes, inspected_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "notes, inspected_at, score_total, score_detail_json, defect_level, "
+            "defect_items_json, suggested_result, final_result, override_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["process_id"], data.get("inspection_type", "first_article"),
              user_id, data.get("quantity_checked", 0), data.get("quantity_passed", 0),
              data.get("quantity_failed", 0), data.get("result", "pending"),
              data.get("defect_category", ""), data.get("defect_quantity", 0),
-             data.get("notes", ""), data.get("inspected_at", None))
+             data.get("notes", ""), data.get("inspected_at", None),
+             data.get("score_total", 0), data.get("score_detail_json", "{}"),
+             data.get("defect_level", ""), data.get("defect_items_json", "[]"),
+             data.get("suggested_result", ""), data.get("final_result", ""),
+             data.get("override_reason", ""))
         )
         return cur.lastrowid
 
@@ -147,12 +152,18 @@ class QualityRepository:
         db.execute(
             "UPDATE quality_inspections SET inspection_type=?, quantity_checked=?, "
             "quantity_passed=?, quantity_failed=?, result=?, defect_category=?, "
-            "defect_quantity=?, notes=?, inspected_at=? WHERE id=?",
+            "defect_quantity=?, notes=?, inspected_at=?, score_total=?, "
+            "score_detail_json=?, defect_level=?, defect_items_json=?, suggested_result=?, "
+            "final_result=?, override_reason=? WHERE id=?",
             (data.get("inspection_type"), data.get("quantity_checked"),
              data.get("quantity_passed"), data.get("quantity_failed"),
              data.get("result"), data.get("defect_category", ""),
              data.get("defect_quantity", 0), data.get("notes", ""),
-             data.get("inspected_at"), inspection_id)
+             data.get("inspected_at"), data.get("score_total", 0),
+             data.get("score_detail_json", "{}"), data.get("defect_level", ""),
+             data.get("defect_items_json", "[]"), data.get("suggested_result", ""),
+             data.get("final_result", ""), data.get("override_reason", ""),
+             inspection_id)
         )
 
     @staticmethod
@@ -170,7 +181,8 @@ class QualityRepository:
         agg = db.execute(
             "SELECT COUNT(*) as total, "
             "COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
-            "COALESCE(SUM(CASE WHEN result IN ('fail','partial') THEN 1 ELSE 0 END),0) as fail_count "
+            "COALESCE(SUM(CASE WHEN result IN ('rework','scrap','fail','partial') THEN 1 ELSE 0 END),0) as fail_count, "
+            "ROUND(AVG(NULLIF(score_total, 0)), 1) as avg_score "
             "FROM quality_inspections"
         ).fetchone()
         today_count = db.execute(
@@ -178,7 +190,8 @@ class QualityRepository:
         ).fetchone()[0]
         return {
             "ok": True, "total": agg["total"], "today_count": today_count,
-            "pass_count": agg["pass_count"], "fail_count": agg["fail_count"]
+            "pass_count": agg["pass_count"], "fail_count": agg["fail_count"],
+            "avg_score": agg["avg_score"] or 0
         }
 
     @staticmethod
@@ -385,14 +398,23 @@ class QualityRepository:
         cur = db.execute(
             "INSERT INTO quality_inspections "
             "(order_id, process_id, order_no, product_code, process_name, inspector_name, "
-            "inspector_id, result, notes, rework_process, remark, serial_no) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "inspector_id, result, notes, rework_process, remark, serial_no, "
+            "quantity_checked, quantity_passed, quantity_failed, score_total, "
+            "score_detail_json, defect_level, defect_items_json, suggested_result, "
+            "final_result, override_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data.get("order_id"), process_id,
              data.get("order_no", ""), data.get("product_code", ""),
              data.get("process_name", ""), data.get("inspector_name", ""),
              user_id, data.get("result", ""), data.get("notes", ""),
              data.get("rework_process", ""), data.get("remark", ""),
-             data.get("serial_no", ""))
+             data.get("serial_no", ""), data.get("quantity_checked", 1),
+             data.get("quantity_passed", 1 if data.get("result") == "pass" else 0),
+             data.get("quantity_failed", 0 if data.get("result") == "pass" else 1),
+             data.get("score_total", 0), data.get("score_detail_json", "{}"),
+             data.get("defect_level", ""), data.get("defect_items_json", "[]"),
+             data.get("suggested_result", ""), data.get("final_result", ""),
+             data.get("override_reason", ""))
         )
         return cur.lastrowid
 
@@ -436,4 +458,7 @@ class QualityRepository:
         scrap_count = db.execute(
             "SELECT COUNT(*) FROM quality_inspections WHERE result='scrap'"
         ).fetchone()[0]
-        return {"total": total, "pass": pass_count, "rework": rework_count, "scrap": scrap_count}
+        avg_score = db.execute(
+            "SELECT ROUND(AVG(NULLIF(score_total, 0)), 1) FROM quality_inspections"
+        ).fetchone()[0] or 0
+        return {"total": total, "pass": pass_count, "rework": rework_count, "scrap": scrap_count, "avg_score": avg_score}

@@ -12,10 +12,18 @@ from modules.route_decorators import (
     safe_audit_log,
 )
 from modules.services.order_attachments_service import OrderAttachmentsService
+from modules.services.order_service import OrderService
 from modules.services.scan_helper_service import ScanHelperService
 from werkzeug.utils import secure_filename
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads', 'attachments')
+
+
+def _completed_order_error(order_id):
+    order = OrderService.get_order(order_id)
+    if order and order['status'] == 'completed':
+        return jsonify({'error': OrderService.COMPLETED_READONLY_MESSAGE}), 400
+    return None
 
 
 @app.route('/api/orders/<int:order_id>/attachments', methods=['GET'])
@@ -30,6 +38,9 @@ def list_attachments(order_id):
 @check_auth
 @check_permission('orders:edit')
 def upload_attachment(order_id):
+    completed_error = _completed_order_error(order_id)
+    if completed_error:
+        return completed_error
     file = request.files.get('file')
     if not file:
         return jsonify({'error': '请选择文件'}), 400
@@ -85,11 +96,15 @@ def download_attachment(attachment_id):
 @check_auth
 @check_permission('orders:edit')
 def delete_attachment(attachment_id):
+    row_check = OrderAttachmentsService.get_attachment_meta(attachment_id)
     pids = get_user_process_ids(g.current_user)
     if pids is not None:
-        row_check = OrderAttachmentsService.get_attachment_meta(attachment_id)
         if row_check and not ScanHelperService.check_order_scope(row_check['order_id'], pids):
             return jsonify({'error': '无权限删除此附件'}), 403
+    if row_check:
+        completed_error = _completed_order_error(row_check['order_id'])
+        if completed_error:
+            return completed_error
     try:
         row = OrderAttachmentsService.delete_attachment(attachment_id)
         file_path = row['file_path']

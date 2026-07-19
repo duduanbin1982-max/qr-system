@@ -5,12 +5,14 @@ import { showToast } from '@/lib/store.js'
 export function usePerformancePageData() {
   const yearMonth = ref(new Date().toISOString().slice(0, 7))
   const warningLevel = ref('')
+  const positionId = ref('')
   const search = ref('')
   const scores = ref([])
   const overview = ref({})
   const plans = ref([])
   const handoffReviews = ref([])
   const summary = ref({})
+  const positionOptions = ref([])
   const rules = ref({})
 
   async function loadRules() {
@@ -25,16 +27,26 @@ export function usePerformancePageData() {
     }
   }
 
-  async function loadScores() {
+  async function loadScoreRows() {
     const data = await api.performanceScores({
       year_month: yearMonth.value,
       warning_level: warningLevel.value,
+      position_id: positionId.value,
       search: search.value,
       per_page: 200,
     })
     scores.value = data.items || []
     summary.value = data.summary || {}
+    positionOptions.value = data.position_options || []
+  }
+
+  async function refreshPerformancePageData() {
+    await loadScoreRows()
     await Promise.all([loadPlans(), loadHandoffReviews()])
+  }
+
+  async function loadScores() {
+    await refreshPerformancePageData()
   }
 
   async function loadPlans() {
@@ -50,7 +62,7 @@ export function usePerformancePageData() {
   async function generateScores() {
     const data = await api.generatePerformance({ year_month: yearMonth.value })
     showToast('已生成评分：' + data.generated + ' 人')
-    await loadScores()
+    await refreshPerformancePageData()
   }
 
   async function saveReview(selectedScore, reviewForm) {
@@ -60,7 +72,7 @@ export function usePerformancePageData() {
       ...reviewForm,
     })
     showToast('评议已保存并重算')
-    await loadScores()
+    await refreshPerformancePageData()
   }
 
   async function createPlan(selectedScore, planForm) {
@@ -91,26 +103,29 @@ export function usePerformancePageData() {
       confirm_note: status === 'confirmed' ? '主管确认' : '主管驳回',
     })
     showToast(status === 'confirmed' ? '交接评价已确认' : '交接评价已驳回')
-    await loadScores()
+    await refreshPerformancePageData()
   }
 
   async function initPerformancePage() {
     await Promise.all([loadRules(), loadOverview()])
-    await loadScores()
+    await refreshPerformancePageData()
   }
 
   return {
     yearMonth,
     warningLevel,
+    positionId,
     search,
     scores,
     overview,
     plans,
     handoffReviews,
     summary,
+    positionOptions,
     rules,
     loadScores,
     loadOverview,
+    refreshPerformancePageData,
     generateScores,
     saveReview,
     createPlan,

@@ -137,6 +137,13 @@ input,textarea,select{font-size:19px !important}
 .cur-proc .badge{background:var(--primary);color:#fff;font-size:var(--text-xs);padding:3px 10px;border-radius:var(--radius-md);display:inline-block;margin-bottom:var(--space-2)}
 .cur-proc .name{font-size:var(--text-2xl);font-weight:700;margin-bottom:var(--space-1)}
 .cur-proc .sub{font-size:var(--text-sm);color:var(--text-muted)}
+.focus-warning-card{background:var(--warning-light);border:1px solid var(--warning-lighter);border-left:4px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.focus-warning-card .fw-title{font-size:var(--text-base);font-weight:700;color:var(--warning-dark);margin-bottom:6px}
+.focus-warning-card .fw-msg{font-size:var(--text-sm);line-height:1.45;color:#7C2D12}
+.focus-warning-card .fw-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:6px}
+.focus-warning-card.blocked{background:var(--danger-light);border-color:var(--danger-lighter);border-left-color:var(--danger)}
+.focus-warning-card.blocked .fw-title{color:var(--danger-dark)}
+.focus-warning-card.blocked .fw-msg{color:var(--danger-dark)}
 .serial-card{background:#fff;border-radius:var(--radius-lg);padding:var(--space-3) 16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .serial-card .label{font-size:var(--text-xs);color:var(--text-muted);margin-bottom:var(--space-1)}
 .serial-card .val{font-size:18px;font-weight:600;font-family:monospace}
@@ -178,6 +185,7 @@ input,textarea,select{font-size:19px !important}
 .btn-report{width:100%;padding:14px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-md);font-size:20px;font-weight:700;cursor:pointer}
 .btn-report:active{background:var(--success-dark)}
 .btn-report:disabled{background:var(--success-lighter);opacity:.55;cursor:not-allowed}
+.btn-report.blocked,.btn-report.blocked:disabled{background:var(--danger);opacity:.9}
 .btn-report.scrap{background:var(--danger)}
 .btn-report.scrap:active{background:var(--danger-dark)}
 .btn-report.rework{background:var(--warning);color:#fff}
@@ -254,11 +262,11 @@ input,textarea,select{font-size:19px !important}
 .empty-recent .icon{font-size:32px;margin-bottom:8px;display:block;opacity:.4}
 ﻿
 /* Handoff quality review */
-.handoff-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:none;align-items:center;justify-content:center;padding:18px}
+.handoff-screen{justify-content:center;align-items:center;padding:var(--space-5);background:linear-gradient(135deg,var(--primary-light),var(--info-light))}.handoff-modal{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10000;display:none;align-items:center;justify-content:center;padding:18px}
 .handoff-modal.active{display:flex}
-.handoff-box{width:100%;max-width:360px;background:#fff;border-radius:18px;padding:20px 18px;box-shadow:0 10px 36px rgba(0,0,0,.22)}
+.handoff-box{width:100%;max-width:420px;background:#fff;border-radius:18px;padding:22px 18px;box-shadow:0 10px 36px rgba(0,0,0,.22)}
 .handoff-box h3{font-size:20px;margin:0 0 8px;color:var(--text-primary)}
-.handoff-title{font-size:14px;color:var(--text-muted);line-height:1.45;margin:0 0 14px}
+.handoff-tip{font-size:13px;color:var(--primary);line-height:1.45;margin:0 0 10px;background:var(--primary-light);border-radius:10px;padding:8px 10px}.handoff-title{font-size:14px;color:var(--text-muted);line-height:1.45;margin:0 0 14px}
 .handoff-stars{display:flex;justify-content:center;gap:8px;margin:8px 0 14px}
 .handoff-stars button{border:none;background:transparent;font-size:34px;color:#ddd;line-height:1;cursor:pointer;padding:0 2px}
 .handoff-stars button.active{color:#f59e0b;text-shadow:0 1px 2px rgba(0,0,0,.12)}

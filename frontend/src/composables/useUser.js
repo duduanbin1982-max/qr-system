@@ -52,6 +52,31 @@ export function useUser() {
     return positionMap.value[position_id] || '未知'
   }
 
+  function getWorkProcesses(user) {
+    if (Array.isArray(user.work_processes) && user.work_processes.length) {
+      return user.work_processes
+    }
+    if (Array.isArray(user.position_processes) || Array.isArray(user.explicit_processes)) {
+      const merged = []
+      const seen = new Set()
+      for (const process of [...(user.position_processes || []), ...(user.explicit_processes || [])]) {
+        if (!process || seen.has(process.id)) continue
+        seen.add(process.id)
+        merged.push(process)
+      }
+      return merged
+    }
+    const ids = (user.process_ids || '').split(',').map(x => parseInt(x.trim())).filter(x => !isNaN(x))
+    return ids.map(id => {
+      const process = processes.value.find(p => p.id === id)
+      return { id, name: process ? process.process_name : '#' + id, source: '员工' }
+    })
+  }
+
+  function getWorkProcessTitle(user) {
+    return getWorkProcesses(user).map(process => process.name).join('、')
+  }
+
   async function load() {
       loading.value = true
       try {
@@ -259,7 +284,7 @@ export function useUser() {
     activeCount, inactiveCount, totalStaff,
     processes, processDropdownOpen, processSearch, selectedProcessIds, filteredProcessList, selectedProcessNames, onProcessChange, dropdownStyle, toggleProcessDropdown,
     page, total, pageSize,
-    getPositionName, positionMap,
+    getPositionName, positionMap, getWorkProcesses, getWorkProcessTitle,
     saving, pwResult, openAdd, openEdit, save, del, purgeUser, resetPwd, unlock, load, searchAndLoad,
     prevPage, nextPage
   }

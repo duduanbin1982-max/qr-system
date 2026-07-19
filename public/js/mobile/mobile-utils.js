@@ -18,6 +18,7 @@ let reportType = 'normal';
 let flashOn    = false;
 let handoffContext = null;
 let handoffRating = 5;
+let handoffAfterClose = null;
 
 // ── 工具函数 ──────────────────────────────
 const $ = function(id) { return document.getElementById(id); };

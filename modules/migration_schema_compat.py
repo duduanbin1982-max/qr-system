@@ -127,6 +127,84 @@ _COMPAT_TABLE_SQL = [
             confirmed_at TEXT DEFAULT '',
             FOREIGN KEY (employee_id) REFERENCES users(id)
         )""",
+        """CREATE TABLE IF NOT EXISTS work_time_standards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            product_code TEXT DEFAULT '',
+            product_name TEXT DEFAULT '',
+            route_id INTEGER,
+            process_id INTEGER NOT NULL,
+            standard_minutes_per_unit REAL NOT NULL DEFAULT 0,
+            setup_minutes REAL DEFAULT 0,
+            difficulty_factor REAL DEFAULT 1,
+            effective_from TEXT DEFAULT '',
+            effective_to TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            version INTEGER DEFAULT 1,
+            remark TEXT DEFAULT '',
+            created_by INTEGER,
+            updated_by INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+            FOREIGN KEY (route_id) REFERENCES process_routes(id) ON DELETE SET NULL,
+            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS work_time_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER,
+            order_no TEXT DEFAULT '',
+            serial_no TEXT DEFAULT '',
+            route_id INTEGER,
+            route_name TEXT DEFAULT '',
+            product_code TEXT DEFAULT '',
+            product_name TEXT DEFAULT '',
+            standard_missing INTEGER DEFAULT 0,
+            process_id INTEGER NOT NULL,
+            process_name TEXT DEFAULT '',
+            user_id INTEGER NOT NULL,
+            user_name TEXT DEFAULT '',
+            standard_id INTEGER,
+            source_work_record_id INTEGER,
+            quantity INTEGER DEFAULT 1,
+            standard_minutes REAL DEFAULT 0,
+            start_time TEXT DEFAULT '',
+            end_time TEXT DEFAULT '',
+            pause_minutes REAL DEFAULT 0,
+            actual_minutes REAL DEFAULT 0,
+            effective_minutes REAL DEFAULT 0,
+            status TEXT DEFAULT 'completed',
+            abnormal_reason TEXT DEFAULT '',
+            review_status TEXT DEFAULT 'approved',
+            reviewed_by INTEGER,
+            reviewed_at TEXT DEFAULT '',
+            review_note TEXT DEFAULT '',
+            created_by INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (standard_id) REFERENCES work_time_standards(id) ON DELETE SET NULL,
+            FOREIGN KEY (source_work_record_id) REFERENCES work_records(id) ON DELETE SET NULL,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS work_time_review_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id INTEGER NOT NULL,
+            old_effective_minutes REAL DEFAULT 0,
+            new_effective_minutes REAL DEFAULT 0,
+            old_review_status TEXT DEFAULT '',
+            new_review_status TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            reviewer_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (record_id) REFERENCES work_time_records(id) ON DELETE CASCADE,
+            FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
+        )""",
     ]
 
 _COMPAT_COLUMNS = {
@@ -139,7 +217,15 @@ _COMPAT_COLUMNS = {
         'processes': [('updated_at', "TEXT DEFAULT ''")],
         'product_items': [('weight', 'REAL DEFAULT 0'), ('production_date', 'TEXT DEFAULT ""'), ('completed_at', 'TEXT DEFAULT ""'), ('version', 'INTEGER DEFAULT 1')],
         'products': [('deleted_at', 'TEXT DEFAULT NULL'), ('lower_opening', 'TEXT DEFAULT ""')],
-        'quality_inspections': [('order_no', 'TEXT DEFAULT ""'), ('product_code', 'TEXT DEFAULT ""'), ('process_name', 'TEXT DEFAULT ""'), ('inspector_name', 'TEXT DEFAULT ""'), ('rework_process', 'TEXT DEFAULT ""'), ('remark', 'TEXT DEFAULT ""'), ('serial_no', 'TEXT DEFAULT ""')],
+        'quality_inspections': [
+            ('order_no', 'TEXT DEFAULT ""'), ('product_code', 'TEXT DEFAULT ""'),
+            ('process_name', 'TEXT DEFAULT ""'), ('inspector_name', 'TEXT DEFAULT ""'),
+            ('rework_process', 'TEXT DEFAULT ""'), ('remark', 'TEXT DEFAULT ""'),
+            ('serial_no', 'TEXT DEFAULT ""'), ('score_total', 'REAL DEFAULT 0'),
+            ('score_detail_json', "TEXT DEFAULT '{}'"), ('defect_level', 'TEXT DEFAULT ""'),
+            ('defect_items_json', "TEXT DEFAULT '[]'"), ('suggested_result', 'TEXT DEFAULT ""'),
+            ('final_result', 'TEXT DEFAULT ""'), ('override_reason', 'TEXT DEFAULT ""')
+        ],
         'rework_records': [('status', 'TEXT DEFAULT "pending"'), ('completed_at', 'TEXT DEFAULT ""'), ('completed_by', 'INTEGER'), ('result', 'TEXT DEFAULT ""'), ('result_remark', 'TEXT DEFAULT ""'), ('duration_hours', 'REAL DEFAULT 0')],
         'roles': [('updated_at', "TEXT DEFAULT ''")],
         'role_groups': [('updated_at', "TEXT DEFAULT ''"), ('permissions', 'TEXT DEFAULT ""'), ('data_scope', "TEXT DEFAULT 'all'")],
@@ -147,6 +233,11 @@ _COMPAT_COLUMNS = {
         'shipment_items': [('order_id', 'INTEGER'), ('product_code', 'TEXT DEFAULT ""'), ('order_no', 'TEXT DEFAULT ""')],
         'shipments': [('deduction_mode', 'TEXT DEFAULT "auto"'), ('logistics_company', 'TEXT DEFAULT ""'), ('tracking_no', 'TEXT DEFAULT ""'), ('cancelled_at', 'TEXT DEFAULT ""'), ('reserved_at', 'TEXT DEFAULT ""'), ('material_bill_no', 'TEXT DEFAULT ""'), ('receivable_amount', 'REAL DEFAULT 0'), ('paid_amount', 'REAL DEFAULT 0'), ('payment_status', 'TEXT DEFAULT "unpaid"'), ('payment_date', 'TEXT DEFAULT ""'), ('payment_method', 'TEXT DEFAULT ""'), ('payment_remark', 'TEXT DEFAULT ""')],
         'system_settings': [('updated_at', "TEXT DEFAULT ''")],
+        'work_time_records': [
+            ('route_id', 'INTEGER'), ('route_name', 'TEXT DEFAULT ""'),
+            ('product_code', 'TEXT DEFAULT ""'), ('product_name', 'TEXT DEFAULT ""'),
+            ('standard_missing', 'INTEGER DEFAULT 0')
+        ],
         'users': [('deleted_at', 'TEXT DEFAULT NULL'), ('department_id', 'INTEGER')],
     }
 
@@ -169,3 +260,12 @@ def ensure_current_schema_compat(db):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_wage_snapshots_employee_month '
         'ON wage_snapshots(employee_id, year_month)'
     )
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_standards_process ON work_time_standards(process_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_standards_product ON work_time_standards(product_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_standards_status ON work_time_standards(status)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_records_user ON work_time_records(user_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_records_process ON work_time_records(process_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_records_order ON work_time_records(order_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_records_review ON work_time_records(review_status)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_records_start ON work_time_records(start_time)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wt_review_logs_record ON work_time_review_logs(record_id)')

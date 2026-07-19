@@ -107,31 +107,46 @@ class OrderService:
 
     @staticmethod
     def list_orders(page=1, limit=DEFAULT_PAGE_SIZE, status='', keyword='', customer='',
-                    data_scope_pids=None):
+                    data_scope_pids=None, archive='active'):
         """分页查询订单列表（含数据权限过滤）。"""
-        where = ['o.deleted_at IS NULL']
-        params = []
-        if status:
-            where.append('o.status = ?')
-            params.append(status)
+        base_where = ['o.deleted_at IS NULL']
+        base_params = []
         if keyword:
-            where.append('(o.order_no LIKE ? OR o.product_name LIKE ? OR o.product_code LIKE ? OR o.customer LIKE ?)')
-            params.extend([f'%{keyword}%'] * 4)
+            base_where.append('(o.order_no LIKE ? OR o.product_name LIKE ? OR o.product_code LIKE ? OR o.customer LIKE ?)')
+            base_params.extend([f'%{keyword}%'] * 4)
         if customer:
-            where.append('o.customer LIKE ?')
-            params.append(f'%{customer}%')
+            base_where.append('o.customer LIKE ?')
+            base_params.append(f'%{customer}%')
 
         if data_scope_pids is not None:
             if not data_scope_pids:
                 return {'orders': [], 'total': 0, 'page': page, 'limit': limit,
-                        'pending': 0, 'producing': 0, 'completed': 0}
+                        'pending': 0, 'producing': 0, 'completed': 0,
+                        'archive': archive or 'active'}
             placeholders = ','.join('?' for _ in data_scope_pids)
-            where.append(
+            base_where.append(
                 f"o.id IN (SELECT order_id FROM order_processes WHERE process_id IN ({placeholders}))"
             )
-            params.extend(data_scope_pids)
+            base_params.extend(data_scope_pids)
+
+        where = list(base_where)
+        params = list(base_params)
+        archive = (archive or 'active').strip().lower()
+        if status:
+            where.append('o.status = ?')
+            params.append(status)
+        elif archive == 'completed':
+            where.append('o.status = ?')
+            params.append('completed')
+        elif archive == 'all':
+            pass
+        else:
+            archive = 'active'
+            where.append('o.status != ?')
+            params.append('completed')
 
         where_sql = ' AND '.join(where)
+        count_where_sql = ' AND '.join(base_where)
         size = min(max(limit, 1), MAX_PAGE_LIMIT)
         rows, total = OrderRepository.list_all(
             where_sql, params, page, size, order_by='o.order_no DESC'
@@ -156,12 +171,13 @@ class OrderService:
             order['processes'] = all_procs.get(order['id'], [])
             result.append(order)
 
-        counts = {row['status']: row['cnt'] for row in OrderRepository.count_by_status(where_sql, params)}
+        counts = {row['status']: row['cnt'] for row in OrderRepository.count_by_status(count_where_sql, base_params)}
         return {
             'orders': result, 'total': total, 'page': page, 'limit': size,
             'pending': counts.get('pending', 0),
             'producing': counts.get('producing', 0),
-            'completed': counts.get('completed', 0)
+            'completed': counts.get('completed', 0),
+            'archive': archive
         }
 
     # ============================================================
@@ -236,6 +252,8 @@ class OrderService:
         'cancelled': ['pending'],
         'paused':    ['producing', 'pending', 'cancelled'],
     }
+    COMPLETED_READONLY_MESSAGE = '已完成订单已归档，只读，请先重新打开订单'
+    REOPEN_STATUSES = {'pending', 'producing'}
 
     @staticmethod
     def update_order(oid, data, user_id=None, user_name=None):
@@ -256,6 +274,10 @@ class OrderService:
         existing = OrderRepository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
+        if existing['deleted_at']:
+            raise ValueError('订单已在回收站中')
+        if existing['status'] == 'completed':
+            raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
 
         # 状态转换校验
         if 'status' in data:
@@ -328,6 +350,8 @@ class OrderService:
         deleted = existing['deleted_at'] if existing else None
         if deleted:
             raise ValueError('订单已在回收站中')
+        if existing['status'] == 'completed':
+            raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
 
         with BaseService.transaction() as txn:
             OrderRepository.mark_deleted(oid, deleted_by=deleted_by, db=txn)
@@ -408,30 +432,39 @@ class OrderService:
         return OrderService.delete_order(oid, deleted_by=user_id)
 
     @staticmethod
+    def reopen_order(oid, reason, status='producing'):
+        """重新打开已完成归档订单。"""
+        reason = (reason or '').strip()
+        if not reason:
+            raise ValueError('请填写重新打开原因')
+        status = (status or 'producing').strip().lower()
+        if status not in OrderService.REOPEN_STATUSES:
+            raise ValueError('重新打开后的状态只能是 pending 或 producing')
+
+        existing = OrderRepository.find_status_by_id(oid)
+        if not existing:
+            raise ValueError('订单不存在')
+        if existing['deleted_at']:
+            raise ValueError('订单已在回收站中')
+        if existing['status'] != 'completed':
+            raise ValueError('只有已完成订单可以重新打开')
+
+        with BaseService.transaction() as txn:
+            OrderRepository.reopen_completed(oid, status, db=txn)
+
+        return {'id': oid, 'status': status, 'reason': reason}
+
+    @staticmethod
     def list_trash(page=1, limit=20):
         """回收站列表（适配器）"""
         return OrderService.trash_orders(page, limit)
 
     @staticmethod
     def get_workpiece_progress(order_id):
-        """获取工件报工进度"""
-        order = OrderRepository.find_by_id(order_id)
-        if not order:
-            raise ValueError("订单不存在")
-        items, processes, work_records = OrderRepository.get_workpiece_progress_rows(order_id)
-        record_map = {}
-        for record in work_records:
-            serial_no = record["serial_no"]
-            record_map.setdefault(serial_no, {})[record["process_id"]] = {
-                "status": record["status"],
-                "completed_at": record["created_at"],
-            }
-        return {
-            "order": dict(order),
-            "items": [dict(item) for item in items],
-            "processes": [dict(process) for process in processes],
-            "record_map": record_map,
-        }
+        """Return order workpiece progress and risk analysis."""
+        from modules.services.order_progress_analyzer import OrderProgressAnalyzer
+
+        return OrderProgressAnalyzer.analyze(order_id)
 
     @staticmethod
     def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE):
@@ -504,8 +537,11 @@ class OrderService:
 
     @staticmethod
     def add_order_material(order_id, data):
-        if not OrderService.get_order(order_id):
+        order = OrderService.get_order(order_id)
+        if not order:
             raise ValueError('?????')
+        if order['status'] == 'completed':
+            raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
         material_id = data.get('material_id')
         quantity = data.get('quantity') or data.get('quantity_per_unit', 1)
         process_id = data.get('process_id') or None
@@ -523,6 +559,9 @@ class OrderService:
     @staticmethod
     def delete_order_material(order_id, item_id):
         with BaseService.transaction() as txn:
+            order = OrderRepository.find_by_id(order_id, db=txn)
+            if order and order['status'] == 'completed':
+                raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
             if not OrderMaterialRepository.find_by_id_and_order(item_id, order_id, db=txn):
                 raise ValueError('??????')
             OrderMaterialRepository.delete(item_id, db=txn)

@@ -92,6 +92,12 @@ class UserRepository:
             + "SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no, "
             "u.marker, u.phone, u.process_ids, u.status, u.created_at, "
             "(SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, "
+            "COALESCE((SELECT json_group_array(json_object('id', p2.id, 'name', p2.name, 'source', '员工')) "
+            "FROM user_processes up3 JOIN processes p2 ON up3.process_id = p2.id "
+            "WHERE up3.user_id = u.id ORDER BY p2.seq_order, p2.id), '[]') AS explicit_process_items, "
+            "COALESCE((SELECT json_group_array(json_object('id', p3.id, 'name', p3.name, 'source', '岗位')) "
+            "FROM position_processes pp3 JOIN processes p3 ON pp3.process_id = p3.id "
+            "WHERE pp3.position_id = u.position_id ORDER BY p3.seq_order, p3.id), '[]') AS position_process_items, "
             "u.last_active, u.position_id, u.locked_until, "
             "rs.role_code, rs.has_admin_role, rs.has_worker_role, rs.has_non_worker_role, rs.role_count, "
             "COALESCE((SELECT json_group_array(json_object('id', r2.id, 'name', r2.name, 'code', r2.code, 'level', r2.level, 'group_name', rg2.name)) "
@@ -108,11 +114,37 @@ class UserRepository:
         for row in rows:
             user = dict(row)
             raw_role_items = user.pop("role_items", "[]")
+            raw_explicit_process_items = user.pop("explicit_process_items", "[]")
+            raw_position_process_items = user.pop("position_process_items", "[]")
             try:
                 parsed_roles = json.loads(raw_role_items or "[]")
                 user["roles"] = parsed_roles if isinstance(parsed_roles, list) else []
             except Exception:
                 user["roles"] = []
+            try:
+                explicit_process_items = json.loads(raw_explicit_process_items or "[]")
+            except Exception:
+                explicit_process_items = []
+            try:
+                position_process_items = json.loads(raw_position_process_items or "[]")
+            except Exception:
+                position_process_items = []
+            process_ids = user.get("process_ids_junction") or user.get("process_ids") or ""
+            user["process_ids"] = process_ids or ""
+            user["explicit_processes"] = explicit_process_items if isinstance(explicit_process_items, list) else []
+            user["position_processes"] = position_process_items if isinstance(position_process_items, list) else []
+            merged_processes = []
+            seen_process_ids = set()
+            for process in user["position_processes"] + user["explicit_processes"]:
+                process_id = process.get("id") if isinstance(process, dict) else None
+                if process_id in seen_process_ids:
+                    continue
+                seen_process_ids.add(process_id)
+                merged_processes.append(process)
+            user["work_processes"] = merged_processes
+            user["work_process_names"] = "、".join(
+                process.get("name", "") for process in merged_processes if isinstance(process, dict) and process.get("name")
+            )
             if "role_code" not in user or not user["role_code"]:
                 user["role_code"] = user.get("role") or "worker"
             user["is_worker_user"] = bool(user.get("has_worker_role")) and not bool(user.get("has_non_worker_role"))

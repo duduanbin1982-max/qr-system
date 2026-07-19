@@ -13,7 +13,7 @@
     <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">加载中...</div>
 
     <div v-else>
-      <div class="daily-total-grid" v-if="summaryTotals.record_count || dailyRecords.length">
+      <div class="daily-total-grid" v-if="summaryTotals.record_count || dailyRecords.length || workTimeSummary.record_count">
         <div class="daily-total-card"><span>报工记录</span><strong>{{ summaryTotals.record_count || dailyRecords.length }}</strong></div>
         <div class="daily-total-card"><span>报工数量</span><strong>{{ summaryTotals.total_quantity || 0 }}</strong></div>
         <div class="daily-total-card"><span>参与员工</span><strong>{{ summaryTotals.worker_count || dailyGroups.length }}</strong></div>
@@ -22,6 +22,14 @@
         <div class="daily-total-card success"><span>正常</span><strong>{{ summaryTotals.normal_quantity || 0 }}</strong></div>
         <div class="daily-total-card warning"><span>返修</span><strong>{{ summaryTotals.rework_quantity || 0 }}</strong><small>{{ summaryTotals.rework_rate || 0 }}%</small></div>
         <div class="daily-total-card danger"><span>报废</span><strong>{{ summaryTotals.scrap_quantity || 0 }}</strong><small>{{ summaryTotals.scrap_rate || 0 }}%</small></div>
+      </div>
+
+      <div v-if="workTimeSummary.record_count" class="daily-work-time-grid">
+        <div class="daily-total-card"><span>工时流水</span><strong>{{ workTimeSummary.record_count }}</strong></div>
+        <div class="daily-total-card"><span>有效工时(h)</span><strong>{{ workTimeSummary.effective_hours || 0 }}</strong></div>
+        <div class="daily-total-card"><span>工时效率</span><strong>{{ workTimeSummary.efficiency || 0 }}%</strong></div>
+        <div class="daily-total-card warning"><span>异常工时</span><strong>{{ workTimeSummary.abnormal_count || 0 }}</strong></div>
+        <div class="daily-total-card warning"><span>缺标准</span><strong>{{ workTimeSummary.missing_standard_count || 0 }}</strong></div>
       </div>
 
       <div v-if="isTruncated" class="daily-warning">数据已截断，请缩小筛选条件</div>
@@ -135,6 +143,7 @@ export default {
     const dailySummary = ref([])
     const dailyGroups = ref([])
     const summaryTotals = ref({})
+    const workTimeSummary = ref({})
     const isTruncated = ref(false)
     const loading = ref(true)
     const employeeSearch = ref('')
@@ -240,6 +249,7 @@ export default {
         dailySummary.value = res.summary || []
         dailyGroups.value = (res.employee_groups && res.employee_groups.length) ? res.employee_groups : fallbackGroups(dailyRecords.value)
         summaryTotals.value = res.summary_totals || {}
+        workTimeSummary.value = res.work_time_summary || {}
         isTruncated.value = !!res.is_truncated
         const nextOpen = {}
         dailyGroups.value.forEach(group => { nextOpen[groupKey(group)] = openGroups.value[groupKey(group)] !== false })
@@ -294,7 +304,7 @@ export default {
 
     watch(() => [props.date, props.productCode], loadDaily, { immediate: true })
     return {
-      dailyRecords, dailySummary, dailyGroups, summaryTotals, isTruncated, loading,
+      dailyRecords, dailySummary, dailyGroups, summaryTotals, workTimeSummary, isTruncated, loading,
       employeeSearch, typeFilter, filteredEmployeeGroups, detailRecordCount, canExport,
       loadDaily, displayWorkNo, exportSummaryCsv, exportDetailCsv, groupKey, isGroupOpen,
       toggleGroup, timeOnly, productMeta, typeLabel, typeClass, qualityText,
@@ -305,7 +315,7 @@ export default {
 <style scoped>
 .daily-header, .daily-detail-header { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); flex-wrap:wrap; }
 .daily-actions, .daily-detail-filters { display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
-.daily-total-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
+.daily-total-grid, .daily-work-time-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
 .daily-total-card { background:var(--bg-surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:var(--space-3); box-shadow:var(--shadow-sm); }
 .daily-total-card span { display:block; color:var(--text-placeholder); font-size:var(--text-xs); margin-bottom:4px; }
 .daily-total-card strong { font-size:22px; color:var(--text-primary); }

@@ -6,6 +6,7 @@ from modules.services.access_policy_service import has_permission, get_user_proc
 from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.handoff_review_service import HandoffReviewService
+from modules.services.order_focus_service import OrderFocusService
 
 
 class MobileScanService:
@@ -96,6 +97,9 @@ class MobileScanService:
                 return {"error": "此订单为序列号模式，请扫描工件二维码"}, 400
 
         order_data = dict(order)
+        if order_data.get("status") == "completed":
+            return {"error": "订单已完成并归档，如需继续报工请先重新打开订单"}, 400
+
         if not ScanHelperService.check_order_scope(order_data["id"], get_user_process_ids(user)):
             return {"error": "您无权查看此订单"}, 403
 
@@ -114,11 +118,21 @@ class MobileScanService:
         handoff_pending = MobileScanService._handoff_pending_for_scan(
             order_data["id"], user, serial_no or ""
         )
+        completion_focus_warning = OrderFocusService.scan_priority_warning(
+            order_data, order_data.get("current_process"), user=user
+        )
+        if completion_focus_warning:
+            order_data["completion_focus_warning"] = completion_focus_warning
 
         if item_info:
             return {
                 "order": order_data,
                 "item": MobileScanService._attach_item_qr_data(item_info),
                 "handoff_pending": handoff_pending,
+                "completion_focus_warning": completion_focus_warning,
             }, 200
-        return {"order": order_data, "handoff_pending": handoff_pending}, 200
+        return {
+            "order": order_data,
+            "handoff_pending": handoff_pending,
+            "completion_focus_warning": completion_focus_warning,
+        }, 200

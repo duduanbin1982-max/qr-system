@@ -17,6 +17,16 @@ class AccessPolicyRepository:
         ).fetchall()
 
     @staticmethod
+    def list_user_process_ids(user_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT p.id FROM user_processes up "
+            "JOIN processes p ON p.id = up.process_id "
+            "WHERE up.user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+    @staticmethod
     def list_existing_process_ids(process_ids, db=None):
         if not process_ids:
             return []

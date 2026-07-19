@@ -21,7 +21,10 @@ def schedule_gantt():
     try:
         limit = request.args.get("limit", 200, type=int)
         offset = request.args.get("offset", 0, type=int)
-        return jsonify(ScheduleService.get_gantt_data(limit=limit, offset=offset))
+        schedule_scope = request.args.get("status", "active")
+        return jsonify(ScheduleService.get_gantt_data(
+            limit=limit, offset=offset, schedule_scope=schedule_scope
+        ))
     except Exception as e:
         return handle_unexpected_error(e, "database operation")
 

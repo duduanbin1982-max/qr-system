@@ -28,6 +28,8 @@ class ScanValidationService:
         order = ScanHelperService.get_order(order_id)
         if not order:
             return None, quantity, ({"error": "订单不存在"}, 404)
+        if order["status"] == "completed":
+            return None, quantity, ({"error": "订单已完成并归档，如需继续报工请先重新打开订单"}, 409)
         return order, quantity, None
 
     @staticmethod
@@ -84,6 +86,12 @@ class ScanValidationService:
         if preflight_error:
             return preflight_error, None, None
 
+        focus_error = ScanValidationService._validate_completion_focus(
+            order, process_id, user, report_type
+        )
+        if focus_error:
+            return focus_error, None, None
+
         _, route_error = ScanValidationService._report_route_error(
             order, order_id, process_id, quantity, report_type
         )
@@ -105,6 +113,14 @@ class ScanValidationService:
         from modules.services.scan_helper_service import ScanHelperService
 
         return bool(ScanHelperService.get_product_items_by_order(order_id))
+
+    @staticmethod
+    def _validate_completion_focus(order, process_id, user, report_type):
+        if report_type != "normal":
+            return None
+        from modules.services.order_focus_service import OrderFocusService
+
+        return OrderFocusService.report_block_error(order, process_id, user)
 
     @staticmethod
     def _validate_order_scope(order_id, user_process_ids):

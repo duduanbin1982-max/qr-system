@@ -228,4 +228,13 @@ class PerformanceScoringPolicy:
             "completed_improvement_plans": metrics.get("completed_improvement_plans", 0),
             "manual_improvement_adjustment": improvement_details["manual_adjustment"],
             "manual_delta": round(manual_delta, 1),
+            "work_time_record_count": metrics.get("work_time_record_count", 0),
+            "work_time_days": metrics.get("work_time_days", 0),
+            "work_time_quantity": metrics.get("work_time_quantity", 0),
+            "work_time_standard_minutes": metrics.get("work_time_standard_minutes", 0),
+            "work_time_actual_minutes": metrics.get("work_time_actual_minutes", 0),
+            "work_time_effective_minutes": metrics.get("work_time_effective_minutes", 0),
+            "work_time_efficiency": metrics.get("work_time_efficiency", 0),
+            "work_time_abnormal_count": metrics.get("work_time_abnormal_count", 0),
+            "work_time_missing_standard_count": metrics.get("work_time_missing_standard_count", 0),
         }

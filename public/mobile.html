@@ -11,7 +11,7 @@
   <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/css/mobile.css?v=5">
+<link rel="stylesheet" href="/css/mobile.css?v=9">
 </head>
 <body>
 
@@ -102,26 +102,29 @@
 
 
 <!-- HANDOFF REVIEW -->
-<div id="handoff-modal" class="handoff-modal">
-  <div class="handoff-box">
-    <h3>上一工序交接评价</h3>
-    <p id="handoff-title" class="handoff-title"></p>
-    <div class="handoff-stars" id="handoff-stars">
-      <button data-score="1">★</button><button data-score="2">★</button><button data-score="3">★</button><button data-score="4">★</button><button data-score="5">★</button>
-    </div>
-    <select id="handoff-issue">
-      <option value="">无明显问题</option>
-      <option value="尺寸问题">尺寸问题</option>
-      <option value="外观问题">外观问题</option>
-      <option value="漏加工">漏加工</option>
-      <option value="数量不符">数量不符</option>
-      <option value="标识不清">标识不清</option>
-      <option value="返修风险">返修风险</option>
-    </select>
-    <textarea id="handoff-comment" placeholder="备注（低分必填问题类型或备注）" rows="3"></textarea>
-    <div class="handoff-actions">
-      <button id="handoff-skip" class="handoff-secondary">稍后</button>
-      <button id="handoff-submit" class="handoff-primary">提交评价</button>
+<div id="s-handoff" class="screen handoff-screen">
+  <div id="handoff-modal" class="handoff-modal">
+    <div class="handoff-box">
+      <h3>上一工序交接评价</h3>
+      <p class="handoff-tip">请对刚接手工件的上一道工序进行质量评价，提交后继续扫码。</p>
+      <p id="handoff-title" class="handoff-title"></p>
+      <div class="handoff-stars" id="handoff-stars">
+        <button data-score="1">★</button><button data-score="2">★</button><button data-score="3">★</button><button data-score="4">★</button><button data-score="5">★</button>
+      </div>
+      <select id="handoff-issue">
+        <option value="">无明显问题</option>
+        <option value="尺寸问题">尺寸问题</option>
+        <option value="外观问题">外观问题</option>
+        <option value="漏加工">漏加工</option>
+        <option value="数量不符">数量不符</option>
+        <option value="标识不清">标识不清</option>
+        <option value="返修风险">返修风险</option>
+      </select>
+      <textarea id="handoff-comment" placeholder="备注（低分必填问题类型或备注）" rows="3"></textarea>
+      <div class="handoff-actions">
+        <button id="handoff-skip" class="handoff-secondary">稍后评价</button>
+        <button id="handoff-submit" class="handoff-primary">提交评价</button>
+      </div>
     </div>
   </div>
 </div>
@@ -146,11 +149,11 @@
 
 <!-- Shared API helper -->
   <script src="/js/mobile/mobile-api.js?v=3"></script>
-  <script src="/js/mobile/mobile-utils.js?v=26"></script>
+  <script src="/js/mobile/mobile-utils.js?v=27"></script>
 <script src="/js/mobile/mobile-auth.js?v=28"></script>
 <script src="/js/mobile/mobile-scan.js?v=26"></script>
-<script src="/js/mobile/mobile-order.js?v=30"></script>
-<script src="/js/mobile/mobile-init.js?v=28"></script>
+<script src="/js/mobile/mobile-order.js?v=34"></script>
+<script src="/js/mobile/mobile-init.js?v=29"></script>
 
 
 

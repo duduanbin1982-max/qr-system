@@ -1,4 +1,5 @@
 """qr-system - QualityService (Refactored: SQL -> QualityRepository)"""
+import json
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.quality_repository import QualityRepository
@@ -6,9 +7,116 @@ import logging
 
 INSPECTION_TYPES = {"first_article": "first article", "in_process": "in_process", "final": "final", "rework_check": "rework_check"}
 DEFECT_CATEGORIES = ["size", "appearance", "material", "welding", "assembly", "other"]
+QUALITY_RESULTS = {"pass", "rework", "scrap"}
+DEFECT_LEVELS = {"", "minor", "general", "severe", "critical"}
+QUALITY_SCORE_ITEMS = [
+    {"key": "dimension_accuracy", "label": "尺寸精度", "max": 30},
+    {"key": "process_conformance", "label": "孔位/工艺符合度", "max": 25},
+    {"key": "appearance_quality", "label": "外观质量", "max": 20},
+    {"key": "function_impact", "label": "装配/功能影响", "max": 15},
+    {"key": "documentation_other", "label": "标识/资料/其他", "max": 10},
+]
 
 
 class QualityService:
+    @staticmethod
+    def _normalize_result(result):
+        result = (result or "").strip()
+        legacy_map = {"fail": "scrap", "failed": "scrap", "partial": "rework", "passed": "pass"}
+        result = legacy_map.get(result, result)
+        if result and result not in QUALITY_RESULTS:
+            raise ValueError("invalid quality result: " + result)
+        return result
+
+    @staticmethod
+    def _json_value(value, default):
+        if value is None or value == "":
+            return default
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (TypeError, json.JSONDecodeError):
+                return default
+        return value
+
+    @staticmethod
+    def _score_number(value, default, max_score):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = float(default)
+        number = max(0.0, min(float(max_score), number))
+        return int(number) if number.is_integer() else round(number, 1)
+
+    @staticmethod
+    def suggest_result(score_total, defect_level):
+        if defect_level == "critical":
+            return "scrap"
+        if score_total >= 85:
+            return "pass"
+        if score_total >= 60:
+            return "rework"
+        return "scrap"
+
+    @staticmethod
+    def _has_scoring_payload(data):
+        scoring_keys = {
+            "score_total", "score_detail", "score_detail_json", "defect_level",
+            "defect_items", "defect_items_json", "suggested_result",
+            "final_result", "override_reason"
+        }
+        return any(key in data for key in scoring_keys)
+
+    @staticmethod
+    def normalize_scoring(data):
+        has_scoring = QualityService._has_scoring_payload(data)
+        detail_input = QualityService._json_value(
+            data.get("score_detail", data.get("score_detail_json")),
+            {},
+        )
+        detail = {}
+        if has_scoring:
+            for item in QUALITY_SCORE_ITEMS:
+                raw_item = detail_input.get(item["key"], item["max"]) if isinstance(detail_input, dict) else item["max"]
+                raw_score = raw_item.get("score", item["max"]) if isinstance(raw_item, dict) else raw_item
+                score = QualityService._score_number(raw_score, item["max"], item["max"])
+                detail[item["key"]] = {"label": item["label"], "max": item["max"], "score": score}
+            score_total = round(sum(v["score"] for v in detail.values()), 1)
+        else:
+            detail = detail_input if isinstance(detail_input, dict) else {}
+            score_total = QualityService._score_number(data.get("score_total", 0), 0, 100)
+
+        defect_level = (data.get("defect_level") or "").strip()
+        if defect_level not in DEFECT_LEVELS:
+            raise ValueError("invalid defect level")
+
+        suggested = QualityService._normalize_result(data.get("suggested_result"))
+        if has_scoring:
+            suggested = suggested or QualityService.suggest_result(score_total, defect_level)
+
+        final_result = QualityService._normalize_result(
+            data.get("final_result") or data.get("result") or suggested
+        )
+        if has_scoring and suggested and final_result != suggested and not (data.get("override_reason") or "").strip():
+            raise ValueError("手动修改系统建议判定时必须填写原因")
+
+        defect_items = QualityService._json_value(
+            data.get("defect_items", data.get("defect_items_json")),
+            [],
+        )
+        if not isinstance(defect_items, list):
+            defect_items = []
+
+        data["score_total"] = score_total
+        data["score_detail_json"] = json.dumps(detail, ensure_ascii=False)
+        data["defect_level"] = defect_level
+        data["defect_items_json"] = json.dumps(defect_items, ensure_ascii=False)
+        data["suggested_result"] = suggested or final_result or ""
+        data["final_result"] = final_result or ""
+        data["override_reason"] = (data.get("override_reason") or "").strip()
+        if final_result:
+            data["result"] = final_result
+        return data
 
     @staticmethod
     def list_inspections(order_id=None, process_id=None, inspection_type="",
@@ -49,8 +157,9 @@ class QualityService:
         if defect_category and defect_category not in DEFECT_CATEGORIES:
             raise ValueError("invalid defect category: " + defect_category)
 
-        result = "pass" if quantity_failed == 0 else ("fail" if quantity_passed == 0 else "partial")
-        data["result"] = result
+        result = "pass" if quantity_failed == 0 else ("scrap" if quantity_passed == 0 else "rework")
+        data.setdefault("result", result)
+        data = QualityService.normalize_scoring(data)
 
         with BaseService.transaction() as txn:
             return QualityRepository.insert_inspection_txn(data, user_id, db=txn)
@@ -79,7 +188,7 @@ class QualityService:
         qc = data.get("quantity_checked", qi["quantity_checked"])
         qp = data.get("quantity_passed", qi["quantity_passed"])
         qf = data.get("quantity_failed", qi["quantity_failed"])
-        result = "pass" if qf == 0 else ("fail" if qp == 0 else "partial")
+        result = "pass" if qf == 0 else ("scrap" if qp == 0 else "rework")
         data.setdefault("result", result)
         data.setdefault("quantity_checked", qc)
         data.setdefault("quantity_passed", qp)
@@ -89,10 +198,20 @@ class QualityService:
         data.setdefault("defect_quantity", data.get("defect_quantity", qi.get("defect_quantity", 0)))
         data.setdefault("notes", data.get("notes", qi["notes"]))
         data.setdefault("inspected_at", data.get("inspected_at", qi["inspected_at"]))
+        if QualityService._has_scoring_payload(data):
+            data = QualityService.normalize_scoring(data)
+        else:
+            data.setdefault("score_total", qi.get("score_total", 0) or 0)
+            data.setdefault("score_detail_json", qi.get("score_detail_json", "{}") or "{}")
+            data.setdefault("defect_level", qi.get("defect_level", "") or "")
+            data.setdefault("defect_items_json", qi.get("defect_items_json", "[]") or "[]")
+            data.setdefault("suggested_result", qi.get("suggested_result", data.get("result", "")) or "")
+            data.setdefault("final_result", qi.get("final_result", data.get("result", "")) or "")
+            data.setdefault("override_reason", qi.get("override_reason", "") or "")
 
         with BaseService.transaction() as txn:
             QualityRepository.update_inspection_txn(inspection_id, data, db=txn)
-        return result
+        return data.get("result", result)
 
     @staticmethod
     def delete_inspection(inspection_id):
@@ -114,6 +233,10 @@ class QualityService:
             {"type": "final", "name": "终检", "default_checked": 1},
             {"type": "rework_check", "name": "返工复检", "default_checked": 1},
         ]
+
+    @staticmethod
+    def get_score_template():
+        return {"items": QUALITY_SCORE_ITEMS}
 
     @staticmethod
     def defect_pareto(date_from="", date_to=""):
@@ -189,11 +312,12 @@ class QualityService:
 
         headers = ["order_no", "product", "customer", "process", "type",
                    "inspector", "checked", "passed", "failed", "result",
+                   "score", "defect_level", "suggested", "final",
                    "defect_cat", "defect_qty", "notes", "inspected_at"]
         style_header(ws, headers)
 
         type_map = {"first_article": "FAI", "in_process": "IPQC", "final": "FQC", "rework_check": "RC"}
-        result_map = {"pass": "PASS", "fail": "FAIL", "partial": "PARTIAL"}
+        result_map = {"pass": "合格", "rework": "返修", "scrap": "报废", "fail": "报废", "partial": "返修"}
 
         for row_idx, item in enumerate(items, 2):
             vals = [
@@ -203,6 +327,9 @@ class QualityService:
                 item.get("inspector_name", ""), item.get("quantity_checked", 0),
                 item.get("quantity_passed", 0), item.get("quantity_failed", 0),
                 result_map.get(item.get("result", ""), item.get("result", "")),
+                item.get("score_total", 0), item.get("defect_level", ""),
+                result_map.get(item.get("suggested_result", ""), item.get("suggested_result", "")),
+                result_map.get(item.get("final_result", ""), item.get("final_result", "")),
                 item.get("defect_category", ""), item.get("defect_quantity", 0),
                 item.get("notes", ""),
                 item.get("inspected_at", "")[:19] if item.get("inspected_at") else "",
@@ -260,6 +387,7 @@ class QualityService:
     def submit_inspection(data, user_id, user_name=""):
         if not data.get("order_id") and not data.get("order_no"):
             raise ValueError("order_id or order_no required")
+        data = QualityService.normalize_scoring(data)
         with BaseService.transaction() as txn:
             return QualityRepository.insert_mobile_inspection_txn(data, user_id, db=txn)
 

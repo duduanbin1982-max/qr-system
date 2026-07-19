@@ -1,6 +1,11 @@
 """qr-system - SettingsService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.setting_repository import SettingRepository
+from modules.order_focus_config import (
+    COMPLETION_FOCUS_MODE_KEY,
+    COMPLETION_FOCUS_MODES,
+    COMPLETION_FOCUS_TAIL_PCT_KEY,
+)
 
 ALLOWED_KEYS = {
     'company_name', 'contact', 'phone', 'address', 'description',
@@ -12,6 +17,7 @@ ALLOWED_KEYS = {
     'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password',
     'smtp_from', 'smtp_tls', 'report_recipients',
     'slow_request_threshold_ms',
+    COMPLETION_FOCUS_MODE_KEY, COMPLETION_FOCUS_TAIL_PCT_KEY,
 }
 
 SENSITIVE_KEYS = {'smtp_password', 'board_token'}
@@ -24,6 +30,8 @@ SETTING_VALIDATORS = {
     'limit_by_order_qty': (str, None, None, 'Must be 0 or 1'),
     'approval_enabled': (str, None, None, 'Must be 0 or 1'),
     'auto_order_no': (str, None, None, 'Order no prefix max 32 chars'),
+    COMPLETION_FOCUS_MODE_KEY: (str, None, None, 'Completion focus mode must be off, soft, or hard'),
+    COMPLETION_FOCUS_TAIL_PCT_KEY: (int, 1, 99, 'Completion focus tail percent must be 1-99'),
 }
 
 def validate_setting(key, value):
@@ -40,6 +48,9 @@ def validate_setting(key, value):
         return None, err_msg
     if key == 'process_order_mode':
         if parsed not in ('sequential', 'out_of_order'):
+            return None, err_msg
+    elif key == COMPLETION_FOCUS_MODE_KEY:
+        if parsed not in COMPLETION_FOCUS_MODES:
             return None, err_msg
     elif key in ('limit_by_prev_process', 'limit_by_order_qty', 'approval_enabled'):
         if str(parsed).strip() not in ('0', '1', ''):
