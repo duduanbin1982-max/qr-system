@@ -1,27 +1,12 @@
-#!/bin/bash
-# QR System - Automated Build Script
-set -e
-cd "$(dirname "$0")/.."
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-echo "=== Building Frontend ==="
-cd frontend && npm run build 2>&1 | tail -3
-cd ..
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-echo "=== Verifying SPA entry ==="
-if [ -f public/static/index.html ]; then
-    echo "public/static/index.html ready"
-else
-    echo "WARNING: public/static/index.html not found!"
+npm run build
+test -s public/static/index.html
+
+if [[ "${1:-}" == "--restart" ]]; then
+    systemctl --user reload-or-restart qr-system.service
 fi
-
-echo "=== Generated assets ==="
-ls -la public/static/assets/ 2>/dev/null || echo "(no assets)"
-
-if [ "$1" = "--restart" ]; then
-    echo "=== Restarting Service ==="
-    systemctl --user restart qr-system
-    sleep 1
-    systemctl --user is-active qr-system && echo "Service active" || echo "Service FAILED"
-fi
-
-echo "=== Build Complete ==="

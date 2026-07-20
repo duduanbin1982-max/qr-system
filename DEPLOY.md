@@ -2,7 +2,7 @@
 
 ## Quick Deploy (single command)
 ```bash
-bash /home/dubin/qr-system/scripts/build.sh --restart
+bash /home/dubin/qr-system/deploy.sh
 ```
 
 ## System Info
@@ -10,7 +10,7 @@ bash /home/dubin/qr-system/scripts/build.sh --restart
 - **User**: dubin
 - **Project**: /home/dubin/qr-system/
 - **DB**: SQLite /home/dubin/qr-system/data/production.db
-- **Service**: systemd qr-system (Gunicorn)
+- **Service**: user systemd `qr-system.service` (Gunicorn)
 
 ## Directory Structure
 ```
@@ -27,7 +27,7 @@ bash /home/dubin/qr-system/scripts/build.sh --restart
 │   └── static/assets/ # Built JS/CSS
 ├── data/              # SQLite database + backups
 ├── scripts/           # Utility scripts
-│   ├── build.sh       # Build + deploy (NEW)
+│   ├── build.sh       # Frontend build only
 │   ├── backup-db.sh   # Database backup
 │   └── heartbeat.sh   # Health check
 └── docs/              # Documentation
@@ -36,17 +36,19 @@ bash /home/dubin/qr-system/scripts/build.sh --restart
 ## Common Operations
 | Task | Command |
 |------|---------|
-| Build + Deploy | `bash scripts/build.sh --restart` |
+| Validate deploy | `bash deploy.sh --check-only` |
+| Build + Deploy | `bash deploy.sh` |
 | Build only | `bash scripts/build.sh` |
-| Restart service | `sudo systemctl restart qr-system` |
-| View logs | `sudo journalctl -u qr-system -f` |
+| Restart service | `systemctl --user restart qr-system` |
+| View logs | `journalctl --user -u qr-system -f` |
 | Backup DB | `bash scripts/backup-db.sh` |
 | DB maintenance | `python3 scripts/db-maintenance.py` |
 
 ## Frontend Build
 - `vite` directly outputs to `public/static/`
 - Flask `/` route serves `public/static/index.html`
-- Deploy or restart after frontend changes should always run `bash scripts/build.sh`
+- Production deployment must use `bash deploy.sh`; it enforces a clean worktree, tests,
+  backup, frontend build, service reload, health verification, and deployed-commit recording.
 
 ## Database
 - **File**: /home/dubin/qr-system/data/production.db
@@ -62,7 +64,7 @@ bash /home/dubin/qr-system/scripts/build.sh --restart
 ## Health Check
 ```bash
 # Check service status
-systemctl status qr-system
+systemctl --user status qr-system
 
 # Check disk usage
 df -h /home/dubin/qr-system/data/

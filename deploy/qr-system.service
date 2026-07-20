@@ -1,0 +1,20 @@
+[Unit]
+Description=QR System Gunicorn
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dubin/qr-system
+Environment=PATH=/home/dubin/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/home/dubin/qr-system/.env
+ExecStartPre=/usr/bin/test -r /home/dubin/qr-system/.env
+ExecStart=/home/dubin/.local/bin/gunicorn -c gunicorn.conf.py server:app
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+KillMode=mixed
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,4 +1,8 @@
-cd ~/qr-system
-export PATH=$HOME/.local/bin:$PATH
-nohup gunicorn -c gunicorn.conf.py server:app > logs/gunicorn.log 2>&1 &
-echo "Started PID: $!"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+install -D -m 0644 "$PROJECT_ROOT/deploy/qr-system.service" "$HOME/.config/systemd/user/qr-system.service"
+systemctl --user daemon-reload
+systemctl --user enable --now qr-system.service
+systemctl --user --no-pager status qr-system.service
