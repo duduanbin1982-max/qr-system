@@ -7,6 +7,7 @@ from flasgger import Swagger
 import os
 from dotenv import load_dotenv
 from modules.config import DB_PATH
+from modules.runtime_version import get_deployed_commit
 
 # Load .env file (production secrets)
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
@@ -106,7 +107,12 @@ def health_check():
         return '', 204
     from datetime import datetime
     from modules.db import get_db
-    status = {'status': 'ok', 'version': '2.0', 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    status = {
+        'status': 'ok',
+        'version': '2.0',
+        'commit': get_deployed_commit(),
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    }
     try:
         db = get_db()
         db.execute('SELECT 1')

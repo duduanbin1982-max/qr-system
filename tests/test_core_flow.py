@@ -27,6 +27,7 @@ class TestAuth:
         data = resp.get_json()
         assert data["status"] == "ok"
         assert "db" in data
+        assert data["commit"] == "unknown" or len(data["commit"]) in (7, 40)
 
     def test_unauthorized_access(self, client):
         resp = client.get("/api/auth/info")

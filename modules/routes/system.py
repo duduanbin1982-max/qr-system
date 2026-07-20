@@ -5,6 +5,7 @@ from flask import request, jsonify, send_file
 from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.config import DATA_DIR, DB_PATH
 from modules.services.system_service import SystemService
+from modules.runtime_version import get_deployed_commit
 
 
 @app.route('/api/system/health', methods=['GET'])
@@ -35,6 +36,7 @@ def system_health():
         'db': 'connected' if db_ok else 'disconnected',
         'db_size_mb': db_size,
         'version': '2.0',
+        'commit': get_deployed_commit(),
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'uptime_seconds': round(time.time() - app.config.get('START_TIME', time.time()), 0),
         'disk': {'free_gb': disk_free_gb, 'total_gb': disk_total_gb, 'used_pct': disk_used_pct},
