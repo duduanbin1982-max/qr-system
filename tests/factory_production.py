@@ -25,11 +25,47 @@ def ensure_process(db, name="Fixture Process", seq_order=1):
     row = db.execute("SELECT id FROM processes WHERE name = ?", (name,)).fetchone()
     if row:
         return row["id"]
-    return db.execute(
+    cursor = db.execute(
         "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
         "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
         (name, seq_order),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def create_process_route(db, process_ids, name=None, category="fixture"):
+    route_name = name or f"Fixture Route {uuid.uuid4().hex[:8]}"
+    route_id = db.execute(
+        "INSERT INTO process_routes (name, description, status, category) "
+        "VALUES (?, 'pytest fixture route', 'active', ?)",
+        (route_name, category),
     ).lastrowid
+    for seq_order, process_id in enumerate(process_ids, start=1):
+        db.execute(
+            "INSERT INTO process_route_items (route_id, process_id, seq_order) "
+            "VALUES (?, ?, ?)",
+            (route_id, process_id, seq_order),
+        )
+    db.commit()
+    return route_id
+
+
+def create_inventory_item(
+    db,
+    quantity=10,
+    order_id=None,
+    product_model="INV-MODEL-001",
+    product_name="Fixture Inventory Product",
+):
+    inventory_id = db.execute(
+        "INSERT INTO inventory "
+        "(product_model, product_name, quantity, unit, order_id, category) "
+        "VALUES (?, ?, ?, '件', ?, 'finished')",
+        (product_model, product_name, quantity, order_id),
+    ).lastrowid
+    db.commit()
+    return inventory_id
 
 
 def create_order(db, process_ids, quantity=10, product_code="TEST-CODE-001"):
