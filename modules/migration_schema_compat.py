@@ -1,15 +1,6 @@
 """Schema compatibility helpers used by incremental migrations."""
 
-import sqlite3
-
-
-def _column_exists(db, table, column):
-    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
-
-
-def _add_column_if_missing(db, table, column, definition):
-    if not _column_exists(db, table, column):
-        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+from modules.migration_helpers import add_column_if_missing
 
 
 _COMPAT_TABLE_SQL = [
@@ -248,10 +239,7 @@ def _ensure_compat_tables(db):
 def _ensure_compat_columns(db):
     for table, table_columns in _COMPAT_COLUMNS.items():
         for column, definition in table_columns:
-            try:
-                _add_column_if_missing(db, table, column, definition)
-            except sqlite3.OperationalError:
-                pass
+            add_column_if_missing(db, table, column, definition)
 
 def ensure_current_schema_compat(db):
     _ensure_compat_tables(db)

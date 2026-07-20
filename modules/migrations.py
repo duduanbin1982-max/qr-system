@@ -7,6 +7,7 @@ from modules.config import DB_PATH, PREDEFINED_ROLES
 from modules.permission_catalog import infer_page_permissions, default_role_permission_additions
 from modules.migration_schema_compat import ensure_current_schema_compat
 from modules.migration_materials import ensure_material_planning_tables
+from modules.migration_helpers import add_column_if_missing, create_unique_index
 from modules.order_focus_config import (
     COMPLETION_FOCUS_DEFAULT_SETTINGS,
     COMPLETION_FOCUS_MODE_KEY,
@@ -83,17 +84,6 @@ def _ensure_board_sessions_table(db):
     )''')
 
 
-def _column_exists(db, table, column):
-    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
-
-
-def _add_column_if_missing(db, table, column, definition):
-    if not _column_exists(db, table, column):
-        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-
-
-
 @migration(1, "Core schema v1-v11: tables, indexes, seed data")
 def m001_baseline(db):
     """Full initial schema + all subsequent migrations as one atomic step."""
@@ -108,45 +98,15 @@ def m001_baseline(db):
     db.row_factory = sqlite3.Row
     
 
-    # P3: Add version column for optimistic locking
-    try:
-        db.execute("ALTER TABLE product_items ADD COLUMN version INTEGER DEFAULT 1")
-        db.commit()
-    except Exception as e:
-        pass
+    add_column_if_missing(db, "product_items", "version", "INTEGER DEFAULT 1")
 
     db.execute("PRAGMA foreign_keys=OFF")  # OFF to avoid FK conflicts on existing data during CREATE TABLE IF NOT EXISTS
 
-    # 迁移 orders 表添加 product_code 列（如果不存在）
-    try:
-        db.execute("ALTER TABLE orders ADD COLUMN product_code TEXT DEFAULT ''")
-        db.commit()
-    except Exception:
-        pass
-
-    # 迁移 orders 软删除字段
-    try:
-        db.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT DEFAULT NULL")
-    except Exception as e: pass
-    try:
-        db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
-    except sqlite3.OperationalError:
-
-        pass
-
-    # 迁移 work_records 添加 serial_no 列（序列号防重复报工）
-    try:
-        db.execute("ALTER TABLE work_records ADD COLUMN serial_no TEXT DEFAULT ''")
-        db.commit()
-    except Exception:
-        pass
-
-    # 迁移 users 密码升级：password_version 列（1=SHA256, 2=bcrypt）
-    try:
-        db.execute("ALTER TABLE users ADD COLUMN password_version INTEGER DEFAULT 1")
-        db.commit()
-    except Exception:
-        pass
+    add_column_if_missing(db, "orders", "product_code", "TEXT DEFAULT ''")
+    add_column_if_missing(db, "orders", "deleted_at", "TEXT DEFAULT NULL")
+    add_column_if_missing(db, "orders", "deleted_by", "INTEGER DEFAULT NULL")
+    add_column_if_missing(db, "work_records", "serial_no", "TEXT DEFAULT ''")
+    add_column_if_missing(db, "users", "password_version", "INTEGER DEFAULT 1")
 
     db.executescript('''
         CREATE TABLE IF NOT EXISTS users (
@@ -622,51 +582,21 @@ def m001_baseline(db):
         CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
     ''')
 
-    # 确保软删除字段存在（_orders_new 迁移可能覆盖）
-    try:
-        db.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT DEFAULT NULL")
-    except Exception as e: pass
-    try:
-        db.execute("ALTER TABLE orders ADD COLUMN deleted_by INTEGER DEFAULT NULL")
-    except sqlite3.OperationalError:
+    add_column_if_missing(db, "orders", "deleted_at", "TEXT DEFAULT NULL")
+    add_column_if_missing(db, "orders", "deleted_by", "INTEGER DEFAULT NULL")
+    add_column_if_missing(db, "processes", "category", 'TEXT DEFAULT "结构件"')
+    add_column_if_missing(db, "products", "category", 'TEXT DEFAULT "结构件"')
+    add_column_if_missing(db, "products", "price", "REAL DEFAULT 0")
+    add_column_if_missing(db, "products", "route_id", "INTEGER DEFAULT NULL")
+    db.execute('CREATE INDEX IF NOT EXISTS idx_products_route ON products(route_id)')
 
-        pass
-
-    # 兼容旧数据库：添加 category 列（结构件/机加工）
-    try:
-        db.execute('ALTER TABLE processes ADD COLUMN category TEXT DEFAULT "结构件"')
-    except Exception as e:
-        pass
-    try:
-        db.execute('ALTER TABLE products ADD COLUMN category TEXT DEFAULT "结构件"')
-    except Exception as e:
-        pass
-    try:
-        db.execute('ALTER TABLE products ADD COLUMN price REAL DEFAULT 0')
-    except Exception as e:
-        pass
-    try:
-        db.execute('ALTER TABLE products ADD COLUMN route_id INTEGER DEFAULT NULL')
-    except Exception as e:
-        pass
-
-    # 迁移后建索引
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_products_route ON products(route_id)')
-    except Exception as e:
-        pass
-
-    # 数据迁移：根据工价记录的工序集合推断产品路线
-    try:
-        routes = db.execute('SELECT id FROM process_routes').fetchall()
-        for (rid,) in routes:
-            route_processes = set(r[0] for r in db.execute(
-                'SELECT process_id FROM process_route_items WHERE route_id = ?', (rid,)
-            ).fetchall())
-            if not route_processes:
-                continue
-    except Exception as e:
-        pass
+    routes = db.execute('SELECT id FROM process_routes').fetchall()
+    for (rid,) in routes:
+        route_processes = set(r[0] for r in db.execute(
+            'SELECT process_id FROM process_route_items WHERE route_id = ?', (rid,)
+        ).fetchall())
+        if not route_processes:
+            continue
 
     # 角色组和角色权限表
     db.execute('''
@@ -756,20 +686,10 @@ def m001_baseline(db):
             UNIQUE(route_id, process_id)
         )
     ''')
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_route_prices_route ON route_prices(route_id)')
-    except Exception as e:
-        pass
+    db.execute('CREATE INDEX IF NOT EXISTS idx_route_prices_route ON route_prices(route_id)')
 
-    # 兼容旧数据库
-    try:
-        db.execute('ALTER TABLE roles ADD COLUMN permissions TEXT DEFAULT ""')
-    except Exception as e: pass
-    try:
-        db.execute('ALTER TABLE roles ADD COLUMN level INTEGER DEFAULT 1')
-    except sqlite3.OperationalError:
-
-        pass
+    add_column_if_missing(db, "roles", "permissions", 'TEXT DEFAULT ""')
+    add_column_if_missing(db, "roles", "level", "INTEGER DEFAULT 1")
 
     # 初始化默认角色组和管理员角色
     db.execute('INSERT OR IGNORE INTO role_groups (id, name, description) VALUES (1, "系统管理组", "系统内置最高权限角色组")')
@@ -852,48 +772,15 @@ def m001_baseline(db):
                   SELECT id, 2 FROM users WHERE role = 'worker' AND NOT EXISTS
                   (SELECT 1 FROM user_roles WHERE user_id = users.id AND role_id = 2)''')
 
-    # Add last_active column if missing
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN last_active TEXT DEFAULT ""')
-    except Exception as e:
-        pass
-
-    # Add v2 columns (nickname, email, group_name, position_id) if missing
+    add_column_if_missing(db, "users", "last_active", 'TEXT DEFAULT ""')
     for col, col_type in [('nickname','TEXT DEFAULT ""'), ('email','TEXT DEFAULT ""'), ('group_name','TEXT DEFAULT ""')]:
-        try:
-            db.execute(f'ALTER TABLE users ADD COLUMN {col} {col_type}')
-        except Exception as e:
-            pass
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN position_id INTEGER DEFAULT NULL')
-    except Exception as e:
-        pass
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN marker TEXT DEFAULT ""')
-    except Exception as e:
-        pass
-
-    # 暴力破解防护：登录失败计数 + 锁定时间
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN failed_login_count INTEGER DEFAULT 0')
-    except Exception as e:
-        pass
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL')
-    except Exception as e:
-        pass
-
-    # 首次登录强制修改密码标记
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0')
-    except Exception as e:
-        pass
-    # 标记默认密码账户需首次登录修改密码
-    try:
-        db.execute("UPDATE users SET must_change_password = 1 WHERE username IN ('admin','worker1','worker2','worker3','worker4') AND must_change_password = 0")
-        db.commit()
-    except Exception as e:
-        pass
+        add_column_if_missing(db, "users", col, col_type)
+    add_column_if_missing(db, "users", "position_id", "INTEGER DEFAULT NULL")
+    add_column_if_missing(db, "users", "marker", 'TEXT DEFAULT ""')
+    add_column_if_missing(db, "users", "failed_login_count", "INTEGER DEFAULT 0")
+    add_column_if_missing(db, "users", "locked_until", "TEXT DEFAULT NULL")
+    add_column_if_missing(db, "users", "must_change_password", "INTEGER DEFAULT 0")
+    db.execute("UPDATE users SET must_change_password = 1 WHERE username IN ('admin','worker1','worker2','worker3','worker4') AND must_change_password = 0")
 
     # 登录尝试记录表（IP速率限制用）
     db.execute('''
@@ -903,10 +790,7 @@ def m001_baseline(db):
             created_at TEXT DEFAULT (datetime('now','localtime'))
         )
     ''')
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_la_ip_created ON login_attempts(ip_address, created_at)')
-    except Exception as e:
-        pass
+    db.execute('CREATE INDEX IF NOT EXISTS idx_la_ip_created ON login_attempts(ip_address, created_at)')
 
     # 登录审计日志表（安全审计 + 异常检测 + 排障）
     db.execute('''
@@ -921,24 +805,11 @@ def m001_baseline(db):
             created_at TEXT DEFAULT (datetime('now','localtime'))
         )
     ''')
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_ll_user_id ON login_logs(user_id)')
-    except Exception as e: pass
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_ll_username ON login_logs(username)')
-    except Exception as e: pass
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_ll_created ON login_logs(created_at DESC)')
-    except sqlite3.OperationalError:
+    db.execute('CREATE INDEX IF NOT EXISTS idx_ll_user_id ON login_logs(user_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_ll_username ON login_logs(username)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_ll_created ON login_logs(created_at DESC)')
 
-        pass
-
-    # 清理 30 天前的登录日志
-    try:
-        db.execute("DELETE FROM login_logs WHERE created_at < datetime('now','localtime','-30 days')")
-    except sqlite3.OperationalError:
-
-        pass
+    db.execute("DELETE FROM login_logs WHERE created_at < datetime('now','localtime','-30 days')")
 
     # 用户会话表（多设备登录 + 远程踢掉）
     db.execute('''
@@ -954,71 +825,29 @@ def m001_baseline(db):
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     ''')
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_us_token ON user_sessions(token)')
-    except Exception as e: pass
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_us_user_id ON user_sessions(user_id)')
-    except sqlite3.OperationalError:
+    db.execute('CREATE INDEX IF NOT EXISTS idx_us_token ON user_sessions(token)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_us_user_id ON user_sessions(user_id)')
 
-        pass
+    db.execute("DELETE FROM user_sessions WHERE is_active = 0 AND created_at < datetime('now','localtime','-7 days')")
 
-    # 清理 7 天前的非活跃会话
-    try:
-        db.execute("DELETE FROM user_sessions WHERE is_active = 0 AND created_at < datetime('now','localtime','-7 days')")
-    except sqlite3.OperationalError:
+    create_unique_index(db, "idx_processes_name", "processes", "name")
+    create_unique_index(db, "idx_positions_name", "positions", "name")
+    create_unique_index(db, "idx_role_groups_name", "role_groups", "name")
 
-        pass
-
-    # Add unique constraint on processes.name
-    try:
-        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_name ON processes(name)')
-    except Exception as e:
-        pass
-
-    # Add unique constraint on positions.name
-    try:
-        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_name ON positions(name)')
-    except Exception as e:
-        pass
-
-    # Add unique constraint on role_groups.name
-    try:
-        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_role_groups_name ON role_groups(name)')
-    except Exception as e:
-        pass
-
-    # audit_logs 索引（性能优化）
-    try:
-        db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)')
-        db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
-        db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)')
-    except Exception as e:
-        pass
+    db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)')
 
     # ============================================================
     # Migration 12: Basic UNIQUE constraints — 防止业务数据重复
     # ============================================================
     # 去重：删除重复行（保留 id 最小的），避免后续建 UNIQUE INDEX 失败
-    for tbl, col in [
-        ('customers', 'name'),
-    ]:
-        try:
-            db.execute(f"DELETE FROM {tbl} WHERE id NOT IN (SELECT MIN(id) FROM {tbl} GROUP BY {col}) AND {col} != ''")
-        except Exception:
-            pass
-    # users.employee_no: 空字符串 → NULL（SQLite UNIQUE 忽略 NULL）
-    try:
-        db.execute("UPDATE users SET employee_no = NULL WHERE employee_no = ''")
-    except Exception:
-        pass
+    db.execute("DELETE FROM customers WHERE id NOT IN (SELECT MIN(id) FROM customers GROUP BY name) AND name != ''")
+    db.execute("UPDATE users SET employee_no = NULL WHERE employee_no = ''")
 
     # 先删除与唯一索引同名的普通索引（避免 IF NOT EXISTS 冲突）
     for drop_idx in ['idx_customers_name', 'idx_suppliers_name', 'idx_materials_name']:
-        try:
-            db.execute(f'DROP INDEX IF EXISTS {drop_idx}')
-        except Exception:
-            pass
+        db.execute(f'DROP INDEX IF EXISTS {drop_idx}')
 
     # 单列唯一索引
     for tbl, col in [
@@ -1030,10 +859,7 @@ def m001_baseline(db):
         ('process_routes', 'name'),
         ('users', 'employee_no'),
     ]:
-        try:
-            db.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_{col} ON {tbl}({col})')
-        except Exception:
-            pass  # 存在重复数据则跳过
+        create_unique_index(db, f"idx_{tbl}_{col}", tbl, col)
 
     # 组合唯一索引
     for tbl, cols in [
@@ -1042,10 +868,7 @@ def m001_baseline(db):
         ('user_roles', 'user_id, role_id'),
     ]:
         col_label = cols.replace(', ', '_').replace(',', '_')
-        try:
-            db.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_{col_label} ON {tbl}({cols})')
-        except Exception:
-            pass
+        create_unique_index(db, f"idx_{tbl}_{col_label}", tbl, cols)
 
     # 系统设置默认种子数据
     default_settings = {
@@ -1057,19 +880,14 @@ def m001_baseline(db):
     for k, v in default_settings.items():
         db.execute('INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)', (k, v))
 
-    # 彻底清理 90 天前软删除的订单及其子表数据
-    try:
-        old_orders = db.execute(
-            "SELECT id FROM orders WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now','localtime','-90 days')"
-        ).fetchall()
-        for (oid,) in old_orders:
-            for tbl in ['work_records','scrap_records','rework_records','quality_inspections',
-                        'material_consumptions','order_processes','product_items','order_attachments']:
-                db.execute(f'DELETE FROM {tbl} WHERE order_id = ?', (oid,))
-            db.execute('DELETE FROM orders WHERE id = ?', (oid,))
-    except Exception as e: pass
-
-    db.commit()
+    old_orders = db.execute(
+        "SELECT id FROM orders WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now','localtime','-90 days')"
+    ).fetchall()
+    for (oid,) in old_orders:
+        for tbl in ['work_records','scrap_records','rework_records','quality_inspections',
+                    'material_consumptions','order_processes','product_items','order_attachments']:
+            db.execute(f'DELETE FROM {tbl} WHERE order_id = ?', (oid,))
+        db.execute('DELETE FROM orders WHERE id = ?', (oid,))
 
     db.commit()
 
@@ -1089,32 +907,17 @@ def m014_material_planning_tables(db):
 
 @migration(15, "Add is_builtin column to roles")
 def m015_roles_is_builtin(db):
-    try:
-        db.execute("ALTER TABLE roles ADD COLUMN is_builtin INTEGER DEFAULT 0")
-    except Exception as e:
-        pass
+    add_column_if_missing(db, "roles", "is_builtin", "INTEGER DEFAULT 0")
     db.execute("UPDATE roles SET is_builtin = 1 WHERE id IN (1, 2)")
     db.commit()
 
 
 @migration(16, "Add approval missing columns (approver_role_2/3, processed_at, current_level)")
 def m016_approval_columns(db):
-    try:
-        db.execute("ALTER TABLE approval_config ADD COLUMN approver_role_2 TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE approval_config ADD COLUMN approver_role_3 TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE approval_records ADD COLUMN processed_at TEXT")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE approval_records ADD COLUMN current_level INTEGER DEFAULT 1")
-    except Exception:
-        pass
+    add_column_if_missing(db, "approval_config", "approver_role_2", "TEXT DEFAULT ''")
+    add_column_if_missing(db, "approval_config", "approver_role_3", "TEXT DEFAULT ''")
+    add_column_if_missing(db, "approval_records", "processed_at", "TEXT")
+    add_column_if_missing(db, "approval_records", "current_level", "INTEGER DEFAULT 1")
     db.commit()
 
 
@@ -1141,10 +944,7 @@ def m018_quality_attachments_index(db):
 
 @migration(19, "Add marker column to users")
 def m019_users_marker(db):
-    try:
-        db.execute('ALTER TABLE users ADD COLUMN marker TEXT DEFAULT ""')
-    except Exception:
-        pass
+    add_column_if_missing(db, "users", "marker", 'TEXT DEFAULT ""')
     db.commit()
 
 
@@ -1256,7 +1056,7 @@ def m024_performance_review_inputs(db):
         "reviewed_at": "TEXT DEFAULT ''",
     }
     for column, definition in score_columns.items():
-        _add_column_if_missing(db, "performance_scores", column, definition)
+        add_column_if_missing(db, "performance_scores", column, definition)
 
     db.execute("""
         CREATE TABLE IF NOT EXISTS performance_reviews (
@@ -1365,7 +1165,7 @@ def m027_quality_inspection_scoring(db):
         "override_reason": "TEXT DEFAULT ''",
     }
     for column, definition in columns.items():
-        _add_column_if_missing(db, "quality_inspections", column, definition)
+        add_column_if_missing(db, "quality_inspections", column, definition)
     db.commit()
 
 
@@ -1550,7 +1350,7 @@ def m030_work_time_record_snapshots(db):
         "standard_missing": "INTEGER DEFAULT 0",
     }
     for column, definition in columns.items():
-        _add_column_if_missing(db, "work_time_records", column, definition)
+        add_column_if_missing(db, "work_time_records", column, definition)
     db.execute("CREATE INDEX IF NOT EXISTS idx_wt_records_route_process ON work_time_records(route_id, process_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_wt_records_standard_missing ON work_time_records(standard_missing)")
     db.commit()

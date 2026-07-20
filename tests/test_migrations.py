@@ -1,4 +1,11 @@
+import ast
 import sqlite3
+from pathlib import Path
+
+import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_run_migrations_uses_supplied_connection():
@@ -126,3 +133,62 @@ def test_material_migration_helper_creates_material_planning_tables():
         assert "idx_order_materials_order" in index_names
     finally:
         db.close()
+
+
+def test_add_column_helper_is_explicit_and_idempotent():
+    from modules.migration_helpers import add_column_if_missing
+
+    db = sqlite3.connect(":memory:")
+    try:
+        assert add_column_if_missing(db, "missing", "value", "TEXT") is False
+        db.execute("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+        assert add_column_if_missing(db, "example", "value", "TEXT DEFAULT ''") is True
+        assert add_column_if_missing(db, "example", "value", "TEXT DEFAULT ''") is False
+    finally:
+        db.close()
+
+
+def test_unique_index_failure_reports_existing_duplicate_data():
+    from modules.migration_helpers import MigrationInvariantError, create_unique_index
+
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute("CREATE TABLE example (id INTEGER PRIMARY KEY, code TEXT)")
+        db.executemany("INSERT INTO example (code) VALUES (?)", [("DUP",), ("DUP",)])
+
+        with pytest.raises(MigrationInvariantError, match=r"duplicate example\(code\) data"):
+            create_unique_index(db, "idx_example_code", "example", "code")
+    finally:
+        db.close()
+
+
+def test_failed_migration_does_not_advance_database_version(monkeypatch):
+    from modules import migrations
+
+    def broken_migration(db):
+        db.execute("SELECT * FROM table_that_does_not_exist")
+
+    monkeypatch.setattr(migrations, "MIGRATIONS", [(1, "intentional failure", broken_migration)])
+    db = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="table_that_does_not_exist"):
+            migrations.run_migrations(db)
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_migration_modules_do_not_silently_swallow_exceptions():
+    violations = []
+    for path in sorted((PROJECT_ROOT / "modules").glob("migration*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
+                violations.append(f"{path.name}:{node.lineno}")
+            if isinstance(node.type, ast.Name) and node.type.id == "Exception":
+                if not any(isinstance(child, ast.Raise) for child in ast.walk(node)):
+                    violations.append(f"{path.name}:{node.lineno}")
+
+    assert violations == []
