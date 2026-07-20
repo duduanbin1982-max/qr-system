@@ -37,6 +37,21 @@ def test_latest_version_matches_highest_registered_migration():
     assert migrations.LATEST_VERSION == max(version for version, _, _ in migrations.MIGRATIONS)
 
 
+def test_migration_registry_is_split_by_domain_without_duplicate_versions():
+    from modules import migrations
+
+    versions = [version for version, _, _ in migrations.MIGRATIONS]
+    assert versions == [1, *range(13, 31)]
+    assert len(versions) == len(set(versions))
+    assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
+        "modules.migration_baseline",
+        "modules.migration_core",
+        "modules.migration_performance",
+        "modules.migration_work_time",
+    }
+    assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
+
+
 def test_database_at_version_29_runs_migration_30():
     from modules import migrations
 
