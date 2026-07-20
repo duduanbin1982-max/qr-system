@@ -54,8 +54,9 @@ bash /home/dubin/qr-system/scripts/build.sh --restart
 - **Schema**: Auto-managed by modules/migrations.py
 
 ## Security Notes
-- Admin password: Stored in /home/dubin/qr-system/.env
-- Sudo password: niDAyede3.14
+- Application secrets are stored in `/home/dubin/qr-system/.env`, which must remain untracked.
+- Server and sudo passwords must never be written to source files, shell history, or deployment logs.
+- Rotate credentials interactively with `passwd`; use SSH public-key authentication for deployments.
 - SSL: Self-signed, browser will show warning
 
 ## Health Check
