@@ -42,6 +42,9 @@ qr_system.db
 uploads/
 modules/uploads/
 public/assets/
+coverage/
+playwright-report/
+test-results/
 *.csr
 .deployed_commit
 data/*.db-wal
