@@ -207,5 +207,16 @@
       "suggestion": 1
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD b2fdcbd; full modules, frontend, public mobile, tests and deployment scripts"
+  },
+  {
+    "date": "2026-07-20T14:33:37+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 94,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 2520006; full modules, frontend, public mobile, tests and deployment scripts after debt remediation"
   }
 ]
