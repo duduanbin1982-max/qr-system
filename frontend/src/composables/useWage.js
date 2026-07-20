@@ -62,7 +62,7 @@ const activeTab = ref("piece")
       params.page = page.value
       params.limit = limit.value
       try {
-        const r = await api.listWages(params)
+        const r = await api.domains.wages.listWages(params)
         const raw = r.wages || []
         wages.value = raw.map(w => ({ ...w }))
         total.value = r.total || 0
@@ -91,18 +91,18 @@ const activeTab = ref("piece")
     const snapStatus = ref({ draft: 0, locked: 0, confirmed: 0, total_employees: 0, total_wage: 0 })
 
     async function loadSnapStatus() {
-      try { snapStatus.value = await api.get("/api/wages/snapshot-status?year_month="+currentMonth.value) || {} }
+      try { snapStatus.value = await api.domains.http.get("/api/wages/snapshot-status?year_month="+currentMonth.value) || {} }
       catch(e) { /* silent */ }
     }
 
     async function saveSnapshot() {
-      try { const r = await api.post("/api/wages/snapshot?year_month="+currentMonth.value, {}); showToast("快照已保存: "+r.saved+" 人"); loadSnapStatus() }
+      try { const r = await api.domains.http.post("/api/wages/snapshot?year_month="+currentMonth.value, {}); showToast("快照已保存: "+r.saved+" 人"); loadSnapStatus() }
       catch(e) { showToast("快照保存失败: "+(e.message||"服务器错误"), "error") }
     }
     async function lockSnapshot() {
       showLockDialog.value = false
       try {
-        const r = await api.post("/api/wages/lock?year_month="+currentMonth.value, { notes: lockNotes.value })
+        const r = await api.domains.http.post("/api/wages/lock?year_month="+currentMonth.value, { notes: lockNotes.value })
         showToast("已锁定: "+r.locked+" 人")
         lockNotes.value = ""
         loadSnapStatus()
@@ -111,7 +111,7 @@ const activeTab = ref("piece")
     async function confirmSnapshot() {
       if (!confirm("确定确认 "+currentMonth.value+" 的工资？确认后将归档不可修改！")) return
       try {
-        const r = await api.post("/api/wages/confirm?year_month="+currentMonth.value, {})
+        const r = await api.domains.http.post("/api/wages/confirm?year_month="+currentMonth.value, {})
         showToast("已确认: "+r.confirmed+" 人")
         loadSnapStatus()
       } catch(e) { showToast("确认失败: "+(e.message||"服务器错误"), "error") }
@@ -161,7 +161,7 @@ const activeTab = ref("piece")
     async function loadMonthly() {
       monthlyLoading.value = true
       try {
-        const r = await api.get("/api/wages/monthly-summary?year_month="+monthlyMonth.value+"&page="+monthlyPage.value+"&limit="+monthlyLimit.value)
+        const r = await api.domains.http.get("/api/wages/monthly-summary?year_month="+monthlyMonth.value+"&page="+monthlyPage.value+"&limit="+monthlyLimit.value)
         monthlyData.value = r; monthlyTotal.value = r.total || 0
       } catch(e) { showToast("加载月度汇总失败","error") }
       finally { monthlyLoading.value = false }
@@ -200,7 +200,7 @@ const activeTab = ref("piece")
     async function loadProcess() {
       processLoading.value = true
       try {
-        const r = await api.get("/api/wages/process-summary?year_month="+processMonth.value)
+        const r = await api.domains.http.get("/api/wages/process-summary?year_month="+processMonth.value)
         processData.value = r
       } catch(e) { showToast("加载工序分析失败","error") }
       finally { processLoading.value = false }
@@ -217,8 +217,8 @@ const activeTab = ref("piece")
       compareLoading.value = true
       try {
         const [rA,rB] = await Promise.all([
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthA.value+"&page=1&limit=2000"),
-          api.get("/api/wages/monthly-summary?year_month="+compareMonthB.value+"&page=1&limit=2000")
+          api.domains.http.get("/api/wages/monthly-summary?year_month="+compareMonthA.value+"&page=1&limit=2000"),
+          api.domains.http.get("/api/wages/monthly-summary?year_month="+compareMonthB.value+"&page=1&limit=2000")
         ])
         const mapA = {}; const mapB = {}; const nameMap = {}
         for (const s of (rA.summary||[])) { const k = s.employee_no || s.employee_name; mapA[k] = s.total_wage||0; nameMap[k] = s.employee_name }
@@ -255,19 +255,19 @@ const activeTab = ref("piece")
     }
 
     async function loadEmployees() {
-      try { const r = await api.listUsers({ role: 'worker', limit: 500 }); employeeList.value = (r.users || []).filter(isWorkerUser) }
+      try { const r = await api.domains.users.listUsers({ role: 'worker', limit: 500 }); employeeList.value = (r.users || []).filter(isWorkerUser) }
       catch(e) { showToast("加载员工列表失败","error") }
     }
     async function loadAdjustments() {
       adjLoading.value = true
-      try { adjustments.value = await api.get("/api/wages/adjustments?year_month="+adjMonth.value) || [] }
+      try { adjustments.value = await api.domains.http.get("/api/wages/adjustments?year_month="+adjMonth.value) || [] }
       catch(e) { showToast("加载调整记录失败","error") }
       finally { adjLoading.value = false }
     }
     async function saveAdjustment() {
       if (!adjForm.value.user_id || !adjForm.value.amount || adjForm.value.amount <= 0) { showToast("请填写员工和金额","error"); return }
       try {
-        await api.post("/api/wages/adjustments", { ...adjForm.value, year_month: adjMonth.value })
+        await api.domains.http.post("/api/wages/adjustments", { ...adjForm.value, year_month: adjMonth.value })
         showToast("保存成功")
         showAdjForm.value = false
         adjForm.value = { user_id: null, type: "bonus", amount: 0, reason: "" }
@@ -276,7 +276,7 @@ const activeTab = ref("piece")
     }
     async function deleteAdjustment(id) {
       if (!confirm("确定删除此调整？")) return
-      try { await api.delete("/api/wages/adjustments/"+id); loadAdjustments() }
+      try { await api.domains.http.delete("/api/wages/adjustments/"+id); loadAdjustments() }
       catch(e) { showToast("删除失败","error") }
     }
 
@@ -298,7 +298,7 @@ const activeTab = ref("piece")
     async function loadTrends() {
       trendLoading.value = true
       try {
-        trendData.value = await api.get("/api/wages/trends?months="+trendMonths.value) || []
+        trendData.value = await api.domains.http.get("/api/wages/trends?months="+trendMonths.value) || []
         await nextTick()
         renderTrendChart()
       } catch(e) { showToast("加载趋势失败","error") }
@@ -347,7 +347,7 @@ const activeTab = ref("piece")
     }
     async function loadPosition() {
       posLoading.value = true
-      try { posData.value = await api.get("/api/wages/position-summary?year_month="+posMonth.value) || {} }
+      try { posData.value = await api.domains.http.get("/api/wages/position-summary?year_month="+posMonth.value) || {} }
       catch(e) { posError.value = "加载岗位汇总失败: " + (e.message || e); showToast("加载岗位汇总失败","error") }
       finally { posLoading.value = false }
     }
@@ -360,7 +360,7 @@ const activeTab = ref("piece")
 
     async function loadPrediction() {
       predLoading.value = true
-      try { predData.value = await api.get("/api/wages/prediction?months="+predMonths.value) || {} }
+      try { predData.value = await api.domains.http.get("/api/wages/prediction?months="+predMonths.value) || {} }
       catch(e) { predError.value = "加载预测失败: " + (e.message || e); showToast("加载预测失败","error") }
       finally { predLoading.value = false }
     }

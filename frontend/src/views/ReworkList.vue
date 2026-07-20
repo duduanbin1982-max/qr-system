@@ -294,14 +294,14 @@ export default {
       if (dateTo.value) qs.push('to=' + dateTo.value)
       qs.push('page=' + p, 'per_page=' + perPage)
       try {
-        const r = await api.listRework({status: statusFilter.value || undefined, search: search.value || undefined, from: dateFrom.value || undefined, to: dateTo.value || undefined, worker_id: filterWorker.value || undefined, process_id: filterProcess.value || undefined, page: p, per_page: perPage})
+        const r = await api.domains.rework.listRework({status: statusFilter.value || undefined, search: search.value || undefined, from: dateFrom.value || undefined, to: dateTo.value || undefined, worker_id: filterWorker.value || undefined, process_id: filterProcess.value || undefined, page: p, per_page: perPage})
         if (r.ok) { items.value = r.items; total.value = r.total }
       } catch (e) { showToast('加载失败', 'error') }
       finally { loading.value = false }
     }
 
     async function loadStats() {
-      try { const r = await api.reworkStats(); if (r && r.ok) stats.value = r }
+      try { const r = await api.domains.rework.reworkStats(); if (r && r.ok) stats.value = r }
       catch (e) { console.warn('Rework stats load failed:', e) }
     }
 
@@ -320,7 +320,7 @@ export default {
       const item = completingItem.value
       if (!item) return
       try {
-        const d = await api.completeRework(item.id, {
+        const d = await api.domains.rework.completeRework(item.id, {
           reason: item.reason,
           result: completeResult.value,
           result_remark: completeResultRemark.value
@@ -335,7 +335,7 @@ export default {
 
     async function saveEdit(item) {
       try {
-        const r = await api.updateRework(item.id, { reason: item.reason })
+        const r = await api.domains.rework.updateRework(item.id, { reason: item.reason })
         if (r.ok) { showToast('已更新'); editing.value = null }
         else showToast(r.error || '失败', 'error')
       } catch (e) { showToast('保存失败', 'error') }
@@ -353,7 +353,7 @@ export default {
     async function doBatchComplete() {
       if (!selectedIds.value.length) { showToast('请选择返工记录', 'error'); return }
       try {
-        const d = await api.batchCompleteRework({
+        const d = await api.domains.rework.batchCompleteRework({
           ids: selectedIds.value,
           reason: batchReason.value,
           result: batchResult.value,
@@ -385,11 +385,11 @@ export default {
 
     async function loadDropdowns() {
       try {
-        const w = await api.listUsers({limit: 200})
+        const w = await api.domains.users.listUsers({limit: 200})
         workers.value = w.users || w.items || []
       } catch (e) { console.warn('Workers dropdown load failed:', e); workers.value = [] }
       try {
-        const p = await api.listProcesses({limit: 200})
+        const p = await api.domains.processes.listProcesses({limit: 200})
         processes.value = p.processes || p.items || []
       } catch (e) { console.warn('Processes dropdown load failed:', e); processes.value = [] }
     }

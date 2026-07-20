@@ -172,7 +172,7 @@ export default {
       if (!code) { showToast('请输入或扫描订单号/二维码','error'); return }
       scanning.value = true
       try {
-        const d = await api.scan({ code })
+        const d = await api.domains.scan.scan({ code })
         order.value = d.order
         serialNo.value = (d.item && d.item.serial_no) || null
         // 自动选当前工序
@@ -202,7 +202,7 @@ export default {
 
       reporting.value = true
       try {
-        await api.report({
+        await api.domains.scan.report({
           order_id: order.value.id,
           process_id: parseInt(reportProcess.value),
           quantity: qty,
@@ -216,7 +216,7 @@ export default {
         // Refresh order data without full re-scan flash
         if (order.value) {
           try {
-            const d = await api.scan({ code: serialNo.value || order.value.order_no })
+            const d = await api.domains.scan.scan({ code: serialNo.value || order.value.order_no })
             if (d.order) {
               order.value = d.order
               serialNo.value = (d.item && d.item.serial_no) || null

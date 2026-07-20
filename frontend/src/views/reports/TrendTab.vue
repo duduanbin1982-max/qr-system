@@ -60,8 +60,8 @@ export default {
         const endDate = fmt(now)
         const startDate = fmt(new Date(now - (days.value - 1) * 86400000))
         const [tRes, qRes] = await Promise.all([
-          api.productionTrend({ days: days.value }),
-          api.qualityAnalysis({ start: startDate, end: endDate })
+          api.domains.stats.productionTrend({ days: days.value }),
+          api.domains.stats.qualityAnalysis({ start: startDate, end: endDate })
         ])
         const trend = tRes.trend || []
         summary.value = tRes.summary || {}

@@ -35,7 +35,7 @@ export function useRouteWorkTimeStandards(processRoutesRef) {
   async function fetchRouteStandardItems(routeId) {
     if (!routeId) return []
     try {
-      const result = await api.listWorkTimeStandardRoutes({ route_id: routeId, limit: 1 })
+      const result = await api.domains.workTime.listWorkTimeStandardRoutes({ route_id: routeId, limit: 1 })
       return (result.route_groups && result.route_groups[0]?.items) || []
     } catch (error) {
       return []

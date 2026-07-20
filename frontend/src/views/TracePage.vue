@@ -321,8 +321,8 @@ const traceHistory = ref(_history)
       searching.value = true
       try {
         const d = traceMode.value === 'serial'
-          ? await api.trace(code)
-          : await api.traceByOrder(code)
+          ? await api.domains.trace.trace(code)
+          : await api.domains.trace.traceByOrder(code)
         result.value = d
         saveHistory(code, traceMode.value)
       } catch(e) {

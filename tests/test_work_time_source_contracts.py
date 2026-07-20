@@ -85,7 +85,7 @@ def test_work_time_record_entry_uses_order_search_and_standard_hint():
     source = Path("frontend/src/views/work-time/WorkTimeRecordsPanel.vue").read_text(encoding="utf-8")
 
     assert "订单号（搜索选择）" in source
-    assert "api.listOrders" in source
+    assert "api.domains.orders.listOrders" in source
     assert "availableProcesses" in source
     assert "standardStatus" in source
     assert "standard_missing" in source

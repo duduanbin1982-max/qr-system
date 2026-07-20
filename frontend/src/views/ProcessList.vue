@@ -187,7 +187,7 @@ export default {
         if (searchKeyword.value.trim()) params.search = searchKeyword.value.trim()
         params.limit = pageSize.value
         params.offset = (page.value - 1) * pageSize.value
-        const d = await api.listProcesses(params)
+        const d = await api.domains.processes.listProcesses(params)
         const data = d.processes || []
         processes.value = data
         total.value = d.total != null ? d.total : data.length
@@ -244,10 +244,10 @@ export default {
         if (data.seq_order === undefined) delete data.seq_order
 
         if (modalEdit.value) {
-          await api.updateProcess(modalId.value, data)
+          await api.domains.processes.updateProcess(modalId.value, data)
           showToast('更新成功')
         } else {
-          await api.createProcess(data)
+          await api.domains.processes.createProcess(data)
           showToast('创建成功')
         }
         showModal.value = false
@@ -259,7 +259,7 @@ export default {
 
     async function del(p) {
     try {
-      const impactRes = await api.getProcessImpact(p.id)
+      const impactRes = await api.domains.processes.getProcessImpact(p.id)
       const impact = impactRes.impact || {}
       const keys = Object.keys(impact)
       if (keys.length > 0) {
@@ -276,7 +276,7 @@ export default {
     } catch(e) { showToast(e.message || '影响检查失败', 'error'); return }
     if (!confirm('确定删除工序 "' + p.process_name + '" 吗？\n此操作不可恢复！')) return
     try {
-      await api.deleteProcess(p.id)
+      await api.domains.processes.deleteProcess(p.id)
       showToast('删除成功')
       await load()
     } catch(e) {

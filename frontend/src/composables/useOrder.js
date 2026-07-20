@@ -55,7 +55,7 @@ const orders = ref([])
       if (!f.quantity || f.quantity < 1) { showToast("数量必须大于0", "error"); return }
       if (!f.reason.trim()) { showToast("请输入返工原因", "error"); return }
       try {
-        await api.scan({ order_id: o.id, process_id: parseInt(f.process_id), quantity: parseInt(f.quantity), report_type: "rework", remark: f.reason })
+        await api.domains.scan.scan({ order_id: o.id, process_id: parseInt(f.process_id), quantity: parseInt(f.quantity), report_type: "rework", remark: f.reason })
         showToast("返工申请已提交")
         showReworkModal.value = false
         await load()
@@ -90,11 +90,11 @@ const orders = ref([])
     const processOptions = ref([])
 
     async function loadOrderMaterials(orderId) {
-      try { const d = await api.listOrderMaterials(orderId); orderMaterials.value = d.materials || [] } catch(e) { orderMaterials.value = [] }
+      try { const d = await api.domains.products.listOrderMaterials(orderId); orderMaterials.value = d.materials || [] } catch(e) { orderMaterials.value = [] }
     }
     async function loadMaterialOptions() {
       try {
-        const d = await api.listMaterials()
+        const d = await api.domains.materials.listMaterials()
         materialOptions.value = d.materials || []
       } catch(e) {
         materialOptions.value = []
@@ -103,7 +103,7 @@ const orders = ref([])
     }
     async function loadProcessOptions() {
       try {
-        const d = await api.listProcesses()
+        const d = await api.domains.processes.listProcesses()
         processOptions.value = d.items || d.processes || []
         const xl = processOptions.value.find(p => p.name === '下料')
         if (xl) orderMatForm.value.process_id = xl.id
@@ -116,7 +116,7 @@ const orders = ref([])
     async function addOrderMaterial() {
       if (!orderMatForm.value.material_id) { showToast('请选择物料', 'error'); return }
       try {
-        await api.addOrderMaterial(modalId.value, {
+        await api.domains.products.addOrderMaterial(modalId.value, {
           material_id: orderMatForm.value.material_id,
           quantity_per_unit: parseFloat(orderMatForm.value.quantity_per_unit) || 1,
           process_id: orderMatForm.value.process_id || null
@@ -128,7 +128,7 @@ const orders = ref([])
     }
     async function removeOrderMaterial(omId) {
       try {
-        await api.deleteOrderMaterial(modalId.value, omId)
+        await api.domains.products.deleteOrderMaterial(modalId.value, omId)
         await loadOrderMaterials(modalId.value)
       } catch(e) { showToast(e.message || '删除失败', 'error') }
     }
@@ -304,7 +304,7 @@ const orders = ref([])
     async function loadAttachments(orderId) {
       attachmentsLoading.value = { ...attachmentsLoading.value, [orderId]: true }
       try {
-        const d = await api.listOrderAttachments(orderId)
+        const d = await api.domains.orderAttachments.listOrderAttachments(orderId)
         attachments.value = { ...attachments.value, [orderId]: d.attachments || [] }
       } catch(e) {
         showToast('加载附件失败: ' + (e.message || ''), 'error')
@@ -333,7 +333,7 @@ const orders = ref([])
       const formData = new FormData()
       formData.append('file', file)
       try {
-        await api.uploadOrderAttachment(orderId, formData)
+        await api.domains.orderAttachments.uploadOrderAttachment(orderId, formData)
         showToast('上传成功')
         await loadAttachments(orderId)
       } catch(e) {
@@ -348,7 +348,7 @@ const orders = ref([])
       if (isCompletedOrder(order)) { completedReadonlyToast(); return }
       if (!confirm('确定删除此附件吗？')) return
       try {
-        await api.deleteAttachment(attachmentId)
+        await api.domains.orderAttachments.deleteAttachment(attachmentId)
         showToast('删除成功')
         await loadAttachments(orderId)
       } catch(e) {
@@ -358,7 +358,7 @@ const orders = ref([])
 
     function downloadAttachment(attachmentId) {
       // httpOnly cookie handles auth automatically
-      window.open(api.downloadAttachment(attachmentId), '_blank')
+      window.open(api.domains.orderAttachments.downloadAttachment(attachmentId), '_blank')
     }
 
     function getFileIcon(fileType) {
@@ -396,7 +396,7 @@ const orders = ref([])
         if (filterStatus.value) params.status = filterStatus.value
         if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
         if (filterCustomer.value.trim()) params.customer = filterCustomer.value.trim()
-        const d = await api.listOrders(params)
+        const d = await api.domains.orders.listOrders(params)
         orders.value = d.orders || []
         total.value = d.total || 0
         pendingCount.value   = d.pending ?? 0
@@ -421,12 +421,12 @@ const orders = ref([])
     function customerChange() { page.value = 1; load() }
 
     async function loadDropdownData() {
-      try { const d = await api.listProductionLines(); productionLines.value = d.lines || [] } catch(e) { productionLines.value = [] }
+      try { const d = await api.domains.production.listProductionLines(); productionLines.value = d.lines || [] } catch(e) { productionLines.value = [] }
       try {
         const [custData, prodData, routeData] = await Promise.all([
-          api.listCustomers(),
-          api.listProducts(),
-          api.listProcessRoutes()
+          api.domains.customers.listCustomers(),
+          api.domains.products.listProducts(),
+          api.domains.processRoutes.listProcessRoutes()
         ])
         customers.value = custData.customers || []
         products.value = prodData.products || []
@@ -455,7 +455,7 @@ const orders = ref([])
       productSearchResults.value = []
       modalEdit.value = false; modalId.value = null
       loadDropdownData()
-      try { const d = await api.nextOrderNo(); form.value.order_no = d.order_no } catch(e) { showToast('自动生成订单号失败：' + (e.message || '请手动输入'), 'warn') }
+      try { const d = await api.domains.orders.nextOrderNo(); form.value.order_no = d.order_no } catch(e) { showToast('自动生成订单号失败：' + (e.message || '请手动输入'), 'warn') }
       showModal.value = true
     }
 
@@ -503,10 +503,10 @@ const orders = ref([])
         else data.production_line_id = null
 
         if (modalEdit.value) {
-          await api.updateOrder(modalId.value, data)
+          await api.domains.orders.updateOrder(modalId.value, data)
           showToast('更新成功')
         } else {
-          await api.createOrder(data)
+          await api.domains.orders.createOrder(data)
           showToast('创建成功')
         }
         showModal.value = false
@@ -519,7 +519,7 @@ const orders = ref([])
     async function del(o) {
       if (isCompletedOrder(o)) { completedReadonlyToast(); return }
       if (!confirm('确定将订单 ' + o.order_no + ' 移入回收站吗？\n30天后可从回收站彻底删除。')) return
-      try { await api.deleteOrder(o.id); showToast('已移至回收站'); await load() } catch(e) { showToast(e.message || '删除失败', 'error') }
+      try { await api.domains.orders.deleteOrder(o.id); showToast('已移至回收站'); await load() } catch(e) { showToast(e.message || '删除失败', 'error') }
     }
 
     async function reopenOrder(o) {
@@ -527,7 +527,7 @@ const orders = ref([])
       if (reason === null) return
       if (!reason.trim()) { showToast('请填写重新打开原因', 'error'); return }
       try {
-        await api.reopenOrder(o.id, { reason: reason.trim(), status: 'producing' })
+        await api.domains.orders.reopenOrder(o.id, { reason: reason.trim(), status: 'producing' })
         showToast('订单已重新打开')
         await load()
       } catch(e) {
@@ -544,21 +544,21 @@ const orders = ref([])
 
     async function loadTrash() {
       try {
-        const d = await api.trashOrders({ page: trashPage.value, limit: trashPageSize })
+        const d = await api.domains.orders.trashOrders({ page: trashPage.value, limit: trashPageSize })
         trashOrders.value = d.orders || []
         trashTotal.value = d.total || 0
       } catch(e) { showToast(e.message || '加载失败', 'error') }
     }
 
     async function restoreOrder(oid) {
-      try { await api.restoreOrder(oid); showToast('订单已恢复'); await loadTrash(); await load() } catch(e) { showToast(e.message || '恢复失败', 'error') }
+      try { await api.domains.orders.restoreOrder(oid); showToast('订单已恢复'); await loadTrash(); await load() } catch(e) { showToast(e.message || '恢复失败', 'error') }
     }
 
     async function permanentDelete(oid) {
       if (!confirm('确认彻底删除该订单？所有关联数据将永久消失，不可恢复！')) return
       try {
         // 彻底删除：需要调用后端硬删除接口
-        await api.purgeOrder(oid)
+        await api.domains.orders.purgeOrder(oid)
         showToast('已彻底删除')
         await loadTrash()
       } catch(e) { showToast(e.message || '删除失败', 'error') }
@@ -570,7 +570,7 @@ const orders = ref([])
       progressLoading.value = true
       progressData.value = null
       try {
-        const d = await api.getWorkpieceProgress(o.id)
+        const d = await api.domains.orders.getWorkpieceProgress(o.id)
         progressData.value = d
       } catch(e) {
         showToast('加载进度失败: ' + (e.message || ''), 'error')
@@ -585,9 +585,9 @@ const orders = ref([])
       completionFocusLoading.value = true
       try {
         try {
-          completionFocusConfig.value = await api.getCompletionFocusConfig()
+          completionFocusConfig.value = await api.domains.orders.getCompletionFocusConfig()
         } catch(e) {}
-        completionFocusData.value = await api.getCompletionFocus({ limit: 120 })
+        completionFocusData.value = await api.domains.orders.getCompletionFocus({ limit: 120 })
         if (completionFocusData.value.config) completionFocusConfig.value = completionFocusData.value.config
       } catch(e) {
         completionFocusData.value = { summary: {}, items: [] }
@@ -599,7 +599,7 @@ const orders = ref([])
 
     async function setCompletionFocusMode(mode) {
       try {
-        const res = await api.saveCompletionFocusConfig({
+        const res = await api.domains.orders.saveCompletionFocusConfig({
           mode,
           tail_percent: completionFocusConfig.value.tail_percent || 70
         })
@@ -628,7 +628,7 @@ const orders = ref([])
       if (!order) return
       if (!focusExceptionForm.value.reason) { showToast('请选择例外原因', 'error'); return }
       try {
-        await api.createCompletionFocusException(order.order_id, {
+        await api.domains.orders.createCompletionFocusException(order.order_id, {
           ...focusExceptionForm.value,
           expires_at: (focusExceptionForm.value.expires_at || '').replace('T', ' ')
         })
@@ -645,7 +645,7 @@ const orders = ref([])
       if (!id) return
       if (!confirm('确认取消该订单的集中完工例外？')) return
       try {
-        await api.cancelCompletionFocusException(id, { reason: '手动取消' })
+        await api.domains.orders.cancelCompletionFocusException(id, { reason: '手动取消' })
         showToast('已取消例外')
         await openCompletionFocus()
       } catch(e) {

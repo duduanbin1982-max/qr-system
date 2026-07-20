@@ -112,7 +112,7 @@ const products = ref([])
 
     async function loadProductAttachments(productId) {
       try {
-        const d = await api.listProductAttachments(productId)
+        const d = await api.domains.products.listProductAttachments(productId)
         productAttachments.value = d.attachments || []
       } catch(e) { /* silent */ }
     }
@@ -132,7 +132,7 @@ const products = ref([])
         const fd = new FormData()
         fd.append('file', file)
         try {
-          await api.uploadProductAttachment(currentEditProductId.value, fd)
+          await api.domains.products.uploadProductAttachment(currentEditProductId.value, fd)
         } catch(e) { showToast(e.message || '\u4e0a\u4f20\u5931\u8d25', 'error') }
       }
       event.target.value = ''
@@ -142,7 +142,7 @@ const products = ref([])
     async function deleteProductAttachment(attId) {
       if (!confirm('\u786e\u5b9a\u5220\u9664\u6b64\u9644\u4ef6\uff1f')) return
       try {
-        await api.deleteProductAttachment(attId)
+        await api.domains.products.deleteProductAttachment(attId)
         showToast('\u5220\u9664\u6210\u529f')
         if (currentEditProductId.value) await loadProductAttachments(currentEditProductId.value)
       } catch(e) { showToast(e.message || '\u5220\u9664\u5931\u8d25', 'error') }
@@ -157,7 +157,7 @@ const products = ref([])
         const cat = filterCategory.value
         if (kw) params.keyword = kw
         if (cat) params.category = cat
-        const d = await api.listProducts(Object.keys(params).length ? params : null)
+        const d = await api.domains.products.listProducts(Object.keys(params).length ? params : null)
         products.value = d.products || []
       } catch(e) {
         showToast(e.message || '\u52a0\u8f7d\u5931\u8d25', 'error')
@@ -218,10 +218,10 @@ const products = ref([])
         // Let backend generate product_code for new products
         if (!modalEdit.value) delete data.product_code
         if (modalEdit.value) {
-          await api.updateProduct(modalId.value, data)
+          await api.domains.products.updateProduct(modalId.value, data)
           showToast('\u66f4\u65b0\u6210\u529f')
         } else {
-          await api.createProduct(data)
+          await api.domains.products.createProduct(data)
           showToast('\u521b\u5efa\u6210\u529f')
         }
         showModal.value = false
@@ -238,7 +238,7 @@ const products = ref([])
     async function del(p) {
       if (!confirm('\u786e\u5b9a\u5220\u9664\u4ea7\u54c1 "' + p.product_name + '" \u5417\uff1f')) return
       try {
-        await api.deleteProduct(p.id)
+        await api.domains.products.deleteProduct(p.id)
         showToast('\u5220\u9664\u6210\u529f')
         await load()
       } catch(e) {
@@ -269,7 +269,7 @@ const products = ref([])
       importLoading.value = true
       showToast('\u6b63\u5728\u5bfc\u5165 ' + file.name + ' ...')
       try {
-        const d = await api.uploadProductImport(formData)
+        const d = await api.domains.products.uploadProductImport(formData)
         let parts = [d.message || '\u5bfc\u5165\u5b8c\u6210']
         if (d.error_summary) parts.push(d.error_summary)
         if (d.columns_found && d.columns_found.length) parts.push('\u8bc6\u522b\u5217: ' + d.columns_found.join(','))
@@ -286,7 +286,7 @@ const products = ref([])
     async function loadTrash() {
       loading.value = true
       try {
-        const d = await api.listProducts({ deleted: 1 })
+        const d = await api.domains.products.listProducts({ deleted: 1 })
         trashedProducts.value = d.products || []
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
@@ -303,7 +303,7 @@ const products = ref([])
     async function purge(pid, name) {
       if (!confirm('Permanently delete "' + name + '"? This cannot be undone!')) return
       try {
-        await api.purgeProduct(pid)
+        await api.domains.products.purgeProduct(pid)
         showToast('Permanently deleted')
         await loadTrash()
         await load()
@@ -314,7 +314,7 @@ const products = ref([])
 
     async function restore(pid) {
       try {
-        await api.restoreProduct(pid)
+        await api.domains.products.restoreProduct(pid)
         showToast('恢复成功')
         await loadTrash()
         await load()
@@ -325,7 +325,7 @@ const products = ref([])
 
     async function loadMaterialOptions() {
       try {
-        const d = await api.listMaterials()
+        const d = await api.domains.materials.listMaterials()
         materialOptions.value = d.materials || []
       } catch(e) {
         materialOptions.value = []
@@ -334,7 +334,7 @@ const products = ref([])
     }
     async function loadProcessOptions() {
       try {
-        const d = await api.listProcesses()
+        const d = await api.domains.processes.listProcesses()
         processOptions.value = d.items || d.processes || []
         const xl = processOptions.value.find(p => p.name === '下料')
         if (xl) bomForm.value.process_id = xl.id
@@ -344,12 +344,12 @@ const products = ref([])
       }
     }
     async function loadProductBom(pid) {
-      try { const d = await api.listProductBom(pid); productBom.value = d.bom || [] } catch(e) { productBom.value = [] }
+      try { const d = await api.domains.products.listProductBom(pid); productBom.value = d.bom || [] } catch(e) { productBom.value = [] }
     }
     async function addBomItem() {
       if (!bomForm.value.material_id) { showToast('请选择物料', 'error'); return }
       try {
-        await api.addProductBom(currentEditProductId.value, {
+        await api.domains.products.addProductBom(currentEditProductId.value, {
           material_id: bomForm.value.material_id,
           quantity_per_unit: parseFloat(bomForm.value.quantity) || 1,
           process_id: bomForm.value.process_id || null
@@ -361,7 +361,7 @@ const products = ref([])
     }
     async function removeBomItem(bomId) {
       try {
-        await api.deleteProductBom(currentEditProductId.value, bomId)
+        await api.domains.products.deleteProductBom(currentEditProductId.value, bomId)
         await loadProductBom(currentEditProductId.value)
       } catch(e) { showToast(e.message || 'Failed', 'error') }
     }

@@ -11,7 +11,7 @@ export function useProcessConfig() {
   async function loadProcessConfig() {
     processConfigLoading.value = true
     try {
-      const d = await api.getSettings()
+      const d = await api.domains.settings.getSettings()
       const s = d.settings || {}
       Object.assign(processConfig, {
         process_order_mode: s.process_order_mode || 'sequential',
@@ -38,7 +38,7 @@ export function useProcessConfig() {
         approval_enabled: processConfig.approval_enabled,
         auto_order_no: processConfig.auto_order_no,
       }
-      await api.saveSettings(payload)
+      await api.domains.settings.saveSettings(payload)
       showToast('保存成功')
     } catch(e) { showToast(e.message, 'error') }
     finally { processConfigSaving.value = false }

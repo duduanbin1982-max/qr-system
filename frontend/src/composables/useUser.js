@@ -81,9 +81,9 @@ export function useUser() {
       loading.value = true
       try {
         const [userData, posData, procData] = await Promise.all([
-        api.listUsers({ page: page.value, limit: pageSize, keyword: searchKeyword.value, role: 'worker' }),
-          api.listPositions(),
-          api.listProcesses()
+        api.domains.users.listUsers({ page: page.value, limit: pageSize, keyword: searchKeyword.value, role: 'worker' }),
+          api.domains.positions.listPositions(),
+          api.domains.processes.listProcesses()
         ])
       users.value = userData.users || []
       total.value = userData.total || 0
@@ -201,10 +201,10 @@ export function useUser() {
       }
       if (modalEdit.value) {
         delete data.username
-        await api.updateUser(modalId.value, data)
+        await api.domains.users.updateUser(modalId.value, data)
         showToast('更新成功')
       } else {
-        const result = await api.createUser(data)
+        const result = await api.domains.users.createUser(data)
         if (result.password) {
           showModal.value = false
           await load()
@@ -234,7 +234,7 @@ export function useUser() {
   async function del(u) {
     if (!confirm('确定删除员工 "' + u.name + '" 吗？')) return
     try {
-      await api.deleteUser(u.id)
+      await api.domains.users.deleteUser(u.id)
       showToast('删除成功')
       await load()
     } catch(e) {
@@ -246,7 +246,7 @@ export function useUser() {
     if (!confirm('确定彻底删除员工 "' + name + '" 吗？\n\n此操作不可恢复！')) return
     if (!confirm('再次确认：这将从数据库中永久移除该员工')) return
     try {
-      await api.permanentDeleteUser(uid)
+      await api.domains.users.permanentDeleteUser(uid)
       showToast('已彻底删除')
       await load()
     } catch(e) {
@@ -258,7 +258,7 @@ export function useUser() {
     const pw = prompt('请输入新密码（留空则随机生成）：', '')
     if (!pw) return
     try {
-      await api.resetPassword(u.id, { password: pw })
+      await api.domains.users.resetPassword(u.id, { password: pw })
       showToast('密码已重置')
     } catch(e) {
       showToast(e.message || '重置失败', 'error')
@@ -268,7 +268,7 @@ export function useUser() {
   async function unlock(u) {
     if (!confirm('确定解锁账户 "' + u.name + '" 吗？')) return
     try {
-      await api.unlockUser(u.id)
+      await api.domains.users.unlockUser(u.id)
       showToast('账户已解锁')
       await load()
     } catch(e) {

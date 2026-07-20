@@ -217,7 +217,7 @@ export default {
       }
       // Load route pricing steps
       try {
-        const d = await api.getRoutePricingDetail(routeId)
+        const d = await api.domains.pricing.getRoutePricingDetail(routeId)
         routeSteps.value = d.steps || []
         routeStepsByRoute[routeId] = d.steps || []
         loadPriceHistory(routeId)
@@ -244,7 +244,7 @@ export default {
 
     async function loadPriceHistory(routeId) {
       try {
-        const d = await api.getRoutePricingHistory(routeId)
+        const d = await api.domains.pricing.getRoutePricingHistory(routeId)
         priceHistory.value = d.history || []
       } catch (e) { priceHistory.value = [] }
     }
@@ -266,7 +266,7 @@ export default {
         if (!Object.keys(prices).length) { showToast('请至少填写一个工序的单价', 'error'); saving.value = false; return }
         const meta = editMeta[rid] || {}
         const data = { prices, effective_date: meta.effectiveDate, remark: meta.remark }
-        const res = await api.saveRouteLevelPricing(rid, data)
+        const res = await api.domains.pricing.saveRouteLevelPricing(rid, data)
         showToast(res.message || '保存成功')
         priceHistory.value = []
         expandedRoute.value = null
@@ -298,7 +298,7 @@ export default {
       try {
         const params = {}
         if (category && category !== 'all') params.category = category
-        const d = await api.listProcessRoutes(Object.keys(params).length ? params : null)
+        const d = await api.domains.processRoutes.listProcessRoutes(Object.keys(params).length ? params : null)
         allRoutes.value = d.routes || []
       } catch (e) { showToast('加载路线失败: ' + (e.message || '网络错误'), 'error') }
     }

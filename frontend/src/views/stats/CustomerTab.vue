@@ -39,7 +39,7 @@ export default {
         const params = {}
         if (props.start) params.start = props.start
         if (props.end) params.end = props.end
-        const d = await api.customerStats(params)
+        const d = await api.domains.stats.customerStats(params)
         customers.value = d || []
       } catch(e) { showToast(e.message, 'error') }
     }

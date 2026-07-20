@@ -1,5 +1,5 @@
 // ===== QR-System API Layer =====
-// Compatibility facade: existing callers keep importing { api } from '@/lib/api.js'.
+// Domain API facade: callers use api.domains.<domain>.<method>().
 export { request, handleApiError, buildQuery, uploadFile } from './api/client.js'
 import { request } from './api/client.js'
 import { authApi } from './api/auth.js'
@@ -71,31 +71,27 @@ export const apiNamespaces = Object.freeze({
   workTime: workTimeApi,
 })
 
-function mergeApiModules(namespaces) {
-  const merged = {}
+function validateApiModules(namespaces) {
   const owners = new Map()
   const duplicateKeys = []
+  let methodCount = 0
   Object.entries(namespaces).forEach(([namespace, moduleApi]) => {
-    for (const [key, value] of Object.entries(moduleApi)) {
-      if (Object.prototype.hasOwnProperty.call(merged, key)) {
+    for (const key of Object.keys(moduleApi)) {
+      if (owners.has(key)) {
         duplicateKeys.push(`${key} (${owners.get(key)} -> ${namespace})`)
       }
       owners.set(key, namespace)
-      merged[key] = value
+      methodCount += 1
     }
   })
   if (duplicateKeys.length) {
     throw new Error(`Duplicate API facade methods: ${duplicateKeys.join(', ')}`)
   }
-  return merged
+  return methodCount
 }
 
-const compatibilityApi = mergeApiModules(apiNamespaces)
-if (Object.prototype.hasOwnProperty.call(compatibilityApi, 'domains')) {
-  throw new Error('API compatibility method "domains" collides with the namespace root')
-}
+export const apiMethodCount = validateApiModules(apiNamespaces)
 
 export const api = Object.freeze({
-  ...compatibilityApi,
   domains: apiNamespaces,
 })

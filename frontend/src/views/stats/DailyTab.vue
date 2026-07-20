@@ -244,7 +244,7 @@ export default {
       try {
         const params = { date: d, per_page: 5000 }
         if (props.productCode) params.product_code = props.productCode
-        const res = await api.dailyStats(params)
+        const res = await api.domains.stats.dailyStats(params)
         dailyRecords.value = res.records || []
         dailySummary.value = res.summary || []
         dailyGroups.value = (res.employee_groups && res.employee_groups.length) ? res.employee_groups : fallbackGroups(dailyRecords.value)

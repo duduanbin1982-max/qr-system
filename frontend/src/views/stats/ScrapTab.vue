@@ -92,7 +92,7 @@ export default {
         if (props.start) params.start = props.start
         if (props.end) params.end = props.end
         if (props.productCode) params.product_code = props.productCode
-        const d = await api.scrapStats(params)
+        const d = await api.domains.stats.scrapStats(params)
         records.value = d.records || []
         summary.value = d.summary || {}
         byProcess.value = d.by_process || []

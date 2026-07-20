@@ -69,7 +69,7 @@ export default {
     async function load() {
       loading.value = true
       try {
-        const d = await api.workerEfficiency({ start: props.start, end: props.end, product_code: props.productCode}) 
+        const d = await api.domains.stats.workerEfficiency({ start: props.start, end: props.end, product_code: props.productCode})
         const all = d.workers || []
         totalWorkers.value = all.length
         workers.value = all.slice(0, 15)

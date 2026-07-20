@@ -16,7 +16,7 @@ export function useCompanyInfo() {
   async function loadSettings() {
     loading.value = true
     try {
-      const data = await api.getSettings()
+      const data = await api.domains.settings.getSettings()
       settings.value = data.settings || {}
       edits.value = { ...settings.value }
     } catch(e) { showToast(e.message, 'error') }
@@ -31,7 +31,7 @@ export function useCompanyInfo() {
       for (const k of COMPANY_KEYS) {
         if (k in edits.value) payload[k] = edits.value[k]
       }
-      await api.post('/api/settings/company-info', payload)
+      await api.domains.http.post('/api/settings/company-info', payload)
       showToast('保存成功')
       settings.value = { ...edits.value }
     } catch(e) { showToast(e.message, 'error') }

@@ -74,7 +74,7 @@ export default {
         if (props.start) params.start = props.start
         if (props.end) params.end = props.end
         if (props.productCode) params.product_code = props.productCode
-        const d = await api.orderProgress(params)
+        const d = await api.domains.stats.orderProgress(params)
         progressOrders.value = d.orders || []
       } catch (e) { showToast(e.message, 'error') }
     }

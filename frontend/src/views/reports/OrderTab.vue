@@ -35,7 +35,7 @@ export default {
 
     async function load() {
       try {
-        const d = await api.orderAnalysis()
+        const d = await api.domains.stats.orderAnalysis()
         byStatus.value = d.status_distribution || []
         monthly.value = d.monthly_trend || []
         let qty = 0, done = 0

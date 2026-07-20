@@ -196,7 +196,7 @@ export default {
       loading.value = true
       error.value = ''
       try {
-        const d = await api.dashboard()
+        const d = await api.domains.dashboard.dashboard()
         stats.value = d.stats
         security.value = d.security || null
         records.value = d.recent_records || []

@@ -16,11 +16,11 @@ export function usePerformancePageData() {
   const rules = ref({})
 
   async function loadRules() {
-    rules.value = await api.performanceRules()
+    rules.value = await api.domains.performance.performanceRules()
   }
 
   async function loadOverview() {
-    const data = await api.performanceOverview({ year_month: yearMonth.value })
+    const data = await api.domains.performance.performanceOverview({ year_month: yearMonth.value })
     overview.value = data || {}
     if (data?.display_month && data.display_month !== yearMonth.value) {
       yearMonth.value = data.display_month
@@ -28,7 +28,7 @@ export function usePerformancePageData() {
   }
 
   async function loadScoreRows() {
-    const data = await api.performanceScores({
+    const data = await api.domains.performance.performanceScores({
       year_month: yearMonth.value,
       warning_level: warningLevel.value,
       position_id: positionId.value,
@@ -50,23 +50,23 @@ export function usePerformancePageData() {
   }
 
   async function loadPlans() {
-    const data = await api.performancePlans({ year_month: yearMonth.value })
+    const data = await api.domains.performance.performancePlans({ year_month: yearMonth.value })
     plans.value = data.plans || []
   }
 
   async function loadHandoffReviews() {
-    const data = await api.handoffReviews({ year_month: yearMonth.value, per_page: 200 })
+    const data = await api.domains.performance.handoffReviews({ year_month: yearMonth.value, per_page: 200 })
     handoffReviews.value = data.items || []
   }
 
   async function generateScores() {
-    const data = await api.generatePerformance({ year_month: yearMonth.value })
+    const data = await api.domains.performance.generatePerformance({ year_month: yearMonth.value })
     showToast('已生成评分：' + data.generated + ' 人')
     await refreshPerformancePageData()
   }
 
   async function saveReview(selectedScore, reviewForm) {
-    await api.savePerformanceReview({
+    await api.domains.performance.savePerformanceReview({
       user_id: selectedScore.user_id,
       year_month: yearMonth.value,
       ...reviewForm,
@@ -76,7 +76,7 @@ export function usePerformancePageData() {
   }
 
   async function createPlan(selectedScore, planForm) {
-    await api.createPerformancePlan({
+    await api.domains.performance.createPerformancePlan({
       score_id: selectedScore.id,
       user_id: selectedScore.user_id,
       year_month: yearMonth.value,
@@ -88,7 +88,7 @@ export function usePerformancePageData() {
   }
 
   async function closePlan(plan) {
-    await api.updatePerformancePlan(plan.id, {
+    await api.domains.performance.updatePerformancePlan(plan.id, {
       status: 'closed',
       review_result: 'passed',
       review_notes: '已完成复评',
@@ -98,7 +98,7 @@ export function usePerformancePageData() {
   }
 
   async function confirmHandoff(review, status) {
-    await api.updateHandoffReviewStatus(review.id, {
+    await api.domains.performance.updateHandoffReviewStatus(review.id, {
       status,
       confirm_note: status === 'confirmed' ? '主管确认' : '主管驳回',
     })

@@ -6,7 +6,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_api_facade_has_unique_methods_and_namespaces():
+def test_api_facade_has_unique_domain_methods_and_no_flat_calls():
     result = subprocess.run(
         ["node", "frontend/scripts/check-api-facade.mjs"],
         cwd=PROJECT_ROOT,
@@ -17,7 +17,7 @@ def test_api_facade_has_unique_methods_and_namespaces():
 
     assert result.returncode == 0, result.stderr
     assert "namespaces" in result.stdout
-    assert "compatibility methods" in result.stdout
+    assert "unique domain methods" in result.stdout
 
 
 def test_frontend_build_runs_api_facade_gate_first():

@@ -26,7 +26,7 @@ async function loadPermissionCatalog() {
 
 /** Login: credentials → httpOnly cookie (server-side) + user info */
 export async function login(username, password) {
-  const d = await api.login({ username, password })
+  const d = await api.domains.auth.login({ username, password })
   const u = d.user || d
   const mustChange = d.must_change_password === true
   if (!mustChange) {
@@ -43,7 +43,7 @@ export async function login(username, password) {
 
 /** Logout: clear server session + local state */
 export async function logout() {
-  try { await api.logout() } catch (_) { /* best-effort */ }
+  try { await api.domains.auth.logout() } catch (_) { /* best-effort */ }
   resetPageAccessCatalog()
   auth.user = null
   auth.isAdmin = false
@@ -56,7 +56,7 @@ export async function logout() {
 export async function restoreSession() {
   auth.loading = true
   try {
-    const d = await api.authInfo()
+    const d = await api.domains.auth.authInfo()
     if (d && d.user) {
       await loadPermissionCatalog()
       auth.user = d.user
@@ -94,7 +94,7 @@ export async function changePassword(newPassword) {
   if (!newPassword || newPassword.length < 8) {
     throw new Error('新密码至少需要8位')
   }
-  const d = await api.changePassword({ new_password: newPassword })
+  const d = await api.domains.auth.changePassword({ new_password: newPassword })
   if (d.error) throw new Error(d.error)
   await loadPermissionCatalog()
   auth.mustChangePassword = false

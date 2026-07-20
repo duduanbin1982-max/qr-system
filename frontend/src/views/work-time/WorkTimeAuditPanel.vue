@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="audit-quick-bar">
       <button
@@ -113,7 +113,7 @@ async function load() {
   isLoading.value = true
   try {
     const params = { ...auditFilters.value, keyword: props.keyword, limit: 200 }
-    const result = await api.listWorkTimeRecords(params)
+    const result = await api.domains.workTime.listWorkTimeRecords(params)
     records.value = result.items || []
   } finally {
     isLoading.value = false

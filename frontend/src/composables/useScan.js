@@ -9,7 +9,7 @@ export function useScan() {
   async function scanCode(code) {
     loading.value = true
     try {
-      const d = await api.get('/api/mobile/decode/' + encodeURIComponent(code))
+      const d = await api.domains.http.get('/api/mobile/decode/' + encodeURIComponent(code))
       return d
     } catch(e) {
       showToast(e.message || '扫码失败', 'error')

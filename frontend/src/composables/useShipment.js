@@ -85,7 +85,7 @@ export function useShipment() {
       const params = { page: page.value, limit: limit.value }
       if (filterStatus.value) params.status = filterStatus.value
       if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
-      const data = await api.listShipments(params)
+      const data = await api.domains.shipments.listShipments(params)
       shipments.value = data.shipments || []
       total.value = data.total || 0
       pendingCount.value = data.pending_count ?? 0
@@ -99,7 +99,7 @@ export function useShipment() {
 
   async function loadInventory() {
     try {
-      const data = await api.listInventory()
+      const data = await api.domains.inventory.listInventory()
       inventory.value = data.items || []
     } catch (error) {
       showToast('加载库存列表失败', 'warn')
@@ -112,7 +112,7 @@ export function useShipment() {
     modalEdit.value = false
     modalId.value = null
     try {
-      const data = await api.draftShipment()
+      const data = await api.domains.shipments.draftShipment()
       form.value.shipment_no = data.shipment_no
     } catch (error) {
       showToast('自动生成出库单号失败，请手动输入', 'warn')
@@ -212,7 +212,7 @@ export function useShipment() {
     try {
       const data = { ...form.value }
       if (modalEdit.value) {
-        await api.updateShipment(modalId.value, data)
+        await api.domains.shipments.updateShipment(modalId.value, data)
         showToast('更新成功')
       } else {
         data.items = items.value.filter((item) => item.inventory_id)
@@ -221,7 +221,7 @@ export function useShipment() {
           saving.value = false
           return
         }
-        const result = await api.createShipment(data)
+        const result = await api.domains.shipments.createShipment(data)
         if (result.warning) showToast(result.warning, 'warn')
         else showToast('创建成功')
       }
@@ -237,7 +237,7 @@ export function useShipment() {
   async function del(shipment) {
     let impactInfo = ''
     try {
-      const result = await api.shipmentImpact(shipment.id)
+      const result = await api.domains.shipments.shipmentImpact(shipment.id)
       if (result.items > 0) {
         impactInfo = '（含 ' + result.items + ' 个物品，将自动归还库存）'
       }
@@ -246,7 +246,7 @@ export function useShipment() {
     }
     if (!confirm('确定删除出库单 ' + shipment.shipment_no + ' 吗？' + impactInfo)) return
     try {
-      await api.deleteShipment(shipment.id)
+      await api.domains.shipments.deleteShipment(shipment.id)
       showToast('删除成功')
       await load()
     } catch (error) {
@@ -256,7 +256,7 @@ export function useShipment() {
 
   async function viewDetail(shipment) {
     try {
-      const data = await api.getShipment(shipment.id)
+      const data = await api.domains.shipments.getShipment(shipment.id)
       detailShipment.value = data
       showDetail.value = true
     } catch (error) {
@@ -267,7 +267,7 @@ export function useShipment() {
   async function doReceive(shipment) {
     if (!confirm('确认签收 ' + shipment.shipment_no + ' 吗？')) return
     try {
-      await api.receiveShipment(shipment.id, { receiver: '', receive_date: new Date().toISOString().slice(0, 10) })
+      await api.domains.shipments.receiveShipment(shipment.id, { receiver: '', receive_date: new Date().toISOString().slice(0, 10) })
       showToast('已签收')
       await load()
     } catch (error) {
@@ -290,7 +290,7 @@ export function useShipment() {
       return
     }
     try {
-      await api.recordPayment(payTarget.value.id, {
+      await api.domains.shipments.recordPayment(payTarget.value.id, {
         amount: payAmount.value,
         method: payMethod.value,
         remark: payRemark.value,
@@ -306,7 +306,7 @@ export function useShipment() {
   async function doComplete(shipment) {
     if (!confirm('确定完成出库单 ' + shipment.shipment_no + ' ？将扣减库存。')) return
     try {
-      await api.completeShipment(shipment.id)
+      await api.domains.shipments.completeShipment(shipment.id)
       showToast('出库完成')
       await load()
     } catch (error) {

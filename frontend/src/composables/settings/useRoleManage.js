@@ -37,17 +37,17 @@ export function useRoleManage() {
 
   async function loadRoles() {
     roleLoading.value = true
-    try { const d = await api.listRoles(); roles.value = d.roles||[] }
+    try { const d = await api.domains.roles.listRoles(); roles.value = d.roles||[] }
     catch(e) { showToast(e.message,'error') }
     finally { roleLoading.value = false }
   }
   async function loadGroups() {
-    try { const d = await api.listRoleGroups(); groups.value = d.role_groups||[] }
+    try { const d = await api.domains.roles.listRoleGroups(); groups.value = d.role_groups||[] }
     catch(e) { groups.value = [] }
   }
   async function loadPermissions() {
     try {
-      const d = await api.getPermissions()
+      const d = await api.domains.roles.getPermissions()
       allPermissions.value = d.permissions || []
       permissionTree.value = d.mergedTree || d.merged_tree || d.tree || []
       permissionCodes.value = d.codes || collectTreeCodes(permissionTree.value)
@@ -108,8 +108,8 @@ export function useRoleManage() {
     roleForm.permissions = JSON.stringify(wildcardSelected.value ? ['*'] : normalizeRolePermissions(selectedPerms.value))
     try {
       const body = { ...roleForm }; delete body._id
-      if (roleModalEdit.value) await api.updateRole(roleForm._id, body)
-      else await api.createRole(body)
+      if (roleModalEdit.value) await api.domains.roles.updateRole(roleForm._id, body)
+      else await api.domains.roles.createRole(body)
       showToast(roleModalEdit.value?'更新成功':'创建成功')
       showRoleModal.value = false
       loadRoles()
@@ -117,7 +117,7 @@ export function useRoleManage() {
   }
   async function deleteRole(rid) {
     if (!confirm('确定删除该角色？')) return
-    try { await api.deleteRole(rid); showToast('删除成功'); loadRoles() }
+    try { await api.domains.roles.deleteRole(rid); showToast('删除成功'); loadRoles() }
     catch(e) { showToast(e.message,'error') }
   }
 

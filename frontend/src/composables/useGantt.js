@@ -229,7 +229,7 @@ export function useGantt() {
         const newEnd = new Date(order.plan_start)
         newEnd.setDate(newEnd.getDate() + days - 1)
         const endStr = newEnd.toISOString().slice(0, 10)
-        await api.updateScheduleOrder(order.id, { plan_start: order.plan_start, plan_end: endStr })
+        await api.domains.production.updateScheduleOrder(order.id, { plan_start: order.plan_start, plan_end: endStr })
         order.plan_end = endStr
         showToast('工期已调整为 ' + days + ' 天')
       } else if (_dragResizeEdge === 'left') {
@@ -237,7 +237,7 @@ export function useGantt() {
         const newStart = new Date(minDate)
         newStart.setDate(newStart.getDate() + daysOffset)
         const startStr = newStart.toISOString().slice(0, 10)
-        await api.updateScheduleOrder(order.id, { plan_start: startStr, plan_end: order.plan_end })
+        await api.domains.production.updateScheduleOrder(order.id, { plan_start: startStr, plan_end: order.plan_end })
         order.plan_start = startStr
         showToast('开始日期已调整')
       }
@@ -260,7 +260,7 @@ export function useGantt() {
   async function saveEditDates() {
     if (!dragTarget.value) return
     try {
-      await api.updateScheduleOrder(dragTarget.value.id, {
+      await api.domains.production.updateScheduleOrder(dragTarget.value.id, {
         plan_start: editForm.value.plan_start,
         plan_end: editForm.value.plan_end,
         production_line_id: editForm.value.production_line_id || null
@@ -294,19 +294,19 @@ export function useGantt() {
   const lineForm = ref({ name: '', remark: '', capacity_per_day: 10 })
 
   async function loadLines() {
-    try { const d = await api.listProductionLines(); productionLines.value = d.lines || d || [] }
+    try { const d = await api.domains.production.listProductionLines(); productionLines.value = d.lines || d || [] }
     catch (e) { console.warn('Production lines load failed:', e); productionLines.value = [] }
   }
 
   async function addLine() {
     if (!lineForm.value.name.trim()) { showToast('产线名称必填', 'error'); return }
-    try { await api.createProductionLine(lineForm.value); showToast('产线已添加'); lineForm.value = { name: '', remark: '', capacity_per_day: 10 }; await loadLines() }
+    try { await api.domains.production.createProductionLine(lineForm.value); showToast('产线已添加'); lineForm.value = { name: '', remark: '', capacity_per_day: 10 }; await loadLines() }
     catch (e) { showToast(e.message || '添加失败', 'error') }
   }
 
   async function delLine(line) {
     if (!confirm('确定删除产线「' + line.name + '」？')) return
-    try { await api.deleteProductionLine(line.id); showToast('已删除'); await loadLines() }
+    try { await api.domains.production.deleteProductionLine(line.id); showToast('已删除'); await loadLines() }
     catch (e) { showToast(e.message || '删除失败', 'error') }
   }
 
@@ -336,7 +336,7 @@ export function useGantt() {
     if (!orderIds.length) { showToast('请先选择未完成订单', 'warning'); return }
     const days = batchDays.value * (direction === 'right' ? 1 : -1)
     try {
-      const r = await api.batchShiftSchedule({ order_ids: orderIds, days })
+      const r = await api.domains.production.batchShiftSchedule({ order_ids: orderIds, days })
       showToast(r.message || ('已偏移 ' + r.count + ' 个订单'))
       selectedOrderIds.value = []
       allSelected.value = false
@@ -348,7 +348,7 @@ export function useGantt() {
   async function load() {
     loading.value = true
     try {
-      const r = await api.getScheduleGantt({ status: scheduleScope.value })
+      const r = await api.domains.production.getScheduleGantt({ status: scheduleScope.value })
       if (r.ok !== false) { orders.value = r.orders || []; dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' } }
     } catch (e) { showToast('加载排程失败', 'error') }
     finally { loading.value = false }
@@ -374,7 +374,7 @@ export function useGantt() {
     const days = big ? 7 : 1
     const shiftVal = days * dir
     try {
-      const r = await api.batchShiftSchedule({ order_ids: orderIds, days: shiftVal })
+      const r = await api.domains.production.batchShiftSchedule({ order_ids: orderIds, days: shiftVal })
       showToast(r.message || ('Shifted ' + (r.count || 0) + ' orders'))
       selectedOrderIds.value = []
       await load()

@@ -41,7 +41,7 @@ function close() {
 
 async function saveReview() {
   try {
-    await api.reviewWorkTimeRecord(reviewForm.value.id, { ...reviewForm.value })
+    await api.domains.workTime.reviewWorkTimeRecord(reviewForm.value.id, { ...reviewForm.value })
     showToast('审核已保存')
     close()
     emit('saved')

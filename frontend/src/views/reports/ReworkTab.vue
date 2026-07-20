@@ -78,7 +78,7 @@ export default {
 
     async function loadTrend() {
       try {
-        const d = await api.reworkTrend({ period: period.value, months: 6 })
+        const d = await api.domains.rework.reworkTrend({ period: period.value, months: 6 })
         trendData.value = d.data || []
         await nextTick()
         renderTrendChart()
@@ -87,7 +87,7 @@ export default {
 
     async function loadProcesses() {
       try {
-        const d = await api.reworkTopProcesses({ n: 6 })
+        const d = await api.domains.rework.reworkTopProcesses({ n: 6 })
         processData.value = d.data || []
         await nextTick()
         renderProcessChart()
@@ -96,7 +96,7 @@ export default {
 
     async function loadWorkers() {
       try {
-        const d = await api.reworkWorkerStats()
+        const d = await api.domains.rework.reworkWorkerStats()
         workerData.value = d.data || []
       } catch (e) { /* silent */ }
     }

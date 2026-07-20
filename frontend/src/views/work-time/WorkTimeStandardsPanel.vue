@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="standard-filter-bar">
       <div class="standard-scope-buttons" aria-label="标准工时筛选">
@@ -319,7 +319,7 @@ async function load() {
       keyword: props.keyword,
       limit: 200,
     }
-    const result = await api.listWorkTimeStandardRoutes(params)
+    const result = await api.domains.workTime.listWorkTimeStandardRoutes(params)
     const nextGroups = result.route_groups || []
     standards.value = result.items || []
     allStandardGroups.value = nextGroups
@@ -401,7 +401,7 @@ async function saveStandard() {
       return
     }
     isSaving.value = true
-    await api.saveRouteWorkTimeStandards(buildSavePayload(routeId, standardForm.value.effective_from || today()))
+    await api.domains.workTime.saveRouteWorkTimeStandards(buildSavePayload(routeId, standardForm.value.effective_from || today()))
     showToast('路线标准工时已保存')
     showStandardModal.value = false
     await load()
@@ -416,7 +416,7 @@ async function saveStandard() {
 async function deactivateStandard(row) {
   if (!confirm('确定停用该标准工时吗？')) return
   try {
-    await api.deleteWorkTimeStandard(row.id)
+    await api.domains.workTime.deleteWorkTimeStandard(row.id)
     showToast('标准工时已停用')
     await load()
     emit('changed')

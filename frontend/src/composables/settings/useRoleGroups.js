@@ -38,13 +38,13 @@ export function useRoleGroups() {
 
   async function loadGroups() {
     groupLoading.value = true
-    try { const d = await api.get('/api/role-groups'); groups.value = d.role_groups||[] }
+    try { const d = await api.domains.http.get('/api/role-groups'); groups.value = d.role_groups||[] }
     catch(e) { showToast(e.message,'error') }
     finally { groupLoading.value = false }
   }
 
   async function loadRoles() {
-    try { const d = await api.get('/api/roles'); roles.value = d.roles||[] }
+    try { const d = await api.domains.http.get('/api/roles'); roles.value = d.roles||[] }
     catch(e) { roles.value = [] }
   }
 
@@ -67,8 +67,8 @@ export function useRoleGroups() {
     if (!groupForm.name) { showToast('角色组名称不能为空','error'); return }
     try {
       const body = { name:groupForm.name, description:groupForm.description, parent_id:groupForm.parent_id, status:groupForm.status }
-      if (groupModalEdit.value) await api.updateRoleGroup(groupForm._id, body)
-      else await api.createRoleGroup(body)
+      if (groupModalEdit.value) await api.domains.roles.updateRoleGroup(groupForm._id, body)
+      else await api.domains.roles.createRoleGroup(body)
       showToast(groupModalEdit.value?'更新成功':'创建成功')
       showGroupModal.value = false
       loadGroups()
@@ -77,7 +77,7 @@ export function useRoleGroups() {
 
   async function deleteGroup(gid) {
     if (!confirm('确定删除该角色组？')) return
-    try { await api.deleteRoleGroup(gid); showToast('删除成功'); loadGroups() }
+    try { await api.domains.roles.deleteRoleGroup(gid); showToast('删除成功'); loadGroups() }
     catch(e) { showToast(e.message,'error') }
   }
 

@@ -51,7 +51,7 @@ export function useInventory() {
 
   async function loadStats() {
     try {
-      const data = await api.inventoryStats()
+      const data = await api.domains.inventory.inventoryStats()
       Object.assign(stats.value, data)
     } catch (error) {
       // noop
@@ -65,7 +65,7 @@ export function useInventory() {
       if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
       if (lowStockOnly.value) params.low_stock = '1'
       if (locationFilter.value) params.location = locationFilter.value
-      const data = await api.listInventory(Object.keys(params).length ? params : null)
+      const data = await api.domains.inventory.listInventory(Object.keys(params).length ? params : null)
       items.value = data.items || []
     } catch (error) {
       showToast(error.message || '加载失败', 'error')
@@ -80,7 +80,7 @@ export function useInventory() {
 
   async function doABC() {
     try {
-      await api.classifyABC()
+      await api.domains.inventory.classifyABC()
       showToast('ABC 分类完成')
       await load()
     } catch (error) {
@@ -92,7 +92,7 @@ export function useInventory() {
     showTurnover.value = true
     turnoverLoading.value = true
     try {
-      const data = await api.inventoryTurnover()
+      const data = await api.domains.inventory.inventoryTurnover()
       turnoverData.value = data.data || []
     } catch (error) {
       showToast('加载周转数据失败', 'error')
@@ -104,7 +104,7 @@ export function useInventory() {
   async function doCount() {
     if (!confirm('确定创建盘点任务吗？')) return
     try {
-      await api.createCountTask()
+      await api.domains.inventory.createCountTask()
       showToast('盘点任务已创建')
     } catch (error) {
       showToast(error.message || '创建失败', 'error')
@@ -113,7 +113,7 @@ export function useInventory() {
 
   async function loadLocations() {
     try {
-      const data = await api.listLocations()
+      const data = await api.domains.inventory.listLocations()
       locations.value = data.locations || []
     } catch (error) {
       // noop
@@ -125,7 +125,7 @@ export function useInventory() {
     logsLoading.value = true
     try {
       const params = inventoryId ? { inventory_id: inventoryId } : {}
-      const data = await api.inventoryLogs(params)
+      const data = await api.domains.inventory.inventoryLogs(params)
       logs.value = data.logs || []
     } catch (error) {
       showToast(error.message || '加载流水失败', 'error')
@@ -174,10 +174,10 @@ export function useInventory() {
     }
     try {
       if (modalEdit.value) {
-        await api.updateInventory(modalId.value, form.value)
+        await api.domains.inventory.updateInventory(modalId.value, form.value)
         showToast('更新成功')
       } else {
-        await api.createInventory(form.value)
+        await api.domains.inventory.createInventory(form.value)
         showToast('创建成功')
       }
       showModal.value = false
@@ -191,7 +191,7 @@ export function useInventory() {
   async function del(item) {
     let impactInfo = ''
     try {
-      const result = await api.inventoryImpact(item.id)
+      const result = await api.domains.inventory.inventoryImpact(item.id)
       if (result.log_count > 0) {
         impactInfo = '（将同步删除 ' + result.log_count + ' 条流水记录）'
       }
@@ -200,7 +200,7 @@ export function useInventory() {
     }
     if (!confirm('确定删除库存 "' + item.product_model + '" 吗？' + impactInfo)) return
     try {
-      await api.deleteInventory(item.id)
+      await api.domains.inventory.deleteInventory(item.id)
       showToast('删除成功')
       await load()
       await loadStats()
@@ -230,10 +230,10 @@ export function useInventory() {
           const order = orderOptions.value.find((item) => item.id == moveOrderId.value)
           if (order) payload.order_no = order.order_no
         }
-        await api.stockIn(payload)
+        await api.domains.inventory.stockIn(payload)
         showToast('入库成功 +' + quantity)
       } else {
-        await api.stockOut({ inventory_id: moveTarget.value.id, quantity, remark: '手动出库' })
+        await api.domains.inventory.stockOut({ inventory_id: moveTarget.value.id, quantity, remark: '手动出库' })
         showToast('出库成功 -' + quantity)
       }
       showMoveModal.value = false
@@ -247,7 +247,7 @@ export function useInventory() {
 
   async function loadOrders() {
     try {
-      const data = await api.listOrders({ limit: 999 })
+      const data = await api.domains.orders.listOrders({ limit: 999 })
       orderOptions.value = data.orders || []
     } catch (error) {
       // noop

@@ -208,7 +208,7 @@ export default {
         const params = {}
         if (kw) params.keyword = kw
         if (tg) params.tag = tg
-        const d = await api.listCustomers(Object.keys(params).length ? params : null)
+        const d = await api.domains.customers.listCustomers(Object.keys(params).length ? params : null)
         customers.value = d.customers || []
       } catch(e) { showToast(e.message || "加载失败", "error") }
       finally { loading.value = false }
@@ -225,20 +225,20 @@ export default {
     async function save() {
       if (!form.value.name || !form.value.name.trim()) { showToast("请输入客户名称", "error"); return }
       try {
-        if (modalEdit.value) { await api.updateCustomer(modalId.value, form.value); showToast("更新成功") }
-        else { await api.createCustomer(form.value); showToast("创建成功") }
+        if (modalEdit.value) { await api.domains.customers.updateCustomer(modalId.value, form.value); showToast("更新成功") }
+        else { await api.domains.customers.createCustomer(form.value); showToast("创建成功") }
         showModal.value = false; await load()
       } catch(e) { showToast(e.message || "保存失败", "error") }
     }
     async function del(c) {
       deleteCheck.value = c; deleteCheckOrders.value = []
       try {
-        const d = await api.customerOrders(c.id)
+        const d = await api.domains.customers.customerOrders(c.id)
         const active = (d.orders || []).filter(o => o.deleted_at === null || o.deleted_at === undefined)
         if (active.length > 0) { deleteCheckOrders.value = active; showDeleteBlock.value = true; return }
       } catch(e) { showToast("无法检查订单关联，跳过预检", "warning") }
       if (!confirm("确定删除客户 \"" + c.name + "\" 吗？")) return
-      try { await api.deleteCustomer(c.id); showToast("删除成功"); await load() }
+      try { await api.domains.customers.deleteCustomer(c.id); showToast("删除成功"); await load() }
       catch(e) { showToast(e.message || "删除失败", "error") }
     }
     async function viewDetail(c) {
@@ -247,7 +247,7 @@ export default {
     }
     async function loadDetailOrders(cid) {
       try {
-        const d = await api.get('/api/customers/' + cid + '/orders?page=' + detailPage.value + '&limit=' + detailPageSize)
+        const d = await api.domains.http.get('/api/customers/' + cid + '/orders?page=' + detailPage.value + '&limit=' + detailPageSize)
         detailOrders.value = d.orders || []
       } catch(e) { detailOrders.value = [] }
     }

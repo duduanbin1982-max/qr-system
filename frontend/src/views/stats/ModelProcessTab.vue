@@ -37,7 +37,7 @@ export default {
     const processList = ref([]); const productList = ref([])
     const loading = ref(false); const updateTime = ref('')
     const load = createLoader(loading, updateTime, async () => {
-      const d = await api.productProcessStats(buildParams(props.start, props.end, ''))
+      const d = await api.domains.stats.productProcessStats(buildParams(props.start, props.end, ''))
       const procNames = d.processes || []
       processList.value = procNames.map((name, i) => ({ id: i, name }))
       productList.value = (d.products || []).map(p => ({

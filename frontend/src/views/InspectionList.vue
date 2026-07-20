@@ -70,13 +70,13 @@ export default {
         const params = {}
         if (keyword.value) params.keyword = keyword.value
         if (filterResult.value) params.result = filterResult.value
-        const d = await api.listInspections(params)
+        const d = await api.domains.quality.listInspections(params)
         items.value = d.items || []
       } catch(e) { console.warn('Inspections load failed:', e); items.value = [] }
     }
 
     async function loadStats() {
-      try { stats.value = await api.inspectionStats() } catch(e) { /* silent: stats are non-critical */ }
+      try { stats.value = await api.domains.quality.inspectionStats() } catch(e) { /* silent: stats are non-critical */ }
     }
 
     function exportExcel() {
@@ -101,7 +101,7 @@ export default {
 
         async function del(r) {
       if (!confirm('确定删除抽检记录吗？')) return
-      try { await api.deleteInspection(r.id); showToast('删除成功'); await load(); await loadStats() }
+      try { await api.domains.quality.deleteInspection(r.id); showToast('删除成功'); await load(); await loadStats() }
       catch(e) { showToast(e.message || '删除失败','error') }
     }
 

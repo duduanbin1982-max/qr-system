@@ -47,7 +47,7 @@ async function loadData() {
   _loadingData = true
   try {
     const params = boardCategory.value ? { category: boardCategory.value } : {}
-    const data = await api.board(params)
+    const data = await api.domains.dashboard.board(params)
     stats.value = data.stats || {}
     today.value = data.today || {}
     orders.value = data.orders || []

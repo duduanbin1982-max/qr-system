@@ -83,7 +83,7 @@ export default {
 
     async function load() {
       try {
-        const kpiData = await api.dashboardKpi()
+        const kpiData = await api.domains.stats.dashboardKpi()
         kpi.value = kpiData
         const trend = kpiData.weekly_trend || []
         trendDates.value = trend.map(r => r.date)

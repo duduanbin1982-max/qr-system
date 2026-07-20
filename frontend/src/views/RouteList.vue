@@ -206,7 +206,7 @@ export default {
         if (searchKeyword.value.trim()) params.search = searchKeyword.value.trim()
         params.limit = pageSize.value
         params.offset = (page.value - 1) * pageSize.value
-        const d = await api.listProcessRoutes(params)
+        const d = await api.domains.processRoutes.listProcessRoutes(params)
         routes.value = d.routes || []
         total.value = d.total || 0
       } catch(e) {
@@ -223,7 +223,7 @@ export default {
     })
 
     async function loadProcesses() {
-      try { const d = await api.listProcesses(); allProcesses.value = d.processes || [] } catch(e) { showToast('加载工序列表失败', 'warn') }
+      try { const d = await api.domains.processes.listProcesses(); allProcesses.value = d.processes || [] } catch(e) { showToast('加载工序列表失败', 'warn') }
     }
 
     function toggleExpand(id) { expandedId.value = expandedId.value === id ? null : id }
@@ -267,10 +267,10 @@ export default {
           processes: routeProcesses.value.filter(p => p.process_id !== '')
         }
         if (modalEdit.value) {
-          await api.updateProcessRoute(modalId.value, data)
+          await api.domains.processRoutes.updateProcessRoute(modalId.value, data)
           showToast('更新成功')
         } else {
-          await api.createProcessRoute(data)
+          await api.domains.processRoutes.createProcessRoute(data)
           showToast('创建成功')
         }
         showModal.value = false
@@ -283,7 +283,7 @@ export default {
     async function del(r) {
       let impactMsg = ''
       try {
-        const res = await api.getRouteImpact(r.id)
+        const res = await api.domains.processRoutes.getRouteImpact(r.id)
         if (res.used_orders > 0) {
           impactMsg = '\n\n' + res.used_orders + ' 个订单正在使用此路线'
         }
@@ -291,7 +291,7 @@ export default {
         showToast(e.message || '检查路线使用情况失败，将继续删除确认', 'warn')
       }
       if (!confirm('确定删除路线 "' + r.name + '" 吗？' + impactMsg + '\n此操作不可恢复！')) return
-      try { await api.deleteProcessRoute(r.id); showToast('删除成功'); await load() }
+      try { await api.domains.processRoutes.deleteProcessRoute(r.id); showToast('删除成功'); await load() }
       catch(e) { showToast(e.message || '删除失败', 'error') }
     }
 

@@ -116,7 +116,7 @@ export default {
 
     async function loadProducts() {
       try {
-        const d = await api.listProducts({})
+        const d = await api.domains.products.listProducts({})
         productOptions.value = (d.products||[]).map(p => ({code:p.product_code, label:p.product_name+' '+p.model}))
       } catch(e) {
         showToast('加载产品列表失败', 'warning')

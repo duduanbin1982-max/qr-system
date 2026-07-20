@@ -83,20 +83,20 @@ const showReviewModal = ref(false)
 const reviewRecord = ref(null)
 
 async function loadStats() {
-  try { stats.value = await api.workTimeStats() } catch (error) { stats.value = {} }
+  try { stats.value = await api.domains.workTime.workTimeStats() } catch (error) { stats.value = {} }
 }
 
 async function loadRefs() {
   try {
-    const result = await api.listProcessRoutes({ limit: 500 })
+    const result = await api.domains.processRoutes.listProcessRoutes({ limit: 500 })
     processRoutes.value = result.routes || result.items || []
   } catch (error) { processRoutes.value = [] }
   try {
-    const result = await api.listProcesses({ limit: 500 })
+    const result = await api.domains.processes.listProcesses({ limit: 500 })
     processes.value = result.processes || result.items || []
   } catch (error) { processes.value = [] }
   try {
-    const result = await api.listUsers({ limit: 200, status: 'active' })
+    const result = await api.domains.users.listUsers({ limit: 200, status: 'active' })
     users.value = result.users || result.items || []
   } catch (error) { users.value = [] }
 }

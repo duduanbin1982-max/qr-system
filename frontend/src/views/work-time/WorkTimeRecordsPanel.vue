@@ -202,7 +202,7 @@ async function checkStandardMatch() {
   if (!recordForm.value.route_id || !recordForm.value.process_id) return
   standardChecking.value = true
   try {
-    const result = await api.listWorkTimeStandards({
+    const result = await api.domains.workTime.listWorkTimeStandards({
       route_id: recordForm.value.route_id,
       process_id: recordForm.value.process_id,
       status: 'active',
@@ -222,7 +222,7 @@ async function load() {
   isLoading.value = true
   try {
     const params = { ...recordFilters.value, keyword: props.keyword, limit: 200 }
-    const result = await api.listWorkTimeRecords(params)
+    const result = await api.domains.workTime.listWorkTimeRecords(params)
     records.value = result.items || []
   } finally {
     isLoading.value = false
@@ -237,7 +237,7 @@ function clearRecordFilters() {
 async function searchOrders() {
   isSearchingOrders.value = true
   try {
-    const result = await api.listOrders({ keyword: orderKeyword.value, limit: 50, archive: 'all' })
+    const result = await api.domains.orders.listOrders({ keyword: orderKeyword.value, limit: 50, archive: 'all' })
     orderOptions.value = result.orders || result.items || []
     if (!orderOptions.value.length) showToast('未找到匹配订单', 'warning')
   } catch (error) {
@@ -304,7 +304,7 @@ async function openRecord() {
 async function saveRecord() {
   try {
     isSaving.value = true
-    await api.createWorkTimeRecord({ ...recordForm.value })
+    await api.domains.workTime.createWorkTimeRecord({ ...recordForm.value })
     showToast('工时流水已保存')
     showRecordModal.value = false
     await load()

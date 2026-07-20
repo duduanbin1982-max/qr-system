@@ -58,7 +58,7 @@ export function useAdminUsers() {
   async function loadAllUsers() {
     adminLoading.value = true
     try {
-      const data = await api.listUsers({ role_not: 'worker', limit: 500 })
+      const data = await api.domains.users.listUsers({ role_not: 'worker', limit: 500 })
       allUsers.value = data.users || []
     } catch (error) {
       showToast(error.message, 'error')
@@ -69,7 +69,7 @@ export function useAdminUsers() {
 
   async function loadRoleGroups() {
     try {
-      const data = await api.get('/api/role-groups')
+      const data = await api.domains.http.get('/api/role-groups')
       roleGroups.value = data.role_groups || []
     } catch (error) {
       console.warn('加载角色组失败', error.message || error)
@@ -78,7 +78,7 @@ export function useAdminUsers() {
 
   async function loadAllRoles() {
     try {
-      const data = await api.get('/api/roles')
+      const data = await api.domains.http.get('/api/roles')
       allRoles.value = data.roles || []
     } catch (error) {
       allRoles.value = []
@@ -135,7 +135,7 @@ export function useAdminUsers() {
 
   async function loadUserRoles(uid) {
     try {
-      const data = await api.get('/api/users/' + uid + '/roles')
+      const data = await api.domains.http.get('/api/users/' + uid + '/roles')
       userRoleIds.value = (data.roles || []).map(role => role.id)
     } catch (error) {
       userRoleIds.value = []
@@ -154,7 +154,7 @@ export function useAdminUsers() {
       return
     }
     try {
-      await api.put('/api/users/' + uid + '/roles', { role_ids: [...userRoleIds.value] })
+      await api.domains.http.put('/api/users/' + uid + '/roles', { role_ids: [...userRoleIds.value] })
       showToast('角色保存成功')
     } catch (error) {
       showToast(error.message, 'error')
@@ -183,9 +183,9 @@ export function useAdminUsers() {
 
       let userId = adminForm._id
       if (adminModalEdit.value) {
-        await api.updateUser(userId, body)
+        await api.domains.users.updateUser(userId, body)
       } else {
-        const result = await api.createUser(body)
+        const result = await api.domains.users.createUser(body)
         userId = result.id
       }
 
@@ -204,7 +204,7 @@ export function useAdminUsers() {
   async function deleteAdminUser(uid) {
     if (!confirm('确定删除该管理员？')) return
     try {
-      await api.deleteUser(uid)
+      await api.domains.users.deleteUser(uid)
       showToast('删除成功')
       loadAllUsers()
     } catch (error) {
@@ -215,7 +215,7 @@ export function useAdminUsers() {
   async function restoreAdminUser(uid) {
     if (!confirm('确定恢复该管理员？')) return
     try {
-      await api.restoreUser(uid)
+      await api.domains.users.restoreUser(uid)
       showToast('恢复成功')
       loadAllUsers()
     } catch (error) {
@@ -226,7 +226,7 @@ export function useAdminUsers() {
   async function permanentDeleteAdminUser(uid) {
     if (!confirm('彻底删除将无法恢复，确定继续？')) return
     try {
-      await api.permanentDeleteUser(uid)
+      await api.domains.users.permanentDeleteUser(uid)
       showToast('已彻底删除')
       loadAllUsers()
     } catch (error) {
@@ -241,7 +241,7 @@ export function useAdminUsers() {
     }
     if (!confirm('确定删除选中的 ' + selectedAdmins.value.length + ' 个管理员？')) return
     try {
-      await api.post('/api/users/batch-delete', { ids: [...selectedAdmins.value] })
+      await api.domains.http.post('/api/users/batch-delete', { ids: [...selectedAdmins.value] })
       showToast('已删除 ' + selectedAdmins.value.length + ' 个管理员')
       selectedAdmins.value = []
       loadAllUsers()

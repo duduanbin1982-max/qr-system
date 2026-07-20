@@ -13,12 +13,12 @@ export function usePositions() {
 
   async function loadPositions() {
     positionLoading.value = true
-    try { const d = await api.listPositions(); positions.value = d.positions||[] }
+    try { const d = await api.domains.positions.listPositions(); positions.value = d.positions||[] }
     catch(e) { showToast(e.message,'error') }
     finally { positionLoading.value = false }
   }
   async function loadAllProcesses() {
-    try { const d = await api.get('/api/processes?limit=500'); allProcesses.value = d.processes||[] }
+    try { const d = await api.domains.http.get('/api/processes?limit=500'); allProcesses.value = d.processes||[] }
     catch(e) { allProcesses.value = [] }
   }
   function openAddPosition() {
@@ -36,8 +36,8 @@ export function usePositions() {
     if (!positionForm.name) { showToast('岗位名称不能为空','error'); return }
     try {
       const body = { name:positionForm.name, description:positionForm.description, status:positionForm.status, process_ids:positionForm.process_ids }
-      if (positionModalEdit.value) await api.updatePosition(positionForm._id, body)
-      else await api.createPosition(body)
+      if (positionModalEdit.value) await api.domains.positions.updatePosition(positionForm._id, body)
+      else await api.domains.positions.createPosition(body)
       showToast(positionModalEdit.value?'更新成功':'创建成功')
       showPositionModal.value = false
       loadPositions()
@@ -46,7 +46,7 @@ export function usePositions() {
   async function deletePosition(pid) {
     let impactMsg = ''
     try {
-      const res = await api.get('/api/positions/' + pid + '/impact')
+      const res = await api.domains.http.get('/api/positions/' + pid + '/impact')
       if (res.users > 0) {
         impactMsg = '\n\n' + res.users + ' 个员工正在使用此岗位，无法删除'
         showToast(impactMsg.trim(), 'warn')
@@ -56,7 +56,7 @@ export function usePositions() {
       showToast(e.message || '检查岗位使用情况失败，将继续删除确认', 'warn')
     }
     if (!confirm('确定删除该岗位？')) return
-    try { await api.deletePosition(pid); showToast('删除成功'); loadPositions() }
+    try { await api.domains.positions.deletePosition(pid); showToast('删除成功'); loadPositions() }
     catch(e) { showToast(e.message,'error') }
   }
   function toggleProcessInPosition(pid) {

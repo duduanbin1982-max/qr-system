@@ -63,7 +63,7 @@ export default {
         if (props.start) params.start = props.start
         if (props.end) params.end = props.end
         if (props.productCode) params.product_code = props.productCode
-        const d = await api.workerStats(params)
+        const d = await api.domains.stats.workerStats(params)
         workers.value = d.workers || []
       } catch (e) { showToast(e.message, 'error') }
     }
@@ -81,7 +81,7 @@ export default {
         const params = { user_id: uid }
         if (props.start) params.start = props.start
         if (props.end) params.end = props.end
-        const d = await api.workerDetail(params)
+        const d = await api.domains.stats.workerDetail(params)
         detailRows.value = d.rows || []
       } catch (e) { showToast(e.message, 'error') }
       loadingDetail.value = null

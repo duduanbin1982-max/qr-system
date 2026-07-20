@@ -223,7 +223,7 @@ export default {
     async function load() {
       loading.value = true
       try {
-        const d = await api.pendingApprovals()
+        const d = await api.domains.approvals.pendingApprovals()
         approvals.value = d.approvals || []
       } catch(e) { showToast(e.message || '加载失败', 'error') }
       finally { loading.value = false }
@@ -232,7 +232,7 @@ export default {
     async function loadHistory() {
       historyLoading.value = true
       try {
-        const d = await api.approvalHistory({ page: historyPage.value })
+        const d = await api.domains.approvals.approvalHistory({ page: historyPage.value })
         history.value = d.approvals || []
         historyTotal.value = d.total || 0
       } catch(e) { showToast(e.message || '加载失败', 'error') }
@@ -258,7 +258,7 @@ export default {
       const label = action === 'approve' ? '通过' : '拒绝'
       if (!confirm('确定批量' + label + ' ' + selectedIds.value.length + ' 条审批？')) return
       try {
-        const result = await api.batchApproval(selectedIds.value, action)
+        const result = await api.domains.approvals.batchApproval(selectedIds.value, action)
         if (result.failed && result.failed.length > 0) {
           showToast(result.message + '，' + result.failed.length + ' 条失败', 'warning')
         } else {
@@ -278,14 +278,14 @@ export default {
 
     async function loadStats() {
       try {
-        const d = await api.approvalStats()
+        const d = await api.domains.approvals.approvalStats()
         stats.value = d
       } catch(e) { console.warn('Approval stats load failed:', e) }
     }
 
     async function loadConfig() {
       try {
-        const d = await api.approvalConfig()
+        const d = await api.domains.approvals.approvalConfig()
         configProcesses.value = d.configs || []
       } catch(e) { showToast('加载配置失败', 'error') }
     }
@@ -293,7 +293,7 @@ export default {
     async function saveConfig(p) {
       try {
         const level = p.approver_role_3 ? 3 : (p.approver_role_2 ? 2 : 1)
-        await api.saveApprovalConfig({
+        await api.domains.approvals.saveApprovalConfig({
           process_id: p.process_id || p.id,
           require_approval: p.require_approval,
           approver_role: p.approver_role || 'admin',
@@ -309,7 +309,7 @@ export default {
       processing.value[id] = true
       try {
         const comment = action === 'reject' ? (rejectComment.value[id] || '') : ''
-        await api.handleApproval(id, action, comment)
+        await api.domains.approvals.handleApproval(id, action, comment)
         showToast(action === 'approve' ? '已批准' : '已拒绝')
         delete rejectComment.value[id]
         await load()

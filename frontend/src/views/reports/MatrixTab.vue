@@ -37,7 +37,7 @@ export default {
     const matrixProcesses = ref([]); const matrixProducts = ref([])
     const loading = ref(false); const updateTime = ref('')
     const load = createLoader(loading, updateTime, async () => {
-      const d = await api.productProcessMatrix(buildParams(props.start, props.end, props.productCode))
+      const d = await api.domains.stats.productProcessMatrix(buildParams(props.start, props.end, props.productCode))
       matrixProcesses.value = d.processes || []; matrixProducts.value = d.products || []
     })
     const exportMatrix = () => {

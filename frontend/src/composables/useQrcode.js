@@ -25,7 +25,7 @@ export function useQrcode() {
     qrPrintLoading.value = true
     qrCodes.value = []
     try {
-      const d = await api.qrcodeBatch({
+      const d = await api.domains.qrcode.qrcodeBatch({
         order_ids: [qrPrintOrder.value.id],
         mode: qrMode.value
       })
