@@ -12,6 +12,7 @@ from modules.order_focus_config import (
     COMPLETION_FOCUS_TAIL_PCT_KEY,
 )
 from modules.permission_catalog import infer_page_permissions
+from modules.shipment_config import DEFAULT_SHIPMENT_NO_PREFIX, SHIPMENT_NO_PREFIX_KEY
 def m001_baseline(db):
     """Full initial schema + all subsequent migrations as one atomic step."""
     db.execute("PRAGMA foreign_keys=OFF")
@@ -800,7 +801,8 @@ def m001_baseline(db):
     # 系统设置默认种子数据
     default_settings = {
         'company_name': '', 'contact': '', 'phone': '', 'address': '', 'description': '',
-        'default_password': '123456', 'approval_enabled': '1', 'auto_order_no': '', 'page_size': '20',
+        'default_password': '123456', 'approval_enabled': '1', 'auto_order_no': '',
+        SHIPMENT_NO_PREFIX_KEY: DEFAULT_SHIPMENT_NO_PREFIX, 'page_size': '20',
         COMPLETION_FOCUS_MODE_KEY: COMPLETION_FOCUS_DEFAULT_SETTINGS[COMPLETION_FOCUS_MODE_KEY],
         COMPLETION_FOCUS_TAIL_PCT_KEY: COMPLETION_FOCUS_DEFAULT_SETTINGS[COMPLETION_FOCUS_TAIL_PCT_KEY],
     }

@@ -174,6 +174,22 @@ def test_repositories_do_not_depend_on_other_repositories():
 
     assert violations == [], f"repositories must not depend on peer repositories: {violations}"
 
+
+def test_repositories_do_not_execute_schema_ddl():
+    ddl_pattern = re.compile(r"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX)\b", re.IGNORECASE)
+    violations = []
+    repository_root = PROJECT_ROOT / "modules" / "repositories"
+    for path in sorted(repository_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if ddl_pattern.search(node.value):
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
+                    )
+
+    assert violations == [], f"schema DDL belongs in migrations, not repositories: {violations}"
+
 def test_services_do_not_import_sqlite_driver_directly():
     violations = []
     service_root = PROJECT_ROOT / "modules" / "services"

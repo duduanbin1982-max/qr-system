@@ -1,5 +1,8 @@
 """Order completion focus board, exceptions, and scan control policy."""
 
+import logging
+
+from modules.repositories.completion_focus_repository import CompletionFocusRepository
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.setting_repository import SettingRepository
 from modules.domain.order_focus import OrderFocusPolicy
@@ -25,6 +28,9 @@ from modules.order_focus_config import (
     FOCUS_MODE_SOFT,
 )
 from modules.setting_reader import clear_settings_cache, get_setting
+
+
+_logger = logging.getLogger(__name__)
 
 
 class OrderFocusService:
@@ -117,7 +123,7 @@ class OrderFocusService:
         warning = warning or {}
         user = user or {}
         try:
-            return OrderRepository.insert_completion_focus_event(
+            return CompletionFocusRepository.insert_event(
                 event_type,
                 order_id=order_id,
                 process_id=process_id or warning.get("recommended_process_id"),
@@ -133,11 +139,12 @@ class OrderFocusService:
                 db=db,
             )
         except Exception:
+            _logger.exception("failed to record completion-focus event: %s", event_type)
             return None
 
     @staticmethod
     def active_exception(order_id):
-        row = OrderRepository.find_active_completion_focus_exception(order_id)
+        row = CompletionFocusRepository.find_active_exception(order_id)
         return dict(row) if row else None
 
     @staticmethod
@@ -152,7 +159,7 @@ class OrderFocusService:
         expires_at = (data.get("expires_at") or "").strip()
         user_name = user.get("name") or user.get("username") or ""
         with BaseService.transaction() as txn:
-            exception_id = OrderRepository.insert_completion_focus_exception(
+            exception_id = CompletionFocusRepository.insert_exception(
                 order_id,
                 reason,
                 detail,
@@ -181,8 +188,8 @@ class OrderFocusService:
     @staticmethod
     def cancel_exception(exception_id, user, cancel_reason=""):
         with BaseService.transaction() as txn:
-            exception = OrderRepository.find_completion_focus_exception_by_id(exception_id, db=txn)
-            OrderRepository.cancel_completion_focus_exception(
+            exception = CompletionFocusRepository.find_exception_by_id(exception_id, db=txn)
+            CompletionFocusRepository.cancel_exception(
                 exception_id, user.get("id"), cancel_reason, db=txn
             )
             OrderFocusService._record_event(
@@ -224,9 +231,9 @@ class OrderFocusService:
         tail_percent = OrderFocusService.tail_percent()
         active_exceptions = {
             row["order_id"]: dict(row)
-            for row in OrderRepository.list_active_completion_focus_exceptions()
+            for row in CompletionFocusRepository.list_active_exceptions()
         }
-        for order_row in OrderRepository.list_completion_focus_orders(limit=limit):
+        for order_row in CompletionFocusRepository.list_orders(limit=limit):
             order = dict(order_row)
             try:
                 progress = OrderProgressAnalyzer.analyze(order["id"])
@@ -266,7 +273,7 @@ class OrderFocusService:
             return None
         if OrderFocusService.active_exception(order_data.get("id")):
             return None
-        priority = OrderRepository.find_earlier_completion_focus_order(
+        priority = CompletionFocusRepository.find_earlier_order(
             order_data.get("id"),
             process_id,
             route_id=order_data.get("route_id"),

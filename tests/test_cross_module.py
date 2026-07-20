@@ -260,6 +260,25 @@ class TestCrossModuleIntegration:
         assert shipments_response.status_code == 200, shipments_response.get_json()
         assert isinstance(shipments_response.get_json(), dict)
 
+    def test_shipment_number_uses_validated_system_prefix(self, client, auth_headers):
+        save_response = client.post(
+            "/api/settings",
+            headers=auth_headers,
+            json={"shipment_no_prefix": "out-"},
+        )
+        assert save_response.status_code == 200, save_response.get_json()
+
+        draft_response = client.get("/api/shipments/draft", headers=auth_headers)
+        assert draft_response.status_code == 200, draft_response.get_json()
+        assert draft_response.get_json()["shipment_no"].startswith("OUT-")
+
+        invalid_response = client.post(
+            "/api/settings",
+            headers=auth_headers,
+            json={"shipment_no_prefix": "invalid prefix!"},
+        )
+        assert invalid_response.status_code == 400
+
 
     def test_shipments_endpoint_includes_product_codes(self, client, auth_headers):
         suffix = uuid.uuid4().hex[:6].upper()

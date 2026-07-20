@@ -7,12 +7,18 @@ from modules.services import BaseService
 from modules.repositories.inventory_repository import InventoryRepository
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.shipment_repository import ShipmentRepository
+from modules.setting_reader import get_setting
+from modules.shipment_config import (
+    DEFAULT_SHIPMENT_NO_PREFIX,
+    SHIPMENT_NO_PREFIX_KEY,
+    normalize_shipment_no_prefix,
+)
 
 
 def _generate_shipment_no(db, prefix=None):
-    if not prefix:
-        setting = None  # Settings lookup
-        prefix = setting["value"] if setting else "SH"
+    if prefix is None:
+        prefix = get_setting(SHIPMENT_NO_PREFIX_KEY, DEFAULT_SHIPMENT_NO_PREFIX)
+    prefix = normalize_shipment_no_prefix(prefix)
     today = datetime.now().strftime("%Y%m%d")
     prefix_len = len(prefix) + 10
     row = ShipmentRepository.max_seq_for_date(prefix, today, prefix_len, db=db)

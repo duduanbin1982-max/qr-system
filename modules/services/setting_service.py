@@ -6,6 +6,7 @@ from modules.order_focus_config import (
     COMPLETION_FOCUS_MODES,
     COMPLETION_FOCUS_TAIL_PCT_KEY,
 )
+from modules.shipment_config import SHIPMENT_NO_PREFIX_KEY, normalize_shipment_no_prefix
 
 ALLOWED_KEYS = {
     'company_name', 'contact', 'phone', 'address', 'description',
@@ -17,6 +18,7 @@ ALLOWED_KEYS = {
     'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password',
     'smtp_from', 'smtp_tls', 'report_recipients',
     'slow_request_threshold_ms',
+    SHIPMENT_NO_PREFIX_KEY,
     COMPLETION_FOCUS_MODE_KEY, COMPLETION_FOCUS_TAIL_PCT_KEY,
 }
 
@@ -30,6 +32,7 @@ SETTING_VALIDATORS = {
     'limit_by_order_qty': (str, None, None, 'Must be 0 or 1'),
     'approval_enabled': (str, None, None, 'Must be 0 or 1'),
     'auto_order_no': (str, None, None, 'Order no prefix max 32 chars'),
+    SHIPMENT_NO_PREFIX_KEY: (str, None, None, 'Invalid shipment number prefix'),
     COMPLETION_FOCUS_MODE_KEY: (str, None, None, 'Completion focus mode must be off, soft, or hard'),
     COMPLETION_FOCUS_TAIL_PCT_KEY: (int, 1, 99, 'Completion focus tail percent must be 1-99'),
 }
@@ -58,6 +61,11 @@ def validate_setting(key, value):
     elif key == 'auto_order_no':
         if len(str(parsed)) > 32:
             return None, err_msg
+    elif key == SHIPMENT_NO_PREFIX_KEY:
+        try:
+            return normalize_shipment_no_prefix(parsed), None
+        except ValueError as exc:
+            return None, str(exc)
     else:
         if vmin is not None and parsed < vmin:
             return None, err_msg
