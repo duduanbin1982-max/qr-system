@@ -17,8 +17,17 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:4173',
     ignoreHTTPSErrors: true,
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+  },
+  webServer: {
+    command: 'python3 scripts/e2e_server.py',
+    url: 'http://127.0.0.1:4173/api/health',
+    reuseExistingServer: false,
+    timeout: 120_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 })
