@@ -196,5 +196,16 @@
       "suggestion": 1
     },
     "scope": "192.168.1.8:/home/dubin/qr-system current running worktree; HEAD 57f5249, deployed marker 4b290ee, 66 modified and 19 untracked files"
+  },
+  {
+    "date": "2026-07-20T07:05:00+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 58,
+    "findings": {
+      "critical": 3,
+      "warning": 5,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD b2fdcbd; full modules, frontend, public mobile, tests and deployment scripts"
   }
 ]
