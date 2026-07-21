@@ -1,16 +1,12 @@
-"""
-qr-system ? TraceRepository???????
-
-???????? ? product_items / work_records / rework_records / shipments ???????
-"""
+"""Persistence queries for product and order traceability."""
 from modules.repositories.context import resolve_db
 
 class TraceRepository:
-    """?????????"""
+    """Traceability persistence gateway."""
 
     @staticmethod
     def find_product_item_by_serial(serial_no, db=None):
-        """?????????????+??????"""
+        """Find a product item and its joined order summary by serial number."""
         db = resolve_db(db)
         return db.execute('''
             SELECT pi.*,
@@ -25,7 +21,7 @@ class TraceRepository:
 
     @staticmethod
     def find_work_records_by_order(order_id, db=None):
-        """???ID??????????+???????"""
+        """Return work reports for an order with process and user names."""
         db = resolve_db(db)
         return db.execute('''
             SELECT wr.id, wr.quantity, wr.status, wr.type, wr.remark, wr.created_at,
@@ -39,7 +35,7 @@ class TraceRepository:
 
     @staticmethod
     def find_rework_records_by_order(order_id, db=None):
-        """???ID??????????+???????"""
+        """Return rework records for an order with process and user names."""
         db = resolve_db(db)
         return db.execute('''
             SELECT rr.id, rr.quantity, rr.reason, rr.status, rr.created_at,

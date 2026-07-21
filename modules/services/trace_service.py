@@ -1,11 +1,8 @@
-"""
-qr-system ? TraceService???????????
-
-? routes/trace.py ???????SQL ??? TraceRepository?
-"""
+"""Product and order traceability service."""
+from modules.domain.errors import ValidationError
 from modules.repositories.trace_repository import TraceRepository
 
-# product_items ??????
+# Public product-item fields returned by trace APIs.
 ITEM_FIELDS = [
     'id', 'serial_no', 'order_id', 'position_no',
     'qr_content', 'status', 'current_process_id', 'created_at'
@@ -15,28 +12,28 @@ ITEM_FIELDS = [
 
 
 class TraceService:
-    """?????????"""
+    """Build traceability views from repository records."""
 
     @staticmethod
     def trace(serial_no):
-        """???????????
+        """Trace one product item by serial number.
 
         Args:
-            serial_no: ??????? trim?
+            serial_no: product serial number; surrounding whitespace is ignored
 
         Returns:
             dict with keys: item, order, work_records, rework_records, shipments
 
         Raises:
-            ValueError: ?????
+            ValidationError: when the serial number is empty or too long
         """
         serial_no = serial_no.strip()
         if not serial_no:
-            raise ValueError('????????')
+            raise ValidationError('序列号不能为空')
         if len(serial_no) > 200:
-            raise ValueError('?????')
+            raise ValidationError('序列号过长')
 
-        # 1. ?????
+        # 1. Load the product item and joined order fields.
         item_row = TraceRepository.find_product_item_by_serial(serial_no)
         if not item_row:
             return {
@@ -46,7 +43,7 @@ class TraceService:
 
         item_dict = dict(item_row)
 
-        # 2. ??????
+        # 2. Normalize the order summary.
         order = None
         order_id = item_row['order_id']
         if order_id:
@@ -60,16 +57,16 @@ class TraceService:
                 'customer': item_row.get('customer', ''),
             }
 
-        # 3. ?? item_dict???? product_items ???
+        # 3. Keep only public product-item fields.
         clean_item = {k: item_dict.get(k) for k in ITEM_FIELDS if k in item_dict}
 
-        # 4. ????
+        # 4. Load work reports.
         work_records = []
         if order_id:
             rows = TraceRepository.find_work_records_by_serial(serial_no, order_id)
             work_records = [dict(r) for r in rows]
 
-        # 5. ????
+        # 5. Load rework records.
         rework_records = []
         if order_id:
             rows = TraceRepository.find_rework_records_by_order(order_id)

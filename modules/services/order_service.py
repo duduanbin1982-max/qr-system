@@ -8,6 +8,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from modules.services import BaseService
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
@@ -488,24 +489,24 @@ class OrderService:
     @staticmethod
     def list_order_materials(order_id):
         if not OrderService.get_order(order_id):
-            raise ValueError('?????')
+            raise NotFoundError('订单不存在')
         return [dict(row) for row in OrderMaterialRepository.list_by_order(order_id)]
 
     @staticmethod
     def add_order_material(order_id, data):
         order = OrderService.get_order(order_id)
         if not order:
-            raise ValueError('?????')
+            raise NotFoundError('订单不存在')
         if order['status'] == 'completed':
             raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
         material_id = data.get('material_id')
         quantity = data.get('quantity') or data.get('quantity_per_unit', 1)
         process_id = data.get('process_id') or None
         if not material_id:
-            raise ValueError('?????')
+            raise ValidationError('物料 ID 不能为空')
         with BaseService.transaction() as txn:
             if OrderMaterialRepository.find_duplicate(order_id, material_id, process_id, db=txn):
-                raise LookupError('???+???????')
+                raise ConflictError('该物料已存在于订单物料配方中')
             new_id = OrderMaterialRepository.insert(
                 order_id, material_id, quantity, process_id, 'manual', db=txn
             )
@@ -519,5 +520,5 @@ class OrderService:
             if order and order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
             if not OrderMaterialRepository.find_by_id_and_order(item_id, order_id, db=txn):
-                raise ValueError('??????')
+                raise NotFoundError('订单物料记录不存在')
             OrderMaterialRepository.delete(item_id, db=txn)

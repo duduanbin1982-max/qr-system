@@ -1,4 +1,4 @@
-"""qr-system ? ???????Refactored: all SQL ? QualityService?"""
+"""Quality inspection HTTP routes."""
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.route_decorators import (

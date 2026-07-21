@@ -6,6 +6,7 @@ qr-system — 产品管理 Service 层
 """
 from datetime import datetime
 from modules.services import BaseService
+from modules.domain.errors import NotFoundError, ValidationError
 from modules.config import generate_product_code
 from modules.repositories.product_repository import ProductRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
@@ -459,10 +460,10 @@ class ProductService:
         quantity = data.get('quantity_per_unit', data.get('quantity', 1))
         process_id = data.get('process_id') or None
         if not material_id:
-            raise ValueError('?????')
+            raise ValidationError('物料 ID 不能为空')
         with BaseService.transaction() as txn:
             if not ProductBomRepository.product_exists(product_id, db=txn):
-                raise LookupError('?????')
+                raise NotFoundError('产品不存在')
             new_id = ProductBomRepository.insert(product_id, material_id, float(quantity), process_id, db=txn)
             row = ProductBomRepository.find_by_id(new_id, db=txn)
             return dict(row)
@@ -471,6 +472,5 @@ class ProductService:
     def delete_product_bom(product_id, bom_id):
         with BaseService.transaction() as txn:
             if not ProductBomRepository.find_by_id_and_product(bom_id, product_id, db=txn):
-                raise ValueError('??????')
+                raise NotFoundError('产品物料配方记录不存在')
             ProductBomRepository.delete(bom_id, db=txn)
-

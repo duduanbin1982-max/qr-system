@@ -20,6 +20,7 @@ from modules.route_decorators import (
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
 from werkzeug.utils import secure_filename
 from modules.services.product_service import ProductService
+from modules.domain.errors import DomainError
 from modules.services.setting_service import SettingsService
 
 
@@ -466,23 +467,21 @@ def delete_product_attachment(attachment_id):
 @check_auth
 @check_permission("products:view")
 def list_product_bom(product_id):
-    """????????"""
+    """Return the product material recipe."""
     return jsonify({"bom": ProductService.list_product_bom(product_id)})
 
 @app.route("/api/products/<int:product_id>/bom", methods=["POST"])
 @check_auth
 @check_permission("products:edit")
 def add_product_bom(product_id):
-    """???????"""
+    """Add one material to a product recipe."""
     try:
         bom = ProductService.add_product_bom(product_id, request.get_json(silent=True) or {})
-    except LookupError as e:
-        return jsonify({"error": str(e)}), 404
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         if "UNIQUE" in str(e).upper():
-            return jsonify({"error": "???+???????"}), 409
+            return jsonify({"error": "该物料已存在于产品配方中", "code": "conflict"}), 409
         raise
     return jsonify({"bom": bom}), 201
 
@@ -490,9 +489,9 @@ def add_product_bom(product_id):
 @check_auth
 @check_permission("products:edit")
 def delete_product_bom(product_id, bom_id):
-    """???????"""
+    """Delete one material from a product recipe."""
     try:
         ProductService.delete_product_bom(product_id, bom_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
-    return jsonify({"message": "???"})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
+    return jsonify({"message": "删除成功"})

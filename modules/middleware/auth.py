@@ -11,12 +11,12 @@ from modules.db import get_db, get_setting
 from modules.services.access_policy_service import get_user_permissions as _get_user_permissions, has_permission as _has_permission
 
 def has_permission(user: Optional[dict], perm: str) -> bool:
-    """???????????????????????"""
+    """Return whether a user has the requested permission."""
     return _has_permission(user, perm)
 
 
 def get_user_permissions(user: Optional[dict]) -> List[str]:
-    """???????????????????"""
+    """Return the effective permission codes for a user."""
     return _get_user_permissions(user)
 
 def check_auth(f: Callable) -> Callable:

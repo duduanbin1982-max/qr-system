@@ -1,28 +1,23 @@
-"""
-qr-system ? MaterialRepository???????
-
-Brooks R6 fix: ??? materials / material_logs / material_consumptions / suppliers ? SQL ???????
-Service ?????????????? SQL?
-"""
+"""Persistence operations for materials, inventory movements, consumption, and suppliers."""
 from modules.repositories.context import resolve_db
 
 
 class MaterialRepository:
-    """?????? ? ?? materials / material_logs / material_consumptions CRUD ?????"""
+    """Material persistence gateway."""
 
     # ============================================================
-    # ??
+    # Queries
     # ============================================================
 
     @staticmethod
     def count_all(db=None):
-        """?????"""
+        """Count all material records."""
         db = resolve_db(db)
         return db.execute('SELECT COUNT(*) FROM materials').fetchone()[0]
 
     @staticmethod
     def find_all_with_supplier(db=None):
-        """?????????????????"""
+        """Return all materials with supplier names."""
         db = resolve_db(db)
         return db.execute('''
             SELECT m.*, s.name as supplier_name
@@ -32,7 +27,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_all_with_supplier_paginated(limit, offset, db=None):
-        """????????????????"""
+        """Return paginated materials with supplier names."""
         db = resolve_db(db)
         return db.execute('''
             SELECT m.*, s.name as supplier_name
@@ -59,7 +54,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_by_id(mid, db=None):
-        """? ID ?????"""
+        """Find one material by ID."""
         db = resolve_db(db)
         return db.execute(
             'SELECT * FROM materials WHERE id = ?', (mid,)
@@ -67,7 +62,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_quantity_by_id(mid, db=None):
-        """????????id + quantity??"""
+        """Find material identity and current quantity."""
         db = resolve_db(db)
         return db.execute(
             'SELECT id, quantity FROM materials WHERE id = ?', (mid,)
@@ -75,7 +70,7 @@ class MaterialRepository:
 
     @staticmethod
     def count_logs_by_material(mid, db=None):
-        """???????????"""
+        """Count inventory logs for a material."""
         db = resolve_db(db)
         return db.execute(
             'SELECT COUNT(*) FROM material_logs WHERE material_id = ?', (mid,)
@@ -83,7 +78,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_logs_by_material(mid, limit=100, db=None):
-        """??????????"""
+        """Return recent inventory logs for a material."""
         db = resolve_db(db)
         return db.execute(
             'SELECT ml.*, u.name as operator_name_from_fk FROM material_logs ml'
@@ -93,7 +88,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_logs_by_material_paginated(mid, limit, offset, db=None):
-        """??????????????"""
+        """Return paginated inventory logs for a material."""
         db = resolve_db(db)
         return db.execute(
             'SELECT ml.*, u.name as operator_name_from_fk FROM material_logs ml'
@@ -103,7 +98,7 @@ class MaterialRepository:
 
     @staticmethod
     def count_consumptions_by_material(mid, db=None):
-        """?????????"""
+        """Count consumption records for a material."""
         db = resolve_db(db)
         return db.execute(
             'SELECT COUNT(*) FROM material_consumptions WHERE material_id = ?', (mid,)
@@ -111,7 +106,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_consumptions_by_material(mid, limit=100, db=None):
-        """??????????/??/???????"""
+        """Return material consumptions with order, process, and operator details."""
         db = resolve_db(db)
         return db.execute('''
             SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
@@ -126,7 +121,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_consumptions_by_material_paginated(mid, limit, offset, db=None):
-        """??????????/??/??????????"""
+        """Return paginated material consumptions with joined business details."""
         db = resolve_db(db)
         return db.execute('''
             SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
@@ -141,7 +136,7 @@ class MaterialRepository:
 
     @staticmethod
     def find_consumption_by_id(cid, db=None):
-        """? ID ???????"""
+        """Find one material consumption record by ID."""
         db = resolve_db(db)
         return db.execute(
             'SELECT * FROM material_consumptions WHERE id = ?', (cid,)
@@ -149,7 +144,7 @@ class MaterialRepository:
 
     @staticmethod
     def count_refs(mid, db=None):
-        """????????????????????"""
+        """Count business records that prevent material deletion."""
         db = resolve_db(db)
         row = db.execute(
             'SELECT COUNT(*) as cnt FROM material_consumptions WHERE material_id = ?', (mid,)
@@ -157,7 +152,7 @@ class MaterialRepository:
         return row['cnt'] if row else 0
 
     # ============================================================
-    # ???
+    # Mutations
     # ============================================================
 
     @staticmethod
@@ -175,26 +170,26 @@ class MaterialRepository:
 
     @staticmethod
     def update(mid, set_clauses, params, db=None):
-        """???? SET ... WHERE id = ????????? set_clauses ? params?"""
+        """Update a material using validated SET clauses and parameters."""
         db = resolve_db(db)
         params.append(mid)
         db.execute(f'UPDATE materials SET {", ".join(set_clauses)} WHERE id = ?', params)
 
     @staticmethod
     def delete(mid, db=None):
-        """?????"""
+        """Delete a material."""
         db = resolve_db(db)
         db.execute('DELETE FROM materials WHERE id = ?', (mid,))
 
     @staticmethod
     def delete_logs_by_material(mid, db=None):
-        """?????????"""
+        """Delete inventory logs for a material."""
         db = resolve_db(db)
         db.execute('DELETE FROM material_logs WHERE material_id = ?', (mid,))
 
     @staticmethod
     def update_quantity(mid, new_qty, db=None):
-        """????????? updated_at??"""
+        """Set material quantity and refresh its update timestamp."""
         db = resolve_db(db)
         db.execute(
             "UPDATE materials SET quantity = ?, "
@@ -204,7 +199,7 @@ class MaterialRepository:
 
     @staticmethod
     def increment_quantity(mid, amount, db=None):
-        """????????? updated_at??"""
+        """Increment material quantity and refresh its update timestamp."""
         db = resolve_db(db)
         db.execute(
             "UPDATE materials SET quantity = quantity + ?, "
@@ -214,7 +209,7 @@ class MaterialRepository:
 
     @staticmethod
     def insert_log(material_id, log_type, quantity, remark, operator_name, db=None):
-        """?????????"""
+        """Insert a material inventory movement."""
         db = resolve_db(db)
         db.execute(
             'INSERT INTO material_logs '
@@ -226,7 +221,7 @@ class MaterialRepository:
     @staticmethod
     def insert_consumption(material_id, order_id, process_id, quantity,
                            user_id, operator_name, notes, db=None):
-        """?????????"""
+        """Insert a material consumption record."""
         db = resolve_db(db)
         db.execute(
             'INSERT INTO material_consumptions '
@@ -239,29 +234,29 @@ class MaterialRepository:
 
     @staticmethod
     def delete_consumption_by_id(cid, db=None):
-        """???????"""
+        """Delete a material consumption record."""
         db = resolve_db(db)
         db.execute('DELETE FROM material_consumptions WHERE id = ?', (cid,))
 
 
 class SupplierRepository:
-    """??????? ? ?? suppliers ? CRUD ?????"""
+    """Supplier persistence gateway."""
 
     @staticmethod
     def count_all(db=None):
-        """??????"""
+        """Count all suppliers."""
         db = resolve_db(db)
         return db.execute('SELECT COUNT(*) FROM suppliers').fetchone()[0]
 
     @staticmethod
     def find_all(db=None):
-        """?????????????"""
+        """Return all suppliers ordered by name."""
         db = resolve_db(db)
         return db.execute('SELECT * FROM suppliers ORDER BY name').fetchall()
 
     @staticmethod
     def find_all_paginated(limit, offset, db=None):
-        """????????????????"""
+        """Return paginated suppliers ordered by name."""
         db = resolve_db(db)
         return db.execute(
             'SELECT * FROM suppliers ORDER BY name LIMIT ? OFFSET ?', (limit, offset)
@@ -269,7 +264,7 @@ class SupplierRepository:
 
     @staticmethod
     def find_by_id(sid, db=None):
-        """? ID ??????? name ????????"""
+        """Find one supplier by ID and include its name."""
         db = resolve_db(db)
         return db.execute(
             'SELECT id, name FROM suppliers WHERE id = ?', (sid,)
@@ -277,7 +272,7 @@ class SupplierRepository:
 
     @staticmethod
     def count_refs(sid, db=None):
-        """????????????"""
+        """Count materials that reference a supplier."""
         db = resolve_db(db)
         row = db.execute(
             'SELECT COUNT(*) as cnt FROM materials WHERE supplier_id = ?', (sid,)
@@ -286,7 +281,7 @@ class SupplierRepository:
 
     @staticmethod
     def insert(data_tuple, db=None):
-        """???????? lastrowid?"""
+        """Insert a supplier and return its ID."""
         db = resolve_db(db)
         cur = db.execute(
             'INSERT INTO suppliers (name, contact, phone, address, remark) '
@@ -297,7 +292,7 @@ class SupplierRepository:
 
     @staticmethod
     def update(sid, data_tuple, db=None):
-        """??????"""
+        """Update a supplier."""
         db = resolve_db(db)
         db.execute(
             'UPDATE suppliers SET name=?, contact=?, phone=?, '
@@ -307,6 +302,6 @@ class SupplierRepository:
 
     @staticmethod
     def delete(sid, db=None):
-        """??????"""
+        """Delete a supplier."""
         db = resolve_db(db)
         db.execute('DELETE FROM suppliers WHERE id = ?', (sid,))

@@ -1,6 +1,4 @@
-"""
-qr-system ? ???????Refactored: SQL ? ApprovalService?
-"""
+"""Approval workflow HTTP routes."""
 from flask import request, jsonify, g
 
 from modules.route_decorators import (
@@ -13,6 +11,7 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.approval_service import ApprovalService
+from modules.domain.errors import DomainError
 
 
 @app.route('/api/approvals/pending', methods=['GET'])
@@ -49,9 +48,9 @@ def handle_approval(record_id, action):
             'approve_' + action, 'approval', record_id,
             f'{g.current_user["name"]} {action} approval {record_id}'
         )
-        return jsonify({'message': '????'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'message': '审批操作成功'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
 
 
 @app.route('/api/approvals/config', methods=['GET'])
@@ -98,8 +97,8 @@ def batch_approval():
                 "failed": failed
             })
         return jsonify({"message": f"已处理 {count} 条", "count": count, "total": len(ids)})
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
 
 @app.route("/api/approvals/stats", methods=["GET"])
 @check_auth

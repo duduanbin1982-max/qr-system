@@ -1,19 +1,15 @@
-"""
-qr-system ? ApprovalService???????????
-
-? routes/approvals.py ???????SQL ??? ApprovalRepository?
-?? BaseService.transaction() ???? SAVEPOINT?
-"""
+"""Approval workflow orchestration service."""
 from modules.services import BaseService
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.approval_repository import ApprovalRepository
 
 
 class ApprovalService:
-    """?????????"""
+    """Coordinate approval records and their work-report effects."""
 
     @staticmethod
     def list_pending(page, limit):
-        """????????????"""
+        """Return pending approval records."""
         total = ApprovalRepository.count_by_status('pending')
         offset = (page - 1) * limit
         rows = ApprovalRepository.find_by_status('pending', limit, offset)
@@ -24,7 +20,7 @@ class ApprovalService:
 
     @staticmethod
     def list_history(page, limit):
-        """??????????????"""
+        """Return processed approval records."""
         total = ApprovalRepository.count_by_status('history')
         offset = (page - 1) * limit
         rows = ApprovalRepository.find_by_status('history', limit, offset)
@@ -35,48 +31,48 @@ class ApprovalService:
 
     @staticmethod
     def handle(record_id, action, approver, comment=''):
-        """??????????????????
+        """Approve or reject one pending work report.
 
         Args:
-            record_id: ???? ID
-            action: 'approve' ? 'reject'
+            record_id: approval record ID
+            action: ``approve`` or ``reject``
             approver: dict with 'id' and 'name'
-            comment: ????
+            comment: optional approval comment
 
         Raises:
-            ValueError: ???????????????
+            DomainError: when the action or approval state is invalid
         """
         if action not in ('approve', 'reject'):
-            raise ValueError('?????')
+            raise ValidationError('审批操作必须是通过或驳回')
 
         record = ApprovalRepository.find_by_id(record_id)
         if not record:
-            raise ValueError('???????')
+            raise NotFoundError('审批记录不存在')
         record = dict(record)
         if record['status'] != 'pending':
-            raise ValueError('???????')
+            raise ConflictError('审批记录已处理，请勿重复操作')
 
         approver_id = approver['id']
         approver_name = approver['name']
 
         if action == 'approve':
-            # ??????
+            # Load the work report linked to this approval.
             wr = ApprovalRepository.find_work_record(record['work_record_id'])
             if not wr:
-                raise ValueError('???????')
+                raise NotFoundError('关联的报工记录不存在')
             wr = dict(wr)
             if wr['status'] == 'approved':
-                raise ValueError('??????????????????')
+                raise ConflictError('报工记录已审批，请勿重复操作')
 
-            # ????
+            # Validate the order invariant before applying approved quantity.
             order = ApprovalRepository.find_order(wr['order_id'])
             if not order or order['deleted_at'] is not None:
-                raise ValueError('???????')
+                raise NotFoundError('关联订单不存在或已删除')
             order = dict(order)
             if order['completed'] + wr['quantity'] > order['quantity']:
-                raise ValueError(
-                    f'?????????({order["completed"]}+{wr["quantity"]})'
-                    f'??????({order["quantity"]})'
+                raise ConflictError(
+                    f'审批后完成数量({order["completed"]}+{wr["quantity"]})'
+                    f'将超过订单数量({order["quantity"]})'
                 )
 
             # Multi-level approval

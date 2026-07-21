@@ -1,24 +1,20 @@
-"""
-qr-system ? ???? Service ?
-
-Brooks R6 fix: ?? SQL ???? MaterialRepository / SupplierRepository?
-Service ???????????????????
-"""
+"""Material and supplier application services."""
 from modules.services import BaseService
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.material_repository import MaterialRepository, SupplierRepository
 
 
-class MaterialNotFoundError(ValueError):
+class MaterialNotFoundError(NotFoundError):
     """Raised when a material is not found."""
     pass
 
 
 class MaterialService:
-    """?????????"""
+    """Material management business operations."""
 
     @staticmethod
     def list_materials(page=1, limit=100):
-        """????????????????"""
+        """Return a paginated material list with supplier names."""
         total = MaterialRepository.count_all()
         offset = (page - 1) * limit
         rows = MaterialRepository.find_all_with_supplier_paginated(limit, offset)
@@ -32,7 +28,7 @@ class MaterialService:
         """Create material. Raises ValueError on empty name or duplicate name+spec+material_type."""
         name = data.get('name', '').strip()
         if not name:
-            raise ValueError('物料名称不能为空')
+            raise ValidationError('物料名称不能为空')
         spec = (data.get('spec') or '').strip()
         mt = (data.get('material_type') or '').strip()
         existing = MaterialRepository.check_duplicate(name, spec, mt)
@@ -43,7 +39,7 @@ class MaterialService:
                 if mt:
                     info += ', ' + '材质' + ':' + mt
                 info += ')'
-            raise ValueError('物料' + info + '已存在')
+            raise ConflictError('物料' + info + '已存在')
         data_tuple = (
             name,
             spec,
@@ -61,12 +57,12 @@ class MaterialService:
 
     @staticmethod
     def update_material(mid, data):
-        """?????Raises ValueError on not found or no fields."""
+        """Update a material after validating identity and uniqueness."""
         row = MaterialRepository.find_by_id(mid)
         if not row:
-            raise ValueError('?????')
+            raise MaterialNotFoundError('物料不存在')
 
-        # ????????????
+        # Validate the effective unique material identity before updating.
         if 'name' in data:
             name = str(data['name']).strip()
             spec = str(data.get('spec', '')).strip()
@@ -79,7 +75,7 @@ class MaterialService:
                     if mt:
                         info += ', ' + '材质' + ':' + mt
                     info += ')'
-                raise ValueError('物料' + info + '已存在')
+                raise ConflictError('物料' + info + '已存在')
 
         set_clauses = []
         params = []
@@ -95,7 +91,7 @@ class MaterialService:
                     set_clauses.append(f'{k} = ?')
                     params.append(float(data[k] or 0))
         if not set_clauses:
-            raise ValueError('no fields to update')
+            raise ValidationError('没有可更新的字段')
 
         set_clauses.append("updated_at = datetime('now','localtime')")
         with BaseService.transaction() as txn:
@@ -105,26 +101,26 @@ class MaterialService:
     def check_impact(mid):
         mat = MaterialRepository.find_by_id(mid)
         if not mat:
-            raise ValueError("Material not found")
+            raise MaterialNotFoundError('物料不存在')
         refs = MaterialRepository.count_refs(mid)
         return {"material_id": mid, "name": mat["name"], "refs": refs}
 
     @staticmethod
     def delete_material(mid):
-        """?????????????Raises ValueError on not found or has refs."""
+        """Delete a material only when no business records reference it."""
         mat = MaterialRepository.find_by_id(mid)
         if not mat:
-            raise ValueError('?????')
+            raise MaterialNotFoundError('物料不存在')
         refs = MaterialRepository.count_refs(mid)
         if refs > 0:
-            raise ValueError(f'???{mat["name"]}??? {refs} ????????????')
+            raise ConflictError(f'物料「{mat["name"]}」已有 {refs} 条关联记录，无法删除')
         with BaseService.transaction() as txn:
             MaterialRepository.delete_logs_by_material(mid, db=txn)
             MaterialRepository.delete(mid, db=txn)
 
     @staticmethod
     def get_logs(mid, page=1, limit=100):
-        """???????????"""
+        """Return paginated material inventory movements."""
         total = MaterialRepository.count_logs_by_material(mid)
         offset = (page - 1) * limit
         rows = MaterialRepository.find_logs_by_material_paginated(mid, limit, offset)
@@ -135,20 +131,20 @@ class MaterialService:
 
     @staticmethod
     def stock_change(mid, change_type, quantity, remark='', operator_name=''):
-        """????/???Raises ValueError on validation failure."""
+        """Apply a validated inbound or outbound stock movement."""
         if change_type not in ('in', 'out'):
-            raise ValueError('????? in ? out')
+            raise ValidationError('库存变动类型必须是 in 或 out')
         if quantity <= 0:
-            raise ValueError('??????0')
+            raise ValidationError('数量必须大于 0')
 
         row = MaterialRepository.find_quantity_by_id(mid)
         if not row:
-            raise ValueError('?????')
+            raise MaterialNotFoundError('物料不存在')
 
         new_qty = (row['quantity'] + quantity if change_type == 'in'
                    else row['quantity'] - quantity)
         if new_qty < 0 and change_type == 'out':
-            raise ValueError(f'????????? {row["quantity"]}')
+            raise ConflictError(f'库存不足，当前库存为 {row["quantity"]}')
 
         with BaseService.transaction() as txn:
             MaterialRepository.update_quantity(mid, new_qty, db=txn)
@@ -159,7 +155,7 @@ class MaterialService:
 
     @staticmethod
     def list_consumptions(mid, page=1, limit=100):
-        """??????????/?????????"""
+        """Return paginated material consumption records."""
         total = MaterialRepository.count_consumptions_by_material(mid)
         offset = (page - 1) * limit
         rows = MaterialRepository.find_consumptions_by_material_paginated(mid, limit, offset)
@@ -171,15 +167,15 @@ class MaterialService:
     @staticmethod
     def create_consumption(mid, order_id, process_id, quantity, notes='',
                            operator_name='', user_id=None):
-        """?????????????Raises ValueError on validation failure."""
+        """Record material consumption and deduct stock atomically."""
         if quantity <= 0:
-            raise ValueError('??????0')
+            raise ValidationError('数量必须大于 0')
 
         mat = MaterialRepository.find_quantity_by_id(mid)
         if not mat:
-            raise ValueError('?????')
+            raise MaterialNotFoundError('物料不存在')
         if mat['quantity'] < quantity:
-            raise ValueError(f'????????? {mat["quantity"]}')
+            raise ConflictError(f'库存不足，当前库存为 {mat["quantity"]}')
 
         with BaseService.transaction() as txn:
             MaterialRepository.insert_consumption(
@@ -190,17 +186,17 @@ class MaterialService:
             MaterialRepository.update_quantity(mid, new_qty, db=txn)
             MaterialRepository.insert_log(
                 mid, 'out', quantity,
-                f'??: {notes}' if notes else '??',
+                f'消耗: {notes}' if notes else '消耗',
                 operator_name, db=txn
             )
         return new_qty
 
     @staticmethod
     def delete_consumption(cid):
-        """?????????????Raises ValueError if not found."""
+        """Undo a material consumption and restore stock atomically."""
         mc = MaterialRepository.find_consumption_by_id(cid)
         if not mc:
-            raise ValueError('?????')
+            raise NotFoundError('物料消耗记录不存在')
 
         with BaseService.transaction() as txn:
             MaterialRepository.increment_quantity(
@@ -210,11 +206,11 @@ class MaterialService:
 
 
 class SupplierService:
-    """??????????"""
+    """Supplier management business operations."""
 
     @staticmethod
     def list_suppliers(page=1, limit=100):
-        """??????????"""
+        """Return a paginated supplier list."""
         total = SupplierRepository.count_all()
         offset = (page - 1) * limit
         rows = SupplierRepository.find_all_paginated(limit, offset)
@@ -225,10 +221,10 @@ class SupplierService:
 
     @staticmethod
     def create_supplier(data):
-        """??????Raises ValueError on empty name."""
+        """Create a supplier after validating its name."""
         name = data.get('name', '').strip()
         if not name:
-            raise ValueError('?????????')
+            raise ValidationError('供应商名称不能为空')
         data_tuple = (
             name,
             data.get('contact', '').strip(),
@@ -241,10 +237,10 @@ class SupplierService:
 
     @staticmethod
     def update_supplier(sid, data):
-        """??????Raises ValueError if not found."""
+        """Update an existing supplier."""
         row = SupplierRepository.find_by_id(sid)
         if not row:
-            raise ValueError('??????')
+            raise NotFoundError('供应商不存在')
         data_tuple = (
             data.get('name', '').strip(),
             data.get('contact', '').strip(),
@@ -257,12 +253,12 @@ class SupplierService:
 
     @staticmethod
     def delete_supplier(sid):
-        """??????Raises ValueError if not found or has refs."""
+        """Delete a supplier only when no materials reference it."""
         sup = SupplierRepository.find_by_id(sid)
         if not sup:
-            raise ValueError('??????')
+            raise NotFoundError('供应商不存在')
         refs = SupplierRepository.count_refs(sid)
         if refs > 0:
-            raise ValueError(f'????{sup["name"]}?? {refs} ??????????')
+            raise ConflictError(f'供应商「{sup["name"]}」被 {refs} 条物料记录引用，无法删除')
         with BaseService.transaction() as txn:
             SupplierRepository.delete(sid, db=txn)

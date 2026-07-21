@@ -153,10 +153,10 @@ def batch_delete_users():
 def import_users():
     import tempfile, os as _os
     if 'file' not in request.files:
-        return jsonify({'error': '???Excel??'}), 400
+        return jsonify({'error': '请上传 Excel 文件'}), 400
     file = request.files['file']
     if not file.filename or not file.filename.lower().endswith('.xlsx'):
-        return jsonify({'error': '???.xlsx??'}), 400
+        return jsonify({'error': '仅支持 .xlsx 文件'}), 400
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     try:
         file.save(tmp.name)

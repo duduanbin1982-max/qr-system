@@ -1,23 +1,17 @@
-"""
-qr-system ? ApprovalRepository???????
-
-???????? ? approval_records ?? + ?????????
-"""
+"""Persistence operations for approval records and approval configuration."""
 from modules.repositories.context import resolve_db
 
 
 class ApprovalRepository:
-    """???????"""
+    """Approval persistence gateway."""
 
     # ============================================================
-    # ??
+    # Queries
     # ============================================================
 
     @staticmethod
     def count_by_status(status_condition, db=None):
-        """?????????????
-        status_condition: '=' ?? pending, '!=' ?? history
-        """
+        """Count pending records or processed history records."""
         db = resolve_db(db)
         op = '=' if status_condition == 'pending' else '!='
         return db.execute(f'''
@@ -29,7 +23,7 @@ class ApprovalRepository:
 
     @staticmethod
     def find_by_status(status_condition, limit, offset, db=None):
-        """?????????????????/??/???????"""
+        """Return approval records with linked work, order, process, and user data."""
         db = resolve_db(db)
         op = '=' if status_condition == 'pending' else '!='
         return db.execute(f'''
@@ -47,7 +41,7 @@ class ApprovalRepository:
 
     @staticmethod
     def find_by_id(record_id, db=None):
-        """? ID ???????"""
+        """Find one approval record by ID."""
         db = resolve_db(db)
         return db.execute(
             'SELECT * FROM approval_records WHERE id = ?', (record_id,)
@@ -63,19 +57,19 @@ class ApprovalRepository:
 
     @staticmethod
     def find_order(oid, db=None):
-        """???????????????"""
+        """Find the order required for approval invariant checks."""
         db = resolve_db(db)
         return db.execute(
             'SELECT quantity, completed, deleted_at FROM orders WHERE id = ?', (oid,)
         ).fetchone()
 
     # ============================================================
-    # ???
+    # Mutations
     # ============================================================
 
     @staticmethod
     def approve(record_id, approver_id, approver_name, comment, db=None):
-        """??????????? + ???? + ??????"""
+        """Mark an approval record approved and store approver details."""
         db = resolve_db(db)
         db.execute('''
             UPDATE approval_records
@@ -86,7 +80,7 @@ class ApprovalRepository:
 
     @staticmethod
     def reject(record_id, approver_id, approver_name, comment, db=None):
-        """??????????? + ???????"""
+        """Mark an approval record rejected and store approver details."""
         db = resolve_db(db)
         db.execute('''
             UPDATE approval_records
@@ -97,7 +91,7 @@ class ApprovalRepository:
 
     @staticmethod
     def update_work_record_status(wr_id, status, db=None):
-        """?????????"""
+        """Update the linked work-report status."""
         db = resolve_db(db)
         db.execute(
             'UPDATE work_records SET status = ? WHERE id = ?', (status, wr_id)
@@ -105,7 +99,7 @@ class ApprovalRepository:
 
     @staticmethod
     def increment_order_completed(oid, quantity, db=None):
-        """??????????"""
+        """Increment the approved completed quantity for an order."""
         db = resolve_db(db)
         db.execute(
             'UPDATE orders SET completed = completed + ? WHERE id = ?', (quantity, oid)

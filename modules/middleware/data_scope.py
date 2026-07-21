@@ -1,6 +1,4 @@
-"""
-qr-system ? ????????????+?????????
-"""
+"""Data-scope helpers for process authorization and SQL filtering."""
 from typing import List, Optional, Tuple
 from modules.services.access_policy_service import get_user_process_ids as _get_user_process_ids
 

@@ -10,6 +10,7 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.order_service import OrderService
+from modules.domain.errors import DomainError
 from modules.services.order_focus_service import OrderFocusService
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.setting_service import SettingsService
@@ -306,33 +307,31 @@ def workpiece_progress(order_id):
 
 @check_permission("orders:view")
 def list_order_materials(order_id):
-    """????????"""
+    """Return the material recipe attached to an order."""
     try:
         materials = OrderService.list_order_materials(order_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     return jsonify({"materials": materials})
 
 @app.route("/api/orders/<int:order_id>/materials", methods=["POST"])
 @check_auth
 @check_permission("orders:edit")
 def add_order_material(order_id):
-    """?????????"""
+    """Add one material requirement to an order."""
     try:
         material = OrderService.add_order_material(order_id, get_json_body())
-    except LookupError as e:
-        return jsonify({"error": str(e)}), 409
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404 if "???" in str(e) else 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     return jsonify({"material": material}), 201
 
 @app.route("/api/orders/<int:order_id>/materials/<int:item_id>", methods=["DELETE"])
 @check_auth
 @check_permission("orders:edit")
 def delete_order_material(order_id, item_id):
-    """?????????"""
+    """Delete one material requirement from an order."""
     try:
         OrderService.delete_order_material(order_id, item_id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
-    return jsonify({"message": "???"})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
+    return jsonify({"message": "删除成功"})

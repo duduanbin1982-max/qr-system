@@ -1,6 +1,4 @@
-"""
-qr-system ? ???????Refactored: all SQL ? MaterialService?
-"""
+"""Material and supplier HTTP routes."""
 from flask import request, jsonify, g
 
 from modules.route_decorators import (
@@ -13,10 +11,11 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.material_service import MaterialService, SupplierService, MaterialNotFoundError
+from modules.domain.errors import DomainError
 
 
 # ============================================================
-# ?? CRUD
+# Material CRUD
 # ============================================================
 
 @app.route('/api/materials', methods=['GET'])
@@ -42,10 +41,10 @@ def create_material():
         mid = MaterialService.create_material(data)
         safe_audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
         return jsonify({'message': 'created', 'id': mid})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        return handle_unexpected_error(e, 'create material')
 
 
 @app.route('/api/materials/<int:mid>', methods=['PUT'])
@@ -58,8 +57,8 @@ def update_material(mid):
         MaterialService.update_material(mid, data)
         safe_audit_log('update', 'material', mid, 'material updated')
         return jsonify({'message': 'updated'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -70,8 +69,8 @@ def update_material(mid):
 def material_impact(mid):
     try:
         return jsonify(MaterialService.check_impact(mid))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
 
 
 @app.route('/api/materials/<int:mid>', methods=['DELETE'])
@@ -82,14 +81,14 @@ def delete_material(mid):
         MaterialService.delete_material(mid)
         safe_audit_log('delete', 'material', mid, f'deleted material {mid}')
         return jsonify({'message': 'deleted'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '???' in str(e) else 409
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
 
 # ============================================================
-# ???????/?????
+# Material stock movements and logs
 # ============================================================
 
 @app.route('/api/materials/<int:mid>/logs', methods=['GET'])
@@ -118,14 +117,14 @@ def material_stock(mid):
         new_qty = MaterialService.stock_change(mid, change_type, quantity, remark, operator_name)
         safe_audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
         return jsonify({'ok': True, 'new_quantity': new_qty})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
 
 # ============================================================
-# ??????????
+# Material consumption records
 # ============================================================
 
 @app.route('/api/materials/<int:mid>/consumptions', methods=['GET'])
@@ -159,8 +158,8 @@ def create_consumption(mid):
         )
         safe_audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
         return jsonify({'ok': True, 'new_quantity': new_qty})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -172,15 +171,15 @@ def delete_consumption(cid):
     try:
         MaterialService.delete_consumption(cid)
         safe_audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
-        return jsonify({'ok': True, 'message': '?????'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+        return jsonify({'ok': True, 'message': '消耗记录已撤销'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
 
 # ============================================================
-# ?????
+# Supplier management
 # ============================================================
 
 @app.route('/api/suppliers', methods=['GET'])
@@ -205,9 +204,9 @@ def create_supplier():
     try:
         sid = SupplierService.create_supplier(data)
         safe_audit_log('create', 'supplier', sid, f"supplier: {data.get('name', '').strip()}")
-        return jsonify({'ok': True, 'id': sid, 'message': '??????'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'ok': True, 'id': sid, 'message': '供应商创建成功'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -221,9 +220,9 @@ def update_supplier(sid):
     try:
         SupplierService.update_supplier(sid, data)
         safe_audit_log('update', 'supplier', sid, 'supplier updated')
-        return jsonify({'ok': True, 'message': '???'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'ok': True, 'message': '更新成功'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')
 
@@ -235,8 +234,8 @@ def delete_supplier(sid):
     try:
         SupplierService.delete_supplier(sid)
         safe_audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')
-        return jsonify({'ok': True, 'message': '???'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '???' in str(e) else 409
+        return jsonify({'ok': True, 'message': '删除成功'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except Exception as e:
         return handle_unexpected_error(e, 'database operation')

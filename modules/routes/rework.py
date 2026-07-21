@@ -1,6 +1,4 @@
-"""
-qr-system ? ???????Refactored: SQL ? ReworkService?
-"""
+"""Rework workflow HTTP routes."""
 from flask import request, jsonify, g, send_file
 from datetime import datetime
 from modules.route_decorators import (
@@ -178,7 +176,7 @@ def rework_complete(rework_id):
             data.get('result_remark', '')
         )
         safe_audit_log('rework_complete', 'rework', rework_id, 'completed')
-        return jsonify({'ok': True, 'message': '????'})
+        return jsonify({'ok': True, 'message': '返工完成'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
