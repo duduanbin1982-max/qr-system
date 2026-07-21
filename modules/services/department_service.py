@@ -1,4 +1,5 @@
 """Department service."""
+from modules.domain.errors import ConflictError, NotFoundError
 from modules.db_unit_of_work import BaseService
 from modules.repositories.department_repository import DepartmentRepository
 
@@ -26,7 +27,7 @@ class DepartmentService:
         if not name:
             raise ValueError("Department name required")
         if DepartmentRepository.find_by_name(name):
-            raise ValueError("Department name already exists")
+            raise ConflictError("Department name already exists")
         with BaseService.transaction() as txn:
             DepartmentRepository.insert_txn(
                 name,
@@ -40,7 +41,7 @@ class DepartmentService:
     @staticmethod
     def update_department(dep_id, data):
         if not DepartmentRepository.find_by_id(dep_id):
-            raise LookupError("Not found")
+            raise NotFoundError("Not found")
         fields = {k: data[k] for k in ["name", "description", "parent_id", "sort_order", "status"] if k in data}
         if not fields:
             raise ValueError("No fields")
@@ -51,7 +52,7 @@ class DepartmentService:
     @staticmethod
     def delete_department(dep_id):
         if not DepartmentRepository.find_active_by_id(dep_id):
-            raise LookupError("Not found")
+            raise NotFoundError("Not found")
         with BaseService.transaction() as txn:
             DepartmentRepository.soft_delete_txn(dep_id, db=txn)
         return True

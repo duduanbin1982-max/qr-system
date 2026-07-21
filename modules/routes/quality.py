@@ -6,7 +6,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    handle_unexpected_error,
     safe_audit_log,
     validate_json,
 )
@@ -22,20 +21,17 @@ def _safe_int(val, default):
 @check_auth
 @check_permission('quality:view')
 def quality_list():
-    try:
-        return jsonify(QualityService.list_inspections(
-            order_id=request.args.get('order_id', type=int),
-            process_id=request.args.get('process_id', type=int),
-            inspection_type=request.args.get('type', ''),
-            result=request.args.get('result', ''),
-            search=request.args.get('search', request.args.get('keyword', '')),
-            date_from=request.args.get('from', ''),
-            date_to=request.args.get('to', ''),
-            page=_safe_int(request.args.get('page', '1'), 1),
-            per_page=_safe_int(request.args.get('limit') or request.args.get('per_page', '20'), 20),
-        ))
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.list_inspections(
+        order_id=request.args.get('order_id', type=int),
+        process_id=request.args.get('process_id', type=int),
+        inspection_type=request.args.get('type', ''),
+        result=request.args.get('result', ''),
+        search=request.args.get('search', request.args.get('keyword', '')),
+        date_from=request.args.get('from', ''),
+        date_to=request.args.get('to', ''),
+        page=_safe_int(request.args.get('page', '1'), 1),
+        per_page=_safe_int(request.args.get('limit') or request.args.get('per_page', '20'), 20),
+    ))
 
 
 @app.route('/api/quality/inspections', methods=['POST'])
@@ -64,10 +60,7 @@ def quality_create():
 @validate_json('quality_update')
 def quality_update(inspection_id):
     data = get_json_body()
-    try:
-        result = QualityService.update_inspection(inspection_id, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    result = QualityService.update_inspection(inspection_id, data)
     safe_audit_log('quality_edit', 'quality_inspection', inspection_id, f'result={result}')
     return jsonify({'ok': True, 'message': '已更新'})
 
@@ -88,10 +81,7 @@ def quality_delete(inspection_id):
 @check_auth
 @check_permission('quality:view')
 def quality_stats():
-    try:
-        return jsonify(QualityService.get_stats())
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.get_stats())
 
 
 
@@ -99,67 +89,52 @@ def quality_stats():
 @check_auth
 @check_permission('quality:view')
 def quality_export():
-    try:
-        output = QualityService.export_inspections(
-            order_id=request.args.get('order_id', type=int),
-            process_id=request.args.get('process_id', type=int),
-            inspection_type=request.args.get('type', ''),
-            result=request.args.get('result', ''),
-            search=request.args.get('search', request.args.get('keyword', '')),
-            date_from=request.args.get('from', ''),
-            date_to=request.args.get('to', ''),
-        )
-        output.seek(0)
-        return send_file(
-            output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True, download_name=f'quality_inspections_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-        )
-    except Exception as e:
-        return handle_unexpected_error(e, 'export operation')
+    output = QualityService.export_inspections(
+        order_id=request.args.get('order_id', type=int),
+        process_id=request.args.get('process_id', type=int),
+        inspection_type=request.args.get('type', ''),
+        result=request.args.get('result', ''),
+        search=request.args.get('search', request.args.get('keyword', '')),
+        date_from=request.args.get('from', ''),
+        date_to=request.args.get('to', ''),
+    )
+    output.seek(0)
+    return send_file(
+        output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True, download_name=f'quality_inspections_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    )
 
 
 @app.route('/api/quality/spc-p-chart', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
 def quality_spc():
-    try:
-        return jsonify(QualityService.spc_p_chart(
-            order_id=request.args.get('order_id', type=int),
-            process_id=request.args.get('process_id', type=int),
-        ))
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.spc_p_chart(
+        order_id=request.args.get('order_id', type=int),
+        process_id=request.args.get('process_id', type=int),
+    ))
 
 
 @app.route('/api/quality/inspector-performance', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
 def quality_inspector_perf():
-    try:
-        return jsonify(QualityService.inspector_performance())
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.inspector_performance())
 
 
 @app.route('/api/quality/supplier-quality', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
 def quality_supplier():
-    try:
-        return jsonify(QualityService.supplier_quality())
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.supplier_quality())
 
 
 @app.route('/api/quality/pass-rate-trend', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
 def quality_pass_rate_trend():
-    try:
-        weeks = request.args.get('weeks', 6, type=int)
-        return jsonify({'ok': True, 'data': QualityService.pass_rate_trend(weeks)})
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    weeks = request.args.get('weeks', 6, type=int)
+    return jsonify({'ok': True, 'data': QualityService.pass_rate_trend(weeks)})
 
 
 @app.route('/api/quality/inspection-templates', methods=['GET'])
@@ -184,12 +159,9 @@ def quality_batch_create():
     items = data.get('items', [])
     if not items:
         return jsonify({'error': '请提供检验项目列表'}), 400
-    try:
-        result = QualityService.batch_create_inspections(items, g.current_user.get('id'))
-        safe_audit_log('quality_batch', 'quality_inspection', 0, f'created {result["created"]} items')
-        return jsonify({'ok': True, **result})
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    result = QualityService.batch_create_inspections(items, g.current_user.get('id'))
+    safe_audit_log('quality_batch', 'quality_inspection', 0, f'created {result["created"]} items')
+    return jsonify({'ok': True, **result})
 
 
 @app.route('/api/quality/defect-categories', methods=['GET'])
@@ -203,26 +175,20 @@ def quality_defect_categories():
 @check_auth
 @check_permission('quality:view')
 def quality_attachments_list(inspection_id):
-    try:
-        return jsonify(QualityService.list_attachments(inspection_id))
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.list_attachments(inspection_id))
 
 
 @app.route('/api/quality/inspections/<int:inspection_id>/attachments', methods=['POST'])
 @check_auth
 @check_permission('quality:edit')
 def quality_attachment_upload(inspection_id):
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'no file selected'}), 400
-        file = request.files['file']
-        if not file.filename:
-            return jsonify({'error': 'empty filename'}), 400
-        QualityService.upload_attachment(inspection_id, file, g.current_user.get('id'))
-        return jsonify({'ok': True, 'message': 'uploaded'})
-    except Exception as e:
-        return handle_unexpected_error(e, 'file upload')
+    if 'file' not in request.files:
+        return jsonify({'error': 'no file selected'}), 400
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': 'empty filename'}), 400
+    QualityService.upload_attachment(inspection_id, file, g.current_user.get('id'))
+    return jsonify({'ok': True, 'message': 'uploaded'})
 
 
 @app.route('/api/quality/attachments/<int:att_id>', methods=['GET'])
@@ -236,8 +202,6 @@ def quality_attachment_download(att_id):
                          as_attachment=True, download_name=row['file_name'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        return handle_unexpected_error(e, 'file download')
 
 
 @app.route('/api/quality/attachments/<int:att_id>', methods=['DELETE'])
@@ -249,21 +213,16 @@ def quality_attachment_delete(att_id):
         return jsonify({'ok': True, 'message': 'deleted'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/quality/defect-pareto', methods=['GET'])
 @check_auth
 @check_permission('quality:view')
 def quality_defect_pareto():
-    try:
-        return jsonify(QualityService.defect_pareto(
-            date_from=request.args.get('from', ''),
-            date_to=request.args.get('to', ''),
-        ))
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(QualityService.defect_pareto(
+        date_from=request.args.get('from', ''),
+        date_to=request.args.get('to', ''),
+    ))
 
 # ═══════════════════════════════════════
 #  Mobile Inspection Routes (merged from inspection.py)

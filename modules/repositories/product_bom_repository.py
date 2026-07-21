@@ -1,4 +1,6 @@
 """Product BOM Repository"""
+import sqlite3
+
 from modules.repositories.context import resolve_db
 
 class ProductBomRepository:
@@ -24,6 +26,19 @@ class ProductBomRepository:
         if own_db:
             db.commit()
         return cur.lastrowid
+
+    @staticmethod
+    def insert_unique(product_id, material_id, quantity_per_unit, process_id, db=None):
+        try:
+            return ProductBomRepository.insert(
+                product_id,
+                material_id,
+                quantity_per_unit,
+                process_id,
+                db=db,
+            )
+        except sqlite3.IntegrityError:
+            return None
 
     @staticmethod
     def delete(bom_id, db=None):

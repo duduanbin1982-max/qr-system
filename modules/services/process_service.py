@@ -1,4 +1,5 @@
 """qr-system - ProcessService (Repository-refactored)"""
+from modules.domain.errors import ConflictError, NotFoundError
 import re
 from modules.services import BaseService
 from modules.repositories.process_repository import ProcessRepository
@@ -52,7 +53,7 @@ class ProcessService:
 
         existing = ProcessRepository.find_by_name(name)
         if existing:
-            raise ValueError("Process '" + name + "' already exists")
+            raise ConflictError("Process '" + name + "' already exists")
 
         seq_order = data.get("seq_order")
         if seq_order is not None:
@@ -75,7 +76,7 @@ class ProcessService:
     def update_process(pid, data):
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError("Process not found")
+            raise NotFoundError("Process not found")
 
         if "name" in data:
             name = (data.get("name") or "").strip()
@@ -101,7 +102,7 @@ class ProcessService:
         if "name" in data:
             dup = ProcessRepository.find_duplicate_name(data["name"], pid)
             if dup:
-                raise ValueError("Process name '" + data["name"] + "' already exists")
+                raise ConflictError("Process name '" + data["name"] + "' already exists")
 
         sets.append('updated_at = datetime("now","localtime")')
 
@@ -112,7 +113,7 @@ class ProcessService:
     def check_impact(pid):
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError("Process not found")
+            raise NotFoundError("Process not found")
         impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
         return {"process_id": pid, "name": existing["name"], "impact": impact}
 
@@ -120,7 +121,7 @@ class ProcessService:
     def delete_process(pid):
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
-            raise ValueError("Not found")
+            raise NotFoundError("Not found")
 
         impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
         if impact:
@@ -128,8 +129,8 @@ class ProcessService:
             blockers = {k: v for k, v in impact.items() if k in critical_tables}
             if blockers:
                 details = ", ".join(k + ": " + str(v) for k, v in blockers.items())
-                raise ValueError("Process has related data: " + details)
-            raise ValueError("Process has " + str(sum(impact.values())) + " related records, cannot delete")
+                raise ConflictError("Process has related data: " + details)
+            raise ConflictError("Process has " + str(sum(impact.values())) + " related records, cannot delete")
 
         with BaseService.transaction() as txn:
             ProcessRepository.delete_txn(pid, db=txn)

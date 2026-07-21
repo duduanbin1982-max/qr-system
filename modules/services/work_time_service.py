@@ -1,4 +1,5 @@
 """Work time management service."""
+from modules.domain.errors import ConflictError, NotFoundError
 
 from datetime import datetime
 
@@ -71,7 +72,7 @@ class WorkTimeService:
         if not process_id:
             raise ValueError("请选择路线中的工序")
         if not WorkTimeRepository.find_route(route_id, db=db):
-            raise ValueError("工序路线不存在")
+            raise NotFoundError("工序路线不存在")
         route_process = WorkTimeRepository.find_route_process(route_id, process_id, db=db)
         if not route_process:
             raise ValueError("所选工序不属于该工序路线")
@@ -90,7 +91,7 @@ class WorkTimeService:
         if status not in STANDARD_STATUSES:
             raise ValueError("标准工时状态不正确")
         if status == "active" and WorkTimeRepository.find_active_standard_for_route_process(route_id, process_id, exclude_id=standard_id, db=db):
-            raise ValueError("该工序路线的这道工序已存在启用标准工时")
+            raise ConflictError("该工序路线的这道工序已存在启用标准工时")
 
         return {
             "product_id": None,
@@ -123,7 +124,7 @@ class WorkTimeService:
             raise ValueError("请选择工序路线")
         route = WorkTimeRepository.find_route(route_id)
         if not route:
-            raise ValueError("工序路线不存在")
+            raise NotFoundError("工序路线不存在")
         route_processes = WorkTimeRepository.list_route_processes(route_id)
         if not route_processes:
             raise ValueError("该工序路线没有配置工序")
@@ -160,7 +161,7 @@ class WorkTimeService:
                 if standard_id:
                     existing = WorkTimeRepository.find_standard(standard_id, db=txn)
                     if not existing:
-                        raise ValueError("标准工时不存在")
+                        raise NotFoundError("标准工时不存在")
                     if existing["route_id"] != route_id or existing["process_id"] != process_id:
                         raise ValueError("标准工时与所选路线工序不匹配")
                 else:
@@ -206,7 +207,7 @@ class WorkTimeService:
     @staticmethod
     def update_standard(standard_id, data, user_id):
         if not WorkTimeRepository.find_standard(standard_id):
-            raise ValueError("标准工时不存在")
+            raise NotFoundError("标准工时不存在")
         data = {**(data or {}), "id": standard_id}
         normalized = WorkTimeService.normalize_standard(data, user_id)
         with BaseService.transaction() as txn:
@@ -215,7 +216,7 @@ class WorkTimeService:
     @staticmethod
     def deactivate_standard(standard_id, user_id):
         if not WorkTimeRepository.find_standard(standard_id):
-            raise ValueError("标准工时不存在")
+            raise NotFoundError("标准工时不存在")
         with BaseService.transaction() as txn:
             WorkTimeRepository.deactivate_standard(standard_id, user_id, txn)
 
@@ -233,10 +234,10 @@ class WorkTimeService:
             raise ValueError("请选择员工")
         process = WorkTimeRepository.find_process(process_id)
         if not process:
-            raise ValueError("工序不存在")
+            raise NotFoundError("工序不存在")
         user = WorkTimeRepository.find_user(user_id)
         if not user:
-            raise ValueError("员工不存在")
+            raise NotFoundError("员工不存在")
 
         order_id = WorkTimeService._to_int(data.get("order_id"))
         order_no = (data.get("order_no") or "").strip()
@@ -247,7 +248,7 @@ class WorkTimeService:
         if order_id:
             order = WorkTimeRepository.find_order(order_id)
             if not order:
-                raise ValueError("订单不存在")
+                raise NotFoundError("订单不存在")
             order_no = order["order_no"] or order_no
             product_code = order["product_code"] or product_code
             product_name = order["product_name"] or product_name
@@ -258,7 +259,7 @@ class WorkTimeService:
         if route_id:
             route = WorkTimeRepository.find_route(route_id)
             if not route:
-                raise ValueError("工序路线不存在")
+                raise NotFoundError("工序路线不存在")
             route_name = route["name"] or route_name
             if not WorkTimeRepository.find_route_process(route_id, process_id):
                 raise ValueError("所选工序不属于该工序路线")
@@ -266,7 +267,7 @@ class WorkTimeService:
         standard_id = WorkTimeService._to_int(data.get("standard_id"))
         standard = WorkTimeRepository.find_standard(standard_id) if standard_id else None
         if standard_id and not standard:
-            raise ValueError("标准工时不存在")
+            raise NotFoundError("标准工时不存在")
         if not standard:
             standard = WorkTimeRepository.find_best_standard(
                 route_id=route_id,
@@ -307,7 +308,7 @@ class WorkTimeService:
     def review_record(record_id, data, reviewer_id):
         record = WorkTimeRepository.find_record(record_id)
         if not record:
-            raise ValueError("工时流水不存在")
+            raise NotFoundError("工时流水不存在")
         review_status = (data.get("review_status") or "approved").strip()
         if review_status not in REVIEW_STATUSES:
             raise ValueError("审核状态不正确")

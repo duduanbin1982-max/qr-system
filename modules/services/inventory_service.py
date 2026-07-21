@@ -3,6 +3,7 @@ qr-system — 库存管理 Service 层
 
 从 routes/inventory.py 提取全部业务逻辑。
 """
+from modules.domain.errors import ConflictError, NotFoundError
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.inventory_repository import InventoryRepository
@@ -27,7 +28,7 @@ class InventoryService:
             raise ValueError('产品型号不能为空')
         with BaseService.transaction() as txn:
             if InventoryRepository.find_duplicate_model_txn(model, data.get('order_id'), 0, txn):
-                raise ValueError('产品型号已存在')
+                raise ConflictError('产品型号已存在')
             return InventoryRepository.insert_txn(
                 model,
                 data.get('product_name', ''),
@@ -52,7 +53,7 @@ class InventoryService:
             raise ValueError('产品型号不能为空')
         with BaseService.transaction() as txn:
             if InventoryRepository.find_duplicate_model_txn(model, data.get('order_id'), item_id, txn):
-                raise ValueError('该订单下产品型号已存在')
+                raise ConflictError('该订单下产品型号已存在')
             InventoryRepository.update_item_txn(
                 item_id,
                 data.get('product_model', ''),
@@ -73,7 +74,7 @@ class InventoryService:
     def delete_item(item_id):
         """删除库存产品（级联删除日志）。"""
         if not InventoryRepository.find_item_by_id(item_id):
-            raise ValueError('库存不存在')
+            raise NotFoundError('库存不存在')
         with BaseService.transaction() as txn:
             InventoryRepository.delete_logs_for_item_txn(item_id, txn)
             InventoryRepository.delete_item_txn(item_id, txn)
@@ -87,7 +88,7 @@ class InventoryService:
         with BaseService.transaction() as txn:
             cur = InventoryRepository.increase_stock_txn(inv_id, qty, txn)
             if cur.rowcount == 0:
-                raise ValueError('库存不存在')
+                raise NotFoundError('库存不存在')
             InventoryRepository.insert_movement_log_txn(
                 inv_id,
                 'in',
@@ -111,8 +112,8 @@ class InventoryService:
             if cur.rowcount == 0:
                 inv = InventoryRepository.get_item_quantity(inv_id, txn)
                 if not inv:
-                    raise ValueError('库存不存在')
-                raise ValueError('库存不足')
+                    raise NotFoundError('库存不存在')
+                raise ConflictError('库存不足')
             InventoryRepository.insert_movement_log_txn(
                 inv_id,
                 'out',
@@ -142,7 +143,7 @@ class InventoryService:
     def stock_adjust(inv_id, actual_qty, operator_id=None, operator_name='', remark=''):
         inv = InventoryRepository.find_adjustment_item(inv_id)
         if not inv:
-            raise ValueError('库存记录不存在')
+            raise NotFoundError('库存记录不存在')
         current = inv['quantity'] or 0
         diff = actual_qty - current
         if diff == 0:
@@ -338,7 +339,7 @@ class InventoryService:
         with BaseService.transaction() as txn:
             inv = InventoryRepository.get_count_item(item_id, txn)
             if not inv:
-                raise ValueError("item not found")
+                raise NotFoundError("item not found")
             old_qty = inv["quantity"]
             diff = actual_qty - old_qty
             log_type = "adjust" if diff != 0 else "count"
@@ -357,7 +358,7 @@ class InventoryService:
     def get_impact(item_id):
         item = InventoryRepository.find_item_for_delete(item_id)
         if not item:
-            raise ValueError("item not found")
+            raise NotFoundError("item not found")
         log_count = InventoryRepository.count_item_logs(item_id)
         order_count = InventoryRepository.count_linked_orders(item_id)
         warnings = []

@@ -3,6 +3,7 @@
 All business logic (validation, bcrypt, secrets) stays here.
 All SQL delegated to UserRepository.
 """
+from modules.domain.errors import ConflictError, NotFoundError
 import bcrypt
 import logging
 import secrets
@@ -54,7 +55,7 @@ class UserService:
         if role_id:
             role_code = UserRepository.find_role_code_by_id(role_id, db=db)
             if not role_code:
-                raise ValueError("Specified role does not exist")
+                raise NotFoundError("Specified role does not exist")
             return role_id, role_code
         if not role_code:
             role_code = "worker"
@@ -99,12 +100,12 @@ class UserService:
             if new_role_id:
                 new_role_code = UserRepository.find_role_code_by_id(new_role_id, db=db)
                 if not new_role_code:
-                    raise ValueError("Specified role does not exist")
+                    raise NotFoundError("Specified role does not exist")
             else:
                 new_role_code = (data.get("role") or "worker").strip() or "worker"
                 new_role_id = UserRepository.find_role_id_by_code(new_role_code, db=db)
                 if not new_role_id:
-                    raise ValueError("Specified role does not exist")
+                    raise NotFoundError("Specified role does not exist")
             group_row = UserRepository.get_role_group_name(new_role_id, db=db)
             if group_row:
                 data["group_name"] = group_row[0]
@@ -118,7 +119,7 @@ class UserService:
             if current_user_id is None:
                 raise ValueError("Only administrators can change roles")
             if current_user_id == uid:
-                raise ValueError("Cannot change your own role")
+                raise ConflictError("Cannot change your own role")
             if not UserRepository.check_admin_role(current_user_id, db=db):
                 raise ValueError("Only administrators can change roles")
         return new_role_id, new_role_code
@@ -161,7 +162,7 @@ class UserService:
             if remaining == 0:
                 remaining_users = UserRepository.count_admin_users_excluding(uid, db=txn)
                 if remaining_users == 0:
-                    raise ValueError("Cannot remove the last administrator")
+                    raise ConflictError("Cannot remove the last administrator")
         old_role_id = UserRepository.find_role_id_by_code(old_role, db=txn) or 2
         UserRepository.delete_user_role_txn(uid, old_role_id, db=txn)
         UserRepository.insert_user_role_txn(uid, new_role_id, db=txn)
@@ -218,13 +219,13 @@ class UserService:
 
         # Uniqueness check
         if UserRepository.find_user_by_username(username, db=db):
-            raise ValueError("Username already exists")
+            raise ConflictError("Username already exists")
 
         # Position validation
         position_id = data.get("position_id")
         if position_id:
             if not UserRepository.find_position_by_id(position_id, db=db):
-                raise ValueError("Specified position does not exist")
+                raise NotFoundError("Specified position does not exist")
 
         # Process validation
         UserService._validate_process_ids(data)
@@ -266,14 +267,14 @@ class UserService:
         db = BaseService.db()
         existing = UserRepository.find_user_by_id_for_update(uid, db=db)
         if not existing:
-            raise ValueError("User not found")
+            raise NotFoundError("User not found")
 
         # Position validation
         if "position_id" in data:
             position_id = data["position_id"]
             if position_id:
                 if not UserRepository.find_position_by_id(position_id, db=db):
-                    raise ValueError("Specified position does not exist")
+                    raise NotFoundError("Specified position does not exist")
 
         # Process validation
         UserService._validate_process_ids(data)
@@ -306,7 +307,7 @@ class UserService:
         db = BaseService.db()
         user = UserRepository.find_deleted_user(uid, db=db)
         if not user:
-            raise ValueError("User not found or not deleted")
+            raise NotFoundError("User not found or not deleted")
         UserRepository.restore_user_txn(uid, db=db)
         db.commit()
         return True
@@ -316,7 +317,7 @@ class UserService:
         db = BaseService.db()
         user = UserRepository.find_deleted_user(uid, db=db)
         if not user:
-            raise ValueError("Can only permanently delete trashed users")
+            raise ConflictError("Can only permanently delete trashed users")
         with BaseService.transaction() as txn:
             UserRepository.permanent_delete_cascade_txn(uid, db=txn)
         return True
@@ -325,17 +326,17 @@ class UserService:
     def delete_user(uid, current_user_id):
         """Soft-delete user by setting status='deleted'."""
         if uid == current_user_id:
-            raise ValueError("Cannot delete self")
+            raise ConflictError("Cannot delete self")
 
         db = BaseService.db()
         user = UserRepository.find_user_by_id_basic(uid, db=db)
         if not user:
-            raise ValueError("User not found")
+            raise NotFoundError("User not found")
 
         # Admin role check via junction table
         if UserRepository.check_admin_role(uid, db=db):
             if UserRepository.count_admin_roles(db=db) <= 1:
-                raise ValueError("Cannot delete the last administrator")
+                raise ConflictError("Cannot delete the last administrator")
 
         UserRepository.soft_delete_user_txn(uid, db=db)
         db.commit()
@@ -347,7 +348,7 @@ class UserService:
         if not ids:
             return 0
         if current_user_id and current_user_id in ids:
-            raise ValueError("Cannot change own status")
+            raise ConflictError("Cannot change own status")
         if status not in ("active", "inactive"):
             raise ValueError("Invalid status")
         db = BaseService.db()
@@ -362,12 +363,12 @@ class UserService:
             return 0
         db = BaseService.db()
         if current_user_id in ids:
-            raise ValueError("Cannot delete self")
+            raise ConflictError("Cannot delete self")
         # Prevent deleting last admin
         admin_count = UserRepository.count_admin_roles_in_ids(ids, db=db)
         if admin_count > 0:
             if UserRepository.count_admin_roles(db=db) <= admin_count:
-                raise ValueError("Cannot remove all administrators")
+                raise ConflictError("Cannot remove all administrators")
         count = UserRepository.batch_soft_delete_users_txn(ids, db=db)
         db.commit()
         return count
@@ -392,9 +393,9 @@ class UserService:
         db = BaseService.db()
         existing = UserRepository.find_user_status(uid, db=db)
         if not existing:
-            raise ValueError("User not found")
+            raise NotFoundError("User not found")
         if existing["status"] != "active":
-            raise ValueError("User is disabled, cannot reset password")
+            raise ConflictError("User is disabled, cannot reset password")
 
         with BaseService.transaction() as txn:
             UserRepository.reset_password_txn(uid, hashed, db=txn)
@@ -407,7 +408,7 @@ class UserService:
         db = BaseService.db()
         row = UserRepository.find_user_by_id_basic(uid, db=db)
         if not row:
-            raise ValueError("User not found")
+            raise NotFoundError("User not found")
         with BaseService.transaction() as txn:
             UserRepository.unlock_user_txn(uid, db=txn)
         return row["username"]
@@ -548,7 +549,7 @@ class UserService:
         """Get single user (without password)."""
         row = UserRepository.find_user_by_id_full(uid)
         if not row:
-            raise ValueError("User not found")
+            raise NotFoundError("User not found")
         u = dict(row)
         u.pop("password", None)
         u.pop("token", None)
@@ -595,7 +596,7 @@ class UserService:
     @staticmethod
     def upload_user_document(uid, file_storage, doc_type, uploaded_by, upload_dir):
         if not UserRepository.find_user_by_id_basic(uid):
-            raise LookupError("User not found")
+            raise NotFoundError("User not found")
         os.makedirs(upload_dir, exist_ok=True)
         ext = file_storage.filename.rsplit(".", 1)[-1].lower() if "." in file_storage.filename else ""
         safe_name = str(uid) + "_" + uuid.uuid4().hex
@@ -614,7 +615,7 @@ class UserService:
     def get_user_document_file(uid, doc_id, upload_dir):
         doc = UserRepository.find_user_document(uid, doc_id)
         if not doc:
-            raise LookupError("Document not found")
+            raise NotFoundError("Document not found")
         doc = dict(doc)
         filepath = os.path.join(upload_dir, doc["file_path"])
         if not os.path.exists(filepath):
@@ -625,7 +626,7 @@ class UserService:
     def delete_user_document(uid, doc_id, upload_dir):
         doc = UserRepository.find_user_document(uid, doc_id)
         if not doc:
-            raise LookupError("Document not found")
+            raise NotFoundError("Document not found")
         doc = dict(doc)
         filepath = os.path.join(upload_dir, doc["file_path"])
         if os.path.exists(filepath):

@@ -59,10 +59,7 @@ def update_process_route(rid):
     data = get_json_body()
     if not data:
         return jsonify({'error': '无更新数据'}), 400
-    try:
-        result = ProcessRouteService.update_route(rid, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    result = ProcessRouteService.update_route(rid, data)
     safe_audit_log('update_process_route', 'process_route', rid, data.get('name', ''))
     return jsonify({'message': '更新成功', **(result or {})})
 
@@ -82,10 +79,7 @@ def process_route_impact(rid):
 @check_permission('routes:delete')
 def delete_process_route(rid):
     """删除工序路线"""
-    try:
-        name = ProcessRouteService.delete_route(rid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    name = ProcessRouteService.delete_route(rid)
     safe_audit_log('delete_process_route', 'process_route', rid, name)
     return jsonify({'message': '删除成功'})
 

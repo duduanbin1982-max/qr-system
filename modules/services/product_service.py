@@ -6,7 +6,7 @@ qr-system — 产品管理 Service 层
 """
 from datetime import datetime
 from modules.services import BaseService
-from modules.domain.errors import NotFoundError, ValidationError
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.config import generate_product_code
 from modules.repositories.product_repository import ProductRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
@@ -104,7 +104,7 @@ class ProductService:
 
         with BaseService.transaction() as db:
             if ProductRepository.exists_by_code(product_code, db=db):
-                raise ValueError(f'产品编码 {product_code} 已存在')
+                raise ConflictError(f'产品编码 {product_code} 已存在')
 
             insert_data = {
                 'product_name': name,
@@ -144,7 +144,7 @@ class ProductService:
         """
         prod = ProductRepository.find_with_fields(pid)
         if not prod:
-            raise ValueError('产品不存在')
+            raise NotFoundError('产品不存在')
 
         allowed = ['product_name', 'model', 'spec', 'style', 'upper_opening',
                    'plate_thickness', 'category', 'price', 'weight',
@@ -181,7 +181,7 @@ class ProductService:
             if new_code:
                 dup = ProductRepository.find_by_code_exclude(new_code, pid, db=txn)
                 if dup:
-                    raise ValueError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
+                    raise ConflictError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
 
             ProductRepository.update(pid, sets, params, db=txn)
 
@@ -197,7 +197,7 @@ class ProductService:
     def check_product_impact(pid):
         prod = ProductRepository.find_active_identity(pid)
         if not prod:
-            raise ValueError("Product not found")
+            raise NotFoundError("Product not found")
         used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
         return {"product": dict(prod), "used_in_orders": used}
 
@@ -213,11 +213,11 @@ class ProductService:
         """
         prod = ProductRepository.find_by_id(pid)
         if not prod:
-            raise ValueError('产品不存在')
+            raise NotFoundError('产品不存在')
 
         used = ProductRepository.count_by_product_code_in_orders(prod['product_code'])
         if used > 0:
-            raise ValueError(f'该产品已被 {used} 个订单使用，无法删除')
+            raise ConflictError(f'该产品已被 {used} 个订单使用，无法删除')
 
         with BaseService.transaction() as txn:
             ProductRepository.soft_delete(pid, db=txn)
@@ -226,9 +226,9 @@ class ProductService:
     def restore_product(pid):
         prod = dict(ProductRepository.find_by_id(pid))
         if not prod:
-            raise ValueError('产品不存在')
+            raise NotFoundError('产品不存在')
         if not prod.get('deleted_at'):
-            raise ValueError('该产品未被删除，无需恢复')
+            raise ConflictError('该产品未被删除，无需恢复')
         with BaseService.transaction() as txn:
             ProductRepository.restore(pid, db=txn)
         return prod['product_name']
@@ -237,12 +237,12 @@ class ProductService:
     def purge_product(pid):
         prod = dict(ProductRepository.find_by_id(pid))
         if not prod:
-            raise ValueError("product not found")
+            raise NotFoundError("product not found")
         if not prod.get("deleted_at"):
-            raise ValueError("only soft-deleted products can be purged")
+            raise ConflictError("only soft-deleted products can be purged")
         used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
         if used > 0:
-            raise ValueError("product referenced by " + str(used) + " orders, cannot purge")
+            raise ConflictError("product referenced by " + str(used) + " orders, cannot purge")
         with BaseService.transaction() as txn:
             ProductRepository.hard_delete(pid, db=txn)
         return prod["product_name"]
@@ -442,7 +442,7 @@ class ProductService:
         """
         row = ProductRepository.find_attachment(attachment_id)
         if not row:
-            raise ValueError('附件不存在')
+            raise NotFoundError('附件不存在')
         with BaseService.transaction() as txn:
             ProductRepository.delete_attachment(attachment_id, db=txn)
         return row
@@ -464,7 +464,11 @@ class ProductService:
         with BaseService.transaction() as txn:
             if not ProductBomRepository.product_exists(product_id, db=txn):
                 raise NotFoundError('产品不存在')
-            new_id = ProductBomRepository.insert(product_id, material_id, float(quantity), process_id, db=txn)
+            new_id = ProductBomRepository.insert_unique(
+                product_id, material_id, float(quantity), process_id, db=txn
+            )
+            if new_id is None:
+                raise ConflictError('该物料已存在于产品配方中')
             row = ProductBomRepository.find_by_id(new_id, db=txn)
             return dict(row)
 

@@ -62,8 +62,6 @@ def save_settings():
         SettingsService.save(data, deleted_keys)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception:
-        return jsonify({'error': '保存失败，请重试'}), 500
 
     try:
         SettingsService.clear_cache()
@@ -93,8 +91,6 @@ def save_company_info():
         SettingsService.save(filtered, [])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception:
-        return jsonify({'error': '保存失败，请重试'}), 500
 
     try:
         SettingsService.clear_cache()

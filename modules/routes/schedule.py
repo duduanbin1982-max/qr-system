@@ -7,7 +7,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    handle_unexpected_error,
     safe_audit_log,
 )
 from modules.services.schedule_service import ScheduleService
@@ -18,15 +17,12 @@ from modules.services.production_line_service import ProductionLineService
 @check_auth
 @check_permission("schedule:view")
 def schedule_gantt():
-    try:
-        limit = request.args.get("limit", 200, type=int)
-        offset = request.args.get("offset", 0, type=int)
-        schedule_scope = request.args.get("status", "active")
-        return jsonify(ScheduleService.get_gantt_data(
-            limit=limit, offset=offset, schedule_scope=schedule_scope
-        ))
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
+    limit = request.args.get("limit", 200, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    schedule_scope = request.args.get("status", "active")
+    return jsonify(ScheduleService.get_gantt_data(
+        limit=limit, offset=offset, schedule_scope=schedule_scope
+    ))
 
 
 @app.route("/api/schedule/order/<int:order_id>", methods=["PUT"])
@@ -49,8 +45,6 @@ def schedule_update_order(order_id):
         return jsonify({"ok": True, "message": "schedule updated"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
 
 
 @app.route("/api/schedule/batch-shift", methods=["POST"])
@@ -75,8 +69,6 @@ def schedule_batch_shift():
         return jsonify({"ok": True, "count": count, "message": f"shifted {count} orders by {days} days"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
 
 
 # ========== Production Lines (via ProductionLineService) ==========

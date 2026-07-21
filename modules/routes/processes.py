@@ -95,10 +95,7 @@ def update_process(pid):
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        ProcessService.update_process(pid, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    ProcessService.update_process(pid, data)
     safe_audit_log('update_process', 'process', pid, str(data))
     return jsonify({'message': '更新成功'})
 

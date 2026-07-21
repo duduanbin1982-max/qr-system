@@ -11,9 +11,6 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.approval_service import ApprovalService
-from modules.domain.errors import DomainError
-
-
 @app.route('/api/approvals/pending', methods=['GET'])
 @check_auth
 @check_permission('approvals:view')
@@ -38,19 +35,16 @@ def get_approval_history():
 @validate_json('approval_action')
 def handle_approval(record_id, action):
     data = get_json_body()
-    try:
-        ApprovalService.handle(
-            record_id, action,
-            approver={'id': g.current_user['id'], 'name': g.current_user['name']},
-            comment=data.get('comment', '')
-        )
-        safe_audit_log(
-            'approve_' + action, 'approval', record_id,
-            f'{g.current_user["name"]} {action} approval {record_id}'
-        )
-        return jsonify({'message': '审批操作成功'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    ApprovalService.handle(
+        record_id, action,
+        approver={'id': g.current_user['id'], 'name': g.current_user['name']},
+        comment=data.get('comment', '')
+    )
+    safe_audit_log(
+        'approve_' + action, 'approval', record_id,
+        f'{g.current_user["name"]} {action} approval {record_id}'
+    )
+    return jsonify({'message': '审批操作成功'})
 
 
 @app.route('/api/approvals/config', methods=['GET'])
@@ -83,22 +77,19 @@ def batch_approval():
     action = data.get("action", "")
     if not ids or action not in ("approve", "reject"):
         return jsonify({"error": "参数错误"}), 400
-    try:
-        count, failed = ApprovalService.batch_handle(
-            ids, action,
-            approver={"id": g.current_user["id"], "name": g.current_user["name"]},
-            comment=data.get("comment", "")
-        )
-        if failed:
-            return jsonify({
-                "message": f"已处理 {count}/{len(ids)} 条",
-                "count": count,
-                "total": len(ids),
-                "failed": failed
-            })
-        return jsonify({"message": f"已处理 {count} 条", "count": count, "total": len(ids)})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    count, failed = ApprovalService.batch_handle(
+        ids, action,
+        approver={"id": g.current_user["id"], "name": g.current_user["name"]},
+        comment=data.get("comment", "")
+    )
+    if failed:
+        return jsonify({
+            "message": f"已处理 {count}/{len(ids)} 条",
+            "count": count,
+            "total": len(ids),
+            "failed": failed
+        })
+    return jsonify({"message": f"已处理 {count} 条", "count": count, "total": len(ids)})
 
 @app.route("/api/approvals/stats", methods=["GET"])
 @check_auth

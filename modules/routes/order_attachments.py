@@ -45,20 +45,17 @@ def upload_attachment(order_id):
     if not file:
         return jsonify({'error': '请选择文件'}), 400
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    try:
-        aid, fpath = OrderAttachmentsService.upload_attachment(
-            order_id,
-            secure_filename(file.filename),
-            file.content_type or 'application/octet-stream',
-            0,
-            g.current_user.get('name', ''),
-            UPLOAD_DIR
-        )
-        file.save(fpath)
-        safe_audit_log('upload_attachment', 'order', order_id, f'attachment {aid}')
-        return jsonify({'id': aid, 'message': '上传成功'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    aid, fpath = OrderAttachmentsService.upload_attachment(
+        order_id,
+        secure_filename(file.filename),
+        file.content_type or 'application/octet-stream',
+        0,
+        g.current_user.get('name', ''),
+        UPLOAD_DIR
+    )
+    file.save(fpath)
+    safe_audit_log('upload_attachment', 'order', order_id, f'attachment {aid}')
+    return jsonify({'id': aid, 'message': '上传成功'})
 
 
 @app.route('/api/order-attachments/<int:attachment_id>/download', methods=['GET'])

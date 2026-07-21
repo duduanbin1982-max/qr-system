@@ -1,7 +1,7 @@
 """Process handoff quality review routes."""
 from flask import jsonify, request, g
 
-from modules.route_decorators import app, check_auth, check_permission, handle_unexpected_error, safe_audit_log
+from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.services.handoff_review_service import HandoffReviewService
 
 
@@ -9,16 +9,13 @@ from modules.services.handoff_review_service import HandoffReviewService
 @check_auth
 @check_permission('scan:view')
 def handoff_review_pending():
-    try:
-        context = HandoffReviewService.pending_context(
-            request.args.get('order_id', type=int),
-            request.args.get('to_process_id', request.args.get('process_id', type=int), type=int),
-            g.current_user.get('id'),
-            request.args.get('serial_no', '').strip(),
-        )
-        return jsonify(context)
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    context = HandoffReviewService.pending_context(
+        request.args.get('order_id', type=int),
+        request.args.get('to_process_id', request.args.get('process_id', type=int), type=int),
+        g.current_user.get('id'),
+        request.args.get('serial_no', '').strip(),
+    )
+    return jsonify(context)
 
 
 @app.route('/api/handoff-reviews', methods=['POST'])
@@ -31,24 +28,19 @@ def handoff_review_create():
         return jsonify(result)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/handoff-reviews', methods=['GET'])
 @check_auth
 @check_permission('performance:view')
 def handoff_review_list():
-    try:
-        return jsonify(HandoffReviewService.list_reviews(
-            year_month=request.args.get('year_month', ''),
-            status=request.args.get('status', ''),
-            user_id=request.args.get('user_id', type=int),
-            page=request.args.get('page', 1, type=int),
-            per_page=request.args.get('per_page', 100, type=int),
-        ))
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    return jsonify(HandoffReviewService.list_reviews(
+        year_month=request.args.get('year_month', ''),
+        status=request.args.get('status', ''),
+        user_id=request.args.get('user_id', type=int),
+        page=request.args.get('page', 1, type=int),
+        per_page=request.args.get('per_page', 100, type=int),
+    ))
 
 
 @app.route('/api/handoff-reviews/<int:review_id>/status', methods=['PUT'])
@@ -61,5 +53,3 @@ def handoff_review_status(review_id):
         return jsonify(result)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')

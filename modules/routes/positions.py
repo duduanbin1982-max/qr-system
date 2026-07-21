@@ -52,10 +52,7 @@ def create_position():
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        pos_id = PositionService.create_position(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    pos_id = PositionService.create_position(data)
     safe_audit_log('create_position', 'position', pos_id, data.get('name', ''))
     return jsonify({'message': '创建成功', 'id': pos_id})
 
@@ -77,11 +74,7 @@ def update_position(pos_id):
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        PositionService.update_position(pos_id, data)
-    except ValueError as e:
-        code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
-        return jsonify({'error': str(e)}), code
+    PositionService.update_position(pos_id, data)
     safe_audit_log('update_position', 'position', pos_id, data.get('name', ''))
     return jsonify({'message': '更新成功'})
 

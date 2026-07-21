@@ -88,10 +88,7 @@ def create_customer():
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        cid = CustomerService.create_customer(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    cid = CustomerService.create_customer(data)
     safe_audit_log('create_customer', 'customer', cid, data.get('name', ''))
     return jsonify({'message': '创建成功', 'id': cid})
 
@@ -140,10 +137,7 @@ def update_customer(cid):
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        CustomerService.update_customer(cid, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    CustomerService.update_customer(cid, data)
     safe_audit_log('update_customer', 'customer', cid, str(data))
     return jsonify({'message': '更新成功'})
 

@@ -1,6 +1,6 @@
 """qr-system - Progress Routes (Refactored)"""
 from flask import jsonify
-from modules.route_decorators import app, check_auth, check_permission, handle_unexpected_error
+from modules.route_decorators import app, check_auth, check_permission
 from modules.services.progress_service import ProgressService
 
 

@@ -48,10 +48,7 @@ def create_menu_permission():
 @check_permission("settings:manage")
 def update_menu_permission(page):
     data = get_json_body()
-    try:
-        AuditLogService.update_menu_permission(page, data)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404 if "不存在" in str(e) else 400
+    AuditLogService.update_menu_permission(page, data)
     safe_audit_log("update_menu_permission", "menu", 0, f"{page} updated")
     return jsonify({"message": "updated"})
 
@@ -76,9 +73,6 @@ def batch_update_menu_permissions():
     items = data.get("items", [])
     if not isinstance(items, list):
         return jsonify({"error": "items must be array"}), 400
-    try:
-        AuditLogService.batch_update_menu_permissions(items)
-    except Exception:
-        return jsonify({"error": "保存失败，请重试"}), 400
+    AuditLogService.batch_update_menu_permissions(items)
     safe_audit_log("batch_update_menu_permissions", "menu", 0, f"{len(items)} items")
     return jsonify({"message": f"已保存 {len(items)} 条菜单配置"})

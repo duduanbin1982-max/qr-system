@@ -6,14 +6,10 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    handle_unexpected_error,
     safe_audit_log,
     validate_json,
 )
 from modules.services.material_service import MaterialService, SupplierService, MaterialNotFoundError
-from modules.domain.errors import DomainError
-
-
 # ============================================================
 # Material CRUD
 # ============================================================
@@ -22,13 +18,10 @@ from modules.domain.errors import DomainError
 @check_auth
 @check_permission('materials:view')
 def list_materials():
-    try:
-        page = max(request.args.get('page', 1, type=int), 1)
-        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-        result = MaterialService.list_materials(page=page, limit=limit)
-        return jsonify(result)
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    result = MaterialService.list_materials(page=page, limit=limit)
+    return jsonify(result)
 
 
 @app.route('/api/materials', methods=['POST'])
@@ -37,14 +30,9 @@ def list_materials():
 @validate_json('create_material')
 def create_material():
     data = get_json_body()
-    try:
-        mid = MaterialService.create_material(data)
-        safe_audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
-        return jsonify({'message': 'created', 'id': mid})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'create material')
+    mid = MaterialService.create_material(data)
+    safe_audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
+    return jsonify({'message': 'created', 'id': mid})
 
 
 @app.route('/api/materials/<int:mid>', methods=['PUT'])
@@ -53,38 +41,25 @@ def create_material():
 @validate_json('update_material')
 def update_material(mid):
     data = get_json_body()
-    try:
-        MaterialService.update_material(mid, data)
-        safe_audit_log('update', 'material', mid, 'material updated')
-        return jsonify({'message': 'updated'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    MaterialService.update_material(mid, data)
+    safe_audit_log('update', 'material', mid, 'material updated')
+    return jsonify({'message': 'updated'})
 
 
 @app.route('/api/materials/<int:mid>/impact', methods=['GET'])
 @check_auth
 @check_permission('materials:view')
 def material_impact(mid):
-    try:
-        return jsonify(MaterialService.check_impact(mid))
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    return jsonify(MaterialService.check_impact(mid))
 
 
 @app.route('/api/materials/<int:mid>', methods=['DELETE'])
 @check_auth
 @check_permission('materials:manage')
 def delete_material(mid):
-    try:
-        MaterialService.delete_material(mid)
-        safe_audit_log('delete', 'material', mid, f'deleted material {mid}')
-        return jsonify({'message': 'deleted'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    MaterialService.delete_material(mid)
+    safe_audit_log('delete', 'material', mid, f'deleted material {mid}')
+    return jsonify({'message': 'deleted'})
 
 
 # ============================================================
@@ -95,13 +70,10 @@ def delete_material(mid):
 @check_auth
 @check_permission('materials:view')
 def material_logs(mid):
-    try:
-        page = max(request.args.get('page', 1, type=int), 1)
-        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-        result = MaterialService.get_logs(mid, page=page, limit=limit)
-        return jsonify(result)
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    result = MaterialService.get_logs(mid, page=page, limit=limit)
+    return jsonify(result)
 
 
 @app.route('/api/materials/<int:mid>/stock', methods=['POST'])
@@ -113,14 +85,9 @@ def material_stock(mid):
     quantity = float(data.get('quantity', 0))
     remark = data.get('remark', '').strip()
     operator_name = data.get('operator_name', '').strip()
-    try:
-        new_qty = MaterialService.stock_change(mid, change_type, quantity, remark, operator_name)
-        safe_audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
-        return jsonify({'ok': True, 'new_quantity': new_qty})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    new_qty = MaterialService.stock_change(mid, change_type, quantity, remark, operator_name)
+    safe_audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
+    return jsonify({'ok': True, 'new_quantity': new_qty})
 
 
 # ============================================================
@@ -131,13 +98,10 @@ def material_stock(mid):
 @check_auth
 @check_permission('materials:view')
 def list_consumptions(mid):
-    try:
-        page = max(request.args.get('page', 1, type=int), 1)
-        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-        result = MaterialService.list_consumptions(mid, page=page, limit=limit)
-        return jsonify(result)
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    result = MaterialService.list_consumptions(mid, page=page, limit=limit)
+    return jsonify(result)
 
 
 @app.route('/api/materials/<int:mid>/consumptions', methods=['POST'])
@@ -151,31 +115,21 @@ def create_consumption(mid):
     notes = data.get('notes', '').strip()
     uname = g.current_user.get('name', g.current_user.get('username', ''))
     uid = g.current_user.get('id')
-    try:
-        new_qty = MaterialService.create_consumption(
-            mid, order_id, process_id, quantity,
-            notes=notes, operator_name=uname, user_id=uid
-        )
-        safe_audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
-        return jsonify({'ok': True, 'new_quantity': new_qty})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    new_qty = MaterialService.create_consumption(
+        mid, order_id, process_id, quantity,
+        notes=notes, operator_name=uname, user_id=uid
+    )
+    safe_audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
+    return jsonify({'ok': True, 'new_quantity': new_qty})
 
 
 @app.route('/api/material-consumptions/<int:cid>', methods=['DELETE'])
 @check_auth
 @check_permission('materials:manage')
 def delete_consumption(cid):
-    try:
-        MaterialService.delete_consumption(cid)
-        safe_audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
-        return jsonify({'ok': True, 'message': '消耗记录已撤销'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    MaterialService.delete_consumption(cid)
+    safe_audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
+    return jsonify({'ok': True, 'message': '消耗记录已撤销'})
 
 
 # ============================================================
@@ -186,13 +140,10 @@ def delete_consumption(cid):
 @check_auth
 @check_permission('materials:view')
 def list_suppliers():
-    try:
-        page = max(request.args.get('page', 1, type=int), 1)
-        limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-        result = SupplierService.list_suppliers(page=page, limit=limit)
-        return jsonify(result)
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
+    result = SupplierService.list_suppliers(page=page, limit=limit)
+    return jsonify(result)
 
 
 @app.route('/api/suppliers', methods=['POST'])
@@ -201,14 +152,9 @@ def list_suppliers():
 @validate_json('create_supplier')
 def create_supplier():
     data = get_json_body()
-    try:
-        sid = SupplierService.create_supplier(data)
-        safe_audit_log('create', 'supplier', sid, f"supplier: {data.get('name', '').strip()}")
-        return jsonify({'ok': True, 'id': sid, 'message': '供应商创建成功'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    sid = SupplierService.create_supplier(data)
+    safe_audit_log('create', 'supplier', sid, f"supplier: {data.get('name', '').strip()}")
+    return jsonify({'ok': True, 'id': sid, 'message': '供应商创建成功'})
 
 
 @app.route('/api/suppliers/<int:sid>', methods=['PUT'])
@@ -217,25 +163,15 @@ def create_supplier():
 @validate_json('create_supplier')
 def update_supplier(sid):
     data = get_json_body()
-    try:
-        SupplierService.update_supplier(sid, data)
-        safe_audit_log('update', 'supplier', sid, 'supplier updated')
-        return jsonify({'ok': True, 'message': '更新成功'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    SupplierService.update_supplier(sid, data)
+    safe_audit_log('update', 'supplier', sid, 'supplier updated')
+    return jsonify({'ok': True, 'message': '更新成功'})
 
 
 @app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
 @check_auth
 @check_permission('materials:manage')
 def delete_supplier(sid):
-    try:
-        SupplierService.delete_supplier(sid)
-        safe_audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')
-        return jsonify({'ok': True, 'message': '删除成功'})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
+    SupplierService.delete_supplier(sid)
+    safe_audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')
+    return jsonify({'ok': True, 'message': '删除成功'})

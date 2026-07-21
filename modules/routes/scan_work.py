@@ -8,7 +8,6 @@ from modules.route_decorators import (
     check_permission,
     get_json_body,
     get_user_process_ids,
-    handle_unexpected_error,
     has_permission,
     rate_limit,
     safe_audit_log,
@@ -29,70 +28,67 @@ from io import BytesIO
 @check_permission("scan:view")
 def scan_order():
     """扫码获取订单信息（支持订单号或产品序列号）"""
+    data = get_json_body()
+    code = data.get("code", "").strip()
+    if not code:
+        return jsonify({"error": "请扫描二维码"}), 400
+
+    # 先当订单号查
+    order = ScanHelperService.get_order_by_no(code)
+    item_info = None
+    serial_no = None
+    if not order:
+        item = ScanHelperService.get_product_item(code)
+        if item:
+            item_info = dict(item)
+            order = ScanHelperService.get_order(item["order_id"])
+            if order and item_info:
+                try:
+                    item_info["qr_data"] = json.loads(item["qr_content"])
+                except (json.JSONDecodeError, TypeError):
+                    item_info["qr_data"] = {}
+
+    # Fallback: if code is a plain-text serial number, look it up directly
+    if not order:
+        item = ScanHelperService.get_product_item(code)
+        if item:
+            item_info = dict(item)
+            serial_no = code
+            order = ScanHelperService.get_order(item["order_id"])
+
+    if not order:
+        return jsonify({"error": f"未找到订单或产品: {code}"}), 404
+
+    # QR模式校验：序列号模式订单拒绝订单号扫描
+    if not serial_no:
+        o_pre = dict(order)
+        _qr_mode = (o_pre.get("qr_mode") or "").strip()
+        _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
+        if (_qr_mode == "serial" or _has_items) and not has_permission(g.current_user, "quality:view"):
+            return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
+
+    o = dict(order)
+    if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
+        return jsonify({"error": "您无权查看此订单"}), 403
+
     try:
-        data = get_json_body()
-        code = data.get("code", "").strip()
-        if not code:
-            return jsonify({"error": "请扫描二维码"}), 400
+        o["extra_fields"] = json.loads(o.get("extra_fields") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        o["extra_fields"] = {}
 
-        # 先当订单号查
-        order = ScanHelperService.get_order_by_no(code)
-        item_info = None
-        serial_no = None
-        if not order:
-            item = ScanHelperService.get_product_item(code)
-            if item:
-                item_info = dict(item)
-                order = ScanHelperService.get_order(item["order_id"])
-                if order and item_info:
-                    try:
-                        item_info["qr_data"] = json.loads(item["qr_content"])
-                    except (json.JSONDecodeError, TypeError):
-                        item_info["qr_data"] = {}
+    procs = ScanHelperService.get_order_processes(o["id"])
+    all_procs = [dict(p) for p in procs]
+    user_pids = get_user_process_ids(g.current_user)
+    o["processes"] = [p for p in all_procs if p["process_id"] in user_pids] if user_pids is not None else all_procs
 
-        # Fallback: if code is a plain-text serial number, look it up directly
-        if not order:
-            item = ScanHelperService.get_product_item(code)
-            if item:
-                item_info = dict(item)
-                serial_no = code
-                order = ScanHelperService.get_order(item["order_id"])
+    records = ScanHelperService.get_work_records(o["id"])
+    o["records"] = [dict(r) for r in records]
 
-        if not order:
-            return jsonify({"error": f"未找到订单或产品: {code}"}), 404
-
-        # QR模式校验：序列号模式订单拒绝订单号扫描
-        if not serial_no:
-            o_pre = dict(order)
-            _qr_mode = (o_pre.get("qr_mode") or "").strip()
-            _has_items = bool(ScanHelperService.get_product_items_by_order(o_pre["id"]))
-            if (_qr_mode == "serial" or _has_items) and not has_permission(g.current_user, "quality:view"):
-                return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
-
-        o = dict(order)
-        if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
-            return jsonify({"error": "您无权查看此订单"}), 403
-
-        try:
-            o["extra_fields"] = json.loads(o.get("extra_fields") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            o["extra_fields"] = {}
-
-        procs = ScanHelperService.get_order_processes(o["id"])
-        all_procs = [dict(p) for p in procs]
-        user_pids = get_user_process_ids(g.current_user)
-        o["processes"] = [p for p in all_procs if p["process_id"] in user_pids] if user_pids is not None else all_procs
-
-        records = ScanHelperService.get_work_records(o["id"])
-        o["records"] = [dict(r) for r in records]
-
-        if item_info:
-            o["has_items"] = True
-            return jsonify({"order": o, "item": item_info})
-        o["has_items"] = bool(ScanHelperService.get_product_items_by_order(o["id"]))
-        return jsonify({"order": o})
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
+    if item_info:
+        o["has_items"] = True
+        return jsonify({"order": o, "item": item_info})
+    o["has_items"] = bool(ScanHelperService.get_product_items_by_order(o["id"]))
+    return jsonify({"order": o})
 
 
 # ============================================================
@@ -104,57 +100,54 @@ def scan_order():
 @check_permission("scan:view")
 def mobile_decode(code):
     """将数字编码的二维码还原为JSON"""
+    code = code.strip()
+    if len(code) > 2048:
+        return jsonify({"error": "二维码数据过长"}), 400
+    if code.startswith("N"):
+        code = code[1:]
+    if not code.isdigit():
+        return jsonify({"code": code})
+
+    if len(code) < 12:
+        return jsonify({"error": "无效的数字编码"}), 400
+
+    mode = code[0]
+    if mode != "2":
+        return jsonify({"code": code})
+
     try:
-        code = code.strip()
-        if len(code) > 2048:
-            return jsonify({"error": "二维码数据过长"}), 400
-        if code.startswith("N"):
-            code = code[1:]
-        if not code.isdigit():
-            return jsonify({"code": code})
+        order_id = int(code[1:7])
+        position_no = int(code[7:12])
+    except ValueError:
+        return jsonify({"error": "无效的数字编码"}), 400
 
-        if len(code) < 12:
-            return jsonify({"error": "无效的数字编码"}), 400
-
-        mode = code[0]
-        if mode != "2":
-            return jsonify({"code": code})
-
-        try:
-            order_id = int(code[1:7])
-            position_no = int(code[7:12])
-        except ValueError:
-            return jsonify({"error": "无效的数字编码"}), 400
-
-        item = ScanHelperService.get_product_item_by_position(order_id, position_no)
-        if not item:
-            order = ScanHelperService.get_order(order_id)
-            if not order:
-                return jsonify({"error": "未找到对应订单或产品"}), 404
-            return jsonify({
-                "code": json.dumps({
-                    "order_id": order_id, "position_no": position_no,
-                    "order_no": dict(order).get("order_no", "")
-                }),
-                "mode": "order_only",
-                "order": {"id": order_id, "order_no": dict(order).get("order_no", "")}
-            })
-
-        item_dict = dict(item)
-        try:
-            item_dict["qr_data"] = json.loads(item_dict.get("qr_content") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            item_dict["qr_data"] = {}
-
+    item = ScanHelperService.get_product_item_by_position(order_id, position_no)
+    if not item:
+        order = ScanHelperService.get_order(order_id)
+        if not order:
+            return jsonify({"error": "未找到对应订单或产品"}), 404
         return jsonify({
             "code": json.dumps({
                 "order_id": order_id, "position_no": position_no,
-                "serial_no": item["serial_no"]
+                "order_no": dict(order).get("order_no", "")
             }),
-            "item": item_dict
+            "mode": "order_only",
+            "order": {"id": order_id, "order_no": dict(order).get("order_no", "")}
         })
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
+
+    item_dict = dict(item)
+    try:
+        item_dict["qr_data"] = json.loads(item_dict.get("qr_content") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        item_dict["qr_data"] = {}
+
+    return jsonify({
+        "code": json.dumps({
+            "order_id": order_id, "position_no": position_no,
+            "serial_no": item["serial_no"]
+        }),
+        "item": item_dict
+    })
 
 
 @app.route("/api/mobile/scan", methods=["POST"])
@@ -162,12 +155,9 @@ def mobile_decode(code):
 @check_permission("scan:view")
 def mobile_scan():
     """扫码获取订单信息（移动端）"""
-    try:
-        data = get_json_body()
-        payload, status = MobileScanService.scan(data, g.current_user)
-        return jsonify(payload), status
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
+    data = get_json_body()
+    payload, status = MobileScanService.scan(data, g.current_user)
+    return jsonify(payload), status
 
 
 @app.route("/api/mobile/report", methods=["POST"])
@@ -216,8 +206,6 @@ def mobile_report():
         return jsonify({"message": "report OK", "handoff_pending": handoff_pending})
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
 
 
 # ============================================================
@@ -266,8 +254,6 @@ def work_report():
         return jsonify({"message": "report OK"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
-    except Exception as e:
-        return handle_unexpected_error(e, "database operation")
 
 
 # ============================================================
@@ -278,14 +264,11 @@ def work_report():
 @check_auth
 def generate_qrcode(code):
     """生成二维码图片"""
-    try:
-        qr = qrcode_lib.QRCode(version=1, box_size=10, border=4)
-        qr.add_data(code)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return send_file(buf, mimetype="image/png")
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    qr = qrcode_lib.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(code)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png")

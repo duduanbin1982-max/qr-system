@@ -20,7 +20,6 @@ from modules.route_decorators import (
 from modules.config import ALLOWED_UPLOAD_EXTENSIONS
 from werkzeug.utils import secure_filename
 from modules.services.product_service import ProductService
-from modules.domain.errors import DomainError
 from modules.services.setting_service import SettingsService
 
 
@@ -117,10 +116,7 @@ def create_product():
     security: [{Bearer: []}]
     """
     data = get_json_body()
-    try:
-        pid, product_code = ProductService.create_product(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '重复' in str(e) else 400
+    pid, product_code = ProductService.create_product(data)
     safe_audit_log('create_product', 'product', pid, data.get('product_name', ''))
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
@@ -164,10 +160,7 @@ def update_product(pid):
     security: [{Bearer: []}]
     """
     data = get_json_body()
-    try:
-        product_code = ProductService.update_product(pid, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    product_code = ProductService.update_product(pid, data)
     safe_audit_log('update_product', 'product', pid, str(data))
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
@@ -216,10 +209,7 @@ def delete_product(pid):
         description: 删除成功
     security: [{Bearer: []}]
     """
-    try:
-        ProductService.delete_product(pid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    ProductService.delete_product(pid)
     safe_audit_log('delete_product', 'product', pid)
     return jsonify({'message': '删除成功'})
 
@@ -475,14 +465,7 @@ def list_product_bom(product_id):
 @check_permission("products:edit")
 def add_product_bom(product_id):
     """Add one material to a product recipe."""
-    try:
-        bom = ProductService.add_product_bom(product_id, request.get_json(silent=True) or {})
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
-    except Exception as e:
-        if "UNIQUE" in str(e).upper():
-            return jsonify({"error": "该物料已存在于产品配方中", "code": "conflict"}), 409
-        raise
+    bom = ProductService.add_product_bom(product_id, request.get_json(silent=True) or {})
     return jsonify({"bom": bom}), 201
 
 @app.route("/api/products/<int:product_id>/bom/<int:bom_id>", methods=["DELETE"])
@@ -490,8 +473,5 @@ def add_product_bom(product_id):
 @check_permission("products:edit")
 def delete_product_bom(product_id, bom_id):
     """Delete one material from a product recipe."""
-    try:
-        ProductService.delete_product_bom(product_id, bom_id)
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    ProductService.delete_product_bom(product_id, bom_id)
     return jsonify({"message": "删除成功"})

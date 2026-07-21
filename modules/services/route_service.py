@@ -3,6 +3,7 @@ qr-system — 工序路线管理 Service 层（Repository-refactored）
 
 从 routes/process_routes.py 提取全部业务逻辑。
 """
+from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.route_repository import RouteRepository
 
@@ -41,7 +42,7 @@ class ProcessRouteService:
 
         existing = RouteRepository.find_route_by_name(name)
         if existing:
-            raise ValueError("路线名称【" + name + "】已存在")
+            raise ConflictError("路线名称【" + name + "】已存在")
 
         with BaseService.transaction() as txn:
             route_id = RouteRepository.insert_route_txn(
@@ -52,7 +53,7 @@ class ProcessRouteService:
                 existing_ids = set(r["id"] for r in RouteRepository.find_existing_process_ids(pids, db=txn))
                 for pid in pids:
                     if pid not in existing_ids:
-                        raise ValueError("工序 ID " + str(pid) + " 不存在")
+                        raise NotFoundError("工序 ID " + str(pid) + " 不存在")
             for idx, p in enumerate(processes):
                 pid = p.get("process_id")
                 if not pid:
@@ -66,13 +67,13 @@ class ProcessRouteService:
     def update_route(rid, data):
         route = RouteRepository.find_route_by_id(rid)
         if not route:
-            raise ValueError("路线不存在")
+            raise NotFoundError("路线不存在")
 
         new_name = data.get("name", route["name"]).strip()
         if new_name != route["name"]:
             dup = RouteRepository.find_route_by_name(new_name)
             if dup and dup["id"] != rid:
-                raise ValueError("路线名称【" + new_name + "】已存在")
+                raise ConflictError("路线名称【" + new_name + "】已存在")
 
         processes = data.get("processes")
         category = data.get("category", route["category"])
@@ -87,7 +88,7 @@ class ProcessRouteService:
                     existing_ids = set(r["id"] for r in RouteRepository.find_existing_process_ids(pids, db=txn))
                     for pid in pids:
                         if pid not in existing_ids:
-                            raise ValueError("工序 ID " + str(pid) + " 不存在")
+                            raise NotFoundError("工序 ID " + str(pid) + " 不存在")
                 for idx, p in enumerate(processes):
                     pid = p.get("process_id")
                     if not pid:
@@ -111,13 +112,13 @@ class ProcessRouteService:
     def delete_route(rid):
         route = RouteRepository.find_route_by_id(rid)
         if not route:
-            raise ValueError("路线不存在")
+            raise NotFoundError("路线不存在")
         used = RouteRepository.count_orders_using_route(rid)
         if used["cnt"] > 0:
-            raise ValueError("该路线已被 " + str(used["cnt"]) + " 个订单使用，无法删除")
+            raise ConflictError("该路线已被 " + str(used["cnt"]) + " 个订单使用，无法删除")
         product_count = RouteRepository.count_products_using_route(rid)
         if product_count["cnt"] > 0:
-            raise ValueError("该路线已被 " + str(product_count["cnt"]) + " 个产品引用，无法删除")
+            raise ConflictError("该路线已被 " + str(product_count["cnt"]) + " 个产品引用，无法删除")
         with BaseService.transaction() as txn:
             RouteRepository.delete_route_items_txn(rid, db=txn)
             RouteRepository.delete_route_txn(rid, db=txn)
@@ -127,7 +128,7 @@ class ProcessRouteService:
     def check_impact(rid):
         route = RouteRepository.find_route_name(rid)
         if not route:
-            raise ValueError("Route not found")
+            raise NotFoundError("Route not found")
         used = RouteRepository.count_orders_using_route(rid)["cnt"]
         return {"route_id": rid, "name": route["name"], "used_orders": used}
 
@@ -135,17 +136,17 @@ class ProcessRouteService:
     def check_order_exists(order_id):
         order = RouteRepository.check_order_exists(order_id)
         if not order:
-            raise ValueError("订单不存在或已删除")
+            raise NotFoundError("订单不存在或已删除")
         return order
 
     @staticmethod
     def apply_route(rid, order_id):
         route = RouteRepository.find_route_by_id(rid)
         if not route:
-            raise ValueError("路线不存在")
+            raise NotFoundError("路线不存在")
         order = RouteRepository.check_order_exists(order_id)
         if not order:
-            raise ValueError("订单不存在")
+            raise NotFoundError("订单不存在")
 
         with BaseService.transaction() as txn:
             existing_cnt = RouteRepository.count_work_records_for_order_txn(order_id, db=txn)

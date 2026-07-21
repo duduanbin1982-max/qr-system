@@ -1,4 +1,5 @@
 """qr-system - QualityService (Refactored: SQL -> QualityRepository)"""
+from modules.domain.errors import NotFoundError
 import json
 from datetime import datetime
 from modules.services import BaseService
@@ -132,7 +133,7 @@ class QualityService:
     def check_order_exists(order_id):
         order = QualityRepository.check_order_exists(order_id)
         if not order:
-            raise ValueError("order not found")
+            raise NotFoundError("order not found")
         if order["deleted_at"] is not None:
             raise ValueError("order deleted, cannot add inspection")
         return order
@@ -168,14 +169,14 @@ class QualityService:
     def get_inspection(inspection_id):
         qi = QualityRepository.find_by_id(inspection_id)
         if not qi:
-            raise ValueError("record not found")
+            raise NotFoundError("record not found")
         return dict(qi)
 
     @staticmethod
     def update_inspection(inspection_id, data):
         qi = QualityRepository.find_by_id(inspection_id)
         if not qi:
-            raise ValueError("record not found")
+            raise NotFoundError("record not found")
         qi = dict(qi)
 
         inspection_type = data.get("inspection_type", qi["inspection_type"])
@@ -217,7 +218,7 @@ class QualityService:
     def delete_inspection(inspection_id):
         qi = QualityRepository.find_by_id(inspection_id)
         if not qi:
-            raise ValueError("record not found")
+            raise NotFoundError("record not found")
         with BaseService.transaction() as txn:
             QualityRepository.delete_inspection_txn(inspection_id, db=txn)
 
@@ -368,14 +369,14 @@ class QualityService:
     def download_attachment(att_id):
         row = QualityRepository.find_attachment_by_id(att_id)
         if not row:
-            raise ValueError("attachment not found")
+            raise NotFoundError("attachment not found")
         return row
 
     @staticmethod
     def delete_attachment(att_id):
         row = QualityRepository.find_attachment_by_id(att_id)
         if not row:
-            raise ValueError("attachment not found")
+            raise NotFoundError("attachment not found")
         with BaseService.transaction() as txn:
             QualityRepository.delete_attachment_txn(att_id, db=txn)
 

@@ -1,6 +1,7 @@
 """
 qr-system — 岗位管理 Service 层 (Repository pattern)
 """
+from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.position_repository import PositionRepository
 
@@ -38,7 +39,7 @@ class PositionService:
                 raise ValueError('无效工序ID: ' + ', '.join(invalid))
         with BaseService.transaction() as txn:
             if PositionRepository.find_position_by_name(name, db=txn):
-                raise ValueError('岗位名称【' + name + '】已存在')
+                raise ConflictError('岗位名称【' + name + '】已存在')
             cur = PositionRepository.insert_position(
                 name, data.get('description', ''), data.get('status', 'active'), db=txn)
             pos_id = cur.lastrowid
@@ -50,7 +51,7 @@ class PositionService:
     def update_position(pos_id, data):
         pos = PositionRepository.find_position_by_id(pos_id)
         if not pos:
-            raise ValueError('岗位不存在')
+            raise NotFoundError('岗位不存在')
         if 'name' in data:
             data['name'] = data['name'].strip()
             if not data['name']:
@@ -82,7 +83,7 @@ class PositionService:
                 dup = PositionRepository.find_position_by_name_excluding(
                     data['name'], pos_id, db=txn)
                 if dup:
-                    raise ValueError('岗位名称【' + data['name'] + '】已存在')
+                    raise ConflictError('岗位名称【' + data['name'] + '】已存在')
             if sets:
                 PositionRepository.update_position_fields(
                     pos_id, ', '.join(sets), params, db=txn)
@@ -95,7 +96,7 @@ class PositionService:
     def check_impact(pos_id):
         pos = PositionRepository.find_position_name_by_id(pos_id)
         if not pos:
-            raise ValueError("Position not found")
+            raise NotFoundError("Position not found")
         users = PositionRepository.count_users_by_position(pos_id)
         return {"position_id": pos_id, "name": pos["name"], "users": users}
 
@@ -103,7 +104,7 @@ class PositionService:
     def delete_position(pos_id):
         pos = PositionRepository.find_position_by_id(pos_id)
         if not pos:
-            raise ValueError('岗位不存在')
+            raise NotFoundError('岗位不存在')
         user_count = PositionRepository.count_users_by_position(pos_id)
         if user_count > 0:
             raise ValueError("该岗位下有 " + str(user_count) + " 个用户，请先将用户调岗后再删除")

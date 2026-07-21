@@ -1,4 +1,5 @@
 """qr-system — 出库管理 Service 层（Repository-refactored）"""
+from modules.domain.errors import ConflictError, NotFoundError
 from datetime import datetime
 from io import BytesIO
 
@@ -62,9 +63,9 @@ class ShipmentService:
         for item in items:
             inv = InventoryRepository.find_item_by_id(item.get("inventory_id", 0))
             if not inv:
-                raise ValueError("库存记录不存在 (ID:" + str(item.get("inventory_id")) + ")")
+                raise NotFoundError("库存记录不存在 (ID:" + str(item.get("inventory_id")) + ")")
             if inv["quantity"] < item.get("quantity", 0):
-                raise ValueError(inv["product_model"] + " " + inv["product_name"] + ": 库存不足 (当前" + str(inv["quantity"]) + "，需要" + str(item["quantity"]) + ")")
+                raise ConflictError(inv["product_model"] + " " + inv["product_name"] + ": 库存不足 (当前" + str(inv["quantity"]) + "，需要" + str(item["quantity"]) + ")")
 
         with BaseService.transaction() as txn:
             try:
@@ -78,7 +79,7 @@ class ShipmentService:
                 )
             except Exception as e:
                 if "UNIQUE" in str(e):
-                    raise ValueError("出库单号已存在，请稍后重试")
+                    raise ConflictError("出库单号已存在，请稍后重试")
                 raise
 
             order_id = data.get("order_id") or (items[0].get("order_id") if items else None)
@@ -131,7 +132,7 @@ class ShipmentService:
     def update_shipment(shipment_id, data):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         fields = {
             "customer", "contact_person", "contact_phone", "address", "remark",
             "status", "receivable_amount", "payment_status",
@@ -140,7 +141,7 @@ class ShipmentService:
         for field in fields:
             if field in data:
                 if field == "status" and data[field] == "completed" and row["status"] != "completed":
-                    raise ValueError("请使用「完成出库」按钮完成出库")
+                    raise ConflictError("请使用「完成出库」按钮完成出库")
                 changes[field] = data[field]
         if not changes:
             raise ValueError("没有需要更新的字段")
@@ -151,7 +152,7 @@ class ShipmentService:
     def delete_shipment(shipment_id, current_user):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         with BaseService.transaction() as txn:
             if row["status"] == "completed":
                 items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
@@ -171,9 +172,9 @@ class ShipmentService:
     def complete_shipment(shipment_id, current_user):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         if row["status"] == "completed":
-            raise ValueError("出库单已完成")
+            raise ConflictError("出库单已完成")
         items = ShipmentRepository.shipment_items_exist(shipment_id)
         if not items:
             raise ValueError("出库单无明细")
@@ -193,7 +194,7 @@ class ShipmentService:
                     inv = InventoryRepository.find_item_by_id(item["inventory_id"], db=txn)
                     current = inv["quantity"] if inv else 0
                     model = inv["product_model"] if inv else (item["product_model"] or "?")
-                    raise ValueError(model + " " + (item["product_name"] or "") + ": 库存不足 (库存" + str(current) + "，需" + str(item["quantity"]) + ")")
+                    raise ConflictError(model + " " + (item["product_name"] or "") + ": 库存不足 (库存" + str(current) + "，需" + str(item["quantity"]) + ")")
                 item_order_no = item["order_no"] if item["order_no"] else sn
                 remark = "出库单 " + sn + " 出库 " + str(item["quantity"]) + " " + (item["unit"] or "件")
                 InventoryRepository.insert_movement_log_txn(
@@ -235,7 +236,7 @@ class ShipmentService:
     def update_logistics(shipment_id, data):
         row = ShipmentRepository.shipment_exists(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         with BaseService.transaction() as txn:
             ShipmentRepository.update_logistics_txn(
                 shipment_id, data.get("logistics_company", ""), data.get("tracking_no", ""), db=txn
@@ -245,11 +246,11 @@ class ShipmentService:
     def receive_shipment(shipment_id, current_user, receiver="", receive_date=""):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         if row["status"] == "received":
-            raise ValueError("已签收")
+            raise ConflictError("已签收")
         if row["status"] != "completed":
-            raise ValueError("仅已出库可签收")
+            raise ConflictError("仅已出库可签收")
         remark_append = (" 签收人: " + receiver + " 签收日期: " + receive_date) if receiver else ""
         with BaseService.transaction() as txn:
             ShipmentRepository.receive_shipment_txn(shipment_id, remark_append, db=txn)
@@ -259,13 +260,13 @@ class ShipmentService:
     def record_payment(shipment_id, current_user, amount, method="", remark=""):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         if row["status"] not in ("completed", "received"):
-            raise ValueError("仅已出库或已签收可收款")
+            raise ConflictError("仅已出库或已签收可收款")
         new_paid = (row["paid_amount"] or 0) + amount
         receivable = row["receivable_amount"] or 0
         if new_paid > receivable:
-            raise ValueError("收款金额超出应收(" + str(receivable) + ")")
+            raise ConflictError("收款金额超出应收(" + str(receivable) + ")")
         payment_status = "paid" if new_paid >= receivable else "partial"
         with BaseService.transaction() as txn:
             ShipmentRepository.record_payment_txn(
@@ -278,9 +279,9 @@ class ShipmentService:
     def cancel_shipment(shipment_id, current_user):
         row = ShipmentRepository.find_shipment_by_id(shipment_id)
         if not row:
-            raise ValueError("出库单不存在")
+            raise NotFoundError("出库单不存在")
         if row["status"] == "cancelled":
-            raise ValueError("出库单已取消")
+            raise ConflictError("出库单已取消")
         with BaseService.transaction() as txn:
             if row["reserved_at"]:
                 items_rel = ShipmentRepository.release_reserved_for_shipment_txn(shipment_id, db=txn)
@@ -305,7 +306,7 @@ class ShipmentService:
     def get_order_stock(order_id):
         order = OrderRepository.find_by_id(order_id)
         if not order:
-            raise ValueError("订单不存在")
+            raise NotFoundError("订单不存在")
         items = InventoryRepository.list_available_by_order(order_id)
         return {"order": dict(order), "items": [dict(it) for it in items]}
 
@@ -320,7 +321,7 @@ class ShipmentService:
     def get_impact(shipment_id):
         s = ShipmentRepository.find_shipment_for_impact(shipment_id)
         if not s:
-            raise ValueError("shipment not found")
+            raise NotFoundError("shipment not found")
         item_count = ShipmentRepository.count_shipment_items_impact(shipment_id)
         inv_count = ShipmentRepository.count_distinct_inventory(shipment_id)
         return {

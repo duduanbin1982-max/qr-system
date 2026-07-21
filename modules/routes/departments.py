@@ -15,11 +15,7 @@ def list_departments():
 @check_permission("users:edit")
 def create_department():
     data = request.get_json() or {}
-    try:
-        name = DepartmentService.create_department(data)
-    except ValueError as exc:
-        status = 409 if "already exists" in str(exc) else 400
-        return jsonify({"error": str(exc)}), status
+    name = DepartmentService.create_department(data)
     safe_audit_log("create_department", "department", 0, "Created: " + name)
     return jsonify({"message": "ok"}), 201
 
@@ -29,12 +25,7 @@ def create_department():
 @check_permission("users:edit")
 def update_department(dep_id):
     data = request.get_json() or {}
-    try:
-        DepartmentService.update_department(dep_id, data)
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    DepartmentService.update_department(dep_id, data)
     return jsonify({"message": "ok"})
 
 

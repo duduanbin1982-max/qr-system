@@ -39,13 +39,9 @@ def list_users():
 @validate_json('create_user')
 def create_user():
     data = get_json_body()
-    try:
-        # P1-2: Pass caller for admin-creation permission check
-        data['_caller_user_id'] = g.current_user.get('id') if hasattr(g, 'current_user') else None
-        uid, password = UserService.create_user(data)
-    except ValueError as e:
-        code = 409 if '已存在' in str(e) else 400
-        return jsonify({'error': str(e)}), code
+    # P1-2: Pass caller for admin-creation permission check
+    data['_caller_user_id'] = g.current_user.get('id') if hasattr(g, 'current_user') else None
+    uid, password = UserService.create_user(data)
     safe_audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
     return jsonify({'message': '添加成功', 'id': uid, 'password': password if password else ''})
 
@@ -56,10 +52,7 @@ def create_user():
 @validate_json('update_user')
 def update_user(uid):
     data = get_json_body()
-    try:
-        UserService.update_user(uid, data, g.current_user.get("id"))
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    UserService.update_user(uid, data, g.current_user.get("id"))
     # Log update without password (but note if password was changed)
     audit_data = dict(data)
     has_pwd = bool(audit_data.get('password'))

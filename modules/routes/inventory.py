@@ -9,7 +9,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    handle_unexpected_error,
     parse_pagination,
     safe_audit_log,
     validate_json,
@@ -120,10 +119,7 @@ def update_inventory(id):
     security: [{Bearer: []}]
     """
     data = get_json_body()
-    try:
-        InventoryService.update_item(id, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    InventoryService.update_item(id, data)
     safe_audit_log('update_inventory', 'inventory', id)
     return jsonify({'message': '更新成功'})
 
@@ -231,11 +227,7 @@ def stock_out():
         return jsonify({'error': '数量必须为数字'}), 400
     if not inv_id or qty <= 0:
         return jsonify({'error': '参数错误'}), 400
-    try:
-        InventoryService.stock_out(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
-    except ValueError as e:
-        code = 400 if '不足' in str(e) else 404
-        return jsonify({'error': str(e)}), code
+    InventoryService.stock_out(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
     safe_audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
     return jsonify({'message': '出库成功'})
 
@@ -309,42 +301,34 @@ def inventory_adjust(id):
         return jsonify({'ok': True, **result})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return handle_unexpected_error(e, 'database operation')
 
 
 @app.route('/api/inventory/export', methods=['GET'])
 @check_auth
 @check_permission('inventory:view')
 def inventory_export():
-    try:
-        output = InventoryService.export_inventory(
-            keyword=request.args.get('keyword', ''),
-            low_stock=request.args.get('low_stock', '') == '1',
-        )
-        output.seek(0)
-        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True, download_name=f'inventory_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
-    except Exception as e:
-        return handle_unexpected_error(e, 'export operation')
+    output = InventoryService.export_inventory(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '') == '1',
+    )
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name=f'inventory_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
 
 
 @app.route('/api/inventory/logs/export', methods=['GET'])
 @check_auth
 @check_permission('inventory:view')
 def inventory_logs_export():
-    try:
-        output = InventoryService.export_logs(
-            inv_id=request.args.get('inventory_id', ''),
-            type_filter=request.args.get('type', ''),
-            date_from=request.args.get('from', ''),
-            date_to=request.args.get('to', ''),
-        )
-        output.seek(0)
-        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True, download_name=f'inventory_logs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
-    except Exception as e:
-        return handle_unexpected_error(e, 'export operation')
+    output = InventoryService.export_logs(
+        inv_id=request.args.get('inventory_id', ''),
+        type_filter=request.args.get('type', ''),
+        date_from=request.args.get('from', ''),
+        date_to=request.args.get('to', ''),
+    )
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name=f'inventory_logs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
 
 
 
@@ -355,11 +339,8 @@ def inventory_logs_export():
 @check_auth
 @check_permission("inventory:edit")
 def classify_abc():
-    try:
-        result = InventoryService.classify_abc()
-        return jsonify(result)
-    except Exception as e:
-        return handle_unexpected_error(e, "abc classification")
+    result = InventoryService.classify_abc()
+    return jsonify(result)
 
 
 # ── P2: 周转率 ──

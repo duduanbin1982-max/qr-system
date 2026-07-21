@@ -1,4 +1,5 @@
 """qr-system - AuditLogService"""
+from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.audit_log_repository import AuditLogRepository
 
@@ -51,7 +52,7 @@ class AuditLogService:
             raise ValueError('Page required')
         existing = AuditLogRepository.find_menu_by_page(page)
         if existing:
-            raise ValueError('Menu page exists: ' + page)
+            raise ConflictError('Menu page exists: ' + page)
         with BaseService.transaction() as txn:
             AuditLogRepository.insert_menu_permission_txn(
                 page, data.get('permission', ''), data.get('label', ''),
@@ -62,7 +63,7 @@ class AuditLogService:
     def update_menu_permission(page, data):
         row = AuditLogRepository.find_menu_by_page(page)
         if not row:
-            raise ValueError('Menu not found')
+            raise NotFoundError('Menu not found')
         updates = {}
         for field in ['permission', 'label', 'icon', 'sort_order']:
             if field in data:
@@ -78,7 +79,7 @@ class AuditLogService:
     def delete_menu_permission(page):
         row = AuditLogRepository.find_menu_by_page(page)
         if not row:
-            raise ValueError('Menu not found')
+            raise NotFoundError('Menu not found')
         with BaseService.transaction() as txn:
             AuditLogRepository.delete_menu_permission_txn(page, db=txn)
 

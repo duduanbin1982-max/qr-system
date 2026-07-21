@@ -95,10 +95,7 @@ def create_shipment():
     data = get_json_body()
     if not data:
         return jsonify({'error': '请求数据为空'}), 400
-    try:
-        sid, sno = ShipmentService.create_shipment(data, g.current_user['name'])
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    sid, sno = ShipmentService.create_shipment(data, g.current_user['name'])
     safe_audit_log('create', 'shipment', sid, f'创建出库单 {sno}')
     return jsonify({'message': '出库单创建成功', 'id': sid, 'shipment_no': sno})
 
@@ -149,10 +146,7 @@ def update_shipment(shipment_id):
     security: [{Bearer: []}]
     """
     data = get_json_body()
-    try:
-        ShipmentService.update_shipment(shipment_id, data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404 if '不存在' in str(e) else 400
+    ShipmentService.update_shipment(shipment_id, data)
     safe_audit_log('update', 'shipment', shipment_id, '更新出库单')
     return jsonify({'message': '更新成功'})
 

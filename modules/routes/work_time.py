@@ -7,7 +7,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    handle_unexpected_error,
     safe_audit_log,
 )
 from modules.services.work_time_service import WorkTimeService
@@ -25,43 +24,34 @@ def _limit_arg():
 @check_auth
 @check_permission("work_time:view")
 def work_time_stats():
-    try:
-        return jsonify({"ok": True, **WorkTimeService.stats()})
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    return jsonify({"ok": True, **WorkTimeService.stats()})
 
 
 @app.route("/api/work-time/standards", methods=["GET"])
 @check_auth
 @check_permission("work_time:view")
 def work_time_list_standards():
-    try:
-        filters = {
-            "keyword": request.args.get("keyword", request.args.get("search", "")),
-            "status": request.args.get("status", ""),
-            "product_id": request.args.get("product_id", type=int),
-            "process_id": request.args.get("process_id", type=int),
-            "route_id": request.args.get("route_id", type=int),
-        }
-        return jsonify(WorkTimeService.list_standards(filters, _page_arg(), _limit_arg()))
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    filters = {
+        "keyword": request.args.get("keyword", request.args.get("search", "")),
+        "status": request.args.get("status", ""),
+        "product_id": request.args.get("product_id", type=int),
+        "process_id": request.args.get("process_id", type=int),
+        "route_id": request.args.get("route_id", type=int),
+    }
+    return jsonify(WorkTimeService.list_standards(filters, _page_arg(), _limit_arg()))
 
 
 @app.route("/api/work-time/standards/routes", methods=["GET"])
 @check_auth
 @check_permission("work_time:view")
 def work_time_list_standard_routes():
-    try:
-        filters = {
-            "keyword": request.args.get("keyword", request.args.get("search", "")),
-            "status": request.args.get("status", ""),
-            "process_id": request.args.get("process_id", type=int),
-            "route_id": request.args.get("route_id", type=int),
-        }
-        return jsonify(WorkTimeService.list_standard_routes(filters, _page_arg(), _limit_arg()))
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    filters = {
+        "keyword": request.args.get("keyword", request.args.get("search", "")),
+        "status": request.args.get("status", ""),
+        "process_id": request.args.get("process_id", type=int),
+        "route_id": request.args.get("route_id", type=int),
+    }
+    return jsonify(WorkTimeService.list_standard_routes(filters, _page_arg(), _limit_arg()))
 
 
 @app.route("/api/work-time/standards/route", methods=["POST"])
@@ -85,8 +75,6 @@ def work_time_save_route_standards():
         return jsonify({"ok": True, "message": "路线标准工时已保存", **result})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
 
 
 @app.route("/api/work-time/standards", methods=["POST"])
@@ -99,22 +87,15 @@ def work_time_create_standard():
         return jsonify({"ok": True, "id": standard_id, "message": "标准工时已创建"})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
 
 
 @app.route("/api/work-time/standards/<int:standard_id>", methods=["PUT"])
 @check_auth
 @check_permission("work_time:edit")
 def work_time_update_standard(standard_id):
-    try:
-        WorkTimeService.update_standard(standard_id, get_json_body(), g.current_user.get("id"))
-        safe_audit_log("work_time_standard_update", "work_time_standard", standard_id, "updated")
-        return jsonify({"ok": True, "message": "标准工时已更新"})
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 404 if "不存在" in str(exc) else 400
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    WorkTimeService.update_standard(standard_id, get_json_body(), g.current_user.get("id"))
+    safe_audit_log("work_time_standard_update", "work_time_standard", standard_id, "updated")
+    return jsonify({"ok": True, "message": "标准工时已更新"})
 
 
 @app.route("/api/work-time/standards/<int:standard_id>", methods=["DELETE"])
@@ -127,30 +108,25 @@ def work_time_delete_standard(standard_id):
         return jsonify({"ok": True, "message": "标准工时已停用"})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
 
 
 @app.route("/api/work-time/records", methods=["GET"])
 @check_auth
 @check_permission("work_time:view")
 def work_time_list_records():
-    try:
-        filters = {
-            "keyword": request.args.get("keyword", request.args.get("search", "")),
-            "status": request.args.get("status", ""),
-            "review_status": request.args.get("review_status", ""),
-            "user_id": request.args.get("user_id", type=int),
-            "process_id": request.args.get("process_id", type=int),
-            "order_id": request.args.get("order_id", type=int),
-            "route_id": request.args.get("route_id", type=int),
-            "standard_missing": request.args.get("standard_missing", ""),
-            "date_from": request.args.get("from", request.args.get("date_from", "")),
-            "date_to": request.args.get("to", request.args.get("date_to", "")),
-        }
-        return jsonify(WorkTimeService.list_records(filters, _page_arg(), _limit_arg()))
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    filters = {
+        "keyword": request.args.get("keyword", request.args.get("search", "")),
+        "status": request.args.get("status", ""),
+        "review_status": request.args.get("review_status", ""),
+        "user_id": request.args.get("user_id", type=int),
+        "process_id": request.args.get("process_id", type=int),
+        "order_id": request.args.get("order_id", type=int),
+        "route_id": request.args.get("route_id", type=int),
+        "standard_missing": request.args.get("standard_missing", ""),
+        "date_from": request.args.get("from", request.args.get("date_from", "")),
+        "date_to": request.args.get("to", request.args.get("date_to", "")),
+    }
+    return jsonify(WorkTimeService.list_records(filters, _page_arg(), _limit_arg()))
 
 
 @app.route("/api/work-time/records", methods=["POST"])
@@ -163,19 +139,12 @@ def work_time_create_record():
         return jsonify({"ok": True, "id": record_id, "message": "工时流水已创建"})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
 
 
 @app.route("/api/work-time/records/<int:record_id>/review", methods=["POST"])
 @check_auth
 @check_permission("work_time:audit")
 def work_time_review_record(record_id):
-    try:
-        WorkTimeService.review_record(record_id, get_json_body(), g.current_user.get("id"))
-        safe_audit_log("work_time_record_review", "work_time_record", record_id, "reviewed")
-        return jsonify({"ok": True, "message": "工时审核已保存"})
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 404 if "不存在" in str(exc) else 400
-    except Exception as exc:
-        return handle_unexpected_error(exc, "database operation")
+    WorkTimeService.review_record(record_id, get_json_body(), g.current_user.get("id"))
+    safe_audit_log("work_time_record_review", "work_time_record", record_id, "reviewed")
+    return jsonify({"ok": True, "message": "工时审核已保存"})

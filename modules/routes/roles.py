@@ -51,10 +51,7 @@ def create_role_group():
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        gid = RoleGroupService.create_group(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    gid = RoleGroupService.create_group(data)
     safe_audit_log('create_role_group', 'role_group', gid, data.get('name', ''))
     return jsonify({'message': '添加成功', 'id': gid})
 
@@ -75,11 +72,7 @@ def update_role_group(gid):
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        RoleGroupService.update_group(gid, data)
-    except ValueError as e:
-        code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
-        return jsonify({'error': str(e)}), code
+    RoleGroupService.update_group(gid, data)
     safe_audit_log('update_role_group', 'role_group', gid, str(data))
     return jsonify({'message': '更新成功'})
 
@@ -144,10 +137,7 @@ def create_role():
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        rid = RoleService.create_role(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409 if '已存在' in str(e) else 400
+    rid = RoleService.create_role(data)
     safe_audit_log('create_role', 'role', rid, f'{data.get("name","")}/{data.get("code","")}')
     return jsonify({'message': '添加成功', 'id': rid})
 
@@ -168,11 +158,7 @@ def update_role(rid):
       - Bearer: []
     """
     data = get_json_body()
-    try:
-        RoleService.update_role(rid, data)
-    except ValueError as e:
-        code = 404 if '不存在' in str(e) else (409 if '已存在' in str(e) else 400)
-        return jsonify({'error': str(e)}), code
+    RoleService.update_role(rid, data)
     safe_audit_log('update_role', 'role', rid, str(data))
     return jsonify({'message': '更新成功'})
 

@@ -10,7 +10,6 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.order_service import OrderService
-from modules.domain.errors import DomainError
 from modules.services.order_focus_service import OrderFocusService
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.setting_service import SettingsService
@@ -62,8 +61,6 @@ def create_order():
         return jsonify({'message': '创建成功', 'id': order_id})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': f'创建失败: {e}'}), 500
 
 
 @app.route('/api/orders/<int:oid>', methods=['PUT'])
@@ -81,8 +78,6 @@ def update_order(oid):
         return jsonify({'message': '更新成功'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': f'更新失败: {e}'}), 500
 
 
 @app.route('/api/orders/<int:oid>', methods=['DELETE'])
@@ -223,10 +218,7 @@ def batch_create_orders():
 @check_permission('orders:view')
 def completion_focus_board():
     limit = min(max(request.args.get('limit', 80, type=int), 1), 200)
-    try:
-        return jsonify(OrderFocusService.board(limit=limit))
-    except Exception as e:
-        return jsonify({'error': '加载集中完工看板失败: ' + str(e)}), 500
+    return jsonify(OrderFocusService.board(limit=limit))
 
 
 @app.route('/api/orders/completion-focus/config', methods=['GET'])
@@ -246,8 +238,6 @@ def save_completion_focus_config():
         return jsonify({'message': '集中完工管控配置已保存', 'config': config})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': '保存集中完工配置失败: ' + str(e)}), 500
 
 
 @app.route('/api/orders/<int:order_id>/completion-focus-exception', methods=['POST'])
@@ -267,8 +257,6 @@ def create_completion_focus_exception(order_id):
         return jsonify({'message': '已设置集中完工例外', 'exception': exception})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': '设置集中完工例外失败: ' + str(e)}), 500
 
 
 @app.route('/api/orders/completion-focus-exceptions/<int:exception_id>', methods=['DELETE'])
@@ -276,12 +264,9 @@ def create_completion_focus_exception(order_id):
 @check_permission('orders:edit')
 def cancel_completion_focus_exception(exception_id):
     data = get_json_body() if request.data else {}
-    try:
-        OrderFocusService.cancel_exception(exception_id, g.current_user, (data.get('reason') or '').strip())
-        safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
-        return jsonify({'message': '已取消集中完工例外'})
-    except Exception as e:
-        return jsonify({'error': '取消集中完工例外失败: ' + str(e)}), 500
+    OrderFocusService.cancel_exception(exception_id, g.current_user, (data.get('reason') or '').strip())
+    safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
+    return jsonify({'message': '已取消集中完工例外'})
 
 
 @app.route('/api/orders/<int:order_id>/workpiece-progress', methods=['GET'])
@@ -295,8 +280,6 @@ def workpiece_progress(order_id):
         return jsonify(OrderService.get_workpiece_progress(order_id))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        return jsonify({'error': '加载工件进度失败: ' + str(e)}), 500
 
 # ═══════════════════════════════════════════
 #  Order Materials (订单物料配方)
@@ -308,10 +291,7 @@ def workpiece_progress(order_id):
 @check_permission("orders:view")
 def list_order_materials(order_id):
     """Return the material recipe attached to an order."""
-    try:
-        materials = OrderService.list_order_materials(order_id)
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    materials = OrderService.list_order_materials(order_id)
     return jsonify({"materials": materials})
 
 @app.route("/api/orders/<int:order_id>/materials", methods=["POST"])
@@ -319,10 +299,7 @@ def list_order_materials(order_id):
 @check_permission("orders:edit")
 def add_order_material(order_id):
     """Add one material requirement to an order."""
-    try:
-        material = OrderService.add_order_material(order_id, get_json_body())
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    material = OrderService.add_order_material(order_id, get_json_body())
     return jsonify({"material": material}), 201
 
 @app.route("/api/orders/<int:order_id>/materials/<int:item_id>", methods=["DELETE"])
@@ -330,8 +307,5 @@ def add_order_material(order_id):
 @check_permission("orders:edit")
 def delete_order_material(order_id, item_id):
     """Delete one material requirement from an order."""
-    try:
-        OrderService.delete_order_material(order_id, item_id)
-    except DomainError as e:
-        return jsonify(e.to_payload()), e.status_code
+    OrderService.delete_order_material(order_id, item_id)
     return jsonify({"message": "删除成功"})

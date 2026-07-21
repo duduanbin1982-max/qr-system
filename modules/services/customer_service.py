@@ -4,6 +4,7 @@ qr-system — 客户管理 Service 层
 从 routes/customers.py 提取全部业务逻辑。
 SQL 已迁移至 modules.repositories.customer_repository。
 """
+from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.customer_repository import CustomerRepository
 import logging
@@ -36,7 +37,7 @@ class CustomerService:
             raise ValueError("客户名称不能为空")
         existing = CustomerRepository.find_by_name(name)
         if existing:
-            raise ValueError("客户名称已存在")
+            raise ConflictError("客户名称已存在")
         with BaseService.transaction() as txn:
             return CustomerRepository.insert({
                 "name": name,
@@ -58,7 +59,7 @@ class CustomerService:
                 raise ValueError("客户名称不能为空")
             existing = CustomerRepository.find_by_name_excluding(name, cid, db=db)
             if existing:
-                raise ValueError("客户名称已存在")
+                raise ConflictError("客户名称已存在")
             data["name"] = name
 
         sets = []
@@ -83,14 +84,14 @@ class CustomerService:
         db = BaseService.db()
         cust = CustomerRepository.find_by_id(cid, db=db)
         if not cust:
-            raise ValueError("客户不存在")
+            raise NotFoundError("客户不存在")
         # 检查是否有活跃（未软删除）订单
         active = CustomerRepository.count_active_orders(cid, db=db)
         if active > 0:
             # 获取前 5 个订单号用于错误提示
             blocking = CustomerRepository.get_active_order_nos(cid, limit=5, db=db)
             order_list = ", ".join(blocking) if blocking else str(active)
-            raise ValueError(f"无法删除：该客户有 {active} 个活跃订单（{order_list}...），请先处理订单")
+            raise ConflictError(f"无法删除：该客户有 {active} 个活跃订单（{order_list}...），请先处理订单")
         with BaseService.transaction() as txn:
             # 解除软删除订单的 customer_id 关联（保留 customer 字段以供审计）
             CustomerRepository.dissociate_soft_deleted_orders(cid, db=txn)
@@ -103,7 +104,7 @@ class CustomerService:
         db = BaseService.db()
         cust = CustomerRepository.find_by_id(cid, db=db)
         if not cust:
-            raise ValueError("客户不存在")
+            raise NotFoundError("客户不存在")
         rows, total = CustomerRepository.get_orders(cid, page, limit, db=db)
 
         result = []

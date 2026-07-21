@@ -25,10 +25,7 @@ def get_user_roles(uid):
 @check_permission("users:edit")
 def set_user_roles(uid):
     data = get_json_body()
-    try:
-        AuditLogService.set_user_roles(uid, data.get("role_ids", []))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    AuditLogService.set_user_roles(uid, data.get("role_ids", []))
     safe_audit_log("set_user_roles", "user", uid, f"roles={data.get('role_ids', [])}")
     return jsonify({"message": "角色分配成功"})
 
@@ -93,7 +90,5 @@ def batch_set_roles():
         AuditLogService.batch_set_roles(user_ids, role_ids, act)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception:
-        return jsonify({"error": "批量操作失败，请重试"}), 400
     safe_audit_log("batch_set_roles", "users", 0, f"users={user_ids} roles={role_ids} action={act}")
     return jsonify({"message": f"已为 {len(user_ids)} 个用户{('分配' if act!='remove' else '移除')}角色"})
