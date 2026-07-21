@@ -37,6 +37,44 @@ class AuthRepository:
         ).fetchone()
 
     @staticmethod
+    def find_active_user_by_token(token, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT u.*, s.created_at AS _session_created_at, "
+            "s.last_active AS _session_last_active "
+            "FROM users u "
+            "LEFT JOIN user_sessions s ON s.user_id = u.id AND s.token = u.token AND s.is_active = 1 "
+            "WHERE u.token = ? AND u.status = 'active' "
+            "ORDER BY s.id DESC LIMIT 1",
+            (token,),
+        ).fetchone()
+
+    @staticmethod
+    def touch_session(user_id, token, active_at, db=None):
+        db = resolve_db(db)
+        db.execute(
+            "UPDATE users SET last_active = ? WHERE id = ? AND token = ?",
+            (active_at, user_id, token),
+        )
+        db.execute(
+            "UPDATE user_sessions SET last_active = ? "
+            "WHERE user_id = ? AND token = ? AND is_active = 1",
+            (active_at, user_id, token),
+        )
+
+    @staticmethod
+    def expire_session(user_id, token, db=None):
+        db = resolve_db(db)
+        db.execute(
+            "UPDATE users SET token = NULL WHERE id = ? AND token = ?",
+            (user_id, token),
+        )
+        db.execute(
+            "UPDATE user_sessions SET is_active = 0 WHERE user_id = ? AND token = ?",
+            (user_id, token),
+        )
+
+    @staticmethod
     def upgrade_password(user_id, new_hash, db=None):
         db = resolve_db(db)
         db.execute(
@@ -103,12 +141,13 @@ class AuthRepository:
         db.execute("UPDATE user_sessions SET is_active = 0 WHERE token = ?", (token,))
 
     @staticmethod
-    def list_sessions(user_id, db=None):
+    def list_sessions(user_id, current_token, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, ip_address, user_agent, created_at, last_active, is_active "
+            "SELECT id, ip_address, user_agent, created_at, last_active, is_active, "
+            "CASE WHEN token = ? THEN 1 ELSE 0 END AS is_current "
             "FROM user_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
-            (user_id,)
+            (current_token, user_id),
         ).fetchall()
 
     @staticmethod

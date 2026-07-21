@@ -87,8 +87,8 @@ class AuthService:
             d.commit()
 
     @staticmethod
-    def list_sessions(user_id, db=None):
-        return AuthRepository.list_sessions(user_id, db=db)
+    def list_sessions(user_id, current_token, db=None):
+        return AuthRepository.list_sessions(user_id, current_token, db=db)
 
     @staticmethod
     def find_session_by_id(sid, db=None):

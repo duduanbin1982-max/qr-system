@@ -105,10 +105,8 @@ def logout():
 @app.route("/api/auth/sessions", methods=["GET"])
 @check_auth
 def list_sessions():
-    rows = AuthService.list_sessions(g.current_user["id"])
-    sessions = [dict(r) for r in rows]
-    for s in sessions:
-        s["is_current"] = (s.get("token") == g.token if "token" in s else False)
+    rows = AuthService.list_sessions(g.current_user["id"], g.token)
+    sessions = [dict(row) for row in rows]
     return jsonify({"sessions": sessions})
 
 

@@ -223,6 +223,17 @@ def test_services_do_not_embed_sql_statements():
     assert violations == [], f"service layer must pass business filters, not SQL: {violations}"
 
 
+def test_auth_middleware_delegates_session_persistence():
+    path = PROJECT_ROOT / "modules" / "middleware" / "auth.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "get_db" not in source
+    assert ".execute(" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
+    assert "AuthSessionService.authenticate" in source
+
+
 def test_shipment_repository_only_owns_shipment_tables():
     path = PROJECT_ROOT / "modules" / "repositories" / "shipment_repository.py"
     source = path.read_text(encoding="utf-8", errors="replace").upper()
