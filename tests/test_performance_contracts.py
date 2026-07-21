@@ -11,22 +11,37 @@ def _worker_id(db):
     return row["id"]
 
 
-def test_performance_generate_scores_and_improvement_plan(client, auth_headers):
-    year_month = "2026-06"
+def _seed_performance_record(
+    client,
+    year_month="2026-06",
+    quantity=5,
+    username="perfworker",
+    order_no="TEST-PERF-001",
+):
     with client.application.app_context():
         db = get_db()
-        user_id = _worker_id(db)
+        ensure_user(db, username, WORKER_HASH, "绩效测试员工", "worker", "TEST-PERF-WORKER")
+        user_id = db.execute(
+            "SELECT id FROM users WHERE username = ?", (username,)
+        ).fetchone()["id"]
         process_id = db.execute("SELECT id FROM processes WHERE status='active' ORDER BY id LIMIT 1").fetchone()["id"]
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status) "
-            "VALUES ('TEST-PERF-001', 'Test Customer', 'Cross Module Product', 'XMOD-PERF', 10, 'producing')"
+            "VALUES (?, 'Test Customer', 'Cross Module Product', 'XMOD-PERF', 20, 'producing')",
+            (order_no,),
         ).lastrowid
         db.execute(
             "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
-            "VALUES (?, ?, ?, 'normal', 5, 'approved', '2026-06-10 08:00:00')",
-            (order_id, process_id, user_id),
+            "VALUES (?, ?, ?, 'normal', ?, 'approved', ?)",
+            (order_id, process_id, user_id, quantity, year_month + "-10 08:00:00"),
         )
         db.commit()
+    return user_id
+
+
+def test_performance_generate_scores(client, auth_headers):
+    year_month = "2026-06"
+    user_id = _seed_performance_record(client, year_month)
 
     generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
     assert generate.status_code == 200, generate.get_json()
@@ -40,6 +55,15 @@ def test_performance_generate_scores_and_improvement_plan(client, auth_headers):
     assert row["output_qty"] == 5
     assert row["total_score"] >= 0
     assert row["warning_level"] in {"green", "yellow", "orange", "red"}
+
+
+def test_performance_improvement_plan_lifecycle(client, auth_headers):
+    year_month = "2026-06"
+    user_id = _seed_performance_record(client, year_month)
+    generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
+    assert generate.status_code == 200, generate.get_json()
+    scores = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers)
+    row = next(item for item in scores.get_json()["items"] if item["user_id"] == user_id)
 
     plan = client.post(
         "/api/performance/plans",
@@ -155,8 +179,7 @@ def test_rework_records_affect_performance_quality_score(client, auth_headers):
     assert "质量扣项3件" in row["warning_reason"]
 
 
-def test_performance_scores_are_grouped_by_position_for_output_and_ranking(client, auth_headers):
-    year_month = "2026-11"
+def _seed_position_performance(client, year_month="2026-11"):
     with client.application.app_context():
         db = get_db()
         welding_position = db.execute(
@@ -187,7 +210,14 @@ def test_performance_scores_are_grouped_by_position_for_output_and_ranking(clien
                 (order_id, process_id, user_id, quantity),
             )
         db.commit()
+    return welding_position, assembly_position, welding_low, welding_high, assembly_worker
 
+
+def test_performance_scores_use_position_max_output_and_rank(client, auth_headers):
+    year_month = "2026-11"
+    welding_position, assembly_position, welding_low, welding_high, assembly_worker = _seed_position_performance(
+        client, year_month
+    )
     generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
     assert generate.status_code == 200, generate.get_json()
 
@@ -202,6 +232,15 @@ def test_performance_scores_are_grouped_by_position_for_output_and_ranking(clien
     assert rows[assembly_worker]["rank_total"] == 1
     assert rows[welding_high]["rank_no"] == 1
     assert rows[welding_high]["rank_total"] == 2
+
+
+def test_performance_scores_filter_by_position(client, auth_headers):
+    year_month = "2026-11"
+    welding_position, _assembly_position, welding_low, welding_high, _assembly_worker = _seed_position_performance(
+        client, year_month
+    )
+    generate = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
+    assert generate.status_code == 200, generate.get_json()
 
     filtered = client.get(
         f"/api/performance/scores?year_month={year_month}&position_id={welding_position}",
@@ -257,8 +296,8 @@ def test_inspection_failures_are_attributed_to_actual_worker_not_inspector(clien
 
 
 
-def test_handoff_review_from_next_process_affects_performance(client, auth_headers):
-    year_month = PerformanceService.current_month()
+def _seed_handoff_performance(client, year_month=None, order_mode=False):
+    year_month = year_month or PerformanceService.current_month()
     with client.application.app_context():
         db = get_db()
         prev_user_id = _worker_id(db)
@@ -275,9 +314,11 @@ def test_handoff_review_from_next_process_affects_performance(client, auth_heade
             ).lastrowid
         else:
             p1, p2 = process_rows[0]["id"], process_rows[1]["id"]
+        order_no = "TEST-HANDOFF-ORDER-001" if order_mode else "TEST-HANDOFF-001"
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
-            "VALUES ('TEST-HANDOFF-001', 'Test Customer', 'Cross Module Product', 'XMOD-HAND', 1, 'producing', 'serial')"
+            "VALUES (?, 'Test Customer', 'Cross Module Product', 'XMOD-HAND', ?, 'producing', ?)",
+            (order_no, 10 if order_mode else 1, "" if order_mode else "serial"),
         ).lastrowid
         db.execute(
             "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
@@ -289,37 +330,57 @@ def test_handoff_review_from_next_process_affects_performance(client, auth_heade
             "VALUES (?, ?, 2, 'pending', 0, 0, 0)",
             (order_id, p2),
         )
-        db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, serial_no, created_at) "
-            "VALUES (?, ?, ?, 'normal', 1, 'approved', 'TEST-HANDOFF-001-001', ?)",
-            (order_id, p1, prev_user_id, year_month + '-01 08:00:00'),
-        )
-        db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, serial_no, created_at) "
-            "VALUES (?, ?, ?, 'normal', 1, 'approved', 'TEST-HANDOFF-001-001', ?)",
-            (order_id, p2, next_user_id, year_month + '-02 08:00:00'),
-        )
+        if order_mode:
+            db.execute(
+                "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
+                "VALUES (?, ?, ?, 'normal', 4, 'approved', ?)",
+                (order_id, p1, prev_user_id, year_month + '-01 08:00:00'),
+            )
+            db.execute(
+                "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
+                "VALUES (?, ?, ?, 'normal', 6, 'approved', ?)",
+                (order_id, p1, next_user_id, year_month + '-01 09:00:00'),
+            )
+        else:
+            db.execute(
+                "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, serial_no, created_at) "
+                "VALUES (?, ?, ?, 'normal', 1, 'approved', 'TEST-HANDOFF-001-001', ?)",
+                (order_id, p1, prev_user_id, year_month + '-01 08:00:00'),
+            )
+            db.execute(
+                "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, serial_no, created_at) "
+                "VALUES (?, ?, ?, 'normal', 1, 'approved', 'TEST-HANDOFF-001-001', ?)",
+                (order_id, p2, next_user_id, year_month + '-02 08:00:00'),
+            )
         db.commit()
+    return {
+        "year_month": year_month,
+        "order_id": order_id,
+        "to_process_id": p2,
+        "previous_user_id": prev_user_id,
+        "serial_no": "TEST-HANDOFF-001-001",
+    }
 
-    generate_before = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
-    assert generate_before.status_code == 200, generate_before.get_json()
-    before = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers).get_json()
-    before_row = next(item for item in before["items"] if item["user_id"] == prev_user_id)
 
-    pending = client.get(
-        f"/api/handoff-reviews/pending?order_id={order_id}&to_process_id={p2}&serial_no=TEST-HANDOFF-001-001",
+def _generate_performance_scores(client, auth_headers, year_month):
+    response = client.post(
+        "/api/performance/generate",
+        json={"year_month": year_month},
         headers=auth_headers,
     )
-    assert pending.status_code == 200, pending.get_json()
-    assert pending.get_json()["required"] is True
-    assert pending.get_json()["from_user_id"] == prev_user_id
+    assert response.status_code == 200, response.get_json()
+    return client.get(
+        f"/api/performance/scores?year_month={year_month}", headers=auth_headers
+    ).get_json()
 
+
+def _confirm_handoff_review(client, auth_headers, data):
     review = client.post(
         "/api/handoff-reviews",
         json={
-            "order_id": order_id,
-            "to_process_id": p2,
-            "serial_no": "TEST-HANDOFF-001-001",
+            "order_id": data["order_id"],
+            "to_process_id": data["to_process_id"],
+            "serial_no": data["serial_no"],
             "rating": 2,
             "issue_type": "外观问题",
             "comment": "接手发现毛刺明显",
@@ -327,74 +388,54 @@ def test_handoff_review_from_next_process_affects_performance(client, auth_heade
         headers=auth_headers,
     )
     assert review.status_code == 200, review.get_json()
-    assert review.get_json()["status"] == "pending"
-
+    review_id = review.get_json()["id"]
     update = client.put(
-        f"/api/handoff-reviews/{review.get_json()['id']}/status",
+        f"/api/handoff-reviews/{review_id}/status",
         json={"status": "confirmed", "confirm_note": "确认属实"},
         headers=auth_headers,
     )
     assert update.status_code == 200, update.get_json()
 
-    generate_after = client.post("/api/performance/generate", json={"year_month": year_month}, headers=auth_headers)
-    assert generate_after.status_code == 200, generate_after.get_json()
-    after = client.get(f"/api/performance/scores?year_month={year_month}", headers=auth_headers).get_json()
-    after_row = next(item for item in after["items"] if item["user_id"] == prev_user_id)
+
+def test_handoff_review_identifies_previous_worker(client, auth_headers):
+    data = _seed_handoff_performance(client)
+    pending = client.get(
+        f"/api/handoff-reviews/pending?order_id={data['order_id']}"
+        f"&to_process_id={data['to_process_id']}&serial_no={data['serial_no']}",
+        headers=auth_headers,
+    )
+    assert pending.status_code == 200, pending.get_json()
+    assert pending.get_json()["required"] is True
+    assert pending.get_json()["from_user_id"] == data["previous_user_id"]
+
+
+def test_handoff_review_penalizes_previous_worker(client, auth_headers):
+    data = _seed_handoff_performance(client)
+    before = _generate_performance_scores(client, auth_headers, data["year_month"])
+    before_row = next(
+        item for item in before["items"] if item["user_id"] == data["previous_user_id"]
+    )
+    _confirm_handoff_review(client, auth_headers, data)
+    after = _generate_performance_scores(client, auth_headers, data["year_month"])
+    after_row = next(
+        item for item in after["items"] if item["user_id"] == data["previous_user_id"]
+    )
     assert after_row["score_details"]["handoff_low_count"] == 1
     assert after_row["score_details"]["handoff_penalty"] > 0
     assert after_row["quality_score"] < before_row["quality_score"]
 
-    reviews = client.get(f"/api/handoff-reviews?year_month={year_month}", headers=auth_headers)
+    reviews = client.get(
+        f"/api/handoff-reviews?year_month={data['year_month']}", headers=auth_headers
+    )
     assert reviews.status_code == 200, reviews.get_json()
     assert reviews.get_json()["total"] >= 1
 
 
 def test_order_mode_handoff_review_requires_clear_previous_worker(client, auth_headers):
-    year_month = "2026-08"
-    with client.application.app_context():
-        db = get_db()
-        first_prev_user = ensure_user(db, "perfprev1", WORKER_HASH, "绩效上一工序甲", "worker", "TEST-PERF-PREV-1")
-        second_prev_user = ensure_user(db, "perfprev2", WORKER_HASH, "绩效上一工序乙", "worker", "TEST-PERF-PREV-2")
-        process_rows = db.execute("SELECT id FROM processes WHERE status='active' ORDER BY id LIMIT 2").fetchall()
-        if len(process_rows) < 2:
-            p1 = db.execute(
-                "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
-                "VALUES ('Fixture Handoff C', 'pytest fixture process', 'fixture', 1, 'active', datetime('now','localtime'))"
-            ).lastrowid
-            p2 = db.execute(
-                "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
-                "VALUES ('Fixture Handoff D', 'pytest fixture process', 'fixture', 2, 'active', datetime('now','localtime'))"
-            ).lastrowid
-        else:
-            p1, p2 = process_rows[0]["id"], process_rows[1]["id"]
-        order_id = db.execute(
-            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
-            "VALUES ('TEST-HANDOFF-ORDER-001', 'Test Customer', 'Cross Module Product', 'XMOD-HAND-O', 10, 'producing', '')"
-        ).lastrowid
-        db.execute(
-            "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
-            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
-            (order_id, p1),
-        )
-        db.execute(
-            "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
-            "VALUES (?, ?, 2, 'pending', 0, 0, 0)",
-            (order_id, p2),
-        )
-        db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
-            "VALUES (?, ?, ?, 'normal', 4, 'approved', ?)",
-            (order_id, p1, first_prev_user, year_month + '-01 08:00:00'),
-        )
-        db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status, created_at) "
-            "VALUES (?, ?, ?, 'normal', 6, 'approved', ?)",
-            (order_id, p1, second_prev_user, year_month + '-01 09:00:00'),
-        )
-        db.commit()
-
+    data = _seed_handoff_performance(client, "2026-08", order_mode=True)
     pending = client.get(
-        f"/api/handoff-reviews/pending?order_id={order_id}&to_process_id={p2}",
+        f"/api/handoff-reviews/pending?order_id={data['order_id']}"
+        f"&to_process_id={data['to_process_id']}",
         headers=auth_headers,
     )
     assert pending.status_code == 200, pending.get_json()

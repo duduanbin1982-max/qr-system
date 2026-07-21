@@ -63,6 +63,23 @@ def _create_order(client, auth_headers, route_id):
     return response.get_json()["id"], order_no
 
 
+def _seed_worker_report(client, auth_headers, worker_auth_headers, quantity=2):
+    route_id, process_ids = _seed_route_bundle(client)
+    order_id, _order_no = _create_order(client, auth_headers, route_id)
+    response = client.post(
+        "/api/mobile/report",
+        headers=worker_auth_headers,
+        json={
+            "order_id": order_id,
+            "process_id": process_ids[0],
+            "quantity": quantity,
+            "report_type": "normal",
+        },
+    )
+    assert response.status_code in (200, 201), response.get_json()
+    return datetime.now().strftime("%Y-%m")
+
+
 class TestCrossModuleIntegration:
     def test_order_report_and_wage_flow(self, client, auth_headers, worker_auth_headers):
         route_id, process_ids = _seed_route_bundle(client)
@@ -108,9 +125,9 @@ class TestCrossModuleIntegration:
         product_process_stats = client.get("/api/stats/product-process", headers=auth_headers)
         assert product_process_stats.status_code == 200
 
-    def test_permissions_quality_and_trace_flow(self, client, auth_headers, worker_auth_headers):
+    def test_admin_cannot_report_as_worker(self, client, auth_headers, worker_auth_headers):
         route_id, process_ids = _seed_route_bundle(client)
-        order_id, order_no = _create_order(client, auth_headers, route_id)
+        order_id, _order_no = _create_order(client, auth_headers, route_id)
 
         admin_report = client.post(
             "/api/mobile/report",
@@ -124,6 +141,10 @@ class TestCrossModuleIntegration:
         )
         assert admin_report.status_code == 403
 
+    def test_worker_cannot_skip_process(self, client, auth_headers, worker_auth_headers):
+        route_id, process_ids = _seed_route_bundle(client)
+        order_id, _order_no = _create_order(client, auth_headers, route_id)
+
         skipped_process = client.post(
             "/api/mobile/report",
             headers=worker_auth_headers,
@@ -135,6 +156,10 @@ class TestCrossModuleIntegration:
             },
         )
         assert skipped_process.status_code in (400, 403), skipped_process.get_json()
+
+    def test_duplicate_worker_report_returns_conflict(self, client, auth_headers, worker_auth_headers):
+        route_id, process_ids = _seed_route_bundle(client)
+        order_id, _order_no = _create_order(client, auth_headers, route_id)
 
         first_report = client.post(
             "/api/mobile/report",
@@ -161,6 +186,22 @@ class TestCrossModuleIntegration:
         )
         assert duplicate_report.status_code == 409, duplicate_report.get_json()
 
+    def test_quality_and_trace_endpoints_follow_worker_report(self, client, auth_headers, worker_auth_headers):
+        route_id, process_ids = _seed_route_bundle(client)
+        order_id, order_no = _create_order(client, auth_headers, route_id)
+        first_report = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_ids[0],
+                "quantity": 1,
+                "report_type": "normal",
+                "serial_no": f"SN-{uuid.uuid4().hex[:8].upper()}",
+            },
+        )
+        assert first_report.status_code in (200, 201), first_report.get_json()
+
         quality_response = client.post(
             "/api/quality/inspections",
             headers=auth_headers,
@@ -181,24 +222,8 @@ class TestCrossModuleIntegration:
         trace_response = client.get(f"/api/trace/{order_no}", headers=auth_headers)
         assert trace_response.status_code in (200, 404)
 
-    def test_wage_snapshot_adjustment_and_trend_flow(self, client, auth_headers, worker_auth_headers):
-        route_id, process_ids = _seed_route_bundle(client)
-        order_id, _order_no = _create_order(client, auth_headers, route_id)
-
-        report_response = client.post(
-            "/api/mobile/report",
-            headers=worker_auth_headers,
-            json={
-                "order_id": order_id,
-                "process_id": process_ids[0],
-                "quantity": 2,
-                "report_type": "normal",
-            },
-        )
-        assert report_response.status_code in (200, 201), report_response.get_json()
-
-        year_month = datetime.now().strftime("%Y-%m")
-
+    def test_wage_snapshot_and_lock_flow(self, client, auth_headers, worker_auth_headers):
+        year_month = _seed_worker_report(client, auth_headers, worker_auth_headers)
         snapshot_response = client.post(
             f"/api/wages/snapshot?year_month={year_month}",
             headers=auth_headers,
@@ -218,6 +243,9 @@ class TestCrossModuleIntegration:
             json={"notes": "fixture"},
         )
         assert lock_response.status_code == 200
+
+    def test_wage_adjustment_and_trends_flow(self, client, auth_headers, worker_auth_headers):
+        year_month = _seed_worker_report(client, auth_headers, worker_auth_headers)
 
         with client.application.app_context():
             db = get_db()

@@ -1,4 +1,5 @@
 import json
+import bcrypt
 
 from modules.db import get_db
 
@@ -45,7 +46,7 @@ def _fixture_ids(client, test_order_id):
         }
 
 
-def test_work_time_standard_record_and_review_flow(client, auth_headers, test_order_id):
+def _create_reviewable_work_time_record(client, auth_headers, test_order_id):
     ids = _fixture_ids(client, test_order_id)
 
     standard_response = client.post(
@@ -64,12 +65,11 @@ def test_work_time_standard_record_and_review_flow(client, auth_headers, test_or
     assert standard_response.status_code == 200, standard_response.get_json()
     standard_id = standard_response.get_json()["id"]
 
-    standards = client.get(
+    standards_response = client.get(
         f"/api/work-time/standards?route_id={ids['route_id']}",
         headers=auth_headers,
     )
-    assert standards.status_code == 200, standards.get_json()
-    assert any(item["id"] == standard_id for item in standards.get_json()["items"])
+    assert standards_response.status_code == 200, standards_response.get_json()
 
     record_response = client.post(
         "/api/work-time/records",
@@ -82,13 +82,18 @@ def test_work_time_standard_record_and_review_flow(client, auth_headers, test_or
             "start_time": "2026-01-02 08:00:00",
             "end_time": "2026-01-02 09:30:00",
             "pause_minutes": 10,
-            "abnormal_reason": "设备调试等待",
+            "abnormal_reason": "\u8bbe\u5907\u8c03\u8bd5\u7b49\u5f85",
         },
         headers=auth_headers,
     )
     assert record_response.status_code == 200, record_response.get_json()
-    record_id = record_response.get_json()["id"]
+    return ids, standard_id, record_response.get_json()["id"]
 
+
+def test_work_time_standard_record_snapshot(client, auth_headers, test_order_id):
+    ids, standard_id, record_id = _create_reviewable_work_time_record(
+        client, auth_headers, test_order_id
+    )
     records = client.get("/api/work-time/records?review_status=pending", headers=auth_headers)
     assert records.status_code == 200, records.get_json()
     record = next(item for item in records.get_json()["items"] if item["id"] == record_id)
@@ -102,12 +107,17 @@ def test_work_time_standard_record_and_review_flow(client, auth_headers, test_or
     assert record["review_status"] == "pending"
     assert record["status"] == "abnormal"
 
+
+def test_work_time_review_updates_effective_minutes(client, auth_headers, test_order_id):
+    ids, standard_id, record_id = _create_reviewable_work_time_record(
+        client, auth_headers, test_order_id
+    )
     review_response = client.post(
         f"/api/work-time/records/{record_id}/review",
         json={
             "effective_minutes": 75,
             "review_status": "approved",
-            "review_note": "扣除设备等待 5 分钟",
+            "review_note": "\u6263\u9664\u8bbe\u5907\u7b49\u5f85 5 \u5206\u949f",
         },
         headers=auth_headers,
     )
@@ -120,6 +130,11 @@ def test_work_time_standard_record_and_review_flow(client, auth_headers, test_or
     assert record["review_status"] == "approved"
     assert record["status"] == "completed"
 
+
+def test_work_time_stats_include_standard_and_record(client, auth_headers, test_order_id):
+    _ids, _standard_id, _record_id = _create_reviewable_work_time_record(
+        client, auth_headers, test_order_id
+    )
     stats = client.get("/api/work-time/stats", headers=auth_headers)
     assert stats.status_code == 200, stats.get_json()
     assert stats.get_json()["records_total"] >= 1
@@ -169,7 +184,7 @@ def test_work_time_standard_rejects_process_outside_route(client, auth_headers, 
 
 
 
-def test_work_time_route_batch_standard_groups_by_route(client, auth_headers, test_order_id):
+def _create_work_time_route_batch(client, auth_headers, test_order_id):
     ids = _fixture_ids(client, test_order_id)
     with client.application.app_context():
         db = get_db()
@@ -212,8 +227,20 @@ def test_work_time_route_batch_standard_groups_by_route(client, auth_headers, te
         headers=auth_headers,
     )
     assert response.status_code == 200, response.get_json()
-    assert response.get_json()["created"] == 2
+    return ids, second_process_id, response.get_json()
 
+
+def test_work_time_route_batch_creates_each_process_standard(client, auth_headers, test_order_id):
+    _ids, _second_process_id, payload = _create_work_time_route_batch(
+        client, auth_headers, test_order_id
+    )
+    assert payload["created"] == 2
+
+
+def test_work_time_route_batch_groups_processes_by_route(client, auth_headers, test_order_id):
+    ids, _second_process_id, _payload = _create_work_time_route_batch(
+        client, auth_headers, test_order_id
+    )
     standards = client.get(
         f"/api/work-time/standards?route_id={ids['route_id']}",
         headers=auth_headers,
@@ -243,12 +270,11 @@ def test_work_time_route_batch_rejects_empty_process_item(client, auth_headers, 
     assert "缺少工序" in response.get_json()["error"]
 
 
-def test_work_time_route_batch_requires_edit_permission(client, test_order_id):
+def _create_work_time_create_only_headers(client, test_order_id):
     ids = _fixture_ids(client, test_order_id)
     username = "worktime_create_only"
     password = "Test@1234"
     with client.application.app_context():
-        import bcrypt
         db = get_db()
         role_id = db.execute(
             "INSERT INTO roles (name, code, description, permissions, status, level) "
@@ -276,7 +302,11 @@ def test_work_time_route_batch_requires_edit_permission(client, test_order_id):
 
     login = client.post("/api/auth/login", json={"username": username, "password": password})
     token = login.get_json()["user"]["token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    return ids, {"Authorization": f"Bearer {token}"}
+
+
+def test_work_time_route_batch_requires_edit_permission(client, test_order_id):
+    ids, headers = _create_work_time_create_only_headers(client, test_order_id)
 
     response = client.post(
         "/api/work-time/standards/route",

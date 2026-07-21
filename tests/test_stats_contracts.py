@@ -79,7 +79,7 @@ def test_daily_records_display_order_number_or_serial(client, auth_headers):
     assert by_order[serial_order_no]["serial_no"] == serial_no
 
 
-def test_daily_records_are_grouped_by_employee_and_include_product_info(client, auth_headers):
+def _seed_two_daily_records(client, first_date="2026-06-30 08:00:00", second_date="2026-06-30 09:00:00"):
     first_order_no = f"TEST-DAILY-{uuid.uuid4().hex[:8].upper()}"
     second_order_no = f"TEST-DAILY-{uuid.uuid4().hex[:8].upper()}"
 
@@ -109,8 +109,13 @@ def test_daily_records_are_grouped_by_employee_and_include_product_info(client, 
             quantity=3,
         )
         db.commit()
+    return first_order_no, second_order_no, first_product_code, second_product_code
 
-    response = client.get("/api/stats/daily?date=2026-06-30&per_page=5000", headers=auth_headers)
+
+def test_daily_records_include_product_metadata(client, auth_headers):
+    first_order_no, second_order_no, first_product_code, second_product_code = _seed_two_daily_records(client)
+
+    response = client.get("/api/stats/daily?date=2026-06-30&per_page=5001", headers=auth_headers)
 
     assert response.status_code == 200, response.get_json()
     data = response.get_json()
@@ -120,6 +125,13 @@ def test_daily_records_are_grouped_by_employee_and_include_product_info(client, 
     assert "product_model" in by_order[first_order_no]
     assert "customer" in by_order[first_order_no]
     assert "route_name" in by_order[first_order_no]
+
+
+def test_daily_records_are_grouped_by_employee_with_totals(client, auth_headers):
+    first_order_no, second_order_no, _first_product_code, _second_product_code = _seed_two_daily_records(client)
+    response = client.get("/api/stats/daily?date=2026-06-30&per_page=5000", headers=auth_headers)
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()
 
     matching_groups = [
         group for group in data["employee_groups"]
