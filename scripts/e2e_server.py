@@ -80,6 +80,14 @@ def prepare_database():
         previous_worker_id = ensure_user(
             db, "e2eprevious", TEST_HASH, "E2E Previous Worker", "worker", "E2E-WORKER-002", "worker-group"
         )
+        position_id = db.execute(
+            "INSERT INTO positions (name, description, status) "
+            "VALUES ('E2E Production Position', 'browser test position', 'active')"
+        ).lastrowid
+        db.execute(
+            "UPDATE users SET position_id = ? WHERE id IN (?, ?)",
+            (position_id, worker_id, previous_worker_id),
+        )
 
         process_ids = []
         for sequence, name in enumerate(("E2E Cutting", "E2E Welding", "E2E Drilling"), start=1):

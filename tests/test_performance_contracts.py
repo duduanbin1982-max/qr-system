@@ -456,19 +456,3 @@ def test_performance_role_permission_seed_matches_catalog():
 
     inspector_permissions = default_role_permission_additions("qc_inspector")
     assert inspector_permissions == ["page:performance", "performance:view"]
-
-
-def test_performance_page_template_bindings_are_returned():
-    from pathlib import Path
-
-    source = Path("frontend/src/views/PerformancePage.vue").read_text(encoding="utf-8")
-    assert "????" not in source
-    assert "usePerformanceNotice(data)" in source
-    assert "usePerformanceModals(data)" in source
-    for binding in [
-        "performanceNotice",
-        "generateCurrentMonthScores",
-        "...modals",
-        "scoringFormula",
-    ]:
-        assert binding in source

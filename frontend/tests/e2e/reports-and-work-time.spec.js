@@ -39,3 +39,25 @@ test('work-time route modal stays stable inside the viewport', async ({ page }) 
   expect(Math.abs(firstBox.x - secondBox.x)).toBeLessThan(2)
   expect(failures).toEqual([])
 })
+
+
+test('work-time record entry opens with order search and standard status', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+  await openSidebarPage(page, '\u5de5\u65f6\u7ba1\u7406')
+
+  await page.getByRole('button', { name: '\u5de5\u65f6\u6d41\u6c34', exact: true }).click()
+  await page.getByRole('button', { name: '\u65b0\u589e\u5de5\u65f6\u6d41\u6c34', exact: true }).click()
+
+  const modal = page.locator('.record-modal')
+  await expect(modal).toBeVisible()
+  await expect(modal).toContainText('\u8ba2\u5355\u53f7\uff08\u641c\u7d22\u9009\u62e9\uff09')
+  const orderSelect = modal.locator('.order-search-group select')
+  await orderSelect.selectOption({ index: 1 })
+  await expect(modal).toContainText('\u6807\u51c6\u5339\u914d')
+  const box = await modal.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height).toBeLessThanOrEqual((page.viewportSize()?.height || 720) + 2)
+  expect(failures).toEqual([])
+})
