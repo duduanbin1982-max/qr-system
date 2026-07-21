@@ -62,3 +62,7 @@ def init_db():
         run_migrations(db)
     finally:
         db.close()
+
+
+if __name__ == "__main__":
+    run_migrations()

@@ -14,12 +14,18 @@ def test_deploy_script_has_required_release_gates():
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
+    assert "python3 -m modules.migrations" in content
     assert "npm run build" in content
     assert "systemctl --user reload" in content
     assert "health_is_ok" in content
     assert "> .deployed_commit" in content
     assert "git pull" not in content
     assert "--skip-tests" not in content
+
+    backup_index = content.index("scripts/backup-db.sh")
+    migration_index = content.index("python3 -m modules.migrations")
+    build_index = content.rindex("npm run build")
+    assert backup_index < migration_index < build_index
 
 
 def test_pytest_suite_declares_test_layers():

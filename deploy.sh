@@ -87,6 +87,9 @@ npm run test:e2e
 log "backing up production database"
 bash scripts/backup-db.sh
 
+log "running production database migrations"
+python3 -m modules.migrations
+
 rollback_dir="$(mktemp -d "$PROJECT_ROOT/data/deploy-rollback.XXXXXX")"
 trap 'rm -rf "$rollback_dir"' EXIT
 if [[ -d public/static ]]; then
