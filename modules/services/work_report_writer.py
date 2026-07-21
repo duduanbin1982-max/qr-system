@@ -6,6 +6,7 @@ from modules.repositories.material_consumption_repository import MaterialConsump
 from modules.repositories.scan_repository import ScanRepository
 from modules.services import BaseService
 from modules.services.inventory_auto_inbound_service import InventoryAutoInboundService
+from modules.services.order_completion_service import OrderCompletionService
 
 
 _logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ class WorkReportWriter:
             helper.insert_approval_record(wr_id, db=db)
 
         if work_status == "approved":
-            WorkReportWriter._apply_approved_normal_effects(
+            WorkReportWriter.apply_approved_normal_report(
                 helper,
                 order_id,
                 process_id,
@@ -166,6 +167,19 @@ class WorkReportWriter:
                 db,
             )
 
+    @staticmethod
+    def apply_approved_normal_report(helper, order_id, process_id, user_id, user_name,
+                                     quantity_local, serial_no, db):
+        WorkReportWriter._apply_approved_normal_effects(
+            helper,
+            order_id,
+            process_id,
+            user_id,
+            user_name,
+            quantity_local,
+            serial_no,
+            db,
+        )
         if serial_no:
             WorkReportWriter._advance_serial_item(
                 helper,
@@ -176,6 +190,12 @@ class WorkReportWriter:
                 serial_no,
                 db,
             )
+        OrderCompletionService.reconcile(
+            order_id,
+            trigger="approved_work_report",
+            actor_id=user_id,
+            db=db,
+        )
 
     @staticmethod
     def _apply_approved_normal_effects(helper, order_id, process_id, user_id, user_name,
@@ -271,13 +291,6 @@ class WorkReportWriter:
                     serial_no,
                     db,
                 )
-
-        helper.update_order_completed(order_id, db=db)
-        order_info = helper.get_order_quantity(order_id, db=db)
-        if order_info:
-            completed_cnt = helper.count_completed_items(order_id, db=db)
-            if completed_cnt >= order_info["quantity"]:
-                helper.complete_order(order_id, db=db)
 
     @staticmethod
     def _move_item_to_next_step(helper, order_id, current_op, item, user_id, user_name,

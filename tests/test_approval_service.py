@@ -25,6 +25,7 @@ class _ApprovalRepoStub:
     work_record = None
     order = None
     config = None
+    order_process = None
 
     @staticmethod
     def find_by_id(record_id):
@@ -43,16 +44,16 @@ class _ApprovalRepoStub:
         return _ApprovalRepoStub.config
 
     @staticmethod
+    def find_order_process(order_id, process_id):
+        return _ApprovalRepoStub.order_process
+
+    @staticmethod
     def approve(record_id, approver_id, approver_name, comment, db=None):
         _ApprovalRepoStub.calls.append(("approve", record_id, approver_id, approver_name, comment))
 
     @staticmethod
     def update_work_record_status(work_record_id, status, db=None):
         _ApprovalRepoStub.calls.append(("update_work_record_status", work_record_id, status))
-
-    @staticmethod
-    def increment_order_completed(order_id, quantity, db=None):
-        _ApprovalRepoStub.calls.append(("increment_order_completed", order_id, quantity))
 
     @staticmethod
     def advance_level(record_id, approver_id, approver_name, comment, next_level, db=None):
@@ -71,6 +72,14 @@ def _install_stub(monkeypatch):
         "transaction",
         staticmethod(lambda: _DummyTransaction()),
     )
+    monkeypatch.setattr(
+        approval_service_module.WorkReportWriter,
+        "apply_approved_normal_report",
+        staticmethod(lambda helper, order_id, process_id, user_id, user_name,
+                            quantity, serial_no, db: _ApprovalRepoStub.calls.append(
+            ("apply_approved_normal_report", order_id, process_id, user_id, quantity, serial_no)
+        )),
+    )
 
 
 def test_handle_approve_accepts_sqlite_rows(monkeypatch):
@@ -87,6 +96,9 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
         "order_id": 11,
         "status": "pending",
         "process_id": 5,
+        "user_id": 13,
+        "user_name": "Worker",
+        "serial_no": "SERIAL-001",
     })
     _ApprovalRepoStub.order = _row({
         "quantity": 10,
@@ -94,6 +106,7 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
         "deleted_at": None,
     })
     _ApprovalRepoStub.config = _row({"approval_level": 1})
+    _ApprovalRepoStub.order_process = _row({"completed": 3})
 
     result = ApprovalService.handle(
         1,
@@ -106,7 +119,7 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
     assert _ApprovalRepoStub.calls == [
         ("approve", 1, 99, "Admin", "ok"),
         ("update_work_record_status", 7, "approved"),
-        ("increment_order_completed", 11, 2),
+        ("apply_approved_normal_report", 11, 5, 13, 2, "SERIAL-001"),
     ]
 
 
@@ -124,6 +137,9 @@ def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
         "order_id": 12,
         "status": "pending",
         "process_id": 6,
+        "user_id": 14,
+        "user_name": "Worker 2",
+        "serial_no": "",
     })
     _ApprovalRepoStub.order = _row({
         "quantity": 10,
@@ -131,6 +147,7 @@ def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
         "deleted_at": None,
     })
     _ApprovalRepoStub.config = _row({"approval_level": 2})
+    _ApprovalRepoStub.order_process = _row({"completed": 0})
 
     result = ApprovalService.handle(
         2,

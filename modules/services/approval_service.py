@@ -2,6 +2,8 @@
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.approval_repository import ApprovalRepository
+from modules.services.scan_helper_service import ScanHelperService
+from modules.services.work_report_writer import WorkReportWriter
 
 
 class ApprovalService:
@@ -69,9 +71,15 @@ class ApprovalService:
             if not order or order['deleted_at'] is not None:
                 raise NotFoundError('关联订单不存在或已删除')
             order = dict(order)
-            if order['completed'] + wr['quantity'] > order['quantity']:
+            order_process = ApprovalRepository.find_order_process(
+                wr['order_id'], wr['process_id']
+            )
+            if not order_process:
+                raise NotFoundError('关联订单工序不存在')
+            process_completed = order_process['completed'] if order_process else 0
+            if (process_completed or 0) + wr['quantity'] > order['quantity']:
                 raise ConflictError(
-                    f'审批后完成数量({order["completed"]}+{wr["quantity"]})'
+                    f'审批后工序完成数量({process_completed or 0}+{wr["quantity"]})'
                     f'将超过订单数量({order["quantity"]})'
                 )
 
@@ -89,8 +97,15 @@ class ApprovalService:
                     ApprovalRepository.update_work_record_status(
                         record['work_record_id'], 'approved', db=txn
                     )
-                    ApprovalRepository.increment_order_completed(
-                        wr['order_id'], wr['quantity'], db=txn
+                    WorkReportWriter.apply_approved_normal_report(
+                        ScanHelperService,
+                        wr['order_id'],
+                        wr['process_id'],
+                        wr['user_id'],
+                        wr['user_name'],
+                        wr['quantity'],
+                        wr['serial_no'],
+                        txn,
                     )
             else:
                 next_level = current_level + 1

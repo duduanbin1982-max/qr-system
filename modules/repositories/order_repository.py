@@ -408,6 +408,15 @@ class OrderRepository:
         ).fetchall()
 
     @staticmethod
+    def list_route_items(route_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT process_id, seq_order, required_audit "
+            "FROM process_route_items WHERE route_id = ? ORDER BY seq_order, id",
+            (route_id,),
+        ).fetchall()
+
+    @staticmethod
     def delete_order_processes(order_id, process_ids, db=None):
         db = resolve_db(db)
         if not process_ids:
@@ -438,6 +447,15 @@ class OrderRepository:
         db.execute(
             'INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) VALUES (?,?,?,?)',
             (order_id, process_id, seq_order, required_audit)
+        )
+
+    @staticmethod
+    def update_order_process_route_fields(order_id, process_id, seq_order, required_audit, db=None):
+        db = resolve_db(db)
+        db.execute(
+            "UPDATE order_processes SET seq_order = ?, required_audit = ? "
+            "WHERE order_id = ? AND process_id = ?",
+            (seq_order, required_audit, order_id, process_id),
         )
 
     @staticmethod

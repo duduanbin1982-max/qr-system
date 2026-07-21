@@ -41,7 +41,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 32)]
+    assert versions == [1, *range(13, 33)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
@@ -49,6 +49,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
         "modules.migration_core",
         "modules.migration_performance",
         "modules.migration_work_time",
+        "modules.migration_order_completion",
     }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -86,6 +87,34 @@ def test_session_migration_deactivates_tokens_that_cannot_authenticate():
         db.close()
 
 
+def test_order_completion_migration_removes_only_legacy_extra_status():
+    from modules.migration_order_completion import m032_remove_legacy_order_status_from_extra_fields
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, extra_fields TEXT)")
+        db.executemany(
+            "INSERT INTO orders (id, extra_fields) VALUES (?, ?)",
+            [
+                (1, '{"status":"pending","model":"A"}'),
+                (2, '{"model":"B"}'),
+                (3, 'invalid-json'),
+            ],
+        )
+
+        m032_remove_legacy_order_status_from_extra_fields(db)
+        m032_remove_legacy_order_status_from_extra_fields(db)
+
+        values = [
+            row["extra_fields"]
+            for row in db.execute("SELECT extra_fields FROM orders ORDER BY id").fetchall()
+        ]
+        assert values == ['{"model":"A"}', '{"model":"B"}', 'invalid-json']
+    finally:
+        db.close()
+
+
 def test_database_at_version_29_runs_all_pending_migrations():
     from modules import migrations
 
@@ -102,8 +131,8 @@ def test_database_at_version_29_runs_all_pending_migrations():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 2
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 31
+        assert migrations.run_migrations(db) == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 32
         index_names = {
             row["name"]
             for row in db.execute(

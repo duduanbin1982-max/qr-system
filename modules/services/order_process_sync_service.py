@@ -37,3 +37,33 @@ class OrderProcessSyncService:
                 OrderRepository.insert_order_process(
                     order_id, process_id, proc["seq_order"], db=db
                 )
+
+    @staticmethod
+    def sync_route(db, order_id, route_id):
+        """Synchronize one order to its selected route while preserving matching progress."""
+        route_items = OrderRepository.list_route_items(route_id, db=db)
+        route_process_ids = [item["process_id"] for item in route_items]
+        existing_rows = OrderRepository.list_order_process_ids(order_id, db=db)
+        existing_ids = {row["process_id"] for row in existing_rows}
+
+        remove_ids = [process_id for process_id in existing_ids if process_id not in route_process_ids]
+        OrderRepository.delete_order_processes(order_id, remove_ids, db=db)
+
+        for item in route_items:
+            process_id = item["process_id"]
+            if process_id in existing_ids:
+                OrderRepository.update_order_process_route_fields(
+                    order_id,
+                    process_id,
+                    item["seq_order"],
+                    item["required_audit"],
+                    db=db,
+                )
+                continue
+            OrderRepository.insert_order_process(
+                order_id,
+                process_id,
+                item["seq_order"],
+                item["required_audit"],
+                db=db,
+            )

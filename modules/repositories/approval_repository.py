@@ -52,7 +52,10 @@ class ApprovalRepository:
         """查询报工记录[含process_id用于多级审批]"""
         db = resolve_db(db)
         return db.execute(
-            'SELECT id, quantity, order_id, status, process_id FROM work_records WHERE id = ?', (wr_id,)
+            "SELECT wr.id, wr.quantity, wr.order_id, wr.status, wr.process_id, "
+            "wr.user_id, wr.serial_no, COALESCE(u.name, u.username, '') AS user_name "
+            "FROM work_records wr LEFT JOIN users u ON u.id = wr.user_id WHERE wr.id = ?",
+            (wr_id,),
         ).fetchone()
 
     @staticmethod
@@ -61,6 +64,14 @@ class ApprovalRepository:
         db = resolve_db(db)
         return db.execute(
             'SELECT quantity, completed, deleted_at FROM orders WHERE id = ?', (oid,)
+        ).fetchone()
+
+    @staticmethod
+    def find_order_process(order_id, process_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT completed FROM order_processes WHERE order_id = ? AND process_id = ?",
+            (order_id, process_id),
         ).fetchone()
 
     # ============================================================
@@ -95,14 +106,6 @@ class ApprovalRepository:
         db = resolve_db(db)
         db.execute(
             'UPDATE work_records SET status = ? WHERE id = ?', (status, wr_id)
-        )
-
-    @staticmethod
-    def increment_order_completed(oid, quantity, db=None):
-        """Increment the approved completed quantity for an order."""
-        db = resolve_db(db)
-        db.execute(
-            'UPDATE orders SET completed = completed + ? WHERE id = ?', (quantity, oid)
         )
 
     @staticmethod

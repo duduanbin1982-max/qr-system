@@ -14,6 +14,7 @@ from modules.repositories.order_repository import OrderRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.services.order_material_snapshot_service import OrderMaterialSnapshotService
 from modules.services.order_process_sync_service import OrderProcessSyncService
+from modules.services.order_completion_service import OrderCompletionService
 from modules.setting_reader import get_setting
 
 # Extracted constants — Brooks R4 fix
@@ -80,7 +81,7 @@ class OrderService:
         core_fields = {
             'order_no', 'customer', 'customer_id', 'product_name', 'quantity',
             'plan_start', 'plan_end', 'deadline', 'remark', 'process_ids',
-            'route_id', 'production_line_id'
+            'route_id', 'production_line_id', 'status'
         }
         return {key: value for key, value in data.items() if key not in core_fields}
 
@@ -284,6 +285,16 @@ class OrderService:
 
             if 'process_ids' in data:
                 OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
+            elif 'route_id' in data and data['route_id']:
+                OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
+
+            if {'process_ids', 'route_id', 'quantity'} & set(data):
+                OrderCompletionService.reconcile(
+                    oid,
+                    trigger='order_structure_updated',
+                    actor_id=user_id,
+                    db=txn,
+                )
 
         return True
 

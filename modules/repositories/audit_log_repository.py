@@ -12,6 +12,16 @@ class AuditLogRepository:
     # Operation Logs
     # ============================================================
     @staticmethod
+    def insert_log(user_id, action, target_type="", target_id=0, detail="", db=None):
+        db = resolve_db(db)
+        cursor = db.execute(
+            "INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) "
+            "VALUES (?,?,?,?,?)",
+            (user_id, action, target_type, target_id, detail),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
     def list_logs(page=1, limit=50, action="", keyword="", user_id=None, category="", date_from="", date_to="", db=None):
         db = resolve_db(db)
         where = ["1=1"]

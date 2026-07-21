@@ -8,6 +8,7 @@ from modules.migration_baseline import MIGRATIONS as BASELINE_MIGRATIONS
 from modules.migration_core import MIGRATIONS as CORE_MIGRATIONS
 from modules.migration_performance import MIGRATIONS as PERFORMANCE_MIGRATIONS
 from modules.migration_work_time import MIGRATIONS as WORK_TIME_MIGRATIONS
+from modules.migration_order_completion import MIGRATIONS as ORDER_COMPLETION_MIGRATIONS
 
 
 MIGRATIONS = [
@@ -16,6 +17,7 @@ MIGRATIONS = [
     *PERFORMANCE_MIGRATIONS,
     *WORK_TIME_MIGRATIONS,
     *AUTH_MIGRATIONS,
+    *ORDER_COMPLETION_MIGRATIONS,
 ]
 
 _versions = [version for version, _, _ in MIGRATIONS]
