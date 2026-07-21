@@ -88,7 +88,7 @@ log "backing up production database"
 bash scripts/backup-db.sh
 
 log "running production database migrations"
-python3 -m modules.migrations
+python3 -c "from dotenv import load_dotenv; load_dotenv('.env'); from modules.migrations import run_migrations; run_migrations()"
 
 rollback_dir="$(mktemp -d "$PROJECT_ROOT/data/deploy-rollback.XXXXXX")"
 trap 'rm -rf "$rollback_dir"' EXIT
