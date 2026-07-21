@@ -16,6 +16,25 @@ os.environ["SECRET_KEY"] = "test-secret-key-for-pytest"
 os.environ["ENABLE_SWAGGER"] = "false"
 os.environ["DB_PATH"] = TEST_DB
 
+UNIT_TEST_FILES = {
+    "test_refactor_services.py",
+    "test_scan_helper.py",
+}
+
+CONTRACT_TEST_FILES = {
+    "test_api_contracts.py",
+    "test_architecture_imports.py",
+    "test_deployment_contracts.py",
+    "test_export_contracts.py",
+    "test_fixture_isolation.py",
+    "test_frontend_api_facade_contracts.py",
+    "test_mobile_frontend_contracts.py",
+    "test_permission_catalog_contracts.py",
+    "test_reports_contracts.py",
+    "test_stats_contracts.py",
+    "test_work_time_source_contracts.py",
+}
+
 
 def _remove_sqlite_artifacts(path):
     for suffix in ("", "-wal", "-shm"):
@@ -70,6 +89,17 @@ app.teardown_appcontext(close_db)
 from modules.routes.registry import register_routes
 
 register_routes()
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        filename = os.path.basename(str(item.path))
+        if filename in UNIT_TEST_FILES:
+            item.add_marker(pytest.mark.unit)
+        elif filename in CONTRACT_TEST_FILES:
+            item.add_marker(pytest.mark.contract)
+        else:
+            item.add_marker(pytest.mark.integration)
 
 
 @pytest.fixture(autouse=True)

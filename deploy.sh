@@ -78,6 +78,12 @@ fi
 log "running complete test suite"
 "$PYTEST_BIN" -q
 
+log "running frontend unit suite"
+npm run test:unit
+
+log "running critical browser suite"
+npm run test:e2e
+
 log "backing up production database"
 bash scripts/backup-db.sh
 

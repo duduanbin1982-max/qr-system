@@ -10,6 +10,8 @@ def test_deploy_script_has_required_release_gates():
     assert "git status --porcelain" in content
     assert "scripts/check_secrets.py" in content
     assert '"$PYTEST_BIN" -q' in content
+    assert "npm run test:unit" in content
+    assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
     assert "npm run build" in content
     assert "systemctl --user reload" in content
@@ -17,6 +19,18 @@ def test_deploy_script_has_required_release_gates():
     assert "> .deployed_commit" in content
     assert "git pull" not in content
     assert "--skip-tests" not in content
+
+
+def test_pytest_suite_declares_test_layers():
+    config = (PROJECT_ROOT / "pytest.ini").read_text(encoding="utf-8")
+    conftest = (PROJECT_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+
+    assert "unit:" in config
+    assert "integration:" in config
+    assert "contract:" in config
+    assert "pytest_collection_modifyitems" in conftest
+    assert "UNIT_TEST_FILES" in conftest
+    assert "CONTRACT_TEST_FILES" in conftest
 
 
 def test_user_service_has_working_reload_and_restart_policy():
