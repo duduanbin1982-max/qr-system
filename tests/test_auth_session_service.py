@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from modules.db import get_db
+from factory_auth import TEST_PASS, TEST_USER
 
 
 def _timestamp(value):
@@ -95,3 +96,29 @@ def test_session_list_marks_current_session_without_exposing_token(client, auth_
     assert response.status_code == 200
     assert any(session["is_current"] == 1 for session in sessions)
     assert all("token" not in session for session in sessions)
+
+
+@pytest.mark.integration
+def test_new_login_deactivates_the_previous_single_token_session(client, auth_headers):
+    previous_token = auth_headers["Authorization"].removeprefix("Bearer ")
+    login_response = client.post(
+        "/api/auth/login",
+        json={"username": TEST_USER, "password": TEST_PASS},
+    )
+    current_token = login_response.get_json()["user"]["token"]
+
+    response = client.get(
+        "/api/auth/sessions",
+        headers={"Authorization": f"Bearer {current_token}"},
+    )
+    sessions = response.get_json()["sessions"]
+    current_session = next(session for session in sessions if session["is_current"] == 1)
+
+    assert response.status_code == 200
+    assert current_session["is_active"] == 1
+    with client.application.app_context():
+        db = get_db()
+        assert db.execute(
+            "SELECT is_active FROM user_sessions WHERE token = ?",
+            (previous_token,),
+        ).fetchone()["is_active"] == 0

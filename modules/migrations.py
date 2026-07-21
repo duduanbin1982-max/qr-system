@@ -3,6 +3,7 @@
 import sqlite3
 
 from modules.config import DB_PATH
+from modules.migration_auth import MIGRATIONS as AUTH_MIGRATIONS
 from modules.migration_baseline import MIGRATIONS as BASELINE_MIGRATIONS
 from modules.migration_core import MIGRATIONS as CORE_MIGRATIONS
 from modules.migration_performance import MIGRATIONS as PERFORMANCE_MIGRATIONS
@@ -14,6 +15,7 @@ MIGRATIONS = [
     *CORE_MIGRATIONS,
     *PERFORMANCE_MIGRATIONS,
     *WORK_TIME_MIGRATIONS,
+    *AUTH_MIGRATIONS,
 ]
 
 _versions = [version for version, _, _ in MIGRATIONS]

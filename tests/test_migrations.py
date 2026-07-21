@@ -41,10 +41,11 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 31)]
+    assert versions == [1, *range(13, 32)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
+        "modules.migration_auth",
         "modules.migration_core",
         "modules.migration_performance",
         "modules.migration_work_time",
@@ -52,7 +53,40 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_database_at_version_29_runs_migration_30():
+def test_session_migration_deactivates_tokens_that_cannot_authenticate():
+    from modules.migration_auth import m031_align_single_token_sessions
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT, token TEXT)"
+        )
+        db.execute(
+            "CREATE TABLE user_sessions (id INTEGER PRIMARY KEY, user_id INTEGER, token TEXT, is_active INTEGER)"
+        )
+        db.execute("INSERT INTO users VALUES (1, 'active', 'current-token')")
+        db.executemany(
+            "INSERT INTO user_sessions VALUES (?, 1, ?, ?)",
+            [
+                (1, "current-token", 1),
+                (2, "stale-token", 1),
+                (3, "old-inactive-token", 0),
+            ],
+        )
+
+        m031_align_single_token_sessions(db)
+        m031_align_single_token_sessions(db)
+
+        assert [
+            row["is_active"]
+            for row in db.execute("SELECT is_active FROM user_sessions ORDER BY id").fetchall()
+        ] == [1, 0, 0]
+    finally:
+        db.close()
+
+
+def test_database_at_version_29_runs_all_pending_migrations():
     from modules import migrations
 
     db = sqlite3.connect(":memory:")
@@ -68,8 +102,8 @@ def test_database_at_version_29_runs_migration_30():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 1
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 30
+        assert migrations.run_migrations(db) == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 31
         index_names = {
             row["name"]
             for row in db.execute(

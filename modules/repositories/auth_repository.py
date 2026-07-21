@@ -105,6 +105,14 @@ class AuthRepository:
         )
 
     @staticmethod
+    def deactivate_user_sessions(user_id, db=None):
+        db = resolve_db(db)
+        db.execute(
+            "UPDATE user_sessions SET is_active = 0 WHERE user_id = ? AND is_active = 1",
+            (user_id,),
+        )
+
+    @staticmethod
     def create_session_insert(user_id, token, ip, ua, db=None):
         db = resolve_db(db)
         db.execute(
@@ -144,10 +152,11 @@ class AuthRepository:
     def list_sessions(user_id, current_token, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, ip_address, user_agent, created_at, last_active, is_active, "
+            "SELECT id, ip_address, user_agent, created_at, last_active, "
+            "CASE WHEN token = ? AND is_active = 1 THEN 1 ELSE 0 END AS is_active, "
             "CASE WHEN token = ? THEN 1 ELSE 0 END AS is_current "
             "FROM user_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
-            (current_token, user_id),
+            (current_token, current_token, user_id),
         ).fetchall()
 
     @staticmethod

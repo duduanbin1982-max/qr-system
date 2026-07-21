@@ -69,6 +69,7 @@ class AuthService:
     @staticmethod
     def create_session(user_id, token, ip, ua, db=None):
         d = AuthService._db(db)
+        AuthRepository.deactivate_user_sessions(user_id, db=d)
         AuthRepository.create_session_update_user(user_id, token, db=d)
         AuthRepository.create_session_insert(user_id, token, ip, ua, db=d)
         if db is None:
