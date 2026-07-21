@@ -24,6 +24,7 @@
     "vue": "^3.5.38"
   },
   "dependencies": {
-    "chart.js": "^4.5.1"
+    "chart.js": "^4.5.1",
+    "html2canvas": "^1.4.1"
   }
 }

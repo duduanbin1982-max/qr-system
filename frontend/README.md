@@ -1,5 +1,13 @@
-# Vue 3 + Vite
+# Frontend Source
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+The authoritative Node.js manifest, lockfile, Vite configuration, and npm scripts live in the project root.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+Run frontend commands from the project root:
+
+```bash
+npm ci
+npm run test:unit
+npm run build
+```
+
+Do not create a second `package.json`, lockfile, or Vite configuration under this directory.

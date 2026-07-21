@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -48,3 +49,16 @@ def test_legacy_entrypoints_delegate_to_authoritative_tools():
 
     assert "nohup gunicorn" not in start_content
     assert 'exec "$PROJECT_ROOT/deploy.sh" "$@"' in script_deploy_content
+
+
+def test_root_node_manifest_is_the_only_frontend_dependency_authority():
+    manifest = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
+
+    assert manifest["dependencies"]["html2canvas"] == "^1.4.1"
+    assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
+    assert not (PROJECT_ROOT / "frontend" / "package-lock.json").exists()
+    assert not (PROJECT_ROOT / "frontend" / "vite.config.js").exists()
+
+    vite_config = (PROJECT_ROOT / "vite.config.js").read_text(encoding="utf-8")
+    assert "root: frontendRoot" in vite_config
+    assert "outDir: staticOutputDir" in vite_config

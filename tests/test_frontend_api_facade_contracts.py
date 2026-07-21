@@ -22,9 +22,6 @@ def test_api_facade_has_unique_domain_methods_and_no_flat_calls():
 
 def test_frontend_build_runs_api_facade_gate_first():
     root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
-    frontend_package = json.loads(
-        (PROJECT_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
-    )
 
     assert root_package["scripts"]["build"].startswith("npm run check:api &&")
-    assert frontend_package["scripts"]["build"].startswith("npm run check:api &&")
+    assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
