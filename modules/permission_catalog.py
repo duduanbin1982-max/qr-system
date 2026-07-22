@@ -14,6 +14,10 @@ ACTION_LABELS = {
     "report": "报工",
     "admin": "管理员",
     "audit": "审核",
+    "submit": "提交评价",
+    "review": "质量核验",
+    "stats": "统计分析",
+    "rules": "规则配置",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -45,6 +49,7 @@ ACTION_PERMISSION_DEFS = {
     "wages": ("工资核算", ["view", "edit"]),
     "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
     "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
+    "process_quality_evaluation": ("工序质量评价", ["view", "submit", "review", "stats", "rules"]),
 }
 
 
@@ -58,6 +63,7 @@ SIDEBAR_ITEMS = [
     {"page": "reports", "code": "page:reports", "icon": "📊", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "icon": "💰", "label": "工资核算"},
     {"page": "performance", "code": "page:performance", "icon": "🎯", "label": "绩效管理"},
+    {"page": "process-quality-evaluation", "code": "page:process-quality-evaluation", "icon": "✅", "label": "工序质量评价"},
     {"page": "work-time", "code": "page:work-time", "icon": "⏱️", "label": "工时管理"},
     {"page": "basic-settings", "code": "page:basic-settings", "icon": "⚙️", "label": "基础设置"},
     {"page": "settings", "code": "page:settings", "icon": "⚙️", "label": "系统设置"},
@@ -88,6 +94,7 @@ PAGE_RULES = [
     {"page": "reports", "code": "page:reports", "label": "数据分析"},
     {"page": "wages", "code": "page:wages", "label": "工资核算"},
     {"page": "performance", "code": "page:performance", "label": "绩效管理"},
+    {"page": "process-quality-evaluation", "code": "page:process-quality-evaluation", "label": "工序质量评价"},
     {"page": "work-time", "code": "page:work-time", "label": "工时管理"},
     {"page": "board", "code": "page:board", "label": "数据看板"},
     {
@@ -137,6 +144,7 @@ ACTION_PAGE_MAP = {
     "reports": ["page:reports"],
     "wages": ["page:wages"],
     "performance": ["page:performance"],
+    "process_quality_evaluation": ["page:process-quality-evaluation"],
     "work_time": ["page:work-time"],
     "board": ["page:board"],
     "users": ["page:basic-settings", "page:basic-settings.users"],
@@ -178,6 +186,7 @@ PAGE_OPERATION_BINDINGS = {
     "page:reports": ["reports"],
     "page:wages": ["wages"],
     "page:performance": ["performance"],
+    "page:process-quality-evaluation": ["process_quality_evaluation"],
     "page:work-time": ["work_time"],
     "page:board": ["board"],
     "page:basic-settings.users": ["users"],
@@ -352,6 +361,11 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
         "performance:create",
         "performance:edit",
         "performance:export",
+        "page:process-quality-evaluation",
+        "process_quality_evaluation:view",
+        "process_quality_evaluation:review",
+        "process_quality_evaluation:stats",
+        "process_quality_evaluation:rules",
         "page:work-time",
         "work_time:view",
         "work_time:create",
@@ -359,7 +373,14 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
         "work_time:audit",
         "work_time:export",
     ],
-    "qc_inspector": ["page:performance", "performance:view"],
+    "qc_inspector": [
+        "page:performance",
+        "performance:view",
+        "page:process-quality-evaluation",
+        "process_quality_evaluation:view",
+        "process_quality_evaluation:review",
+        "process_quality_evaluation:stats",
+    ],
     "warehouse_keeper": ["page:performance", "performance:view"],
 }
 

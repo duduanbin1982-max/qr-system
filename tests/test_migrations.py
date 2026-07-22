@@ -28,6 +28,9 @@ def test_run_migrations_uses_supplied_connection():
         assert "board_sessions" in table_names
         assert "product_bom" in table_names
         assert "order_materials" in table_names
+        assert "process_quality_evaluation_tasks" in table_names
+        assert "process_quality_evaluations" in table_names
+        assert "process_quality_evaluation_reviews" in table_names
     finally:
         db.close()
 
@@ -41,7 +44,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 33)]
+    assert versions == [1, *range(13, 34)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
@@ -50,6 +53,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
         "modules.migration_performance",
         "modules.migration_work_time",
         "modules.migration_order_completion",
+        "modules.migration_process_quality",
     }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -131,8 +135,8 @@ def test_database_at_version_29_runs_all_pending_migrations():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 3
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 32
+        assert migrations.run_migrations(db) == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 33
         index_names = {
             row["name"]
             for row in db.execute(

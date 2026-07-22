@@ -46,6 +46,7 @@ ROUTE_MODULES = (
     "modules.routes.progress",  # process progress + delivery alerts
     "modules.routes.performance",  # performance evaluation + improvement workflow
     "modules.routes.handoff_reviews",  # process handoff quality review
+    "modules.routes.process_quality_evaluations",  # full-process quality evaluation
     "modules.routes.system",  # health, backup, integrity checks
 )
 

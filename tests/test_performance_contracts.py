@@ -496,4 +496,7 @@ def test_performance_role_permission_seed_matches_catalog():
     assert "performance:edit" in manager_permissions
 
     inspector_permissions = default_role_permission_additions("qc_inspector")
-    assert inspector_permissions == ["page:performance", "performance:view"]
+    assert "page:performance" in inspector_permissions
+    assert "performance:view" in inspector_permissions
+    assert "page:process-quality-evaluation" in inspector_permissions
+    assert "process_quality_evaluation:review" in inspector_permissions

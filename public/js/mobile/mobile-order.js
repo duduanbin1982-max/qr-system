@@ -50,18 +50,6 @@ function doScan(code) {
       $("rpt-qty").disabled = false;
       $("rpt-qty").title = "";
     }
-    if (openHandoffReview(d.handoff_pending, {
-      afterClose: function(action) {
-        if (typeof show === 'function') show('order');
-        updateReportBtn();
-        if (action === 'skipped') {
-          toast('已稍后评价，系统会在下次扫码继续提醒', 2400);
-        }
-      }
-    })) {
-      updateReportBtn();
-      return;
-    }
     if (d.completion_focus_warning) {
       switchMode('manual');
       toast(d.completion_focus_warning.blocking ? '集中完工强拦截：请先处理前序订单' : '存在更早订单应优先收尾，已切换为手动确认', 3200);
@@ -193,34 +181,9 @@ function doReport() {
 
   api.mobileReport(body)
   .then(function(d) {
-    handleReportHandoffReview(body, d || {});
+    showReportSuccess(body, d || {});
   })
   .catch(function(e) { toast((e && e.message) || '网络异常'); btn.disabled = false; updateReportBtn(); });
-}
-
-function handleReportHandoffReview(body, response) {
-  var finishReport = function() { showReportSuccess(body, response || {}); };
-  if (body.report_type !== 'normal' || !curOrder || !curProcId) {
-    finishReport();
-    return;
-  }
-  if (openHandoffReview(response && response.handoff_pending, { afterClose: finishReport })) {
-    return;
-  }
-  var params = 'order_id=' + encodeURIComponent(curOrder.id) +
-    '&to_process_id=' + encodeURIComponent(body.process_id || curProcId) +
-    '&serial_no=' + encodeURIComponent(body.serial_no || curSerial || '');
-  api.handoffPending(params)
-    .then(function(ctx) {
-      if (!openHandoffReview(ctx, { afterClose: finishReport })) {
-        finishReport();
-      }
-    })
-    .catch(function(e) {
-      console.warn('handoff pending failed:', e && e.message);
-      toast('交接评价检查失败，本次先完成报工', 2400);
-      finishReport();
-    });
 }
 
 function showReportSuccess(body, response) {
@@ -232,100 +195,9 @@ function showReportSuccess(body, response) {
     '<div>⚙️ 工序: ' + esc(curOrder.current_process && curOrder.current_process.process_name || '') + '</div>' +
     '<div>📊 数量: ' + qty + ' 件</div>' +
     '<div>🏷️ 类型: ' + label + '</div>' +
-    '<div>👤 操作人: ' + esc(response.worker ? response.worker.name : (user() ? user().name : '未知')) + '</div>';
+    '<div>👤 操作人: ' + esc(response.worker ? response.worker.name : (user() ? user().name : '未知')) + '</div>' +
+    ((response.quality_evaluation_pending_count || 0) > 0
+      ? '<div class="success-quality-tip">待处理质量评价：' + response.quality_evaluation_pending_count + ' 条</div>'
+      : '');
   show('ok');
-}
-
-function openHandoffReview(ctx, options) {
-  if (!ctx || !ctx.required) return false;
-  var modal = $('handoff-modal');
-  if (!modal) return false;
-  options = options || {};
-  handoffContext = ctx;
-  handoffAfterClose = (typeof options.afterClose === 'function') ? options.afterClose : null;
-  handoffRating = 5;
-  setHandoffRating(5);
-  var serialLabel = ctx.serial_no ? '（工件：' + ctx.serial_no + '）' : '（订单模式）';
-  $('handoff-title').textContent = '请先评价 ' + (ctx.from_user_name || '上一工序操作员') + ' 的 ' + (ctx.from_process_name || '上一工序') + ' → ' + (ctx.to_process_name || '当前工序') + ' 交接质量 ' + serialLabel;
-  $('handoff-issue').value = '';
-  $('handoff-comment').value = '';
-  $('handoff-submit').disabled = false;
-  var skipBtn = $('handoff-skip');
-  if (skipBtn) skipBtn.textContent = '稍后评价';
-  var reportBtn = $('btn-report');
-  if (reportBtn) reportBtn.disabled = true;
-  if (typeof show === 'function') show('handoff');
-  modal.classList.add('active');
-  toast('请先完成上一工序交接评价', 1800);
-  return true;
-}
-
-function maybeOpenHandoffReview(body, pendingContext) {
-  if (body.report_type !== 'normal' || !curOrder || !curProcId) return;
-  if (openHandoffReview(pendingContext)) return;
-  var params = 'order_id=' + encodeURIComponent(curOrder.id) +
-    '&to_process_id=' + encodeURIComponent(body.process_id || curProcId) +
-    '&serial_no=' + encodeURIComponent(body.serial_no || curSerial || '');
-  api.handoffPending(params)
-    .then(function(ctx) { openHandoffReview(ctx); })
-    .catch(function(e) {
-      console.warn('handoff pending failed:', e && e.message);
-      toast((e && e.message) || '交接评价检查失败，请稍后重试');
-    });
-}
-
-function setHandoffRating(score) {
-  handoffRating = score || 5;
-  var stars = document.querySelectorAll('#handoff-stars button');
-  for (var i = 0; i < stars.length; i++) {
-    var s = parseInt(stars[i].getAttribute('data-score')) || 0;
-    stars[i].classList.toggle('active', s <= handoffRating);
-  }
-}
-
-function closeHandoffModal(action) {
-  var modal = $('handoff-modal');
-  if (modal) modal.classList.remove('active');
-  var callback = handoffAfterClose;
-  var result = (typeof action === 'string') ? action : 'closed';
-  handoffContext = null;
-  handoffAfterClose = null;
-  if (callback) {
-    setTimeout(function() { callback(result); }, 0);
-    return;
-  }
-  if (curOrder && typeof show === 'function') {
-    show('order');
-  } else if (typeof show === 'function') {
-    show('main');
-  }
-  if (typeof updateReportBtn === 'function') {
-    updateReportBtn();
-  }
-}
-
-function submitHandoffReview() {
-  if (!handoffContext) { closeHandoffModal(); return; }
-  var issue = ($('handoff-issue').value || '').trim();
-  var comment = ($('handoff-comment').value || '').trim();
-  if (handoffRating <= 2 && !issue && !comment) {
-    toast('低分评价请填写问题类型或备注');
-    return;
-  }
-  $('handoff-submit').disabled = true;
-  api.createHandoffReview({
-    order_id: handoffContext.order_id,
-    to_process_id: handoffContext.to_process_id,
-    serial_no: handoffContext.serial_no || '',
-    rating: handoffRating,
-    issue_type: issue,
-    comment: comment
-  }).then(function(res) {
-    toast(res.status === 'pending' ? '评价已提交，等待主管确认' : '交接评价已提交');
-    closeHandoffModal('submitted');
-  }).catch(function(e) {
-    toast(e.message || '评价提交失败');
-  }).finally(function() {
-    $('handoff-submit').disabled = false;
-  });
 }

@@ -55,6 +55,12 @@ export const SIDEBAR_ITEMS = [
     "label": "绩效管理"
   },
   {
+    "page": "process-quality-evaluation",
+    "code": "page:process-quality-evaluation",
+    "icon": "✅",
+    "label": "工序质量评价"
+  },
+  {
     "page": "work-time",
     "code": "page:work-time",
     "icon": "⏱️",
@@ -160,6 +166,11 @@ export const PAGE_RULE_TREE = [
     "page": "performance",
     "code": "page:performance",
     "label": "绩效管理"
+  },
+  {
+    "page": "process-quality-evaluation",
+    "code": "page:process-quality-evaluation",
+    "label": "工序质量评价"
   },
   {
     "page": "work-time",
@@ -307,6 +318,9 @@ export const ACTION_PAGE_MAP = {
   ],
   "performance": [
     "page:performance"
+  ],
+  "process_quality_evaluation": [
+    "page:process-quality-evaluation"
   ],
   "work_time": [
     "page:work-time"

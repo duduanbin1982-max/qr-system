@@ -64,7 +64,9 @@ def insert_serial(db, order_id, order_no, serial_no, current_process_id, status=
 
 def prepare_database():
     remove_database()
+    from modules.domain.work_report import WorkReportCommand
     from modules.migrations import run_migrations
+    from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
     from factory_auth import TEST_HASH, ensure_user
 
     db = sqlite3.connect(E2E_DB)
@@ -145,11 +147,24 @@ def prepare_database():
             "WHERE order_id = ? AND process_id = ?",
             (handoff_order_id, process_ids[1]),
         )
-        db.execute(
+        trigger_work_record_id = db.execute(
             "INSERT INTO work_records "
             "(order_id, process_id, user_id, type, quantity, serial_no, status, created_at) "
             "VALUES (?, ?, ?, 'normal', 1, 'E2E-HANDOFF-001', 'approved', datetime('now','localtime'))",
             (handoff_order_id, process_ids[1], worker_id),
+        ).lastrowid
+        ProcessQualityEvaluationService.generate_tasks(
+            WorkReportCommand(
+                report_type="normal",
+                order_id=handoff_order_id,
+                process_id=process_ids[1],
+                user_id=worker_id,
+                user_name="E2E Current Worker",
+                quantity=1,
+                serial_no="E2E-HANDOFF-001",
+            ),
+            trigger_work_record_id,
+            db,
         )
         db.execute(
             "UPDATE product_items SET current_process_id = ? WHERE serial_no = 'E2E-HANDOFF-001'",

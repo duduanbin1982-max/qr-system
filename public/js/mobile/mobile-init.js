@@ -64,14 +64,17 @@
   if (_el) _el.addEventListener('click', doReport);
   
 
-  var _stars = document.querySelectorAll('#handoff-stars button');
-  for (var _si = 0; _si < _stars.length; _si++) {
-    _stars[_si].addEventListener('click', function() { setHandoffRating(parseInt(this.getAttribute('data-score')) || 5); });
+  _el = document.getElementById('quality-evaluation-entry');
+  if (_el) _el.addEventListener('click', openQualityEvaluationCenter);
+  _el = document.getElementById('quality-back');
+  if (_el) _el.addEventListener('click', goMain);
+  _el = document.getElementById('quality-refresh');
+  if (_el) _el.addEventListener('click', loadQualityEvaluationTasks);
+  _el = document.getElementById('quality-task-list');
+  if (_el) {
+    _el.addEventListener('click', handleQualityTaskClick);
+    _el.addEventListener('change', handleQualityScoreChange);
   }
-  _el = document.getElementById('handoff-skip');
-  if (_el) _el.addEventListener('click', function() { closeHandoffModal('skipped'); });
-  _el = document.getElementById('handoff-submit');
-  if (_el) _el.addEventListener('click', submitHandoffReview);
 
   _el = document.querySelector('.btn-done');
   if (_el) _el.addEventListener('click', goMain);

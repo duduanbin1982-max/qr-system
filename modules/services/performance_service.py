@@ -4,7 +4,7 @@ from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.performance_repository import PerformanceRepository
 from modules.repositories.work_time_repository import WorkTimeRepository
-from modules.services.handoff_review_service import HandoffReviewService
+from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 from modules.services.performance_scoring_policy import PerformanceScoringPolicy
 
 
@@ -91,7 +91,7 @@ class PerformanceService:
                 max_output_by_position.get(position_key, 0),
                 metrics["output_qty"],
             )
-        handoff_metrics = HandoffReviewService.monthly_metrics(year_month)
+        handoff_metrics = ProcessQualityEvaluationService.monthly_metrics(year_month)
         with BaseService.transaction() as db:
             for worker in workers:
                 metrics = metrics_by_user[worker["id"]]

@@ -149,10 +149,11 @@ class WorkReportWriter:
             WorkReportWriter.apply_approved_normal_report(
                 command,
                 db,
+                wr_id,
             )
 
     @staticmethod
-    def apply_approved_normal_report(command, db):
+    def apply_approved_normal_report(command, db, work_record_id=None):
         from modules.services.scan_helper_service import ScanHelperService
 
         WorkReportWriter._apply_approved_normal_effects(
@@ -175,6 +176,9 @@ class WorkReportWriter:
                 command.serial_no,
                 db,
             )
+        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+
+        ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
         OrderCompletionService.reconcile(
             command.order_id,
             trigger="approved_work_report",

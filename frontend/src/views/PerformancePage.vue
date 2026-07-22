@@ -61,12 +61,6 @@
       @plan="openPlan"
     />
 
-    <HandoffReviewTable
-      :reviews="handoffReviews"
-      :can-edit="canEdit"
-      @confirm="confirmHandoff"
-    />
-
     <ImprovementPlanTable
       :plans="plans"
       :can-edit="canEdit"
@@ -107,14 +101,13 @@ import { usePerformancePageData } from '@/composables/usePerformancePageData.js'
 import { usePerformanceNotice } from '@/composables/usePerformanceNotice.js'
 import { usePerformanceModals } from '@/composables/usePerformanceModals.js'
 import PerformanceScoreTable from './performance/PerformanceScoreTable.vue'
-import HandoffReviewTable from './performance/HandoffReviewTable.vue'
 import ImprovementPlanTable from './performance/ImprovementPlanTable.vue'
 import PerformanceDetailModal from './performance/PerformanceDetailModal.vue'
 import PerformanceReviewModal from './performance/PerformanceReviewModal.vue'
 import PerformancePlanModal from './performance/PerformancePlanModal.vue'
 
 export default {
-  components: { PerformanceScoreTable, HandoffReviewTable, ImprovementPlanTable, PerformanceDetailModal, PerformanceReviewModal, PerformancePlanModal },
+  components: { PerformanceScoreTable, ImprovementPlanTable, PerformanceDetailModal, PerformanceReviewModal, PerformancePlanModal },
   setup() {
     const data = usePerformancePageData()
     const modals = usePerformanceModals(data)

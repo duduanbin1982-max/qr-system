@@ -44,6 +44,7 @@ function goMain() {
   show('main');
   loadStats();
   loadRecent();
+  loadQualityEvaluationCount();
 }
 
 function goBack() { curOrder = null; reportMode = 'auto'; reportType = 'normal'; show('main'); loadStats(); loadRecent(); }

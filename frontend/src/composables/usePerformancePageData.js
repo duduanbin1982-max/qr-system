@@ -10,7 +10,6 @@ export function usePerformancePageData() {
   const scores = ref([])
   const overview = ref({})
   const plans = ref([])
-  const handoffReviews = ref([])
   const summary = ref({})
   const positionOptions = ref([])
   const rules = ref({})
@@ -42,7 +41,7 @@ export function usePerformancePageData() {
 
   async function refreshPerformancePageData() {
     await loadScoreRows()
-    await Promise.all([loadPlans(), loadHandoffReviews()])
+    await loadPlans()
   }
 
   async function loadScores() {
@@ -52,11 +51,6 @@ export function usePerformancePageData() {
   async function loadPlans() {
     const data = await api.domains.performance.performancePlans({ year_month: yearMonth.value })
     plans.value = data.plans || []
-  }
-
-  async function loadHandoffReviews() {
-    const data = await api.domains.performance.handoffReviews({ year_month: yearMonth.value, per_page: 200 })
-    handoffReviews.value = data.items || []
   }
 
   async function generateScores() {
@@ -97,15 +91,6 @@ export function usePerformancePageData() {
     await loadPlans()
   }
 
-  async function confirmHandoff(review, status) {
-    await api.domains.performance.updateHandoffReviewStatus(review.id, {
-      status,
-      confirm_note: status === 'confirmed' ? '主管确认' : '主管驳回',
-    })
-    showToast(status === 'confirmed' ? '交接评价已确认' : '交接评价已驳回')
-    await refreshPerformancePageData()
-  }
-
   async function initPerformancePage() {
     await Promise.all([loadRules(), loadOverview()])
     await refreshPerformancePageData()
@@ -119,7 +104,6 @@ export function usePerformancePageData() {
     scores,
     overview,
     plans,
-    handoffReviews,
     summary,
     positionOptions,
     rules,
@@ -130,7 +114,6 @@ export function usePerformancePageData() {
     saveReview,
     createPlan,
     closePlan,
-    confirmHandoff,
     initPerformancePage,
   }
 }

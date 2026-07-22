@@ -21,7 +21,6 @@ ALLOWED_ROUTE_EXCEPTION_RECOVERY = {
     ("imports.py", "bulk_import_orders"),
     ("imports.py", "bulk_import_products"),
     ("imports.py", "bulk_import_customers"),
-    ("scan_work.py", "mobile_report"),
     ("settings.py", "save_settings"),
     ("settings.py", "save_company_info"),
     ("system.py", "system_health"),

@@ -223,6 +223,7 @@ const InspectionList = definePageAsyncComponent('质量检验', () => import('./
 const WageList = definePageAsyncComponent('工资核算', () => import('./WageList.vue'))
 const PerformancePage = definePageAsyncComponent('绩效管理', () => import('./PerformancePage.vue'))
 const WorkTimePage = definePageAsyncComponent('工时管理', () => import('./WorkTimePage.vue'))
+const ProcessQualityEvaluationPage = definePageAsyncComponent('工序质量评价', () => import('./ProcessQualityEvaluationPage.vue'))
 
 // Expose globals for template compatibility
 window.A = { auth, router, store, showToast, navigate, logout, api }
@@ -256,6 +257,7 @@ export default {
     WageList,
     PerformancePage,
     WorkTimePage,
+    ProcessQualityEvaluationPage,
     NoPermissionPage
   },
   setup() {
@@ -287,7 +289,8 @@ export default {
         'machining-processes': 'ProcessList', 'inventory': 'InventoryList',
         'materials': 'MaterialList', 'schedule': 'GanttChart',
         'rework': 'ReworkList', 'quality': 'InspectionList',
-        'wages': 'WageList', 'performance': 'PerformancePage', 'work-time': 'WorkTimePage', 'prices': 'PriceList',
+        'wages': 'WageList', 'performance': 'PerformancePage', 'work-time': 'WorkTimePage',
+        'process-quality-evaluation': 'ProcessQualityEvaluationPage', 'prices': 'PriceList',
         'all-prices': 'PriceList', 'structure-prices': 'PriceList',
         'machining-prices': 'PriceList', 'routes': 'RouteList',
         'scan': 'ScanReport', 'shipments': 'ShipmentList',

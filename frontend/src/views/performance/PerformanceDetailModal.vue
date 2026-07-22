@@ -14,7 +14,7 @@
         <div>岗位：{{ positionName }}，岗位内排名：{{ score.rank_no }}/{{ score.rank_total }}，岗位最高产量：{{ detailValue('position_max_output') || detailValue('max_output') }}</div>
         <div>产量：{{ score.output_qty }}，本次产量分仅与同岗位员工比较。</div>
         <div>质量扣项：报废 {{ score.scrap_qty || 0 }}，返工 {{ score.rework_qty || 0 }}，抽检不合格 {{ score.inspection_failed_qty || 0 }}。</div>
-        <div>交接评价：共 {{ detailValue('handoff_review_count') }} 次，平均 {{ detailValue('handoff_avg_rating') || '-' }} 分，低分 {{ detailValue('handoff_low_count') }} 次，扣质量分 {{ detailValue('handoff_penalty') }}。</div>
+        <div>工序质量评价：共 {{ detailValue('handoff_review_count') }} 次，平均 {{ detailValue('handoff_avg_rating') || '-' }} 分，低分 {{ detailValue('handoff_low_count') }} 次，扣质量分 {{ detailValue('handoff_penalty') }}。</div>
         <div>改进闭环：未关闭 {{ detailValue('open_improvement_plans') }} 项，复评未通过 {{ detailValue('failed_improvement_plans') }} 项，已关闭 {{ detailValue('completed_improvement_plans') }} 项。</div>
         <div>纪律原因：{{ score.discipline_reason || '无' }}</div>
         <div>改进说明：{{ score.improvement_reason || '无' }}</div>

@@ -80,8 +80,9 @@ var api = {
   decodeQR: function(code) { return apiRequest("GET", "/mobile/decode/" + encodeURIComponent(code)); },
   mobileScan: function(data) { return apiRequest("POST", "/mobile/scan", data); },
   mobileReport: function(data) { return apiRequest("POST", "/mobile/report", data); },
-  handoffPending: function(params) { return apiRequest("GET", "/handoff-reviews/pending" + buildMobileQuery(params)); },
-  createHandoffReview: function(data) { return apiRequest("POST", "/handoff-reviews", data); },
+  qualityEvaluationTasks: function(params) { return apiRequest("GET", "/process-quality-evaluations/tasks" + buildMobileQuery(params)); },
+  submitQualityEvaluations: function(data) { return apiRequest("POST", "/process-quality-evaluations", data); },
+  qualityEvaluationRules: function() { return apiRequest("GET", "/process-quality-evaluations/rules"); },
   report: function(data) { return apiRequest("POST", "/report", data); },
 
   // 质量检验

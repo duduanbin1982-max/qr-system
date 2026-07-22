@@ -11,7 +11,7 @@
   <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/css/mobile.css?v=9">
+<link rel="stylesheet" href="/css/mobile.css?v=10">
 </head>
 <body>
 
@@ -50,6 +50,10 @@
 <button class="sub-btn">📸 拍照识别</button>
 <button class="sub-btn">✏️ 手动输入</button>
 </div>
+<button id="quality-evaluation-entry" class="quality-entry">
+  <span><strong>质量评价</strong><small>评价已接手工件的上游工序</small></span>
+  <span id="quality-pending-badge" class="quality-badge">0</span>
+</button>
 <div class="manual-row" id="manual-row"><input type="text" id="inp-code" placeholder="输入订单号或序列号" autocomplete="off"><button>查询</button></div>
 <input type="file" id="photo-input" accept="image/*" style="display:none">
 <div class="recent-section" id="recent-section">
@@ -101,30 +105,20 @@
 </div>
 
 
-<!-- HANDOFF REVIEW -->
-<div id="s-handoff" class="screen handoff-screen">
-  <div id="handoff-modal" class="handoff-modal">
-    <div class="handoff-box">
-      <h3>上一工序交接评价</h3>
-      <p class="handoff-tip">请对刚接手工件的上一道工序进行质量评价，提交后继续扫码。</p>
-      <p id="handoff-title" class="handoff-title"></p>
-      <div class="handoff-stars" id="handoff-stars">
-        <button data-score="1">★</button><button data-score="2">★</button><button data-score="3">★</button><button data-score="4">★</button><button data-score="5">★</button>
-      </div>
-      <select id="handoff-issue">
-        <option value="">无明显问题</option>
-        <option value="尺寸问题">尺寸问题</option>
-        <option value="外观问题">外观问题</option>
-        <option value="漏加工">漏加工</option>
-        <option value="数量不符">数量不符</option>
-        <option value="标识不清">标识不清</option>
-        <option value="返修风险">返修风险</option>
-      </select>
-      <textarea id="handoff-comment" placeholder="备注（低分必填问题类型或备注）" rows="3"></textarea>
-      <div class="handoff-actions">
-        <button id="handoff-skip" class="handoff-secondary">稍后评价</button>
-        <button id="handoff-submit" class="handoff-primary">提交评价</button>
-      </div>
+<!-- PROCESS QUALITY EVALUATION CENTER -->
+<div id="s-quality-evaluation" class="screen quality-screen">
+  <div class="back-bar">
+    <button id="quality-back" class="top-btn" style="color:var(--text-primary);background:var(--bg-hover)">← 返回</button>
+    <h1>质量评价</h1>
+    <button id="quality-refresh" class="top-btn quality-refresh">刷新</button>
+  </div>
+  <div class="quality-body">
+    <div class="quality-intro">
+      <strong>全流程上游工序评价</strong>
+      <span>直接上一道工序为必评，其他已完成上游工序为选评。低分需说明问题并进入质量核验。</span>
+    </div>
+    <div id="quality-task-list" class="quality-task-list">
+      <div class="quality-empty">正在加载评价任务...</div>
     </div>
   </div>
 </div>
@@ -148,12 +142,13 @@
 </div>
 
 <!-- Shared API helper -->
-  <script src="/js/mobile/mobile-api.js?v=3"></script>
-  <script src="/js/mobile/mobile-utils.js?v=27"></script>
+  <script src="/js/mobile/mobile-api.js?v=4"></script>
+  <script src="/js/mobile/mobile-utils.js?v=28"></script>
 <script src="/js/mobile/mobile-auth.js?v=28"></script>
 <script src="/js/mobile/mobile-scan.js?v=26"></script>
-<script src="/js/mobile/mobile-order.js?v=34"></script>
-<script src="/js/mobile/mobile-init.js?v=29"></script>
+<script src="/js/mobile/mobile-order.js?v=35"></script>
+<script src="/js/mobile/mobile-quality-evaluation.js?v=1"></script>
+<script src="/js/mobile/mobile-init.js?v=30"></script>
 
 
 

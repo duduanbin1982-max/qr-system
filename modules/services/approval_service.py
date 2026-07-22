@@ -101,6 +101,7 @@ class ApprovalService:
                     WorkReportWriter.apply_approved_normal_report(
                         command,
                         txn,
+                        record['work_record_id'],
                     )
             else:
                 next_level = current_level + 1

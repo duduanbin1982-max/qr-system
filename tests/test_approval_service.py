@@ -86,7 +86,10 @@ def _install_stub(monkeypatch):
     monkeypatch.setattr(
         approval_service_module.WorkReportWriter,
         "apply_approved_normal_report",
-        staticmethod(lambda command, db: applied.update(command=command)),
+        staticmethod(lambda command, db, work_record_id=None: applied.update(
+            command=command,
+            work_record_id=work_record_id,
+        )),
     )
     return applied
 
@@ -132,6 +135,7 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
     assert applied["command"].user_id == 13
     assert applied["command"].effective_quantity == 1
     assert applied["command"].serial_no == "SERIAL-001"
+    assert applied["work_record_id"] == 7
 
 
 def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):

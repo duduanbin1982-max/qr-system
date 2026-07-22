@@ -154,7 +154,7 @@ class TestScanWorkFlow:
         assert next_scan.status_code == 200, next_scan.get_json()
         assert next_scan.get_json()["order"]["current_process"]["process_id"] == process_ids[1]
 
-    def test_mobile_report_returns_handoff_pending_for_previous_serial_process(self, client, worker_auth_headers):
+    def test_mobile_report_creates_quality_evaluation_task_for_previous_serial_process(self, client, worker_auth_headers):
         order_id, _, serial_no, process_ids, current_user_id, previous_user_id = _seed_serial_handoff_order(client)
 
         report = client.post(
@@ -170,14 +170,20 @@ class TestScanWorkFlow:
         )
 
         assert report.status_code == 200, report.get_json()
-        pending = report.get_json()["handoff_pending"]
-        assert pending["required"] is True
-        assert pending["from_process_id"] == process_ids[0]
-        assert pending["to_process_id"] == process_ids[1]
-        assert pending["from_user_id"] == previous_user_id
-        assert pending["from_user_id"] != current_user_id
+        assert report.get_json()["quality_evaluation_pending_count"] == 1
+        tasks = client.get(
+            "/api/process-quality-evaluations/tasks",
+            headers=worker_auth_headers,
+        )
+        assert tasks.status_code == 200, tasks.get_json()
+        pending = tasks.get_json()["items"][0]
+        assert pending["is_required"] == 1
+        assert pending["target_process_id"] == process_ids[0]
+        assert pending["evaluator_process_id"] == process_ids[1]
+        assert pending["target_user_id"] == previous_user_id
+        assert pending["target_user_id"] != current_user_id
 
-    def test_mobile_scan_reopens_unsubmitted_handoff_after_serial_advances(self, client, worker_auth_headers):
+    def test_mobile_scan_reports_unsubmitted_quality_task_count_after_serial_advances(self, client, worker_auth_headers):
         order_id, _, serial_no, process_ids, _, _ = _seed_serial_handoff_order(client)
 
         report = client.post(
@@ -198,11 +204,14 @@ class TestScanWorkFlow:
         assert scan.status_code == 200, scan.get_json()
         payload = scan.get_json()
         assert payload["order"]["current_process"]["process_id"] == process_ids[2]
-        pending = payload["handoff_pending"]
-        assert pending["required"] is True
-        assert pending["from_process_id"] == process_ids[0]
-        assert pending["to_process_id"] == process_ids[1]
-        assert pending["serial_no"] == serial_no
+        assert payload["quality_evaluation_pending_count"] == 1
+        tasks = client.get(
+            "/api/process-quality-evaluations/tasks",
+            headers=worker_auth_headers,
+        ).get_json()["items"]
+        assert tasks[0]["target_process_id"] == process_ids[0]
+        assert tasks[0]["evaluator_process_id"] == process_ids[1]
+        assert tasks[0]["serial_no"] == serial_no
 
     def test_work_report_submit(self, client, auth_headers, worker_auth_headers, test_order_id):
         """POST /api/report — submit a work report."""

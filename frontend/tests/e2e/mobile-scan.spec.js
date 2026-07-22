@@ -5,16 +5,19 @@ import { loginWorkerMobile, observeRuntimeFailures, openMobileCode } from './hel
 
 test.use({ viewport: { width: 390, height: 844 } })
 
-test('mobile scan opens and submits the previous-process handoff review', async ({ page }) => {
+test('mobile quality evaluation center submits an upstream-process task', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginWorkerMobile(page)
-  await openMobileCode(page, 'E2E-HANDOFF-001')
 
-  await expect(page.locator('#s-handoff')).toHaveClass(/active/)
-  await expect(page.locator('#handoff-title')).toContainText('E2E Previous Worker')
-  await page.locator('#handoff-stars button[data-score="4"]').click()
-  await page.locator('#handoff-submit').click()
-  await expect(page.locator('#s-order')).toHaveClass(/active/)
+  await expect(page.locator('#quality-pending-badge')).toHaveText('1')
+  await page.locator('#quality-evaluation-entry').click()
+  await expect(page.locator('#s-quality-evaluation')).toHaveClass(/active/)
+  await expect(page.locator('.quality-task')).toContainText('E2E Previous Worker')
+  await expect(page.locator('.quality-task')).toContainText('E2E Cutting')
+  await page.locator('.quality-task select[data-dimension="appearance_quality"]').selectOption('4')
+  await page.locator('.quality-task button[data-action="submit"]').click()
+  await expect(page.locator('.toast')).toContainText('评价已提交')
+  await expect(page.locator('.quality-task')).toHaveCount(0)
   expect(failures).toEqual([])
 })
 

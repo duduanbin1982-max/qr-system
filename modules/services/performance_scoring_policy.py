@@ -198,7 +198,7 @@ class PerformanceScoringPolicy:
         if quality_details["bad_qty"]:
             reasons.append(f"质量扣项{quality_details['bad_qty']}件")
         if quality_details["handoff_low_count"]:
-            reasons.append(f"交接低分{quality_details['handoff_low_count']}次")
+            reasons.append(f"工序质量低分{quality_details['handoff_low_count']}次")
         if metrics["work_days"] < 15:
             reasons.append(f"有效报工天数{metrics['work_days']}天")
         if discipline_deduction:

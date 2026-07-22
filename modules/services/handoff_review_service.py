@@ -99,6 +99,9 @@ class HandoffReviewService:
         }
         with BaseService.transaction() as db:
             review_id = HandoffReviewRepository.insert_review(payload, db)
+            from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+
+            ProcessQualityEvaluationService.record_legacy_handoff(review_id, payload, db)
         return {"ok": True, "id": review_id, "status": status}
 
     @staticmethod
@@ -120,4 +123,9 @@ class HandoffReviewService:
         payload["confirmed_by"] = current_user.get("id") if current_user else None
         with BaseService.transaction() as db:
             HandoffReviewRepository.update_status(review_id, payload, db)
+            from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
+
+            ProcessQualityEvaluationRepository.update_legacy_status(
+                review_id, status, payload["confirmed_by"], payload.get("confirm_note", ""), db
+            )
         return {"ok": True}

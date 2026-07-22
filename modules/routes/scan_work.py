@@ -16,7 +16,7 @@ from modules.route_decorators import (
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService
-from modules.services.handoff_review_service import HandoffReviewService
+from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
 import qrcode as qrcode_lib
@@ -197,15 +197,10 @@ def mobile_report():
             order_id,
             "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type
         )
-        handoff_pending = {"required": False}
-        if report_type == "normal":
-            try:
-                handoff_pending = HandoffReviewService.pending_context(
-                    order_id, process_id, user["id"], serial_no or ""
-                )
-            except Exception as exc:
-                handoff_pending = {"required": False, "reason": f"交接评价检查失败: {exc}"}
-        return jsonify({"message": "report OK", "handoff_pending": handoff_pending})
+        return jsonify({
+            "message": "report OK",
+            "quality_evaluation_pending_count": ProcessQualityEvaluationService.pending_count(user["id"]),
+        })
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
 

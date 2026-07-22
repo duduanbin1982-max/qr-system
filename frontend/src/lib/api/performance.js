@@ -9,6 +9,4 @@ export const performanceApi = {
   savePerformanceReview: (data) => request('POST', '/api/performance/reviews', data),
   createPerformancePlan: (data) => request('POST', '/api/performance/plans', data),
   updatePerformancePlan: (id, data) => request('PUT', '/api/performance/plans/' + id, data),
-  handoffReviews: (params) => request('GET', '/api/handoff-reviews' + buildQuery(params)),
-  updateHandoffReviewStatus: (id, data) => request('PUT', '/api/handoff-reviews/' + id + '/status', data),
 }
