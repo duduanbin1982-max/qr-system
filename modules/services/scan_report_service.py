@@ -6,6 +6,7 @@ ScanHelperService so the helper remains a lower-level data access seam.
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.scan_validation_service import ScanValidationService
 from modules.services.work_report_writer import WorkReportWriter
+from modules.domain.work_report import WorkReportCommand
 
 
 class ScanReportService:
@@ -27,17 +28,15 @@ class ScanReportService:
         return ScanHelperService.check_approval_required(process_id) is not None
 
     @staticmethod
-    def execute_report_write(report_type, order_id, process_id, user_id, user_name,
-                             quantity, remark, serial_no, need_approval, record_type="normal"):
-        return WorkReportWriter.execute_report_write(
-            report_type,
-            order_id,
-            process_id,
-            user_id,
-            user_name,
+    def execute_report_write(command):
+        return WorkReportWriter.execute_report_write(command)
+
+    @staticmethod
+    def build_command(data, user, quantity, serial_no, need_approval):
+        return WorkReportCommand.from_submission(
+            data,
+            user,
             quantity,
-            remark,
             serial_no,
             need_approval,
-            record_type=record_type,
         )

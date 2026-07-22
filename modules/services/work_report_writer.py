@@ -16,66 +16,58 @@ class WorkReportWriter:
     """Persists normal, scrap, and rework reports inside one transaction."""
 
     @staticmethod
-    def execute_report_write(report_type, order_id, process_id, user_id, user_name,
-                             quantity, remark, serial_no, need_approval, record_type="normal"):
+    def execute_report_write(command):
         """共享报工写入逻辑。整个方法在事务中执行，全部成功或全部回滚。"""
         from modules.services.scan_helper_service import ScanHelperService
 
         with BaseService.transaction() as db:
             WorkReportWriter._check_duplicates(
                 ScanHelperService,
-                report_type,
-                order_id,
-                process_id,
-                user_id,
-                serial_no,
+                command.report_type,
+                command.order_id,
+                command.process_id,
+                command.user_id,
+                command.serial_no,
                 db,
             )
             current_op = WorkReportWriter._load_current_operation(
                 ScanHelperService,
-                order_id,
-                process_id,
+                command.order_id,
+                command.process_id,
                 db,
             )
 
-            if report_type == "normal":
+            if command.report_type == "normal":
                 WorkReportWriter._check_normal_limits(
                     ScanHelperService,
-                    order_id,
+                    command.order_id,
                     current_op,
-                    quantity,
+                    command.quantity,
                     db,
                 )
                 WorkReportWriter._write_normal_report(
                     ScanHelperService,
-                    order_id,
-                    process_id,
-                    user_id,
-                    user_name,
-                    quantity,
-                    remark,
-                    serial_no,
-                    need_approval,
+                    command,
                     db,
                 )
-            elif report_type == "scrap":
+            elif command.report_type == "scrap":
                 WorkReportWriter._write_scrap_report(
                     ScanHelperService,
-                    order_id,
-                    process_id,
-                    user_id,
-                    quantity,
-                    remark,
+                    command.order_id,
+                    command.process_id,
+                    command.user_id,
+                    command.quantity,
+                    command.remark,
                     db,
                 )
-            elif report_type == "rework":
+            elif command.report_type == "rework":
                 WorkReportWriter._write_rework_report(
                     ScanHelperService,
-                    order_id,
-                    process_id,
-                    user_id,
-                    quantity,
-                    remark,
+                    command.order_id,
+                    command.process_id,
+                    command.user_id,
+                    command.quantity,
+                    command.remark,
                     db,
                 )
 
@@ -136,64 +128,57 @@ class WorkReportWriter:
             raise ValueError(err.get("error", "报工数量超出订单总量限制"))
 
     @staticmethod
-    def _write_normal_report(helper, order_id, process_id, user_id, user_name,
-                             quantity, remark, serial_no, need_approval, db):
-        work_status = "pending" if need_approval else "approved"
-        quantity_local = 1 if serial_no else quantity
+    def _write_normal_report(helper, command, db):
+        work_status = "pending" if command.need_approval else "approved"
         wr_id = helper.insert_work_record(
-            order_id,
-            process_id,
-            user_id,
+            command.order_id,
+            command.process_id,
+            command.user_id,
             "normal",
-            quantity_local,
-            remark,
+            command.effective_quantity,
+            command.remark,
             work_status,
-            serial_no,
+            command.serial_no,
             db=db,
         )
 
-        if need_approval:
+        if command.need_approval:
             helper.insert_approval_record(wr_id, db=db)
 
         if work_status == "approved":
             WorkReportWriter.apply_approved_normal_report(
-                helper,
-                order_id,
-                process_id,
-                user_id,
-                user_name,
-                quantity_local,
-                serial_no,
+                command,
                 db,
             )
 
     @staticmethod
-    def apply_approved_normal_report(helper, order_id, process_id, user_id, user_name,
-                                     quantity_local, serial_no, db):
+    def apply_approved_normal_report(command, db):
+        from modules.services.scan_helper_service import ScanHelperService
+
         WorkReportWriter._apply_approved_normal_effects(
-            helper,
-            order_id,
-            process_id,
-            user_id,
-            user_name,
-            quantity_local,
-            serial_no,
+            ScanHelperService,
+            command.order_id,
+            command.process_id,
+            command.user_id,
+            command.user_name,
+            command.effective_quantity,
+            command.serial_no,
             db,
         )
-        if serial_no:
+        if command.serial_no:
             WorkReportWriter._advance_serial_item(
-                helper,
-                order_id,
-                process_id,
-                user_id,
-                user_name,
-                serial_no,
+                ScanHelperService,
+                command.order_id,
+                command.process_id,
+                command.user_id,
+                command.user_name,
+                command.serial_no,
                 db,
             )
         OrderCompletionService.reconcile(
-            order_id,
+            command.order_id,
             trigger="approved_work_report",
-            actor_id=user_id,
+            actor_id=command.user_id,
             db=db,
         )
 

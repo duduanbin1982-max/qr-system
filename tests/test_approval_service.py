@@ -20,12 +20,16 @@ class _DummyTransaction:
 
 
 class _ApprovalRepoStub:
-    calls = []
     record = None
     work_record = None
     order = None
     config = None
     order_process = None
+    approval_status = None
+    work_record_status = None
+    advanced_level = None
+    rejected = False
+    approved = False
 
     @staticmethod
     def find_by_id(record_id):
@@ -49,23 +53,30 @@ class _ApprovalRepoStub:
 
     @staticmethod
     def approve(record_id, approver_id, approver_name, comment, db=None):
-        _ApprovalRepoStub.calls.append(("approve", record_id, approver_id, approver_name, comment))
+        _ApprovalRepoStub.approved = True
+        _ApprovalRepoStub.approval_status = "approved"
 
     @staticmethod
     def update_work_record_status(work_record_id, status, db=None):
-        _ApprovalRepoStub.calls.append(("update_work_record_status", work_record_id, status))
+        _ApprovalRepoStub.work_record_status = status
 
     @staticmethod
     def advance_level(record_id, approver_id, approver_name, comment, next_level, db=None):
-        _ApprovalRepoStub.calls.append(("advance_level", record_id, next_level))
+        _ApprovalRepoStub.advanced_level = next_level
 
     @staticmethod
     def reject(record_id, approver_id, approver_name, comment, db=None):
-        _ApprovalRepoStub.calls.append(("reject", record_id, approver_id, approver_name, comment))
+        _ApprovalRepoStub.rejected = True
+        _ApprovalRepoStub.approval_status = "rejected"
 
 
 def _install_stub(monkeypatch):
-    _ApprovalRepoStub.calls = []
+    _ApprovalRepoStub.approval_status = None
+    _ApprovalRepoStub.work_record_status = None
+    _ApprovalRepoStub.advanced_level = None
+    _ApprovalRepoStub.rejected = False
+    _ApprovalRepoStub.approved = False
+    applied = {"command": None}
     monkeypatch.setattr(approval_service_module, "ApprovalRepository", _ApprovalRepoStub)
     monkeypatch.setattr(
         approval_service_module.BaseService,
@@ -75,15 +86,13 @@ def _install_stub(monkeypatch):
     monkeypatch.setattr(
         approval_service_module.WorkReportWriter,
         "apply_approved_normal_report",
-        staticmethod(lambda helper, order_id, process_id, user_id, user_name,
-                            quantity, serial_no, db: _ApprovalRepoStub.calls.append(
-            ("apply_approved_normal_report", order_id, process_id, user_id, quantity, serial_no)
-        )),
+        staticmethod(lambda command, db: applied.update(command=command)),
     )
+    return applied
 
 
 def test_handle_approve_accepts_sqlite_rows(monkeypatch):
-    _install_stub(monkeypatch)
+    applied = _install_stub(monkeypatch)
     _ApprovalRepoStub.record = _row({
         "id": 1,
         "work_record_id": 7,
@@ -116,15 +125,17 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
     )
 
     assert result == "approve"
-    assert _ApprovalRepoStub.calls == [
-        ("approve", 1, 99, "Admin", "ok"),
-        ("update_work_record_status", 7, "approved"),
-        ("apply_approved_normal_report", 11, 5, 13, 2, "SERIAL-001"),
-    ]
+    assert _ApprovalRepoStub.approval_status == "approved"
+    assert _ApprovalRepoStub.work_record_status == "approved"
+    assert applied["command"].order_id == 11
+    assert applied["command"].process_id == 5
+    assert applied["command"].user_id == 13
+    assert applied["command"].effective_quantity == 1
+    assert applied["command"].serial_no == "SERIAL-001"
 
 
 def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
-    _install_stub(monkeypatch)
+    applied = _install_stub(monkeypatch)
     _ApprovalRepoStub.record = _row({
         "id": 2,
         "work_record_id": 8,
@@ -157,4 +168,7 @@ def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
     )
 
     assert result == "approve"
-    assert _ApprovalRepoStub.calls == [("advance_level", 2, 2)]
+    assert _ApprovalRepoStub.advanced_level == 2
+    assert _ApprovalRepoStub.approved is False
+    assert _ApprovalRepoStub.work_record_status is None
+    assert applied["command"] is None

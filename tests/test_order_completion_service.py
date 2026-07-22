@@ -1,10 +1,14 @@
 import uuid
 
+import pytest
+
 from modules.db import get_db
+import modules.services.work_report_writer as work_report_writer_module
 from modules.services.order_completion_service import OrderCompletionService
 from modules.services.order_service import OrderService
 from modules.services.approval_service import ApprovalService
 from modules.services.work_report_writer import WorkReportWriter
+from modules.domain.work_report import WorkReportCommand
 
 
 def _seed_completed_serial_order(client, quantity=2, status="producing"):
@@ -46,6 +50,90 @@ def _order_state(client, order_id):
             "SELECT status, completed FROM orders WHERE id = ?", (order_id,)
         ).fetchone()
         return dict(row)
+
+
+def _seed_pending_serial_approval(client):
+    suffix = uuid.uuid4().hex[:8].upper()
+    with client.application.app_context():
+        db = get_db()
+        worker = db.execute(
+            "SELECT id, COALESCE(name, username, '') AS name FROM users ORDER BY id LIMIT 1"
+        ).fetchone()
+        process_id = db.execute(
+            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+            "VALUES (?, 'approval fixture', 'fixture', 1, 'active', datetime('now','localtime'))",
+            (f"Approval Completion Process {suffix}",),
+        ).lastrowid
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, "
+            "completed, status, qr_mode) "
+            "VALUES (?, 'Test Customer', 'Approval Product', ?, 1, 0, 'producing', 'serial')",
+            (f"TEST-APPROVAL-COMP-{suffix}", f"APPROVAL-COMP-{suffix}"),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO order_processes "
+            "(order_id, process_id, seq_order, status, completed, scrapped, rework) "
+            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
+            (order_id, process_id),
+        )
+        serial_no = f"TEST-APPROVAL-COMP-{suffix}-001"
+        db.execute(
+            "INSERT INTO product_items "
+            "(serial_no, order_id, qr_content, status, position_no, current_process_id) "
+            "VALUES (?, ?, ?, 'in_progress', 1, ?)",
+            (serial_no, order_id, serial_no, process_id),
+        )
+        db.commit()
+
+        WorkReportWriter.execute_report_write(WorkReportCommand(
+            report_type="normal",
+            order_id=order_id,
+            process_id=process_id,
+            user_id=worker["id"],
+            user_name=worker["name"],
+            quantity=1,
+            serial_no=serial_no,
+            need_approval=True,
+        ))
+        approval_id = db.execute(
+            "SELECT ar.id FROM approval_records ar "
+            "JOIN work_records wr ON wr.id = ar.work_record_id "
+            "WHERE wr.order_id = ?",
+            (order_id,),
+        ).fetchone()["id"]
+        return {
+            "approval_id": approval_id,
+            "order_id": order_id,
+            "process_id": process_id,
+            "serial_no": serial_no,
+            "worker": dict(worker),
+        }
+
+
+def _approval_effect_state(client, context):
+    with client.application.app_context():
+        db = get_db()
+        approval = db.execute(
+            "SELECT ar.status AS approval_status, wr.status AS work_status "
+            "FROM approval_records ar JOIN work_records wr ON wr.id = ar.work_record_id "
+            "WHERE ar.id = ?",
+            (context["approval_id"],),
+        ).fetchone()
+        item = db.execute(
+            "SELECT status, current_process_id FROM product_items WHERE serial_no = ?",
+            (context["serial_no"],),
+        ).fetchone()
+        process = db.execute(
+            "SELECT status, completed FROM order_processes "
+            "WHERE order_id = ? AND process_id = ?",
+            (context["order_id"], context["process_id"]),
+        ).fetchone()
+        return {
+            **dict(approval),
+            "item": dict(item),
+            "process": dict(process),
+            "order": _order_state(client, context["order_id"]),
+        }
 
 
 def test_reconcile_completes_serial_order_and_ignores_extra_fields_status(client):
@@ -115,80 +203,78 @@ def test_new_pending_process_keeps_reopened_order_active(client):
 
 
 def test_pending_serial_report_advances_only_after_approval(client):
-    suffix = uuid.uuid4().hex[:8].upper()
+    context = _seed_pending_serial_approval(client)
+    before = _approval_effect_state(client, context)
+    assert before["item"] == {
+        "status": "in_progress",
+        "current_process_id": context["process_id"],
+    }
+    assert before["order"] == {"status": "producing", "completed": 0}
+
     with client.application.app_context():
-        db = get_db()
-        worker = db.execute(
-            "SELECT id, COALESCE(name, username, '') AS name FROM users ORDER BY id LIMIT 1"
-        ).fetchone()
-        process_id = db.execute(
-            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
-            "VALUES (?, 'approval fixture', 'fixture', 1, 'active', datetime('now','localtime'))",
-            (f"Approval Completion Process {suffix}",),
-        ).lastrowid
-        order_id = db.execute(
-            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, "
-            "completed, status, qr_mode) "
-            "VALUES (?, 'Test Customer', 'Approval Product', ?, 1, 0, 'producing', 'serial')",
-            (f"TEST-APPROVAL-COMP-{suffix}", f"APPROVAL-COMP-{suffix}"),
-        ).lastrowid
-        db.execute(
-            "INSERT INTO order_processes "
-            "(order_id, process_id, seq_order, status, completed, scrapped, rework) "
-            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
-            (order_id, process_id),
-        )
-        serial_no = f"TEST-APPROVAL-COMP-{suffix}-001"
-        db.execute(
-            "INSERT INTO product_items "
-            "(serial_no, order_id, qr_content, status, position_no, current_process_id) "
-            "VALUES (?, ?, ?, 'in_progress', 1, ?)",
-            (serial_no, order_id, serial_no, process_id),
-        )
-        db.commit()
-
-        WorkReportWriter.execute_report_write(
-            "normal",
-            order_id,
-            process_id,
-            worker["id"],
-            worker["name"],
-            1,
-            "",
-            serial_no,
-            True,
-        )
-
-        before = db.execute(
-            "SELECT status, current_process_id FROM product_items WHERE serial_no = ?",
-            (serial_no,),
-        ).fetchone()
-        approval_id = db.execute(
-            "SELECT ar.id FROM approval_records ar "
-            "JOIN work_records wr ON wr.id = ar.work_record_id "
-            "WHERE wr.order_id = ?",
-            (order_id,),
-        ).fetchone()["id"]
-        assert dict(before) == {"status": "in_progress", "current_process_id": process_id}
-        assert _order_state(client, order_id) == {"status": "producing", "completed": 0}
-
         ApprovalService.handle(
-            approval_id,
+            context["approval_id"],
             "approve",
-            {"id": worker["id"], "name": worker["name"]},
+            context["worker"],
             "approved in test",
         )
 
-        after = db.execute(
-            "SELECT status, current_process_id FROM product_items WHERE serial_no = ?",
-            (serial_no,),
-        ).fetchone()
-        process = db.execute(
-            "SELECT status, completed FROM order_processes "
-            "WHERE order_id = ? AND process_id = ?",
-            (order_id, process_id),
-        ).fetchone()
+    after = _approval_effect_state(client, context)
+    assert after["approval_status"] == "approved"
+    assert after["work_status"] == "approved"
+    assert after["item"] == {"status": "completed", "current_process_id": None}
+    assert after["process"] == {"status": "completed", "completed": 1}
+    assert after["order"] == {"status": "completed", "completed": 1}
 
-    assert dict(after) == {"status": "completed", "current_process_id": None}
-    assert dict(process) == {"status": "completed", "completed": 1}
-    assert _order_state(client, order_id) == {"status": "completed", "completed": 1}
+
+def test_rejected_serial_report_does_not_apply_production_effects(client):
+    context = _seed_pending_serial_approval(client)
+
+    with client.application.app_context():
+        ApprovalService.handle(
+            context["approval_id"],
+            "reject",
+            context["worker"],
+            "rejected in test",
+        )
+
+    state = _approval_effect_state(client, context)
+    assert state["approval_status"] == "rejected"
+    assert state["work_status"] == "rejected"
+    assert state["item"] == {
+        "status": "in_progress",
+        "current_process_id": context["process_id"],
+    }
+    assert state["process"] == {"status": "pending", "completed": 0}
+    assert state["order"] == {"status": "producing", "completed": 0}
+
+
+def test_approval_side_effect_failure_rolls_back_all_status_changes(client, monkeypatch):
+    context = _seed_pending_serial_approval(client)
+
+    def fail_material_deduction(*args, **kwargs):
+        raise RuntimeError("forced material failure")
+
+    monkeypatch.setattr(
+        work_report_writer_module.MaterialConsumptionRepository,
+        "deduct_for_process",
+        staticmethod(fail_material_deduction),
+    )
+    with client.application.app_context():
+        with pytest.raises(RuntimeError, match="forced material failure"):
+            ApprovalService.handle(
+                context["approval_id"],
+                "approve",
+                context["worker"],
+                "rollback in test",
+            )
+
+    state = _approval_effect_state(client, context)
+    assert state["approval_status"] == "pending"
+    assert state["work_status"] == "pending"
+    assert state["item"] == {
+        "status": "in_progress",
+        "current_process_id": context["process_id"],
+    }
+    assert state["process"] == {"status": "pending", "completed": 0}
+    assert state["order"] == {"status": "producing", "completed": 0}

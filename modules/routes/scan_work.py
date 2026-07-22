@@ -186,8 +186,10 @@ def mobile_report():
         need_approval = ScanReportService.check_approval_required(process_id)
 
         # Execute report write
-        ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
-            user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
+        command = ScanReportService.build_command(
+            data, user, quantity, serial_no, need_approval
+        )
+        ScanReportService.execute_report_write(command)
 
         safe_audit_log(
             "report_" + report_type,
@@ -241,8 +243,10 @@ def work_report():
         need_approval = ScanReportService.check_approval_required(process_id)
 
         # Execute report write
-        ScanReportService.execute_report_write(report_type, order_id, process_id, user["id"],
-            user.get("name", ""), quantity, remark, serial_no, need_approval, report_type)
+        command = ScanReportService.build_command(
+            data, user, quantity, serial_no, need_approval
+        )
+        ScanReportService.execute_report_write(command)
 
         safe_audit_log(
             "report_" + report_type,

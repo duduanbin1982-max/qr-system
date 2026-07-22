@@ -2,8 +2,8 @@
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.approval_repository import ApprovalRepository
-from modules.services.scan_helper_service import ScanHelperService
 from modules.services.work_report_writer import WorkReportWriter
+from modules.domain.work_report import WorkReportCommand
 
 
 class ApprovalService:
@@ -97,14 +97,9 @@ class ApprovalService:
                     ApprovalRepository.update_work_record_status(
                         record['work_record_id'], 'approved', db=txn
                     )
+                    command = WorkReportCommand.from_approved_record(wr)
                     WorkReportWriter.apply_approved_normal_report(
-                        ScanHelperService,
-                        wr['order_id'],
-                        wr['process_id'],
-                        wr['user_id'],
-                        wr['user_name'],
-                        wr['quantity'],
-                        wr['serial_no'],
+                        command,
                         txn,
                     )
             else:
