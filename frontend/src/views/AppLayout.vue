@@ -219,7 +219,7 @@ const ProductionSettings = definePageAsyncComponent('生产设置', () => import
 const ReworkList = definePageAsyncComponent('返工管理', () => import('./ReworkList.vue'))
 const GanttChart = definePageAsyncComponent('生产排程', () => import('./GanttChart.vue'))
 const ApprovalPage = definePageAsyncComponent('审批管理', () => import('./ApprovalPage.vue'))
-const InspectionList = definePageAsyncComponent('质量检验', () => import('./InspectionList.vue'))
+const QualityManagementPage = definePageAsyncComponent('质量管理', () => import('./QualityManagementPage.vue'))
 const WageList = definePageAsyncComponent('工资核算', () => import('./WageList.vue'))
 const PerformancePage = definePageAsyncComponent('绩效管理', () => import('./PerformancePage.vue'))
 const WorkTimePage = definePageAsyncComponent('工时管理', () => import('./WorkTimePage.vue'))
@@ -253,7 +253,7 @@ export default {
     ReworkList,
     GanttChart,
     ApprovalPage,
-    InspectionList,
+    QualityManagementPage,
     WageList,
     PerformancePage,
     WorkTimePage,
@@ -288,7 +288,7 @@ export default {
         'all-processes': 'ProcessList', 'structure-processes': 'ProcessList',
         'machining-processes': 'ProcessList', 'inventory': 'InventoryList',
         'materials': 'MaterialList', 'schedule': 'GanttChart',
-        'rework': 'ReworkList', 'quality': 'InspectionList',
+        'rework': 'ReworkList', 'quality': 'QualityManagementPage', 'quality-management': 'QualityManagementPage',
         'wages': 'WageList', 'performance': 'PerformancePage', 'work-time': 'WorkTimePage',
         'process-quality-evaluation': 'ProcessQualityEvaluationPage', 'prices': 'PriceList',
         'all-prices': 'PriceList', 'structure-prices': 'PriceList',
@@ -311,7 +311,11 @@ export default {
         await loadPageAccessCatalog()
         restoreNavState()
         const saved = localStorage.getItem('currentPage')
-        if (saved && saved !== 'login') router.page = saved
+        if (saved === 'quality') {
+          localStorage.setItem('currentPage', 'quality-management')
+          router.page = 'quality-management'
+        }
+        else if (saved && saved !== 'login') router.page = saved
         else router.page = pageAccess.landingPage(auth.user)
         if (!pageAccess.canOpen(auth.user, router.page)) {
           router.page = pageAccess.landingPage(auth.user)

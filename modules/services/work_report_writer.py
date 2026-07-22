@@ -116,6 +116,9 @@ class WorkReportWriter:
         if not order:
             return
 
+        from modules.services.quality_management_service import QualityManagementService
+        QualityManagementService.assert_report_allowed(order_id, current_op.get("process_id"), db=db)
+
         err, code = helper.check_quantity_limits(
             order_id,
             current_op.get("seq_order", 0),
@@ -155,6 +158,9 @@ class WorkReportWriter:
     @staticmethod
     def apply_approved_normal_report(command, db, work_record_id=None):
         from modules.services.scan_helper_service import ScanHelperService
+        from modules.services.quality_management_service import QualityManagementService
+
+        QualityManagementService.assert_report_allowed(command.order_id, command.process_id, db=db)
 
         WorkReportWriter._apply_approved_normal_effects(
             ScanHelperService,
@@ -179,6 +185,14 @@ class WorkReportWriter:
         from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
         ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
+        QualityManagementService.generate_for_report(
+            command.order_id,
+            command.process_id,
+            work_record_id,
+            command.serial_no,
+            command.user_id,
+            db,
+        )
         OrderCompletionService.reconcile(
             command.order_id,
             trigger="approved_work_report",
@@ -194,12 +208,6 @@ class WorkReportWriter:
             new_completed = (op["completed"] or 0) + quantity_local
             helper.update_order_process_completed(order_id, process_id, new_completed, db=db)
 
-        WorkReportWriter._create_first_article_if_needed(
-            order_id,
-            process_id,
-            user_id,
-            db,
-        )
         MaterialConsumptionRepository.deduct_for_process(
             order_id,
             process_id,
@@ -217,38 +225,6 @@ class WorkReportWriter:
                 user_id,
                 user_name,
                 db,
-            )
-
-    @staticmethod
-    def _create_first_article_if_needed(order_id, process_id, user_id, db):
-        first_count = ScanRepository.count_approved_normal_work_records(order_id, process_id, db=db)
-        if first_count > 1:
-            return
-
-        existing = ScanRepository.find_first_article_inspection(order_id, process_id, db=db)
-        if existing:
-            return
-
-        try:
-            from modules.services.quality_service import QualityService
-
-            QualityService.create_inspection({
-                "order_id": order_id,
-                "process_id": process_id,
-                "inspection_type": "first_article",
-                "quantity_checked": 1,
-                "quantity_passed": 0,
-                "quantity_failed": 0,
-                "defect_category": "",
-                "defect_quantity": 0,
-                "notes": "自动创建: 首件报工",
-                "inspected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }, user_id)
-        except Exception:
-            _logger.warning(
-                "auto_create_inspection failed: order_id=%s process_id=%s",
-                order_id,
-                process_id,
             )
 
     @staticmethod

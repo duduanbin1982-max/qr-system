@@ -38,7 +38,9 @@ class TraceService:
         if not item_row:
             return {
                 'item': None, 'order': None,
-                'work_records': [], 'rework_records': [], 'shipments': []
+                'work_records': [], 'rework_records': [], 'shipments': [],
+                'quality_inspections': [], 'quality_tasks': [],
+                'quality_nonconformances': [], 'quality_capa': [],
             }
 
         item_dict = dict(item_row)
@@ -78,6 +80,16 @@ class TraceService:
             rows = TraceRepository.find_quality_inspections_by_order(order_id)
             quality_inspections = [dict(r) for r in rows]
 
+        quality_tasks = []
+        quality_nonconformances = []
+        quality_capa = []
+        if order_id:
+            quality_tasks = [dict(row) for row in TraceRepository.find_quality_tasks_by_order(order_id)]
+            quality_nonconformances = [
+                dict(row) for row in TraceRepository.find_quality_nonconformances_by_order(order_id)
+            ]
+            quality_capa = [dict(row) for row in TraceRepository.find_quality_capa_by_order(order_id)]
+
         # 7. 物料消耗
         material_consumptions = []
         if order_id:
@@ -102,6 +114,9 @@ class TraceService:
             'work_records': work_records,
             'rework_records': rework_records,
             'quality_inspections': quality_inspections,
+            'quality_tasks': quality_tasks,
+            'quality_nonconformances': quality_nonconformances,
+            'quality_capa': quality_capa,
             'material_consumptions': material_consumptions,
             'inventory_logs': inventory_logs,
             'shipments': shipments,
@@ -122,7 +137,11 @@ class TraceService:
         # 1. 查订单
         order_row = TraceRepository.find_order_by_no(order_no)
         if not order_row:
-            return {"order": None, "items": [], "work_records": [], "rework_records": [], "shipments": []}
+            return {
+                "order": None, "items": [], "work_records": [], "rework_records": [], "shipments": [],
+                "quality_inspections": [], "quality_tasks": [],
+                "quality_nonconformances": [], "quality_capa": [],
+            }
 
         order = dict(order_row)
         order_id = order["id"]
@@ -143,6 +162,12 @@ class TraceService:
         qi_rows = TraceRepository.find_quality_inspections_by_order(order_id)
         quality_inspections = [dict(r) for r in qi_rows]
 
+        quality_tasks = [dict(row) for row in TraceRepository.find_quality_tasks_by_order(order_id)]
+        quality_nonconformances = [
+            dict(row) for row in TraceRepository.find_quality_nonconformances_by_order(order_id)
+        ]
+        quality_capa = [dict(row) for row in TraceRepository.find_quality_capa_by_order(order_id)]
+
         # 6. 查物料消耗
         mc_rows = TraceRepository.find_material_consumptions_by_order(order_id)
         material_consumptions = [dict(r) for r in mc_rows]
@@ -161,6 +186,9 @@ class TraceService:
             "work_records": work_records,
             "rework_records": rework_records,
             "quality_inspections": quality_inspections,
+            "quality_tasks": quality_tasks,
+            "quality_nonconformances": quality_nonconformances,
+            "quality_capa": quality_capa,
             "material_consumptions": material_consumptions,
             "inventory_logs": inventory_logs,
             "shipments": shipments,

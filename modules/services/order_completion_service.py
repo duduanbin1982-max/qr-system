@@ -37,6 +37,7 @@ class OrderCompletionService:
             mode_ready
             and processes_ready
             and int(data.get("pending_approvals") or 0) == 0
+            and int(data.get("pending_quality_gates") or 0) == 0
         )
         target_status = "completed" if ready else data.get("status")
         return {
@@ -75,7 +76,8 @@ class OrderCompletionService:
                 f"trigger={trigger}; status={result['status']}->{result['target_status']}; "
                 f"completed={result['derived_completed']}/{result['quantity']}; "
                 f"items={result['completed_items']}/{result['item_total']}; "
-                f"processes={result['completed_processes']}/{result['process_total']}"
+                f"processes={result['completed_processes']}/{result['process_total']}; "
+                f"quality_gates={result.get('pending_quality_gates', 0)}"
             )
             AuditLogRepository.insert_log(
                 actor_id,

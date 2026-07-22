@@ -21,6 +21,24 @@ test('administrator can open all previously blank critical pages', async ({ page
   expect(failures).toEqual([])
 })
 
+test('quality management loads every workflow tab without runtime failures', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+  await openSidebarPage(page, '质量管理', '质量管理')
+
+  const main = page.locator('.main-content')
+  for (const label of [
+    '质量工作台', '检验任务', '检验记录', '标准方案', '不合格品',
+    'CAPA', '质量资源', '统计分析', '门禁规则',
+  ]) {
+    await main.locator('.qm-tabs').getByRole('button', { name: label, exact: true }).click()
+    await expect(main.locator('.qm-body')).toBeVisible()
+    await expect(main).not.toContainText('加载失败')
+  }
+
+  expect(failures).toEqual([])
+})
+
 test('order list renders active and archived E2E orders', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginAdmin(page)

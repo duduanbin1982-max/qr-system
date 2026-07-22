@@ -35,6 +35,7 @@ ROUTE_MODULES = (
     "modules.routes.work_time",  # 工时管理
     "modules.routes.rework",  # 返工管理
     "modules.routes.quality",  # 质量检验
+    "modules.routes.quality_management",  # quality management closed loop
     "modules.routes.stats",  # 统计报表
     "modules.routes.exports",  # Excel export
     "modules.routes.notifications",  # 通百中心

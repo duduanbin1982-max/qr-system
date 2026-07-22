@@ -6,6 +6,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    has_permission,
     safe_audit_log,
     validate_json,
 )
@@ -230,9 +231,13 @@ def quality_defect_pareto():
 
 @app.route("/api/inspection/submit", methods=["POST"])
 @check_auth
-@check_permission("quality:edit")
 def inspection_submit():
     """Submit inspection result from mobile scan (redirected here)"""
+    if not (
+        has_permission(g.current_user, "quality:inspect")
+        or has_permission(g.current_user, "quality:edit")
+    ):
+        return jsonify({"error": "无权限"}), 403
     data = get_json_body()
     try:
         QualityService.submit_inspection(data, g.current_user.get("id"), g.current_user.get("name", ""))

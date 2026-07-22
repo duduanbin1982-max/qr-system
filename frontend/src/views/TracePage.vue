@@ -148,14 +148,35 @@
             </div>
             <div v-for="qi in (result.quality_inspections||[])" :key="'qi-'+qi.id" class="tl-item" style="display:flex;gap:var(--space-4);padding:var(--space-3) 0;border-bottom:1px solid var(--bg-hover)">
               <div style="min-width:60px;text-align:center">
-                <div :style="{width:'32px',height:'32px',borderRadius:'50%',background: qi.result==='passed'?'#e8f5e9':qi.result==='failed'?'#fce4ec':'#fff3e0',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto',fontSize:'14px'}">🔍</div>
+                <div :style="{width:'32px',height:'32px',borderRadius:'50%',background: qi.result==='pass'?'#e8f5e9':qi.result==='rework'||qi.result==='scrap'?'#fce4ec':'#fff3e0',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto',fontSize:'14px'}">🔍</div>
               </div>
               <div style="flex:1">
-                <div style="font-weight:500">{{ qi.process_name || '-' }} 质检 <span class="badge" :class="qi.result==='passed'?'badge-success':qi.result==='failed'?'badge-danger':'badge-warning'" style="font-size:var(--text-2xs)">{{ qi.result==='passed'?'合格':qi.result==='failed'?'不合格':'待检' }}</span></div>
+                <div style="font-weight:500">{{ qi.process_name || '-' }} 质检 <span class="badge" :class="qualityResultClass(qi.result)" style="font-size:var(--text-2xs)">{{ qualityResultLabel(qi.result) }}</span></div>
                 <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">抽检 {{ qi.quantity_checked }} / 合格 {{ qi.quantity_passed }} {{ qi.inspected_at }}</div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Quality Tasks -->
+      <div class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>质量任务 ({{ (result.quality_tasks||[]).length }})</h3></div>
+        <div class="card-body">
+          <table v-if="result.quality_tasks && result.quality_tasks.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>任务号</th><th>工序</th><th>类型</th><th>标准</th><th>门禁</th><th>抽样</th><th>状态</th><th>期限</th></tr></thead>
+            <tbody>
+              <tr v-for="task in result.quality_tasks" :key="task.id">
+                <td><code>{{ task.task_no }}</code></td><td>{{ task.process_name || '-' }}</td>
+                <td>{{ task.inspection_type }}</td><td>{{ task.standard_no || '-' }}</td>
+                <td>{{ task.gate_mode==='hard'?'强拦截':task.gate_mode==='soft'?'软提示':'关闭' }}</td>
+                <td>{{ task.sample_qty }}</td>
+                <td><span class="badge" :class="qualityTaskStatusClass(task.status)">{{ qualityTaskStatusLabel(task.status) }}</span></td>
+                <td>{{ task.due_at || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无质量任务</p>
         </div>
       </div>
 
@@ -172,13 +193,49 @@
                 <td>{{ q.quantity_checked }}</td>
                 <td style="color:var(--success)">{{ q.quantity_passed }}</td>
                 <td style="color:var(--danger)">{{ q.quantity_failed }}</td>
-                <td><span class="badge" :class="q.result==='passed'?'badge-success':q.result==='failed'?'badge-danger':'badge-warning'" style="font-size:var(--text-2xs)">{{ q.result==='passed'?'合格':q.result==='failed'?'不合格':'待检' }}</span></td>
+                <td><span class="badge" :class="qualityResultClass(q.result)" style="font-size:var(--text-2xs)">{{ qualityResultLabel(q.result) }}</span></td>
                 <td>{{ q.inspector_name || "-" }}</td>
                 <td style="font-size:var(--text-xs-alt)">{{ q.inspected_at || q.created_at }}</td>
               </tr>
             </tbody>
           </table>
           <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无质检记录</p>
+        </div>
+      </div>
+
+      <!-- Nonconformances -->
+      <div class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>不合格品闭环 ({{ (result.quality_nonconformances||[]).length }})</h3></div>
+        <div class="card-body">
+          <table v-if="result.quality_nonconformances && result.quality_nonconformances.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>不合格单</th><th>工序</th><th>等级</th><th>数量</th><th>处置</th><th>状态</th><th>责任人</th><th>措施记录</th></tr></thead>
+            <tbody>
+              <tr v-for="ncr in result.quality_nonconformances" :key="ncr.id">
+                <td><code>{{ ncr.ncr_no }}</code></td><td>{{ ncr.process_name || '-' }}</td>
+                <td>{{ ncr.defect_level || '-' }}</td><td>{{ ncr.defect_quantity }}</td>
+                <td>{{ qualityDispositionLabel(ncr.disposition) }}</td>
+                <td><span class="badge" :class="ncr.status==='closed'?'badge-success':'badge-warning'">{{ ncr.status==='closed'?'已关闭':'处理中' }}</span></td>
+                <td>{{ ncr.owner_name || '-' }}</td><td>{{ ncr.action_count || 0 }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无不合格品记录</p>
+        </div>
+      </div>
+
+      <!-- CAPA -->
+      <div class="card" style="margin-bottom:var(--space-5)" v-if="result.quality_capa && result.quality_capa.length">
+        <div class="card-header"><h3>纠正预防措施 ({{ result.quality_capa.length }})</h3></div>
+        <div class="card-body">
+          <table class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>CAPA 编号</th><th>来源</th><th>标题</th><th>负责人</th><th>期限</th><th>状态</th><th>验证结果</th></tr></thead>
+            <tbody><tr v-for="capa in result.quality_capa" :key="capa.id">
+              <td><code>{{ capa.capa_no }}</code></td><td>{{ capa.ncr_no || '-' }}</td><td>{{ capa.title }}</td>
+              <td>{{ capa.owner_name || '-' }}</td><td>{{ capa.due_at || '-' }}</td>
+              <td><span class="badge" :class="capa.status==='closed'||capa.status==='verified'?'badge-success':'badge-warning'">{{ capa.status }}</span></td>
+              <td>{{ capa.effectiveness_result || '-' }}</td>
+            </tr></tbody>
+          </table>
         </div>
       </div>
 
@@ -315,6 +372,26 @@ const traceHistory = ref(_history)
       window.print()
     }
 
+    function qualityResultLabel(value) {
+      return ({ pass: '合格', rework: '返修', scrap: '报废', pending: '待检' })[value] || value || '-'
+    }
+
+    function qualityResultClass(value) {
+      return value === 'pass' ? 'badge-success' : value === 'rework' || value === 'scrap' ? 'badge-danger' : 'badge-warning'
+    }
+
+    function qualityTaskStatusLabel(value) {
+      return ({ pending: '待检', in_progress: '检验中', passed: '已通过', failed: '不合格', cancelled: '已取消' })[value] || value
+    }
+
+    function qualityTaskStatusClass(value) {
+      return value === 'passed' ? 'badge-success' : value === 'failed' || value === 'cancelled' ? 'badge-danger' : 'badge-warning'
+    }
+
+    function qualityDispositionLabel(value) {
+      return ({ pending: '待处置', rework: '返修', scrap: '报废', concession: '让步接收', isolate: '隔离', return: '退货' })[value] || value || '-'
+    }
+
     async function doTrace() {
       const code = traceCode.value.trim()
       if (!code) { showToast(traceMode.value==='serial'?'请输入产品序列号':'请输入订单号','error'); return }
@@ -333,7 +410,11 @@ const traceHistory = ref(_history)
       }
     }
 
-    return { traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff, printReport }
+    return {
+      traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff, printReport,
+      qualityResultLabel, qualityResultClass, qualityTaskStatusLabel, qualityTaskStatusClass,
+      qualityDispositionLabel,
+    }
   }
 }
 </script>

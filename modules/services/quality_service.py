@@ -389,8 +389,10 @@ class QualityService:
         if not data.get("order_id") and not data.get("order_no"):
             raise ValueError("order_id or order_no required")
         data = QualityService.normalize_scoring(data)
-        with BaseService.transaction() as txn:
-            return QualityRepository.insert_mobile_inspection_txn(data, user_id, db=txn)
+        from modules.services.quality_management_service import QualityManagementService
+        return QualityManagementService.inspect_from_mobile(
+            data, {"id": user_id, "name": user_name},
+        )
 
     @staticmethod
     def list_inspections_simple(keyword="", page=1, limit=20, result=""):

@@ -224,6 +224,16 @@ class ProcessQualityEvaluationService:
                     "status": status,
                 }, db)
                 ProcessQualityEvaluationRepository.complete_task(task["id"], db)
+                if status == "pending_verification":
+                    from modules.services.quality_management_service import QualityManagementService
+                    QualityManagementService.generate_for_low_evaluation({
+                        "id": evaluation_id,
+                        "order_id": task["order_id"],
+                        "serial_no": task["serial_no"],
+                        "target_process_id": task["target_process_id"],
+                        "target_work_record_id": task["target_work_record_id"],
+                        "quantity": task["quantity"],
+                    }, user_id, db)
                 results.append({"id": evaluation_id, "task_id": task["id"], "status": status, "total_score": total_score})
         return {"ok": True, "items": results}
 

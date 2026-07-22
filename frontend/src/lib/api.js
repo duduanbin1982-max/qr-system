@@ -31,6 +31,7 @@ import { productionApi } from './api/production.js'
 import { performanceApi } from './api/performance.js'
 import { workTimeApi } from './api/work-time.js'
 import { processQualityEvaluationsApi } from './api/process-quality-evaluations.js'
+import { qualityManagementApi } from './api/quality-management.js'
 
 const httpApi = {
   get:    (url)         => request('GET', url),
@@ -71,6 +72,7 @@ export const apiNamespaces = Object.freeze({
   performance: performanceApi,
   workTime: workTimeApi,
   processQualityEvaluations: processQualityEvaluationsApi,
+  qualityManagement: qualityManagementApi,
 })
 
 function validateApiModules(namespaces) {

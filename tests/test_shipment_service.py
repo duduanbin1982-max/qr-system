@@ -2,6 +2,8 @@ import pytest
 
 from factories import create_inventory_item, create_order, ensure_process
 from modules.db import get_db
+from modules.domain.errors import ConflictError
+from modules.services.quality_management_service import QualityManagementService
 from modules.services.shipment_service import ShipmentService
 
 
@@ -40,6 +42,24 @@ def _shipment_payload(order_id, order_no, inventory_id, quantity=4, **overrides)
     }
     payload.update(overrides)
     return payload
+
+
+def _pass_outgoing_inspection(shipment_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM quality_inspection_tasks WHERE shipment_id=? AND inspection_type='outgoing'",
+        (shipment_id,),
+    ).fetchone()
+    assert row, "outgoing quality task was not generated"
+    task = QualityManagementService.get_task(row["id"])
+    measurements = [
+        {"item_id": item["id"], "item_code": item["item_code"], "value": item["weight"]}
+        for item in task.get("standard_items", [])
+    ]
+    QualityManagementService.inspect_task(row["id"], {
+        "quantity_checked": task["sample_qty"], "quantity_failed": 0,
+        "result": "pass", "measurements": measurements,
+    }, CURRENT_USER)
 
 
 def test_create_and_get_shipment_preserves_product_and_order_identity(client):
@@ -82,6 +102,9 @@ def test_complete_shipment_deducts_stock_and_updates_delivery_status(client):
             created_by="测试管理员",
         )
 
+        with pytest.raises(ConflictError, match="出库检验任务"):
+            ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
+        _pass_outgoing_inspection(shipment_id)
         assert ShipmentService.complete_shipment(shipment_id, CURRENT_USER) == shipment_no
         shipment = ShipmentService.get_shipment(shipment_id)
         inventory = db.execute(
@@ -112,6 +135,7 @@ def test_logistics_receive_and_payment_follow_status_rules(client):
         ShipmentService.update_logistics(
             shipment_id, {"logistics_company": "顺丰", "tracking_no": "SF001"}
         )
+        _pass_outgoing_inspection(shipment_id)
         ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
         ShipmentService.record_payment(shipment_id, CURRENT_USER, 40, "bank", "首款")
         ShipmentService.receive_shipment(shipment_id, CURRENT_USER, "张三", "2026-07-20")
@@ -135,6 +159,7 @@ def test_cancel_or_delete_completed_shipment_restores_stock(client, action):
             _shipment_payload(order_id, order_no, inventory_id, quantity=5),
             created_by="测试管理员",
         )
+        _pass_outgoing_inspection(shipment_id)
         ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
 
         if action == "cancel":

@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta
 from modules.services import BaseService
 from modules.repositories.rework_repository import ReworkRepository
-from modules.services.quality_service import QualityService
 
 
 class ReworkService:
@@ -123,25 +122,8 @@ class ReworkService:
             ReworkRepository.complete_rework_txn(
                 rework_id, reason_final, user_id, result, result_remark, duration, db=txn
             )
-
-        # Auto-create quality re-check after rework complete (non-critical)
-        try:
-            QualityService.create_inspection({
-                "order_id": rw["order_id"],
-                "process_id": rw["process_id"],
-                "inspection_type": "rework_check",
-                "quantity_checked": rw["quantity"],
-                "quantity_passed": rw["quantity"] if result == "ok" else 0,
-                "quantity_failed": rw["quantity"] if result == "scrap" else 0,
-                "defect_category": "",
-                "defect_quantity": 0,
-                "notes": "rework re-check (rework_id:" + str(rework_id) + ") - result:" + result + " " + result_remark,
-                "inspected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }, user_id)
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "auto_create_inspection on rework complete failed: rework_id=%s", rework_id
-            )
+            from modules.services.quality_management_service import QualityManagementService
+            QualityManagementService.generate_for_rework(rework_id, user_id, txn)
 
     # ============ Analytics ============
 
@@ -191,25 +173,8 @@ class ReworkService:
                         rid, reason_final, user_id, result, result_remark, duration, db=txn
                     )
 
-                    # Auto-create inspection (in same transaction, non-critical)
-                    try:
-                        QualityService.create_inspection({
-                            "order_id": rw["order_id"],
-                            "process_id": rw["process_id"],
-                            "inspection_type": "rework_check",
-                            "quantity_checked": rw["quantity"],
-                            "quantity_passed": rw["quantity"] if result == "ok" else 0,
-                            "quantity_failed": rw["quantity"] if result == "scrap" else 0,
-                            "defect_category": "",
-                            "defect_quantity": 0,
-                            "notes": "rework batch-check (rework_id:" + str(rid) + ")",
-                            "inspected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }, user_id)
-                    except Exception:
-                        logging.getLogger(__name__).warning(
-                            "auto_create_inspection on rework batch complete failed: rework_id=%s",
-                            rid,
-                        )
+                    from modules.services.quality_management_service import QualityManagementService
+                    QualityManagementService.generate_for_rework(rid, user_id, txn)
 
                     completed += 1
                 except ValueError as e:

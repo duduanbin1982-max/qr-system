@@ -64,6 +64,11 @@ class ShipmentService:
             inv = InventoryRepository.find_item_by_id(item.get("inventory_id", 0))
             if not inv:
                 raise NotFoundError("库存记录不存在 (ID:" + str(item.get("inventory_id")) + ")")
+            quality_status = inv["quality_status"] if "quality_status" in inv.keys() else "released"
+            if (quality_status or "released") != "released":
+                raise ConflictError(
+                    inv["product_model"] + " " + inv["product_name"] + ": 库存处于质量隔离状态，不能创建出库单"
+                )
             if inv["quantity"] < item.get("quantity", 0):
                 raise ConflictError(inv["product_model"] + " " + inv["product_name"] + ": 库存不足 (当前" + str(inv["quantity"]) + "，需要" + str(item["quantity"]) + ")")
 
@@ -115,6 +120,9 @@ class ShipmentService:
                         item.get("inventory_id", 0), item.get("quantity", 0), db=txn
                     )
                 ShipmentRepository.mark_reserved_txn(shipment_id, db=txn)
+
+            from modules.services.quality_management_service import QualityManagementService
+            QualityManagementService.generate_for_shipment(shipment_id, created_by, txn)
 
             return shipment_id, shipment_no
 
@@ -181,6 +189,8 @@ class ShipmentService:
 
         sn = row["shipment_no"]
         with BaseService.transaction() as txn:
+            from modules.services.quality_management_service import QualityManagementService
+            QualityManagementService.assert_shipment_allowed(shipment_id, db=txn)
             if row["reserved_at"]:
                 for item in items:
                     InventoryRepository.release_reserved_stock_txn(

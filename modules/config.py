@@ -61,7 +61,7 @@ PREDEFINED_ROLES = {
         'permissions': [
             'page:production', 'page:production.orders', 'page:production.customers',
             'page:production.materials', 'page:production.trace', 'page:production.approvals',
-            'page:production.quality', 'page:production.rework',
+            'page:quality-management', 'page:production.rework',
             'page:scan', 'page:stats', 'page:reports', 'page:inventory', 'page:board',
             'page:work-time',
             'orders:view','orders:create','orders:edit','orders:delete',

@@ -55,6 +55,12 @@ export const SIDEBAR_ITEMS = [
     "label": "绩效管理"
   },
   {
+    "page": "quality-management",
+    "code": "page:quality-management",
+    "icon": "🛡️",
+    "label": "质量管理"
+  },
+  {
     "page": "process-quality-evaluation",
     "code": "page:process-quality-evaluation",
     "icon": "✅",
@@ -124,11 +130,6 @@ export const PAGE_RULE_TREE = [
         "page": "rework",
         "code": "page:production.rework",
         "label": "返工管理"
-      },
-      {
-        "page": "quality",
-        "code": "page:production.quality",
-        "label": "质量检验"
       }
     ]
   },
@@ -166,6 +167,11 @@ export const PAGE_RULE_TREE = [
     "page": "performance",
     "code": "page:performance",
     "label": "绩效管理"
+  },
+  {
+    "page": "quality-management",
+    "code": "page:quality-management",
+    "label": "质量管理"
   },
   {
     "page": "process-quality-evaluation",
@@ -295,8 +301,7 @@ export const ACTION_PAGE_MAP = {
     "page:production.rework"
   ],
   "quality": [
-    "page:production",
-    "page:production.quality"
+    "page:quality-management"
   ],
   "scan": [
     "page:scan"

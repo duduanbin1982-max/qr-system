@@ -224,7 +224,14 @@ def test_pending_serial_report_advances_only_after_approval(client):
     assert after["work_status"] == "approved"
     assert after["item"] == {"status": "completed", "current_process_id": None}
     assert after["process"] == {"status": "completed", "completed": 1}
-    assert after["order"] == {"status": "completed", "completed": 1}
+    assert after["order"] == {"status": "producing", "completed": 1}
+    with client.application.app_context():
+        pending_quality_gates = get_db().execute(
+            "SELECT COUNT(*) FROM quality_inspection_tasks "
+            "WHERE order_id=? AND gate_mode='hard' AND status IN ('pending','in_progress','failed')",
+            (context["order_id"],),
+        ).fetchone()[0]
+    assert pending_quality_gates == 2
 
 
 def test_rejected_serial_report_does_not_apply_production_effects(client):

@@ -25,7 +25,7 @@ function doScan(code) {
 
     // -- 管理员/质检员扫码 → 重定向到抽检页面 --
     var _u = user();
-    if (_u && _u.permissions && (_u.permissions.indexOf("*") !== -1 || _u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:view") !== -1)) {
+    if (_u && _u.permissions && (_u.permissions.indexOf("*") !== -1 || _u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:inspect") !== -1 || _u.permissions.indexOf("quality:edit") !== -1)) {
       closeCam();
       try { sessionStorage.setItem("iq_token", token()); sessionStorage.setItem("iq_code", code); } catch(e) {}
       window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code);

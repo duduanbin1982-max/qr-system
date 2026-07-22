@@ -10,6 +10,7 @@ from modules.migration_performance import MIGRATIONS as PERFORMANCE_MIGRATIONS
 from modules.migration_work_time import MIGRATIONS as WORK_TIME_MIGRATIONS
 from modules.migration_order_completion import MIGRATIONS as ORDER_COMPLETION_MIGRATIONS
 from modules.migration_process_quality import MIGRATIONS as PROCESS_QUALITY_MIGRATIONS
+from modules.migration_quality_management import MIGRATIONS as QUALITY_MANAGEMENT_MIGRATIONS
 
 
 MIGRATIONS = [
@@ -20,6 +21,7 @@ MIGRATIONS = [
     *AUTH_MIGRATIONS,
     *ORDER_COMPLETION_MIGRATIONS,
     *PROCESS_QUALITY_MIGRATIONS,
+    *QUALITY_MANAGEMENT_MIGRATIONS,
 ]
 
 _versions = [version for version, _, _ in MIGRATIONS]

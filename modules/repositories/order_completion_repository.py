@@ -43,6 +43,12 @@ class OrderCompletionRepository:
                       FROM work_records wr
                      WHERE wr.order_id = o.id
                        AND wr.status = 'pending') AS pending_approvals
+                   ,(SELECT COUNT(*)
+                       FROM quality_inspection_tasks task
+                      WHERE task.order_id = o.id
+                        AND task.inspection_type != 'outgoing'
+                        AND task.gate_mode = 'hard'
+                        AND task.status IN ('pending','in_progress','failed')) AS pending_quality_gates
               FROM orders o
              WHERE o.id = ?
             """,
