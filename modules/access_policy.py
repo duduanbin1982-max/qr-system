@@ -4,6 +4,11 @@ import logging
 from typing import Iterable, List, Optional, Sequence, Set
 
 
+PERMISSION_IMPLICATIONS = {
+    "quality:edit": {"quality:review"},
+}
+
+
 def _row_value(row, key):
     try:
         return row[key]
@@ -38,7 +43,13 @@ def collect_permission_codes(permission_rows: Iterable, user_id=None, logger=Non
 
 def has_permission_code(permissions: Sequence[str], perm: str) -> bool:
     permission_set = set(permissions or [])
-    return "*" in permission_set or perm in permission_set
+    if "*" in permission_set or perm in permission_set:
+        return True
+    return any(
+        perm in implied
+        for granted, implied in PERMISSION_IMPLICATIONS.items()
+        if granted in permission_set
+    )
 
 
 def parse_process_ids(process_ids_text: str) -> List[int]:

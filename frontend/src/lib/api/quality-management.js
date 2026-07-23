@@ -25,8 +25,12 @@ export const qualityManagementApi = {
   startQualityTask: id => request('POST', root + '/tasks/' + id + '/start', {}),
   inspectQualityTask: (id, data) => request('POST', root + '/tasks/' + id + '/inspect', data),
   managedInspections: params => request('GET', root + '/inspections' + buildQuery(params)),
+  qualityInspection: id => request('GET', root + '/inspections/' + id),
+  reviewQualityInspection: (id, data) => request('POST', root + '/inspections/' + id + '/review', data),
 
   qualityNcr: params => request('GET', root + '/ncr' + buildQuery(params)),
+  qualityNcrDetail: id => request('GET', root + '/ncr/' + id),
+  createQualityNcr: data => request('POST', root + '/ncr', data),
   disposeQualityNcr: (id, data) => request('PUT', root + '/ncr/' + id + '/disposition', data),
   qualityCapa: params => request('GET', root + '/capa' + buildQuery(params)),
   createQualityCapa: data => request('POST', root + '/capa', data),

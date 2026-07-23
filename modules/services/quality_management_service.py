@@ -666,6 +666,101 @@ class QualityManagementService:
         return QualityManagementRepository.list_inspections(**filters)
 
     @staticmethod
+    def get_inspection(inspection_id):
+        inspection = QualityManagementRepository.inspection_by_id(inspection_id)
+        if not inspection:
+            raise NotFoundError("检验记录不存在")
+        return dict(inspection)
+
+    @classmethod
+    def review_inspection(cls, inspection_id, data, user_id):
+        inspection = QualityManagementRepository.inspection_by_id(inspection_id)
+        if not inspection:
+            raise NotFoundError("检验记录不存在")
+        status = cls._text(data.get("status"))
+        note = cls._text(data.get("note"))
+        if status not in {"approved", "rejected"}:
+            raise ValidationError("审核状态无效")
+        if status == "rejected" and not note:
+            raise ValidationError("驳回检验记录必须填写原因")
+        current = dict(inspection)
+        if current.get("review_status") != "unreviewed":
+            raise ConflictError("检验记录已经完成审核，不能重复审核")
+        quality_status = "released" if status == "approved" and current.get("result") == "pass" else "nonconforming"
+        with BaseService.transaction() as db:
+            QualityManagementRepository.review_inspection(
+                inspection_id, status, note, user_id, quality_status, db
+            )
+            ncr_id = None
+            if status == "rejected":
+                existing = QualityManagementRepository.ncr_by_inspection(inspection_id, db)
+                if existing:
+                    ncr_id = existing["id"]
+                else:
+                    ncr_id = QualityManagementRepository.insert_ncr({
+                        "ncr_no": cls._new_code("NCR", "quality_nonconformances", db),
+                        "inspection_id": inspection_id,
+                        "task_id": current.get("task_id"),
+                        "order_id": current.get("order_id"),
+                        "process_id": current.get("process_id"),
+                        "serial_no": current.get("serial_no", ""),
+                        "defect_category": current.get("defect_category", ""),
+                        "defect_level": current.get("defect_level") or "general",
+                        "defect_quantity": max(int(current.get("defect_quantity") or 1), 1),
+                        "description": note,
+                        "disposition": "pending",
+                        "status": "open",
+                        "source_type": "inspection_review",
+                    }, user_id, db)
+                    QualityManagementRepository.add_ncr_action(
+                        ncr_id, "review_reject", current.get("review_status", ""), "open", note, user_id, db
+                    )
+                QualityManagementRepository.reject_task_for_review(current.get("task_id"), db)
+                if current.get("order_id"):
+                    QualityManagementRepository.set_inventory_quality(
+                        current["order_id"], "quarantined", f"检验记录 {inspection_id} 审核驳回", db
+                    )
+            elif current.get("result") == "pass" and current.get("inspection_type") == "final" and current.get("order_id"):
+                QualityManagementRepository.set_inventory_quality(current["order_id"], "released", "", db)
+            return {"inspection_id": inspection_id, "review_status": status, "ncr_id": ncr_id}
+
+    @classmethod
+    def create_ncr(cls, data, user_id):
+        description = cls._text(data.get("description"))
+        defect_level = cls._text(data.get("defect_level"))
+        if not description:
+            raise ValidationError("质量异常必须填写问题描述")
+        if defect_level not in {"minor", "general", "severe", "critical"}:
+            raise ValidationError("质量异常必须选择缺陷等级")
+        quantity = max(cls._positive_int(data.get("defect_quantity"), 1), 1)
+        with BaseService.transaction() as db:
+            ncr_id = QualityManagementRepository.insert_ncr({
+                **data,
+                "ncr_no": cls._new_code("NCR", "quality_nonconformances", db),
+                "defect_level": defect_level,
+                "defect_quantity": quantity,
+                "description": description,
+                "disposition": "pending",
+                "status": "open",
+                "source_type": "manual",
+            }, user_id, db)
+            QualityManagementRepository.add_ncr_action(
+                ncr_id, "create", "", "open", "手工创建质量异常", user_id, db
+            )
+            if data.get("order_id"):
+                QualityManagementRepository.set_inventory_quality(
+                    int(data["order_id"]), "quarantined", f"质量异常单 #{ncr_id} 待处置", db
+                )
+            return ncr_id
+
+    @staticmethod
+    def get_ncr(ncr_id):
+        ncr = QualityManagementRepository.ncr_detail(ncr_id)
+        if not ncr:
+            raise NotFoundError("质量异常单不存在")
+        return ncr
+
+    @staticmethod
     def list_ncr(**filters):
         return QualityManagementRepository.list_ncr(**filters)
 
@@ -709,6 +804,11 @@ class QualityManagementService:
                 if not ncr.get("order_id") or not ncr.get("process_id"):
                     raise ValidationError("返修处置必须关联订单和工序")
                 rework_id = QualityManagementRepository.insert_rework_for_ncr(ncr, user_id, db)
+            if disposition in {"rework", "isolate", "scrap"} and ncr.get("order_id"):
+                quality_status = "quarantined" if disposition in {"rework", "isolate"} else "nonconforming"
+                QualityManagementRepository.set_inventory_quality(
+                    ncr["order_id"], quality_status, f"质量异常单 {ncr['ncr_no']} 待质量放行", db
+                )
             if disposition == "concession" and ncr.get("task_id"):
                 QualityManagementRepository.release_task(ncr["task_id"], db)
                 task = QualityManagementRepository.task_by_id(ncr["task_id"], db)

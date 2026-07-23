@@ -560,6 +560,41 @@ class QualityManagementRepository:
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
+    def inspection_by_id(inspection_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT qi.*, o.order_no, o.product_name, o.product_code, "
+            "process.name AS process_name, inspector.name AS inspector_name, "
+            "reviewer.name AS reviewer_name, task.task_no, standard.standard_no "
+            "FROM quality_inspections qi LEFT JOIN orders o ON o.id=qi.order_id "
+            "LEFT JOIN processes process ON process.id=qi.process_id "
+            "LEFT JOIN users inspector ON inspector.id=qi.inspector_id "
+            "LEFT JOIN users reviewer ON reviewer.id=qi.reviewed_by "
+            "LEFT JOIN quality_inspection_tasks task ON task.id=qi.task_id "
+            "LEFT JOIN quality_standards standard ON standard.id=qi.standard_id "
+            "WHERE qi.id=?",
+            (inspection_id,),
+        ).fetchone()
+
+    @staticmethod
+    def review_inspection(inspection_id, status, note, reviewer_id, quality_status, db):
+        db.execute(
+            "UPDATE quality_inspections SET review_status=?, review_note=?, reviewed_by=?, "
+            "reviewed_at=datetime('now','localtime'), quality_status=?, updated_at=datetime('now','localtime') "
+            "WHERE id=?",
+            (status, note, reviewer_id, quality_status, inspection_id),
+        )
+
+    @staticmethod
+    def reject_task_for_review(task_id, db):
+        if task_id:
+            db.execute(
+                "UPDATE quality_inspection_tasks SET status='failed', "
+                "updated_at=datetime('now','localtime') WHERE id=?",
+                (task_id,),
+            )
+
+    @staticmethod
     def insert_ncr(data, user_id, db):
         cursor = db.execute(
             "INSERT INTO quality_nonconformances "
@@ -616,6 +651,44 @@ class QualityManagementRepository:
     def ncr_by_id(ncr_id, db=None):
         db = resolve_db(db)
         return db.execute("SELECT * FROM quality_nonconformances WHERE id=?", (ncr_id,)).fetchone()
+
+    @staticmethod
+    def ncr_by_inspection(inspection_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM quality_nonconformances WHERE inspection_id=? ORDER BY id DESC LIMIT 1",
+            (inspection_id,),
+        ).fetchone()
+
+    @staticmethod
+    def ncr_detail(ncr_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT ncr.*, o.order_no, o.product_name, o.product_code, process.name AS process_name, "
+            "responsible.name AS responsible_user_name, owner.name AS owner_name, "
+            "supplier.name AS supplier_name, material.name AS material_name "
+            "FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
+            "LEFT JOIN processes process ON process.id=ncr.process_id "
+            "LEFT JOIN users responsible ON responsible.id=ncr.responsible_user_id "
+            "LEFT JOIN users owner ON owner.id=ncr.owner_id "
+            "LEFT JOIN suppliers supplier ON supplier.id=ncr.supplier_id "
+            "LEFT JOIN materials material ON material.id=ncr.material_id "
+            "WHERE ncr.id=?",
+            (ncr_id,),
+        ).fetchone()
+        if not row:
+            return None
+        actions = db.execute(
+            "SELECT action_log.action, action_log.from_status, action_log.to_status, action_log.note, "
+            "action_log.actor_id, actor.name AS actor_name, action_log.created_at AS created_at "
+            "FROM quality_nonconformance_actions action_log "
+            "LEFT JOIN users actor ON actor.id=action_log.actor_id "
+            "WHERE ncr_id=? ORDER BY action_log.id DESC",
+            (ncr_id,),
+        ).fetchall()
+        result = dict(row)
+        result["actions"] = [dict(action) for action in actions]
+        return result
 
     @staticmethod
     def update_ncr(ncr_id, data, db):
@@ -863,8 +936,21 @@ class QualityManagementRepository:
         ).fetchone()
         ncr = db.execute(
             "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status NOT IN ('closed','cancelled') THEN 1 ELSE 0 END),0) AS open, "
-            "COALESCE(SUM(CASE WHEN status='pending_reinspection' THEN 1 ELSE 0 END),0) AS pending_reinspection "
+            "COALESCE(SUM(CASE WHEN status='pending_reinspection' THEN 1 ELSE 0 END),0) AS pending_reinspection, "
+            "COALESCE(SUM(CASE WHEN status NOT IN ('closed','cancelled') AND due_at!='' "
+            "AND DATE(due_at)<DATE('now','localtime') THEN 1 ELSE 0 END),0) AS overdue "
             "FROM quality_nonconformances"
+        ).fetchone()
+        review_pending = db.execute(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) AS passed, "
+            "COALESCE(SUM(CASE WHEN result!='pass' THEN 1 ELSE 0 END),0) AS nonconforming "
+            "FROM quality_inspections WHERE COALESCE(review_status,'unreviewed')='unreviewed'"
+        ).fetchone()
+        quality_holds = db.execute(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(CASE WHEN quality_status='quarantined' THEN 1 ELSE 0 END),0) AS quarantined, "
+            "COALESCE(SUM(CASE WHEN quality_status='nonconforming' THEN 1 ELSE 0 END),0) AS nonconforming "
+            "FROM inventory WHERE quality_status IN ('quarantined','nonconforming')"
         ).fetchone()
         capa = db.execute(
             "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status NOT IN ('closed','verified') THEN 1 ELSE 0 END),0) AS open, "
@@ -883,19 +969,31 @@ class QualityManagementRepository:
             "WHERE task.status IN ('pending','in_progress') ORDER BY CASE WHEN task.due_at!='' AND task.due_at<datetime('now','localtime') THEN 0 ELSE 1 END,task.id DESC LIMIT 10"
         ).fetchall()
         open_ncr = db.execute(
-            "SELECT ncr.ncr_no,ncr.defect_level,ncr.status,ncr.due_at,o.order_no,process.name AS process_name "
+            "SELECT ncr.ncr_no,ncr.defect_level,ncr.status,ncr.due_at,o.order_no,process.name AS process_name, "
+            "CASE WHEN ncr.due_at!='' AND DATE(ncr.due_at)<DATE('now','localtime') THEN 1 ELSE 0 END AS overdue "
             "FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
             "LEFT JOIN processes process ON process.id=ncr.process_id WHERE ncr.status NOT IN ('closed','cancelled') "
             "ORDER BY ncr.id DESC LIMIT 10"
+        ).fetchall()
+        pending_reviews = db.execute(
+            "SELECT qi.id,qi.result,qi.score_total,qi.inspected_at,task.task_no,o.order_no, "
+            "process.name AS process_name,inspector.name AS inspector_name "
+            "FROM quality_inspections qi LEFT JOIN quality_inspection_tasks task ON task.id=qi.task_id "
+            "LEFT JOIN orders o ON o.id=qi.order_id LEFT JOIN processes process ON process.id=qi.process_id "
+            "LEFT JOIN users inspector ON inspector.id=qi.inspector_id "
+            "WHERE COALESCE(qi.review_status,'unreviewed')='unreviewed' "
+            "ORDER BY qi.inspected_at DESC,qi.id DESC LIMIT 10"
         ).fetchall()
         checked = int(inspection["checked"] or 0)
         failed = int(inspection["failed"] or 0)
         return {
             "tasks": dict(task), "inspections": dict(inspection), "ncr": dict(ncr),
+            "review_pending": dict(review_pending), "quality_holds": dict(quality_holds),
             "capa": dict(capa), "gauges": dict(gauges),
             "pass_rate": round((checked - failed) / checked * 100, 1) if checked else 0,
             "recent_tasks": [dict(row) for row in recent_tasks],
             "open_ncr": [dict(row) for row in open_ncr],
+            "pending_reviews": [dict(row) for row in pending_reviews],
         }
 
     @staticmethod

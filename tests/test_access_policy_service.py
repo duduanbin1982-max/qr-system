@@ -50,6 +50,11 @@ def test_has_permission_code_supports_wildcard():
     assert has_permission_code(["orders:view"], "inventory:delete") is False
 
 
+def test_quality_edit_implies_quality_review():
+    assert has_permission_code(["quality:edit"], "quality:review") is True
+    assert has_permission_code(["quality:view"], "quality:review") is False
+
+
 def test_resolve_process_scope_prefers_explicit_allowed_processes():
     result = resolve_process_scope(
         [{"process_id": 3}],

@@ -1,49 +1,10 @@
 """Quality management closed-loop integration tests."""
 
-from factories import create_inventory_item, create_order, ensure_process
+from factories import create_inventory_item
 from modules.db import get_db
 from modules.domain.errors import ConflictError
 from modules.services.quality_management_service import QualityManagementService
-
-
-def _seed_order(client, quantity=3):
-    with client.application.app_context():
-        db = get_db()
-        process_id = ensure_process(db, "Quality Gate Process")
-        order_id = create_order(db, [process_id], quantity=quantity, product_code="QM-TEST-001")
-        order = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
-        return order_id, process_id, dict(order)
-
-
-def _submit_task(client, auth_headers, task_id, result="pass", failed=0, defect_level=""):
-    detail = client.get(f"/api/quality-management/tasks/{task_id}", headers=auth_headers)
-    assert detail.status_code == 200, detail.get_json()
-    task = detail.get_json()["task"]
-    measurements = []
-    for item in task.get("standard_items", []):
-        value = True
-        if item["item_type"] == "score":
-            value = item["weight"]
-        elif item["item_type"] == "numeric":
-            value = item["nominal_value"] or item["lower_limit"] or item["upper_limit"] or 1
-        elif item["item_type"] == "text":
-            value = "符合"
-        measurements.append({"item_id": item["id"], "item_code": item["item_code"], "value": value})
-    response = client.post(
-        f"/api/quality-management/tasks/{task_id}/inspect",
-        headers=auth_headers,
-        json={
-            "quantity_checked": task["sample_qty"],
-            "quantity_failed": failed,
-            "result": result,
-            "defect_level": defect_level,
-            "defect_category": "dimension" if result != "pass" else "",
-            "notes": "quality management integration test",
-            "measurements": measurements,
-        },
-    )
-    assert response.status_code == 200, response.get_json()
-    return response.get_json()
+from quality_helpers import seed_quality_order, submit_quality_task
 
 
 def test_quality_management_catalog_and_default_rules(client, auth_headers):
@@ -64,7 +25,7 @@ def test_quality_management_catalog_and_default_rules(client, auth_headers):
 
 
 def test_first_article_task_blocks_until_inspected(client, auth_headers):
-    order_id, process_id, _ = _seed_order(client)
+    order_id, process_id, _ = seed_quality_order(client)
     with client.application.app_context():
         db = get_db()
         db.execute(
@@ -88,13 +49,13 @@ def test_first_article_task_blocks_until_inspected(client, auth_headers):
             pass
         task_id = task["id"]
 
-    _submit_task(client, auth_headers, task_id)
+    submit_quality_task(client, auth_headers, task_id)
     with client.application.app_context():
         QualityManagementService.assert_report_allowed(order_id, process_id, get_db())
 
 
 def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_headers):
-    order_id, process_id, _ = _seed_order(client)
+    order_id, process_id, _ = seed_quality_order(client)
     manual = client.post(
         "/api/quality-management/tasks",
         headers=auth_headers,
@@ -104,7 +65,7 @@ def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_head
         },
     )
     assert manual.status_code == 200, manual.get_json()
-    failed = _submit_task(client, auth_headers, manual.get_json()["id"], "rework", 1, "severe")
+    failed = submit_quality_task(client, auth_headers, manual.get_json()["id"], "rework", 1, "severe")
     assert failed["ncr_id"]
 
     disposition = client.put(
@@ -125,7 +86,7 @@ def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_head
         recheck_id = QualityManagementService.generate_for_rework(rework_id, 1, db)
         db.commit()
     assert recheck_id
-    _submit_task(client, auth_headers, recheck_id)
+    submit_quality_task(client, auth_headers, recheck_id)
 
     with client.application.app_context():
         ncr = get_db().execute("SELECT * FROM quality_nonconformances WHERE id=?", (failed["ncr_id"],)).fetchone()
@@ -134,7 +95,7 @@ def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_head
 
 
 def test_final_gate_quarantines_inventory_and_releases_order(client, auth_headers):
-    order_id, process_id, _ = _seed_order(client, quantity=1)
+    order_id, process_id, _ = seed_quality_order(client, quantity=1)
     with client.application.app_context():
         db = get_db()
         create_inventory_item(db, order_id=order_id, product_model="QM-TEST-001")
@@ -159,8 +120,8 @@ def test_final_gate_quarantines_inventory_and_releases_order(client, auth_header
             (order_id,),
         ).fetchone()[0]
 
-    _submit_task(client, auth_headers, first_task_id)
-    _submit_task(client, auth_headers, task_id)
+    submit_quality_task(client, auth_headers, first_task_id)
+    submit_quality_task(client, auth_headers, task_id)
     with client.application.app_context():
         db = get_db()
         assert db.execute("SELECT quality_status FROM inventory WHERE order_id=?", (order_id,)).fetchone()[0] == "released"
@@ -206,7 +167,7 @@ def test_supplier_inspection_and_gauge_calibration(client, auth_headers):
 
 
 def test_mobile_inspection_uses_task_ncr_and_trace_closed_loop(client, auth_headers):
-    order_id, process_id, order = _seed_order(client)
+    order_id, process_id, order = seed_quality_order(client)
     task = client.post(
         "/api/quality-management/tasks",
         headers=auth_headers,

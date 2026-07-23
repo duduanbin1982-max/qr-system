@@ -321,6 +321,9 @@ def _extend_inspections(db):
         ("scope_type", "TEXT DEFAULT 'production'"),
         ("reviewed_by", "INTEGER"),
         ("reviewed_at", "TEXT DEFAULT ''"),
+        ("review_status", "TEXT DEFAULT 'unreviewed'"),
+        ("review_note", "TEXT DEFAULT ''"),
+        ("updated_at", "TEXT DEFAULT ''"),
     ]
     for name, definition in columns:
         add_column_if_missing(db, "quality_inspections", name, definition)
@@ -331,6 +334,7 @@ def _extend_inspections(db):
         "ELSE 'pending' END WHERE COALESCE(quality_status, '') IN ('', 'pending')"
     )
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_inspection_task ON quality_inspections(task_id) WHERE task_id IS NOT NULL")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_quality_inspection_review ON quality_inspections(review_status, inspected_at)")
     add_column_if_missing(db, "rework_records", "source_ncr_id", "INTEGER")
     add_column_if_missing(db, "inventory", "quality_status", "TEXT DEFAULT 'released'")
     add_column_if_missing(db, "inventory", "quality_hold_reason", "TEXT DEFAULT ''")
@@ -423,7 +427,7 @@ def _grant_permissions(db):
         if "quality:edit" in permission_set:
             additions.extend([
                 "quality:inspect", "quality:standards", "quality:plans", "quality:disposition",
-                "quality:capa", "quality:supplier", "quality:calibration",
+                "quality:review", "quality:capa", "quality:supplier", "quality:calibration",
             ])
         merged = list(dict.fromkeys(permissions + additions))
         if merged != permissions:
@@ -447,6 +451,24 @@ def m034_quality_management_closed_loop(db):
     db.commit()
 
 
+def m035_quality_audit_and_ncr_workflow(db):
+    """Add review metadata while keeping existing inspections operational."""
+    _extend_inspections(db)
+    db.execute(
+        "UPDATE quality_inspections SET review_status='approved' "
+        "WHERE COALESCE(review_status, '') IN ('', 'unreviewed') "
+        "AND result='pass'"
+    )
+    db.execute(
+        "UPDATE quality_inspections SET review_status='rejected' "
+        "WHERE COALESCE(review_status, '') IN ('', 'unreviewed') "
+        "AND result IN ('rework','scrap','fail','partial')"
+    )
+    _grant_permissions(db)
+    db.commit()
+
+
 MIGRATIONS = [
     (34, "Add quality management closed-loop workflow", m034_quality_management_closed_loop),
+    (35, "Add quality review and manual NCR workflow", m035_quality_audit_and_ncr_workflow),
 ]

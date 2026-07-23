@@ -50,7 +50,7 @@ ACTION_PERMISSION_DEFS = {
     "settings": ("系统设置", ["manage", "edit"]),
     "logs": ("操作日志", ["view", "delete"]),
     "materials": ("物料", ["view", "manage"]),
-    "quality": ("质量管理", ["view", "inspect", "standards", "plans", "disposition", "capa", "supplier", "calibration", "edit", "delete"]),
+    "quality": ("质量管理", ["view", "inspect", "standards", "plans", "disposition", "review", "capa", "supplier", "calibration", "edit", "delete"]),
     "rework": ("返工", ["view", "create", "edit"]),
     "schedule": ("生产排程", ["view"]),
     "wages": ("工资核算", ["view", "edit"]),

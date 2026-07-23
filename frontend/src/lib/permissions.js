@@ -25,6 +25,10 @@ let runtimeSidebarItems = SIDEBAR_ITEMS
 let runtimePageRules = PAGE_RULES
 let runtimeActionPageMap = ACTION_PAGE_MAP
 
+const IMPLIED_PERMISSIONS = {
+  'quality:edit': ['quality:review'],
+}
+
 function flattenPageRules(nodes, parent = '') {
   const rules = {}
   for (const node of nodes || []) {
@@ -98,7 +102,8 @@ export function getPermissionList(user) {
 export function hasPermission(user, permission) {
   if (!permission) return true
   const permissions = getPermissionList(user)
-  return permissions.includes('*') || permissions.includes(permission)
+  if (permissions.includes('*') || permissions.includes(permission)) return true
+  return permissions.some(granted => (IMPLIED_PERMISSIONS[granted] || []).includes(permission))
 }
 
 export function hasAnyPermission(user, permissions) {
@@ -130,6 +135,10 @@ export function normalizeRolePermissions(codes) {
   if (!Array.isArray(codes)) return []
   if (codes.includes('*')) return ['*']
   const normalized = new Set(codes.filter(Boolean))
+  for (const [granted, implied] of Object.entries(IMPLIED_PERMISSIONS)) {
+    if (!normalized.has(granted)) continue
+    implied.forEach(code => normalized.add(code))
+  }
   for (const code of codes) {
     if (typeof code !== 'string' || code.startsWith('page:') || !code.includes(':')) continue
     const [resource] = code.split(':')

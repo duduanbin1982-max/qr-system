@@ -7,6 +7,17 @@
       <div class="summary-item"><span class="s-icon">复</span><div><div class="s-val">{{ dashboard.ncr?.pending_reinspection || 0 }}</div><div class="s-label">待复检</div></div></div>
       <div class="summary-item"><span class="s-icon">率</span><div><div class="s-val text-success">{{ dashboard.pass_rate || 0 }}%</div><div class="s-label">检验合格率</div></div></div>
       <div class="summary-item"><span class="s-icon">校</span><div><div class="s-val text-danger">{{ dashboard.gauges?.overdue || 0 }}</div><div class="s-label">量具校准逾期</div></div></div>
+      <div class="summary-item"><span class="s-icon">审</span><div><div class="s-val text-warning">{{ dashboard.review_pending?.total || 0 }}</div><div class="s-label">待审核记录</div></div></div>
+      <div class="summary-item"><span class="s-icon">隔</span><div><div class="s-val text-danger">{{ dashboard.quality_holds?.total || 0 }}</div><div class="s-label">质量隔离库存</div></div></div>
+      <div class="summary-item"><span class="s-icon">限</span><div><div class="s-val text-danger">{{ dashboard.ncr?.overdue || 0 }}</div><div class="s-label">逾期质量异常</div></div></div>
+    </div>
+
+    <div v-if="activeTab==='records' && canReview && records.some(row => row.review_status === 'unreviewed')" class="card qm-review-queue">
+      <div class="qm-section-head"><h4>待审核检验记录</h4><span class="cell-muted">审核驳回会自动生成质量异常并锁定关联库存</span></div>
+      <div v-for="row in records.filter(item => item.review_status === 'unreviewed')" :key="'review-' + row.id" class="qm-review-item">
+        <div><code>{{ row.task_no || ('检验记录 #' + row.id) }}</code><span class="cell-muted">{{ row.order_no || '-' }} / {{ row.process_name || '-' }} / {{ row.result }}</span></div>
+        <button class="btn btn-primary btn-sm" @click="openReview(row)">审核</button>
+      </div>
     </div>
 
     <div class="card qm-shell">
@@ -32,6 +43,12 @@
 
       <div class="card-body qm-body">
         <section v-if="activeTab==='overview'" class="qm-overview">
+          <div class="qm-section-head"><h4>待审核检验</h4><button class="btn btn-default btn-sm" @click="switchTab('records')">查看全部</button></div>
+          <div class="table-wrap">
+            <table v-if="dashboard.pending_reviews?.length" class="data-table"><thead><tr><th>检验记录</th><th>订单</th><th>工序</th><th>结果</th><th>检验员</th><th>时间</th></tr></thead>
+              <tbody><tr v-for="row in dashboard.pending_reviews" :key="row.id"><td><code>{{ row.task_no || ('记录 #' + row.id) }}</code></td><td>{{ row.order_no || '-' }}</td><td>{{ row.process_name || '-' }}</td><td><span class="badge" :class="resultClass(row.result)">{{ resultLabel(row.result) }}</span></td><td>{{ row.inspector_name || '-' }}</td><td>{{ row.inspected_at || '-' }}</td></tr></tbody>
+            </table><div v-else class="empty"><div class="empty-text">暂无待审核检验记录</div></div>
+          </div>
           <div class="qm-section-head"><h4>待处理检验</h4><button class="btn btn-default btn-sm" @click="switchTab('tasks')">查看全部</button></div>
           <div class="table-wrap">
             <table v-if="dashboard.recent_tasks?.length" class="data-table"><thead><tr><th>任务号</th><th>类型</th><th>订单</th><th>工序</th><th>状态</th><th>要求完成</th></tr></thead>
@@ -60,7 +77,13 @@
           </table><div v-else class="empty"><div class="empty-text">暂无检验记录</div></div></div>
         </section>
 
-        <section v-else-if="activeTab==='standards'">
+        <div v-if="activeTab==='ncr' && ncrItems.length" class="qm-ncr-detail-list">
+          <div v-for="row in ncrItems" :key="'detail-' + row.id" class="qm-ncr-detail-link">
+            <code>{{ row.ncr_no }}</code><span>{{ row.description || '质量异常' }}</span><button class="btn btn-default btn-sm" @click="openNcrDetail(row)">查看详情</button>
+          </div>
+        </div>
+
+        <section v-if="activeTab==='standards'">
           <div class="qm-segments"><button class="tab-btn" :class="{active:standardMode==='standards'}" @click="standardMode='standards';loadStandards()">质量标准</button><button class="tab-btn" :class="{active:standardMode==='plans'}" @click="standardMode='plans';loadPlans()">检验方案</button></div>
           <div v-if="standardMode==='standards'" class="table-wrap"><table v-if="standards.length" class="data-table qm-wide"><thead><tr><th>标准编码</th><th>名称</th><th>适用范围</th><th>检验类型</th><th>版本</th><th>项目数</th><th>抽样</th><th>最低分</th><th>门禁</th><th>状态</th><th>操作</th></tr></thead>
             <tbody><tr v-for="row in standards" :key="row.id"><td><code>{{ row.standard_no }}</code></td><td>{{ row.name }}</td><td>{{ scopeLabel(row) }}</td><td>{{ typeLabel(row.inspection_type) }}</td><td>V{{ row.version }}</td><td>{{ row.item_count }}</td><td>{{ samplingLabel(row) }}</td><td>{{ row.min_score }}</td><td>{{ gateLabel(row.gate_mode) }}</td><td><span class="badge" :class="row.status==='active'?'badge-success':'badge-info'">{{ row.status==='active'?'启用':'停用' }}</span></td><td class="qm-row-actions"><button v-if="canStandards" class="btn btn-default btn-sm" @click="editStandard(row)">编辑</button><button v-if="canStandards && row.status==='active'" class="btn btn-danger btn-sm" @click="archiveStandard(row)">停用</button></td></tr></tbody>
@@ -144,6 +167,12 @@
     <div v-if="showGauge" class="modal-overlay"><div class="modal qm-modal"><div class="modal-header"><span>{{ gaugeForm.id ? '编辑量具' : '新增量具' }}</span><span class="modal-close" @click="showGauge=false">&times;</span></div><div class="modal-body"><div class="qm-form-grid"><label>量具编号<input v-model="gaugeForm.gauge_no" class="form-input"></label><label>名称<input v-model="gaugeForm.name" class="form-input"></label><label>型号<input v-model="gaugeForm.model" class="form-input"></label><label>量程<input v-model="gaugeForm.measurement_range" class="form-input"></label><label>精度<input v-model="gaugeForm.accuracy" class="form-input"></label><label>存放位置<input v-model="gaugeForm.location" class="form-input"></label><label>校准周期(天)<input v-model.number="gaugeForm.calibration_cycle_days" type="number" min="1" class="form-input"></label><label>负责人<select v-model="gaugeForm.owner_id" class="form-input"><option :value="null">未分配</option><option v-for="u in refs.users" :key="u.id" :value="u.id">{{ u.name }}</option></select></label><label>状态<select v-model="gaugeForm.status" class="form-input"><option value="active">在用</option><option value="suspended">停用</option><option value="scrapped">报废</option></select></label></div><label class="qm-full-label">备注<textarea v-model="gaugeForm.remark" rows="2" class="form-input"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" @click="showGauge=false">取消</button><button class="btn btn-primary" @click="saveGauge">保存</button></div></div></div>
 
     <div v-if="showCalibration" class="modal-overlay"><div class="modal qm-modal"><div class="modal-header"><span>量具校准 - {{ calibrationGauge?.gauge_no }}</span><span class="modal-close" @click="showCalibration=false">&times;</span></div><div class="modal-body"><div class="qm-form-grid"><label>校准日期<input v-model="calibrationForm.calibrated_at" type="date" class="form-input"></label><label>下次校准<input v-model="calibrationForm.next_calibration_at" type="date" class="form-input"></label><label>结果<select v-model="calibrationForm.result" class="form-input"><option value="pass">合格</option><option value="fail">不合格</option></select></label><label>证书号<input v-model="calibrationForm.certificate_no" class="form-input"></label><label>校准机构<input v-model="calibrationForm.organization" class="form-input"></label></div><label class="qm-full-label">备注<textarea v-model="calibrationForm.notes" rows="2" class="form-input"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" @click="showCalibration=false">取消</button><button class="btn btn-primary" @click="saveCalibration">保存校准</button></div></div></div>
+
+    <div v-if="showReview" class="modal-overlay"><div class="modal qm-modal"><div class="modal-header"><span>审核检验记录</span><span class="modal-close" @click="showReview=false">&times;</span></div><div class="modal-body"><div class="qm-inspection-meta"><span>{{ reviewRow?.task_no || ('检验记录 #' + reviewRow?.id) }}</span><span>{{ reviewRow?.order_no || '-' }}</span><span>{{ reviewRow?.result }}</span><span>评分 {{ reviewRow?.score_total || '-' }}</span></div><div class="qm-form-grid"><label>审核结果<select v-model="reviewForm.status" class="form-input"><option value="approved">审核通过</option><option value="rejected">驳回并生成异常</option></select></label></div><label class="qm-full-label">审核意见<textarea v-model="reviewForm.note" rows="4" class="form-input" placeholder="驳回时必须填写原因"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" @click="showReview=false">取消</button><button class="btn btn-primary" @click="saveReview">提交审核</button></div></div></div>
+
+    <div v-if="showNcr" class="modal-overlay"><div class="modal qm-modal"><div class="modal-header"><span>新增质量异常</span><span class="modal-close" @click="showNcr=false">&times;</span></div><div class="modal-body"><div class="qm-form-grid"><label>订单<select v-model="ncrForm.order_id" class="form-input"><option :value="null">不关联订单</option><option v-for="o in refs.orders" :key="o.id" :value="o.id">{{ o.order_no }} - {{ o.product_name }}</option></select></label><label>工序<select v-model="ncrForm.process_id" class="form-input"><option :value="null">不关联工序</option><option v-for="p in refs.processes" :key="p.id" :value="p.id">{{ p.name }}</option></select></label><label>缺陷等级<select v-model="ncrForm.defect_level" class="form-input"><option value="minor">轻微</option><option value="general">一般</option><option value="severe">严重</option><option value="critical">致命</option></select></label><label>缺陷数量<input v-model.number="ncrForm.defect_quantity" type="number" min="1" class="form-input"></label><label>缺陷分类<input v-model="ncrForm.defect_category" class="form-input"></label><label>责任人员<select v-model="ncrForm.responsible_user_id" class="form-input"><option :value="null">未指定</option><option v-for="u in refs.users" :key="u.id" :value="u.id">{{ u.name }}</option></select></label><label>负责人<select v-model="ncrForm.owner_id" class="form-input"><option :value="null">未指定</option><option v-for="u in refs.users" :key="u.id" :value="u.id">{{ u.name }}</option></select></label><label>要求完成<input v-model="ncrForm.due_at" type="date" class="form-input"></label></div><label class="qm-full-label">问题描述<textarea v-model="ncrForm.description" rows="4" class="form-input"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" @click="showNcr=false">取消</button><button class="btn btn-primary" @click="saveNcr">创建异常</button></div></div></div>
+
+    <div v-if="showNcrDetail" class="modal-overlay"><div class="modal qm-modal qm-modal-wide"><div class="modal-header"><span>质量异常详情 - {{ ncrDetail?.ncr_no }}</span><span class="modal-close" @click="showNcrDetail=false">&times;</span></div><div class="modal-body"><div class="qm-inspection-meta"><span>{{ ncrDetail?.order_no || ncrDetail?.supplier_name || '未关联对象' }}</span><span>{{ ncrDetail?.process_name || ncrDetail?.material_name || '-' }}</span><span>{{ defectLevelLabel(ncrDetail?.defect_level) }}</span><span>{{ ncrStatusLabel(ncrDetail?.status) }}</span></div><p>{{ ncrDetail?.description || '-' }}</p><div class="qm-section-head"><h4>处理轨迹</h4></div><div v-if="ncrDetail?.actions?.length" class="qm-timeline"><div v-for="action in ncrDetail.actions" :key="action.created_at + action.action" class="qm-timeline-item"><strong>{{ action.action }}</strong><span>{{ action.actor_name || '系统' }} · {{ action.created_at }}</span><div>{{ action.note || '-' }}</div></div></div><div v-else class="empty"><div class="empty-text">暂无处理记录</div></div></div><div class="modal-footer"><button class="btn btn-default" @click="showNcrDetail=false">关闭</button></div></div></div>
   </div>
 </template>
 
@@ -171,6 +200,7 @@ const canInspect = computed(() => can('quality:inspect') || can('quality:edit'))
 const canStandards = computed(() => can('quality:standards'))
 const canPlans = computed(() => can('quality:plans'))
 const canDisposition = computed(() => can('quality:disposition'))
+const canReview = computed(() => can('quality:review') || can('quality:edit'))
 const canCapa = computed(() => can('quality:capa'))
 const canSupplier = computed(() => can('quality:supplier'))
 const canCalibration = computed(() => can('quality:calibration'))
@@ -188,9 +218,13 @@ const ruleForm = reactive({})
 
 const showStandard=ref(false), showPlan=ref(false), showTask=ref(false), showInspection=ref(false), showDisposition=ref(false)
 const showCapa=ref(false), showSupplier=ref(false), showGauge=ref(false), showCalibration=ref(false)
+const showReview=ref(false), showNcr=ref(false), showNcrDetail=ref(false)
 const inspectionTask=ref(null), dispositionRow=ref(null), calibrationGauge=ref(null)
+const reviewRow=ref(null), ncrDetail=ref(null)
 const standardForm=reactive({}), planForm=reactive({}), taskForm=reactive({}), inspectionForm=reactive({measurements:[]})
 const dispositionForm=reactive({}), capaForm=reactive({}), supplierForm=reactive({}), gaugeForm=reactive({}), calibrationForm=reactive({})
+const reviewForm=reactive({status:'approved',note:''})
+const ncrForm=reactive({order_id:null,process_id:null,defect_level:'general',defect_quantity:1,defect_category:'',description:'',responsible_user_id:null,owner_id:null,due_at:''})
 
 const primaryLabel = computed(() => {
   if (activeTab.value==='tasks' && canInspect.value) return '新增任务'
@@ -199,6 +233,7 @@ const primaryLabel = computed(() => {
   if (activeTab.value==='capa' && canCapa.value) return '新增 CAPA'
   if (activeTab.value==='suppliers' && canSupplier.value) return '新增来料检验'
   if (activeTab.value==='gauges' && canCalibration.value) return '新增量具'
+  if (activeTab.value==='ncr' && canDisposition.value) return '新增质量异常'
   return ''
 })
 
@@ -230,7 +265,12 @@ async function loadActive(){
   }catch(e){showToast(e.message||'质量数据加载失败','error')}
 }
 async function switchTab(key){activeTab.value=key;filterStatus.value='';keyword.value='';localStorage.setItem('qualityManagementTab',key);await loadActive()}
-function openPrimary(){if(activeTab.value==='tasks')openTask();else if(activeTab.value==='standards'&&standardMode.value==='standards')openStandard();else if(activeTab.value==='standards')openPlan();else if(activeTab.value==='capa')openCapa();else if(activeTab.value==='suppliers')openSupplier();else if(activeTab.value==='gauges')openGauge()}
+function openPrimary(){if(activeTab.value==='tasks')openTask();else if(activeTab.value==='standards'&&standardMode.value==='standards')openStandard();else if(activeTab.value==='standards')openPlan();else if(activeTab.value==='capa')openCapa();else if(activeTab.value==='suppliers')openSupplier();else if(activeTab.value==='gauges')openGauge();else if(activeTab.value==='ncr')openNcr()}
+function openReview(row){reviewRow.value=row;Object.assign(reviewForm,{status:'approved',note:''});showReview.value=true}
+async function saveReview(){try{await api.domains.qualityManagement.reviewQualityInspection(reviewRow.value.id,{...reviewForm});showReview.value=false;showToast('检验审核已保存');await loadRecords();await loadDashboard()}catch(e){showToast(e.message||'审核失败','error')}}
+function openNcr(){Object.assign(ncrForm,{order_id:null,process_id:null,defect_level:'general',defect_quantity:1,defect_category:'',description:'',responsible_user_id:null,owner_id:null,due_at:''});showNcr.value=true}
+async function saveNcr(){try{await api.domains.qualityManagement.createQualityNcr({...ncrForm});showNcr.value=false;showToast('质量异常已创建');await loadNcr();await loadDashboard()}catch(e){showToast(e.message||'创建异常失败','error')}}
+async function openNcrDetail(row){try{const result=await api.domains.qualityManagement.qualityNcrDetail(row.id);ncrDetail.value=result.ncr;showNcrDetail.value=true}catch(e){showToast(e.message||'异常详情加载失败','error')}}
 
 function emptyStandardItem(){return {item_code:'',item_name:'',item_type:'numeric',unit:'',nominal_value:'',lower_limit:'',upper_limit:'',required:true,weight:0,inspection_method:'',acceptance_criteria:''}}
 function openStandard(){Object.assign(standardForm,{id:null,standard_no:'',name:'',product_code:'',route_id:null,process_id:null,inspection_type:'in_process',version:1,status:'active',gate_mode:'soft',sampling_mode:'fixed',sample_value:1,min_score:85,acceptance_rule:'all_required_pass',notes:'',items:[emptyStandardItem()]});showStandard.value=true}
@@ -288,6 +328,6 @@ onMounted(async()=>{if(!visibleTabs.value.some(tab=>tab.key===activeTab.value))a
 </script>
 
 <style scoped>
-.qm-page{padding:var(--space-6)}.qm-shell{min-height:620px}.qm-header{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}.qm-header h3{margin:0}.qm-tabs,.qm-segments{display:flex;gap:var(--space-1);flex-wrap:wrap}.qm-actions{margin-left:auto;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}.qm-search{width:180px}.qm-filter{width:130px}.qm-body{padding-top:var(--space-3)}.qm-wide{min-width:1180px}.qm-row-actions{white-space:nowrap}.qm-row-actions .btn+.btn{margin-left:5px}.cell-muted{font-size:var(--text-xs-alt);color:var(--text-placeholder);margin-top:3px}.qm-overdue-row{background:var(--danger-light)}.qm-section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin:0 0 var(--space-3)}.qm-section-head h4{margin:0}.qm-second{margin-top:var(--space-6)}.qm-segments{margin-bottom:var(--space-4)}.qm-summary-table{margin-bottom:var(--space-5);max-width:900px}.qm-analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-6)}.qm-date-filter{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-5)}.qm-date-filter .form-input{width:160px}.qm-rules{max-width:900px}.qm-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3) var(--space-6);margin-bottom:var(--space-5)}.qm-rule-grid label{display:grid;grid-template-columns:1fr 160px;align-items:center;gap:var(--space-3);padding:10px 0;border-bottom:1px solid var(--border)}.qm-rule-grid input[type=checkbox]{justify-self:end;width:18px;height:18px}.qm-modal{width:min(760px,94vw);max-height:88vh;display:flex;flex-direction:column}.qm-modal-wide{width:min(1120px,96vw)}.qm-modal .modal-body{overflow:auto}.qm-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}.qm-form-grid label,.qm-full-label{display:flex;flex-direction:column;gap:6px;font-size:var(--text-sm);color:var(--text-secondary)}.qm-full-label{margin-top:var(--space-3)}.qm-item-table{min-width:980px}.qm-item-table .form-input{min-width:80px}.qm-inspection-meta{display:flex;gap:var(--space-4);flex-wrap:wrap;padding:10px 12px;margin-bottom:var(--space-3);background:var(--bg-hover);font-weight:600}.qm-inspection-form{margin-top:var(--space-4)}
+.qm-page{padding:var(--space-6)}.qm-shell{min-height:620px}.qm-header{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}.qm-header h3{margin:0}.qm-tabs,.qm-segments{display:flex;gap:var(--space-1);flex-wrap:wrap}.qm-actions{margin-left:auto;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}.qm-search{width:180px}.qm-filter{width:130px}.qm-body{padding-top:var(--space-3)}.qm-wide{min-width:1180px}.qm-row-actions{white-space:nowrap}.qm-row-actions .btn+.btn{margin-left:5px}.cell-muted{font-size:var(--text-xs-alt);color:var(--text-placeholder);margin-top:3px}.qm-overdue-row{background:var(--danger-light)}.qm-section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin:0 0 var(--space-3)}.qm-section-head h4{margin:0}.qm-second{margin-top:var(--space-6)}.qm-segments{margin-bottom:var(--space-4)}.qm-summary-table{margin-bottom:var(--space-5);max-width:900px}.qm-analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-6)}.qm-date-filter{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-5)}.qm-date-filter .form-input{width:160px}.qm-rules{max-width:900px}.qm-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3) var(--space-6);margin-bottom:var(--space-5)}.qm-rule-grid label{display:grid;grid-template-columns:1fr 160px;align-items:center;gap:var(--space-3);padding:10px 0;border-bottom:1px solid var(--border)}.qm-rule-grid input[type=checkbox]{justify-self:end;width:18px;height:18px}.qm-modal{width:min(760px,94vw);max-height:88vh;display:flex;flex-direction:column}.qm-modal-wide{width:min(1120px,96vw)}.qm-modal .modal-body{overflow:auto}.qm-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}.qm-form-grid label,.qm-full-label{display:flex;flex-direction:column;gap:6px;font-size:var(--text-sm);color:var(--text-secondary)}.qm-full-label{margin-top:var(--space-3)}.qm-item-table{min-width:980px}.qm-item-table .form-input{min-width:80px}.qm-inspection-meta{display:flex;gap:var(--space-4);flex-wrap:wrap;padding:10px 12px;margin-bottom:var(--space-3);background:var(--bg-hover);font-weight:600}.qm-inspection-form{margin-top:var(--space-4)}.qm-review-queue{padding:var(--space-4);margin-bottom:var(--space-5)}.qm-review-item,.qm-ncr-detail-link{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:10px 0;border-bottom:1px solid var(--border-light)}.qm-review-item:last-child,.qm-ncr-detail-link:last-child{border-bottom:0}.qm-review-item>div,.qm-ncr-detail-link>span{flex:1;min-width:0}.qm-ncr-detail-list{margin-bottom:var(--space-5)}.qm-timeline{display:flex;flex-direction:column;gap:var(--space-3)}.qm-timeline-item{padding:10px 12px;border-left:3px solid var(--primary);background:var(--bg-hover)}.qm-timeline-item span{display:block;color:var(--text-placeholder);font-size:var(--text-xs);margin:3px 0}.qm-timeline-item div{color:var(--text-secondary)}
 @media(max-width:1000px){.qm-page{padding:var(--space-3)}.qm-actions{margin-left:0;width:100%}.qm-analytics-grid,.qm-rule-grid{grid-template-columns:1fr}.qm-form-grid{grid-template-columns:1fr}.qm-rule-grid label{grid-template-columns:1fr 150px}.qm-search{width:min(100%,220px)}}
 </style>

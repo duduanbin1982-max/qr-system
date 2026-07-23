@@ -182,6 +182,24 @@ def quality_management_inspections():
     ))
 
 
+@app.route("/api/quality-management/inspections/<int:inspection_id>", methods=["GET"])
+@check_auth
+@check_permission("quality:view")
+def quality_management_inspection_detail(inspection_id):
+    return jsonify({"ok": True, "inspection": QualityManagementService.get_inspection(inspection_id)})
+
+
+@app.route("/api/quality-management/inspections/<int:inspection_id>/review", methods=["POST"])
+@check_auth
+@check_permission("quality:review")
+def quality_management_inspection_review(inspection_id):
+    result = QualityManagementService.review_inspection(
+        inspection_id, get_json_body(), g.current_user.get("id")
+    )
+    safe_audit_log("quality_inspection_review", "quality_inspection", inspection_id, result["review_status"])
+    return jsonify({"ok": True, **result})
+
+
 @app.route("/api/quality-management/ncr", methods=["GET"])
 @check_auth
 @check_permission("quality:view")
@@ -191,6 +209,22 @@ def quality_ncr_list():
         status=request.args.get("status", ""), disposition=request.args.get("disposition", ""),
         keyword=request.args.get("keyword", ""), page=page, limit=limit,
     ))
+
+
+@app.route("/api/quality-management/ncr", methods=["POST"])
+@check_auth
+@check_permission("quality:disposition")
+def quality_ncr_create():
+    ncr_id = QualityManagementService.create_ncr(get_json_body(), g.current_user.get("id"))
+    safe_audit_log("quality_ncr_create", "quality_ncr", ncr_id, "manual")
+    return jsonify({"ok": True, "id": ncr_id})
+
+
+@app.route("/api/quality-management/ncr/<int:ncr_id>", methods=["GET"])
+@check_auth
+@check_permission("quality:view")
+def quality_ncr_detail(ncr_id):
+    return jsonify({"ok": True, "ncr": QualityManagementService.get_ncr(ncr_id)})
 
 
 @app.route("/api/quality-management/ncr/<int:ncr_id>/disposition", methods=["PUT"])
