@@ -159,20 +159,50 @@ def test_repositories_do_not_depend_on_service_db_helper():
 def test_repositories_do_not_depend_on_other_repositories():
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
-    for path in sorted(repository_root.glob("*.py")):
+    for path in sorted(repository_root.rglob("*.py")):
         if path.name in {"__init__.py", "context.py"}:
             continue
+        relative_parent = path.parent.relative_to(repository_root)
+        owned_namespace = None
+        if relative_parent.parts:
+            owned_namespace = "modules.repositories." + ".".join(relative_parent.parts)
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
             module = node.module or ""
             if module.startswith("modules.repositories.") and module != "modules.repositories.context":
+                if owned_namespace and module.startswith(owned_namespace + "."):
+                    continue
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT).as_posix()} -> {module}"
                 )
 
     assert violations == [], f"repositories must not depend on peer repositories: {violations}"
+
+
+def test_quality_management_facades_stay_thin():
+    service_facade = PROJECT_ROOT / "modules" / "services" / "quality_management_service.py"
+    repository_facade = PROJECT_ROOT / "modules" / "repositories" / "quality_management" / "__init__.py"
+    legacy_repository = PROJECT_ROOT / "modules" / "repositories" / "quality_management_repository.py"
+    expected_service_modules = {
+        "base.py", "gates.py", "inspections.py", "nonconformance.py",
+        "partners.py", "standards.py", "tasks.py",
+    }
+    expected_repository_modules = {
+        "analytics.py", "inspections.py", "nonconformance.py",
+        "partners.py", "standards.py", "tasks.py",
+    }
+
+    assert len(service_facade.read_text(encoding="utf-8").splitlines()) < 40
+    assert len(repository_facade.read_text(encoding="utf-8").splitlines()) < 40
+    assert not legacy_repository.exists()
+    assert expected_service_modules.issubset({
+        path.name for path in service_facade.parent.joinpath("quality_management").glob("*.py")
+    })
+    assert expected_repository_modules.issubset({
+        path.name for path in repository_facade.parent.glob("*.py")
+    })
 
 
 def test_repositories_do_not_execute_schema_ddl():
