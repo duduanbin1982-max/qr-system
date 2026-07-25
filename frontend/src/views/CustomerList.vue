@@ -247,7 +247,7 @@ export default {
     }
     async function loadDetailOrders(cid) {
       try {
-        const d = await api.domains.http.get('/api/customers/' + cid + '/orders?page=' + detailPage.value + '&limit=' + detailPageSize)
+        const d = await api.domains.customers.customerOrders(cid, { page: detailPage.value, limit: detailPageSize })
         detailOrders.value = d.orders || []
       } catch(e) { detailOrders.value = [] }
     }

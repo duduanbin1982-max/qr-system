@@ -38,13 +38,13 @@ export function useRoleGroups() {
 
   async function loadGroups() {
     groupLoading.value = true
-    try { const d = await api.domains.http.get('/api/role-groups'); groups.value = d.role_groups||[] }
+    try { const d = await api.domains.roles.listRoleGroups(); groups.value = d.role_groups||[] }
     catch(e) { showToast(e.message,'error') }
     finally { groupLoading.value = false }
   }
 
   async function loadRoles() {
-    try { const d = await api.domains.http.get('/api/roles'); roles.value = d.roles||[] }
+    try { const d = await api.domains.roles.listRoles(); roles.value = d.roles||[] }
     catch(e) { roles.value = [] }
   }
 

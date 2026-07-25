@@ -69,7 +69,7 @@ export function useAdminUsers() {
 
   async function loadRoleGroups() {
     try {
-      const data = await api.domains.http.get('/api/role-groups')
+      const data = await api.domains.roles.listRoleGroups()
       roleGroups.value = data.role_groups || []
     } catch (error) {
       console.warn('加载角色组失败', error.message || error)
@@ -78,7 +78,7 @@ export function useAdminUsers() {
 
   async function loadAllRoles() {
     try {
-      const data = await api.domains.http.get('/api/roles')
+      const data = await api.domains.roles.listRoles()
       allRoles.value = data.roles || []
     } catch (error) {
       allRoles.value = []
@@ -135,7 +135,7 @@ export function useAdminUsers() {
 
   async function loadUserRoles(uid) {
     try {
-      const data = await api.domains.http.get('/api/users/' + uid + '/roles')
+      const data = await api.domains.users.getUserRoles(uid)
       userRoleIds.value = (data.roles || []).map(role => role.id)
     } catch (error) {
       userRoleIds.value = []
@@ -154,7 +154,7 @@ export function useAdminUsers() {
       return
     }
     try {
-      await api.domains.http.put('/api/users/' + uid + '/roles', { role_ids: [...userRoleIds.value] })
+      await api.domains.users.setUserRoles(uid, [...userRoleIds.value])
       showToast('角色保存成功')
     } catch (error) {
       showToast(error.message, 'error')
@@ -241,7 +241,7 @@ export function useAdminUsers() {
     }
     if (!confirm('确定删除选中的 ' + selectedAdmins.value.length + ' 个管理员？')) return
     try {
-      await api.domains.http.post('/api/users/batch-delete', { ids: [...selectedAdmins.value] })
+      await api.domains.users.batchDeleteUsers([...selectedAdmins.value])
       showToast('已删除 ' + selectedAdmins.value.length + ' 个管理员')
       selectedAdmins.value = []
       loadAllUsers()

@@ -12,14 +12,14 @@ export function useApprovalConfig() {
   async function loadApprovalConfig() {
     approvalConfigLoading.value = true
     try {
-      const d = await api.domains.http.get('/api/approvals/config')
+      const d = await api.domains.approvals.approvalConfig()
       approvalConfigs.value = d.configs || []
     } catch(e) { showToast('加载审批配置失败', 'error') }
     finally { approvalConfigLoading.value = false }
   }
   async function loadApprovalProcesses() {
     try {
-      const d = await api.domains.http.get('/api/processes?limit=500')
+      const d = await api.domains.processes.listProcesses({ limit: 500 })
       approvalProcesses.value = d.processes || []
     } catch(e) { /* ignore */ }
   }
@@ -37,7 +37,7 @@ export function useApprovalConfig() {
     const current = isApprovalRequired(processId)
     approvalConfigSaving.value = true
     try {
-      await api.domains.http.post('/api/approvals/config', {
+      await api.domains.approvals.saveApprovalConfig({
         process_id: processId,
         require_approval: current ? 0 : 1
       })

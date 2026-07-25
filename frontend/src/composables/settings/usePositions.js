@@ -18,7 +18,7 @@ export function usePositions() {
     finally { positionLoading.value = false }
   }
   async function loadAllProcesses() {
-    try { const d = await api.domains.http.get('/api/processes?limit=500'); allProcesses.value = d.processes||[] }
+    try { const d = await api.domains.processes.listProcesses({ limit: 500 }); allProcesses.value = d.processes||[] }
     catch(e) { allProcesses.value = [] }
   }
   function openAddPosition() {
@@ -46,7 +46,7 @@ export function usePositions() {
   async function deletePosition(pid) {
     let impactMsg = ''
     try {
-      const res = await api.domains.http.get('/api/positions/' + pid + '/impact')
+      const res = await api.domains.positions.getPositionImpact(pid)
       if (res.users > 0) {
         impactMsg = '\n\n' + res.users + ' 个员工正在使用此岗位，无法删除'
         showToast(impactMsg.trim(), 'warn')

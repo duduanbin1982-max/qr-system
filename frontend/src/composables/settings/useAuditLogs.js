@@ -25,7 +25,7 @@ export function useAuditLogs() {
       if (logFilterDateFrom.value) params.set('date_from', logFilterDateFrom.value)
       if (logFilterDateTo.value) params.set('date_to', logFilterDateTo.value)
       if (logFilterCategory.value) params.set('category', logFilterCategory.value)
-      const d = await api.domains.http.get('/api/logs?' + params.toString())
+      const d = await api.domains.logs.listLogs(Object.fromEntries(params.entries()))
       logs.value = d.logs || []
       logsTotal.value = d.total || 0
     } catch(e) { showToast(e.message,'error') }
@@ -47,7 +47,7 @@ export function useAuditLogs() {
     const days = beforeDays || 90
     if (!confirm('确定清除 ' + days + ' 天前的日志？')) return
     try {
-      const r = await api.domains.http.post('/api/logs/clear', { before_days: days })
+      const r = await api.domains.logs.deleteLogs({ before_days: days })
       showToast('已清除 ' + (r.deleted || r.cleared || 0) + ' 条日志')
     } catch(e) { showToast(e.message,'error') }
     loadLogs()

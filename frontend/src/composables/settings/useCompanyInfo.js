@@ -31,7 +31,7 @@ export function useCompanyInfo() {
       for (const k of COMPANY_KEYS) {
         if (k in edits.value) payload[k] = edits.value[k]
       }
-      await api.domains.http.post('/api/settings/company-info', payload)
+      await api.domains.settings.saveCompanyInfo(payload)
       showToast('保存成功')
       settings.value = { ...edits.value }
     } catch(e) { showToast(e.message, 'error') }

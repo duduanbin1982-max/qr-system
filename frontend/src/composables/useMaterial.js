@@ -189,7 +189,7 @@ export function useMaterial() {
   async function searchOrders() {
     if (!orderSearch.value.trim()) { orderResults.value = []; return }
     try {
-      const r = await api.domains.http.get('/api/orders?keyword=' + encodeURIComponent(orderSearch.value) + '&limit=8')
+      const r = await api.domains.orders.listOrders({ keyword: orderSearch.value, limit: 8 })
       orderResults.value = r.orders || []
       orderDropdown.value = true
     } catch (e) { orderResults.value = [] }
@@ -270,7 +270,7 @@ export function useMaterial() {
     selectedMaterial.value = m
     showDetail.value = true
     try {
-      const d = await api.domains.http.get("/api/materials/" + m.id + "/consumptions")
+      const d = await api.domains.materials.getMaterialConsumptions(m.id)
       detailConsumptions.value = (d.consumptions || []).slice(0, 20)
     } catch (e) { detailConsumptions.value = [] }
     setTimeout(() => renderTrendChart(), 200)

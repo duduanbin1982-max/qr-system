@@ -1,7 +1,6 @@
 // ===== QR-System API Layer =====
 // Domain API facade: callers use api.domains.<domain>.<method>().
 export { request, handleApiError, buildQuery, uploadFile } from './api/client.js'
-import { request } from './api/client.js'
 import { authApi } from './api/auth.js'
 import { dashboardApi } from './api/dashboard.js'
 import { ordersApi } from './api/orders.js'
@@ -33,16 +32,7 @@ import { workTimeApi } from './api/work-time.js'
 import { processQualityEvaluationsApi } from './api/process-quality-evaluations.js'
 import { qualityManagementApi } from './api/quality-management.js'
 
-const httpApi = {
-  get:    (url)         => request('GET', url),
-  post:   (url, data)   => request('POST', url, data),
-  put:    (url, data)   => request('PUT', url, data),
-  delete: (url)         => request('DELETE', url),
-  del:    (url)         => request('DELETE', url),
-}
-
 export const apiNamespaces = Object.freeze({
-  http: httpApi,
   auth: authApi,
   dashboard: dashboardApi,
   orders: ordersApi,

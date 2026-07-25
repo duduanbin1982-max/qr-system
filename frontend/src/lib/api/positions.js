@@ -6,4 +6,5 @@ export const positionsApi = {
   createPosition:   (data)   => request('POST', '/api/positions', data),
   updatePosition:   (id,data)=> request('PUT',  '/api/positions/' + id, data),
   deletePosition:   (id)     => request('DELETE', '/api/positions/' + id),
+  getPositionImpact:(id)     => request('GET', '/api/positions/' + id + '/impact'),
 }

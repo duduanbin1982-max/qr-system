@@ -22,4 +22,7 @@ export const usersApi = {
   permanentDeleteUser: (id) => request('DELETE', '/api/users/' + id + '/permanent'),
   resetPassword: (id, data) => request('POST', '/api/users/' + id + '/reset-password', data),
   unlockUser: (id) => request('POST', '/api/users/' + id + '/unlock'),
+  getUserRoles: (id) => request('GET', '/api/users/' + id + '/roles'),
+  setUserRoles: (id, roleIds) => request('PUT', '/api/users/' + id + '/roles', { role_ids: roleIds }),
+  batchDeleteUsers: (ids) => request('POST', '/api/users/batch-delete', { ids }),
 }
