@@ -3,8 +3,8 @@
 import json
 import re
 
-from modules.migration_process_quality import DEFAULT_RULES
 from modules.domain.errors import ConflictError
+from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
 from modules.repositories.setting_repository import SettingRepository
 from modules.services import BaseService
@@ -25,7 +25,7 @@ class ProcessQualityEvaluationService:
             value = json.loads(raw) if raw else {}
         except (TypeError, json.JSONDecodeError):
             value = {}
-        rules = dict(DEFAULT_RULES)
+        rules = dict(PROCESS_QUALITY_EVALUATION_DEFAULT_RULES)
         rules.update(value if isinstance(value, dict) else {})
         rules["low_score_threshold"] = cls._score_threshold(rules.get("low_score_threshold"))
         rules["critical_score_threshold"] = cls._score_threshold(rules.get("critical_score_threshold"), 40)

@@ -2,26 +2,7 @@
 
 import json
 
-
-DEFAULT_RULES = {
-    "enabled": True,
-    "required_previous_process": True,
-    "low_score_threshold": 60,
-    "critical_score_threshold": 40,
-    "minimum_samples_for_performance": 3,
-    "hide_target_identity": True,
-    "auto_open_mobile": True,
-    "dimensions": [
-        {"key": "processing_quality", "label": "加工质量"},
-        {"key": "dimensional_accuracy", "label": "尺寸或精度"},
-        {"key": "appearance_quality", "label": "外观质量"},
-        {"key": "process_continuity", "label": "工序可接续性"},
-        {"key": "cleanliness_protection", "label": "清洁及防护"},
-    ],
-    "issue_tags": ["尺寸问题", "外观问题", "漏加工", "毛刺锐边", "标识不清", "清洁防护", "返修风险", "其他"],
-    "critical_issue_tags": ["致命缺陷", "安全风险", "严重尺寸超差"],
-}
-
+from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
 
 def _grade_sql(rating_column):
     return (
@@ -175,7 +156,7 @@ def m033_full_process_quality_evaluation(db):
     db.execute(
         "INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime')) "
         "ON CONFLICT(key) DO NOTHING",
-        ("process_quality_evaluation_rules", json.dumps(DEFAULT_RULES, ensure_ascii=False)),
+        ("process_quality_evaluation_rules", json.dumps(PROCESS_QUALITY_EVALUATION_DEFAULT_RULES, ensure_ascii=False)),
     )
     _grant_role_permissions(db)
     db.commit()
@@ -258,7 +239,7 @@ def m036_process_quality_evaluation_b(db):
         stored = json.loads(row[0] or "{}") if row else {}
     except (TypeError, json.JSONDecodeError):
         stored = {}
-    merged = dict(DEFAULT_RULES)
+    merged = dict(PROCESS_QUALITY_EVALUATION_DEFAULT_RULES)
     if isinstance(stored, dict):
         merged.update(stored)
     db.execute(
@@ -320,7 +301,7 @@ def m037_process_quality_review_remediation(db):
         rules = {}
     if not isinstance(rules, dict):
         rules = {}
-    rules = {**DEFAULT_RULES, **rules}
+    rules = {**PROCESS_QUALITY_EVALUATION_DEFAULT_RULES, **rules}
     evaluations = db.execute(
         "SELECT id, total_score, issue_tags_json, template_snapshot_json "
         "FROM process_quality_evaluations"

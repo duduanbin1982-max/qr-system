@@ -2,6 +2,7 @@
 
 import json
 
+from modules.domain.quality_rules import QUALITY_MANAGEMENT_DEFAULT_RULES
 from modules.migration_helpers import add_column_if_missing
 
 
@@ -21,22 +22,6 @@ DEFAULT_STANDARDS = [
     ("QS-DEFAULT-OQC", "默认出库检验标准", "outgoing", "hard"),
     ("QS-DEFAULT-RC", "默认返修复检标准", "rework_check", "hard"),
 ]
-
-
-DEFAULT_RULES = {
-    "enabled": True,
-    "first_article_gate": "hard",
-    "in_process_gate": "soft",
-    "final_gate": "hard",
-    "shipment_gate": "hard",
-    "auto_first_article": True,
-    "auto_final_inspection": True,
-    "auto_outgoing_inspection": True,
-    "in_process_frequency": 20,
-    "low_evaluation_creates_task": True,
-    "capa_repeat_threshold": 3,
-    "gauge_due_warning_days": 30,
-}
 
 
 def _create_tables(db):
@@ -445,7 +430,7 @@ def m034_quality_management_closed_loop(db):
     db.execute(
         "INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime')) "
         "ON CONFLICT(key) DO NOTHING",
-        ("quality_management_rules", json.dumps(DEFAULT_RULES, ensure_ascii=False)),
+        ("quality_management_rules", json.dumps(QUALITY_MANAGEMENT_DEFAULT_RULES, ensure_ascii=False)),
     )
     _grant_permissions(db)
     db.commit()

@@ -205,6 +205,26 @@ def test_services_do_not_import_sqlite_driver_directly():
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
 
 
+def test_services_do_not_depend_on_migrations():
+    violations = []
+    service_root = PROJECT_ROOT / "modules" / "services"
+    for path in sorted(service_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            imported_modules = []
+            if isinstance(node, ast.Import):
+                imported_modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.append(node.module)
+            for module_name in imported_modules:
+                if module_name == "modules.migrations" or module_name.startswith("modules.migration_"):
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno} -> {module_name}"
+                    )
+
+    assert violations == [], f"services must not depend on schema migrations: {violations}"
+
+
 def test_services_do_not_embed_sql_statements():
     sql_pattern = re.compile(
         r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",

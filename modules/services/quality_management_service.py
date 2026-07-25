@@ -5,7 +5,7 @@ import math
 from datetime import datetime, timedelta
 
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
-from modules.migration_quality_management import DEFAULT_RULES
+from modules.domain.quality_rules import QUALITY_MANAGEMENT_DEFAULT_RULES
 from modules.repositories.quality_management_repository import QualityManagementRepository
 from modules.repositories.setting_repository import SettingRepository
 from modules.services import BaseService
@@ -53,7 +53,7 @@ class QualityManagementService:
             stored = json.loads(raw or "{}")
         except (TypeError, json.JSONDecodeError):
             stored = {}
-        result = dict(DEFAULT_RULES)
+        result = dict(QUALITY_MANAGEMENT_DEFAULT_RULES)
         if isinstance(stored, dict):
             result.update(stored)
         return result
@@ -61,7 +61,7 @@ class QualityManagementService:
     @classmethod
     def save_rules(cls, data):
         rules = cls.rules()
-        for key in DEFAULT_RULES:
+        for key in QUALITY_MANAGEMENT_DEFAULT_RULES:
             if key in data:
                 rules[key] = data[key]
         for key in ("first_article_gate", "in_process_gate", "final_gate", "shipment_gate"):
