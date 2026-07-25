@@ -1,6 +1,6 @@
 """Process handoff quality review workflow."""
-from modules.services import BaseService
 from modules.repositories.handoff_review_repository import HandoffReviewRepository
+from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
 
 class HandoffReviewService:
@@ -97,35 +97,26 @@ class HandoffReviewService:
             "comment": comment,
             "status": status,
         }
-        with BaseService.transaction() as db:
-            review_id = HandoffReviewRepository.insert_review(payload, db)
-            from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
-
-            ProcessQualityEvaluationService.record_legacy_handoff(review_id, payload, db)
-        return {"ok": True, "id": review_id, "status": status}
+        result = ProcessQualityEvaluationService.import_legacy_handoff(payload)
+        return {
+            "ok": True,
+            "id": result["legacy_review_id"],
+            "evaluation_id": result["evaluation_id"],
+            "status": status,
+        }
 
     @staticmethod
     def list_reviews(year_month="", status="", user_id=None, page=1, per_page=100):
         return HandoffReviewRepository.list_reviews(year_month, status, user_id, page, per_page)
 
     @staticmethod
-    def monthly_metrics(year_month):
-        rows = HandoffReviewRepository.monthly_metrics(year_month)
-        return {row["user_id"]: dict(row) for row in rows}
-
-    @staticmethod
     def update_status(review_id, data, current_user):
         status = data.get("status", "confirmed")
         if status not in {"confirmed", "rejected"}:
             raise ValueError("状态只能是 confirmed 或 rejected")
-        payload = dict(data)
-        payload["status"] = status
-        payload["confirmed_by"] = current_user.get("id") if current_user else None
-        with BaseService.transaction() as db:
-            HandoffReviewRepository.update_status(review_id, payload, db)
-            from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
-
-            ProcessQualityEvaluationRepository.update_legacy_status(
-                review_id, status, payload["confirmed_by"], payload.get("confirm_note", ""), db
-            )
-        return {"ok": True}
+        return ProcessQualityEvaluationService.review_legacy_handoff(
+            review_id,
+            status,
+            data.get("confirm_note", ""),
+            current_user,
+        )

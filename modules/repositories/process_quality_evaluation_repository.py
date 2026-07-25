@@ -309,6 +309,14 @@ class ProcessQualityEvaluationRepository:
         ).fetchone()
 
     @staticmethod
+    def evaluation_by_legacy_handoff(handoff_review_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM process_quality_evaluations WHERE source_handoff_review_id = ?",
+            (handoff_review_id,),
+        ).fetchone()
+
+    @staticmethod
     def review_evaluation(evaluation_id, status, reviewer_user_id, note, db):
         db.execute(
             "UPDATE process_quality_evaluations SET status = ?, reviewed_by = ?, review_note = ?, "
@@ -319,15 +327,6 @@ class ProcessQualityEvaluationRepository:
             "INSERT INTO process_quality_evaluation_reviews (evaluation_id, action, reviewer_user_id, note) "
             "VALUES (?,?,?,?)",
             (evaluation_id, status, reviewer_user_id, note),
-        )
-
-    @staticmethod
-    def update_legacy_status(handoff_review_id, status, reviewer_user_id, note, db):
-        db.execute(
-            "UPDATE process_quality_evaluations SET status = ?, reviewed_by = ?, review_note = ?, "
-            "reviewed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') "
-            "WHERE source_handoff_review_id = ?",
-            (status, reviewer_user_id, note, handoff_review_id),
         )
 
     @staticmethod

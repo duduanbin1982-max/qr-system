@@ -53,7 +53,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 38)]
+    assert versions == [1, *range(13, 39)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
@@ -145,8 +145,8 @@ def test_database_at_version_29_runs_all_pending_migrations():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 8
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 37
+        assert migrations.run_migrations(db) == 9
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 38
         index_names = {
             row["name"]
             for row in db.execute(
@@ -241,6 +241,47 @@ def test_process_quality_remediation_migration_repairs_invariants():
         ]
         assert "idx_pqe_templates_active_general" in indexes
         assert "idx_pqe_templates_active_route" in indexes
+    finally:
+        db.close()
+
+
+def test_legacy_handoff_cutover_migration_uses_evaluation_status_as_authority():
+    from modules.migration_process_quality import m038_converge_legacy_handoff_status
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE process_handoff_reviews (
+                id INTEGER PRIMARY KEY,
+                status TEXT,
+                confirmed_by INTEGER,
+                confirm_note TEXT,
+                confirmed_at TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE process_quality_evaluations (
+                id INTEGER PRIMARY KEY,
+                source_handoff_review_id INTEGER,
+                status TEXT,
+                reviewed_by INTEGER,
+                review_note TEXT,
+                reviewed_at TEXT
+            );
+            INSERT INTO process_handoff_reviews VALUES (1, 'pending', NULL, '', NULL, '2026-01-01');
+            INSERT INTO process_quality_evaluations VALUES (10, 1, 'confirmed', 7, 'verified', '2026-01-02');
+            """
+        )
+
+        m038_converge_legacy_handoff_status(db)
+        m038_converge_legacy_handoff_status(db)
+
+        row = db.execute("SELECT * FROM process_handoff_reviews WHERE id = 1").fetchone()
+        assert row["status"] == "confirmed"
+        assert row["confirmed_by"] == 7
+        assert row["confirm_note"] == "verified"
+        assert row["confirmed_at"] == "2026-01-02"
     finally:
         db.close()
 

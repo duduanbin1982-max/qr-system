@@ -8,6 +8,7 @@ from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULE
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
 from modules.repositories.setting_repository import SettingRepository
 from modules.services import BaseService
+from modules.services.legacy_handoff_adapter import LegacyHandoffAdapter
 
 
 class ProcessQualityEvaluationService:
@@ -494,14 +495,22 @@ class ProcessQualityEvaluationService:
         if status == "rejected" and not note:
             raise ValueError("驳回评价必须填写核验说明")
         with BaseService.transaction() as db:
-            ProcessQualityEvaluationRepository.review_evaluation(
-                evaluation_id, status, reviewer_id, note, db
-            )
-            if status == "rejected":
-                cls._cancel_rejected_evaluation_tasks(
-                    evaluation_id, evaluation["order_id"], reviewer_id, note, db
-                )
+            cls._apply_review(evaluation, status, reviewer_id, note, db)
         return {"ok": True, "status": status}
+
+    @classmethod
+    def _apply_review(cls, evaluation, status, reviewer_id, note, db):
+        ProcessQualityEvaluationRepository.review_evaluation(
+            evaluation["id"], status, reviewer_id, note, db
+        )
+        if evaluation["source_handoff_review_id"]:
+            LegacyHandoffAdapter.sync_compatibility_status(
+                evaluation["source_handoff_review_id"], status, reviewer_id, note, db
+            )
+        if status == "rejected":
+            cls._cancel_rejected_evaluation_tasks(
+                evaluation["id"], evaluation["order_id"], reviewer_id, note, db
+            )
 
     @staticmethod
     def _cancel_rejected_evaluation_tasks(evaluation_id, order_id, reviewer_id, note, db):
@@ -592,7 +601,24 @@ class ProcessQualityEvaluationService:
         return {row["user_id"]: dict(row) for row in rows if row["user_id"] is not None}
 
     @classmethod
-    def record_legacy_handoff(cls, review_id, data, db):
+    def import_legacy_handoff(cls, data):
+        with BaseService.transaction() as db:
+            review_id = LegacyHandoffAdapter.create_compatibility_record(data, db)
+            evaluation_id = cls._record_legacy_handoff(review_id, data, db)
+        return {"legacy_review_id": review_id, "evaluation_id": evaluation_id}
+
+    @classmethod
+    def review_legacy_handoff(cls, review_id, status, note, current_user):
+        reviewer_id = current_user.get("id") if current_user else None
+        evaluation = ProcessQualityEvaluationRepository.evaluation_by_legacy_handoff(review_id)
+        if not evaluation:
+            raise ValueError("旧交接评价未关联全流程质量评价")
+        with BaseService.transaction() as db:
+            cls._apply_review(evaluation, status, reviewer_id, str(note or "").strip(), db)
+        return {"ok": True, "status": status, "evaluation_id": evaluation["id"]}
+
+    @classmethod
+    def _record_legacy_handoff(cls, review_id, data, db):
         rating = cls._rating(data.get("rating"), "评分")
         rules = cls.rules(db)
         task = ProcessQualityEvaluationRepository.find_matching_pending_task({

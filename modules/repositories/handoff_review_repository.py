@@ -143,19 +143,6 @@ class HandoffReviewRepository:
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "per_page": per_page}
 
     @staticmethod
-    def monthly_metrics(year_month, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT from_user_id AS user_id, COUNT(*) AS review_count, ROUND(AVG(rating), 2) AS avg_rating, "
-            "SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) AS low_count, "
-            "SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS good_count "
-            "FROM process_handoff_reviews "
-            "WHERE created_at LIKE ? AND status = 'confirmed' "
-            "GROUP BY from_user_id",
-            (year_month + "%",),
-        ).fetchall()
-
-    @staticmethod
     def update_status(review_id, data, db):
         db.execute(
             "UPDATE process_handoff_reviews SET status = ?, confirm_note = ?, confirmed_by = ?, "

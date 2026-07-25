@@ -341,8 +341,27 @@ def m037_process_quality_review_remediation(db):
     db.commit()
 
 
+def m038_converge_legacy_handoff_status(db):
+    db.execute(
+        "UPDATE process_handoff_reviews SET "
+        "status = (SELECT CASE evaluation.status WHEN 'pending_verification' THEN 'pending' ELSE evaluation.status END "
+        "FROM process_quality_evaluations evaluation WHERE evaluation.source_handoff_review_id = process_handoff_reviews.id), "
+        "confirmed_by = COALESCE((SELECT evaluation.reviewed_by FROM process_quality_evaluations evaluation "
+        "WHERE evaluation.source_handoff_review_id = process_handoff_reviews.id), confirmed_by), "
+        "confirm_note = COALESCE(NULLIF((SELECT evaluation.review_note FROM process_quality_evaluations evaluation "
+        "WHERE evaluation.source_handoff_review_id = process_handoff_reviews.id), ''), confirm_note), "
+        "confirmed_at = COALESCE((SELECT evaluation.reviewed_at FROM process_quality_evaluations evaluation "
+        "WHERE evaluation.source_handoff_review_id = process_handoff_reviews.id), confirmed_at), "
+        "updated_at = datetime('now','localtime') "
+        "WHERE EXISTS (SELECT 1 FROM process_quality_evaluations evaluation "
+        "WHERE evaluation.source_handoff_review_id = process_handoff_reviews.id)"
+    )
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
     (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
     (37, "Remediate process quality review invariants", m037_process_quality_review_remediation),
+    (38, "Converge legacy handoff review status", m038_converge_legacy_handoff_status),
 ]

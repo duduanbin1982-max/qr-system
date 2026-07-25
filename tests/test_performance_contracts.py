@@ -389,13 +389,15 @@ def _confirm_handoff_review(client, auth_headers, data):
         headers=auth_headers,
     )
     assert review.status_code == 200, review.get_json()
-    review_id = review.get_json()["id"]
+    review_payload = review.get_json()
+    review_id = review_payload["id"]
     update = client.put(
         f"/api/handoff-reviews/{review_id}/status",
         json={"status": "confirmed", "confirm_note": "确认属实"},
         headers=auth_headers,
     )
     assert update.status_code == 200, update.get_json()
+    return review_payload
 
 
 def test_handoff_review_identifies_previous_worker(client, auth_headers):
@@ -431,6 +433,44 @@ def test_handoff_review_penalizes_previous_worker(client, auth_headers):
     )
     assert reviews.status_code == 200, reviews.get_json()
     assert reviews.get_json()["total"] >= 1
+
+
+def test_legacy_handoff_review_is_backed_by_authoritative_evaluation(client, auth_headers):
+    data = _seed_handoff_performance(client)
+    review = client.post(
+        "/api/handoff-reviews",
+        json={
+            "order_id": data["order_id"],
+            "to_process_id": data["to_process_id"],
+            "serial_no": data["serial_no"],
+            "rating": 2,
+            "issue_type": "外观问题",
+            "comment": "兼容接口评价",
+        },
+        headers=auth_headers,
+    )
+    assert review.status_code == 200, review.get_json()
+    assert review.headers["Deprecation"] == "true"
+    payload = review.get_json()
+    assert payload["evaluation_id"]
+
+    confirmed = client.put(
+        f"/api/process-quality-evaluations/{payload['evaluation_id']}/review",
+        json={"status": "confirmed", "note": "新模型核验"},
+        headers=auth_headers,
+    )
+    assert confirmed.status_code == 200, confirmed.get_json()
+
+    with client.application.app_context():
+        db = get_db()
+        legacy = db.execute(
+            "SELECT status FROM process_handoff_reviews WHERE id = ?", (payload["id"],)
+        ).fetchone()
+        evaluation = db.execute(
+            "SELECT status FROM process_quality_evaluations WHERE id = ?", (payload["evaluation_id"],)
+        ).fetchone()
+        assert legacy["status"] == "confirmed"
+        assert evaluation["status"] == "confirmed"
 
 
 def test_order_mode_handoff_review_requires_clear_previous_worker(client, auth_headers):

@@ -5,6 +5,13 @@ from modules.route_decorators import app, check_auth, check_permission, safe_aud
 from modules.services.handoff_review_service import HandoffReviewService
 
 
+def _legacy_response(payload, status=200):
+    response = jsonify(payload)
+    response.headers['Deprecation'] = 'true'
+    response.headers['Link'] = '</api/process-quality-evaluations>; rel="successor-version"'
+    return response, status
+
+
 @app.route('/api/handoff-reviews/pending', methods=['GET'])
 @check_auth
 @check_permission('scan:view')
@@ -15,7 +22,7 @@ def handoff_review_pending():
         g.current_user.get('id'),
         request.args.get('serial_no', '').strip(),
     )
-    return jsonify(context)
+    return _legacy_response(context)
 
 
 @app.route('/api/handoff-reviews', methods=['POST'])
@@ -25,16 +32,16 @@ def handoff_review_create():
     try:
         result = HandoffReviewService.create_review(request.get_json() or {}, g.current_user)
         safe_audit_log('handoff_review_create', 'handoff_review', result.get('id', 0), result.get('status', ''))
-        return jsonify(result)
+        return _legacy_response(result)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return _legacy_response({'error': str(e)}, 400)
 
 
 @app.route('/api/handoff-reviews', methods=['GET'])
 @check_auth
 @check_permission('performance:view')
 def handoff_review_list():
-    return jsonify(HandoffReviewService.list_reviews(
+    return _legacy_response(HandoffReviewService.list_reviews(
         year_month=request.args.get('year_month', ''),
         status=request.args.get('status', ''),
         user_id=request.args.get('user_id', type=int),
@@ -50,6 +57,6 @@ def handoff_review_status(review_id):
     try:
         result = HandoffReviewService.update_status(review_id, request.get_json() or {}, g.current_user)
         safe_audit_log('handoff_review_status', 'handoff_review', review_id, result.get('status', ''))
-        return jsonify(result)
+        return _legacy_response(result)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return _legacy_response({'error': str(e)}, 400)
