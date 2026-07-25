@@ -52,9 +52,9 @@ def test_mobile_quality_evaluation_assets_are_cache_busted_and_network_first():
     sw_content = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
     assert _asset_version(mobile_html, "mobile-utils.js") >= 27
-    assert _asset_version(mobile_html, "mobile-order.js") >= 32
-    assert _asset_version(mobile_html, "mobile-init.js") >= 29
-    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 1
+    assert _asset_version(mobile_html, "mobile-order.js") >= 36
+    assert _asset_version(mobile_html, "mobile-init.js") >= 31
+    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 2
     cache_match = re.search(r'CACHE_NAME = "qr-system-v3\.(\d+)"', sw_content)
     assert cache_match and int(cache_match.group(1)) >= 5
     assert 'url.pathname.startsWith("/js/mobile/")' in sw_content
@@ -69,3 +69,20 @@ def test_mobile_uses_independent_quality_evaluation_center():
     assert 'id="s-quality-evaluation"' in mobile_html
     assert "handoffPending" not in order_script
     assert "openHandoffReview" not in order_script
+
+
+def test_mobile_quality_evaluation_b_workflow_is_wired():
+    mobile_html = (PROJECT_ROOT / "public" / "mobile.html").read_text(encoding="utf-8")
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+    quality_script = (MOBILE_DIR / "mobile-quality-evaluation.js").read_text(encoding="utf-8")
+
+    assert 'data-quality-view="mine"' in mobile_html
+    assert "quality_evaluation_auto_open" in order_script
+    assert "openQualityEvaluationCenter" in order_script
+    assert "dimension_scores" in quality_script
+    assert "不适用" in quality_script
+    assert "critical_issue_tags" in quality_script
+    assert "quality-critical-tag" in quality_script
+    assert "skipQualityEvaluationTask" in quality_script
+    assert "createQualityEvaluationAppeal" in quality_script
+    assert "target_user_name" not in quality_script

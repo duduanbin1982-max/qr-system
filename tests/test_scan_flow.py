@@ -171,6 +171,8 @@ class TestScanWorkFlow:
 
         assert report.status_code == 200, report.get_json()
         assert report.get_json()["quality_evaluation_pending_count"] == 1
+        assert report.get_json()["quality_evaluation_required_count"] == 1
+        assert report.get_json()["quality_evaluation_auto_open"] is True
         tasks = client.get(
             "/api/process-quality-evaluations/tasks",
             headers=worker_auth_headers,
@@ -180,8 +182,9 @@ class TestScanWorkFlow:
         assert pending["is_required"] == 1
         assert pending["target_process_id"] == process_ids[0]
         assert pending["evaluator_process_id"] == process_ids[1]
-        assert pending["target_user_id"] == previous_user_id
-        assert pending["target_user_id"] != current_user_id
+        assert "target_user_id" not in pending
+        assert "target_user_name" not in pending
+        assert previous_user_id != current_user_id
 
     def test_mobile_scan_reports_unsubmitted_quality_task_count_after_serial_advances(self, client, worker_auth_headers):
         order_id, _, serial_no, process_ids, _, _ = _seed_serial_handoff_order(client)

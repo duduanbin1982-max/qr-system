@@ -7,6 +7,10 @@ DEFAULT_RULES = {
     "enabled": True,
     "required_previous_process": True,
     "low_score_threshold": 60,
+    "critical_score_threshold": 40,
+    "minimum_samples_for_performance": 3,
+    "hide_target_identity": True,
+    "auto_open_mobile": True,
     "dimensions": [
         {"key": "processing_quality", "label": "加工质量"},
         {"key": "dimensional_accuracy", "label": "尺寸或精度"},
@@ -15,6 +19,7 @@ DEFAULT_RULES = {
         {"key": "cleanliness_protection", "label": "清洁及防护"},
     ],
     "issue_tags": ["尺寸问题", "外观问题", "漏加工", "毛刺锐边", "标识不清", "清洁防护", "返修风险", "其他"],
+    "critical_issue_tags": ["致命缺陷", "安全风险", "严重尺寸超差"],
 }
 
 
@@ -176,6 +181,187 @@ def m033_full_process_quality_evaluation(db):
     db.commit()
 
 
+def _column_names(db, table_name):
+    return {row[1] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _add_column(db, table_name, definition):
+    column_name = definition.split()[0]
+    if column_name not in _column_names(db, table_name):
+        db.execute(f"ALTER TABLE {table_name} ADD COLUMN {definition}")
+
+
+def m036_process_quality_evaluation_b(db):
+    _add_column(db, "process_quality_evaluation_tasks", "template_id INTEGER")
+    _add_column(db, "process_quality_evaluation_tasks", "template_snapshot_json TEXT DEFAULT '{}'")
+    _add_column(db, "process_quality_evaluation_tasks", "skip_reason TEXT DEFAULT ''")
+    _add_column(db, "process_quality_evaluation_tasks", "skipped_at TEXT DEFAULT ''")
+    _add_column(db, "process_quality_evaluations", "template_id INTEGER")
+    _add_column(db, "process_quality_evaluations", "dimension_scores_json TEXT DEFAULT '{}'")
+    _add_column(db, "process_quality_evaluations", "template_snapshot_json TEXT DEFAULT '{}'")
+    _add_column(db, "process_quality_evaluations", "severity TEXT DEFAULT 'normal'")
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS process_quality_evaluation_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            route_id INTEGER,
+            process_id INTEGER NOT NULL,
+            dimensions_json TEXT NOT NULL DEFAULT '[]',
+            issue_tags_json TEXT NOT NULL DEFAULT '[]',
+            critical_issue_tags_json TEXT NOT NULL DEFAULT '[]',
+            low_score_threshold INTEGER DEFAULT 60,
+            critical_score_threshold INTEGER DEFAULT 40,
+            status TEXT DEFAULT 'active',
+            created_by INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (route_id) REFERENCES process_routes(id) ON DELETE SET NULL,
+            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS process_quality_evaluation_appeals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evaluation_id INTEGER NOT NULL,
+            requester_user_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            reviewed_by INTEGER,
+            review_note TEXT DEFAULT '',
+            reviewed_at TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (evaluation_id) REFERENCES process_quality_evaluations(id) ON DELETE CASCADE,
+            FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pqe_templates_scope "
+        "ON process_quality_evaluation_templates(process_id, route_id, status)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pqe_appeals_pending "
+        "ON process_quality_evaluation_appeals(evaluation_id) WHERE status = 'pending'"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pqe_appeals_status "
+        "ON process_quality_evaluation_appeals(status, created_at)"
+    )
+
+    row = db.execute(
+        "SELECT value FROM system_settings WHERE key = 'process_quality_evaluation_rules'"
+    ).fetchone()
+    try:
+        stored = json.loads(row[0] or "{}") if row else {}
+    except (TypeError, json.JSONDecodeError):
+        stored = {}
+    merged = dict(DEFAULT_RULES)
+    if isinstance(stored, dict):
+        merged.update(stored)
+    db.execute(
+        "INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime')) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        ("process_quality_evaluation_rules", json.dumps(merged, ensure_ascii=False)),
+    )
+    _grant_role_permissions(db)
+    db.commit()
+
+
+def _evaluation_severity(row, rules):
+    try:
+        snapshot = json.loads(row["template_snapshot_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        snapshot = {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    try:
+        issue_tags = json.loads(row["issue_tags_json"] or "[]")
+    except (TypeError, json.JSONDecodeError):
+        issue_tags = []
+    if not isinstance(issue_tags, list):
+        issue_tags = []
+
+    def threshold(key, default):
+        value = snapshot.get(key)
+        if value is None:
+            value = rules.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    low_threshold = threshold("low_score_threshold", 60)
+    critical_threshold = threshold("critical_score_threshold", 40)
+    critical_tags = snapshot.get("critical_issue_tags") or rules.get("critical_issue_tags") or []
+    if row["total_score"] < critical_threshold or set(critical_tags).intersection(issue_tags):
+        return "critical"
+    if row["total_score"] < low_threshold:
+        return "warning"
+    return "normal"
+
+
+def m037_process_quality_review_remediation(db):
+    _add_column(db, "quality_inspection_tasks", "cancelled_at TEXT DEFAULT ''")
+    _add_column(db, "quality_inspection_tasks", "cancel_reason TEXT DEFAULT ''")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quality_tasks_source_evaluation "
+        "ON quality_inspection_tasks(source_evaluation_id)"
+    )
+
+    row = db.execute(
+        "SELECT value FROM system_settings WHERE key = 'process_quality_evaluation_rules'"
+    ).fetchone()
+    try:
+        rules = json.loads(row[0] or "{}") if row else {}
+    except (TypeError, json.JSONDecodeError):
+        rules = {}
+    if not isinstance(rules, dict):
+        rules = {}
+    rules = {**DEFAULT_RULES, **rules}
+    evaluations = db.execute(
+        "SELECT id, total_score, issue_tags_json, template_snapshot_json "
+        "FROM process_quality_evaluations"
+    ).fetchall()
+    db.executemany(
+        "UPDATE process_quality_evaluations SET severity = ? WHERE id = ?",
+        [(_evaluation_severity(evaluation, rules), evaluation["id"]) for evaluation in evaluations],
+    )
+
+    db.execute(
+        "UPDATE quality_inspection_tasks SET status = 'cancelled', "
+        "cancelled_at = datetime('now','localtime'), cancel_reason = '关联评价已被驳回', "
+        "completed_at = COALESCE(NULLIF(completed_at, ''), datetime('now','localtime')), "
+        "updated_at = datetime('now','localtime') "
+        "WHERE source_evaluation_id IN ("
+        "SELECT id FROM process_quality_evaluations WHERE status = 'rejected'"
+        ") AND status IN ('pending','in_progress','failed')"
+    )
+
+    db.execute(
+        "UPDATE process_quality_evaluation_templates AS template SET status = 'inactive', "
+        "updated_at = datetime('now','localtime') WHERE template.status = 'active' AND EXISTS ("
+        "SELECT 1 FROM process_quality_evaluation_templates AS newer "
+        "WHERE newer.status = 'active' AND newer.process_id = template.process_id "
+        "AND newer.route_id IS template.route_id AND newer.id > template.id)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pqe_templates_active_general "
+        "ON process_quality_evaluation_templates(process_id) "
+        "WHERE status = 'active' AND route_id IS NULL"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pqe_templates_active_route "
+        "ON process_quality_evaluation_templates(process_id, route_id) "
+        "WHERE status = 'active' AND route_id IS NOT NULL"
+    )
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
+    (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
+    (37, "Remediate process quality review invariants", m037_process_quality_review_remediation),
 ]

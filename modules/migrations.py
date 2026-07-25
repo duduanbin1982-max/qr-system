@@ -13,7 +13,7 @@ from modules.migration_process_quality import MIGRATIONS as PROCESS_QUALITY_MIGR
 from modules.migration_quality_management import MIGRATIONS as QUALITY_MANAGEMENT_MIGRATIONS
 
 
-MIGRATIONS = [
+MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
     *PERFORMANCE_MIGRATIONS,
@@ -22,7 +22,7 @@ MIGRATIONS = [
     *ORDER_COMPLETION_MIGRATIONS,
     *PROCESS_QUALITY_MIGRATIONS,
     *QUALITY_MANAGEMENT_MIGRATIONS,
-]
+], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]
 if len(_versions) != len(set(_versions)):

@@ -3,6 +3,7 @@ import json
 from modules.db import get_db
 from factories import ensure_user, WORKER_HASH
 from modules.services.performance_service import PerformanceService
+from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
 
 def _worker_id(db):
@@ -411,6 +412,7 @@ def test_handoff_review_identifies_previous_worker(client, auth_headers):
 
 def test_handoff_review_penalizes_previous_worker(client, auth_headers):
     data = _seed_handoff_performance(client)
+    ProcessQualityEvaluationService.save_rules({"minimum_samples_for_performance": 1})
     before = _generate_performance_scores(client, auth_headers, data["year_month"])
     before_row = next(
         item for item in before["items"] if item["user_id"] == data["previous_user_id"]

@@ -26,9 +26,24 @@ def process_quality_tasks():
         keyword=request.args.get("keyword", "").strip(),
         page=request.args.get("page", 1, type=int),
         per_page=min(request.args.get("per_page", 100, type=int), 500),
+        include_target_identity=requested_all,
     )
     result["pending_count"] = ProcessQualityEvaluationService.pending_count(g.current_user["id"])
     return jsonify(result)
+
+
+@app.route("/api/process-quality-evaluations/tasks/<int:task_id>/skip", methods=["POST"])
+@check_auth
+@check_permission("process_quality_evaluation:submit")
+def process_quality_task_skip(task_id):
+    try:
+        result = ProcessQualityEvaluationService.skip_task(
+            task_id, request.get_json() or {}, g.current_user
+        )
+        safe_audit_log("process_quality_evaluation_skip", "process_quality_evaluation_task", task_id, "skipped")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/process-quality-evaluations", methods=["POST"])
@@ -53,6 +68,19 @@ def process_quality_list():
         process_id=request.args.get("process_id", type=int),
         user_id=request.args.get("user_id", type=int),
         keyword=request.args.get("keyword", "").strip(),
+        page=request.args.get("page", 1, type=int),
+        per_page=min(request.args.get("per_page", 100, type=int), 500),
+    ))
+
+
+@app.route("/api/process-quality-evaluations/mine", methods=["GET"])
+@check_auth
+def process_quality_mine():
+    if not _can_read(g.current_user):
+        return jsonify({"error": "无权限"}), 403
+    return jsonify(ProcessQualityEvaluationService.my_evaluations(
+        g.current_user,
+        year_month=request.args.get("year_month", ""),
         page=request.args.get("page", 1, type=int),
         per_page=min(request.args.get("per_page", 100, type=int), 500),
     ))
@@ -92,6 +120,92 @@ def process_quality_save_rules():
     try:
         result = ProcessQualityEvaluationService.save_rules(request.get_json() or {})
         safe_audit_log("process_quality_evaluation_rules", "system_setting", 0, "updated")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/process-quality-evaluations/references", methods=["GET"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_references():
+    return jsonify(ProcessQualityEvaluationService.references())
+
+
+@app.route("/api/process-quality-evaluations/templates", methods=["GET"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_template_list():
+    return jsonify({"items": ProcessQualityEvaluationService.list_templates(request.args.get("status", ""))})
+
+
+@app.route("/api/process-quality-evaluations/templates", methods=["POST"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_template_create():
+    try:
+        result = ProcessQualityEvaluationService.save_template(
+            request.get_json() or {}, g.current_user
+        )
+        safe_audit_log("process_quality_template_create", "process_quality_evaluation_template", result["id"], "created")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/process-quality-evaluations/templates/<int:template_id>", methods=["PUT"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_template_update(template_id):
+    try:
+        result = ProcessQualityEvaluationService.save_template(
+            request.get_json() or {}, g.current_user, template_id
+        )
+        safe_audit_log("process_quality_template_update", "process_quality_evaluation_template", template_id, "updated")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/process-quality-evaluations/<int:evaluation_id>/appeals", methods=["POST"])
+@check_auth
+def process_quality_appeal_create(evaluation_id):
+    if not _can_read(g.current_user):
+        return jsonify({"error": "无权限"}), 403
+    try:
+        result = ProcessQualityEvaluationService.create_appeal(
+            evaluation_id, request.get_json() or {}, g.current_user
+        )
+        safe_audit_log("process_quality_appeal_create", "process_quality_evaluation", evaluation_id, "pending")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/process-quality-evaluations/appeals", methods=["GET"])
+@check_auth
+def process_quality_appeal_list():
+    can_review = has_permission(g.current_user, "process_quality_evaluation:review")
+    mine = request.args.get("scope") == "mine"
+    if not mine and not can_review:
+        return jsonify({"error": "无权限"}), 403
+    if mine and not _can_read(g.current_user):
+        return jsonify({"error": "无权限"}), 403
+    return jsonify(ProcessQualityEvaluationService.list_appeals(
+        request.args.get("status", ""), g.current_user, mine=mine,
+        year_month=request.args.get("year_month", ""),
+    ))
+
+
+@app.route("/api/process-quality-evaluations/appeals/<int:appeal_id>/review", methods=["PUT"])
+@check_auth
+@check_permission("process_quality_evaluation:review")
+def process_quality_appeal_review(appeal_id):
+    try:
+        result = ProcessQualityEvaluationService.review_appeal(
+            appeal_id, request.get_json() or {}, g.current_user
+        )
+        safe_audit_log("process_quality_appeal_review", "process_quality_evaluation_appeal", appeal_id, result["status"])
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

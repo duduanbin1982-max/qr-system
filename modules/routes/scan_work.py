@@ -197,9 +197,12 @@ def mobile_report():
             order_id,
             "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type
         )
+        evaluation_rules = ProcessQualityEvaluationService.rules()
         return jsonify({
             "message": "report OK",
             "quality_evaluation_pending_count": ProcessQualityEvaluationService.pending_count(user["id"]),
+            "quality_evaluation_required_count": ProcessQualityEvaluationService.pending_required_count(user["id"]),
+            "quality_evaluation_auto_open": bool(evaluation_rules.get("auto_open_mobile", True)),
         })
     except ValueError as e:
         return jsonify({"error": str(e)}), 409

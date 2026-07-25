@@ -3,19 +3,24 @@
 import json
 import uuid
 
+import pytest
+
 from modules.db import get_db
+from modules.domain.errors import ConflictError
 from modules.domain.work_report import WorkReportCommand
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
-from factories import WORKER_HASH, ensure_user
+from modules.services.quality_management_service import QualityManagementService
+from factories import WORKER_HASH, WORKER_PASS, ensure_user
 
 
 def _seed_serial_flow(client):
     suffix = uuid.uuid4().hex[:6].upper()
+    upstream_usernames = [f"pqe_up_{suffix.lower()}_{index}" for index in (1, 2)]
     with client.application.app_context():
         db = get_db()
         upstream_users = [
-            ensure_user(db, f"pqe_up_{suffix.lower()}_{index}", WORKER_HASH, f"上游员工{index}", "worker", f"PQE-UP-{suffix}-{index}")
-            for index in (1, 2)
+            ensure_user(db, username, WORKER_HASH, f"上游员工{index}", "worker", f"PQE-UP-{suffix}-{index}")
+            for index, username in enumerate(upstream_usernames, start=1)
         ]
         evaluator = db.execute("SELECT id FROM users WHERE username = 'testworker'").fetchone()
         assert evaluator
@@ -58,6 +63,7 @@ def _seed_serial_flow(client):
         "serial_no": serial_no,
         "process_ids": process_ids,
         "upstream_users": upstream_users,
+        "upstream_usernames": upstream_usernames,
         "evaluator_user_id": evaluator["id"],
     }
 
@@ -91,6 +97,15 @@ def _score_payload(task_id, score=5, issue_tags=None):
     }
 
 
+def _login_headers(client, username):
+    response = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": WORKER_PASS},
+    )
+    assert response.status_code == 200, response.get_json()
+    return {"Authorization": f"Bearer {response.get_json()['user']['token']}"}
+
+
 def test_approved_report_creates_all_upstream_evaluation_tasks(client, worker_auth_headers):
     flow = _seed_serial_flow(client)
     response = _complete_serial_report(client, worker_auth_headers, flow)
@@ -104,6 +119,8 @@ def test_approved_report_creates_all_upstream_evaluation_tasks(client, worker_au
     payload = tasks.get_json()
     assert payload["total"] == 2
     assert {item["target_process_id"] for item in payload["items"]} == set(flow["process_ids"][:2])
+    assert all("target_user_id" not in item for item in payload["items"])
+    assert all("target_user_name" not in item for item in payload["items"])
     required = [item for item in payload["items"] if item["is_required"]]
     assert len(required) == 1
     assert required[0]["target_process_id"] == flow["process_ids"][1]
@@ -157,7 +174,7 @@ def test_confirmed_full_process_score_is_available_to_performance(client, worker
         "/api/process-quality-evaluations/tasks",
         headers=worker_auth_headers,
     ).get_json()["items"]
-    target_task = next(item for item in tasks if item["target_user_id"] == flow["upstream_users"][0])
+    target_task = next(item for item in tasks if item["target_process_id"] == flow["process_ids"][0])
     created = client.post(
         "/api/process-quality-evaluations",
         headers=worker_auth_headers,
@@ -165,6 +182,7 @@ def test_confirmed_full_process_score_is_available_to_performance(client, worker
     )
     assert created.status_code == 200, created.get_json()
 
+    ProcessQualityEvaluationService.save_rules({"minimum_samples_for_performance": 1})
     metrics = ProcessQualityEvaluationService.monthly_metrics(
         target_task["created_at"][:7]
     )
@@ -228,3 +246,397 @@ def test_order_mode_multiple_contributors_creates_process_level_task(client):
     assert task["attribution_type"] == "process"
     assert task["target_user_id"] is None
     assert task["quantity"] == 10
+
+
+def test_optional_history_task_can_be_skipped_but_required_task_cannot(client, worker_auth_headers):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    tasks = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"]
+    required = next(item for item in tasks if item["is_required"])
+    optional = next(item for item in tasks if not item["is_required"])
+
+    blocked = client.post(
+        f"/api/process-quality-evaluations/tasks/{required['id']}/skip",
+        headers=worker_auth_headers,
+        json={"reason": "不评价"},
+    )
+    assert blocked.status_code == 400
+    skipped = client.post(
+        f"/api/process-quality-evaluations/tasks/{optional['id']}/skip",
+        headers=worker_auth_headers,
+        json={"reason": "未发现历史工序问题"},
+    )
+    assert skipped.status_code == 200, skipped.get_json()
+    remaining = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"]
+    assert [item["id"] for item in remaining] == [required["id"]]
+
+
+def test_pending_required_evaluation_blocks_next_normal_report(client, worker_auth_headers):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute(
+            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+            "VALUES (?, 'pytest fixture process', 'fixture', 1, 'active', datetime('now','localtime'))",
+            (f"必评门禁测试工序-{suffix}",),
+        ).lastrowid
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
+            "VALUES (?, 'Test Customer', '必评门禁产品', ?, 1, 'producing', '')",
+            (f"TEST-PQE-GATE-{suffix}", f"PQE-GATE-{suffix}"),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
+            (order_id, process_id),
+        )
+        db.commit()
+
+    blocked = client.post(
+        "/api/mobile/report",
+        headers=worker_auth_headers,
+        json={
+            "order_id": order_id,
+            "process_id": process_id,
+            "quantity": 1,
+            "report_type": "normal",
+        },
+    )
+
+    assert blocked.status_code == 409, blocked.get_json()
+    assert "未完成的必评任务" in blocked.get_json()["error"]
+
+
+def test_process_template_drives_dynamic_weighted_dimensions(client, auth_headers, worker_auth_headers):
+    flow = _seed_serial_flow(client)
+    created_template = client.post(
+        "/api/process-quality-evaluations/templates",
+        headers=auth_headers,
+        json={
+            "name": "钻孔接手评价",
+            "process_id": flow["process_ids"][1],
+            "dimensions": [
+                {"key": "hole_size", "label": "孔径", "weight": 3, "required": True},
+                {"key": "burr", "label": "毛刺", "weight": 1, "required": True},
+            ],
+            "issue_tags": ["孔径超差", "毛刺"],
+            "critical_issue_tags": ["孔径严重超差"],
+            "low_score_threshold": 60,
+            "critical_score_threshold": 40,
+            "status": "active",
+        },
+    )
+    assert created_template.status_code == 200, created_template.get_json()
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][1]
+    )
+    assert [item["key"] for item in task["template_snapshot"]["dimensions"]] == ["hole_size", "burr"]
+
+    submitted = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json={
+            "task_id": task["id"],
+            "dimension_scores": {"hole_size": 5, "burr": 1},
+            "issue_tags": [],
+            "comment": "",
+        },
+    )
+    assert submitted.status_code == 200, submitted.get_json()
+    assert submitted.get_json()["items"][0]["total_score"] == 80
+
+
+def test_optional_template_dimension_can_be_omitted():
+    scores, _, total_score = ProcessQualityEvaluationService._evaluate_dimensions(
+        {"dimension_scores": {"required_quality": 4}},
+        {
+            "dimensions": [
+                {
+                    "key": "required_quality",
+                    "label": "必评质量",
+                    "weight": 1,
+                    "required": True,
+                },
+                {
+                    "key": "optional_appearance",
+                    "label": "选评外观",
+                    "weight": 1,
+                    "required": False,
+                },
+            ]
+        },
+    )
+
+    assert scores == {"required_quality": 4}
+    assert total_score == 80
+
+
+def test_saving_active_template_deactivates_previous_template_in_same_scope(
+    client, auth_headers
+):
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute(
+            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+            "VALUES (?, 'pytest fixture process', 'fixture', 1, 'active', datetime('now','localtime'))",
+            (f"模板唯一性工序-{suffix}",),
+        ).lastrowid
+        db.commit()
+    payload = {
+        "process_id": process_id,
+        "dimensions": [
+            {"key": "quality", "label": "质量", "weight": 1, "required": True}
+        ],
+        "issue_tags": [],
+        "critical_issue_tags": [],
+        "low_score_threshold": 60,
+        "critical_score_threshold": 40,
+        "status": "active",
+    }
+    first = client.post(
+        "/api/process-quality-evaluations/templates",
+        headers=auth_headers,
+        json={**payload, "name": "第一版模板"},
+    ).get_json()["id"]
+    second = client.post(
+        "/api/process-quality-evaluations/templates",
+        headers=auth_headers,
+        json={**payload, "name": "第二版模板"},
+    ).get_json()["id"]
+
+    templates = client.get(
+        "/api/process-quality-evaluations/templates", headers=auth_headers
+    ).get_json()["items"]
+    status_by_id = {item["id"]: item["status"] for item in templates}
+    assert status_by_id[first] == "inactive"
+    assert status_by_id[second] == "active"
+
+
+def test_route_template_rejects_process_outside_selected_route(client, auth_headers):
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute(
+            "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+            "VALUES (?, 'pytest fixture process', 'fixture', 1, 'active', datetime('now','localtime'))",
+            (f"路线外工序-{suffix}",),
+        ).lastrowid
+        route_id = db.execute(
+            "INSERT INTO process_routes (name, description, status, category, updated_at) "
+            "VALUES (?, 'pytest fixture route', 'active', 'fixture', datetime('now','localtime'))",
+            (f"评价模板路线-{suffix}",),
+        ).lastrowid
+        db.commit()
+
+    response = client.post(
+        "/api/process-quality-evaluations/templates",
+        headers=auth_headers,
+        json={
+            "name": "错误路线模板",
+            "route_id": route_id,
+            "process_id": process_id,
+            "dimensions": [
+                {"key": "quality", "label": "质量", "weight": 1, "required": True}
+            ],
+            "low_score_threshold": 60,
+            "critical_score_threshold": 40,
+            "status": "active",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "不属于该工序路线" in response.get_json()["error"]
+
+
+def test_pending_appeal_is_excluded_from_performance_and_can_be_accepted(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    ProcessQualityEvaluationService.save_rules({"minimum_samples_for_performance": 1})
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][0]
+    )
+    created = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 4),
+    ).get_json()["items"][0]
+    month = task["created_at"][:7]
+    assert flow["upstream_users"][0] in ProcessQualityEvaluationService.monthly_metrics(month)
+
+    target_headers = _login_headers(client, flow["upstream_usernames"][0])
+    appeal = client.post(
+        f"/api/process-quality-evaluations/{created['id']}/appeals",
+        headers=target_headers,
+        json={"reason": "该工件在接手后发生二次碰伤"},
+    )
+    assert appeal.status_code == 200, appeal.get_json()
+    assert flow["upstream_users"][0] not in ProcessQualityEvaluationService.monthly_metrics(month)
+
+    reviewed = client.put(
+        f"/api/process-quality-evaluations/appeals/{appeal.get_json()['id']}/review",
+        headers=auth_headers,
+        json={"status": "accepted", "note": "现场记录证明申诉成立"},
+    )
+    assert reviewed.status_code == 200, reviewed.get_json()
+    record = client.get(
+        f"/api/process-quality-evaluations?year_month={month}", headers=auth_headers
+    ).get_json()["items"][0]
+    assert record["status"] == "rejected"
+    assert record["appeal_status"] == "accepted"
+
+
+def test_single_confirmed_evaluation_does_not_enter_performance_before_minimum_samples(
+    client, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][0]
+    )
+    submitted = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 4),
+    )
+    assert submitted.status_code == 200, submitted.get_json()
+    assert flow["upstream_users"][0] not in ProcessQualityEvaluationService.monthly_metrics(
+        task["created_at"][:7]
+    )
+
+
+def test_critical_evaluation_creates_hard_quality_verification_task(
+    client, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"][0]
+    submitted = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 1, ["严重尺寸超差"]),
+    )
+    assert submitted.status_code == 200, submitted.get_json()
+    result = submitted.get_json()["items"][0]
+    assert result["severity"] == "critical"
+    with client.application.app_context():
+        quality_task = get_db().execute(
+            "SELECT gate_mode, priority FROM quality_inspection_tasks WHERE source_evaluation_id = ?",
+            (result["id"],),
+        ).fetchone()
+    assert quality_task
+    assert quality_task["gate_mode"] == "hard"
+    assert quality_task["priority"] == "urgent"
+    ProcessQualityEvaluationService.save_rules(
+        {"low_score_threshold": 10, "critical_score_threshold": 5}
+    )
+    assert ProcessQualityEvaluationService.stats()["summary"]["low_score_count"] == 1
+    with client.application.app_context(), pytest.raises(
+        ConflictError, match="工序质量核验任务"
+    ):
+        QualityManagementService.assert_report_allowed(
+            flow["order_id"], task["target_process_id"]
+        )
+
+
+def test_rejected_evaluation_cancels_quality_task(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"][0]
+    created = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 1, ["严重尺寸超差"]),
+    ).get_json()["items"][0]
+
+    reviewed = client.put(
+        f"/api/process-quality-evaluations/{created['id']}/review",
+        headers=auth_headers,
+        json={"status": "rejected", "note": "现场复核不属于上道工序责任"},
+    )
+
+    assert reviewed.status_code == 200, reviewed.get_json()
+    with client.application.app_context():
+        quality_task = get_db().execute(
+            "SELECT status, cancel_reason, cancelled_at FROM quality_inspection_tasks "
+            "WHERE source_evaluation_id = ?",
+            (created["id"],),
+        ).fetchone()
+    assert quality_task["status"] == "cancelled"
+    assert "关联评价已被驳回" in quality_task["cancel_reason"]
+    assert quality_task["cancelled_at"]
+    stats = client.get(
+        "/api/process-quality-evaluations/stats", headers=auth_headers
+    ).get_json()
+    assert stats["summary"]["total"] == 0
+    assert stats["processes"] == []
+    assert stats["evaluators"] == []
+
+
+def test_accepted_appeal_cancels_existing_quality_task(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][0]
+    )
+    created = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 2, ["尺寸问题"]),
+    ).get_json()["items"][0]
+    confirmed = client.put(
+        f"/api/process-quality-evaluations/{created['id']}/review",
+        headers=auth_headers,
+        json={"status": "confirmed", "note": "暂按现场检查结果确认"},
+    )
+    assert confirmed.status_code == 200, confirmed.get_json()
+    target_headers = _login_headers(client, flow["upstream_usernames"][0])
+    appeal = client.post(
+        f"/api/process-quality-evaluations/{created['id']}/appeals",
+        headers=target_headers,
+        json={"reason": "复核记录显示问题在后续搬运中产生"},
+    )
+    reviewed = client.put(
+        f"/api/process-quality-evaluations/appeals/{appeal.get_json()['id']}/review",
+        headers=auth_headers,
+        json={"status": "accepted", "note": "申诉证据完整，确认不归责上道工序"},
+    )
+
+    assert reviewed.status_code == 200, reviewed.get_json()
+    with client.application.app_context():
+        quality_task = get_db().execute(
+            "SELECT status, cancel_reason FROM quality_inspection_tasks "
+            "WHERE source_evaluation_id = ?",
+            (created["id"],),
+        ).fetchone()
+    assert quality_task["status"] == "cancelled"
+    assert "申诉成立" in quality_task["cancel_reason"]

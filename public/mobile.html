@@ -11,7 +11,7 @@
   <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/css/mobile.css?v=10">
+<link rel="stylesheet" href="/css/mobile.css?v=12">
 </head>
 <body>
 
@@ -114,9 +114,10 @@
   </div>
   <div class="quality-body">
     <div class="quality-intro">
-      <strong>全流程上游工序评价</strong>
-      <span>直接上一道工序为必评，其他已完成上游工序为选评。低分需说明问题并进入质量核验。</span>
+      <strong>工序接手质量评价</strong>
+      <span>直接上一道工序必评，历史工序选评。提交前隐藏人员身份，低分先核验再进入绩效。</span>
     </div>
+    <div id="quality-view-switch" class="quality-view-switch"><button data-quality-view="tasks" class="active">待评价</button><button data-quality-view="mine">我的评价/申诉</button></div>
     <div id="quality-task-list" class="quality-task-list">
       <div class="quality-empty">正在加载评价任务...</div>
     </div>
@@ -142,13 +143,13 @@
 </div>
 
 <!-- Shared API helper -->
-  <script src="/js/mobile/mobile-api.js?v=4"></script>
+  <script src="/js/mobile/mobile-api.js?v=5"></script>
   <script src="/js/mobile/mobile-utils.js?v=28"></script>
 <script src="/js/mobile/mobile-auth.js?v=28"></script>
 <script src="/js/mobile/mobile-scan.js?v=26"></script>
-<script src="/js/mobile/mobile-order.js?v=35"></script>
-<script src="/js/mobile/mobile-quality-evaluation.js?v=1"></script>
-<script src="/js/mobile/mobile-init.js?v=30"></script>
+<script src="/js/mobile/mobile-order.js?v=36"></script>
+<script src="/js/mobile/mobile-quality-evaluation.js?v=3"></script>
+<script src="/js/mobile/mobile-init.js?v=31"></script>
 
 
 

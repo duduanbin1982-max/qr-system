@@ -69,7 +69,9 @@
   _el = document.getElementById('quality-back');
   if (_el) _el.addEventListener('click', goMain);
   _el = document.getElementById('quality-refresh');
-  if (_el) _el.addEventListener('click', loadQualityEvaluationTasks);
+  if (_el) _el.addEventListener('click', function() { switchQualityView(qualityViewMode); });
+  _el = document.getElementById('quality-view-switch');
+  if (_el) _el.addEventListener('click', handleQualityTaskClick);
   _el = document.getElementById('quality-task-list');
   if (_el) {
     _el.addEventListener('click', handleQualityTaskClick);

@@ -43,6 +43,7 @@ class WorkReportWriter:
                     command.order_id,
                     current_op,
                     command.quantity,
+                    command.user_id,
                     db,
                 )
                 WorkReportWriter._write_normal_report(
@@ -103,7 +104,10 @@ class WorkReportWriter:
         return current_op
 
     @staticmethod
-    def _check_normal_limits(helper, order_id, current_op, quantity, db):
+    def _check_normal_limits(helper, order_id, current_op, quantity, user_id, db):
+        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+
+        ProcessQualityEvaluationService.assert_required_tasks_completed(user_id, db)
         err, code = helper.check_process_order(
             order_id,
             current_op.get("seq_order", 0),
@@ -159,7 +163,9 @@ class WorkReportWriter:
     def apply_approved_normal_report(command, db, work_record_id=None):
         from modules.services.scan_helper_service import ScanHelperService
         from modules.services.quality_management_service import QualityManagementService
+        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
+        ProcessQualityEvaluationService.assert_required_tasks_completed(command.user_id, db)
         QualityManagementService.assert_report_allowed(command.order_id, command.process_id, db=db)
 
         WorkReportWriter._apply_approved_normal_effects(
@@ -182,8 +188,6 @@ class WorkReportWriter:
                 command.serial_no,
                 db,
             )
-        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
-
         ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
         QualityManagementService.generate_for_report(
             command.order_id,

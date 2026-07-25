@@ -200,4 +200,12 @@ function showReportSuccess(body, response) {
       ? '<div class="success-quality-tip">待处理质量评价：' + response.quality_evaluation_pending_count + ' 条</div>'
       : '');
   show('ok');
+  if ((response.quality_evaluation_pending_count || 0) > 0 && response.quality_evaluation_auto_open !== false) {
+    var doneButton = document.querySelector('.btn-done');
+    if (doneButton) doneButton.textContent = '立即完成质量评价';
+    setTimeout(function() {
+      openQualityEvaluationCenter();
+      if (doneButton) doneButton.textContent = '继续扫码';
+    }, 900);
+  }
 }

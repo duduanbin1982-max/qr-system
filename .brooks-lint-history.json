@@ -284,5 +284,16 @@
       "suggestion": 0
     },
     "scope": "192.168.1.8:/home/dubin/qr-system remediation worktree over HEAD 98fa4cc; 209 backend modules, 262 backend tests, 5 frontend unit tests, 9 critical browser workflows, 0 import cycles"
+  },
+  {
+    "date": "2026-07-26T00:10:00+08:00",
+    "mode": "PR Review",
+    "score": 39,
+    "findings": {
+      "critical": 2,
+      "warning": 6,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system worktree over HEAD 4827949; 21 changed files for Process Quality Evaluation B plus adjacent quality-gate, performance, and browser-contract paths; 285 backend tests, 5 frontend unit tests, build, and 10 browser workflows"
   }
 ]

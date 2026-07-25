@@ -363,7 +363,8 @@ class QualityManagementService:
         standard = dict(standard_row) if standard_row else {}
         plan = {
             "id": None, "standard_id": standard.get("id"), "standard_version": standard.get("version", 1),
-            "inspection_type": "quality_verification", "trigger_type": "low_evaluation", "gate_mode": "soft",
+            "inspection_type": "quality_verification", "trigger_type": "low_evaluation",
+            "gate_mode": "hard" if evaluation.get("severity") == "critical" else "soft",
             "sampling_mode": "fixed", "sample_value": max(cls._positive_int(evaluation.get("quantity"), 1), 1),
             "due_minutes": 120,
         }
@@ -934,10 +935,23 @@ class QualityManagementService:
         return QualityManagementRepository.analytics(date_from=date_from, date_to=date_to)
 
     @staticmethod
+    def cancel_tasks_for_evaluation(evaluation_id, reason, db):
+        return QualityManagementRepository.cancel_tasks_for_evaluation(
+            evaluation_id, reason, db
+        )
+
+    @staticmethod
     def assert_report_allowed(order_id, process_id, db=None):
         gate = QualityManagementRepository.hard_report_gate(order_id, process_id, db)
         if gate:
-            raise ConflictError(f"首件检验任务 {gate['task_no']} 尚未放行，当前工序不能继续批量报工")
+            task_name = (
+                "首件检验"
+                if gate["inspection_type"] == "first_article"
+                else "工序质量核验"
+            )
+            raise ConflictError(
+                f"{task_name}任务 {gate['task_no']} 尚未放行，当前工序不能继续报工"
+            )
 
     @staticmethod
     def assert_completion_allowed(order_id, db=None):

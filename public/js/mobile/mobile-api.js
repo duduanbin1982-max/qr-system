@@ -81,7 +81,11 @@ var api = {
   mobileScan: function(data) { return apiRequest("POST", "/mobile/scan", data); },
   mobileReport: function(data) { return apiRequest("POST", "/mobile/report", data); },
   qualityEvaluationTasks: function(params) { return apiRequest("GET", "/process-quality-evaluations/tasks" + buildMobileQuery(params)); },
+  skipQualityEvaluationTask: function(id, data) { return apiRequest("POST", "/process-quality-evaluations/tasks/" + id + "/skip", data); },
   submitQualityEvaluations: function(data) { return apiRequest("POST", "/process-quality-evaluations", data); },
+  myQualityEvaluations: function(params) { return apiRequest("GET", "/process-quality-evaluations/mine" + buildMobileQuery(params)); },
+  createQualityEvaluationAppeal: function(id, data) { return apiRequest("POST", "/process-quality-evaluations/" + id + "/appeals", data); },
+  myQualityEvaluationAppeals: function(params) { return apiRequest("GET", "/process-quality-evaluations/appeals" + buildMobileQuery(params)); },
   qualityEvaluationRules: function() { return apiRequest("GET", "/process-quality-evaluations/rules"); },
   report: function(data) { return apiRequest("POST", "/report", data); },
 

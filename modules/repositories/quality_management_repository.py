@@ -464,12 +464,24 @@ class QualityManagementRepository:
         )
 
     @staticmethod
+    def cancel_tasks_for_evaluation(evaluation_id, reason, db):
+        return db.execute(
+            "UPDATE quality_inspection_tasks SET status='cancelled', cancel_reason=?, "
+            "cancelled_at=datetime('now','localtime'), "
+            "completed_at=COALESCE(NULLIF(completed_at,''),datetime('now','localtime')), "
+            "updated_at=datetime('now','localtime') WHERE source_evaluation_id=? "
+            "AND status IN ('pending','in_progress','failed')",
+            (reason, evaluation_id),
+        ).rowcount
+
+    @staticmethod
     def hard_report_gate(order_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
             "SELECT task.task_no, task.status, task.inspection_type, task.due_at "
             "FROM quality_inspection_tasks task WHERE task.order_id=? AND task.process_id=? "
-            "AND task.inspection_type='first_article' AND task.gate_mode='hard' "
+            "AND task.inspection_type IN ('first_article','quality_verification') "
+            "AND task.gate_mode='hard' "
             "AND task.status IN ('pending','in_progress','failed') ORDER BY task.id DESC LIMIT 1",
             (order_id, process_id),
         ).fetchone()

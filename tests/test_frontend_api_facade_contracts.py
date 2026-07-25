@@ -25,3 +25,11 @@ def test_frontend_build_runs_api_facade_gate_first():
 
     assert root_package["scripts"]["build"].startswith("npm run check:api &&")
     assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
+
+
+def test_process_quality_page_only_loads_stats_with_permission():
+    page = (
+        PROJECT_ROOT / "frontend" / "src" / "views" / "ProcessQualityEvaluationPage.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "if (can('process_quality_evaluation:stats')) await loadStats()" in page

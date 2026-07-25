@@ -31,6 +31,8 @@ def test_run_migrations_uses_supplied_connection():
         assert "process_quality_evaluation_tasks" in table_names
         assert "process_quality_evaluations" in table_names
         assert "process_quality_evaluation_reviews" in table_names
+        assert "process_quality_evaluation_templates" in table_names
+        assert "process_quality_evaluation_appeals" in table_names
         assert "quality_standards" in table_names
         assert "quality_inspection_plans" in table_names
         assert "quality_inspection_tasks" in table_names
@@ -51,7 +53,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 36)]
+    assert versions == [1, *range(13, 38)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
@@ -143,8 +145,8 @@ def test_database_at_version_29_runs_all_pending_migrations():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 6
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
+        assert migrations.run_migrations(db) == 8
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 37
         index_names = {
             row["name"]
             for row in db.execute(
@@ -153,6 +155,92 @@ def test_database_at_version_29_runs_all_pending_migrations():
         }
         assert "idx_wt_records_route_process" in index_names
         assert "idx_wt_records_standard_missing" in index_names
+    finally:
+        db.close()
+
+
+def test_process_quality_remediation_migration_repairs_invariants():
+    from modules.migration_process_quality import m037_process_quality_review_remediation
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE process_quality_evaluations (
+                id INTEGER PRIMARY KEY,
+                total_score REAL,
+                issue_tags_json TEXT,
+                template_snapshot_json TEXT,
+                severity TEXT,
+                status TEXT
+            );
+            CREATE TABLE quality_inspection_tasks (
+                id INTEGER PRIMARY KEY,
+                source_evaluation_id INTEGER,
+                status TEXT,
+                completed_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
+            );
+            CREATE TABLE process_quality_evaluation_templates (
+                id INTEGER PRIMARY KEY,
+                process_id INTEGER,
+                route_id INTEGER,
+                status TEXT,
+                updated_at TEXT DEFAULT ''
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO system_settings VALUES (?, ?)",
+            (
+                "process_quality_evaluation_rules",
+                '{"low_score_threshold":60,"critical_score_threshold":40}',
+            ),
+        )
+        db.execute(
+            "INSERT INTO process_quality_evaluations VALUES (1, 75, ?, ?, 'normal', 'rejected')",
+            ('["严重尺寸超差"]', '{"critical_issue_tags":["严重尺寸超差"]}'),
+        )
+        db.execute(
+            "INSERT INTO quality_inspection_tasks "
+            "(id, source_evaluation_id, status) VALUES (1, 1, 'failed')"
+        )
+        db.executemany(
+            "INSERT INTO process_quality_evaluation_templates "
+            "(id, process_id, route_id, status) VALUES (?, 10, NULL, 'active')",
+            [(1,), (2,)],
+        )
+
+        m037_process_quality_review_remediation(db)
+        m037_process_quality_review_remediation(db)
+
+        evaluation = db.execute(
+            "SELECT severity FROM process_quality_evaluations WHERE id = 1"
+        ).fetchone()
+        task = db.execute(
+            "SELECT status, cancel_reason, cancelled_at FROM quality_inspection_tasks WHERE id = 1"
+        ).fetchone()
+        templates = db.execute(
+            "SELECT id, status FROM process_quality_evaluation_templates ORDER BY id"
+        ).fetchall()
+        indexes = {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+        assert evaluation["severity"] == "critical"
+        assert task["status"] == "cancelled"
+        assert task["cancel_reason"] == "关联评价已被驳回"
+        assert task["cancelled_at"]
+        assert [(row["id"], row["status"]) for row in templates] == [
+            (1, "inactive"),
+            (2, "active"),
+        ]
+        assert "idx_pqe_templates_active_general" in indexes
+        assert "idx_pqe_templates_active_route" in indexes
     finally:
         db.close()
 
