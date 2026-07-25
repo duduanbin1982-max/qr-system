@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "check:api": "node frontend/scripts/check-api-facade.mjs",
+    "check:imports": "node frontend/scripts/check-import-cycles.mjs",
+    "check:architecture": "npm run check:api && npm run check:imports",
     "test:unit": "vitest run --config vitest.config.js",
     "test:unit:coverage": "vitest run --config vitest.config.js --coverage",
     "test:e2e": "npm run build && bash scripts/run-playwright.sh",
     "test:frontend": "npm run test:unit && npm run test:e2e",
-    "build": "npm run check:api && vite build",
+    "build": "npm run check:api && npm run check:imports && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {

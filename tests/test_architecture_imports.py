@@ -255,6 +255,42 @@ def test_services_do_not_depend_on_migrations():
     assert violations == [], f"services must not depend on schema migrations: {violations}"
 
 
+def test_performance_uses_authoritative_quality_evaluation_source():
+    performance_paths = (
+        PROJECT_ROOT / "modules" / "services" / "performance_service.py",
+        PROJECT_ROOT / "modules" / "services" / "performance_scoring_policy.py",
+        PROJECT_ROOT / "modules" / "repositories" / "performance_repository.py",
+    )
+    forbidden_modules = {
+        "modules.services.handoff_review_service",
+        "modules.repositories.handoff_review_repository",
+    }
+    violations = []
+    for path in performance_paths:
+        source = path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+        if "process_handoff_reviews" in source:
+            violations.append(f"{path.relative_to(PROJECT_ROOT).as_posix()} -> legacy table")
+        for node in ast.walk(tree):
+            imported_modules = []
+            if isinstance(node, ast.Import):
+                imported_modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.append(node.module)
+            for module_name in imported_modules:
+                if module_name in forbidden_modules:
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno} -> {module_name}"
+                    )
+
+    performance_source = performance_paths[0].read_text(encoding="utf-8", errors="replace")
+    assert "ProcessQualityEvaluationService.monthly_metrics" in performance_source
+    assert violations == [], (
+        "performance scoring must use process_quality_evaluations as its authoritative source: "
+        f"{violations}"
+    )
+
+
 def test_services_do_not_embed_sql_statements():
     sql_pattern = re.compile(
         r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",

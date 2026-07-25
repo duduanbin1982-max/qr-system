@@ -31,6 +31,7 @@ CONTRACT_TEST_FILES = {
     "test_frontend_api_facade_contracts.py",
     "test_mobile_frontend_contracts.py",
     "test_permission_catalog_contracts.py",
+    "test_quality_cutover_contracts.py",
     "test_reports_contracts.py",
     "test_stats_contracts.py",
     "test_work_time_source_contracts.py",
