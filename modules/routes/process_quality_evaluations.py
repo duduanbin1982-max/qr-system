@@ -50,6 +50,17 @@ def process_quality_task_disposal_summary():
     ))
 
 
+@app.route("/api/process-quality-evaluations/tasks/audits", methods=["GET"])
+@check_auth
+@check_permission("process_quality_evaluation:waive")
+def process_quality_task_audits():
+    return jsonify(ProcessQualityEvaluationService.task_audits(
+        keyword=request.args.get("keyword", "").strip(),
+        page=request.args.get("page", 1, type=int),
+        per_page=min(request.args.get("per_page", 100, type=int), 500),
+    ))
+
+
 @app.route("/api/process-quality-evaluations/tasks/waive", methods=["POST"])
 @check_auth
 @check_permission("process_quality_evaluation:waive")

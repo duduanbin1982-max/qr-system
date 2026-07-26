@@ -309,13 +309,69 @@ class ProcessQualityEvaluationRepository:
             [reason_code, reason, operator_user_id, *task_ids],
         )
         if cursor.rowcount:
-            db.executemany(
-                "INSERT INTO process_quality_evaluation_task_audits "
-                "(task_id, action, operator_user_id, reason_code, reason) "
-                "VALUES (?, 'waived', ?, ?, ?)",
-                [(task_id, operator_user_id, reason_code, reason) for task_id in task_ids],
-            )
+            for task_id in task_ids:
+                audit_cursor = db.execute(
+                    "INSERT INTO process_quality_evaluation_task_audits ("
+                    "task_id, action, operator_user_id, operator_name, reason_code, reason, "
+                    "order_id, order_no, order_status, order_deleted_at, product_code, product_name, "
+                    "serial_no, target_process_id, target_process_name, evaluator_process_id, "
+                    "evaluator_process_name, target_user_id, target_user_name, evaluator_user_id, "
+                    "evaluator_name, is_required, task_status, task_created_at) "
+                    "SELECT task.id, 'waived', ?, COALESCE(operator.name, ''), ?, ?, "
+                    "task.order_id, orders.order_no, orders.status, COALESCE(orders.deleted_at, ''), "
+                    "orders.product_code, orders.product_name, task.serial_no, task.target_process_id, "
+                    "target_process.name, task.evaluator_process_id, evaluator_process.name, "
+                    "task.target_user_id, COALESCE(target_user.name, ''), task.evaluator_user_id, "
+                    "evaluator.name, task.is_required, task.status, task.created_at "
+                    "FROM process_quality_evaluation_tasks task "
+                    "JOIN orders ON orders.id = task.order_id "
+                    "JOIN processes target_process ON target_process.id = task.target_process_id "
+                    "JOIN processes evaluator_process ON evaluator_process.id = task.evaluator_process_id "
+                    "JOIN users evaluator ON evaluator.id = task.evaluator_user_id "
+                    "LEFT JOIN users target_user ON target_user.id = task.target_user_id "
+                    "LEFT JOIN users operator ON operator.id = ? WHERE task.id = ?",
+                    (operator_user_id, reason_code, reason, operator_user_id, task_id),
+                )
+                if audit_cursor.rowcount != 1:
+                    raise RuntimeError("评价任务豁免审计快照写入失败")
         return cursor.rowcount
+
+    @staticmethod
+    def list_task_audits(keyword="", page=1, per_page=100, db=None):
+        db = resolve_db(db)
+        where = "1=1"
+        params = []
+        if keyword:
+            where = (
+                "(order_no LIKE ? OR product_name LIKE ? OR product_code LIKE ? OR "
+                "serial_no LIKE ? OR target_process_name LIKE ? OR evaluator_name LIKE ?)"
+            )
+            value = f"%{keyword}%"
+            params = [value, value, value, value, value, value]
+        total = db.execute(
+            "SELECT COUNT(*) FROM process_quality_evaluation_task_audits WHERE " + where,
+            params,
+        ).fetchone()[0]
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            "SELECT audit.*, 1 AS audit_record, audit.reason AS waiver_reason, "
+            "audit.reason_code AS waiver_reason_code, audit.operator_name AS waived_by_name, "
+            "audit.created_at AS waived_at, 'audit' AS status "
+            "FROM process_quality_evaluation_task_audits audit WHERE " + where +
+            " ORDER BY audit.created_at DESC, audit.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset],
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["created_at"] = item.get("task_created_at") or item["created_at"]
+            items.append(item)
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
 
     @staticmethod
     def list_evaluations(year_month="", status="", process_id=None, user_id=None, keyword="", page=1, per_page=100, db=None):

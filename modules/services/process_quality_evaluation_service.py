@@ -351,6 +351,12 @@ class ProcessQualityEvaluationService:
         return summary
 
     @staticmethod
+    def task_audits(keyword="", page=1, per_page=100):
+        return ProcessQualityEvaluationRepository.list_task_audits(
+            keyword=keyword, page=page, per_page=per_page
+        )
+
+    @staticmethod
     def _task_ids(value):
         if not isinstance(value, list):
             return []

@@ -414,6 +414,81 @@ def m040_harden_process_quality_task_waivers(db):
     db.commit()
 
 
+def m041_preserve_process_quality_waiver_audits(db):
+    db.execute(
+        "ALTER TABLE process_quality_evaluation_task_audits "
+        "RENAME TO process_quality_evaluation_task_audits_legacy"
+    )
+    db.execute("""
+        CREATE TABLE process_quality_evaluation_task_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            operator_user_id INTEGER,
+            operator_name TEXT DEFAULT '',
+            reason_code TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            order_id INTEGER,
+            order_no TEXT DEFAULT '',
+            order_status TEXT DEFAULT '',
+            order_deleted_at TEXT DEFAULT '',
+            product_code TEXT DEFAULT '',
+            product_name TEXT DEFAULT '',
+            serial_no TEXT DEFAULT '',
+            target_process_id INTEGER,
+            target_process_name TEXT DEFAULT '',
+            evaluator_process_id INTEGER,
+            evaluator_process_name TEXT DEFAULT '',
+            target_user_id INTEGER,
+            target_user_name TEXT DEFAULT '',
+            evaluator_user_id INTEGER,
+            evaluator_name TEXT DEFAULT '',
+            is_required INTEGER DEFAULT 0,
+            task_status TEXT DEFAULT '',
+            task_created_at TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    db.execute("""
+        INSERT INTO process_quality_evaluation_task_audits (
+            id, task_id, action, operator_user_id, operator_name, reason_code, reason,
+            order_id, order_no, order_status, order_deleted_at, product_code, product_name,
+            serial_no, target_process_id, target_process_name, evaluator_process_id,
+            evaluator_process_name, target_user_id, target_user_name, evaluator_user_id,
+            evaluator_name, is_required, task_status, task_created_at, created_at
+        )
+        SELECT audit.id, audit.task_id, audit.action, audit.operator_user_id,
+            COALESCE(operator.name, ''),
+            COALESCE(NULLIF(audit.reason_code, ''), 'legacy_unclassified'), audit.reason,
+            task.order_id, COALESCE(orders.order_no, ''), COALESCE(orders.status, ''),
+            COALESCE(orders.deleted_at, ''), COALESCE(orders.product_code, ''),
+            COALESCE(orders.product_name, ''), COALESCE(task.serial_no, ''),
+            task.target_process_id, COALESCE(target_process.name, ''),
+            task.evaluator_process_id, COALESCE(evaluator_process.name, ''),
+            task.target_user_id, COALESCE(target_user.name, ''), task.evaluator_user_id,
+            COALESCE(evaluator.name, ''), COALESCE(task.is_required, 0),
+            COALESCE(task.status, ''), COALESCE(task.created_at, ''), audit.created_at
+        FROM process_quality_evaluation_task_audits_legacy audit
+        LEFT JOIN process_quality_evaluation_tasks task ON task.id = audit.task_id
+        LEFT JOIN orders ON orders.id = task.order_id
+        LEFT JOIN processes target_process ON target_process.id = task.target_process_id
+        LEFT JOIN processes evaluator_process ON evaluator_process.id = task.evaluator_process_id
+        LEFT JOIN users target_user ON target_user.id = task.target_user_id
+        LEFT JOIN users evaluator ON evaluator.id = task.evaluator_user_id
+        LEFT JOIN users operator ON operator.id = audit.operator_user_id
+    """)
+    db.execute("DROP TABLE process_quality_evaluation_task_audits_legacy")
+    db.execute(
+        "CREATE INDEX idx_pqe_task_audits_task "
+        "ON process_quality_evaluation_task_audits(task_id, created_at)"
+    )
+    db.execute(
+        "CREATE INDEX idx_pqe_task_audits_order "
+        "ON process_quality_evaluation_task_audits(order_id, created_at)"
+    )
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
     (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
@@ -421,4 +496,5 @@ MIGRATIONS = [
     (38, "Converge legacy handoff review status", m038_converge_legacy_handoff_status),
     (39, "Add auditable process quality task waivers", m039_process_quality_task_waivers),
     (40, "Harden process quality task waiver policy", m040_harden_process_quality_task_waivers),
+    (41, "Preserve process quality waiver audit snapshots", m041_preserve_process_quality_waiver_audits),
 ]

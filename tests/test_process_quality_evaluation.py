@@ -474,6 +474,33 @@ def test_quality_inspector_can_waive_historical_but_not_live_tasks(client, worke
     assert historical_waived.status_code == 200, historical_waived.get_json()
     assert historical_waived.get_json()["waiver_scope"] == "historical"
 
+    with client.application.app_context():
+        db = get_db()
+        db.execute("DELETE FROM orders WHERE id = ?", (flow["order_id"],))
+        db.commit()
+        assert db.execute(
+            "SELECT id FROM process_quality_evaluation_tasks WHERE id = ?", (task["id"],)
+        ).fetchone() is None
+        audit = db.execute(
+            "SELECT * FROM process_quality_evaluation_task_audits WHERE task_id = ?",
+            (task["id"],),
+        ).fetchone()
+        assert audit["order_no"] == flow["order_no"]
+        assert audit["target_process_name"]
+        assert audit["evaluator_name"] == "Test Worker"
+        assert audit["operator_name"] == "评价任务质检员"
+        assert audit["reason_code"] == "completed_order_history"
+
+    audit_response = client.get(
+        f"/api/process-quality-evaluations/tasks/audits?keyword={flow['order_no']}",
+        headers=qc_headers,
+    )
+    assert audit_response.status_code == 200, audit_response.get_json()
+    audit_item = audit_response.get_json()["items"][0]
+    assert audit_item["audit_record"] == 1
+    assert audit_item["order_no"] == flow["order_no"]
+    assert audit_item["waiver_reason_code"] == "completed_order_history"
+
 
 def test_process_template_drives_dynamic_weighted_dimensions(client, auth_headers, worker_auth_headers):
     flow = _seed_serial_flow(client)
