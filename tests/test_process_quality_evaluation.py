@@ -474,6 +474,16 @@ def test_quality_inspector_can_waive_historical_but_not_live_tasks(client, worke
     assert historical_waived.status_code == 200, historical_waived.get_json()
     assert historical_waived.get_json()["waiver_scope"] == "historical"
 
+    stale_submission = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"]),
+    )
+    assert stale_submission.status_code == 409, stale_submission.get_json()
+    assert stale_submission.get_json()["code"] == "quality_evaluation_task_stale"
+    assert stale_submission.get_json()["action"] == "refresh_quality_evaluation"
+    assert stale_submission.get_json()["details"]["task_status"] == "waived"
+
     with client.application.app_context():
         db = get_db()
         db.execute("DELETE FROM orders WHERE id = ?", (flow["order_id"],))

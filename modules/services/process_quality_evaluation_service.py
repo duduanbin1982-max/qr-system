@@ -3,7 +3,11 @@
 import json
 import re
 
-from modules.domain.errors import ConflictError, RequiredQualityEvaluationError
+from modules.domain.errors import (
+    ConflictError,
+    RequiredQualityEvaluationError,
+    StaleQualityEvaluationTaskError,
+)
 from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
 from modules.repositories.setting_repository import SettingRepository
@@ -470,12 +474,20 @@ class ProcessQualityEvaluationService:
             raise ValueError("评价任务不存在")
         if int(task["evaluator_user_id"]) != int(current_user.get("id") or 0):
             raise ValueError("只能处理分配给当前操作员的评价任务")
+        if task["status"] != "pending":
+            raise StaleQualityEvaluationTaskError(
+                "该评价任务已由其他人员处理，请刷新任务列表",
+                details={"task_id": task_id, "task_status": task["status"]},
+            )
         if task["is_required"]:
             raise ValueError("直接上一道工序为必评，不能跳过")
         reason = str(data.get("reason") or "历史工序选评跳过").strip()
         with BaseService.transaction() as db:
             if not ProcessQualityEvaluationRepository.skip_task(task_id, reason, db):
-                raise ValueError("该评价任务已处理")
+                raise StaleQualityEvaluationTaskError(
+                    "该评价任务已由其他人员处理，请刷新任务列表",
+                    details={"task_id": task_id},
+                )
         return {"ok": True, "status": "skipped"}
 
     @classmethod
@@ -530,7 +542,10 @@ class ProcessQualityEvaluationService:
                 if int(task["evaluator_user_id"]) != int(user_id):
                     raise ValueError("只能提交分配给当前操作员的评价")
                 if task["status"] != "pending":
-                    raise ValueError("该评价任务已完成")
+                    raise StaleQualityEvaluationTaskError(
+                        "该评价任务已由其他人员处理，请刷新任务列表",
+                        details={"task_id": task["id"], "task_status": task["status"]},
+                    )
                 template_snapshot = task.get("template_snapshot") or cls._default_template(rules)
                 dimension_scores, legacy_dimensions, total_score = cls._evaluate_dimensions(
                     entry, template_snapshot

@@ -79,6 +79,9 @@ def prepare_database():
         worker_id = ensure_user(
             db, "e2eworker", TEST_HASH, "E2E Current Worker", "worker", "E2E-WORKER-001", "worker-group"
         )
+        race_worker_id = ensure_user(
+            db, "e2eraceworker", TEST_HASH, "E2E Race Worker", "worker", "E2E-WORKER-003", "worker-group"
+        )
         previous_worker_id = ensure_user(
             db, "e2eprevious", TEST_HASH, "E2E Previous Worker", "worker", "E2E-WORKER-002", "worker-group"
         )
@@ -122,6 +125,10 @@ def prepare_database():
             db.execute(
                 "INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?, ?)",
                 (worker_id, process_id),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO user_processes (user_id, process_id) VALUES (?, ?)",
+                (race_worker_id, process_id),
             )
 
         insert_order(db, "E2E-ORDER-001", process_ids, route_id=route_id)
@@ -171,7 +178,54 @@ def prepare_database():
             (process_ids[2],),
         )
 
+        race_handoff_order_id = insert_order(
+            db, "E2E-HANDOFF-RACE-ORDER", process_ids, qr_mode="serial", route_id=route_id
+        )
+        insert_serial(
+            db,
+            race_handoff_order_id,
+            "E2E-HANDOFF-RACE-ORDER",
+            "E2E-HANDOFF-RACE-001",
+            process_ids[1],
+        )
+        db.execute(
+            "INSERT INTO work_records "
+            "(order_id, process_id, user_id, type, quantity, serial_no, status, created_at) "
+            "VALUES (?, ?, ?, 'normal', 1, 'E2E-HANDOFF-RACE-001', 'approved', datetime('now','localtime'))",
+            (race_handoff_order_id, process_ids[0], previous_worker_id),
+        )
+        db.execute(
+            "UPDATE order_processes SET status = 'completed', completed = 1 "
+            "WHERE order_id = ? AND process_id = ?",
+            (race_handoff_order_id, process_ids[1]),
+        )
+        race_trigger_work_record_id = db.execute(
+            "INSERT INTO work_records "
+            "(order_id, process_id, user_id, type, quantity, serial_no, status, created_at) "
+            "VALUES (?, ?, ?, 'normal', 1, 'E2E-HANDOFF-RACE-001', 'approved', datetime('now','localtime'))",
+            (race_handoff_order_id, process_ids[1], race_worker_id),
+        ).lastrowid
+        ProcessQualityEvaluationService.generate_tasks(
+            WorkReportCommand(
+                report_type="normal",
+                order_id=race_handoff_order_id,
+                process_id=process_ids[1],
+                user_id=race_worker_id,
+                user_name="E2E Race Worker",
+                quantity=1,
+                serial_no="E2E-HANDOFF-RACE-001",
+            ),
+            race_trigger_work_record_id,
+            db,
+        )
+        db.execute(
+            "UPDATE product_items SET current_process_id = ? "
+            "WHERE serial_no = 'E2E-HANDOFF-RACE-001'",
+            (process_ids[2],),
+        )
+
         insert_order(db, "E2E-QUALITY-GATE-ORDER", [process_ids[1]])
+        insert_order(db, "E2E-QUALITY-RACE-GATE-ORDER", [process_ids[1]])
 
         completed_order_id = insert_order(
             db, "E2E-COMPLETE-ORDER", [process_ids[0]], status="completed", qr_mode="serial", route_id=route_id

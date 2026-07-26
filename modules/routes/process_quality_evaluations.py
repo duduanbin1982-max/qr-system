@@ -2,6 +2,7 @@
 
 from flask import g, jsonify, request
 
+from modules.domain.errors import DomainError
 from modules.route_decorators import app, check_auth, check_permission, has_permission, safe_audit_log
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
@@ -94,6 +95,8 @@ def process_quality_task_skip(task_id):
         )
         safe_audit_log("process_quality_evaluation_skip", "process_quality_evaluation_task", task_id, "skipped")
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -106,6 +109,8 @@ def process_quality_submit():
         result = ProcessQualityEvaluationService.submit(request.get_json() or {}, g.current_user)
         safe_audit_log("process_quality_evaluation_submit", "process_quality_evaluation", 0, str(len(result["items"])))
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

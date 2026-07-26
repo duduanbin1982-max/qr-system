@@ -33,3 +33,12 @@ class ConflictError(DomainError):
 
 class RequiredQualityEvaluationError(ConflictError):
     code = "quality_evaluation_required"
+
+
+class StaleQualityEvaluationTaskError(ConflictError):
+    code = "quality_evaluation_task_stale"
+
+    def to_payload(self):
+        payload = super().to_payload()
+        payload["action"] = "refresh_quality_evaluation"
+        return payload

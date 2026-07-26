@@ -2,7 +2,7 @@
 
 var qualityRules = { low_score_threshold: 60, critical_score_threshold: 40, issue_tags: [], critical_issue_tags: [] };
 var qualityViewMode = 'tasks';
-var qualityNavigation = { returnTo: 'main', reportDraft: null };
+var qualityNavigation = { returnTo: 'main', reportDraft: null, resumeNotice: '' };
 
 function updateQualityEvaluationIndicator(result) {
   var badge = $('quality-pending-badge');
@@ -35,7 +35,8 @@ function openQualityEvaluationCenter(options) {
   options = options && options.returnTo ? options : {};
   qualityNavigation = {
     returnTo: options.returnTo === 'order' ? 'order' : 'main',
-    reportDraft: options.reportDraft ? Object.assign({}, options.reportDraft) : null
+    reportDraft: options.reportDraft ? Object.assign({}, options.reportDraft) : null,
+    resumeNotice: ''
   };
   qualityViewMode = 'tasks';
   updateQualityViewButtons();
@@ -49,7 +50,7 @@ function openRequiredQualityEvaluation(reportDraft) {
 }
 
 function resetQualityNavigation() {
-  qualityNavigation = { returnTo: 'main', reportDraft: null };
+  qualityNavigation = { returnTo: 'main', reportDraft: null, resumeNotice: '' };
 }
 
 function restoreBlockedReport(draft) {
@@ -81,10 +82,18 @@ function resumeBlockedReportWhenReady(tasks) {
   var requiredTasks = tasks.filter(function(task) { return !!task.is_required; });
   if (requiredTasks.length) return false;
   var draft = qualityNavigation.reportDraft;
+  var notice = qualityNavigation.resumeNotice;
   resetQualityNavigation();
   restoreBlockedReport(draft);
-  toast('必评任务已完成，请确认后继续提交报工', 3200);
+  toast(notice || '必评任务已完成，请确认后继续提交报工', 3200);
   return true;
+}
+
+function recoverStaleQualityTask(error) {
+  var message = (error && error.message) || '评价任务已由其他人员处理，已刷新任务列表';
+  if (qualityNavigation.returnTo === 'order') qualityNavigation.resumeNotice = message;
+  toast(message, 3200);
+  loadQualityEvaluationTasks();
 }
 
 function switchQualityView(mode) {
@@ -262,6 +271,10 @@ function submitQualityTask(card, button) {
     if (qualityNavigation.returnTo === 'order' || !$('quality-task-list').querySelector('.quality-task')) loadQualityEvaluationTasks();
     else loadQualityEvaluationCount();
   }).catch(function(error) {
+    if (error && (error.domainCode === 'quality_evaluation_task_stale' || error.action === 'refresh_quality_evaluation')) {
+      recoverStaleQualityTask(error);
+      return;
+    }
     toast(error.message || '评价提交失败');
     button.disabled = false;
     button.textContent = '提交评价';
@@ -278,7 +291,14 @@ function skipQualityTask(card, button) {
       if (qualityNavigation.returnTo === 'order') loadQualityEvaluationTasks();
       else loadQualityEvaluationCount();
     })
-    .catch(function(error) { toast(error.message || '跳过失败'); button.disabled = false; });
+    .catch(function(error) {
+      if (error && (error.domainCode === 'quality_evaluation_task_stale' || error.action === 'refresh_quality_evaluation')) {
+        recoverStaleQualityTask(error);
+        return;
+      }
+      toast(error.message || '跳过失败');
+      button.disabled = false;
+    });
 }
 
 function renderMyQualityEvaluations(records, appeals) {

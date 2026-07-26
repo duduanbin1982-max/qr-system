@@ -20,9 +20,9 @@ export async function loginAdmin(page) {
   await expect(page.locator('.sidebar')).toBeVisible()
 }
 
-export async function loginWorkerMobile(page) {
+export async function loginWorkerMobile(page, username = 'e2eworker') {
   await page.goto('/mobile.html')
-  await page.locator('#inp-user').fill('e2eworker')
+  await page.locator('#inp-user').fill(username)
   await page.locator('#inp-pwd').fill(TEST_PASSWORD)
   await page.locator('#btn-login').click()
   await expect(page.locator('#s-main')).toHaveClass(/active/)

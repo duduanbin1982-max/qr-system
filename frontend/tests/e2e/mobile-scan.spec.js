@@ -44,6 +44,58 @@ test('blocked mobile report opens required evaluation and restores the report', 
   expect(failures).toEqual([])
 })
 
+test('mobile refreshes a task waived concurrently and restores the report', async ({ page, request }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginWorkerMobile(page, 'e2eraceworker')
+
+  await expect(page.locator('#quality-pending-badge')).toHaveText('1')
+  await page.evaluate(() => switchMode('manual'))
+  await openMobileCode(page, 'E2E-QUALITY-RACE-GATE-ORDER')
+  await page.locator('#btn-report').click()
+  await expect(page.locator('#s-quality-evaluation')).toHaveClass(/active/, { timeout: 10_000 })
+
+  const loginResponse = await request.post('/api/auth/login', {
+    data: { username: 'e2eadmin', password: 'Test@1234' },
+  })
+  expect(loginResponse.ok()).toBeTruthy()
+  const adminToken = (await loginResponse.json()).user.token
+  const taskResponse = await request.get(
+    '/api/process-quality-evaluations/tasks?scope=all&status=pending&keyword=E2E-HANDOFF-RACE-ORDER',
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  )
+  const task = (await taskResponse.json()).items[0]
+  expect(task).toBeTruthy()
+  const waiverResponse = await request.post('/api/process-quality-evaluations/tasks/waive', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: {
+      task_ids: [task.id],
+      reason_code: 'emergency_authorized_release',
+      reason: '浏览器并发恢复测试授权放行评价任务',
+    },
+  })
+  expect(waiverResponse.ok()).toBeTruthy()
+
+  const staleResponse = page.waitForResponse(response => (
+    response.url().endsWith('/api/process-quality-evaluations')
+      && response.request().method() === 'POST'
+      && response.status() === 409
+  ))
+  await page.locator('.quality-task button[data-action="submit"]').click()
+  expect((await (await staleResponse).json()).code).toBe('quality_evaluation_task_stale')
+  await expect(page.locator('#s-order')).toHaveClass(/active/, { timeout: 10_000 })
+  await expect(page.locator('.toast')).toContainText('其他人员处理')
+  await expect(page.locator('#rpt-qty')).toHaveValue('1')
+
+  const successfulReport = page.waitForResponse(response => (
+    response.url().endsWith('/api/mobile/report')
+      && response.request().method() === 'POST'
+      && response.status() === 200
+  ))
+  await page.locator('#btn-report').click()
+  await successfulReport
+  expect(failures).toEqual([])
+})
+
 test('mobile scan reports permission and completed-workpiece errors in Chinese', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginWorkerMobile(page)
