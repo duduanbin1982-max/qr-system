@@ -10,6 +10,9 @@ from modules.domain.errors import (
 )
 from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
+from modules.repositories.process_quality_evaluation_task_repository import (
+    ProcessQualityEvaluationTaskRepository,
+)
 from modules.repositories.setting_repository import SettingRepository
 from modules.services import BaseService
 from modules.services.legacy_handoff_adapter import LegacyHandoffAdapter
@@ -23,18 +26,6 @@ class ProcessQualityEvaluationService:
         ("process_continuity", "工序可接续性"),
         ("cleanliness_protection", "清洁及防护"),
     )
-    HISTORICAL_WAIVER_REASONS = (
-        ("completed_order_history", "已完成订单历史遗留"),
-        ("historical_import", "历史数据导入异常"),
-        ("worker_departed", "原评价人员已离职"),
-        ("no_actual_handoff", "现场确认未发生实际交接"),
-    )
-    LIVE_WAIVER_REASONS = (
-        ("task_generated_in_error", "评价任务错误生成"),
-        ("handoff_attribution_error", "工序交接归属错误"),
-        ("emergency_authorized_release", "紧急生产授权放行"),
-    )
-
     @classmethod
     def rules(cls, db=None):
         raw = SettingRepository.get_value("process_quality_evaluation_rules", "", db=db)
@@ -251,7 +242,7 @@ class ProcessQualityEvaluationService:
         rules = cls.rules(db)
         if not rules.get("enabled", True):
             return 0
-        upstream = ProcessQualityEvaluationRepository.upstream_processes(
+        upstream = ProcessQualityEvaluationTaskRepository.upstream_processes(
             command.order_id, command.process_id, db
         )
         if not upstream:
@@ -261,7 +252,7 @@ class ProcessQualityEvaluationService:
         is_serial = bool(command.serial_no)
         nearest_seq = upstream[0]["seq_order"]
         for process in upstream:
-            template_row = ProcessQualityEvaluationRepository.matching_template(
+            template_row = ProcessQualityEvaluationTaskRepository.matching_template(
                 process["route_id"], process["process_id"], db
             )
             template_snapshot = cls._template_snapshot(template_row, rules)
@@ -270,7 +261,7 @@ class ProcessQualityEvaluationService:
             quantity = command.effective_quantity
             attribution_type = "process"
             if is_serial:
-                work = ProcessQualityEvaluationRepository.serial_target_work(
+                work = ProcessQualityEvaluationTaskRepository.serial_target_work(
                     command.order_id, process["process_id"], command.serial_no, db
                 )
                 if not work:
@@ -280,7 +271,7 @@ class ProcessQualityEvaluationService:
                 quantity = work["quantity"] or 1
                 attribution_type = "worker"
             else:
-                contributors = ProcessQualityEvaluationRepository.order_target_contributors(
+                contributors = ProcessQualityEvaluationTaskRepository.order_target_contributors(
                     command.order_id, process["process_id"], db
                 )
                 if not contributors:
@@ -293,7 +284,7 @@ class ProcessQualityEvaluationService:
 
             if target_user_id and int(target_user_id) == int(command.user_id):
                 continue
-            created += ProcessQualityEvaluationRepository.insert_task({
+            created += ProcessQualityEvaluationTaskRepository.insert_task({
                 "trigger_work_record_id": trigger_work_record_id,
                 "order_id": command.order_id,
                 "serial_no": command.serial_no or "",
@@ -318,7 +309,7 @@ class ProcessQualityEvaluationService:
         cls, evaluator_user_id=None, status="pending", keyword="", page=1, per_page=100,
         include_target_identity=False,
     ):
-        result = ProcessQualityEvaluationRepository.list_tasks(
+        result = ProcessQualityEvaluationTaskRepository.list_tasks(
             evaluator_user_id, status, keyword, page, per_page
         )
         if cls.rules().get("hide_target_identity", True) and not include_target_identity:
@@ -330,181 +321,17 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def pending_count(cls, evaluator_user_id):
-        return ProcessQualityEvaluationRepository.pending_count(evaluator_user_id)
+        return ProcessQualityEvaluationTaskRepository.pending_count(evaluator_user_id)
 
     @classmethod
     def pending_required_count(cls, evaluator_user_id, db=None):
-        return ProcessQualityEvaluationRepository.pending_required_count(
+        return ProcessQualityEvaluationTaskRepository.pending_required_count(
             evaluator_user_id, db
         )
 
     @classmethod
-    def task_disposal_summary(cls, allow_live=False):
-        summary = ProcessQualityEvaluationRepository.task_disposal_summary()
-        summary["waiver_policy"] = {
-            "can_waive_live": bool(allow_live),
-            "historical_reasons": [
-                {"code": code, "label": label}
-                for code, label in cls.HISTORICAL_WAIVER_REASONS
-            ],
-            "live_reasons": [
-                {"code": code, "label": label}
-                for code, label in cls.LIVE_WAIVER_REASONS
-            ],
-        }
-        return summary
-
-    @staticmethod
-    def task_audits(keyword="", page=1, per_page=100):
-        return ProcessQualityEvaluationRepository.list_task_audits(
-            keyword=keyword, page=page, per_page=per_page
-        )
-
-    @staticmethod
-    def _task_ids(value):
-        if not isinstance(value, list):
-            return []
-        task_ids = []
-        for item in value:
-            try:
-                task_id = int(item)
-            except (TypeError, ValueError):
-                continue
-            if task_id > 0 and task_id not in task_ids:
-                task_ids.append(task_id)
-        return task_ids
-
-    @classmethod
-    def _resolve_waiver_tasks(cls, data, db):
-        task_ids = cls._task_ids(data.get("task_ids"))
-        order_id = data.get("order_id")
-        if order_id is not None:
-            try:
-                order_id = int(order_id)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("订单参数无效") from exc
-            if order_id <= 0:
-                raise ValueError("订单参数无效")
-        if not task_ids and order_id is None:
-            raise ValueError("请选择待处置的评价任务")
-        if task_ids and len(task_ids) > 200:
-            raise ValueError("单次最多豁免200条任务")
-        if order_id is not None and not task_ids:
-            task_ids = ProcessQualityEvaluationRepository.pending_task_ids_for_order(
-                order_id, bool(data.get("required_only", True)), db
-            )
-        if not task_ids:
-            raise ValueError("没有可豁免的待评价任务")
-        if len(task_ids) > 200:
-            raise ValueError("单次最多豁免200条任务")
-        pending_tasks = ProcessQualityEvaluationRepository.pending_tasks_by_ids(task_ids, db)
-        if len(pending_tasks) != len(task_ids):
-            raise ValueError("所选任务包含已处理或不存在的记录，请刷新后重试")
-        return task_ids, pending_tasks
-
-    @staticmethod
-    def _task_waiver_scope(task):
-        if task["order_deleted_at"] or task["order_status"] in {"completed", "cancelled"}:
-            return "historical"
-        return "live"
-
-    @classmethod
-    def waiver_preview(cls, data, allow_live=False):
-        with BaseService.transaction() as db:
-            task_ids, tasks = cls._resolve_waiver_tasks(data, db)
-
-        scopes = {cls._task_waiver_scope(task) for task in tasks}
-        has_mixed_scopes = len(scopes) > 1
-        waiver_scope = "mixed" if has_mixed_scopes else next(iter(scopes))
-        requires_live_permission = "live" in scopes
-        orders = {}
-        for task in tasks:
-            order = orders.setdefault(task["order_id"], {
-                "order_id": task["order_id"],
-                "order_no": task["order_no"],
-                "order_status": task["order_status"],
-                "waiver_scope": cls._task_waiver_scope(task),
-                "task_count": 0,
-                "required_count": 0,
-                "optional_count": 0,
-            })
-            order["task_count"] += 1
-            count_key = "required_count" if task["is_required"] else "optional_count"
-            order[count_key] += 1
-
-        warnings = []
-        if has_mixed_scopes:
-            warnings.append("生产中订单与历史订单不能混合豁免，请分开选择后再操作。")
-        if requires_live_permission:
-            warnings.append("包含生产中或待生产订单，提交后会立即解除对应员工的报工门禁。")
-        if requires_live_permission and not allow_live:
-            warnings.append("当前账号没有生产中订单豁免权限。")
-        required_count = sum(1 for task in tasks if task["is_required"])
-        if required_count:
-            warnings.append(f"本次将豁免 {required_count} 条必评任务，评价数据将永久缺失并保留审计记录。")
-
-        return {
-            "task_ids": task_ids,
-            "task_count": len(tasks),
-            "required_count": required_count,
-            "optional_count": len(tasks) - required_count,
-            "affected_worker_count": len({task["evaluator_user_id"] for task in tasks}),
-            "orders": sorted(orders.values(), key=lambda item: (item["order_no"], item["order_id"])),
-            "waiver_scope": waiver_scope,
-            "has_mixed_scopes": has_mixed_scopes,
-            "requires_live_permission": requires_live_permission,
-            "can_submit": not has_mixed_scopes and (allow_live or not requires_live_permission),
-            "warnings": warnings,
-        }
-
-    @classmethod
-    def waive_tasks(cls, data, current_user, allow_live=False):
-        reason = str(data.get("reason") or "").strip()
-        if len(reason) > 500:
-            raise ValueError("豁免原因不能超过500个字符")
-        reason_code = str(data.get("reason_code") or "").strip()
-
-        with BaseService.transaction() as db:
-            task_ids, pending_tasks = cls._resolve_waiver_tasks(data, db)
-            waiver_scope = cls._validate_waiver_policy(
-                pending_tasks, reason_code, reason, allow_live
-            )
-            updated = ProcessQualityEvaluationRepository.waive_tasks(
-                task_ids, reason_code, reason, current_user.get("id"), db
-            )
-        return {
-            "ok": True,
-            "status": "waived",
-            "count": updated,
-            "task_ids": task_ids,
-            "reason_code": reason_code,
-            "waiver_scope": waiver_scope,
-            "order_ids": sorted({task["order_id"] for task in pending_tasks}),
-        }
-
-    @classmethod
-    def _validate_waiver_policy(cls, tasks, reason_code, reason, allow_live):
-        scopes = {cls._task_waiver_scope(task) for task in tasks}
-        if len(scopes) != 1:
-            raise ValueError("生产中订单与历史订单的评价任务必须分开处置")
-        scope = scopes.pop()
-        allowed_reasons = dict(
-            cls.HISTORICAL_WAIVER_REASONS
-            if scope == "historical"
-            else cls.LIVE_WAIVER_REASONS
-        )
-        if reason_code not in allowed_reasons:
-            raise ValueError("请选择与订单状态匹配的豁免原因类型")
-        if scope == "live" and not allow_live:
-            raise PermissionError("生产中或待生产订单仅允许系统管理员授权豁免")
-        minimum_length = 10 if scope == "live" else 2
-        if len(reason) < minimum_length:
-            raise ValueError(f"豁免说明至少填写{minimum_length}个字符")
-        return scope
-
-    @classmethod
     def assert_required_tasks_completed(cls, evaluator_user_id, db=None):
-        task = ProcessQualityEvaluationRepository.pending_required_task(
+        task = ProcessQualityEvaluationTaskRepository.pending_required_task(
             evaluator_user_id, db
         )
         if task:
@@ -523,7 +350,7 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def skip_task(cls, task_id, data, current_user):
-        task = ProcessQualityEvaluationRepository.task_by_id(task_id)
+        task = ProcessQualityEvaluationTaskRepository.task_by_id(task_id)
         if not task:
             raise ValueError("评价任务不存在")
         if int(task["evaluator_user_id"]) != int(current_user.get("id") or 0):
@@ -537,7 +364,7 @@ class ProcessQualityEvaluationService:
             raise ValueError("直接上一道工序为必评，不能跳过")
         reason = str(data.get("reason") or "历史工序选评跳过").strip()
         with BaseService.transaction() as db:
-            if not ProcessQualityEvaluationRepository.skip_task(task_id, reason, db):
+            if not ProcessQualityEvaluationTaskRepository.skip_task(task_id, reason, db):
                 raise StaleQualityEvaluationTaskError(
                     "该评价任务已由其他人员处理，请刷新任务列表",
                     details={"task_id": task_id},
@@ -590,7 +417,7 @@ class ProcessQualityEvaluationService:
             rules = cls.rules(db)
             for entry in entries:
                 task_id = entry.get("task_id")
-                task = ProcessQualityEvaluationRepository.task_by_id(task_id, db) if task_id else None
+                task = ProcessQualityEvaluationTaskRepository.task_by_id(task_id, db) if task_id else None
                 if not task:
                     raise ValueError("评价任务不存在")
                 if int(task["evaluator_user_id"]) != int(user_id):
@@ -647,7 +474,7 @@ class ProcessQualityEvaluationService:
                     "template_snapshot": template_snapshot,
                     "severity": severity,
                 }, db)
-                ProcessQualityEvaluationRepository.complete_task(task["id"], db)
+                ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
                 if status == "pending_verification":
                     from modules.services.quality_management_service import QualityManagementService
                     QualityManagementService.generate_for_low_evaluation({
@@ -819,7 +646,7 @@ class ProcessQualityEvaluationService:
     def _record_legacy_handoff(cls, review_id, data, db):
         rating = cls._rating(data.get("rating"), "评分")
         rules = cls.rules(db)
-        task = ProcessQualityEvaluationRepository.find_matching_pending_task({
+        task = ProcessQualityEvaluationTaskRepository.find_matching_pending_task({
             "order_id": data["order_id"],
             "serial_no": data.get("serial_no", ""),
             "target_process_id": data["from_process_id"],
@@ -859,5 +686,5 @@ class ProcessQualityEvaluationService:
             "severity": "warning" if total_score < rules["low_score_threshold"] else "normal",
         }, db)
         if task:
-            ProcessQualityEvaluationRepository.complete_task(task["id"], db)
+            ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
         return evaluation_id

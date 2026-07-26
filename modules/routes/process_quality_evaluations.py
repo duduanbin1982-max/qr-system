@@ -5,6 +5,9 @@ from flask import g, jsonify, request
 from modules.domain.errors import DomainError
 from modules.route_decorators import app, check_auth, check_permission, has_permission, safe_audit_log
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+from modules.services.process_quality_evaluation_waiver_service import (
+    ProcessQualityEvaluationWaiverService,
+)
 
 
 def _can_read(user):
@@ -46,7 +49,7 @@ def process_quality_tasks():
 @check_auth
 @check_permission("process_quality_evaluation:waive")
 def process_quality_task_disposal_summary():
-    return jsonify(ProcessQualityEvaluationService.task_disposal_summary(
+    return jsonify(ProcessQualityEvaluationWaiverService.task_disposal_summary(
         allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live")
     ))
 
@@ -55,7 +58,7 @@ def process_quality_task_disposal_summary():
 @check_auth
 @check_permission("process_quality_evaluation:waive")
 def process_quality_task_audits():
-    return jsonify(ProcessQualityEvaluationService.task_audits(
+    return jsonify(ProcessQualityEvaluationWaiverService.task_audits(
         keyword=request.args.get("keyword", "").strip(),
         page=request.args.get("page", 1, type=int),
         per_page=min(request.args.get("per_page", 100, type=int), 500),
@@ -67,7 +70,7 @@ def process_quality_task_audits():
 @check_permission("process_quality_evaluation:waive")
 def process_quality_task_waive():
     try:
-        result = ProcessQualityEvaluationService.waive_tasks(
+        result = ProcessQualityEvaluationWaiverService.waive_tasks(
             request.get_json() or {}, g.current_user,
             allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live"),
         )
@@ -90,7 +93,7 @@ def process_quality_task_waive():
 @check_permission("process_quality_evaluation:waive")
 def process_quality_task_waiver_preview():
     try:
-        return jsonify(ProcessQualityEvaluationService.waiver_preview(
+        return jsonify(ProcessQualityEvaluationWaiverService.waiver_preview(
             request.get_json() or {},
             allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live"),
         ))
