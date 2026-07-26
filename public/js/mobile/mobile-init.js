@@ -65,9 +65,9 @@
   
 
   _el = document.getElementById('quality-evaluation-entry');
-  if (_el) _el.addEventListener('click', openQualityEvaluationCenter);
+  if (_el) _el.addEventListener('click', function() { openQualityEvaluationCenter(); });
   _el = document.getElementById('quality-back');
-  if (_el) _el.addEventListener('click', goMain);
+  if (_el) _el.addEventListener('click', closeQualityEvaluationCenter);
   _el = document.getElementById('quality-refresh');
   if (_el) _el.addEventListener('click', function() { switchQualityView(qualityViewMode); });
   _el = document.getElementById('quality-view-switch');

@@ -171,6 +171,8 @@ def prepare_database():
             (process_ids[2],),
         )
 
+        insert_order(db, "E2E-QUALITY-GATE-ORDER", [process_ids[1]])
+
         completed_order_id = insert_order(
             db, "E2E-COMPLETE-ORDER", [process_ids[0]], status="completed", qr_mode="serial", route_id=route_id
         )

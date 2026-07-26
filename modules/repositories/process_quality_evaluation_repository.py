@@ -178,6 +178,15 @@ class ProcessQualityEvaluationRepository:
         ).fetchone()[0]
 
     @staticmethod
+    def pending_required_count(evaluator_user_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT COUNT(*) FROM process_quality_evaluation_tasks "
+            "WHERE evaluator_user_id = ? AND status = 'pending' AND is_required = 1",
+            (evaluator_user_id,),
+        ).fetchone()[0]
+
+    @staticmethod
     def pending_required_task(evaluator_user_id, db=None):
         db = resolve_db(db)
         return db.execute(

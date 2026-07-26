@@ -1,5 +1,5 @@
 // Service Worker - QR System PWA v3
-const CACHE_NAME = "qr-system-v3.8";
+const CACHE_NAME = "qr-system-v3.9";
 // Pre-cache only immutable/large assets (NOT HTML)
 const ASSETS = [
   "/offline.html",

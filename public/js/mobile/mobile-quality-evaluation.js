@@ -2,6 +2,7 @@
 
 var qualityRules = { low_score_threshold: 60, critical_score_threshold: 40, issue_tags: [], critical_issue_tags: [] };
 var qualityViewMode = 'tasks';
+var qualityNavigation = { returnTo: 'main', reportDraft: null };
 
 function loadQualityEvaluationCount() {
   var badge = $('quality-pending-badge');
@@ -15,11 +16,60 @@ function loadQualityEvaluationCount() {
     .catch(function() { badge.textContent = '0'; badge.classList.add('empty'); });
 }
 
-function openQualityEvaluationCenter() {
+function openQualityEvaluationCenter(options) {
+  options = options && options.returnTo ? options : {};
+  qualityNavigation = {
+    returnTo: options.returnTo === 'order' ? 'order' : 'main',
+    reportDraft: options.reportDraft ? Object.assign({}, options.reportDraft) : null
+  };
   qualityViewMode = 'tasks';
   updateQualityViewButtons();
   show('quality-evaluation');
   loadQualityEvaluationTasks();
+}
+
+function openRequiredQualityEvaluation(reportDraft) {
+  if (camStream) closeCam();
+  openQualityEvaluationCenter({ returnTo: 'order', reportDraft: reportDraft });
+}
+
+function resetQualityNavigation() {
+  qualityNavigation = { returnTo: 'main', reportDraft: null };
+}
+
+function restoreBlockedReport(draft) {
+  if (!curOrder || !curProcId) {
+    resetQualityNavigation();
+    goMain();
+    return;
+  }
+  show('order');
+  switchMode('manual');
+  setReportType((draft && draft.report_type) || 'normal');
+  if (draft && draft.quantity) $('rpt-qty').value = draft.quantity;
+  if (draft && draft.remark) $('rpt-reason').value = draft.remark;
+  updateReportBtn();
+}
+
+function closeQualityEvaluationCenter() {
+  var navigation = qualityNavigation;
+  resetQualityNavigation();
+  if (navigation.returnTo === 'order') {
+    restoreBlockedReport(navigation.reportDraft);
+    return;
+  }
+  goMain();
+}
+
+function resumeBlockedReportWhenReady(tasks) {
+  if (qualityNavigation.returnTo !== 'order') return false;
+  var requiredTasks = tasks.filter(function(task) { return !!task.is_required; });
+  if (requiredTasks.length) return false;
+  var draft = qualityNavigation.reportDraft;
+  resetQualityNavigation();
+  restoreBlockedReport(draft);
+  toast('必评任务已完成，请确认后继续提交报工', 3200);
+  return true;
 }
 
 function switchQualityView(mode) {
@@ -44,12 +94,14 @@ function loadQualityEvaluationTasks() {
     api.qualityEvaluationRules()
   ]).then(function(results) {
     qualityRules = results[1] || qualityRules;
-    renderQualityEvaluationTasks(results[0].items || []);
+    var tasks = results[0].items || [];
+    renderQualityEvaluationTasks(tasks);
     var badge = $('quality-pending-badge');
     if (badge) {
       badge.textContent = String(results[0].pending_count || 0);
       badge.classList.toggle('empty', !(results[0].pending_count || 0));
     }
+    resumeBlockedReportWhenReady(tasks);
   }).catch(function(error) {
     list.innerHTML = '<div class="quality-empty error">' + esc(error.message || '评价任务加载失败') + '</div>';
   });
@@ -196,7 +248,7 @@ function submitQualityTask(card, button) {
     var item = result.items && result.items[0];
     toast(item && item.status === 'pending_verification' ? '评价已提交，等待质量核验' : '评价已提交');
     card.remove();
-    if (!$('quality-task-list').querySelector('.quality-task')) loadQualityEvaluationTasks();
+    if (qualityNavigation.returnTo === 'order' || !$('quality-task-list').querySelector('.quality-task')) loadQualityEvaluationTasks();
     else loadQualityEvaluationCount();
   }).catch(function(error) {
     toast(error.message || '评价提交失败');
@@ -209,7 +261,12 @@ function skipQualityTask(card, button) {
   if (!confirm('确认当前历史工序未发现问题并跳过选评吗？')) return;
   button.disabled = true;
   api.skipQualityEvaluationTask(parseInt(card.getAttribute('data-task-id')), { reason: '未发现历史工序问题' })
-    .then(function() { toast('已跳过历史工序选评'); card.remove(); loadQualityEvaluationCount(); })
+    .then(function() {
+      toast('已跳过历史工序选评');
+      card.remove();
+      if (qualityNavigation.returnTo === 'order') loadQualityEvaluationTasks();
+      else loadQualityEvaluationCount();
+    })
     .catch(function(error) { toast(error.message || '跳过失败'); button.disabled = false; });
 }
 

@@ -3,7 +3,7 @@
 import json
 import re
 
-from modules.domain.errors import ConflictError
+from modules.domain.errors import ConflictError, RequiredQualityEvaluationError
 from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
 from modules.repositories.setting_repository import SettingRepository
@@ -317,21 +317,28 @@ class ProcessQualityEvaluationService:
         return ProcessQualityEvaluationRepository.pending_count(evaluator_user_id)
 
     @classmethod
-    def pending_required_count(cls, evaluator_user_id):
-        result = ProcessQualityEvaluationRepository.list_tasks(
-            evaluator_user_id=evaluator_user_id, status="pending", page=1, per_page=500
+    def pending_required_count(cls, evaluator_user_id, db=None):
+        return ProcessQualityEvaluationRepository.pending_required_count(
+            evaluator_user_id, db
         )
-        return sum(1 for item in result["items"] if item.get("is_required"))
 
-    @staticmethod
-    def assert_required_tasks_completed(evaluator_user_id, db=None):
+    @classmethod
+    def assert_required_tasks_completed(cls, evaluator_user_id, db=None):
         task = ProcessQualityEvaluationRepository.pending_required_task(
             evaluator_user_id, db
         )
         if task:
-            raise ConflictError(
+            raise RequiredQualityEvaluationError(
                 f"您有未完成的必评任务：订单 {task['order_no']} 的"
-                f"{task['target_process_name']}工序，请先完成评价后再继续报工"
+                f"{task['target_process_name']}工序，请先完成评价后再继续报工",
+                details={
+                    "pending_required_count": cls.pending_required_count(
+                        evaluator_user_id, db
+                    ),
+                    "first_task_id": task["id"],
+                    "order_no": task["order_no"],
+                    "target_process_name": task["target_process_name"],
+                },
             )
 
     @classmethod

@@ -183,7 +183,16 @@ function doReport() {
   .then(function(d) {
     showReportSuccess(body, d || {});
   })
-  .catch(function(e) { toast((e && e.message) || '网络异常'); btn.disabled = false; updateReportBtn(); });
+  .catch(function(e) {
+    btn.disabled = false;
+    updateReportBtn();
+    if (e && (e.domainCode === 'quality_evaluation_required' || e.action === 'open_quality_evaluation')) {
+      toast(e.message || '请先完成必评任务', 3200);
+      openRequiredQualityEvaluation(body, e);
+      return;
+    }
+    toast((e && e.message) || '网络异常');
+  });
 }
 
 function showReportSuccess(body, response) {

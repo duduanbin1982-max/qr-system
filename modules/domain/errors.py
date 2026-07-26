@@ -29,3 +29,7 @@ class NotFoundError(DomainError):
 class ConflictError(DomainError):
     code = "conflict"
     status_code = 409
+
+
+class RequiredQualityEvaluationError(ConflictError):
+    code = "quality_evaluation_required"

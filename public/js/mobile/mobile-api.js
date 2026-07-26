@@ -39,16 +39,22 @@ async function parseApiResponse(response) {
   } else {
     payload = {};
   }
+  function responseError(fallbackMessage) {
+    var error = new Error((payload && payload.error) || fallbackMessage);
+    error.code = response.status;
+    error.status = response.status;
+    error.domainCode = (payload && payload.code) || "";
+    error.action = (payload && payload.action) || "";
+    error.details = (payload && payload.details) || {};
+    error.payload = payload;
+    return error;
+  }
   if (response.status === 401) {
     if (window.handleAuthExpired) window.handleAuthExpired();
-    var authError = new Error((payload && payload.error) || "登录已过期");
-    authError.code = 401;
-    throw authError;
+    throw responseError("登录已过期");
   }
   if (!response.ok || (payload && payload.error)) {
-    var err = new Error((payload && payload.error) || "服务器错误(" + response.status + ")");
-    err.code = response.status;
-    throw err;
+    throw responseError("服务器错误(" + response.status + ")");
   }
   return payload;
 }

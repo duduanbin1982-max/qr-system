@@ -310,7 +310,13 @@ def test_pending_required_evaluation_blocks_next_normal_report(client, worker_au
     )
 
     assert blocked.status_code == 409, blocked.get_json()
-    assert "未完成的必评任务" in blocked.get_json()["error"]
+    payload = blocked.get_json()
+    assert "未完成的必评任务" in payload["error"]
+    assert payload["code"] == "quality_evaluation_required"
+    assert payload["action"] == "open_quality_evaluation"
+    assert payload["details"]["pending_required_count"] == 1
+    assert payload["details"]["first_task_id"] > 0
+    assert payload["details"]["order_no"] == flow["order_no"]
 
 
 def test_process_template_drives_dynamic_weighted_dimensions(client, auth_headers, worker_auth_headers):

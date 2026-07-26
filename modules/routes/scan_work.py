@@ -17,6 +17,7 @@ from modules.services.scan_helper_service import ScanHelperService
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+from modules.domain.errors import RequiredQualityEvaluationError
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
 import qrcode as qrcode_lib
@@ -204,6 +205,10 @@ def mobile_report():
             "quality_evaluation_required_count": ProcessQualityEvaluationService.pending_required_count(user["id"]),
             "quality_evaluation_auto_open": bool(evaluation_rules.get("auto_open_mobile", True)),
         })
+    except RequiredQualityEvaluationError as e:
+        payload = e.to_payload()
+        payload["action"] = "open_quality_evaluation"
+        return jsonify(payload), e.status_code
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
 
