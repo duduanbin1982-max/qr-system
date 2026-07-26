@@ -85,6 +85,19 @@ def process_quality_task_waive():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/process-quality-evaluations/tasks/waiver-preview", methods=["POST"])
+@check_auth
+@check_permission("process_quality_evaluation:waive")
+def process_quality_task_waiver_preview():
+    try:
+        return jsonify(ProcessQualityEvaluationService.waiver_preview(
+            request.get_json() or {},
+            allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live"),
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/process-quality-evaluations/tasks/<int:task_id>/skip", methods=["POST"])
 @check_auth
 @check_permission("process_quality_evaluation:submit")

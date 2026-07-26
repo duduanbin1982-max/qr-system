@@ -4,6 +4,7 @@ export const processQualityEvaluationsApi = {
   qualityEvaluationTasks: (params) => request('GET', '/api/process-quality-evaluations/tasks' + buildQuery(params)),
   qualityEvaluationTaskDisposalSummary: () => request('GET', '/api/process-quality-evaluations/tasks/disposal-summary'),
   qualityEvaluationTaskAudits: (params) => request('GET', '/api/process-quality-evaluations/tasks/audits' + buildQuery(params)),
+  previewQualityEvaluationTaskWaiver: (data) => request('POST', '/api/process-quality-evaluations/tasks/waiver-preview', data),
   waiveQualityEvaluationTasks: (data) => request('POST', '/api/process-quality-evaluations/tasks/waive', data),
   skipQualityEvaluationTask: (id, data) => request('POST', `/api/process-quality-evaluations/tasks/${id}/skip`, data),
   submitQualityEvaluations: (data) => request('POST', '/api/process-quality-evaluations', data),

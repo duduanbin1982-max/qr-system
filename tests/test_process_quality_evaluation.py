@@ -356,6 +356,23 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
     assert summary_before.status_code == 200, summary_before.get_json()
     assert summary_before.get_json()["required_pending"] >= 1
 
+    preview = client.post(
+        "/api/process-quality-evaluations/tasks/waiver-preview",
+        headers=auth_headers,
+        json={"order_id": flow["order_id"], "required_only": True},
+    )
+    assert preview.status_code == 200, preview.get_json()
+    preview_payload = preview.get_json()
+    assert preview_payload["task_ids"] == [required_task["id"]]
+    assert preview_payload["task_count"] == 1
+    assert preview_payload["required_count"] == 1
+    assert preview_payload["optional_count"] == 0
+    assert preview_payload["affected_worker_count"] == 1
+    assert preview_payload["waiver_scope"] == "live"
+    assert preview_payload["requires_live_permission"] is True
+    assert preview_payload["can_submit"] is True
+    assert preview_payload["orders"][0]["order_no"] == flow["order_no"]
+
     waived = client.post(
         "/api/process-quality-evaluations/tasks/waive",
         headers=auth_headers,
@@ -419,6 +436,72 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
     assert released.status_code == 200, released.get_json()
 
 
+def test_task_disposal_age_uses_server_time_and_separates_optional_overdue(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task_items = client.get(
+        f"/api/process-quality-evaluations/tasks?keyword={flow['order_no']}",
+        headers=worker_auth_headers,
+    ).get_json()["items"]
+    required_task = next(item for item in task_items if item["is_required"])
+    optional_task = next(item for item in task_items if not item["is_required"])
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE process_quality_evaluation_tasks SET created_at = datetime('now','localtime') "
+            "WHERE order_id = ?",
+            (flow["order_id"],),
+        )
+        db.execute(
+            "UPDATE process_quality_evaluation_tasks SET created_at = datetime('now','localtime','-80 hours') "
+            "WHERE id IN (?, ?)",
+            (required_task["id"], optional_task["id"]),
+        )
+        db.commit()
+
+    summary = client.get(
+        "/api/process-quality-evaluations/tasks/disposal-summary", headers=auth_headers
+    ).get_json()
+    assert summary["overdue_24h"] == 1
+    assert summary["overdue_72h"] == 1
+    assert summary["optional_overdue_24h"] == 1
+    assert summary["optional_overdue_72h"] == 1
+
+    task_response = client.get(
+        f"/api/process-quality-evaluations/tasks?scope=all&keyword={flow['order_no']}",
+        headers=auth_headers,
+    )
+    assert task_response.status_code == 200, task_response.get_json()
+    aged_task = next(
+        item for item in task_response.get_json()["items"]
+        if item["id"] == required_task["id"]
+    )
+    assert aged_task["age_level"] == "critical"
+    assert aged_task["age_hours"] >= 79
+
+    waived = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=auth_headers,
+        json={
+            "task_ids": [required_task["id"]],
+            "reason_code": "task_generated_in_error",
+            "reason": "测试服务器时效审计快照计算逻辑",
+        },
+    )
+    assert waived.status_code == 200, waived.get_json()
+    audit_response = client.get(
+        f"/api/process-quality-evaluations/tasks/audits?keyword={flow['order_no']}",
+        headers=auth_headers,
+    )
+    assert audit_response.status_code == 200, audit_response.get_json()
+    audit_item = audit_response.get_json()["items"][0]
+    assert audit_item["age_level"] == "critical"
+    assert audit_item["age_hours"] >= 79
+
+
 def test_quality_inspector_can_waive_historical_but_not_live_tasks(client, worker_auth_headers):
     flow = _seed_serial_flow(client)
     _complete_serial_report(client, worker_auth_headers, flow)
@@ -442,6 +525,16 @@ def test_quality_inspector_can_waive_historical_but_not_live_tasks(client, worke
     )
     assert summary.status_code == 200, summary.get_json()
     assert summary.get_json()["waiver_policy"]["can_waive_live"] is False
+
+    preview = client.post(
+        "/api/process-quality-evaluations/tasks/waiver-preview",
+        headers=qc_headers,
+        json={"task_ids": [task["id"]]},
+    )
+    assert preview.status_code == 200, preview.get_json()
+    assert preview.get_json()["waiver_scope"] == "live"
+    assert preview.get_json()["requires_live_permission"] is True
+    assert preview.get_json()["can_submit"] is False
 
     live_denied = client.post(
         "/api/process-quality-evaluations/tasks/waive",

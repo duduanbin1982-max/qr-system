@@ -152,7 +152,11 @@ class ProcessQualityEvaluationRepository:
             "o.status AS order_status, COALESCE(o.deleted_at, '') AS order_deleted_at, "
             "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
             "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
-            "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
+            "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name, "
+            "ROUND(MAX(0, (julianday('now','localtime') - julianday(task.created_at)) * 24), 1) AS age_hours, "
+            "CASE WHEN task.created_at <= datetime('now','localtime','-72 hours') THEN 'critical' "
+            "WHEN task.created_at <= datetime('now','localtime','-24 hours') THEN 'warning' "
+            "ELSE 'normal' END AS age_level "
             "FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_p ON target_p.id = task.target_process_id "
@@ -257,8 +261,10 @@ class ProcessQualityEvaluationRepository:
             "COUNT(*) AS pending_total, "
             "COALESCE(SUM(CASE WHEN task.is_required = 1 THEN 1 ELSE 0 END), 0) AS required_pending, "
             "COALESCE(SUM(CASE WHEN task.is_required = 0 THEN 1 ELSE 0 END), 0) AS optional_pending, "
-            "COALESCE(SUM(CASE WHEN task.created_at <= datetime('now','localtime','-24 hours') THEN 1 ELSE 0 END), 0) AS overdue_24h, "
-            "COALESCE(SUM(CASE WHEN task.created_at <= datetime('now','localtime','-72 hours') THEN 1 ELSE 0 END), 0) AS overdue_72h, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 1 AND task.created_at <= datetime('now','localtime','-24 hours') THEN 1 ELSE 0 END), 0) AS overdue_24h, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 1 AND task.created_at <= datetime('now','localtime','-72 hours') THEN 1 ELSE 0 END), 0) AS overdue_72h, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 0 AND task.created_at <= datetime('now','localtime','-24 hours') THEN 1 ELSE 0 END), 0) AS optional_overdue_24h, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 0 AND task.created_at <= datetime('now','localtime','-72 hours') THEN 1 ELSE 0 END), 0) AS optional_overdue_72h, "
             "COALESCE(SUM(CASE WHEN task.is_required = 1 AND orders.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_order_required, "
             "COALESCE(SUM(CASE WHEN task.is_required = 1 AND orders.status = 'producing' THEN 1 ELSE 0 END), 0) AS producing_order_required, "
             "COUNT(DISTINCT task.evaluator_user_id) AS affected_workers "
@@ -287,7 +293,7 @@ class ProcessQualityEvaluationRepository:
             return []
         placeholders = ",".join("?" for _ in task_ids)
         return db.execute(
-            "SELECT task.id, task.order_id, task.is_required, orders.order_no, "
+            "SELECT task.id, task.order_id, task.evaluator_user_id, task.is_required, orders.order_no, "
             "orders.status AS order_status, COALESCE(orders.deleted_at, '') AS order_deleted_at "
             "FROM process_quality_evaluation_tasks task "
             "JOIN orders ON orders.id = task.order_id "
@@ -356,7 +362,11 @@ class ProcessQualityEvaluationRepository:
         rows = db.execute(
             "SELECT audit.*, 1 AS audit_record, audit.reason AS waiver_reason, "
             "audit.reason_code AS waiver_reason_code, audit.operator_name AS waived_by_name, "
-            "audit.created_at AS waived_at, 'audit' AS status "
+            "audit.created_at AS waived_at, 'audit' AS status, "
+            "ROUND(MAX(0, (julianday(audit.created_at) - julianday(audit.task_created_at)) * 24), 1) AS age_hours, "
+            "CASE WHEN audit.task_created_at <= datetime(audit.created_at, '-72 hours') THEN 'critical' "
+            "WHEN audit.task_created_at <= datetime(audit.created_at, '-24 hours') THEN 'warning' "
+            "ELSE 'normal' END AS age_level "
             "FROM process_quality_evaluation_task_audits audit WHERE " + where +
             " ORDER BY audit.created_at DESC, audit.id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],

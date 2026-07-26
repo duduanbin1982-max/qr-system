@@ -97,3 +97,71 @@ test('performance page filters by position and opens score evidence', async ({ p
   await expect(modal).toContainText('\u5c97\u4f4d\u6700\u9ad8\u4ea7\u91cf')
   expect(failures).toEqual([])
 })
+
+test('process quality disposal uses server pagination and previews waiver impact', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  let disposalPerPage = null
+  let previewPayload = null
+
+  await page.route(/\/api\/process-quality-evaluations\/tasks(?:\?.*)?$/, async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    disposalPerPage = url.searchParams.get('per_page')
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [{
+          id: 9001, order_id: 501, order_no: 'E2E-PQE-PREVIEW', order_status: 'completed',
+          order_deleted_at: '', serial_no: 'SN-PQE-001', product_name: 'E2E Quality Part',
+          product_code: 'E2E-QP', target_process_name: 'E2E Welding', target_user_name: 'E2E Current Worker',
+          evaluator_process_name: 'E2E Drilling', evaluator_name: 'E2E Current Worker', evaluator_user_id: 2,
+          template_snapshot: { name: 'E2E Template' }, is_required: 1, attribution_type: 'worker',
+          status: 'pending', created_at: '2026-07-26 08:00:00', age_hours: 30, age_level: 'warning',
+        }],
+        total: 1, page: 1, per_page: 50, pending_count: 1, pending_required_count: 1,
+      }),
+    })
+  })
+  await page.route('**/api/process-quality-evaluations/tasks/disposal-summary', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      required_pending: 1, overdue_24h: 1, overdue_72h: 0, completed_order_required: 1,
+      affected_workers: 1,
+      waiver_policy: {
+        can_waive_live: true,
+        historical_reasons: [{ code: 'completed_order_history', label: '已完成订单历史遗留' }],
+        live_reasons: [{ code: 'task_generated_in_error', label: '评价任务错误生成' }],
+      },
+    }),
+  }))
+  await page.route('**/api/process-quality-evaluations/tasks/waiver-preview', async route => {
+    previewPayload = route.request().postDataJSON()
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_ids: [9001], task_count: 1, required_count: 1, optional_count: 0,
+        affected_worker_count: 1, waiver_scope: 'historical', has_mixed_scopes: false,
+        requires_live_permission: false, can_submit: true,
+        orders: [{ order_id: 501, order_no: 'E2E-PQE-PREVIEW', order_status: 'completed', waiver_scope: 'historical', task_count: 1, required_count: 1, optional_count: 0 }],
+        warnings: ['本次将豁免 1 条必评任务，评价数据将永久缺失并保留审计记录。'],
+      }),
+    })
+  })
+
+  await loginAdmin(page)
+  await openSidebarPage(page, '工序质量评价', '工序质量评价')
+  const main = page.locator('.main-content')
+  await main.locator('.pqe-tabs').getByRole('button', { name: /任务处置/ }).click()
+  await expect.poll(() => disposalPerPage).toBe('50')
+  await main.locator('.pqe-wide tbody input[type="checkbox"]').check()
+  await main.getByRole('button', { name: '豁免选中任务', exact: true }).click()
+
+  const modal = page.locator('.modal').filter({ hasText: '豁免评价任务' })
+  await expect(modal).toBeVisible()
+  await expect(modal).toContainText('影响任务')
+  await expect(modal).toContainText('E2E-PQE-PREVIEW')
+  await expect(modal).toContainText('永久缺失')
+  expect(previewPayload).toEqual({ task_ids: [9001] })
+  await modal.getByRole('button', { name: '取消', exact: true }).click()
+  expect(failures).toEqual([])
+})

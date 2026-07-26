@@ -375,12 +375,7 @@ class ProcessQualityEvaluationService:
         return task_ids
 
     @classmethod
-    def waive_tasks(cls, data, current_user, allow_live=False):
-        reason = str(data.get("reason") or "").strip()
-        if len(reason) > 500:
-            raise ValueError("豁免原因不能超过500个字符")
-        reason_code = str(data.get("reason_code") or "").strip()
-
+    def _resolve_waiver_tasks(cls, data, db):
         task_ids = cls._task_ids(data.get("task_ids"))
         order_id = data.get("order_id")
         if order_id is not None:
@@ -394,19 +389,83 @@ class ProcessQualityEvaluationService:
             raise ValueError("请选择待处置的评价任务")
         if task_ids and len(task_ids) > 200:
             raise ValueError("单次最多豁免200条任务")
+        if order_id is not None and not task_ids:
+            task_ids = ProcessQualityEvaluationRepository.pending_task_ids_for_order(
+                order_id, bool(data.get("required_only", True)), db
+            )
+        if not task_ids:
+            raise ValueError("没有可豁免的待评价任务")
+        if len(task_ids) > 200:
+            raise ValueError("单次最多豁免200条任务")
+        pending_tasks = ProcessQualityEvaluationRepository.pending_tasks_by_ids(task_ids, db)
+        if len(pending_tasks) != len(task_ids):
+            raise ValueError("所选任务包含已处理或不存在的记录，请刷新后重试")
+        return task_ids, pending_tasks
+
+    @staticmethod
+    def _task_waiver_scope(task):
+        if task["order_deleted_at"] or task["order_status"] in {"completed", "cancelled"}:
+            return "historical"
+        return "live"
+
+    @classmethod
+    def waiver_preview(cls, data, allow_live=False):
+        with BaseService.transaction() as db:
+            task_ids, tasks = cls._resolve_waiver_tasks(data, db)
+
+        scopes = {cls._task_waiver_scope(task) for task in tasks}
+        has_mixed_scopes = len(scopes) > 1
+        waiver_scope = "mixed" if has_mixed_scopes else next(iter(scopes))
+        requires_live_permission = "live" in scopes
+        orders = {}
+        for task in tasks:
+            order = orders.setdefault(task["order_id"], {
+                "order_id": task["order_id"],
+                "order_no": task["order_no"],
+                "order_status": task["order_status"],
+                "waiver_scope": cls._task_waiver_scope(task),
+                "task_count": 0,
+                "required_count": 0,
+                "optional_count": 0,
+            })
+            order["task_count"] += 1
+            count_key = "required_count" if task["is_required"] else "optional_count"
+            order[count_key] += 1
+
+        warnings = []
+        if has_mixed_scopes:
+            warnings.append("生产中订单与历史订单不能混合豁免，请分开选择后再操作。")
+        if requires_live_permission:
+            warnings.append("包含生产中或待生产订单，提交后会立即解除对应员工的报工门禁。")
+        if requires_live_permission and not allow_live:
+            warnings.append("当前账号没有生产中订单豁免权限。")
+        required_count = sum(1 for task in tasks if task["is_required"])
+        if required_count:
+            warnings.append(f"本次将豁免 {required_count} 条必评任务，评价数据将永久缺失并保留审计记录。")
+
+        return {
+            "task_ids": task_ids,
+            "task_count": len(tasks),
+            "required_count": required_count,
+            "optional_count": len(tasks) - required_count,
+            "affected_worker_count": len({task["evaluator_user_id"] for task in tasks}),
+            "orders": sorted(orders.values(), key=lambda item: (item["order_no"], item["order_id"])),
+            "waiver_scope": waiver_scope,
+            "has_mixed_scopes": has_mixed_scopes,
+            "requires_live_permission": requires_live_permission,
+            "can_submit": not has_mixed_scopes and (allow_live or not requires_live_permission),
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def waive_tasks(cls, data, current_user, allow_live=False):
+        reason = str(data.get("reason") or "").strip()
+        if len(reason) > 500:
+            raise ValueError("豁免原因不能超过500个字符")
+        reason_code = str(data.get("reason_code") or "").strip()
 
         with BaseService.transaction() as db:
-            if order_id is not None and not task_ids:
-                task_ids = ProcessQualityEvaluationRepository.pending_task_ids_for_order(
-                    order_id, bool(data.get("required_only", True)), db
-                )
-            if not task_ids:
-                raise ValueError("没有可豁免的待评价任务")
-            if len(task_ids) > 200:
-                raise ValueError("单次最多豁免200条任务")
-            pending_tasks = ProcessQualityEvaluationRepository.pending_tasks_by_ids(task_ids, db)
-            if len(pending_tasks) != len(task_ids):
-                raise ValueError("所选任务包含已处理或不存在的记录，请刷新后重试")
+            task_ids, pending_tasks = cls._resolve_waiver_tasks(data, db)
             waiver_scope = cls._validate_waiver_policy(
                 pending_tasks, reason_code, reason, allow_live
             )
@@ -425,12 +484,7 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def _validate_waiver_policy(cls, tasks, reason_code, reason, allow_live):
-        scopes = {
-            "historical"
-            if task["order_deleted_at"] or task["order_status"] in {"completed", "cancelled"}
-            else "live"
-            for task in tasks
-        }
+        scopes = {cls._task_waiver_scope(task) for task in tasks}
         if len(scopes) != 1:
             raise ValueError("生产中订单与历史订单的评价任务必须分开处置")
         scope = scopes.pop()
