@@ -9,7 +9,9 @@ from modules.services.process_quality_evaluation_service import ProcessQualityEv
 def _can_read(user):
     return has_permission(user, "process_quality_evaluation:view") or has_permission(
         user, "process_quality_evaluation:submit"
-    ) or has_permission(user, "process_quality_evaluation:rules")
+    ) or has_permission(user, "process_quality_evaluation:waive") or has_permission(
+        user, "process_quality_evaluation:rules"
+    )
 
 
 @app.route("/api/process-quality-evaluations/tasks", methods=["GET"])
@@ -18,6 +20,8 @@ def process_quality_tasks():
     if not _can_read(g.current_user):
         return jsonify({"error": "无权限"}), 403
     can_view_all = has_permission(g.current_user, "process_quality_evaluation:view") or has_permission(
+        g.current_user, "process_quality_evaluation:waive"
+    ) or has_permission(
         g.current_user, "process_quality_evaluation:rules"
     )
     requested_all = can_view_all and request.args.get("scope") == "all"
@@ -39,26 +43,32 @@ def process_quality_tasks():
 
 @app.route("/api/process-quality-evaluations/tasks/disposal-summary", methods=["GET"])
 @check_auth
-@check_permission("process_quality_evaluation:rules")
+@check_permission("process_quality_evaluation:waive")
 def process_quality_task_disposal_summary():
-    return jsonify(ProcessQualityEvaluationService.task_disposal_summary())
+    return jsonify(ProcessQualityEvaluationService.task_disposal_summary(
+        allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live")
+    ))
 
 
 @app.route("/api/process-quality-evaluations/tasks/waive", methods=["POST"])
 @check_auth
-@check_permission("process_quality_evaluation:rules")
+@check_permission("process_quality_evaluation:waive")
 def process_quality_task_waive():
     try:
         result = ProcessQualityEvaluationService.waive_tasks(
-            request.get_json() or {}, g.current_user
+            request.get_json() or {}, g.current_user,
+            allow_live=has_permission(g.current_user, "process_quality_evaluation:waive_live"),
         )
         safe_audit_log(
             "process_quality_evaluation_task_waive",
             "process_quality_evaluation_task",
             0,
-            f"count={result['count']} reason={(request.get_json() or {}).get('reason', '')[:120]}",
+            f"count={result['count']} code={result['reason_code']} "
+            f"reason={(request.get_json() or {}).get('reason', '')[:120]}",
         )
         return jsonify(result)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

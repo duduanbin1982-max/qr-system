@@ -386,10 +386,39 @@ def m039_process_quality_task_waivers(db):
     db.commit()
 
 
+def m040_harden_process_quality_task_waivers(db):
+    _add_column(db, "process_quality_evaluation_tasks", "waiver_reason_code TEXT DEFAULT ''")
+    _add_column(db, "process_quality_evaluation_task_audits", "reason_code TEXT DEFAULT ''")
+    for role in db.execute("SELECT id, code, permissions FROM roles").fetchall():
+        try:
+            permissions = json.loads(role["permissions"] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(permissions, list) or "*" in permissions:
+            continue
+        permission_set = set(permissions)
+        additions = []
+        if role["code"] == "qc_inspector" or "quality:edit" in permission_set:
+            additions.append("process_quality_evaluation:waive")
+        if "settings:manage" in permission_set:
+            additions.extend([
+                "process_quality_evaluation:waive",
+                "process_quality_evaluation:waive_live",
+            ])
+        merged = list(dict.fromkeys(permissions + additions))
+        if merged != permissions:
+            db.execute(
+                "UPDATE roles SET permissions = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                (json.dumps(merged, ensure_ascii=False), role["id"]),
+            )
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
     (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
     (37, "Remediate process quality review invariants", m037_process_quality_review_remediation),
     (38, "Converge legacy handoff review status", m038_converge_legacy_handoff_status),
     (39, "Add auditable process quality task waivers", m039_process_quality_task_waivers),
+    (40, "Harden process quality task waiver policy", m040_harden_process_quality_task_waivers),
 ]

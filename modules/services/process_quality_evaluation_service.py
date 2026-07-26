@@ -19,6 +19,18 @@ class ProcessQualityEvaluationService:
         ("process_continuity", "工序可接续性"),
         ("cleanliness_protection", "清洁及防护"),
     )
+    HISTORICAL_WAIVER_REASONS = (
+        ("completed_order_history", "已完成订单历史遗留"),
+        ("historical_import", "历史数据导入异常"),
+        ("worker_departed", "原评价人员已离职"),
+        ("no_actual_handoff", "现场确认未发生实际交接"),
+    )
+    LIVE_WAIVER_REASONS = (
+        ("task_generated_in_error", "评价任务错误生成"),
+        ("handoff_attribution_error", "工序交接归属错误"),
+        ("emergency_authorized_release", "紧急生产授权放行"),
+    )
+
     @classmethod
     def rules(cls, db=None):
         raw = SettingRepository.get_value("process_quality_evaluation_rules", "", db=db)
@@ -322,9 +334,21 @@ class ProcessQualityEvaluationService:
             evaluator_user_id, db
         )
 
-    @staticmethod
-    def task_disposal_summary():
-        return ProcessQualityEvaluationRepository.task_disposal_summary()
+    @classmethod
+    def task_disposal_summary(cls, allow_live=False):
+        summary = ProcessQualityEvaluationRepository.task_disposal_summary()
+        summary["waiver_policy"] = {
+            "can_waive_live": bool(allow_live),
+            "historical_reasons": [
+                {"code": code, "label": label}
+                for code, label in cls.HISTORICAL_WAIVER_REASONS
+            ],
+            "live_reasons": [
+                {"code": code, "label": label}
+                for code, label in cls.LIVE_WAIVER_REASONS
+            ],
+        }
+        return summary
 
     @staticmethod
     def _task_ids(value):
@@ -341,12 +365,11 @@ class ProcessQualityEvaluationService:
         return task_ids
 
     @classmethod
-    def waive_tasks(cls, data, current_user):
+    def waive_tasks(cls, data, current_user, allow_live=False):
         reason = str(data.get("reason") or "").strip()
-        if len(reason) < 2:
-            raise ValueError("豁免原因至少填写2个字符")
         if len(reason) > 500:
             raise ValueError("豁免原因不能超过500个字符")
+        reason_code = str(data.get("reason_code") or "").strip()
 
         task_ids = cls._task_ids(data.get("task_ids"))
         order_id = data.get("order_id")
@@ -374,16 +397,46 @@ class ProcessQualityEvaluationService:
             pending_tasks = ProcessQualityEvaluationRepository.pending_tasks_by_ids(task_ids, db)
             if len(pending_tasks) != len(task_ids):
                 raise ValueError("所选任务包含已处理或不存在的记录，请刷新后重试")
+            waiver_scope = cls._validate_waiver_policy(
+                pending_tasks, reason_code, reason, allow_live
+            )
             updated = ProcessQualityEvaluationRepository.waive_tasks(
-                task_ids, reason, current_user.get("id"), db
+                task_ids, reason_code, reason, current_user.get("id"), db
             )
         return {
             "ok": True,
             "status": "waived",
             "count": updated,
             "task_ids": task_ids,
+            "reason_code": reason_code,
+            "waiver_scope": waiver_scope,
             "order_ids": sorted({task["order_id"] for task in pending_tasks}),
         }
+
+    @classmethod
+    def _validate_waiver_policy(cls, tasks, reason_code, reason, allow_live):
+        scopes = {
+            "historical"
+            if task["order_deleted_at"] or task["order_status"] in {"completed", "cancelled"}
+            else "live"
+            for task in tasks
+        }
+        if len(scopes) != 1:
+            raise ValueError("生产中订单与历史订单的评价任务必须分开处置")
+        scope = scopes.pop()
+        allowed_reasons = dict(
+            cls.HISTORICAL_WAIVER_REASONS
+            if scope == "historical"
+            else cls.LIVE_WAIVER_REASONS
+        )
+        if reason_code not in allowed_reasons:
+            raise ValueError("请选择与订单状态匹配的豁免原因类型")
+        if scope == "live" and not allow_live:
+            raise PermissionError("生产中或待生产订单仅允许系统管理员授权豁免")
+        minimum_length = 10 if scope == "live" else 2
+        if len(reason) < minimum_length:
+            raise ValueError(f"豁免说明至少填写{minimum_length}个字符")
+        return scope
 
     @classmethod
     def assert_required_tasks_completed(cls, evaluator_user_id, db=None):

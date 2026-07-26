@@ -16,6 +16,8 @@ ACTION_LABELS = {
     "audit": "审核",
     "submit": "提交评价",
     "review": "质量核验",
+    "waive": "历史任务豁免",
+    "waive_live": "生产中例外豁免",
     "stats": "统计分析",
     "rules": "规则配置",
     "inspect": "执行检验",
@@ -56,7 +58,10 @@ ACTION_PERMISSION_DEFS = {
     "wages": ("工资核算", ["view", "edit"]),
     "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
     "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
-    "process_quality_evaluation": ("工序质量评价", ["view", "submit", "review", "stats", "rules"]),
+    "process_quality_evaluation": (
+        "工序质量评价",
+        ["view", "submit", "review", "waive", "waive_live", "stats", "rules"],
+    ),
 }
 
 
@@ -387,6 +392,7 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
         "page:process-quality-evaluation",
         "process_quality_evaluation:view",
         "process_quality_evaluation:review",
+        "process_quality_evaluation:waive",
         "process_quality_evaluation:stats",
     ],
     "warehouse_keeper": ["page:performance", "performance:view"],

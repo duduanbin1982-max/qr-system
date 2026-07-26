@@ -88,6 +88,7 @@ class ProcessQualityEvaluationRepository:
         db = resolve_db(db)
         row = db.execute(
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
+            "o.status AS order_status, COALESCE(o.deleted_at, '') AS order_deleted_at, "
             "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
             "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
             "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
@@ -148,6 +149,7 @@ class ProcessQualityEvaluationRepository:
         offset = (page - 1) * per_page
         rows = db.execute(
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
+            "o.status AS order_status, COALESCE(o.deleted_at, '') AS order_deleted_at, "
             "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
             "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
             "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
@@ -285,28 +287,33 @@ class ProcessQualityEvaluationRepository:
             return []
         placeholders = ",".join("?" for _ in task_ids)
         return db.execute(
-            "SELECT id, order_id, is_required FROM process_quality_evaluation_tasks "
-            f"WHERE id IN ({placeholders}) AND status = 'pending' ORDER BY id",
+            "SELECT task.id, task.order_id, task.is_required, orders.order_no, "
+            "orders.status AS order_status, COALESCE(orders.deleted_at, '') AS order_deleted_at "
+            "FROM process_quality_evaluation_tasks task "
+            "JOIN orders ON orders.id = task.order_id "
+            f"WHERE task.id IN ({placeholders}) AND task.status = 'pending' ORDER BY task.id",
             task_ids,
         ).fetchall()
 
     @staticmethod
-    def waive_tasks(task_ids, reason, operator_user_id, db):
+    def waive_tasks(task_ids, reason_code, reason, operator_user_id, db):
         if not task_ids:
             return 0
         placeholders = ",".join("?" for _ in task_ids)
         cursor = db.execute(
-            "UPDATE process_quality_evaluation_tasks SET status = 'waived', waiver_reason = ?, "
+            "UPDATE process_quality_evaluation_tasks SET status = 'waived', "
+            "waiver_reason_code = ?, waiver_reason = ?, "
             "waived_by = ?, waived_at = datetime('now','localtime'), "
             "updated_at = datetime('now','localtime') "
             f"WHERE id IN ({placeholders}) AND status = 'pending'",
-            [reason, operator_user_id, *task_ids],
+            [reason_code, reason, operator_user_id, *task_ids],
         )
         if cursor.rowcount:
             db.executemany(
                 "INSERT INTO process_quality_evaluation_task_audits "
-                "(task_id, action, operator_user_id, reason) VALUES (?, 'waived', ?, ?)",
-                [(task_id, operator_user_id, reason) for task_id in task_ids],
+                "(task_id, action, operator_user_id, reason_code, reason) "
+                "VALUES (?, 'waived', ?, ?, ?)",
+                [(task_id, operator_user_id, reason_code, reason) for task_id in task_ids],
             )
         return cursor.rowcount
 

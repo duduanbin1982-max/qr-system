@@ -335,7 +335,11 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
     denied = client.post(
         "/api/process-quality-evaluations/tasks/waive",
         headers=worker_auth_headers,
-        json={"task_ids": [required_task["id"]], "reason": "worker cannot waive"},
+        json={
+            "task_ids": [required_task["id"]],
+            "reason_code": "emergency_authorized_release",
+            "reason": "worker cannot waive",
+        },
     )
     assert denied.status_code == 403
 
@@ -358,7 +362,8 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
         json={
             "order_id": flow["order_id"],
             "required_only": True,
-            "reason": "completed order historical task review",
+            "reason_code": "emergency_authorized_release",
+            "reason": "紧急订单经生产负责人确认授权继续报工",
         },
     )
     assert waived.status_code == 200, waived.get_json()
@@ -371,17 +376,20 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
     )
     assert waived_tasks.status_code == 200, waived_tasks.get_json()
     waived_task = next(item for item in waived_tasks.get_json()["items"] if item["id"] == required_task["id"])
-    assert waived_task["waiver_reason"] == "completed order historical task review"
+    assert waived_task["waiver_reason_code"] == "emergency_authorized_release"
+    assert waived_task["waiver_reason"] == "紧急订单经生产负责人确认授权继续报工"
     assert waived_task["waived_by_name"]
 
     with client.application.app_context():
         db = get_db()
         audit = db.execute(
-            "SELECT action, reason FROM process_quality_evaluation_task_audits WHERE task_id = ?",
+            "SELECT action, reason_code, reason "
+            "FROM process_quality_evaluation_task_audits WHERE task_id = ?",
             (required_task["id"],),
         ).fetchone()
     assert audit["action"] == "waived"
-    assert audit["reason"] == "completed order historical task review"
+    assert audit["reason_code"] == "emergency_authorized_release"
+    assert audit["reason"] == "紧急订单经生产负责人确认授权继续报工"
 
     suffix = uuid.uuid4().hex[:6].upper()
     with client.application.app_context():
@@ -409,6 +417,62 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
         },
     )
     assert released.status_code == 200, released.get_json()
+
+
+def test_quality_inspector_can_waive_historical_but_not_live_tasks(client, worker_auth_headers):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["is_required"]
+    )
+    suffix = uuid.uuid4().hex[:6].lower()
+    username = f"pqe_qc_{suffix}"
+    with client.application.app_context():
+        db = get_db()
+        ensure_user(
+            db, username, WORKER_HASH, "评价任务质检员", "qc_inspector", f"PQE-QC-{suffix}"
+        )
+    qc_headers = _login_headers(client, username)
+
+    summary = client.get(
+        "/api/process-quality-evaluations/tasks/disposal-summary", headers=qc_headers
+    )
+    assert summary.status_code == 200, summary.get_json()
+    assert summary.get_json()["waiver_policy"]["can_waive_live"] is False
+
+    live_denied = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=qc_headers,
+        json={
+            "task_ids": [task["id"]],
+            "reason_code": "task_generated_in_error",
+            "reason": "现场核实该任务由重复报工错误生成",
+        },
+    )
+    assert live_denied.status_code == 403, live_denied.get_json()
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET status = 'completed' WHERE id = ?",
+            (flow["order_id"],),
+        )
+        db.commit()
+
+    historical_waived = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=qc_headers,
+        json={
+            "task_ids": [task["id"]],
+            "reason_code": "completed_order_history",
+            "reason": "订单完工后的历史遗留任务",
+        },
+    )
+    assert historical_waived.status_code == 200, historical_waived.get_json()
+    assert historical_waived.get_json()["waiver_scope"] == "historical"
 
 
 def test_process_template_drives_dynamic_weighted_dimensions(client, auth_headers, worker_auth_headers):
