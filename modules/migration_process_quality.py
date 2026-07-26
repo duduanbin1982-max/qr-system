@@ -359,9 +359,37 @@ def m038_converge_legacy_handoff_status(db):
     db.commit()
 
 
+def m039_process_quality_task_waivers(db):
+    _add_column(db, "process_quality_evaluation_tasks", "waiver_reason TEXT DEFAULT ''")
+    _add_column(db, "process_quality_evaluation_tasks", "waived_by INTEGER")
+    _add_column(db, "process_quality_evaluation_tasks", "waived_at TEXT DEFAULT ''")
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS process_quality_evaluation_task_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            operator_user_id INTEGER,
+            reason TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (task_id) REFERENCES process_quality_evaluation_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (operator_user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pqe_task_audits_task "
+        "ON process_quality_evaluation_task_audits(task_id, created_at)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pqe_tasks_status_created "
+        "ON process_quality_evaluation_tasks(status, created_at)"
+    )
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
     (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
     (37, "Remediate process quality review invariants", m037_process_quality_review_remediation),
     (38, "Converge legacy handoff review status", m038_converge_legacy_handoff_status),
+    (39, "Add auditable process quality task waivers", m039_process_quality_task_waivers),
 ]

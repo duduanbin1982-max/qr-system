@@ -322,6 +322,69 @@ class ProcessQualityEvaluationService:
             evaluator_user_id, db
         )
 
+    @staticmethod
+    def task_disposal_summary():
+        return ProcessQualityEvaluationRepository.task_disposal_summary()
+
+    @staticmethod
+    def _task_ids(value):
+        if not isinstance(value, list):
+            return []
+        task_ids = []
+        for item in value:
+            try:
+                task_id = int(item)
+            except (TypeError, ValueError):
+                continue
+            if task_id > 0 and task_id not in task_ids:
+                task_ids.append(task_id)
+        return task_ids
+
+    @classmethod
+    def waive_tasks(cls, data, current_user):
+        reason = str(data.get("reason") or "").strip()
+        if len(reason) < 2:
+            raise ValueError("豁免原因至少填写2个字符")
+        if len(reason) > 500:
+            raise ValueError("豁免原因不能超过500个字符")
+
+        task_ids = cls._task_ids(data.get("task_ids"))
+        order_id = data.get("order_id")
+        if order_id is not None:
+            try:
+                order_id = int(order_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("订单参数无效") from exc
+            if order_id <= 0:
+                raise ValueError("订单参数无效")
+        if not task_ids and order_id is None:
+            raise ValueError("请选择待处置的评价任务")
+        if task_ids and len(task_ids) > 200:
+            raise ValueError("单次最多豁免200条任务")
+
+        with BaseService.transaction() as db:
+            if order_id is not None and not task_ids:
+                task_ids = ProcessQualityEvaluationRepository.pending_task_ids_for_order(
+                    order_id, bool(data.get("required_only", True)), db
+                )
+            if not task_ids:
+                raise ValueError("没有可豁免的待评价任务")
+            if len(task_ids) > 200:
+                raise ValueError("单次最多豁免200条任务")
+            pending_tasks = ProcessQualityEvaluationRepository.pending_tasks_by_ids(task_ids, db)
+            if len(pending_tasks) != len(task_ids):
+                raise ValueError("所选任务包含已处理或不存在的记录，请刷新后重试")
+            updated = ProcessQualityEvaluationRepository.waive_tasks(
+                task_ids, reason, current_user.get("id"), db
+            )
+        return {
+            "ok": True,
+            "status": "waived",
+            "count": updated,
+            "task_ids": task_ids,
+            "order_ids": sorted({task["order_id"] for task in pending_tasks}),
+        }
+
     @classmethod
     def assert_required_tasks_completed(cls, evaluator_user_id, db=None):
         task = ProcessQualityEvaluationRepository.pending_required_task(

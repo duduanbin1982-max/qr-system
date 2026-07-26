@@ -90,13 +90,14 @@ class ProcessQualityEvaluationRepository:
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
             "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
             "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
-            "evaluator_u.name AS evaluator_name "
+            "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
             "FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_p ON target_p.id = task.target_process_id "
             "JOIN processes evaluator_p ON evaluator_p.id = task.evaluator_process_id "
             "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
             "JOIN users evaluator_u ON evaluator_u.id = task.evaluator_user_id "
+            "LEFT JOIN users waiver_u ON waiver_u.id = task.waived_by "
             "WHERE task.id = ?",
             (task_id,),
         ).fetchone()
@@ -149,13 +150,14 @@ class ProcessQualityEvaluationRepository:
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
             "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
             "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
-            "evaluator_u.name AS evaluator_name "
+            "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
             "FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_p ON target_p.id = task.target_process_id "
             "JOIN processes evaluator_p ON evaluator_p.id = task.evaluator_process_id "
             "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
             "JOIN users evaluator_u ON evaluator_u.id = task.evaluator_user_id "
+            "LEFT JOIN users waiver_u ON waiver_u.id = task.waived_by "
             "WHERE " + where_clause + " ORDER BY task.is_required DESC, task.created_at DESC, task.id DESC "
             "LIMIT ? OFFSET ?",
             params + [per_page, offset],
@@ -243,6 +245,69 @@ class ProcessQualityEvaluationRepository:
             "WHERE id = ? AND status = 'pending' AND is_required = 0",
             (reason, task_id),
         )
+        return cursor.rowcount
+
+    @staticmethod
+    def task_disposal_summary(db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT "
+            "COUNT(*) AS pending_total, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 1 THEN 1 ELSE 0 END), 0) AS required_pending, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 0 THEN 1 ELSE 0 END), 0) AS optional_pending, "
+            "COALESCE(SUM(CASE WHEN task.created_at <= datetime('now','localtime','-24 hours') THEN 1 ELSE 0 END), 0) AS overdue_24h, "
+            "COALESCE(SUM(CASE WHEN task.created_at <= datetime('now','localtime','-72 hours') THEN 1 ELSE 0 END), 0) AS overdue_72h, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 1 AND orders.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_order_required, "
+            "COALESCE(SUM(CASE WHEN task.is_required = 1 AND orders.status = 'producing' THEN 1 ELSE 0 END), 0) AS producing_order_required, "
+            "COUNT(DISTINCT task.evaluator_user_id) AS affected_workers "
+            "FROM process_quality_evaluation_tasks task "
+            "JOIN orders ON orders.id = task.order_id "
+            "WHERE task.status = 'pending'"
+        ).fetchone()
+        return dict(row)
+
+    @staticmethod
+    def pending_task_ids_for_order(order_id, required_only=True, db=None):
+        db = resolve_db(db)
+        where = "order_id = ? AND status = 'pending'"
+        params = [order_id]
+        if required_only:
+            where += " AND is_required = 1"
+        return [row[0] for row in db.execute(
+            "SELECT id FROM process_quality_evaluation_tasks WHERE " + where + " ORDER BY id",
+            params,
+        ).fetchall()]
+
+    @staticmethod
+    def pending_tasks_by_ids(task_ids, db=None):
+        db = resolve_db(db)
+        if not task_ids:
+            return []
+        placeholders = ",".join("?" for _ in task_ids)
+        return db.execute(
+            "SELECT id, order_id, is_required FROM process_quality_evaluation_tasks "
+            f"WHERE id IN ({placeholders}) AND status = 'pending' ORDER BY id",
+            task_ids,
+        ).fetchall()
+
+    @staticmethod
+    def waive_tasks(task_ids, reason, operator_user_id, db):
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" for _ in task_ids)
+        cursor = db.execute(
+            "UPDATE process_quality_evaluation_tasks SET status = 'waived', waiver_reason = ?, "
+            "waived_by = ?, waived_at = datetime('now','localtime'), "
+            "updated_at = datetime('now','localtime') "
+            f"WHERE id IN ({placeholders}) AND status = 'pending'",
+            [reason, operator_user_id, *task_ids],
+        )
+        if cursor.rowcount:
+            db.executemany(
+                "INSERT INTO process_quality_evaluation_task_audits "
+                "(task_id, action, operator_user_id, reason) VALUES (?, 'waived', ?, ?)",
+                [(task_id, operator_user_id, reason) for task_id in task_ids],
+            )
         return cursor.rowcount
 
     @staticmethod

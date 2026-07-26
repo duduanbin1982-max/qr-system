@@ -2,6 +2,7 @@
   <div class="pqe-page">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">待</span><div><div class="s-val">{{ taskTotal }}</div><div class="s-label">待评价</div></div></div>
+      <div class="summary-item"><span class="s-icon">必</span><div><div class="s-val text-danger">{{ disposalSummary.required_pending || 0 }}</div><div class="s-label">待处理必评</div></div></div>
       <div class="summary-item"><span class="s-icon">评</span><div><div class="s-val">{{ statsSummary.total || 0 }}</div><div class="s-label">评价总数</div></div></div>
       <div class="summary-item"><span class="s-icon">分</span><div><div class="s-val text-primary">{{ statsSummary.avg_score || 0 }}</div><div class="s-label">平均分</div></div></div>
       <div class="summary-item"><span class="s-icon">核</span><div><div class="s-val text-warning">{{ statsSummary.pending_verification || 0 }}</div><div class="s-label">待核验</div></div></div>
@@ -20,6 +21,7 @@
         <div class="pqe-actions">
           <input v-if="!['stats','rules','templates'].includes(activeTab)" v-model="keyword" class="form-input pqe-search" placeholder="搜索订单、产品、序列号或工序" @keyup.enter="loadActive">
           <input v-if="['records','review','appeals','stats'].includes(activeTab)" v-model="yearMonth" class="form-input pqe-month" type="month" @change="loadActive">
+          <select v-if="activeTab === 'disposal'" v-model="disposalStatus" class="form-input pqe-status-filter" @change="loadDisposal"><option value="pending">待处置</option><option value="waived">已豁免</option></select>
           <button class="btn btn-default btn-sm" @click="loadActive">刷新</button>
           <button v-if="activeTab === 'templates' && canRules" class="btn btn-primary btn-sm" @click="openTemplate()">新增模板</button>
         </div>
@@ -31,6 +33,25 @@
           <div class="table-wrap"><table v-if="tasks.length" class="data-table pqe-wide"><thead><tr><th>生成时间</th><th>订单/工件</th><th>产品</th><th>上游工序</th><th>被评价人</th><th>接手工序/评价人</th><th>模板</th><th>要求</th><th>归属</th></tr></thead>
             <tbody><tr v-for="task in tasks" :key="task.id"><td>{{ task.created_at }}</td><td><code>{{ task.order_no }}</code><div class="cell-muted">{{ task.serial_no || '订单模式' }}</div></td><td>{{ task.product_name }}<div class="cell-muted">{{ task.product_code || '-' }}</div></td><td>{{ task.target_process_name }}</td><td>{{ task.target_user_name || '工序整体' }}</td><td>{{ task.evaluator_process_name }}<div class="cell-muted">{{ task.evaluator_name }}</div></td><td>{{ task.template_snapshot?.name || '通用评价模板' }}</td><td><span class="badge" :class="task.is_required ? 'badge-warning' : 'badge-info'">{{ task.is_required ? '必评' : '选评' }}</span></td><td>{{ task.attribution_type === 'worker' ? '个人绩效' : '工序统计' }}</td></tr></tbody>
           </table><div v-else class="empty"><div class="empty-text">暂无待评价任务</div></div></div>
+        </section>
+
+        <section v-else-if="activeTab === 'disposal'">
+          <div class="pqe-note">豁免只用于历史补录、订单归档或确实无法评价的任务。豁免后不再阻塞报工，原因、操作人和时间会永久留痕。</div>
+          <div class="pqe-disposal-summary">
+            <div><strong>{{ disposalSummary.required_pending || 0 }}</strong><span>待处理必评</span></div>
+            <div><strong>{{ disposalSummary.overdue_24h || 0 }}</strong><span>超24小时</span></div>
+            <div><strong class="text-danger">{{ disposalSummary.overdue_72h || 0 }}</strong><span>超72小时</span></div>
+            <div><strong>{{ disposalSummary.completed_order_required || 0 }}</strong><span>已完成订单遗留</span></div>
+            <div><strong>{{ disposalSummary.affected_workers || 0 }}</strong><span>受影响员工</span></div>
+          </div>
+          <div class="pqe-disposal-actions">
+            <label v-if="disposalStatus === 'pending'"><input type="checkbox" :checked="allPendingSelected" @change="toggleAllDisposal($event.target.checked)"> 全选当前待处置任务</label>
+            <span v-if="disposalStatus === 'pending'">已选择 {{ selectedTaskIds.length }} 条</span>
+            <button v-if="disposalStatus === 'pending'" class="btn btn-warning btn-sm" :disabled="!selectedTaskIds.length" @click="openWaiver(selectedTaskIds)">豁免选中任务</button>
+          </div>
+          <div class="table-wrap"><table v-if="disposalTasks.length" class="data-table pqe-wide"><thead><tr><th v-if="disposalStatus === 'pending'"></th><th>生成时间</th><th>订单/工件</th><th>上游工序</th><th>评价人</th><th>要求</th><th>时效</th><th>状态/处置</th><th>操作</th></tr></thead>
+            <tbody><tr v-for="task in disposalTasks" :key="task.id"><td v-if="disposalStatus === 'pending'"><input type="checkbox" :checked="selectedTaskIds.includes(task.id)" @change="toggleDisposalTask(task.id, $event.target.checked)"></td><td>{{ task.created_at }}</td><td><code>{{ task.order_no }}</code><div class="cell-muted">{{ task.serial_no || '订单模式' }}</div></td><td>{{ task.target_process_name }}</td><td>{{ task.evaluator_name }}</td><td><span class="badge" :class="task.is_required ? 'badge-warning' : 'badge-info'">{{ task.is_required ? '必评' : '选评' }}</span></td><td><span :class="taskAgeClass(task)">{{ taskAgeText(task) }}</span></td><td><template v-if="task.status === 'waived'"><span class="badge badge-info">已豁免</span><div class="cell-muted">{{ task.waived_by_name || '-' }} · {{ task.waived_at || '-' }}</div><div class="cell-muted">{{ task.waiver_reason || '-' }}</div></template><span v-else class="badge badge-warning">待处置</span></td><td class="action-cell"><template v-if="task.status === 'pending'"><button class="btn btn-default btn-sm" @click="openWaiver([task.id])">豁免</button><button v-if="task.is_required" class="btn btn-warning btn-sm" @click="openOrderWaiver(task)">本订单必评</button></template></td></tr></tbody>
+          </table><div v-else class="empty"><div class="empty-text">暂无{{ disposalStatus === 'pending' ? '待处置' : '已豁免' }}任务</div></div></div>
         </section>
 
         <section v-else-if="activeTab === 'records' || activeTab === 'review'">
@@ -87,6 +108,8 @@
     </div><div class="modal-footer"><button class="btn btn-default" @click="showTemplate=false">取消</button><button class="btn btn-primary" @click="saveTemplate">保存</button></div></div></div>
 
     <div v-if="showReview" class="modal-overlay"><div class="modal pqe-modal"><div class="modal-header"><span>{{ reviewTitle }}</span><span class="modal-close" @click="showReview=false">&times;</span></div><div class="modal-body"><div class="pqe-review-meta">{{ reviewTargetLabel }}</div><label class="pqe-full-label">处理说明<textarea v-model="reviewForm.note" rows="4" class="form-input" placeholder="填写现场核验依据和处理结论"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" @click="showReview=false">取消</button><button class="btn btn-primary" @click="saveReview">确认提交</button></div></div></div>
+
+    <div v-if="showWaiver" class="modal-overlay"><div class="modal pqe-modal"><div class="modal-header"><span>{{ waiverTitle }}</span><span class="modal-close" @click="showWaiver=false">&times;</span></div><div class="modal-body"><div class="pqe-review-meta">{{ waiverTargetLabel }}</div><label class="pqe-full-label">豁免原因<textarea v-model="waiverForm.reason" rows="4" class="form-input" placeholder="例如：订单已归档的历史遗留任务，现场无法补评"></textarea></label></div><div class="modal-footer"><button class="btn btn-default" :disabled="waiving" @click="showWaiver=false">取消</button><button class="btn btn-warning" :disabled="waiving" @click="saveWaiver">{{ waiving ? '提交中...' : '确认豁免' }}</button></div></div></div>
   </div>
 </template>
 
@@ -98,6 +121,7 @@ import { showToast } from '@/lib/store.js'
 
 const tabs = [
   { key: 'tasks', label: '待评价' }, { key: 'records', label: '评价记录' },
+  { key: 'disposal', label: '任务处置', permission: 'process_quality_evaluation:rules' },
   { key: 'review', label: '异常核验', permission: 'process_quality_evaluation:review' },
   { key: 'appeals', label: '申诉复核', permission: 'process_quality_evaluation:review' },
   { key: 'templates', label: '评价模板', permission: 'process_quality_evaluation:rules' },
@@ -109,24 +133,31 @@ const canRules = computed(() => can('process_quality_evaluation:rules'))
 const activeTab = ref(localStorage.getItem('processQualityEvaluationTab') || 'tasks')
 const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const keyword = ref('')
-const tasks = ref([]), records = ref([]), appeals = ref([]), templates = ref([])
+const tasks = ref([]), records = ref([]), appeals = ref([]), templates = ref([]), disposalTasks = ref([])
 const taskTotal = ref(0), statsSummary = ref({}), appealSummary = ref({}), processStats = ref([]), evaluatorStats = ref([])
+const disposalSummary = ref({}), disposalStatus = ref('pending'), selectedTaskIds = ref([])
 const refs = reactive({ routes: [], processes: [] })
 const ruleForm = reactive({ enabled: true, required_previous_process: true, auto_open_mobile: true, hide_target_identity: true, low_score_threshold: 60, critical_score_threshold: 40, minimum_samples_for_performance: 3 })
 const issueTagsText = ref(''), criticalTagsText = ref('')
 const showTemplate = ref(false), templateForm = reactive({}), templateTagsText = ref(''), templateCriticalTagsText = ref('')
 const showReview = ref(false), reviewForm = reactive({ type: '', target: null, status: '', note: '' })
+const showWaiver = ref(false), waiving = ref(false), waiverForm = reactive({ taskIds: [], orderId: null, orderNo: '', reason: '' })
 const reviewTitle = computed(() => reviewForm.type === 'appeal' ? (reviewForm.status === 'accepted' ? '确认申诉成立' : '确认申诉不成立') : (reviewForm.status === 'confirmed' ? '确认低分评价' : '驳回低分评价'))
 const reviewTargetLabel = computed(() => reviewForm.target ? `${reviewForm.target.order_no || ''} · ${reviewForm.target.target_process_name || ''} · ${reviewForm.target.total_score || 0}分` : '')
 
-function tabCount(key) { if (key === 'review') return statsSummary.value.pending_verification || 0; if (key === 'appeals') return appealSummary.value.pending || 0; return 0 }
+const allPendingSelected = computed(() => disposalStatus.value === 'pending' && disposalTasks.value.length > 0 && selectedTaskIds.value.length === disposalTasks.value.length)
+const waiverTitle = computed(() => waiverForm.orderId ? '豁免本订单必评任务' : '豁免评价任务')
+const waiverTargetLabel = computed(() => waiverForm.orderId ? `订单 ${waiverForm.orderNo || waiverForm.orderId} 的全部待处理必评任务将解除报工门禁。` : `将豁免已选择的 ${waiverForm.taskIds.length} 条待评价任务。`)
+
+function tabCount(key) { if (key === 'disposal') return disposalSummary.value.required_pending || 0; if (key === 'review') return statsSummary.value.pending_verification || 0; if (key === 'appeals') return appealSummary.value.pending || 0; return 0 }
 async function loadTasks() { const data = await api.domains.processQualityEvaluations.qualityEvaluationTasks({ scope: 'all', status: 'pending', keyword: keyword.value, per_page: 500 }); tasks.value = data.items || []; taskTotal.value = data.total || 0 }
+async function loadDisposal() { const [summary, taskData] = await Promise.all([api.domains.processQualityEvaluations.qualityEvaluationTaskDisposalSummary(), api.domains.processQualityEvaluations.qualityEvaluationTasks({ scope: 'all', status: disposalStatus.value, keyword: keyword.value, per_page: 500 })]); disposalSummary.value = summary || {}; disposalTasks.value = taskData.items || []; const visibleIds = new Set(disposalTasks.value.filter(task => task.status === 'pending').map(task => task.id)); selectedTaskIds.value = selectedTaskIds.value.filter(id => visibleIds.has(id)) }
 async function loadRecords(status = '') { const data = await api.domains.processQualityEvaluations.qualityEvaluationRecords({ year_month: yearMonth.value, status, keyword: keyword.value, per_page: 500 }); records.value = data.items || [] }
 async function loadAppeals() { const data = await api.domains.processQualityEvaluations.qualityEvaluationAppeals({ status: '', year_month: yearMonth.value }); appeals.value = data.items || [] }
 async function loadTemplates() { const [templateData, refData] = await Promise.all([api.domains.processQualityEvaluations.qualityEvaluationTemplates({}), api.domains.processQualityEvaluations.qualityEvaluationReferences()]); templates.value = templateData.items || []; Object.assign(refs, refData) }
 async function loadStats() { const data = await api.domains.processQualityEvaluations.qualityEvaluationStats({ year_month: yearMonth.value }); statsSummary.value = data.summary || {}; appealSummary.value = data.appeals || {}; processStats.value = data.processes || []; evaluatorStats.value = data.evaluators || [] }
 async function loadRules() { const data = await api.domains.processQualityEvaluations.qualityEvaluationRules(); Object.assign(ruleForm, data); issueTagsText.value = (data.issue_tags || []).join('，'); criticalTagsText.value = (data.critical_issue_tags || []).join('，') }
-async function loadActive() { try { if (activeTab.value === 'tasks') await loadTasks(); if (activeTab.value === 'records') await loadRecords(); if (activeTab.value === 'review') await loadRecords('pending_verification'); if (activeTab.value === 'appeals') await loadAppeals(); if (activeTab.value === 'templates') await loadTemplates(); if (activeTab.value === 'rules') await loadRules(); if (can('process_quality_evaluation:stats')) await loadStats() } catch (error) { showToast(error.message || '评价数据加载失败', 'error') } }
+async function loadActive() { try { if (activeTab.value === 'tasks') await loadTasks(); if (activeTab.value === 'disposal') await loadDisposal(); if (activeTab.value === 'records') await loadRecords(); if (activeTab.value === 'review') await loadRecords('pending_verification'); if (activeTab.value === 'appeals') await loadAppeals(); if (activeTab.value === 'templates') await loadTemplates(); if (activeTab.value === 'rules') await loadRules(); if (can('process_quality_evaluation:stats')) await loadStats() } catch (error) { showToast(error.message || '评价数据加载失败', 'error') } }
 async function switchTab(key) { activeTab.value = key; localStorage.setItem('processQualityEvaluationTab', key); await loadActive() }
 
 function splitTags(value) { return value.split(/[，,]/).map(item => item.trim()).filter(Boolean) }
@@ -136,6 +167,12 @@ function addDimension() { templateForm.dimensions.push({ key: '', label: '', wei
 async function saveTemplate() { try { const payload = { ...templateForm, issue_tags: splitTags(templateTagsText.value), critical_issue_tags: splitTags(templateCriticalTagsText.value) }; if (templateForm.id) await api.domains.processQualityEvaluations.updateQualityEvaluationTemplate(templateForm.id, payload); else await api.domains.processQualityEvaluations.createQualityEvaluationTemplate(payload); showTemplate.value = false; showToast('评价模板已保存'); await loadTemplates() } catch (error) { showToast(error.message || '模板保存失败', 'error') } }
 function openReview(type, target, status) { Object.assign(reviewForm, { type, target, status, note: '' }); showReview.value = true }
 async function saveReview() { if (!reviewForm.note.trim()) { showToast('请填写处理说明', 'error'); return } try { if (reviewForm.type === 'appeal') await api.domains.processQualityEvaluations.reviewQualityEvaluationAppeal(reviewForm.target.id, { status: reviewForm.status, note: reviewForm.note }); else await api.domains.processQualityEvaluations.reviewQualityEvaluation(reviewForm.target.id, { status: reviewForm.status, note: reviewForm.note }); showReview.value = false; showToast('复核结果已保存'); await loadActive() } catch (error) { showToast(error.message || '复核失败', 'error') } }
+
+function toggleDisposalTask(taskId, checked) { selectedTaskIds.value = checked ? [...new Set([...selectedTaskIds.value, taskId])] : selectedTaskIds.value.filter(id => id !== taskId) }
+function toggleAllDisposal(checked) { selectedTaskIds.value = checked ? disposalTasks.value.filter(task => task.status === 'pending').map(task => task.id) : [] }
+function openWaiver(taskIds) { Object.assign(waiverForm, { taskIds: [...new Set(taskIds)], orderId: null, orderNo: '', reason: '' }); showWaiver.value = true }
+function openOrderWaiver(task) { Object.assign(waiverForm, { taskIds: [], orderId: task.order_id, orderNo: task.order_no, reason: '' }); showWaiver.value = true }
+async function saveWaiver() { if (waiverForm.reason.trim().length < 2) { showToast('请填写至少2个字符的豁免原因', 'error'); return } waiving.value = true; try { const payload = { reason: waiverForm.reason.trim() }; if (waiverForm.orderId) { payload.order_id = waiverForm.orderId; payload.required_only = true } else payload.task_ids = waiverForm.taskIds; const result = await api.domains.processQualityEvaluations.waiveQualityEvaluationTasks(payload); showWaiver.value = false; selectedTaskIds.value = []; showToast(`已豁免 ${result.count || 0} 条评价任务`); await loadDisposal(); await loadTasks() } catch (error) { showToast(error.message || '豁免失败', 'error') } finally { waiving.value = false } }
 
 function dimensionText(row) { const labels = Object.fromEntries((row.template_snapshot?.dimensions || []).map(item => [item.key, item.label])); const values = row.dimension_scores || {}; const entries = Object.entries(values); if (entries.length) return entries.map(([key, value]) => `${labels[key] || key} ${value}分`).join(' / '); return `加工 ${row.processing_quality} / 精度 ${row.dimensional_accuracy} / 外观 ${row.appearance_quality} / 接续 ${row.process_continuity} / 防护 ${row.cleanliness_protection}` }
 function issueText(row) { return [...(row.issue_tags || []), row.comment].filter(Boolean).join('；') || '-' }
@@ -147,11 +184,14 @@ function appealText(value) { return { pending: '待复核', accepted: '申诉成
 function appealClass(value) { return value === 'accepted' ? 'badge-success' : value === 'rejected' ? 'badge-info' : 'badge-warning' }
 function scoreClass(score) { return score >= 80 ? 'text-success' : score >= 60 ? 'text-warning' : 'text-danger' }
 function scoreDeviation(row) { return Math.round(((row.avg_score || 0) - (statsSummary.value.avg_score || 0)) * 10) / 10 }
+function taskAgeHours(task) { const createdAt = new Date(String(task.created_at || '').replace(' ', 'T')).getTime(); return Number.isFinite(createdAt) ? Math.max(0, (Date.now() - createdAt) / 3600000) : 0 }
+function taskAgeText(task) { const hours = taskAgeHours(task); return hours >= 72 ? `超时 ${Math.floor(hours)} 小时` : hours >= 24 ? `已 ${Math.floor(hours)} 小时` : '24小时内' }
+function taskAgeClass(task) { const hours = taskAgeHours(task); return hours >= 72 ? 'text-danger' : hours >= 24 ? 'text-warning' : '' }
 
 onMounted(async () => { if (!visibleTabs.value.some(tab => tab.key === activeTab.value)) activeTab.value = visibleTabs.value[0]?.key || 'tasks'; await loadActive() })
 </script>
 
 <style scoped>
-.pqe-page{padding:var(--space-6)}.pqe-shell{min-height:620px}.pqe-toolbar{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}.pqe-toolbar h3{margin:0}.pqe-subtitle{font-size:var(--text-xs-alt);color:var(--text-placeholder);margin-top:4px}.pqe-tabs{display:flex;gap:var(--space-1);flex-wrap:wrap}.pqe-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;margin-left:4px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px}.pqe-actions{margin-left:auto;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}.pqe-search{width:240px}.pqe-month{width:150px}.pqe-body{padding-top:var(--space-3)}.pqe-wide{min-width:1320px}.cell-muted{margin-top:3px;color:var(--text-placeholder);font-size:var(--text-xs-alt)}.dimension-cell{max-width:320px;white-space:normal;line-height:1.6}.action-cell{white-space:nowrap}.action-cell .btn+.btn{margin-left:6px}.pqe-note{padding:10px 12px;margin-bottom:var(--space-3);border-left:3px solid var(--primary);background:var(--primary-light);color:var(--text-secondary);font-size:var(--text-sm)}.pqe-stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6)}.pqe-section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin:var(--space-4) 0 var(--space-3)}.pqe-section-head h4{margin:0}.pqe-rules{max-width:900px}.pqe-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3) var(--space-6)}.pqe-rule-grid label{display:grid;grid-template-columns:1fr 150px;align-items:center;gap:var(--space-3);padding:9px 0;border-bottom:1px solid var(--border)}.pqe-rule-grid input[type=checkbox]{justify-self:end;width:18px;height:18px}.pqe-full-label{display:flex;flex-direction:column;gap:6px;margin:var(--space-3) 0;color:var(--text-secondary);font-size:var(--text-sm)}.pqe-modal{width:min(720px,94vw);max-height:88vh;display:flex;flex-direction:column}.pqe-modal-wide{width:min(1040px,96vw)}.pqe-modal .modal-body{overflow:auto}.pqe-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}.pqe-form-grid label{display:flex;flex-direction:column;gap:6px;color:var(--text-secondary);font-size:var(--text-sm)}.pqe-dimension-table{min-width:760px}.pqe-dimension-table .form-input{min-width:100px}.pqe-review-meta{padding:10px 12px;background:var(--bg-hover);font-weight:600}
-@media(max-width:900px){.pqe-page{padding:var(--space-3)}.pqe-actions{margin-left:0;width:100%}.pqe-search{width:min(100%,240px)}.pqe-stats-grid,.pqe-rule-grid,.pqe-form-grid{grid-template-columns:1fr}.pqe-rule-grid label{grid-template-columns:1fr 130px}}
+.pqe-page{padding:var(--space-6)}.pqe-shell{min-height:620px}.pqe-toolbar{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}.pqe-toolbar h3{margin:0}.pqe-subtitle{font-size:var(--text-xs-alt);color:var(--text-placeholder);margin-top:4px}.pqe-tabs{display:flex;gap:var(--space-1);flex-wrap:wrap}.pqe-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;margin-left:4px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px}.pqe-actions{margin-left:auto;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}.pqe-search{width:240px}.pqe-month,.pqe-status-filter{width:150px}.pqe-body{padding-top:var(--space-3)}.pqe-wide{min-width:1320px}.cell-muted{margin-top:3px;color:var(--text-placeholder);font-size:var(--text-xs-alt)}.dimension-cell{max-width:320px;white-space:normal;line-height:1.6}.action-cell{white-space:nowrap}.action-cell .btn+.btn{margin-left:6px}.pqe-note{padding:10px 12px;margin-bottom:var(--space-3);border-left:3px solid var(--primary);background:var(--primary-light);color:var(--text-secondary);font-size:var(--text-sm)}.pqe-disposal-summary{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:var(--space-3);margin-bottom:var(--space-3)}.pqe-disposal-summary>div{border:1px solid var(--border);padding:10px 12px;background:var(--bg-card)}.pqe-disposal-summary strong{display:block;font-size:var(--text-lg)}.pqe-disposal-summary span{color:var(--text-placeholder);font-size:var(--text-xs-alt)}.pqe-disposal-actions{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3);font-size:var(--text-sm)}.pqe-stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6)}.pqe-section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin:var(--space-4) 0 var(--space-3)}.pqe-section-head h4{margin:0}.pqe-rules{max-width:900px}.pqe-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3) var(--space-6)}.pqe-rule-grid label{display:grid;grid-template-columns:1fr 150px;align-items:center;gap:var(--space-3);padding:9px 0;border-bottom:1px solid var(--border)}.pqe-rule-grid input[type=checkbox]{justify-self:end;width:18px;height:18px}.pqe-full-label{display:flex;flex-direction:column;gap:6px;margin:var(--space-3) 0;color:var(--text-secondary);font-size:var(--text-sm)}.pqe-modal{width:min(720px,94vw);max-height:88vh;display:flex;flex-direction:column}.pqe-modal-wide{width:min(1040px,96vw)}.pqe-modal .modal-body{overflow:auto}.pqe-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}.pqe-form-grid label{display:flex;flex-direction:column;gap:6px;color:var(--text-secondary);font-size:var(--text-sm)}.pqe-dimension-table{min-width:760px}.pqe-dimension-table .form-input{min-width:100px}.pqe-review-meta{padding:10px 12px;background:var(--bg-hover);font-weight:600}
+@media(max-width:900px){.pqe-page{padding:var(--space-3)}.pqe-actions{margin-left:0;width:100%}.pqe-search{width:min(100%,240px)}.pqe-disposal-summary,.pqe-stats-grid,.pqe-rule-grid,.pqe-form-grid{grid-template-columns:1fr}.pqe-disposal-actions{align-items:flex-start;flex-direction:column}.pqe-rule-grid label{grid-template-columns:1fr 130px}}
 </style>

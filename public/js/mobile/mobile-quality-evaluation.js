@@ -4,16 +4,31 @@ var qualityRules = { low_score_threshold: 60, critical_score_threshold: 40, issu
 var qualityViewMode = 'tasks';
 var qualityNavigation = { returnTo: 'main', reportDraft: null };
 
+function updateQualityEvaluationIndicator(result) {
+  var badge = $('quality-pending-badge');
+  var hint = $('quality-entry-hint');
+  var count = result && result.pending_count == null ? (result.total || 0) : ((result && result.pending_count) || 0);
+  var requiredCount = (result && result.pending_required_count) || 0;
+  if (badge) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.title = requiredCount ? '其中必评 ' + requiredCount + ' 条' : '暂无必评任务';
+    badge.classList.toggle('empty', count === 0);
+  }
+  if (hint) {
+    hint.textContent = requiredCount
+      ? '待评价 ' + count + ' 条，其中必评 ' + requiredCount + ' 条'
+      : (count ? '待评价 ' + count + ' 条，暂无必评' : '评价已接手工件的上游工序');
+  }
+}
+
 function loadQualityEvaluationCount() {
   var badge = $('quality-pending-badge');
   if (!badge || !user()) return;
   api.qualityEvaluationTasks({ status: 'pending', per_page: 1 })
     .then(function(result) {
-      var count = result.pending_count == null ? (result.total || 0) : result.pending_count;
-      badge.textContent = count > 99 ? '99+' : String(count);
-      badge.classList.toggle('empty', count === 0);
+      updateQualityEvaluationIndicator(result);
     })
-    .catch(function() { badge.textContent = '0'; badge.classList.add('empty'); });
+    .catch(function() { updateQualityEvaluationIndicator({ pending_count: 0, pending_required_count: 0 }); });
 }
 
 function openQualityEvaluationCenter(options) {
@@ -96,11 +111,7 @@ function loadQualityEvaluationTasks() {
     qualityRules = results[1] || qualityRules;
     var tasks = results[0].items || [];
     renderQualityEvaluationTasks(tasks);
-    var badge = $('quality-pending-badge');
-    if (badge) {
-      badge.textContent = String(results[0].pending_count || 0);
-      badge.classList.toggle('empty', !(results[0].pending_count || 0));
-    }
+    updateQualityEvaluationIndicator(results[0]);
     resumeBlockedReportWhenReady(tasks);
   }).catch(function(error) {
     list.innerHTML = '<div class="quality-empty error">' + esc(error.message || '评价任务加载失败') + '</div>';

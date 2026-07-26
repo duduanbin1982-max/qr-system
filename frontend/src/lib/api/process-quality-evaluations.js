@@ -2,6 +2,8 @@ import { buildQuery, request } from './client.js'
 
 export const processQualityEvaluationsApi = {
   qualityEvaluationTasks: (params) => request('GET', '/api/process-quality-evaluations/tasks' + buildQuery(params)),
+  qualityEvaluationTaskDisposalSummary: () => request('GET', '/api/process-quality-evaluations/tasks/disposal-summary'),
+  waiveQualityEvaluationTasks: (data) => request('POST', '/api/process-quality-evaluations/tasks/waive', data),
   skipQualityEvaluationTask: (id, data) => request('POST', `/api/process-quality-evaluations/tasks/${id}/skip`, data),
   submitQualityEvaluations: (data) => request('POST', '/api/process-quality-evaluations', data),
   qualityEvaluationRecords: (params) => request('GET', '/api/process-quality-evaluations' + buildQuery(params)),

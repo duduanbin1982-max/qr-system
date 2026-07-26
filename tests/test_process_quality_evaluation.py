@@ -319,6 +319,98 @@ def test_pending_required_evaluation_blocks_next_normal_report(client, worker_au
     assert payload["details"]["order_no"] == flow["order_no"]
 
 
+def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    tasks_response = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    )
+    assert tasks_response.status_code == 200, tasks_response.get_json()
+    task_payload = tasks_response.get_json()
+    required_task = next(item for item in task_payload["items"] if item["is_required"])
+    assert task_payload["pending_required_count"] == 1
+
+    denied = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=worker_auth_headers,
+        json={"task_ids": [required_task["id"]], "reason": "worker cannot waive"},
+    )
+    assert denied.status_code == 403
+
+    missing_reason = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=auth_headers,
+        json={"task_ids": [required_task["id"]]},
+    )
+    assert missing_reason.status_code == 400
+
+    summary_before = client.get(
+        "/api/process-quality-evaluations/tasks/disposal-summary", headers=auth_headers
+    )
+    assert summary_before.status_code == 200, summary_before.get_json()
+    assert summary_before.get_json()["required_pending"] >= 1
+
+    waived = client.post(
+        "/api/process-quality-evaluations/tasks/waive",
+        headers=auth_headers,
+        json={
+            "order_id": flow["order_id"],
+            "required_only": True,
+            "reason": "completed order historical task review",
+        },
+    )
+    assert waived.status_code == 200, waived.get_json()
+    assert waived.get_json()["count"] == 1
+    assert waived.get_json()["task_ids"] == [required_task["id"]]
+
+    waived_tasks = client.get(
+        "/api/process-quality-evaluations/tasks?scope=all&status=waived",
+        headers=auth_headers,
+    )
+    assert waived_tasks.status_code == 200, waived_tasks.get_json()
+    waived_task = next(item for item in waived_tasks.get_json()["items"] if item["id"] == required_task["id"])
+    assert waived_task["waiver_reason"] == "completed order historical task review"
+    assert waived_task["waived_by_name"]
+
+    with client.application.app_context():
+        db = get_db()
+        audit = db.execute(
+            "SELECT action, reason FROM process_quality_evaluation_task_audits WHERE task_id = ?",
+            (required_task["id"],),
+        ).fetchone()
+    assert audit["action"] == "waived"
+    assert audit["reason"] == "completed order historical task review"
+
+    suffix = uuid.uuid4().hex[:6].upper()
+    with client.application.app_context():
+        db = get_db()
+        order_id = db.execute(
+            "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
+            "VALUES (?, 'Test Customer', 'gate release product', ?, 1, 'producing', '')",
+            (f"TEST-PQE-WAIVE-{suffix}", f"PQE-WAIVE-{suffix}"),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed, scrapped, rework) "
+            "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
+            (order_id, flow["process_ids"][2]),
+        )
+        db.commit()
+
+    released = client.post(
+        "/api/mobile/report",
+        headers=worker_auth_headers,
+        json={
+            "order_id": order_id,
+            "process_id": flow["process_ids"][2],
+            "quantity": 1,
+            "report_type": "normal",
+        },
+    )
+    assert released.status_code == 200, released.get_json()
+
+
 def test_process_template_drives_dynamic_weighted_dimensions(client, auth_headers, worker_auth_headers):
     flow = _seed_serial_flow(client)
     created_template = client.post(

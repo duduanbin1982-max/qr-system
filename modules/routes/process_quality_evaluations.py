@@ -9,7 +9,7 @@ from modules.services.process_quality_evaluation_service import ProcessQualityEv
 def _can_read(user):
     return has_permission(user, "process_quality_evaluation:view") or has_permission(
         user, "process_quality_evaluation:submit"
-    )
+    ) or has_permission(user, "process_quality_evaluation:rules")
 
 
 @app.route("/api/process-quality-evaluations/tasks", methods=["GET"])
@@ -17,7 +17,9 @@ def _can_read(user):
 def process_quality_tasks():
     if not _can_read(g.current_user):
         return jsonify({"error": "无权限"}), 403
-    can_view_all = has_permission(g.current_user, "process_quality_evaluation:view")
+    can_view_all = has_permission(g.current_user, "process_quality_evaluation:view") or has_permission(
+        g.current_user, "process_quality_evaluation:rules"
+    )
     requested_all = can_view_all and request.args.get("scope") == "all"
     evaluator_id = request.args.get("evaluator_user_id", type=int) if requested_all else g.current_user["id"]
     result = ProcessQualityEvaluationService.pending_tasks(
@@ -29,7 +31,36 @@ def process_quality_tasks():
         include_target_identity=requested_all,
     )
     result["pending_count"] = ProcessQualityEvaluationService.pending_count(g.current_user["id"])
+    result["pending_required_count"] = ProcessQualityEvaluationService.pending_required_count(
+        g.current_user["id"]
+    )
     return jsonify(result)
+
+
+@app.route("/api/process-quality-evaluations/tasks/disposal-summary", methods=["GET"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_task_disposal_summary():
+    return jsonify(ProcessQualityEvaluationService.task_disposal_summary())
+
+
+@app.route("/api/process-quality-evaluations/tasks/waive", methods=["POST"])
+@check_auth
+@check_permission("process_quality_evaluation:rules")
+def process_quality_task_waive():
+    try:
+        result = ProcessQualityEvaluationService.waive_tasks(
+            request.get_json() or {}, g.current_user
+        )
+        safe_audit_log(
+            "process_quality_evaluation_task_waive",
+            "process_quality_evaluation_task",
+            0,
+            f"count={result['count']} reason={(request.get_json() or {}).get('reason', '')[:120]}",
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/process-quality-evaluations/tasks/<int:task_id>/skip", methods=["POST"])

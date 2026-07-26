@@ -53,7 +53,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 
     versions = [version for version, _, _ in migrations.MIGRATIONS]
-    assert versions == [1, *range(13, 39)]
+    assert versions == [1, *range(13, migrations.LATEST_VERSION + 1)]
     assert len(versions) == len(set(versions))
     assert {migration_fn.__module__ for _, _, migration_fn in migrations.MIGRATIONS} == {
         "modules.migration_baseline",
@@ -145,8 +145,10 @@ def test_database_at_version_29_runs_all_pending_migrations():
         db.execute("PRAGMA user_version = 29")
         db.commit()
 
-        assert migrations.run_migrations(db) == 9
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 38
+        assert migrations.run_migrations(db) == len([
+            version for version, _, _ in migrations.MIGRATIONS if version > 29
+        ])
+        assert db.execute("PRAGMA user_version").fetchone()[0] == migrations.LATEST_VERSION
         index_names = {
             row["name"]
             for row in db.execute(
