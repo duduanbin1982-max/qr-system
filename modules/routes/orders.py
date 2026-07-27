@@ -3,6 +3,7 @@ from flask import request, jsonify, g
 from modules.route_decorators import (
     app,
     check_auth,
+    check_order_data_scope,
     check_permission,
     get_json_body,
     get_user_process_ids,
@@ -11,17 +12,13 @@ from modules.route_decorators import (
 )
 from modules.services.order_service import OrderService
 from modules.services.order_focus_service import OrderFocusService
-from modules.services.scan_helper_service import ScanHelperService
 from modules.services.setting_service import SettingsService
 
 
 
 def _check_order_data_scope(oid):
     """Check if current user can access this order based on process permissions."""
-    pids = get_user_process_ids(g.current_user)
-    if pids is not None and not ScanHelperService.check_order_scope(oid, pids):
-        return False
-    return True
+    return check_order_data_scope(oid, g.current_user)
 
 @app.route('/api/orders', methods=['GET'])
 @check_auth
@@ -133,7 +130,11 @@ def reopen_order(oid):
 def trash_orders():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 20, type=int), 1), 200)
-    result = OrderService.list_trash(page, limit)
+    result = OrderService.list_trash(
+        page,
+        limit,
+        data_scope_pids=get_user_process_ids(g.current_user),
+    )
     return jsonify(result)
 
 
@@ -218,7 +219,10 @@ def batch_create_orders():
 @check_permission('orders:view')
 def completion_focus_board():
     limit = min(max(request.args.get('limit', 80, type=int), 1), 200)
-    return jsonify(OrderFocusService.board(limit=limit))
+    return jsonify(OrderFocusService.board(
+        limit=limit,
+        data_scope_pids=get_user_process_ids(g.current_user),
+    ))
 
 
 @app.route('/api/orders/completion-focus/config', methods=['GET'])
@@ -264,7 +268,16 @@ def create_completion_focus_exception(order_id):
 @check_permission('orders:edit')
 def cancel_completion_focus_exception(exception_id):
     data = get_json_body() if request.data else {}
-    OrderFocusService.cancel_exception(exception_id, g.current_user, (data.get('reason') or '').strip())
+    order_id = OrderFocusService.exception_order_id(exception_id)
+    if not order_id:
+        return jsonify({'error': '集中完工例外不存在'}), 404
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}), 403
+    OrderFocusService.cancel_exception(
+        exception_id,
+        g.current_user,
+        (data.get('reason') or '').strip(),
+    )
     safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
     return jsonify({'message': '已取消集中完工例外'})
 
@@ -291,6 +304,8 @@ def workpiece_progress(order_id):
 @check_permission("orders:view")
 def list_order_materials(order_id):
     """Return the material recipe attached to an order."""
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}), 403
     materials = OrderService.list_order_materials(order_id)
     return jsonify({"materials": materials})
 
@@ -299,6 +314,8 @@ def list_order_materials(order_id):
 @check_permission("orders:edit")
 def add_order_material(order_id):
     """Add one material requirement to an order."""
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}), 403
     material = OrderService.add_order_material(order_id, get_json_body())
     return jsonify({"material": material}), 201
 
@@ -307,5 +324,7 @@ def add_order_material(order_id):
 @check_permission("orders:edit")
 def delete_order_material(order_id, item_id):
     """Delete one material requirement from an order."""
+    if not _check_order_data_scope(order_id):
+        return jsonify({"error": "无权限访问此订单"}), 403
     OrderService.delete_order_material(order_id, item_id)
     return jsonify({"message": "删除成功"})

@@ -186,9 +186,16 @@ class OrderFocusService:
         }
 
     @staticmethod
+    def exception_order_id(exception_id):
+        exception = CompletionFocusRepository.find_exception_by_id(exception_id)
+        return exception["order_id"] if exception else None
+
+    @staticmethod
     def cancel_exception(exception_id, user, cancel_reason=""):
         with BaseService.transaction() as txn:
             exception = CompletionFocusRepository.find_exception_by_id(exception_id, db=txn)
+            if not exception:
+                raise ValueError("集中完工例外不存在")
             CompletionFocusRepository.cancel_exception(
                 exception_id, user.get("id"), cancel_reason, db=txn
             )
@@ -216,7 +223,7 @@ class OrderFocusService:
         return OrderFocusPolicy.focus_label(focus_type)
 
     @staticmethod
-    def board(limit=80):
+    def board(limit=80, data_scope_pids=None):
         config = OrderFocusService.config()
         if not OrderFocusService.enabled():
             return {
@@ -229,11 +236,16 @@ class OrderFocusService:
 
         rows = []
         tail_percent = OrderFocusService.tail_percent()
+        order_rows = CompletionFocusRepository.list_orders(
+            limit=limit,
+            data_scope_pids=data_scope_pids,
+        )
+        visible_order_ids = [row["id"] for row in order_rows]
         active_exceptions = {
             row["order_id"]: dict(row)
-            for row in CompletionFocusRepository.list_active_exceptions()
-        }
-        for order_row in CompletionFocusRepository.list_orders(limit=limit):
+            for row in CompletionFocusRepository.list_active_exceptions(visible_order_ids)
+        } if visible_order_ids else {}
+        for order_row in order_rows:
             order = dict(order_row)
             try:
                 progress = OrderProgressAnalyzer.analyze(order["id"])

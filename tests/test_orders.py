@@ -129,6 +129,52 @@ def _seed_completion_focus_pair(client, lead_username=None):
     return later_order_id, process_id
 
 
+def _seed_scoped_order_pair(client):
+    suffix = uuid.uuid4().hex[:6].upper()
+    username = f"order_scope_{suffix.lower()}"
+    with client.application.app_context():
+        from modules.db import get_db
+
+        db = get_db()
+        process_ids = []
+        for seq_order in (1, 2):
+            process_ids.append(db.execute(
+                "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
+                "VALUES (?, 'order scope fixture', 'fixture', ?, 'active', datetime('now','localtime'))",
+                (f"Order Scope Process {suffix}-{seq_order}", 8000 + seq_order),
+            ).lastrowid)
+
+        order_ids = []
+        for index, process_id in enumerate(process_ids, start=1):
+            order_id = db.execute(
+                "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status) "
+                "VALUES (?, 'Scope Customer', 'Scope Product', ?, 2, 'producing')",
+                (f"TEST-ORDER-SCOPE-{suffix}-{index}", f"SCOPE-{suffix}-{index}"),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO order_processes (order_id, process_id, seq_order, status, completed) "
+                "VALUES (?, ?, 1, 'pending', 0)",
+                (order_id, process_id),
+            )
+            order_ids.append(order_id)
+
+        user_id = ensure_user(
+            db,
+            username,
+            TEST_HASH,
+            "Order Scope Manager",
+            "production_manager",
+            f"TEST-ORDER-SCOPE-{suffix}",
+        )
+        db.execute("DELETE FROM user_processes WHERE user_id = ?", (user_id,))
+        db.execute(
+            "INSERT INTO user_processes (user_id, process_id) VALUES (?, ?)",
+            (user_id, process_ids[0]),
+        )
+        db.commit()
+    return username, order_ids, process_ids
+
+
 
 class TestOrderCRUD:
     def test_list_orders(self, client, auth_headers):
@@ -203,6 +249,7 @@ class TestOrderCRUD:
         assert status_resp.status_code == 200
         assert test_order_id in _listed_order_ids(status_resp)
 
+
     def test_completed_order_is_readonly_until_reopened(self, client, auth_headers, test_order_id):
         _set_order_status(client, test_order_id, "completed")
 
@@ -255,6 +302,120 @@ class TestOrderCRUD:
         )
         assert report_resp.status_code == 409
         assert "已完成并归档" in report_resp.get_json()["error"]
+
+
+class TestOrderDataScope:
+    def test_order_subresources_enforce_process_scope(self, client):
+        username, order_ids, _ = _seed_scoped_order_pair(client)
+        headers = _login_headers(client, username, TEST_PASS)
+        allowed_order_id, forbidden_order_id = order_ids
+
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            forbidden_attachment_id = db.execute(
+                "INSERT INTO order_attachments "
+                "(order_id, file_name, file_type, file_size, file_path, uploaded_by) "
+                "VALUES (?, 'forbidden.txt', 'text/plain', 0, '', 'scope fixture')",
+                (forbidden_order_id,),
+            ).lastrowid
+            db.commit()
+
+        allowed = client.get(
+            f"/api/orders/{allowed_order_id}/materials",
+            headers=headers,
+        )
+        assert allowed.status_code == 200, allowed.get_json()
+
+        for endpoint in (
+            f"/api/orders/{forbidden_order_id}/materials",
+            f"/api/orders/{forbidden_order_id}/attachments",
+            f"/api/orders/{forbidden_order_id}/remarks",
+            f"/api/order-attachments/{forbidden_attachment_id}/download",
+        ):
+            response = client.get(endpoint, headers=headers)
+            assert response.status_code == 403, (endpoint, response.get_json())
+
+        delete_response = client.delete(
+            f"/api/order-attachments/{forbidden_attachment_id}",
+            headers=headers,
+        )
+        assert delete_response.status_code == 403, delete_response.get_json()
+
+        with client.application.app_context():
+            from modules.db import get_db
+
+            row = get_db().execute(
+                "SELECT id FROM order_attachments WHERE id = ?",
+                (forbidden_attachment_id,),
+            ).fetchone()
+            assert row is not None
+
+    def test_trash_and_focus_queries_filter_process_scope(self, client):
+        username, order_ids, process_ids = _seed_scoped_order_pair(client)
+        headers = _login_headers(client, username, TEST_PASS)
+
+        with client.application.app_context():
+            from modules.db import get_db
+            from modules.repositories.completion_focus_repository import CompletionFocusRepository
+
+            scoped_rows = CompletionFocusRepository.list_orders(
+                limit=200,
+                data_scope_pids=[process_ids[0]],
+            )
+            scoped_ids = {row["id"] for row in scoped_rows}
+            assert order_ids[0] in scoped_ids
+            assert order_ids[1] not in scoped_ids
+
+            forbidden_exception_id = CompletionFocusRepository.insert_exception(
+                order_ids[1],
+                "scope fixture",
+                "must remain inaccessible",
+                "2099-01-01 00:00:00",
+                None,
+                "scope fixture",
+            )
+            db = get_db()
+            db.commit()
+
+        board_response = client.get(
+            "/api/orders/completion-focus?limit=200",
+            headers=headers,
+        )
+        assert board_response.status_code == 200, board_response.get_json()
+        board_ids = {item["order_id"] for item in board_response.get_json()["items"]}
+        assert order_ids[0] in board_ids
+        assert order_ids[1] not in board_ids
+
+        cancel_response = client.delete(
+            f"/api/orders/completion-focus-exceptions/{forbidden_exception_id}",
+            headers=headers,
+        )
+        assert cancel_response.status_code == 403, cancel_response.get_json()
+
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            exception = db.execute(
+                "SELECT status FROM order_completion_focus_exceptions WHERE id = ?",
+                (forbidden_exception_id,),
+            ).fetchone()
+            assert exception["status"] == "active"
+            db = get_db()
+            db.execute(
+                "UPDATE orders SET deleted_at = datetime('now','localtime'), "
+                "pre_delete_status = status, status = 'cancelled' WHERE id IN (?, ?)",
+                order_ids,
+            )
+            db.commit()
+
+        response = client.get("/api/orders/trash?limit=200", headers=headers)
+        assert response.status_code == 200, response.get_json()
+        trash_ids = {order["id"] for order in response.get_json()["orders"]}
+        assert order_ids[0] in trash_ids
+        assert order_ids[1] not in trash_ids
 
 
 class TestOrderDeleteFlow:

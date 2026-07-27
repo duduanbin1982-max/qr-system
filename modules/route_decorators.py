@@ -8,7 +8,7 @@ modules focused on HTTP orchestration while preserving the existing public API.
 from modules.app import app
 from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
-from modules.middleware.data_scope import get_user_process_ids
+from modules.middleware.data_scope import check_order_data_scope, get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error
 from modules.middleware.helpers import get_json_body, list_response, parse_pagination, safe_route
 from modules.middleware.rate_limit import rate_limit
@@ -18,6 +18,7 @@ __all__ = [
     "app",
     "check_auth",
     "check_permission",
+    "check_order_data_scope",
     "get_json_body",
     "get_user_process_ids",
     "handle_unexpected_error",

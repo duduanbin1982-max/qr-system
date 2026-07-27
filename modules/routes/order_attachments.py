@@ -7,13 +7,12 @@ from flask import request, jsonify, g, send_file
 from modules.route_decorators import (
     app,
     check_auth,
+    check_order_data_scope,
     check_permission,
-    get_user_process_ids,
     safe_audit_log,
 )
 from modules.services.order_attachments_service import OrderAttachmentsService
 from modules.services.order_service import OrderService
-from modules.services.scan_helper_service import ScanHelperService
 from werkzeug.utils import secure_filename
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads', 'attachments')
@@ -30,6 +29,8 @@ def _completed_order_error(order_id):
 @check_auth
 @check_permission('orders:view')
 def list_attachments(order_id):
+    if not check_order_data_scope(order_id, g.current_user):
+        return jsonify({'error': '无权限访问此订单'}), 403
     attachments = OrderAttachmentsService.list_attachments(order_id)
     return jsonify({'attachments': attachments})
 
@@ -38,6 +39,8 @@ def list_attachments(order_id):
 @check_auth
 @check_permission('orders:edit')
 def upload_attachment(order_id):
+    if not check_order_data_scope(order_id, g.current_user):
+        return jsonify({'error': '无权限访问此订单'}), 403
     completed_error = _completed_order_error(order_id)
     if completed_error:
         return completed_error
@@ -63,11 +66,9 @@ def upload_attachment(order_id):
 @check_auth
 @check_permission('orders:view')
 def download_attachment(attachment_id):
-    pids = get_user_process_ids(g.current_user)
-    if pids is not None:
-        row_check = OrderAttachmentsService.get_attachment_meta(attachment_id)
-        if row_check and not ScanHelperService.check_order_scope(row_check['order_id'], pids):
-            return jsonify({'error': '无权限下载此附件'}), 403
+    row_check = OrderAttachmentsService.get_attachment_meta(attachment_id)
+    if row_check and not check_order_data_scope(row_check['order_id'], g.current_user):
+        return jsonify({'error': '无权限下载此附件'}), 403
     try:
         row = OrderAttachmentsService.get_attachment_file(attachment_id)
     except ValueError as e:
@@ -94,10 +95,8 @@ def download_attachment(attachment_id):
 @check_permission('orders:edit')
 def delete_attachment(attachment_id):
     row_check = OrderAttachmentsService.get_attachment_meta(attachment_id)
-    pids = get_user_process_ids(g.current_user)
-    if pids is not None:
-        if row_check and not ScanHelperService.check_order_scope(row_check['order_id'], pids):
-            return jsonify({'error': '无权限删除此附件'}), 403
+    if row_check and not check_order_data_scope(row_check['order_id'], g.current_user):
+        return jsonify({'error': '无权限删除此附件'}), 403
     if row_check:
         completed_error = _completed_order_error(row_check['order_id'])
         if completed_error:

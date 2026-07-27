@@ -217,20 +217,33 @@ class OrderRepository:
         ).fetchall()
 
     @staticmethod
-    def list_trash(page, limit, db=None):
+    def list_trash(page, limit, data_scope_pids=None, db=None):
         db = resolve_db(db)
+        where = ["o.deleted_at IS NOT NULL"]
+        params = []
+        if data_scope_pids is not None:
+            if not data_scope_pids:
+                return [], 0
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            where.append(
+                "o.id IN (SELECT order_id FROM order_processes "
+                f"WHERE process_id IN ({placeholders}))"
+            )
+            params.extend(data_scope_pids)
+        where_sql = " AND ".join(where)
         total = db.execute(
-            'SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL'
+            "SELECT COUNT(*) FROM orders o WHERE " + where_sql,
+            params,
         ).fetchone()[0]
         offset = (page - 1) * limit
         rows = db.execute('''
             SELECT o.*, u.name as deleted_by_name
             FROM orders o
             LEFT JOIN users u ON o.deleted_by = u.id
-            WHERE o.deleted_at IS NOT NULL
+            WHERE ''' + where_sql + '''
             ORDER BY o.deleted_at DESC
             LIMIT ? OFFSET ?
-        ''', (limit, offset)).fetchall()
+        ''', params + [limit, offset]).fetchall()
         return rows, total
 
     # ============================================================

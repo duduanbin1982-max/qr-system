@@ -432,9 +432,9 @@ class OrderService:
         return {'id': oid, 'status': status, 'reason': reason}
 
     @staticmethod
-    def list_trash(page=1, limit=20):
+    def list_trash(page=1, limit=20, data_scope_pids=None):
         """回收站列表（适配器）"""
-        return OrderService.trash_orders(page, limit)
+        return OrderService.trash_orders(page, limit, data_scope_pids=data_scope_pids)
 
     @staticmethod
     def get_workpiece_progress(order_id):
@@ -444,11 +444,15 @@ class OrderService:
         return OrderProgressAnalyzer.analyze(order_id)
 
     @staticmethod
-    def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE):
+    def trash_orders(page=1, limit=DEFAULT_PAGE_SIZE, data_scope_pids=None):
         """分页查询回收站订单。"""
         page = max(page, 1)
         limit = min(max(limit, 1), 200)
-        rows, total = OrderRepository.list_trash(page, limit)
+        rows, total = OrderRepository.list_trash(
+            page,
+            limit,
+            data_scope_pids=data_scope_pids,
+        )
         return {
             'orders': [dict(row) for row in rows],
             'total': total,

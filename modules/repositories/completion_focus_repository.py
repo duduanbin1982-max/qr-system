@@ -5,21 +5,34 @@ from modules.repositories.context import resolve_db
 
 class CompletionFocusRepository:
     @staticmethod
-    def list_orders(limit=80, db=None):
+    def list_orders(limit=80, data_scope_pids=None, db=None):
         db = resolve_db(db)
+        where = [
+            "o.deleted_at IS NULL",
+            "COALESCE(o.status, '') IN ('pending', 'producing', 'paused')",
+            "COALESCE(o.quantity, 0) > 0",
+        ]
+        params = []
+        if data_scope_pids is not None:
+            if not data_scope_pids:
+                return []
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            where.append(
+                "EXISTS (SELECT 1 FROM order_processes scope_op "
+                f"WHERE scope_op.order_id = o.id AND scope_op.process_id IN ({placeholders}))"
+            )
+            params.extend(data_scope_pids)
         return db.execute(
             """
             SELECT o.*, pr.name AS route_name, c.name AS customer_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE o.deleted_at IS NULL
-              AND COALESCE(o.status, '') IN ('pending', 'producing', 'paused')
-              AND COALESCE(o.quantity, 0) > 0
+            WHERE """ + " AND ".join(where) + """
             ORDER BY o.created_at ASC, o.id ASC
             LIMIT ?
             """,
-            (limit,),
+            params + [limit],
         ).fetchall()
 
     @staticmethod

@@ -7,6 +7,17 @@ def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
     return _get_user_process_ids(user)
 
 
+def check_order_data_scope(order_id: int, user: Optional[dict], db=None) -> bool:
+    """Return whether a user may access an order and its child resources."""
+    from modules.services.scan_helper_service import ScanHelperService
+
+    return ScanHelperService.check_order_scope(
+        order_id,
+        get_user_process_ids(user),
+        db=db,
+    )
+
+
 
 # Whitelist of allowed column names for process_filter_condition
 _ALLOWED_FILTER_COLUMNS = {'process_id', 'id', 'wr.process_id', 'op.process_id'}
