@@ -44,6 +44,6 @@ orders_schemas = {
                 'quantity': {'maximum': 99999, 'minimum': 1, 'type': 'integer'},
                 'remark': {'maxLength': 1024, 'type': 'string'},
                 'route_id': {'type': ['integer', 'null']},
-                'status': {'enum': ['pending', 'producing', 'completed', 'cancelled', 'paused'], 'type': 'string'}},
+                'status': {'enum': ['pending', 'producing', 'cancelled', 'paused'], 'type': 'string'}},
  'type': 'object'},
 }

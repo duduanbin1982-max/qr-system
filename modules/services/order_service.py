@@ -216,7 +216,7 @@ class OrderService:
 
     VALID_TRANSITIONS = {
         'pending':   ['producing', 'cancelled', 'paused'],
-        'producing': ['completed', 'cancelled', 'paused'],
+        'producing': ['cancelled', 'paused'],
         'completed': [],
         'cancelled': ['pending'],
         'paused':    ['producing', 'pending', 'cancelled'],
@@ -247,14 +247,8 @@ class OrderService:
         if existing['status'] == 'completed':
             raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
 
-        # 状态转换校验
-        if 'status' in data:
-            new_status = data['status']
-            old_status = existing['status']
-            if new_status != old_status:
-                allowed = OrderService.VALID_TRANSITIONS.get(old_status, [])
-                if new_status not in allowed:
-                    raise ValueError(f"不允许从「{old_status}」切换到「{new_status}」")
+        if data.get('status') == 'completed':
+            raise ValueError('订单完成状态只能由系统根据实际完工事实自动生成')
 
         # customer_id → name lookup
         if 'customer_id' in data and data['customer_id']:
@@ -268,6 +262,21 @@ class OrderService:
         remark_changed = 'remark' in data
 
         with BaseService.transaction() as txn:
+            # Re-check the lifecycle state after acquiring the write transaction.
+            # The initial read above is only for fast feedback and is not a lock.
+            current = OrderRepository.find_status_by_id(oid, db=txn)
+            if not current:
+                raise ValueError('订单不存在')
+            if current['deleted_at']:
+                raise ValueError('订单已在回收站中')
+            if current['status'] == 'completed':
+                raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
+
+            if 'status' in data and data['status'] != current['status']:
+                allowed = OrderService.VALID_TRANSITIONS.get(current['status'], [])
+                if data['status'] not in allowed:
+                    raise ValueError(f"不允许从「{current['status']}」切换到「{data['status']}」")
+
             # TOCTOU-safe remark history: re-read inside transaction
             if remark_changed and user_id:
                 current = OrderRepository.find_order_remark(oid, db=txn)

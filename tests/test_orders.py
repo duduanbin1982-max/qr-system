@@ -26,6 +26,17 @@ def _order_no(client, order_id):
         return row["order_no"]
 
 
+def _order_status(client, order_id):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        row = get_db().execute(
+            "SELECT status FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()
+        return row["status"]
+
+
 def _first_process_id(client, order_id):
     with client.application.app_context():
         from modules.db import get_db
@@ -149,6 +160,19 @@ class TestOrderCRUD:
         assert resp.status_code == 200, f"update_order response: {resp.get_json()}"
         data = resp.get_json()
         assert data["message"]
+
+    def test_update_order_cannot_manually_complete(self, client, auth_headers, test_order_id):
+        _set_order_status(client, test_order_id, "producing")
+
+        response = client.put(
+            f"/api/orders/{test_order_id}",
+            headers=auth_headers,
+            json={"status": "completed"},
+        )
+
+        assert response.status_code == 400
+        assert "参数校验失败" in response.get_json()["error"]
+        assert _order_status(client, test_order_id) == "producing"
 
     def test_completed_orders_are_archived_by_default(self, client, auth_headers, test_order_id):
         _set_order_status(client, test_order_id, "completed")

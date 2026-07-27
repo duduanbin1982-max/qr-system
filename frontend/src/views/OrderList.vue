@@ -264,7 +264,6 @@
                 <select class="form-input" v-model="form.status">
                   <option value="pending">待生产</option>
                   <option value="producing">生产中</option>
-                  <option value="completed">已完成</option>
                   <option value="cancelled">已取消</option>
                   <option value="paused">已暂停</option>
                 </select>
