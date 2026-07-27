@@ -3,7 +3,7 @@
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">🏢</span><div><div class="s-val">{{ totalCount }}</div><div class="s-label">客户总数</div></div></div>
-      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val text-info">{{ hasOrders }}</div><div class="s-label">有订单</div></div></div>
+      <div v-if="canViewOrders" class="summary-item"><span class="s-icon">📦</span><div><div class="s-val text-info">{{ hasOrders }}</div><div class="s-label">有订单</div></div></div>
       <div class="summary-item"><span class="s-icon">📞</span><div><div class="s-val text-primary">{{ hasContact }}</div><div class="s-label">有联系人</div></div></div>
       <div class="summary-item"><span class="s-icon">📧</span><div><div class="s-val text-success">{{ hasEmail }}</div><div class="s-label">有邮箱</div></div></div>
     </div>
@@ -34,8 +34,8 @@
                 <th style="min-width:70px">联系人</th>
                 <th style="min-width:100px">标签</th>
                 <th style="min-width:110px">联系电话</th>
-                <th style="width:60px;text-align:center">订单</th>
-                <th style="min-width:90px">最近下单</th>
+                <th v-if="canViewOrders" style="width:60px;text-align:center">订单</th>
+                <th v-if="canViewOrders" style="min-width:90px">最近下单</th>
                 <th style="min-width:100px">邮箱</th>
                 <th>地址</th>
                 <th style="width:100px;text-align:center">操作</th>
@@ -44,7 +44,10 @@
             <tbody>
               <tr v-for="(c, idx) in customers" :key="c.id">
                 <td style="text-align:center"><span class="row-num">{{ idx + 1 }}</span></td>
-                <td><a style="color:var(--primary);font-weight:600;cursor:pointer" @click="viewDetail(c)">{{ c.name }}</a></td>
+                <td>
+                  <a v-if="canViewOrders" href="#" data-testid="customer-order-link" style="color:var(--primary);font-weight:600" @click.prevent="viewDetail(c)">{{ c.name }}</a>
+                  <strong v-else>{{ c.name }}</strong>
+                </td>
                 <td>{{ c.contact || "-" }}</td>
                 <td>
                   <span v-if="c.tags" style="display:flex;gap:4px;flex-wrap:wrap">
@@ -53,8 +56,8 @@
                   <span v-else style="color:var(--text-placeholder)">-</span>
                 </td>
                 <td><a v-if="c.phone" :href="'tel:' + c.phone" style="color:var(--primary);text-decoration:none">{{ c.phone }}</a><span v-else>-</span></td>
-                <td style="text-align:center"><span :style="{fontWeight:600,color:(c.order_count||0)>0?'var(--primary)':'var(--text-placeholder)'}">{{ c.order_count || 0 }}</span></td>
-                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ c.last_order_date ? c.last_order_date.slice(0,10) : "-" }}</td>
+                <td v-if="canViewOrders" style="text-align:center"><span :style="{fontWeight:600,color:(c.order_count||0)>0?'var(--primary)':'var(--text-placeholder)'}">{{ c.order_count || 0 }}</span></td>
+                <td v-if="canViewOrders" style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ c.last_order_date ? c.last_order_date.slice(0,10) : "-" }}</td>
                 <td style="color:var(--text-placeholder)"><a v-if="c.email" :href="'mailto:' + c.email" style="color:var(--primary);text-decoration:none">{{ c.email }}</a><span v-else>-</span></td>
                 <td :title="c.address || ''" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--text-placeholder);font-size:var(--text-sm)">{{ c.address || "-" }}</td>
                 <td style="text-align:center">
@@ -199,6 +202,7 @@ export default {
     const canEdit = computed(() => can("customers:edit"))
     const canDelete = computed(() => can("customers:delete"))
     const canCreate = computed(() => can("customers:create"))
+    const canViewOrders = computed(() => can("orders:view"))
     
     async function load() {
       loading.value = true
@@ -242,6 +246,7 @@ export default {
       catch(e) { showToast(e.message || "删除失败", "error") }
     }
     async function viewDetail(c) {
+      if (!canViewOrders.value) return
       detail.value = c; showDetail.value = true; detailPage.value = 1
       await loadDetailOrders(c.id)
     }
@@ -260,7 +265,7 @@ export default {
       showModal, modalEdit, form, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
       deleteCheck, deleteCheckOrders, showDeleteBlock,
-      hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,
+      hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, canViewOrders, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,
       detailPage, detailPageSize, detailPrevPage, detailNextPage
     }
   }

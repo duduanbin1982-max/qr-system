@@ -16,7 +16,15 @@ class CustomerService:
     """客户管理业务逻辑。"""
 
     @staticmethod
-    def list_customers(keyword=None, page=1, limit=100, tag=None):
+    def list_customers(
+        keyword=None,
+        page=1,
+        limit=100,
+        tag=None,
+        *,
+        include_order_stats=True,
+        data_scope_pids=None,
+    ):
         db = BaseService.db()
         where = "1=1"
         params = []
@@ -26,7 +34,15 @@ class CustomerService:
         if tag:
             where += " AND c.tags LIKE ?"
             params.append(f"%{tag}%")
-        rows, total = CustomerRepository.list_with_order_stats(where, params, page, limit, db=db)
+        rows, total = CustomerRepository.list_with_order_stats(
+            where,
+            params,
+            page,
+            limit,
+            include_order_stats=include_order_stats,
+            data_scope_pids=data_scope_pids,
+            db=db,
+        )
         return {"customers": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
@@ -98,14 +114,20 @@ class CustomerService:
             CustomerRepository.delete(cid, db=txn)
 
     @staticmethod
-    def get_customer_orders(cid, page=1, limit=50):
+    def get_customer_orders(cid, page=1, limit=50, data_scope_pids=None):
         """获取客户的订单历史（含工序详情和 extra_fields 解析）。"""
         import json
         db = BaseService.db()
         cust = CustomerRepository.find_by_id(cid, db=db)
         if not cust:
             raise NotFoundError("客户不存在")
-        rows, total = CustomerRepository.get_orders(cid, page, limit, db=db)
+        rows, total = CustomerRepository.get_orders(
+            cid,
+            page,
+            limit,
+            data_scope_pids=data_scope_pids,
+            db=db,
+        )
 
         result = []
         for row in rows:
@@ -115,7 +137,11 @@ class CustomerService:
             except (TypeError, json.JSONDecodeError):
                 _logger.warning("invalid customer order extra_fields: order_id=%s", o.get("id"))
                 o["extra_fields"] = {}
-            procs = CustomerRepository.get_order_processes(o["id"], db=db)
+            procs = CustomerRepository.get_order_processes(
+                o["id"],
+                data_scope_pids=data_scope_pids,
+                db=db,
+            )
             o["processes"] = [dict(p) for p in procs]
             result.append(o)
         return {"orders": result, "total": total, "page": page, "limit": limit}

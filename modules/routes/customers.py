@@ -4,13 +4,15 @@ qr-system — 客户管理（路由层）
 薄层：HTTP 解析 → 调用 CustomerService → 格式化响应。
 注：Swagger docstring 仅供文档参考。
 """
-from flask import request, jsonify
+from flask import g, request, jsonify
 
 from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
+    get_user_process_ids,
     get_json_body,
+    has_permission,
     safe_audit_log,
     validate_json,
 )
@@ -42,7 +44,16 @@ def list_customers():
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     keyword = request.args.get('keyword', '').strip()
     tag = request.args.get('tag', '').strip()
-    return jsonify(CustomerService.list_customers(keyword, page, limit, tag))
+    can_view_orders = has_permission(g.current_user, 'orders:view')
+    data_scope_pids = get_user_process_ids(g.current_user) if can_view_orders else []
+    return jsonify(CustomerService.list_customers(
+        keyword,
+        page,
+        limit,
+        tag,
+        include_order_stats=can_view_orders,
+        data_scope_pids=data_scope_pids,
+    ))
 
 
 @app.route('/api/customers', methods=['POST'])
@@ -177,6 +188,7 @@ def delete_customer(cid):
 @app.route('/api/customers/<int:cid>/orders', methods=['GET'])
 @check_auth
 @check_permission('customers:view')
+@check_permission('orders:view')
 def customer_orders(cid):
     """
     客户订单历史
@@ -198,4 +210,9 @@ def customer_orders(cid):
     """
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 50, type=int), 1), 200)
-    return jsonify(CustomerService.get_customer_orders(cid, page, limit))
+    return jsonify(CustomerService.get_customer_orders(
+        cid,
+        page,
+        limit,
+        data_scope_pids=get_user_process_ids(g.current_user),
+    ))

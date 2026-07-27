@@ -59,20 +59,50 @@ class CustomerRepository:
         return rows, total
 
     @staticmethod
-    def list_with_order_stats(where_sql, params, page, limit, db=None):
+    def list_with_order_stats(
+        where_sql,
+        params,
+        page,
+        limit,
+        *,
+        include_order_stats=True,
+        data_scope_pids=None,
+        db=None,
+    ):
         """分页列表，附带活跃订单数和最近下单时间。where_sql 不含 WHERE 关键字。"""
         db = resolve_db(db)
         total = db.execute(
             f"SELECT COUNT(*) FROM customers c WHERE {where_sql}", params
         ).fetchone()[0]
         offset = (page - 1) * limit
+        if not include_order_stats or data_scope_pids == []:
+            rows = db.execute(
+                "SELECT c.*, 0 as order_count, NULL as last_order_date "
+                "FROM customers c "
+                f"WHERE {where_sql} "
+                "ORDER BY c.id DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return rows, total
+
+        scope_sql = ""
+        scope_params = []
+        if data_scope_pids is not None:
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            scope_sql = (
+                " AND EXISTS (SELECT 1 FROM order_processes scope_op "
+                "WHERE scope_op.order_id = o.id "
+                f"AND scope_op.process_id IN ({placeholders}))"
+            )
+            scope_params.extend(data_scope_pids)
         rows = db.execute(
             "SELECT c.*, COUNT(o.id) as order_count, MAX(o.created_at) as last_order_date "
             "FROM customers c "
-            "LEFT JOIN orders o ON o.customer_id = c.id AND o.deleted_at IS NULL "
+            "LEFT JOIN orders o ON o.customer_id = c.id AND o.deleted_at IS NULL"
+            f"{scope_sql} "
             f"WHERE {where_sql} "
             "GROUP BY c.id ORDER BY c.id DESC LIMIT ? OFFSET ?",
-            params + [limit, offset]
+            scope_params + params + [limit, offset],
         ).fetchall()
         return rows, total
 
@@ -86,34 +116,55 @@ class CustomerRepository:
         ).fetchone()[0]
 
     @staticmethod
-    def get_orders(customer_id, page, limit, db=None):
+    def get_orders(customer_id, page, limit, data_scope_pids=None, db=None):
         """获取客户的订单列表（含路线名）。"""
         db = resolve_db(db)
+        if data_scope_pids == []:
+            return [], 0
+        where = ["o.customer_id = ?", "o.deleted_at IS NULL"]
+        params = [customer_id]
+        if data_scope_pids is not None:
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            where.append(
+                "EXISTS (SELECT 1 FROM order_processes scope_op "
+                "WHERE scope_op.order_id = o.id "
+                f"AND scope_op.process_id IN ({placeholders}))"
+            )
+            params.extend(data_scope_pids)
+        where_sql = " AND ".join(where)
         total = db.execute(
-            "SELECT COUNT(*) FROM orders WHERE customer_id = ? AND deleted_at IS NULL",
-            (customer_id,)
+            f"SELECT COUNT(*) FROM orders o WHERE {where_sql}",
+            params,
         ).fetchone()[0]
         offset = (page - 1) * limit
         rows = db.execute("""
             SELECT o.*, pr.name as route_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
-            WHERE o.customer_id = ? AND o.deleted_at IS NULL
+            WHERE {where_sql}
             ORDER BY o.created_at DESC LIMIT ? OFFSET ?
-        """, (customer_id, limit, offset)).fetchall()
+        """.format(where_sql=where_sql), params + [limit, offset]).fetchall()
         return rows, total
 
     @staticmethod
-    def get_order_processes(order_id, db=None):
+    def get_order_processes(order_id, data_scope_pids=None, db=None):
         """获取订单的工序列表（含工序名）。"""
         db = resolve_db(db)
+        if data_scope_pids == []:
+            return []
+        where = ["op.order_id = ?"]
+        params = [order_id]
+        if data_scope_pids is not None:
+            placeholders = ",".join("?" for _ in data_scope_pids)
+            where.append(f"op.process_id IN ({placeholders})")
+            params.extend(data_scope_pids)
         return db.execute("""
             SELECT op.*, p.name as process_name
             FROM order_processes op
             JOIN processes p ON op.process_id = p.id
-            WHERE op.order_id = ?
+            WHERE {where_sql}
             ORDER BY op.seq_order
-        """, (order_id,)).fetchall()
+        """.format(where_sql=" AND ".join(where)), params).fetchall()
 
     # ============================================================
     # 写操作
