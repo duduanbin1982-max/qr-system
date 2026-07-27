@@ -36,10 +36,29 @@ class OrderAttachmentsRepository:
     def find_with_meta(attachment_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT order_id, file_name, file_type, file_path FROM order_attachments WHERE id = ?",
+            "SELECT * FROM order_attachments WHERE id = ?",
             (attachment_id,)
         ).fetchone()
 
     @staticmethod
     def delete_txn(attachment_id, db):
         db.execute("DELETE FROM order_attachments WHERE id = ?", (attachment_id,))
+
+    @staticmethod
+    def restore_txn(row, db):
+        db.execute(
+            "INSERT INTO order_attachments "
+            "(id, order_id, file_name, file_type, file_size, file_data, file_path, uploaded_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                row['id'],
+                row['order_id'],
+                row['file_name'],
+                row['file_type'],
+                row['file_size'],
+                row['file_data'],
+                row['file_path'],
+                row['uploaded_by'],
+                row['created_at'],
+            ),
+        )

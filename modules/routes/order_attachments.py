@@ -13,7 +13,6 @@ from modules.route_decorators import (
 )
 from modules.services.order_attachments_service import OrderAttachmentsService
 from modules.services.order_service import OrderService
-from werkzeug.utils import secure_filename
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads', 'attachments')
 
@@ -47,18 +46,19 @@ def upload_attachment(order_id):
     file = request.files.get('file')
     if not file:
         return jsonify({'error': '请选择文件'}), 400
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    aid, fpath = OrderAttachmentsService.upload_attachment(
-        order_id,
-        secure_filename(file.filename),
-        file.content_type or 'application/octet-stream',
-        0,
-        g.current_user.get('name', ''),
-        UPLOAD_DIR
-    )
-    file.save(fpath)
+    try:
+        aid, file_size = OrderAttachmentsService.upload_attachment(
+            order_id,
+            file,
+            g.current_user.get('name', ''),
+            UPLOAD_DIR,
+        )
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except OSError:
+        return jsonify({'error': '附件保存失败，请稍后重试'}), 500
     safe_audit_log('upload_attachment', 'order', order_id, f'attachment {aid}')
-    return jsonify({'id': aid, 'message': '上传成功'})
+    return jsonify({'id': aid, 'file_size': file_size, 'message': '上传成功'})
 
 
 @app.route('/api/order-attachments/<int:attachment_id>/download', methods=['GET'])
@@ -76,7 +76,7 @@ def download_attachment(attachment_id):
 
     file_path = row['file_path']
     if not file_path or not os.path.exists(file_path):
-        return jsonify({'error': 'Attachment file not found'}), 404
+        return jsonify({'error': '附件文件不存在'}), 404
 
     with open(file_path, 'rb') as file_obj:
         file_data = file_obj.read()
@@ -102,11 +102,10 @@ def delete_attachment(attachment_id):
         if completed_error:
             return completed_error
     try:
-        row = OrderAttachmentsService.delete_attachment(attachment_id)
-        file_path = row['file_path']
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        row = OrderAttachmentsService.delete_attachment(attachment_id, UPLOAD_DIR)
         safe_audit_log('delete_attachment', 'order', row['order_id'], f'deleted {attachment_id}')
         return jsonify({'message': '已删除'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
+    except OSError:
+        return jsonify({'error': '附件删除失败，请稍后重试'}), 500
