@@ -365,6 +365,24 @@ class OrderRepository:
             db.execute(f"DELETE FROM {table} WHERE order_id = ?", (order_id,))
         db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
 
+    @staticmethod
+    def detach_preserved_order_references(order_id, order_no, db=None):
+        """Preserve stock and shipment history while removing their order foreign keys."""
+        db = resolve_db(db)
+        inventory_note = f"原订单 {order_no} 已彻底删除，库存记录保留"
+        db.execute(
+            "UPDATE inventory SET order_id = NULL, remark = CASE "
+            "WHEN TRIM(COALESCE(remark, '')) = '' THEN ? "
+            "ELSE remark || '；' || ? END WHERE order_id = ?",
+            (inventory_note, inventory_note, order_id),
+        )
+        db.execute(
+            "UPDATE shipment_items SET order_id = NULL, order_no = CASE "
+            "WHEN TRIM(COALESCE(order_no, '')) = '' THEN ? ELSE order_no END "
+            "WHERE order_id = ?",
+            (order_no, order_id),
+        )
+
     # ============================================================
     # 关联数据
     # ============================================================

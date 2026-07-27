@@ -427,6 +427,73 @@ class TestOrderDeleteFlow:
         restore_resp = client.post(f"/api/orders/{test_order_id}/restore", headers=auth_headers)
         assert restore_resp.status_code == 200
 
+    def test_purge_preserves_inventory_and_shipment_history(self, client, auth_headers):
+        suffix = uuid.uuid4().hex[:8].upper()
+        order_no = f"TEST-PURGE-{suffix}"
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            order_id = db.execute(
+                "INSERT INTO orders "
+                "(order_no, customer, product_name, product_code, quantity, status, deleted_at) "
+                "VALUES (?, 'Purge Customer', 'Purge Product', ?, 7, 'cancelled', "
+                "datetime('now','localtime'))",
+                (order_no, f"PURGE-{suffix}"),
+            ).lastrowid
+            inventory_id = db.execute(
+                "INSERT INTO inventory "
+                "(product_model, product_name, quantity, unit, order_id, remark) "
+                "VALUES (?, 'Purge Product', 7, '件', ?, '保留原备注')",
+                (f"PURGE-INV-{suffix}", order_id),
+            ).lastrowid
+            shipment_id = db.execute(
+                "INSERT INTO shipments "
+                "(shipment_no, customer, status, total_quantity, created_by) "
+                "VALUES (?, 'Purge Customer', 'completed', 2, 'pytest')",
+                (f"PURGE-SHIP-{suffix}",),
+            ).lastrowid
+            shipment_item_id = db.execute(
+                "INSERT INTO shipment_items "
+                "(shipment_id, inventory_id, product_model, product_name, quantity, unit, "
+                "order_id, product_code, order_no) VALUES (?, ?, ?, 'Purge Product', 2, "
+                "'件', ?, ?, '')",
+                (shipment_id, inventory_id, f"PURGE-INV-{suffix}", order_id,
+                 f"PURGE-{suffix}"),
+            ).lastrowid
+            db.commit()
+
+        response = client.delete(f"/api/orders/{order_id}/purge", headers=auth_headers)
+        assert response.status_code == 200, response.get_json()
+
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            assert db.execute(
+                "SELECT id FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone() is None
+            inventory = db.execute(
+                "SELECT order_id, quantity, remark FROM inventory WHERE id = ?",
+                (inventory_id,),
+            ).fetchone()
+            assert inventory["order_id"] is None
+            assert inventory["quantity"] == 7
+            assert "保留原备注" in inventory["remark"]
+            assert order_no in inventory["remark"]
+            shipment_item = db.execute(
+                "SELECT order_id, order_no, quantity FROM shipment_items WHERE id = ?",
+                (shipment_item_id,),
+            ).fetchone()
+            assert shipment_item["order_id"] is None
+            assert shipment_item["order_no"] == order_no
+            assert shipment_item["quantity"] == 2
+            assert db.execute(
+                "SELECT id FROM shipments WHERE id = ?",
+                (shipment_id,),
+            ).fetchone() is not None
+
     def test_trash_list(self, client, auth_headers):
         resp = client.get("/api/orders/trash", headers=auth_headers)
         assert resp.status_code == 200

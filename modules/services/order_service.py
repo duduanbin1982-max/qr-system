@@ -507,6 +507,11 @@ class OrderService:
             "quality_inspections"
         ]
         with BaseService.transaction() as txn:
+            OrderRepository.detach_preserved_order_references(
+                oid,
+                existing['order_no'] or '',
+                db=txn,
+            )
             OrderRepository.purge_with_children(oid, _PURGE_CHILD_TABLES, db=txn)
         return existing['order_no'] or ""
 
