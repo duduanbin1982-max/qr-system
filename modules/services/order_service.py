@@ -264,26 +264,38 @@ class OrderService:
         with BaseService.transaction() as txn:
             # Re-check the lifecycle state after acquiring the write transaction.
             # The initial read above is only for fast feedback and is not a lock.
-            current = OrderRepository.find_status_by_id(oid, db=txn)
-            if not current:
+            current_order = OrderRepository.find_by_id(oid, db=txn)
+            if not current_order:
                 raise ValueError('订单不存在')
-            if current['deleted_at']:
+            if current_order['deleted_at']:
                 raise ValueError('订单已在回收站中')
-            if current['status'] == 'completed':
+            if current_order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
 
-            if 'status' in data and data['status'] != current['status']:
-                allowed = OrderService.VALID_TRANSITIONS.get(current['status'], [])
+            if 'status' in data and data['status'] != current_order['status']:
+                allowed = OrderService.VALID_TRANSITIONS.get(current_order['status'], [])
                 if data['status'] not in allowed:
-                    raise ValueError(f"不允许从「{current['status']}」切换到「{data['status']}」")
+                    raise ValueError(f"不允许从「{current_order['status']}」切换到「{data['status']}」")
+
+            route_changed, process_ids_changed = OrderProcessSyncService.prepare_update(
+                txn,
+                oid,
+                current_order['route_id'],
+                data,
+            )
+            structure_changed = route_changed or process_ids_changed
+            quantity_changed = (
+                'quantity' in data
+                and data['quantity'] != current_order['quantity']
+            )
 
             # TOCTOU-safe remark history: re-read inside transaction
             if remark_changed and user_id:
-                current = OrderRepository.find_order_remark(oid, db=txn)
-                if current and data['remark'] != (current['remark'] or ''):
+                current_remark = OrderRepository.find_order_remark(oid, db=txn)
+                if current_remark and data['remark'] != (current_remark['remark'] or ''):
                     OrderService.log_remark_history(
                         oid,
-                        current['remark'] or '',
+                        current_remark['remark'] or '',
                         data['remark'],
                         user_id,
                         user_name or '',
@@ -292,12 +304,15 @@ class OrderService:
 
             OrderRepository.update_form_fields(oid, data, db=txn)
 
-            if 'process_ids' in data:
+            if process_ids_changed:
                 OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
-            elif 'route_id' in data and data['route_id']:
-                OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
+            elif route_changed:
+                if data['route_id']:
+                    OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
+                else:
+                    OrderProcessSyncService.clear_processes(txn, oid)
 
-            if {'process_ids', 'route_id', 'quantity'} & set(data):
+            if structure_changed or quantity_changed or 'process_ids' in data:
                 OrderCompletionService.reconcile(
                     oid,
                     trigger='order_structure_updated',

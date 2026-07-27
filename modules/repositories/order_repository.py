@@ -439,6 +439,16 @@ class OrderRepository:
         ).fetchall()
 
     @staticmethod
+    def count_active_work_records(order_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT COUNT(*) AS cnt FROM work_records "
+            "WHERE order_id = ? AND COALESCE(status, '') != 'deleted'",
+            (order_id,),
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+    @staticmethod
     def list_route_items(route_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -456,6 +466,14 @@ class OrderRepository:
         db.execute(
             f'DELETE FROM order_processes WHERE order_id = ? AND process_id IN ({placeholders})',
             [order_id] + list(process_ids)
+        )
+
+    @staticmethod
+    def delete_all_order_processes(order_id, db=None):
+        db = resolve_db(db)
+        db.execute(
+            'DELETE FROM order_processes WHERE order_id = ?',
+            (order_id,),
         )
 
     @staticmethod

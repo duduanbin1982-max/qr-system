@@ -73,6 +73,39 @@ def _order_processes(client, order_id):
         ]
 
 
+def _order_route_id(client, order_id):
+    with client.application.app_context():
+        row = get_db().execute(
+            "SELECT route_id FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()
+        return row["route_id"]
+
+
+def _seed_alternate_route(client, process_id):
+    with client.application.app_context():
+        db = get_db()
+        route_id = db.execute(
+            "SELECT MAX(value) + 10000 FROM ("
+            "SELECT COALESCE(MAX(id), 0) AS value FROM process_routes "
+            "UNION ALL "
+            "SELECT COALESCE(MAX(route_id), 0) AS value FROM orders WHERE route_id IS NOT NULL"
+            ")"
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO process_routes (id, name, description, status, category, updated_at) "
+            "VALUES (?, ?, 'alternate route fixture', 'active', 'fixture', datetime('now','localtime'))",
+            (route_id, f"Alternate Route {uuid.uuid4().hex[:6].upper()}"),
+        )
+        db.execute(
+            "INSERT INTO process_route_items (route_id, process_id, seq_order, required_audit) "
+            "VALUES (?, ?, 1, 1)",
+            (route_id, process_id),
+        )
+        db.commit()
+        return route_id
+
+
 def test_route_update_syncs_unreported_order_processes(client, auth_headers):
     route_id, route_name, process_ids = _seed_route(client)
     order_id = _create_order_with_route(client, auth_headers, route_id)
@@ -134,3 +167,57 @@ def test_route_update_skips_orders_with_work_records(client, auth_headers):
     assert response.get_json()["synced_orders"] == 0, response.get_json()
     assert response.get_json()["skipped_orders"] == 1, response.get_json()
     assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)], "reported order should keep its original process list"
+
+    ordinary_edit = client.put(
+        f"/api/orders/{order_id}",
+        headers=auth_headers,
+        json={"route_id": route_id, "remark": "same route ordinary edit"},
+    )
+    assert ordinary_edit.status_code == 200, ordinary_edit.get_json()
+    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+
+
+def test_unreported_order_clears_route_and_copied_processes(client, auth_headers):
+    route_id, _, process_ids = _seed_route(client)
+    order_id = _create_order_with_route(client, auth_headers, route_id)
+    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+
+    response = client.put(
+        f"/api/orders/{order_id}",
+        headers=auth_headers,
+        json={"route_id": None},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert _order_route_id(client, order_id) is None
+    assert _order_processes(client, order_id) == []
+
+
+def test_reported_order_rejects_direct_route_change(client, auth_headers):
+    route_id, _, process_ids = _seed_route(client)
+    order_id = _create_order_with_route(client, auth_headers, route_id)
+    alternate_route_id = _seed_alternate_route(client, process_ids[2])
+
+    with client.application.app_context():
+        db = get_db()
+        user_id = db.execute(
+            "SELECT id FROM users WHERE username = ?",
+            (TEST_USER,),
+        ).fetchone()["id"]
+        db.execute(
+            "INSERT INTO work_records (order_id, process_id, user_id, status, quantity) "
+            "VALUES (?, ?, ?, 'approved', 1)",
+            (order_id, process_ids[0], user_id),
+        )
+        db.commit()
+
+    response = client.put(
+        f"/api/orders/{order_id}",
+        headers=auth_headers,
+        json={"route_id": alternate_route_id},
+    )
+
+    assert response.status_code == 400, response.get_json()
+    assert "已有 1 条报工记录" in response.get_json()["error"]
+    assert _order_route_id(client, order_id) == route_id
+    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]

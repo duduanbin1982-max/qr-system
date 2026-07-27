@@ -7,6 +7,39 @@ class OrderProcessSyncService:
     """Keeps order-process route/list synchronization out of OrderService."""
 
     @staticmethod
+    def normalize_process_ids(process_ids):
+        return sorted(set(int(process_id) for process_id in process_ids))
+
+    @staticmethod
+    def prepare_update(db, order_id, current_route_id, data):
+        """Normalize and validate a requested route or custom-process change."""
+        route_changed = 'route_id' in data and data['route_id'] != current_route_id
+        process_ids_changed = False
+        if 'process_ids' in data:
+            if 'route_id' in data:
+                raise ValueError('不能同时修改工序路线和自定义工序')
+            requested_process_ids = OrderProcessSyncService.normalize_process_ids(
+                data['process_ids']
+            )
+            current_process_ids = {
+                row['process_id']
+                for row in OrderRepository.list_order_process_ids(order_id, db=db)
+            }
+            process_ids_changed = set(requested_process_ids) != current_process_ids
+            data['process_ids'] = requested_process_ids
+            if process_ids_changed:
+                data['route_id'] = None
+                route_changed = current_route_id is not None
+
+        if route_changed or process_ids_changed:
+            work_record_count = OrderRepository.count_active_work_records(order_id, db=db)
+            if work_record_count:
+                raise ValueError(
+                    f'订单已有 {work_record_count} 条报工记录，不能直接修改工序路线或工序'
+                )
+        return route_changed, process_ids_changed
+
+    @staticmethod
     def assign_processes(db, order_id, route_id=None, process_ids=None):
         """Assign order processes from a route, explicit process list, or all active processes."""
         if route_id and not process_ids:
@@ -22,7 +55,7 @@ class OrderProcessSyncService:
     @staticmethod
     def sync_processes(db, order_id, process_ids):
         """Synchronize explicit process list for an existing order."""
-        new_process_ids = sorted(set(int(process_id) for process_id in process_ids))
+        new_process_ids = OrderProcessSyncService.normalize_process_ids(process_ids)
         existing_procs = OrderRepository.list_order_process_ids(order_id, db=db)
         existing_ids = {row["process_id"] for row in existing_procs}
 
@@ -67,3 +100,8 @@ class OrderProcessSyncService:
                 item["required_audit"],
                 db=db,
             )
+
+    @staticmethod
+    def clear_processes(db, order_id):
+        """Clear the copied process list when an unreported order drops its route."""
+        OrderRepository.delete_all_order_processes(order_id, db=db)

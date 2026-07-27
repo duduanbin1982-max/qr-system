@@ -38,6 +38,7 @@ orders_schemas = {
                 'deadline': {'maxLength': 32, 'type': 'string'},
                 'plan_end': {'maxLength': 32, 'type': 'string'},
                 'plan_start': {'maxLength': 32, 'type': 'string'},
+                'process_ids': {'items': {'type': 'integer'}, 'maxItems': 50, 'type': 'array'},
                 'product_code': {'maxLength': 64, 'type': 'string'},
                 'product_name': {'maxLength': 128, 'type': 'string'},
                 'production_line_id': {'type': ['integer', 'null']},

@@ -91,6 +91,7 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
     try {
       const data = { ...form.value, quantity: parseInt(form.value.quantity) }
       if (data.route_id) data.route_id = parseInt(data.route_id) || null
+      else if (modalEdit.value) data.route_id = null
       else delete data.route_id
       if (data.customer_id) data.customer_id = parseInt(data.customer_id)
       if (data.production_line_id) data.production_line_id = parseInt(data.production_line_id) || null

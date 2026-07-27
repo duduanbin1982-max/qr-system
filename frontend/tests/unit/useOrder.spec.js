@@ -14,12 +14,13 @@ const mocks = vi.hoisted(() => ({
   listOrderMaterials: vi.fn(),
   listMaterials: vi.fn(),
   listProcesses: vi.fn(),
+  updateOrder: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
   api: {
     domains: {
-      orders: { listOrders: mocks.listOrders },
+      orders: { listOrders: mocks.listOrders, updateOrder: mocks.updateOrder },
       customers: { listCustomers: mocks.listCustomers },
       products: {
         listProducts: mocks.listProducts,
@@ -118,5 +119,45 @@ describe('useOrder facade', () => {
       quantity_per_unit: 2.5,
       process_id: 30,
     }))
+  })
+
+  it('submits a cleared route explicitly when editing', async () => {
+    mocks.listOrders.mockResolvedValue({ orders: [], total: 0 })
+    mocks.listCustomers.mockResolvedValue({ customers: [] })
+    mocks.listProducts.mockResolvedValue({ products: [] })
+    mocks.listProcessRoutes.mockResolvedValue({ routes: [{ id: 8, name: '标准路线' }] })
+    mocks.listProductionLines.mockResolvedValue({ lines: [] })
+    mocks.listOrderMaterials.mockResolvedValue({ materials: [] })
+    mocks.listMaterials.mockResolvedValue({ materials: [] })
+    mocks.listProcesses.mockResolvedValue({ processes: [] })
+    mocks.updateOrder.mockResolvedValue({ message: '更新成功' })
+
+    let order
+    const harness = defineComponent({
+      setup() {
+        order = useOrder()
+        return () => h('div')
+      },
+    })
+
+    mount(harness)
+    await flushPromises()
+    await order.openEdit({
+      id: 9,
+      status: 'pending',
+      order_no: 'ORD-009',
+      product_name: '测试产品',
+      route_id: 8,
+      quantity: 10,
+    })
+    order.form.value.route_id = ''
+    order.routeSearch.value = ''
+
+    await order.save()
+
+    expect(mocks.updateOrder).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ route_id: null }),
+    )
   })
 })
