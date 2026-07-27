@@ -113,6 +113,54 @@ class CustomerRepository:
         return rows, total
 
     @staticmethod
+    def summarize(
+        where_sql,
+        params,
+        *,
+        include_order_stats=True,
+        data_scope_pids=None,
+        db=None,
+    ):
+        """Return filtered customer totals independent of list pagination."""
+        db = resolve_db(db)
+        order_expression = "0"
+        scope_params = []
+        if include_order_stats and data_scope_pids != []:
+            scope_sql = ""
+            if data_scope_pids is not None:
+                placeholders = ",".join("?" for _ in data_scope_pids)
+                scope_sql = (
+                    " AND EXISTS (SELECT 1 FROM order_processes scope_op "
+                    "WHERE scope_op.order_id = o.id "
+                    f"AND scope_op.process_id IN ({placeholders}))"
+                )
+                scope_params.extend(data_scope_pids)
+            order_expression = (
+                "CASE WHEN EXISTS (SELECT 1 FROM orders o "
+                "WHERE o.customer_id = c.id AND o.deleted_at IS NULL"
+                f"{scope_sql}) THEN 1 ELSE 0 END"
+            )
+        return db.execute(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(CASE WHEN TRIM(COALESCE(c.contact, '')) != '' THEN 1 ELSE 0 END), 0) AS with_contact, "
+            "COALESCE(SUM(CASE WHEN TRIM(COALESCE(c.email, '')) != '' THEN 1 ELSE 0 END), 0) AS with_email, "
+            f"COALESCE(SUM({order_expression}), 0) AS with_orders "
+            "FROM customers c "
+            f"WHERE {where_sql}",
+            scope_params + params,
+        ).fetchone()
+
+    @staticmethod
+    def list_tag_values(db=None):
+        """Return stored tag strings for building the complete filter options."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT tags FROM customers "
+            "WHERE TRIM(COALESCE(tags, '')) != '' "
+            "ORDER BY id"
+        ).fetchall()
+
+    @staticmethod
     def count_active_orders(customer_id, db=None):
         """统计某客户的活跃（非软删除）订单数。"""
         db = resolve_db(db)

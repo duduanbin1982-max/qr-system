@@ -46,7 +46,27 @@ class CustomerService:
             data_scope_pids=data_scope_pids,
             db=db,
         )
-        return {"customers": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
+        summary_row = CustomerRepository.summarize(
+            where,
+            params,
+            include_order_stats=include_order_stats,
+            data_scope_pids=data_scope_pids,
+            db=db,
+        )
+        available_tags = set()
+        for row in CustomerRepository.list_tag_values(db=db):
+            for value in (row["tags"] or "").split(","):
+                normalized = value.strip()
+                if normalized:
+                    available_tags.add(normalized)
+        return {
+            "customers": [dict(r) for r in rows],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "summary": dict(summary_row),
+            "available_tags": sorted(available_tags),
+        }
 
     @staticmethod
     def create_customer(data):

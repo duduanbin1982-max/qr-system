@@ -91,4 +91,31 @@ describe('CustomerList order permissions', () => {
     await flushPromises()
     expect(wrapper.vm.saving).toBe(false)
   })
+
+  it('uses server totals and resets pagination for searches', async () => {
+    mocks.permissions = new Set(['customers:view'])
+    mocks.listCustomers.mockResolvedValue({
+      customers: [{ id: 21, name: '分页客户' }],
+      total: 25,
+      summary: { total: 25, with_orders: 2, with_contact: 13, with_email: 9 },
+      available_tags: ['VIP', '重点'],
+    })
+    const wrapper = mount(CustomerList)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('客户总数')
+    expect(wrapper.text()).toContain('25')
+    await wrapper.vm.nextPage()
+    await flushPromises()
+    expect(mocks.listCustomers).toHaveBeenLastCalledWith({ page: 2, limit: 20 })
+
+    await wrapper.find('input[placeholder="搜索名称/联系人/电话..."]').setValue('新关键词')
+    wrapper.vm.searchAndLoad()
+    await flushPromises()
+    expect(mocks.listCustomers).toHaveBeenLastCalledWith({
+      page: 1,
+      limit: 20,
+      keyword: '新关键词',
+    })
+  })
 })

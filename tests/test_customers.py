@@ -218,3 +218,54 @@ def test_update_customer_maps_unique_constraint_race_to_conflict(
 
     assert response.status_code == 409
     assert response.get_json()["error"] == "客户名称已存在"
+
+
+def test_customer_list_paginates_and_returns_filtered_summary(client, auth_headers):
+    suffix = uuid.uuid4().hex[:8]
+    keyword = f"Paged Customer {suffix}"
+    with client.application.app_context():
+        db = get_db()
+        customer_ids = []
+        for index in range(25):
+            customer_ids.append(db.execute(
+                "INSERT INTO customers (name, contact, email, tags) VALUES (?, ?, ?, ?)",
+                (
+                    f"{keyword} {index:02d}",
+                    "Contact" if index % 2 == 0 else "",
+                    "customer@example.com" if index % 3 == 0 else "",
+                    "VIP,重点" if index % 2 == 0 else "长期合作",
+                ),
+            ).lastrowid)
+        for index in (0, 1):
+            db.execute(
+                "INSERT INTO orders "
+                "(order_no, customer, customer_id, product_name, product_code, quantity, status) "
+                "VALUES (?, ?, ?, 'Paged Product', ?, 1, 'pending')",
+                (
+                    f"TEST-PAGED-{suffix}-{index}",
+                    f"{keyword} {index:02d}",
+                    customer_ids[index],
+                    f"PAGED-{suffix}-{index}",
+                ),
+            )
+        db.commit()
+
+    response = client.get(
+        "/api/customers",
+        query_string={"keyword": keyword, "page": 2, "limit": 10},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["customers"]) == 10
+    assert payload["total"] == 25
+    assert payload["page"] == 2
+    assert payload["limit"] == 10
+    assert payload["summary"] == {
+        "total": 25,
+        "with_contact": 13,
+        "with_email": 9,
+        "with_orders": 2,
+    }
+    assert {"VIP", "重点", "长期合作"}.issubset(payload["available_tags"])

@@ -14,10 +14,10 @@
         <div style="display:flex;gap:var(--space-2);align-items:center">
           <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/联系人/电话..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/联系人/电话..." @keyup.enter="searchAndLoad" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
-          <button class="btn btn-default btn-sm" @click="load">搜索</button>
-          <select v-model="tagFilter" @change="load" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:6px 10px;font-size:var(--text-sm);background:white;width:100px">
+          <button class="btn btn-default btn-sm" :disabled="loading" @click="searchAndLoad">搜索</button>
+          <select v-model="tagFilter" @change="filterAndLoad" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:6px 10px;font-size:var(--text-sm);background:white;width:100px">
             <option value="">全部标签</option>
             <option v-for="t in allTags" :key="t" :value="t">{{ t }}</option>
           </select>
@@ -26,7 +26,8 @@
       </div>
       <div class="card-body">
         <div class="table-wrap">
-          <table v-if="customers.length" class="data-table" style="min-width:900px">
+          <div v-if="loading" class="empty"><div class="empty-text">正在加载客户数据...</div></div>
+          <table v-else-if="customers.length" class="data-table" style="min-width:900px">
             <thead>
               <tr>
                 <th style="width:40px;text-align:center">#</th>
@@ -43,7 +44,7 @@
             </thead>
             <tbody>
               <tr v-for="(c, idx) in customers" :key="c.id">
-                <td style="text-align:center"><span class="row-num">{{ idx + 1 }}</span></td>
+                <td style="text-align:center"><span class="row-num">{{ (page - 1) * pageSize + idx + 1 }}</span></td>
                 <td>
                   <a v-if="canViewOrders" href="#" data-testid="customer-order-link" style="color:var(--primary);font-weight:600" @click.prevent="viewDetail(c)">{{ c.name }}</a>
                   <strong v-else>{{ c.name }}</strong>
@@ -69,8 +70,14 @@
               </tr>
             </tbody>
           </table>
+          <div v-else-if="loadError" class="empty"><div class="empty-text">{{ loadError }}</div><button class="btn btn-default btn-sm" @click="load">重试</button></div>
           <div v-else class="empty"><div class="empty-icon">🏢</div><div class="empty-text">暂无客户数据</div></div>
         </div>
+      </div>
+      <div v-if="total > pageSize" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-3) 16px;border-top:1px solid var(--border)">
+        <button class="btn btn-sm btn-default" :disabled="page <= 1 || loading" @click="prevPage">上一页</button>
+        <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total / pageSize) }} 页（共 {{ total }} 条）</span>
+        <button class="btn btn-sm btn-default" :disabled="page * pageSize >= total || loading" @click="nextPage">下一页</button>
       </div>
     </div>
     
@@ -152,6 +159,7 @@ export default {
   setup() {
     const customers = ref([])
     const loading = ref(true)
+    const loadError = ref("")
     const searchKeyword = ref("")
     const showModal = ref(false)
     const modalEdit = ref(false)
@@ -190,16 +198,16 @@ export default {
       const colors = {"VIP":"#dc2626","长期合作":"#2563eb","新客户":"#16a34a","重点":"#f59e0b","沉睡":"#9ca3af","月结":"#7c3aed","现结":"#0891b2"}
       return colors[tag] || "#6b7280"
     }
-    const allTags = computed(() => {
-      const s = new Set()
-      customers.value.forEach(c => { if(c.tags) c.tags.split(",").forEach(t => { const tt = t.trim(); if(tt) s.add(tt) }) })
-      return [...s].sort()
-    })
+    const allTags = ref([])
     const tagFilter = ref("")
-    const hasContact = computed(() => customers.value.filter(c => c.contact).length)
-    const hasEmail = computed(() => customers.value.filter(c => c.email).length)
-    const hasOrders = computed(() => customers.value.filter(c => (c.order_count || 0) > 0).length)
-    const totalCount = computed(() => customers.value.length)
+    const page = ref(1)
+    const pageSize = 20
+    const total = ref(0)
+    const summary = ref({ total: 0, with_orders: 0, with_contact: 0, with_email: 0 })
+    const hasContact = computed(() => summary.value.with_contact || 0)
+    const hasEmail = computed(() => summary.value.with_email || 0)
+    const hasOrders = computed(() => summary.value.with_orders || 0)
+    const totalCount = computed(() => summary.value.total || 0)
     const canEdit = computed(() => can("customers:edit"))
     const canDelete = computed(() => can("customers:delete"))
     const canCreate = computed(() => can("customers:create"))
@@ -207,17 +215,32 @@ export default {
     
     async function load() {
       loading.value = true
+      loadError.value = ""
       try {
         const kw = searchKeyword.value.trim()
         const tg = tagFilter.value
-        const params = {}
+        const params = { page: page.value, limit: pageSize }
         if (kw) params.keyword = kw
         if (tg) params.tag = tg
-        const d = await api.domains.customers.listCustomers(Object.keys(params).length ? params : null)
+        const d = await api.domains.customers.listCustomers(params)
         customers.value = d.customers || []
-      } catch(e) { showToast(e.message || "加载失败", "error") }
+        total.value = d.total || 0
+        summary.value = d.summary || { total: total.value, with_orders: 0, with_contact: 0, with_email: 0 }
+        allTags.value = d.available_tags || []
+      } catch(e) {
+        customers.value = []
+        total.value = 0
+        summary.value = { total: 0, with_orders: 0, with_contact: 0, with_email: 0 }
+        loadError.value = e.message || "客户数据加载失败"
+        showToast(loadError.value, "error")
+      }
       finally { loading.value = false }
     }
+
+    function searchAndLoad() { page.value = 1; load() }
+    function filterAndLoad() { page.value = 1; load() }
+    function prevPage() { if (page.value > 1) { page.value--; load() } }
+    function nextPage() { if (page.value * pageSize < total.value) { page.value++; load() } }
     
     function openAdd() {
       form.value = { name:"", contact:"", phone:"", email:"", address:"", remark:"", tags:"" }
@@ -265,11 +288,12 @@ export default {
     onMounted(() => load())
     
     return {
-      customers, loading, searchKeyword, load,
+      customers, loading, loadError, searchKeyword, load, searchAndLoad, filterAndLoad,
       showModal, modalEdit, form, saving, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
       deleteCheck, deleteCheckOrders, showDeleteBlock,
       hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, canViewOrders, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,
+      page, pageSize, total, summary, prevPage, nextPage,
       detailPage, detailPageSize, detailPrevPage, detailNextPage
     }
   }
