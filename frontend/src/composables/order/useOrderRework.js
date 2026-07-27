@@ -23,7 +23,7 @@ export function useOrderRework({ load, isCompletedOrder, completedReadonlyToast 
     if (!data.quantity || data.quantity < 1) { showToast('数量必须大于0', 'error'); return }
     if (!data.reason.trim()) { showToast('请输入返工原因', 'error'); return }
     try {
-      await api.domains.scan.scan({
+      await api.domains.scan.report({
         order_id: order.id,
         process_id: parseInt(data.process_id),
         quantity: parseInt(data.quantity),

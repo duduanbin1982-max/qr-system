@@ -36,6 +36,8 @@ export function useOrderQuery() {
   const canEdit = computed(() => can('orders:edit'))
   const canDelete = computed(() => can('orders:delete'))
   const canView = computed(() => can('orders:view'))
+  const canScanView = computed(() => can('scan:view'))
+  const canReport = computed(() => can('scan:report'))
 
   function pct(order) {
     const done = (order.completed || 0) + (order.scrapped || 0)
@@ -148,7 +150,7 @@ export function useOrderQuery() {
     orders, loading, total, page, limit, filterStatus, archiveFilter, searchKeyword, filterCustomer,
     customers, products, processRoutes, productionLines, expandedId,
     pendingCount, producingCount, completedCount, statusMap,
-    canCreate, canEdit, canDelete, canView,
+    canCreate, canEdit, canDelete, canView, canScanView, canReport,
     pct, scrapPct, riskLabel, formatHours, isOverdue,
     load, loadDropdownData, searchAndLoad, archiveChange, statusChange, customerChange,
     debouncedSearch, toggleExpand, prevPage, nextPage,

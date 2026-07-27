@@ -35,7 +35,7 @@
           </div>
           <button class="btn btn-default btn-sm" @click="searchAndLoad">搜索</button>
           <button class="btn btn-warning btn-sm" @click="openCompletionFocus">🎯 集中完工</button>
-          <button class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
+          <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAdd">+ 新建订单</button>
           <button class="btn btn-sm trash-btn" @click="showTrash=true;loadTrash()">🗑️ 回收站</button>
         </div>
       </div>
@@ -77,11 +77,11 @@
                   <td style="text-align:center">
                     <div class="o-actions" style="justify-content:center" @click.stop>
                       <span class="o-abtn" style="color:var(--primary-accent)" @click="openProgress(o)" title="工件进度">📊</span>
-                      <span v-if="!isCompletedOrder(o)" class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
-                      <span class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
-                      <span v-if="!isCompletedOrder(o)" class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
-                      <span v-if="!isCompletedOrder(o)" class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
-                      <span v-else class="o-abtn" style="color:var(--primary)" @click="reopenOrder(o)" title="重新打开">🔓</span>
+                      <span v-if="canEdit && !isCompletedOrder(o)" class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
+                      <span v-if="canScanView" class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
+                      <span v-if="canReport && !isCompletedOrder(o)" class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
+                      <span v-if="canDelete && !isCompletedOrder(o)" class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
+                      <span v-if="canEdit && isCompletedOrder(o)" class="o-abtn" style="color:var(--primary)" @click="reopenOrder(o)" title="重新打开">🔓</span>
                     </div>
                   </td>
                 </tr>
@@ -104,11 +104,11 @@
                     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-light)">
                       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)">
                         <span style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary)">📎 附件 ({{ getAttachments(o.id).length }})</span>
-                        <label v-if="!isCompletedOrder(o)" style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
+                        <label v-if="canEdit && !isCompletedOrder(o)" style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-1);padding:var(--space-1) 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);white-space:nowrap">
                           + 上传
                           <input type="file" ref="uploadInputRef" style="display:none" @change="handleAttachmentUpload(o.id, $event)" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.zip,.rar">
                         </label>
-                        <span v-else style="font-size:var(--text-xs);color:var(--text-placeholder)">已归档只读</span>
+                        <span v-else-if="isCompletedOrder(o)" style="font-size:var(--text-xs);color:var(--text-placeholder)">已归档只读</span>
                       </div>
                       <div v-if="isAttachmentsLoading(o.id)" style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">⏳ 加载中...</div>
                       <div v-else-if="getAttachments(o.id).length" style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
@@ -119,7 +119,7 @@
                             <span @click.stop="downloadAttachment(att.id)" style="color:var(--primary);cursor:pointer;font-weight:500;display:block;overflow:hidden;text-overflow:ellipsis;max-width:200px" :title="att.file_name">{{ att.file_name }}</span>
                             <span style="font-size:var(--text-2xs);color:var(--text-placeholder)">{{ formatFileSize(att.file_size) }} · {{ att.created_at?.slice(0,16) }}</span>
                           </div>
-                          <span v-if="!isCompletedOrder(o)" @click.stop="delAttachment(att.id, o.id)" title="删除" style="cursor:pointer;opacity:0.5;font-size:var(--text-base);flex-shrink:0">🗑️</span>
+                          <span v-if="canEdit && !isCompletedOrder(o)" @click.stop="delAttachment(att.id, o.id)" title="删除" style="cursor:pointer;opacity:0.5;font-size:var(--text-base);flex-shrink:0">🗑️</span>
                         </div>
                       </div>
                       <div v-else style="font-size:var(--text-xs);color:var(--text-placeholder);padding:var(--space-2)">暂无附件</div>
@@ -141,7 +141,7 @@
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <div v-if="showModal" class="modal-overlay" >
+    <div v-if="showModal && (modalEdit ? canEdit : canCreate)" class="modal-overlay" >
       <div class="modal" style="max-width:780px">
         <div class="modal-header">
           <span>{{ modalEdit ? '编辑订单' : '新建订单' }}</span>
@@ -323,7 +323,7 @@
                 <div style="font-weight:700;margin-bottom:4px">当前模式：{{ completionFocusModeLabel(completionFocusConfig.mode) }}</div>
                 <div style="font-size:var(--text-xs);color:var(--text-placeholder)">关闭=不提示不拦截；软提示=提示但允许；强拦截=普通员工不可继续报工。</div>
               </div>
-              <div class="focus-mode-buttons">
+              <div v-if="canEdit" class="focus-mode-buttons">
                 <button
                   v-for="option in completionFocusModeOptions()"
                   :key="option.value"
@@ -385,8 +385,8 @@
                       <span class="focus-label focus-exception">例外：{{ item.exception_reason }}</span>
                       <div style="color:var(--text-placeholder);margin-top:4px">到期：{{ item.exception_expires_at || '长期' }}</div>
                     </div>
-                    <button v-if="!item.is_exception" class="btn btn-sm btn-default" @click="openFocusException(item)">设为例外</button>
-                    <button v-else class="btn btn-sm btn-danger" @click="cancelFocusException(item)">取消例外</button>
+                    <button v-if="canEdit && !item.is_exception" class="btn btn-sm btn-default" @click="openFocusException(item)">设为例外</button>
+                    <button v-if="canEdit && item.is_exception" class="btn btn-sm btn-danger" @click="cancelFocusException(item)">取消例外</button>
                   </td>
                 </tr>
               </tbody>
@@ -398,7 +398,7 @@
     </div>
 
     <!-- 集中完工例外弹窗 -->
-    <div v-if="showFocusExceptionModal" class="modal-overlay" >
+    <div v-if="canEdit && showFocusExceptionModal" class="modal-overlay" >
       <div class="modal" style="max-width:460px;width:95%">
         <div class="modal-header">
           <span>🟦 设置例外订单 — {{ focusExceptionOrder?.order_no || '' }}</span>
@@ -429,7 +429,7 @@
     </div>
 
     <!-- 申请返工弹窗 -->
-    <div v-if="showReworkModal" class="modal-overlay" >
+    <div v-if="canReport && showReworkModal" class="modal-overlay" >
       <div class="modal" style="max-width:450px;width:95%">
         <div class="modal-header">
           <span>🔧 申请返工 — {{ reworkOrder?.order_no || '' }}</span>
@@ -460,7 +460,7 @@
     </div>
 
     <!-- 二维码打印弹窗 -->
-    <div v-if="showQrPrint" class="modal-overlay" >
+    <div v-if="canScanView && showQrPrint" class="modal-overlay" >
       <div class="modal qr-modal-lg">
         <div class="modal-header">
           <span>🖨️ 二维码标签打印 — {{ qrPrintOrder?.order_no || '' }}</span>
@@ -526,7 +526,7 @@
         <div class="modal-body" style="max-height:60vh;overflow-y:auto">
           <table v-if="trashOrders.length" class="data-table">
             <thead>
-              <tr><th>订单号</th><th>产品</th><th>客户</th><th>删除时间</th><th>操作人</th><th style="text-align:center">操作</th></tr>
+              <tr><th>订单号</th><th>产品</th><th>客户</th><th>删除时间</th><th>操作人</th><th v-if="canDelete" style="text-align:center">操作</th></tr>
             </thead>
             <tbody>
               <tr v-for="o in trashOrders" :key="o.id">
@@ -535,7 +535,7 @@
                 <td>{{ o.customer }}</td>
                 <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ o.deleted_at }}</td>
                 <td style="font-size:var(--text-xs)">{{ o.deleted_by_name || '-' }}</td>
-                <td style="text-align:center">
+                <td v-if="canDelete" style="text-align:center">
                   <button class="btn btn-sm" style="background:var(--success-lighter);color:var(--success);font-size:var(--text-xs-alt);padding:var(--space-1) 10px" @click="restoreOrder(o.id)">恢复</button>
                   <button class="btn btn-sm" style="background:var(--danger-lighter, #fff0f0);color:var(--danger,#e74c3c);font-size:var(--text-xs-alt);padding:var(--space-1) 10px;margin-left:6px" @click="permanentDelete(o.id)">彻底删除</button>
                 </td>

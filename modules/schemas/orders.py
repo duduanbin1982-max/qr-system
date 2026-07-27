@@ -36,6 +36,7 @@ orders_schemas = {
  'properties': {'customer': {'maxLength': 128, 'type': 'string'},
                 'customer_id': {'type': ['integer', 'null']},
                 'deadline': {'maxLength': 32, 'type': 'string'},
+                'order_no': {'maxLength': 64, 'minLength': 1, 'type': 'string'},
                 'plan_end': {'maxLength': 32, 'type': 'string'},
                 'plan_start': {'maxLength': 32, 'type': 'string'},
                 'process_ids': {'items': {'type': 'integer'}, 'maxItems': 50, 'type': 'array'},

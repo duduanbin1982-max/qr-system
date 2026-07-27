@@ -53,8 +53,8 @@ def get_next_order_no():
 def create_order():
     data = get_json_body()
     try:
-        order_id, _order_no = OrderService.create_order(data)
-        safe_audit_log('create_order', 'order', order_id, data.get('order_no', ''))
+        order_id, order_no = OrderService.create_order(data)
+        safe_audit_log('create_order', 'order', order_id, f'order_no={order_no}')
         return jsonify({'message': '创建成功', 'id': order_id})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -71,7 +71,19 @@ def update_order(oid):
     try:
         # Remark history is now handled inside OrderService.update_order for TOCTOU safety
         uname = g.current_user.get('name', g.current_user.get('username', ''))
-        OrderService.update_order(oid, data, user_id=g.current_user['id'], user_name=uname)
+        order_no = OrderService.update_order(
+            oid,
+            data,
+            user_id=g.current_user['id'],
+            user_name=uname,
+        )
+        changed_fields = ','.join(sorted(data))
+        safe_audit_log(
+            'update_order',
+            'order',
+            oid,
+            f'order_no={order_no}; fields={changed_fields}',
+        )
         return jsonify({'message': '更新成功'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -86,8 +98,8 @@ def delete_order(oid):
     """软删除 — 移入回收站"""
     try:
         user_id = g.current_user['id']
-        OrderService.soft_delete_order(oid, user_id)
-        safe_audit_log('delete_order', 'order', oid, '')
+        order_no = OrderService.soft_delete_order(oid, user_id)
+        safe_audit_log('delete_order', 'order', oid, f'order_no={order_no}')
         return jsonify({'message': '已移入回收站'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -102,6 +114,7 @@ def restore_order(oid):
     """从回收站恢复"""
     try:
         order_no = OrderService.restore_order(oid)
+        safe_audit_log('restore_order', 'order', oid, f'order_no={order_no}')
         return jsonify({'message': f'订单 {order_no} 已恢复'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -118,7 +131,12 @@ def reopen_order(oid):
     status = data.get('status', 'producing')
     try:
         result = OrderService.reopen_order(oid, reason, status=status)
-        safe_audit_log('reopen_order', 'order', oid, f"status={result['status']}; reason={reason}")
+        safe_audit_log(
+            'reopen_order',
+            'order',
+            oid,
+            f"order_no={result['order_no']}; status={result['status']}; reason={reason}",
+        )
         return jsonify({'message': '订单已重新打开', 'status': result['status']})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -147,6 +165,7 @@ def purge_order(oid):
     """彻底删除（仅回收站中的订单）"""
     try:
         order_no = OrderService.purge_order(oid)
+        safe_audit_log('purge_order', 'order', oid, f'order_no={order_no}')
         return jsonify({'message': f'订单 {order_no} 已彻底删除'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

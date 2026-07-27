@@ -303,6 +303,8 @@ class OrderService:
                     )
 
             OrderRepository.update_form_fields(oid, data, db=txn)
+            updated_order = OrderRepository.find_by_id(oid, db=txn)
+            actual_order_no = updated_order['order_no']
 
             if process_ids_changed:
                 OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
@@ -320,7 +322,7 @@ class OrderService:
                     db=txn,
                 )
 
-        return True
+        return actual_order_no
 
     # ============================================================
     # 删除（级联清理子表）
@@ -335,7 +337,6 @@ class OrderService:
             ValueError: 订单不存在
             RuntimeError: 数据库错误
         """
-        db = BaseService.db()
         existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
@@ -447,7 +448,12 @@ class OrderService:
         with BaseService.transaction() as txn:
             OrderRepository.reopen_completed(oid, status, db=txn)
 
-        return {'id': oid, 'status': status, 'reason': reason}
+        return {
+            'id': oid,
+            'order_no': existing['order_no'],
+            'status': status,
+            'reason': reason,
+        }
 
     @staticmethod
     def list_trash(page=1, limit=20, data_scope_pids=None):
@@ -481,7 +487,6 @@ class OrderService:
     @staticmethod
     def restore_order(oid):
         """从回收站恢复订单。"""
-        db = BaseService.db()
         existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
@@ -508,7 +513,6 @@ class OrderService:
 
     @staticmethod
     def purge_order(oid):
-        db = BaseService.db()
         existing = OrderRepository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')

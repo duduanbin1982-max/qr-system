@@ -26,6 +26,19 @@ def _order_no(client, order_id):
         return row["order_no"]
 
 
+def _audit_detail(client, action, order_id):
+    with client.application.app_context():
+        from modules.db import get_db
+
+        row = get_db().execute(
+            "SELECT detail FROM audit_logs WHERE action = ? AND target_type = 'order' "
+            "AND target_id = ? ORDER BY id DESC LIMIT 1",
+            (action, order_id),
+        ).fetchone()
+        assert row is not None, f"missing audit log: {action} order={order_id}"
+        return row["detail"]
+
+
 def _order_status(client, order_id):
     with client.application.app_context():
         from modules.db import get_db
@@ -206,6 +219,58 @@ class TestOrderCRUD:
         assert resp.status_code == 200, f"update_order response: {resp.get_json()}"
         data = resp.get_json()
         assert data["message"]
+
+    def test_order_lifecycle_audits_use_actual_order_number(self, client, auth_headers):
+        create_response = client.post(
+            "/api/orders",
+            headers=auth_headers,
+            json={"product_name": "Audit Product", "quantity": 1},
+        )
+        assert create_response.status_code == 200, create_response.get_json()
+        order_id = create_response.get_json()["id"]
+        order_no = _order_no(client, order_id)
+        assert _audit_detail(client, "create_order", order_id) == f"order_no={order_no}"
+
+        update_response = client.put(
+            f"/api/orders/{order_id}",
+            headers=auth_headers,
+            json={"remark": "audit update"},
+        )
+        assert update_response.status_code == 200, update_response.get_json()
+        update_detail = _audit_detail(client, "update_order", order_id)
+        assert f"order_no={order_no}" in update_detail
+        assert "fields=remark" in update_detail
+
+        _set_order_status(client, order_id, "completed")
+        reopen_response = client.post(
+            f"/api/orders/{order_id}/reopen",
+            headers=auth_headers,
+            json={"reason": "audit reopen", "status": "producing"},
+        )
+        assert reopen_response.status_code == 200, reopen_response.get_json()
+        reopen_detail = _audit_detail(client, "reopen_order", order_id)
+        assert f"order_no={order_no}" in reopen_detail
+        assert "reason=audit reopen" in reopen_detail
+
+        delete_response = client.delete(f"/api/orders/{order_id}", headers=auth_headers)
+        assert delete_response.status_code == 200, delete_response.get_json()
+        assert _audit_detail(client, "delete_order", order_id) == f"order_no={order_no}"
+
+        restore_response = client.post(
+            f"/api/orders/{order_id}/restore",
+            headers=auth_headers,
+        )
+        assert restore_response.status_code == 200, restore_response.get_json()
+        assert _audit_detail(client, "restore_order", order_id) == f"order_no={order_no}"
+
+        delete_response = client.delete(f"/api/orders/{order_id}", headers=auth_headers)
+        assert delete_response.status_code == 200, delete_response.get_json()
+        purge_response = client.delete(
+            f"/api/orders/{order_id}/purge",
+            headers=auth_headers,
+        )
+        assert purge_response.status_code == 200, purge_response.get_json()
+        assert _audit_detail(client, "purge_order", order_id) == f"order_no={order_no}"
 
     def test_update_order_cannot_manually_complete(self, client, auth_headers, test_order_id):
         _set_order_status(client, test_order_id, "producing")

@@ -32,10 +32,10 @@ class OrderRepository:
 
     @staticmethod
     def find_status_by_id(order_id, db=None):
-        """轻量查询 — 仅返回 id, status, deleted_at，用于状态校验。"""
+        """轻量查询订单状态与审计所需订单号。"""
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, status, deleted_at FROM orders WHERE id = ?", (order_id,)
+            "SELECT id, order_no, status, deleted_at FROM orders WHERE id = ?", (order_id,)
         ).fetchone()
 
     @staticmethod
@@ -174,11 +174,6 @@ class OrderRepository:
         )
 
     @staticmethod
-    def update_fields(order_id, set_clauses, params, db=None):
-        db = resolve_db(db)
-        db.execute('UPDATE orders SET ' + ', '.join(set_clauses) + ' WHERE id = ?', list(params) + [order_id])
-
-    @staticmethod
     def update_form_fields(order_id, changes, db=None):
         db = resolve_db(db)
         allowed = (
@@ -267,65 +262,6 @@ class OrderRepository:
         return cur.lastrowid
 
     @staticmethod
-    def insert(data, db=None):
-        """插入新订单，返回 order_id。需要外层事务管理。"""
-        db = resolve_db(db)
-        cur = db.execute('''
-            INSERT INTO orders (order_no, customer, customer_id, product_name,
-                product_code, model, spec, style, upper_opening, plate_thickness,
-                category, quantity, plan_start, plan_end, deadline, remark, route_id, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
-        ''', (
-            data['order_no'],
-            data.get('customer', ''),
-            data.get('customer_id'),
-            data.get('product_name', ''),
-            data.get('product_code', ''),
-            data.get('model', ''),
-            data.get('spec', ''),
-            data.get('style', ''),
-            data.get('upper_opening', ''),
-            data.get('plate_thickness', ''),
-            data.get('category', ''),
-            data.get('quantity', 1),
-            data.get('plan_start', ''),
-            data.get('plan_end', ''),
-            data.get('deadline', ''),
-            data.get('remark', ''),
-            data.get('route_id'),
-        ))
-        return cur.lastrowid
-
-    @staticmethod
-    def update(order_id, set_clauses, params, db=None):
-        """UPDATE orders SET ... WHERE id = ?。调用方自行构建 set_clauses 和 params。"""
-        db = resolve_db(db)
-        params.append(order_id)
-        db.execute(
-            f'UPDATE orders SET {", ".join(set_clauses)} WHERE id = ?', params
-        )
-
-    @staticmethod
-    def soft_delete(order_id, deleted_by, db=None):
-        db = resolve_db(db)
-        now = db.execute("SELECT datetime('now','localtime')").fetchone()[0]
-        db.execute(
-            "UPDATE orders SET deleted_at = ?, deleted_by = ?, status = 'cancelled' WHERE id = ?",
-            (now, deleted_by, order_id)
-        )
-        # Cascade soft-delete to related records
-        db.execute("UPDATE work_records SET status='deleted' WHERE order_id=? AND status!='deleted'", (order_id,))
-        db.execute("UPDATE product_items SET status='deleted' WHERE order_id=? AND status!='deleted'", (order_id,))
-        db.execute("DELETE FROM order_processes WHERE order_id=?", (order_id,))
-        db.execute("UPDATE inventory SET quantity=0, remark='订单已删除' WHERE order_id=?", (order_id,))
-        # Also restore cascade
-    @staticmethod
-    def soft_restore(order_id, db=None):
-        db = resolve_db(db)
-        db.execute("UPDATE work_records SET status='approved' WHERE order_id=? AND status='deleted'", (order_id,))
-        db.execute("UPDATE product_items SET status='active' WHERE order_id=? AND status='deleted'", (order_id,))
-
-    @staticmethod
     def restore(order_id, prev_status, db=None):
         db = resolve_db(db)
         db.execute(
@@ -341,22 +277,6 @@ class OrderRepository:
             "WHERE id = ? AND status = 'completed' AND deleted_at IS NULL",
             (status, order_id)
         )
-
-    @staticmethod
-    def purge(order_id, db=None):
-        """硬删除订单及其所有关联数据。返回 order_no。"""
-        db = resolve_db(db)
-        order = db.execute(
-            'SELECT id, order_no FROM orders WHERE id = ?', (order_id,)
-        ).fetchone()
-        if not order:
-            raise ValueError('订单不存在')
-        for tbl in ['order_attachments', 'work_records', 'scrap_records',
-                     'rework_records', 'quality_inspections', 'order_processes',
-                     'material_consumptions']:
-            db.execute(f'DELETE FROM {tbl} WHERE order_id = ?', (order_id,))
-        db.execute('DELETE FROM orders WHERE id = ?', (order_id,))
-        return order['order_no']
 
     @staticmethod
     def purge_with_children(order_id, child_tables, db=None):
