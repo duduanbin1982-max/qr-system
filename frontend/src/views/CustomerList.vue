@@ -156,6 +156,7 @@ import { ref, onMounted, computed } from "vue"
 import { api } from "@/lib/api.js"
 import { showToast } from "@/lib/store.js"
 import { can } from "@/lib/auth.js"
+import { useCustomerDetails } from "@/composables/customer/useCustomerDetails.js"
 
 export default {
   setup() {
@@ -167,14 +168,6 @@ export default {
     const modalEdit = ref(false)
     const modalId = ref(null)
     const form = ref({ name:"", contact:"", phone:"", email:"", address:"", remark:"", tags:"" })
-    const detail = ref(null)
-    const detailOrders = ref([])
-    const showDetail = ref(false)
-    const detailPage = ref(1)
-    const detailTotal = ref(0)
-    const detailLoading = ref(false)
-    const detailError = ref("")
-    const detailPageSize = 10
     const deleteCheck = ref(null)
     const deleteCheckOrders = ref([])
     const showDeleteBlock = ref(false)
@@ -182,7 +175,6 @@ export default {
     const selectedTags = ref([])
     const newTag = ref("")
     const saving = ref(false)
-    let detailRequestSequence = 0
 
     function addTag() {
       if (newTag.value && !selectedTags.value.includes(newTag.value)) {
@@ -217,6 +209,11 @@ export default {
     const canDelete = computed(() => can("customers:delete"))
     const canCreate = computed(() => can("customers:create"))
     const canViewOrders = computed(() => can("orders:view"))
+    const {
+      showDetail, detail, detailOrders, detailLoading, detailError,
+      detailPage, detailTotal, detailPageSize,
+      viewDetail, loadDetailOrders, detailPrevPage, detailNextPage, closeDetail,
+    } = useCustomerDetails(canViewOrders)
     
     async function load() {
       loading.value = true
@@ -276,57 +273,6 @@ export default {
       if (!confirm("确定删除客户 \"" + c.name + "\" 吗？")) return
       try { await api.domains.customers.deleteCustomer(c.id); showToast("删除成功"); await load() }
       catch(e) { showToast(e.message || "删除失败", "error") }
-    }
-    async function viewDetail(c) {
-      if (!canViewOrders.value) return
-      detailRequestSequence++
-      detail.value = c
-      detailOrders.value = []
-      detailTotal.value = 0
-      detailError.value = ""
-      detailPage.value = 1
-      showDetail.value = true
-      await loadDetailOrders(c.id)
-    }
-    async function loadDetailOrders(cid) {
-      const requestId = ++detailRequestSequence
-      detailLoading.value = true
-      detailError.value = ""
-      try {
-        const d = await api.domains.customers.customerOrders(cid, { page: detailPage.value, limit: detailPageSize })
-        if (requestId !== detailRequestSequence || !showDetail.value || detail.value?.id !== cid) return
-        detailOrders.value = d.orders || []
-        detailTotal.value = d.total || 0
-      } catch(e) {
-        if (requestId !== detailRequestSequence || !showDetail.value || detail.value?.id !== cid) return
-        detailOrders.value = []
-        detailTotal.value = 0
-        detailError.value = e.message || "订单加载失败"
-      } finally {
-        if (requestId === detailRequestSequence) detailLoading.value = false
-      }
-    }
-    function detailPrevPage() {
-      if (!detailLoading.value && detailPage.value > 1) {
-        detailPage.value--
-        loadDetailOrders(detail.value.id)
-      }
-    }
-    function detailNextPage() {
-      if (!detailLoading.value && detailPage.value * detailPageSize < detailTotal.value) {
-        detailPage.value++
-        loadDetailOrders(detail.value.id)
-      }
-    }
-    function closeDetail() {
-      detailRequestSequence++
-      showDetail.value = false
-      detail.value = null
-      detailOrders.value = []
-      detailTotal.value = 0
-      detailPage.value = 1
-      detailLoading.value = false
-      detailError.value = ""
     }
     onMounted(() => load())
     

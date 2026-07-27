@@ -142,6 +142,25 @@ describe('CustomerList order permissions', () => {
     expect(wrapper.vm.detailOrders).toEqual([{ id: 22, order_no: 'ORDER-002' }])
   })
 
+  it('ignores a pending detail response after the modal closes', async () => {
+    mocks.permissions = new Set(['customers:view', 'orders:view'])
+    let resolveRequest
+    mocks.customerOrders.mockImplementation(() => new Promise(resolve => {
+      resolveRequest = resolve
+    }))
+    const wrapper = mount(CustomerList)
+    await flushPromises()
+
+    const request = wrapper.vm.viewDetail({ id: 1, name: '关闭测试客户' })
+    wrapper.vm.closeDetail()
+    resolveRequest({ orders: [{ id: 11, order_no: 'ORDER-001' }], total: 1 })
+    await request
+
+    expect(wrapper.vm.showDetail).toBe(false)
+    expect(wrapper.vm.detail).toBe(null)
+    expect(wrapper.vm.detailOrders).toEqual([])
+  })
+
   it('shows detail failures and uses total to stop pagination', async () => {
     mocks.permissions = new Set(['customers:view', 'orders:view'])
     mocks.customerOrders

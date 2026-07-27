@@ -45,26 +45,6 @@ class CustomerRepository:
         ).fetchone()
 
     @staticmethod
-    def count_all(where_sql, params, db=None):
-        """按条件统计客户数。where_sql 不含 WHERE 关键字。"""
-        db = resolve_db(db)
-        return db.execute(
-            f"SELECT COUNT(*) FROM customers WHERE {where_sql}", params
-        ).fetchone()[0]
-
-    @staticmethod
-    def list_all(where_sql, params, page, limit, db=None):
-        """分页列表（where_sql 不含 WHERE 关键字，调用方负责拼接）。"""
-        db = resolve_db(db)
-        total = CustomerRepository.count_all(where_sql, params, db=db)
-        offset = (page - 1) * limit
-        rows = db.execute(
-            f"SELECT * FROM customers WHERE {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
-            params + [limit, offset]
-        ).fetchall()
-        return rows, total
-
-    @staticmethod
     def list_with_order_stats(
         where_sql,
         params,

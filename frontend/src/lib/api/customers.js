@@ -1,4 +1,4 @@
-import { request, buildQuery, uploadFile } from './client.js'
+import { request, buildQuery } from './client.js'
 
 export const customersApi = {
   // ========== 客户 ==========
