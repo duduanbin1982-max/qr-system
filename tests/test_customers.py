@@ -269,3 +269,60 @@ def test_customer_list_paginates_and_returns_filtered_summary(client, auth_heade
         "with_orders": 2,
     }
     assert {"VIP", "重点", "长期合作"}.issubset(payload["available_tags"])
+
+
+def test_customer_tag_filter_matches_complete_tags_only(client, auth_headers):
+    suffix = uuid.uuid4().hex[:8]
+    names_by_tags = {
+        "VIP": f"Exact VIP {suffix}",
+        "超级VIP": f"Super VIP {suffix}",
+        "重点, VIP ": f"Spaced VIP {suffix}",
+        "VIP客户": f"VIP Customer {suffix}",
+    }
+    with client.application.app_context():
+        db = get_db()
+        for tags, name in names_by_tags.items():
+            db.execute(
+                "INSERT INTO customers (name, tags) VALUES (?, ?)",
+                (name, tags),
+            )
+        db.commit()
+
+    response = client.get(
+        "/api/customers",
+        query_string={"keyword": suffix, "tag": "VIP"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert {item["name"] for item in payload["customers"]} == {
+        names_by_tags["VIP"],
+        names_by_tags["重点, VIP "],
+    }
+    assert payload["summary"]["total"] == 2
+
+
+def test_customer_writes_normalize_and_deduplicate_tags(client, auth_headers):
+    customer_name = f"Normalized Tags {uuid.uuid4().hex[:8]}"
+
+    create_response = client.post(
+        "/api/customers",
+        json={"name": customer_name, "tags": " VIP,重点,VIP, ,长期合作 "},
+        headers=auth_headers,
+    )
+    customer_id = create_response.get_json()["id"]
+    update_response = client.put(
+        f"/api/customers/{customer_id}",
+        json={"tags": "重点，月结，重点"},
+        headers=auth_headers,
+    )
+
+    assert create_response.status_code == 200
+    assert update_response.status_code == 200
+    with client.application.app_context():
+        tags = get_db().execute(
+            "SELECT tags FROM customers WHERE id = ?",
+            (customer_id,),
+        ).fetchone()["tags"]
+    assert tags == "重点,月结"

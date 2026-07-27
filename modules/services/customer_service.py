@@ -19,6 +19,17 @@ class CustomerService:
     """客户管理业务逻辑。"""
 
     @staticmethod
+    def _normalize_tags(tags):
+        normalized = []
+        seen = set()
+        for value in str(tags or "").replace("，", ",").split(","):
+            tag = value.strip()
+            if tag and tag not in seen:
+                normalized.append(tag)
+                seen.add(tag)
+        return ",".join(normalized)
+
+    @staticmethod
     def list_customers(
         keyword=None,
         page=1,
@@ -35,8 +46,13 @@ class CustomerService:
             where += " AND (c.name LIKE ? OR c.contact LIKE ? OR c.phone LIKE ?)"
             params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
         if tag:
-            where += " AND c.tags LIKE ?"
-            params.append(f"%{tag}%")
+            where += (
+                " AND INSTR("
+                "',' || REPLACE(REPLACE(COALESCE(c.tags, ''), ' ', ''), '，', ',') || ',', "
+                "',' || REPLACE(?, ' ', '') || ','"
+                ") > 0"
+            )
+            params.append(tag)
         rows, total = CustomerRepository.list_with_order_stats(
             where,
             params,
@@ -55,7 +71,7 @@ class CustomerService:
         )
         available_tags = set()
         for row in CustomerRepository.list_tag_values(db=db):
-            for value in (row["tags"] or "").split(","):
+            for value in (row["tags"] or "").replace("，", ",").split(","):
                 normalized = value.strip()
                 if normalized:
                     available_tags.add(normalized)
@@ -86,7 +102,7 @@ class CustomerService:
                     "email": data.get("email", ""),
                     "address": data.get("address", ""),
                     "remark": data.get("remark", ""),
-                    "tags": data.get("tags", ""),
+                    "tags": CustomerService._normalize_tags(data.get("tags", "")),
                 }, db=txn)
         except DuplicateCustomerNameError as exc:
             raise ConflictError("客户名称已存在") from exc
@@ -99,6 +115,8 @@ class CustomerService:
             if not name:
                 raise ValueError("客户名称不能为空")
             data["name"] = name
+        if "tags" in data:
+            data["tags"] = CustomerService._normalize_tags(data.get("tags"))
 
         sets = []
         params = []
