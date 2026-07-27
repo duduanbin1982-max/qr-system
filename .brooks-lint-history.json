@@ -306,5 +306,16 @@
       "suggestion": 1
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD c695980; full architecture scan of 217 backend modules, 151 Vue source modules, mobile H5 boundaries, production quality-model inventory, and 10 architecture contracts"
+  },
+  {
+    "date": "2026-07-28T05:52:23+08:00",
+    "mode": "PR Review",
+    "score": 41,
+    "findings": {
+      "critical": 1,
+      "warning": 5,
+      "suggestion": 2
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD b6f0569; customer management frontend, API, route, service, repository, schema, permissions, data scope, production constraints, and related tests"
   }
 ]
