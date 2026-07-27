@@ -92,7 +92,7 @@
           <div class="form-group"><label>地址</label><input class="form-input" v-model="form.address" placeholder="客户地址"></div>
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
         </div>
-        <div class="modal-footer"><button class="btn btn-default" @click="showModal=false">取消</button><button class="btn btn-primary" @click="save">💾 保存</button></div>
+        <div class="modal-footer"><button class="btn btn-default" :disabled="saving" @click="showModal=false">取消</button><button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? "保存中..." : "保存" }}</button></div>
       </div>
     </div>
     
@@ -169,6 +169,7 @@ export default {
     const presetTags = ["VIP", "长期合作", "新客户", "重点", "沉睡", "月结", "现结"]
     const selectedTags = ref([])
     const newTag = ref("")
+    const saving = ref(false)
 
     function addTag() {
       if (newTag.value && !selectedTags.value.includes(newTag.value)) {
@@ -227,12 +228,15 @@ export default {
       modalEdit.value = true; modalId.value = c.id; initTags(c.tags||""); showModal.value = true
     }
     async function save() {
+      if (saving.value) return
       if (!form.value.name || !form.value.name.trim()) { showToast("请输入客户名称", "error"); return }
+      saving.value = true
       try {
         if (modalEdit.value) { await api.domains.customers.updateCustomer(modalId.value, form.value); showToast("更新成功") }
         else { await api.domains.customers.createCustomer(form.value); showToast("创建成功") }
         showModal.value = false; await load()
       } catch(e) { showToast(e.message || "保存失败", "error") }
+      finally { saving.value = false }
     }
     async function del(c) {
       deleteCheck.value = c; deleteCheckOrders.value = []
@@ -262,7 +266,7 @@ export default {
     
     return {
       customers, loading, searchKeyword, load,
-      showModal, modalEdit, form, openAdd, openEdit, save, del,
+      showModal, modalEdit, form, saving, openAdd, openEdit, save, del,
       showDetail, detail, detailOrders, viewDetail,
       deleteCheck, deleteCheckOrders, showDeleteBlock,
       hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, canViewOrders, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,

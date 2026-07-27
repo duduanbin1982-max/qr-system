@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   permissions: new Set(),
   listCustomers: vi.fn(),
   customerOrders: vi.fn(),
+  createCustomer: vi.fn(),
+  updateCustomer: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
@@ -16,6 +18,8 @@ vi.mock('@/lib/api.js', () => ({
       customers: {
         listCustomers: mocks.listCustomers,
         customerOrders: mocks.customerOrders,
+        createCustomer: mocks.createCustomer,
+        updateCustomer: mocks.updateCustomer,
       },
     },
   },
@@ -33,6 +37,8 @@ describe('CustomerList order permissions', () => {
     mocks.permissions = new Set()
     mocks.listCustomers.mockReset()
     mocks.customerOrders.mockReset()
+    mocks.createCustomer.mockReset()
+    mocks.updateCustomer.mockReset()
     mocks.listCustomers.mockResolvedValue({
       customers: [{
         id: 1,
@@ -62,5 +68,27 @@ describe('CustomerList order permissions', () => {
     expect(wrapper.find('[data-testid="customer-order-link"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('最近下单')
     expect(wrapper.text()).toContain('有订单')
+  })
+
+  it('prevents duplicate submissions while a save is pending', async () => {
+    mocks.permissions = new Set(['customers:view', 'customers:create'])
+    let resolveCreate
+    mocks.createCustomer.mockImplementation(() => new Promise(resolve => {
+      resolveCreate = resolve
+    }))
+    const wrapper = mount(CustomerList)
+    await flushPromises()
+    await wrapper.find('button.btn-primary').trigger('click')
+    await wrapper.find('input[placeholder="客户公司名称"]').setValue('并发客户')
+
+    const firstSave = wrapper.vm.save()
+    const secondSave = wrapper.vm.save()
+
+    expect(mocks.createCustomer).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.saving).toBe(true)
+    resolveCreate({ id: 1 })
+    await Promise.all([firstSave, secondSave])
+    await flushPromises()
+    expect(wrapper.vm.saving).toBe(false)
   })
 })

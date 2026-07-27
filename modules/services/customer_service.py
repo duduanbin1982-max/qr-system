@@ -6,7 +6,10 @@ SQL 已迁移至 modules.repositories.customer_repository。
 """
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
-from modules.repositories.customer_repository import CustomerRepository
+from modules.repositories.customer_repository import (
+    CustomerRepository,
+    DuplicateCustomerNameError,
+)
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -51,31 +54,30 @@ class CustomerService:
         name = data.get("name", "").strip()
         if not name:
             raise ValueError("客户名称不能为空")
-        existing = CustomerRepository.find_by_name(name)
-        if existing:
-            raise ConflictError("客户名称已存在")
-        with BaseService.transaction() as txn:
-            return CustomerRepository.insert({
-                "name": name,
-                "contact": data.get("contact", ""),
-                "phone": data.get("phone", ""),
-                "email": data.get("email", ""),
-                "address": data.get("address", ""),
-                "remark": data.get("remark", ""),
-                "tags": data.get("tags", ""),
-            }, db=txn)
+        try:
+            with BaseService.transaction() as txn:
+                existing = CustomerRepository.find_by_name(name, db=txn)
+                if existing:
+                    raise ConflictError("客户名称已存在")
+                return CustomerRepository.insert({
+                    "name": name,
+                    "contact": data.get("contact", ""),
+                    "phone": data.get("phone", ""),
+                    "email": data.get("email", ""),
+                    "address": data.get("address", ""),
+                    "remark": data.get("remark", ""),
+                    "tags": data.get("tags", ""),
+                }, db=txn)
+        except DuplicateCustomerNameError as exc:
+            raise ConflictError("客户名称已存在") from exc
 
     @staticmethod
     def update_customer(cid, data):
         """更新客户。Raises ValueError on empty/missing name or duplicate."""
-        db = BaseService.db()
         if "name" in data:
             name = (data.get("name") or "").strip()
             if not name:
                 raise ValueError("客户名称不能为空")
-            existing = CustomerRepository.find_by_name_excluding(name, cid, db=db)
-            if existing:
-                raise ConflictError("客户名称已存在")
             data["name"] = name
 
         sets = []
@@ -88,11 +90,25 @@ class CustomerService:
             raise ValueError("无更新内容")
 
         name_changed = "name" in data
-        with BaseService.transaction() as txn:
-            CustomerRepository.update(cid, sets, params, db=txn)
-            # P0: Cascade customer name update to orders.customer
-            if name_changed:
-                CustomerRepository.cascade_name_to_orders(cid, data["name"], db=txn)
+        try:
+            with BaseService.transaction() as txn:
+                if not CustomerRepository.find_by_id(cid, db=txn):
+                    raise NotFoundError("客户不存在")
+                if name_changed:
+                    existing = CustomerRepository.find_by_name_excluding(
+                        data["name"],
+                        cid,
+                        db=txn,
+                    )
+                    if existing:
+                        raise ConflictError("客户名称已存在")
+                updated = CustomerRepository.update(cid, sets, params, db=txn)
+                if updated != 1:
+                    raise NotFoundError("客户不存在")
+                if name_changed:
+                    CustomerRepository.cascade_name_to_orders(cid, data["name"], db=txn)
+        except DuplicateCustomerNameError as exc:
+            raise ConflictError("客户名称已存在") from exc
 
     @staticmethod
     def delete_customer(cid):

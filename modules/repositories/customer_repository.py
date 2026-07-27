@@ -4,7 +4,13 @@ qr-system — CustomerRepository（数据访问层）
 将所有 customers 表及相关 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
+import sqlite3
+
 from modules.repositories.context import resolve_db
+
+
+class DuplicateCustomerNameError(Exception):
+    """Raised when the database rejects a duplicate customer name."""
 
 
 class CustomerRepository:
@@ -174,13 +180,18 @@ class CustomerRepository:
     def insert(data, db=None):
         """插入新客户，返回 customer_id。需要外层事务管理。"""
         db = resolve_db(db)
-        cur = db.execute("""
-            INSERT INTO customers (name, contact, phone, email, address, remark, tags)
-            VALUES (?,?,?,?,?,?,?)
-        """, (data["name"], data.get("contact", ""),
-              data.get("phone", ""), data.get("email", ""),
-              data.get("address", ""), data.get("remark", ""),
-              data.get("tags", "")))
+        try:
+            cur = db.execute("""
+                INSERT INTO customers (name, contact, phone, email, address, remark, tags)
+                VALUES (?,?,?,?,?,?,?)
+            """, (data["name"], data.get("contact", ""),
+                  data.get("phone", ""), data.get("email", ""),
+                  data.get("address", ""), data.get("remark", ""),
+                  data.get("tags", "")))
+        except sqlite3.IntegrityError as exc:
+            if "customers.name" in str(exc):
+                raise DuplicateCustomerNameError from exc
+            raise
         return cur.lastrowid
 
     @staticmethod
@@ -189,10 +200,17 @@ class CustomerRepository:
         set_clauses = list(set_clauses)  # Don't mutate caller's list
         if not any("updated_at" in c for c in set_clauses):
             set_clauses.append('updated_at = datetime("now","localtime")')
-        params.append(customer_id)
-        db.execute(
-            f"UPDATE customers SET {', '.join(set_clauses)} WHERE id = ?", params
-        )
+        update_params = list(params) + [customer_id]
+        try:
+            cursor = db.execute(
+                f"UPDATE customers SET {', '.join(set_clauses)} WHERE id = ?",
+                update_params,
+            )
+        except sqlite3.IntegrityError as exc:
+            if "customers.name" in str(exc):
+                raise DuplicateCustomerNameError from exc
+            raise
+        return cursor.rowcount
 
     @staticmethod
     def delete(customer_id, db=None):

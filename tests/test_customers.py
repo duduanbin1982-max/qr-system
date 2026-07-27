@@ -3,6 +3,7 @@ import uuid
 
 from factories import TEST_HASH, TEST_PASS
 from modules.db import get_db
+from modules.repositories.customer_repository import CustomerRepository
 from modules.services.customer_service import CustomerService
 
 
@@ -133,3 +134,87 @@ def test_customer_order_history_filters_orders_and_processes_by_scope(client):
 
     assert [item["id"] for item in result["orders"]] == [order_ids[0]]
     assert [item["process_id"] for item in result["orders"][0]["processes"]] == [process_ids[0]]
+
+
+def test_update_missing_customer_returns_not_found_without_success_audit(
+    client,
+    auth_headers,
+):
+    missing_id = 999999999
+
+    response = client.put(
+        f"/api/customers/{missing_id}",
+        json={"contact": "Missing Customer"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "客户不存在"
+    with client.application.app_context():
+        audit = get_db().execute(
+            "SELECT id FROM audit_logs "
+            "WHERE action = 'update_customer' AND target_id = ?",
+            (missing_id,),
+        ).fetchone()
+    assert audit is None
+
+
+def test_create_customer_maps_unique_constraint_race_to_conflict(
+    client,
+    auth_headers,
+    monkeypatch,
+):
+    customer_name = f"Race Customer {uuid.uuid4().hex[:8]}"
+    with client.application.app_context():
+        db = get_db()
+        db.execute("INSERT INTO customers (name) VALUES (?)", (customer_name,))
+        db.commit()
+
+    monkeypatch.setattr(
+        CustomerRepository,
+        "find_by_name",
+        staticmethod(lambda name, db=None: None),
+    )
+    response = client.post(
+        "/api/customers",
+        json={"name": customer_name},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "客户名称已存在"
+
+
+def test_update_customer_maps_unique_constraint_race_to_conflict(
+    client,
+    auth_headers,
+    monkeypatch,
+):
+    suffix = uuid.uuid4().hex[:8]
+    with client.application.app_context():
+        db = get_db()
+        first_name = f"First Customer {suffix}"
+        first_id = db.execute(
+            "INSERT INTO customers (name) VALUES (?)",
+            (first_name,),
+        ).lastrowid
+        second_id = db.execute(
+            "INSERT INTO customers (name) VALUES (?)",
+            (f"Second Customer {suffix}",),
+        ).lastrowid
+        db.commit()
+    assert first_id != second_id
+
+    monkeypatch.setattr(
+        CustomerRepository,
+        "find_by_name_excluding",
+        staticmethod(lambda name, exclude_id, db=None: None),
+    )
+    response = client.put(
+        f"/api/customers/{second_id}",
+        json={"name": first_name},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "客户名称已存在"
