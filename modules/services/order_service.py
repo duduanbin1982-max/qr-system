@@ -356,6 +356,9 @@ class OrderService:
         return {
             'order_id': oid,
             'order_no': order['order_no'],
+            'work_records': normal,
+            'scrap_records': scrap,
+            'rework_records': rework,
             'records': all_records,
             'summary': {
                 'normal_count': len(normal),
@@ -371,11 +374,11 @@ class OrderService:
 
     @staticmethod
     def get_shipments(oid):
-        """获取订单关联产品的发货记录。"""
+        """获取明确关联到订单的发货记录。"""
         order = OrderRepository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
-        shipments = OrderRepository.get_shipments_by_product_code(order['product_code'])
+        shipments = OrderRepository.get_shipments(oid)
         return {
             'order_id': oid,
             'order_no': order['order_no'],

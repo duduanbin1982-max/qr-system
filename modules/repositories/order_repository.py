@@ -519,10 +519,15 @@ class OrderRepository:
     def get_shipments(order_id, db=None):
         db = resolve_db(db)
         return db.execute('''
-            SELECT DISTINCT s.*,
-                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) as item_count
+            SELECT s.*,
+                   COUNT(si.id) AS order_item_count,
+                   COALESCE(SUM(si.quantity), 0) AS order_quantity,
+                   (SELECT COUNT(*) FROM shipment_items all_si
+                    WHERE all_si.shipment_id = s.id) AS item_count
             FROM shipments s
-            WHERE s.order_id = ?
+            JOIN shipment_items si ON si.shipment_id = s.id
+            WHERE si.order_id = ?
+            GROUP BY s.id
             ORDER BY s.created_at DESC
         ''', (order_id,)).fetchall()
 

@@ -432,12 +432,93 @@ class TestOrderDeleteFlow:
         assert resp.status_code == 200
 
     def test_work_records(self, client, auth_headers, test_order_id):
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            process = db.execute(
+                "SELECT process_id FROM order_processes WHERE order_id = ? ORDER BY seq_order LIMIT 1",
+                (test_order_id,),
+            ).fetchone()
+            user = db.execute(
+                "SELECT id FROM users ORDER BY id LIMIT 1",
+            ).fetchone()
+            record_id = db.execute(
+                "INSERT INTO work_records "
+                "(order_id, process_id, user_id, type, quantity, status, serial_no) "
+                "VALUES (?, ?, ?, 'normal', 3, 'approved', ?)",
+                (test_order_id, process["process_id"], user["id"], f"ORDER-API-{uuid.uuid4().hex}"),
+            ).lastrowid
+            db.commit()
+
         resp = client.get(f"/api/orders/{test_order_id}/work-records", headers=auth_headers)
         assert resp.status_code == 200
+        data = resp.get_json()
+        assert any(record["id"] == record_id for record in data["work_records"])
+        assert any(record["id"] == record_id for record in data["records"])
+        assert data["summary"]["normal_count"] >= 1
 
     def test_shipments(self, client, auth_headers, test_order_id):
+        suffix = uuid.uuid4().hex[:8].upper()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            order = db.execute(
+                "SELECT order_no, product_code FROM orders WHERE id = ?",
+                (test_order_id,),
+            ).fetchone()
+            other_order_id = db.execute(
+                "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status) "
+                "VALUES (?, 'Other Customer', 'Same Code Product', ?, 1, 'producing')",
+                (f"TEST-OTHER-SHIP-{suffix}", order["product_code"]),
+            ).lastrowid
+            inventory_id = db.execute(
+                "INSERT INTO inventory (product_model, product_name, quantity, unit, order_id) "
+                "VALUES (?, 'Order Shipment Product', 10, '件', ?)",
+                (f"ORDER-SHIP-{suffix}", test_order_id),
+            ).lastrowid
+            other_inventory_id = db.execute(
+                "INSERT INTO inventory (product_model, product_name, quantity, unit, order_id) "
+                "VALUES (?, 'Other Shipment Product', 10, '件', ?)",
+                (f"OTHER-SHIP-{suffix}", other_order_id),
+            ).lastrowid
+            shipment_id = db.execute(
+                "INSERT INTO shipments (shipment_no, customer, status, total_quantity, created_by) "
+                "VALUES (?, 'Order Customer', 'completed', 2, 'pytest')",
+                (f"TEST-ORDER-SHIP-{suffix}",),
+            ).lastrowid
+            other_shipment_id = db.execute(
+                "INSERT INTO shipments (shipment_no, customer, status, total_quantity, created_by) "
+                "VALUES (?, 'Other Customer', 'completed', 1, 'pytest')",
+                (f"TEST-OTHER-SHIP-{suffix}",),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO shipment_items "
+                "(shipment_id, inventory_id, product_model, product_name, quantity, unit, "
+                "order_id, product_code, order_no) VALUES (?, ?, ?, 'Order Shipment Product', "
+                "2, '件', ?, ?, ?)",
+                (shipment_id, inventory_id, f"ORDER-SHIP-{suffix}", test_order_id,
+                 order["product_code"], order["order_no"]),
+            )
+            db.execute(
+                "INSERT INTO shipment_items "
+                "(shipment_id, inventory_id, product_model, product_name, quantity, unit, "
+                "order_id, product_code, order_no) VALUES (?, ?, ?, 'Other Shipment Product', "
+                "1, '件', ?, ?, ?)",
+                (other_shipment_id, other_inventory_id, f"OTHER-SHIP-{suffix}", other_order_id,
+                 order["product_code"], f"TEST-OTHER-SHIP-{suffix}"),
+            )
+            db.commit()
+
         resp = client.get(f"/api/orders/{test_order_id}/shipments", headers=auth_headers)
         assert resp.status_code == 200
+        data = resp.get_json()
+        shipment_ids = {shipment["id"] for shipment in data["shipments"]}
+        assert shipment_id in shipment_ids
+        assert other_shipment_id not in shipment_ids
+        shipment = next(item for item in data["shipments"] if item["id"] == shipment_id)
+        assert shipment["order_quantity"] == 2
 
 
 class TestOrderEdgeCases:

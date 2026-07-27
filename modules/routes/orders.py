@@ -160,17 +160,7 @@ def get_order_work_records(oid):
         return jsonify({"error": "无权限访问此订单"}), 403
     """获取订单报工/报废/返工记录"""
     try:
-        order = OrderService.get_order(oid)
-        if not order:
-            return jsonify({'error': '订单不存在'}), 404
-        d = dict(order)
-        return jsonify({
-            'order_id': oid,
-            'order_no': d.get('order_no', ''),
-            'work_records': d.get('work_records', []),
-            'scrap_records': d.get('scrap_records', []),
-            'rework_records': d.get('rework_records', []),
-        })
+        return jsonify(OrderService.get_work_records(oid))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
 
@@ -183,14 +173,7 @@ def get_order_shipments(oid):
         return jsonify({"error": "无权限访问此订单"}), 403
     """获取订单发货记录"""
     try:
-        order = OrderService.get_order(oid)
-        if not order:
-            return jsonify({'error': '订单不存在'}), 404
-        d = dict(order)
-        return jsonify({
-            'order_id': oid,
-            'shipments': d.get('shipments', []),
-        })
+        return jsonify(OrderService.get_shipments(oid))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
 
