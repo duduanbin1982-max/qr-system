@@ -105,7 +105,7 @@
     
     <div v-if="showDetail" class="modal-overlay" >
       <div class="modal" style="max-width:750px">
-        <div class="modal-header"><span>📋 {{ detail?.name }} — 订单列表</span><span class="modal-close" @click="showDetail=false">&times;</span></div>
+        <div class="modal-header"><span>📋 {{ detail?.name }} — 订单列表</span><span class="modal-close" @click="closeDetail">&times;</span></div>
         <div class="modal-body">
           <div v-if="detail" style="margin-bottom:16px;padding:12px;background:var(--bg-hover);border-radius:var(--radius-md);display:flex;gap:24px;flex-wrap:wrap;font-size:var(--text-sm)">
             <span v-if="detail.contact">👤 联系人: <strong>{{ detail.contact }}</strong></span>
@@ -113,7 +113,9 @@
             <span v-if="detail.email">📧 <a :href="'mailto:'+detail.email" style="color:var(--primary)">{{ detail.email }}</a></span>
             <span v-if="detail.address">📍 {{ detail.address }}</span>
           </div>
-          <div v-if="detailOrders.length" style="display:flex;flex-direction:column;gap:8px">
+          <div v-if="detailLoading" style="text-align:center;padding:30px;color:var(--text-placeholder)">正在加载订单...</div>
+          <div v-else-if="detailError" style="text-align:center;padding:30px;color:var(--danger)"><div>{{ detailError }}</div><button class="btn btn-default btn-sm" style="margin-top:12px" @click="loadDetailOrders(detail.id)">重试</button></div>
+          <div v-else-if="detailOrders.length" style="display:flex;flex-direction:column;gap:8px">
             <div v-for="o in detailOrders" :key="o.id" style="padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-md);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:var(--text-sm)">
               <code style="font-weight:600;color:var(--primary);min-width:100px">{{ o.order_no }}</code>
               <span style="color:var(--text-primary);flex:1;min-width:120px">{{ o.product_name || "-" }}</span>
@@ -125,12 +127,12 @@
           </div>
           <div v-else style="text-align:center;padding:30px;color:var(--text-placeholder)">暂无订单记录</div>
         </div>
-        <div v-if="detailOrders.length >= detailPageSize" style="display:flex;justify-content:center;gap:8px;margin-top:12px">
+        <div v-if="!detailLoading && !detailError && detailTotal > detailPageSize" style="display:flex;justify-content:center;gap:8px;margin-top:12px">
           <button class="btn btn-sm btn-default" @click="detailPrevPage" :disabled="detailPage <= 1">上一页</button>
-          <span style="padding:4px 12px;font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ detailPage }} 页</span>
-          <button class="btn btn-sm btn-default" @click="detailNextPage">下一页</button>
+          <span style="padding:4px 12px;font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ detailPage }} / {{ Math.ceil(detailTotal / detailPageSize) }} 页（共 {{ detailTotal }} 条）</span>
+          <button class="btn btn-sm btn-default" @click="detailNextPage" :disabled="detailPage * detailPageSize >= detailTotal">下一页</button>
         </div>
-        <div class="modal-footer"><button class="btn btn-primary" @click="showDetail=false">关闭</button></div>
+        <div class="modal-footer"><button class="btn btn-primary" @click="closeDetail">关闭</button></div>
       </div>
     </div>
     
@@ -170,6 +172,8 @@ export default {
     const showDetail = ref(false)
     const detailPage = ref(1)
     const detailTotal = ref(0)
+    const detailLoading = ref(false)
+    const detailError = ref("")
     const detailPageSize = 10
     const deleteCheck = ref(null)
     const deleteCheckOrders = ref([])
@@ -178,6 +182,7 @@ export default {
     const selectedTags = ref([])
     const newTag = ref("")
     const saving = ref(false)
+    let detailRequestSequence = 0
 
     function addTag() {
       if (newTag.value && !selectedTags.value.includes(newTag.value)) {
@@ -274,27 +279,65 @@ export default {
     }
     async function viewDetail(c) {
       if (!canViewOrders.value) return
-      detail.value = c; showDetail.value = true; detailPage.value = 1
+      detailRequestSequence++
+      detail.value = c
+      detailOrders.value = []
+      detailTotal.value = 0
+      detailError.value = ""
+      detailPage.value = 1
+      showDetail.value = true
       await loadDetailOrders(c.id)
     }
     async function loadDetailOrders(cid) {
+      const requestId = ++detailRequestSequence
+      detailLoading.value = true
+      detailError.value = ""
       try {
         const d = await api.domains.customers.customerOrders(cid, { page: detailPage.value, limit: detailPageSize })
+        if (requestId !== detailRequestSequence || !showDetail.value || detail.value?.id !== cid) return
         detailOrders.value = d.orders || []
-      } catch(e) { detailOrders.value = [] }
+        detailTotal.value = d.total || 0
+      } catch(e) {
+        if (requestId !== detailRequestSequence || !showDetail.value || detail.value?.id !== cid) return
+        detailOrders.value = []
+        detailTotal.value = 0
+        detailError.value = e.message || "订单加载失败"
+      } finally {
+        if (requestId === detailRequestSequence) detailLoading.value = false
+      }
     }
-    function detailPrevPage() { if (detailPage.value > 1) { detailPage.value--; loadDetailOrders(detail.value.id) } }
-    function detailNextPage() { detailPage.value++; loadDetailOrders(detail.value.id) }
+    function detailPrevPage() {
+      if (!detailLoading.value && detailPage.value > 1) {
+        detailPage.value--
+        loadDetailOrders(detail.value.id)
+      }
+    }
+    function detailNextPage() {
+      if (!detailLoading.value && detailPage.value * detailPageSize < detailTotal.value) {
+        detailPage.value++
+        loadDetailOrders(detail.value.id)
+      }
+    }
+    function closeDetail() {
+      detailRequestSequence++
+      showDetail.value = false
+      detail.value = null
+      detailOrders.value = []
+      detailTotal.value = 0
+      detailPage.value = 1
+      detailLoading.value = false
+      detailError.value = ""
+    }
     onMounted(() => load())
     
     return {
       customers, loading, loadError, searchKeyword, load, searchAndLoad, filterAndLoad,
       showModal, modalEdit, form, saving, openAdd, openEdit, save, del,
-      showDetail, detail, detailOrders, viewDetail,
+      showDetail, detail, detailOrders, detailLoading, detailError, viewDetail, loadDetailOrders, closeDetail,
       deleteCheck, deleteCheckOrders, showDeleteBlock,
       hasContact, hasEmail, hasOrders, totalCount, canEdit, canDelete, canCreate, canViewOrders, tagFilter, allTags, tagColor, presetTags, selectedTags, newTag, addTag, removeTag, initTags,
       page, pageSize, total, summary, prevPage, nextPage,
-      detailPage, detailPageSize, detailPrevPage, detailNextPage
+      detailPage, detailTotal, detailPageSize, detailPrevPage, detailNextPage
     }
   }
 }

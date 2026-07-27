@@ -118,4 +118,52 @@ describe('CustomerList order permissions', () => {
       keyword: '新关键词',
     })
   })
+
+  it('clears stale orders and ignores superseded detail requests', async () => {
+    mocks.permissions = new Set(['customers:view', 'orders:view'])
+    let resolveFirst
+    let resolveSecond
+    mocks.customerOrders.mockImplementation(id => new Promise(resolve => {
+      if (id === 1) resolveFirst = resolve
+      else resolveSecond = resolve
+    }))
+    const wrapper = mount(CustomerList)
+    await flushPromises()
+
+    const firstRequest = wrapper.vm.viewDetail({ id: 1, name: '客户一' })
+    const secondRequest = wrapper.vm.viewDetail({ id: 2, name: '客户二' })
+    expect(wrapper.vm.detailOrders).toEqual([])
+    resolveSecond({ orders: [{ id: 22, order_no: 'ORDER-002' }], total: 1 })
+    await secondRequest
+    expect(wrapper.vm.detailOrders).toEqual([{ id: 22, order_no: 'ORDER-002' }])
+
+    resolveFirst({ orders: [{ id: 11, order_no: 'ORDER-001' }], total: 1 })
+    await firstRequest
+    expect(wrapper.vm.detailOrders).toEqual([{ id: 22, order_no: 'ORDER-002' }])
+  })
+
+  it('shows detail failures and uses total to stop pagination', async () => {
+    mocks.permissions = new Set(['customers:view', 'orders:view'])
+    mocks.customerOrders
+      .mockRejectedValueOnce(new Error('订单网络失败'))
+      .mockResolvedValueOnce({ orders: Array.from({ length: 10 }, (_, index) => ({ id: index + 1 })), total: 11 })
+      .mockResolvedValueOnce({ orders: [{ id: 11 }], total: 11 })
+    const wrapper = mount(CustomerList)
+    await flushPromises()
+
+    await wrapper.vm.viewDetail({ id: 1, name: '详情客户' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('订单网络失败')
+    expect(wrapper.text()).not.toContain('暂无订单记录')
+
+    await wrapper.vm.loadDetailOrders(1)
+    await flushPromises()
+    expect(wrapper.vm.detailTotal).toBe(11)
+    wrapper.vm.detailNextPage()
+    await flushPromises()
+    expect(mocks.customerOrders).toHaveBeenLastCalledWith(1, { page: 2, limit: 10 })
+    expect(wrapper.vm.detailPage).toBe(2)
+    wrapper.vm.detailNextPage()
+    expect(wrapper.vm.detailPage).toBe(2)
+  })
 })
