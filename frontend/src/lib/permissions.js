@@ -1,5 +1,6 @@
 import {
   ACTION_PAGE_MAP,
+  IMPLIED_PERMISSIONS,
   PAGE_RULE_TREE,
   SIDEBAR_ITEMS,
 } from './permissionFallback.generated.js'
@@ -24,10 +25,6 @@ export const PAGE_RULES = flattenFallbackPageRules(PAGE_RULE_TREE)
 let runtimeSidebarItems = SIDEBAR_ITEMS
 let runtimePageRules = PAGE_RULES
 let runtimeActionPageMap = ACTION_PAGE_MAP
-
-const IMPLIED_PERMISSIONS = {
-  'quality:edit': ['quality:review'],
-}
 
 function flattenPageRules(nodes, parent = '') {
   const rules = {}

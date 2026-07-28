@@ -8,7 +8,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.permission_catalog import ACTION_PAGE_MAP, PAGE_RULES, SIDEBAR_ITEMS
+from modules.permission_catalog import (
+    ACTION_PAGE_MAP,
+    PAGE_RULES,
+    PERMISSION_IMPLICATIONS,
+    SIDEBAR_ITEMS,
+)
 
 OUTPUT = PROJECT_ROOT / "frontend" / "src" / "lib" / "permissionFallback.generated.js"
 
@@ -23,6 +28,7 @@ def render_catalog():
     content += js_const("SIDEBAR_ITEMS", SIDEBAR_ITEMS)
     content += js_const("PAGE_RULE_TREE", PAGE_RULES)
     content += js_const("ACTION_PAGE_MAP", ACTION_PAGE_MAP)
+    content += js_const("IMPLIED_PERMISSIONS", PERMISSION_IMPLICATIONS)
     return content
 
 
@@ -41,7 +47,7 @@ def main(argv=None):
             print(f"{OUTPUT.relative_to(PROJECT_ROOT)} is out of date", file=sys.stderr)
             return 1
         return 0
-    OUTPUT.write_text(content, encoding="utf-8")
+    OUTPUT.write_text(content, encoding="utf-8", newline="\n")
     print(f"wrote {OUTPUT.relative_to(PROJECT_ROOT)}")
     return 0
 

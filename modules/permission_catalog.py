@@ -10,6 +10,8 @@ ACTION_LABELS = {
     "edit": "编辑",
     "delete": "删除",
     "manage": "管理",
+    "stock": "库存调整",
+    "consume": "物料消耗",
     "export": "导出",
     "report": "报工",
     "admin": "管理员",
@@ -51,7 +53,8 @@ ACTION_PERMISSION_DEFS = {
     "board": ("数据看板", ["view"]),
     "settings": ("系统设置", ["manage", "edit"]),
     "logs": ("操作日志", ["view", "delete"]),
-    "materials": ("物料", ["view", "manage"]),
+    "materials": ("物料", ["view", "create", "edit", "delete", "stock", "consume", "manage"]),
+    "suppliers": ("供应商", ["view", "create", "edit", "delete"]),
     "quality": ("质量管理", ["view", "inspect", "standards", "plans", "disposition", "review", "capa", "supplier", "calibration", "edit", "delete"]),
     "rework": ("返工", ["view", "create", "edit"]),
     "schedule": ("生产排程", ["view"]),
@@ -145,6 +148,7 @@ ACTION_PAGE_MAP = {
     "orders": ["page:production", "page:production.orders"],
     "customers": ["page:production", "page:production.customers"],
     "materials": ["page:production", "page:production.materials"],
+    "suppliers": ["page:production", "page:production.materials"],
     "trace": ["page:production", "page:production.trace"],
     "approvals": ["page:production", "page:production.approvals"],
     "schedule": ["page:production", "page:production.schedule"],
@@ -186,7 +190,7 @@ PAGE_OPERATION_BINDINGS = {
     "page:dashboard": ["dashboard"],
     "page:production.orders": ["orders"],
     "page:production.customers": ["customers"],
-    "page:production.materials": ["materials"],
+    "page:production.materials": ["materials", "suppliers"],
     "page:production.trace": ["trace"],
     "page:production.approvals": ["approvals"],
     "page:production.schedule": ["schedule"],
@@ -232,6 +236,27 @@ ACTION_PERMISSION_CODES = [
     for action in actions
 ]
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
+
+PERMISSION_IMPLICATIONS = {
+    "quality:edit": ["quality:review"],
+    "materials:manage": [
+        "materials:view",
+        "materials:create",
+        "materials:edit",
+        "materials:delete",
+        "materials:stock",
+        "materials:consume",
+        "suppliers:view",
+        "suppliers:create",
+        "suppliers:edit",
+        "suppliers:delete",
+    ],
+    "materials:create": ["suppliers:view"],
+    "materials:edit": ["suppliers:view"],
+    "suppliers:create": ["suppliers:view"],
+    "suppliers:edit": ["suppliers:view"],
+    "suppliers:delete": ["suppliers:view"],
+}
 
 
 def _action_permission_nodes():

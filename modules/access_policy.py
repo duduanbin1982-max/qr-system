@@ -3,10 +3,7 @@ import json
 import logging
 from typing import Iterable, List, Optional, Sequence, Set
 
-
-PERMISSION_IMPLICATIONS = {
-    "quality:edit": {"quality:review"},
-}
+from modules.permission_catalog import PERMISSION_IMPLICATIONS
 
 
 def _row_value(row, key):

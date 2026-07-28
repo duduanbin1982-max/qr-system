@@ -83,9 +83,14 @@ export function useMaterial() {
   })
 
   // RBAC
-  const canEdit = computed(() => can('materials:manage'))
-  const canDelete = computed(() => can('materials:manage'))
-  const canCreate = computed(() => can('materials:manage'))
+  const canEdit = computed(() => can('materials:edit'))
+  const canDelete = computed(() => can('materials:delete'))
+  const canCreate = computed(() => can('materials:create'))
+  const canStock = computed(() => can('materials:stock'))
+  const canConsume = computed(() => can('materials:consume'))
+  const canViewSuppliers = computed(() => can('suppliers:view'))
+  const canCreateSupplier = computed(() => can('suppliers:create'))
+  const canDeleteSupplier = computed(() => can('suppliers:delete'))
 
   // Dialog low stock warning computed properties
   const stockGap = computed(() => (form.value.quantity || 0) - (form.value.safe_stock || 0))
@@ -348,7 +353,10 @@ export function useMaterial() {
     })
   }
 
-  onMounted(() => { load(); loadSuppliers() })
+  onMounted(() => {
+    load()
+    if (canViewSuppliers.value) loadSuppliers()
+  })
 
   _instance = {
     materials, logs, showLogs, suppliers, loading, showForm, showStock, showConsume, editing, selectedMaterial,
@@ -360,7 +368,9 @@ export function useMaterial() {
     abcRanks, getAbcClass,
     logTypeText, logQuantityText,
     showDetail, detailConsumptions, trendChart, openDetail, renderTrendChart,
-    canEdit, canDelete, canCreate, filteredMaterials, stockGap, stockStatus, showStockWarning,
+    canEdit, canDelete, canCreate, canStock, canConsume,
+    canViewSuppliers, canCreateSupplier, canDeleteSupplier,
+    filteredMaterials, stockGap, stockStatus, showStockWarning,
     totalInventoryValue, materialTypeFilter, materialTypeOptions,
   }
   return _instance

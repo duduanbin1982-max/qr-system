@@ -8,6 +8,7 @@ from modules.permission_catalog import (
     build_permission_payload,
     infer_page_permissions,
 )
+from modules.access_policy import has_permission_code
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -61,3 +62,25 @@ def test_frontend_permissions_module_uses_generated_fallback_catalog():
     assert "permissionFallback.generated.js" in frontend_permissions
     assert "export const SIDEBAR_ITEMS = [" not in frontend_permissions
     assert "export const ACTION_PAGE_MAP = {" not in frontend_permissions
+
+
+def test_legacy_material_manage_permission_implies_granular_operations():
+    expected = {
+        "materials:view",
+        "materials:create",
+        "materials:edit",
+        "materials:delete",
+        "materials:stock",
+        "materials:consume",
+        "suppliers:view",
+        "suppliers:create",
+        "suppliers:edit",
+        "suppliers:delete",
+    }
+
+    assert {"view", "create", "edit", "delete", "stock", "consume", "manage"}.issubset(
+        set(ACTION_PERMISSION_DEFS["materials"][1])
+    )
+    assert ACTION_PERMISSION_DEFS["suppliers"][1] == ["view", "create", "edit", "delete"]
+    assert all(has_permission_code(["materials:manage"], code) for code in expected)
+    assert PAGE_OPERATION_BINDINGS["page:production.materials"] == ["materials", "suppliers"]

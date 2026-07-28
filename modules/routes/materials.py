@@ -26,7 +26,7 @@ def list_materials():
 
 @app.route('/api/materials', methods=['POST'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:create')
 @validate_json('create_material')
 def create_material():
     data = get_json_body()
@@ -37,7 +37,7 @@ def create_material():
 
 @app.route('/api/materials/<int:mid>', methods=['PUT'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:edit')
 @validate_json('update_material')
 def update_material(mid):
     data = get_json_body()
@@ -55,7 +55,7 @@ def material_impact(mid):
 
 @app.route('/api/materials/<int:mid>', methods=['DELETE'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:delete')
 def delete_material(mid):
     MaterialService.delete_material(mid)
     safe_audit_log('delete', 'material', mid, f'deleted material {mid}')
@@ -78,7 +78,7 @@ def material_logs(mid):
 
 @app.route('/api/materials/<int:mid>/stock', methods=['POST'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:stock')
 def material_stock(mid):
     data = get_json_body()
     change_type = data.get('type', '').strip()
@@ -114,7 +114,7 @@ def list_consumptions(mid):
 
 @app.route('/api/materials/<int:mid>/consumptions', methods=['POST'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:consume')
 def create_consumption(mid):
     data = get_json_body()
     order_id = data.get('order_id') or None
@@ -133,7 +133,7 @@ def create_consumption(mid):
 
 @app.route('/api/material-consumptions/<int:cid>', methods=['DELETE'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('materials:consume')
 def delete_consumption(cid):
     data = get_json_body()
     result = MaterialService.delete_consumption(
@@ -156,7 +156,7 @@ def delete_consumption(cid):
 
 @app.route('/api/suppliers', methods=['GET'])
 @check_auth
-@check_permission('materials:view')
+@check_permission('suppliers:view')
 def list_suppliers():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
@@ -166,7 +166,7 @@ def list_suppliers():
 
 @app.route('/api/suppliers', methods=['POST'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('suppliers:create')
 @validate_json('create_supplier')
 def create_supplier():
     data = get_json_body()
@@ -177,7 +177,7 @@ def create_supplier():
 
 @app.route('/api/suppliers/<int:sid>', methods=['PUT'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('suppliers:edit')
 @validate_json('create_supplier')
 def update_supplier(sid):
     data = get_json_body()
@@ -188,7 +188,7 @@ def update_supplier(sid):
 
 @app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
 @check_auth
-@check_permission('materials:manage')
+@check_permission('suppliers:delete')
 def delete_supplier(sid):
     SupplierService.delete_supplier(sid)
     safe_audit_log('delete', 'supplier', sid, f'deleted supplier {sid}')

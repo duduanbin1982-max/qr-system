@@ -284,6 +284,10 @@ export const ACTION_PAGE_MAP = {
     "page:production",
     "page:production.materials"
   ],
+  "suppliers": [
+    "page:production",
+    "page:production.materials"
+  ],
   "trace": [
     "page:production",
     "page:production.trace"
@@ -379,5 +383,37 @@ export const ACTION_PAGE_MAP = {
     "page:settings.role-manage",
     "page:settings.positions",
     "page:settings.approval-config"
+  ]
+}
+export const IMPLIED_PERMISSIONS = {
+  "quality:edit": [
+    "quality:review"
+  ],
+  "materials:manage": [
+    "materials:view",
+    "materials:create",
+    "materials:edit",
+    "materials:delete",
+    "materials:stock",
+    "materials:consume",
+    "suppliers:view",
+    "suppliers:create",
+    "suppliers:edit",
+    "suppliers:delete"
+  ],
+  "materials:create": [
+    "suppliers:view"
+  ],
+  "materials:edit": [
+    "suppliers:view"
+  ],
+  "suppliers:create": [
+    "suppliers:view"
+  ],
+  "suppliers:edit": [
+    "suppliers:view"
+  ],
+  "suppliers:delete": [
+    "suppliers:view"
   ]
 }

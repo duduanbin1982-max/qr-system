@@ -22,7 +22,7 @@
             <option v-for="mt in materialTypeOptions" :key="mt" :value="mt">{{ mt }}</option>
           </select>
           <button class="btn btn-primary" @click="openCreate" v-if="canCreate">+ 新增物料</button>
-          <button class="btn" style="background:#0891B2;color:#fff" @click="openSupplierAdd">🏭 供应商管理</button>
+          <button v-if="canViewSuppliers" class="btn" style="background:#0891B2;color:#fff" @click="openSupplierAdd">🏭 供应商管理</button>
         </div>
       </div>
       <table class="data-table" v-if="materials.length">
@@ -49,8 +49,8 @@
             <td><span style="color:var(--teal);font-size:var(--text-xs)">{{ m.supplier_name || '-' }}</span></td>
             <td>{{ m.location || '-' }}</td>
             <td style="white-space:nowrap">
-              <button v-if="canEdit" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
-              <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:#e67e22;color:white">消耗</button>
+              <button v-if="canStock" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
+              <button v-if="canConsume" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:#e67e22;color:white">消耗</button>
               <button class="btn btn-sm" @click="viewLogs(m)" style="margin-right:4px">流水</button>
               <button class="btn btn-sm" @click="openDetail(m)" style="margin-right:4px;background:var(--teal);color:#fff">详情</button>
               <button class="btn btn-sm" @click="openEdit(m)" v-if="canEdit" style="margin-right:4px">编辑</button>
@@ -123,7 +123,7 @@
                 <option :value="null">-- 无 --</option>
                 <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
               </select>
-              <button type="button" class="btn btn-sm" style="white-space:nowrap;padding:8px 12px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm)" @click="openSupplierAdd">+ 新增</button>
+              <button v-if="canCreateSupplier" type="button" class="btn btn-sm" style="white-space:nowrap;padding:8px 12px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm)" @click="openSupplierAdd">+ 新增</button>
             </div>
           </div>
           
@@ -146,7 +146,7 @@
             <input v-model="supplierForm.contact" class="form-input" placeholder="联系人" style="flex:1">
             <input v-model="supplierForm.phone" class="form-input" placeholder="电话" style="flex:1">
           </div>
-          <button class="btn btn-primary btn-sm" @click="addSupplier" style="width:100%;margin-bottom:16px">➕ 新增供应商</button>
+          <button v-if="canCreateSupplier" class="btn btn-primary btn-sm" @click="addSupplier" style="width:100%;margin-bottom:16px">➕ 新增供应商</button>
           <div v-if="suppliers.length" style="border-top:1px solid var(--border-light);padding-top:12px">
             <div style="font-size:13px;color:var(--text-placeholder);margin-bottom:8px">已有供应商 ({{ suppliers.length }})</div>
             <div v-for="s in suppliers" :key="s.id" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-hover);border-radius:6px;margin-bottom:4px">
@@ -155,7 +155,7 @@
                 <span v-if="s.contact" style="color:var(--text-placeholder);font-size:12px;margin-left:8px">{{ s.contact }}</span>
                 <span v-if="s.phone" style="color:var(--text-placeholder);font-size:12px;margin-left:8px">{{ s.phone }}</span>
               </div>
-              <button class="btn btn-sm" style="background:var(--danger);color:#fff;padding:4px 10px;font-size:12px" @click="deleteSupplier(s)">删除</button>
+              <button v-if="canDeleteSupplier" class="btn btn-sm" style="background:var(--danger);color:#fff;padding:4px 10px;font-size:12px" @click="deleteSupplier(s)">删除</button>
             </div>
           </div>
         </div>
