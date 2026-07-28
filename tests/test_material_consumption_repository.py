@@ -34,13 +34,15 @@ def _database():
             process_id INTEGER
         );
         CREATE TABLE material_consumptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             material_id INTEGER,
             order_id INTEGER,
             process_id INTEGER,
             quantity REAL,
             operator_id INTEGER,
             operator_name TEXT,
-            notes TEXT
+            notes TEXT,
+            source_work_record_id INTEGER
         );
         CREATE TABLE material_logs (
             material_id INTEGER,
@@ -76,6 +78,7 @@ def test_deduct_for_process_prefers_order_material_snapshot():
     assert db.execute("SELECT quantity FROM materials WHERE id = 31").fetchone()[0] == 20
     consumption = db.execute("SELECT * FROM material_consumptions").fetchone()
     assert dict(consumption) == {
+        "id": 1,
         "material_id": 30,
         "order_id": 10,
         "process_id": 40,
@@ -83,6 +86,7 @@ def test_deduct_for_process_prefers_order_material_snapshot():
         "operator_id": 50,
         "operator_name": "Worker",
         "notes": "auto-deduct from order BOM",
+        "source_work_record_id": None,
     }
 
 
@@ -159,3 +163,26 @@ def test_deduct_for_process_blocks_all_materials_when_any_stock_is_short():
     ]
     assert db.execute("SELECT COUNT(*) FROM material_consumptions").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM material_logs").fetchone()[0] == 0
+
+
+def test_deduct_for_process_rejects_duplicate_work_record_source():
+    db = _database()
+    db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
+    db.execute("INSERT INTO materials VALUES (30, 10, NULL, 'Steel', 'kg')")
+    db.execute("INSERT INTO order_materials VALUES (10, 30, 2, 40)")
+
+    MaterialService.deduct_for_process(
+        10, 40, 2, 50, "Worker", db=db, work_record_id=77
+    )
+    with pytest.raises(ConflictError, match='物料已经扣减') as error:
+        MaterialService.deduct_for_process(
+            10, 40, 2, 50, "Worker", db=db, work_record_id=77
+        )
+
+    assert error.value.details == {
+        'work_record_id': 77,
+        'consumption_ids': [1],
+    }
+    assert db.execute("SELECT quantity FROM materials WHERE id = 30").fetchone()[0] == 6
+    assert db.execute("SELECT COUNT(*) FROM material_consumptions").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM material_logs").fetchone()[0] == 1

@@ -143,6 +143,16 @@ class MaterialRepository:
         ).fetchone()
 
     @staticmethod
+    def find_consumptions_by_work_record(work_record_id, db=None):
+        """Return automatic deductions already linked to a work report."""
+        db = resolve_db(db)
+        return db.execute(
+            'SELECT id, material_id FROM material_consumptions '
+            'WHERE source_work_record_id = ? ORDER BY id',
+            (work_record_id,),
+        ).fetchall()
+
+    @staticmethod
     def find_log_for_source(source_type, source_id, db=None):
         """Find the latest ledger entry for a business source."""
         db = resolve_db(db)
@@ -301,16 +311,17 @@ class MaterialRepository:
 
     @staticmethod
     def insert_consumption(material_id, order_id, process_id, quantity,
-                           user_id, operator_name, notes, db=None):
+                           user_id, operator_name, notes,
+                           source_work_record_id=None, db=None):
         """Insert a material consumption record."""
         db = resolve_db(db)
         cursor = db.execute(
             'INSERT INTO material_consumptions '
             '(material_id, order_id, process_id, quantity, '
-            'operator_id, operator_name, notes) '
-            'VALUES (?,?,?,?,?,?,?)',
+            'operator_id, operator_name, notes, source_work_record_id) '
+            'VALUES (?,?,?,?,?,?,?,?)',
             (material_id, order_id or None, process_id or None, quantity,
-             user_id, operator_name, notes)
+             user_id, operator_name, notes, source_work_record_id)
         )
         return cursor.lastrowid
 

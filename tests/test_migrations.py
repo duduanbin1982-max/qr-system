@@ -213,6 +213,40 @@ def test_material_stock_ledger_migration_creates_one_baseline_per_material():
         db.close()
 
 
+def test_material_consumption_work_source_migration_is_idempotent_and_unique():
+    from modules.migration_materials import m043_link_material_consumptions_to_work_reports
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE work_records (id INTEGER PRIMARY KEY);
+            CREATE TABLE materials (id INTEGER PRIMARY KEY);
+            CREATE TABLE material_consumptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                material_id INTEGER NOT NULL
+            );
+            """
+        )
+
+        m043_link_material_consumptions_to_work_reports(db)
+        m043_link_material_consumptions_to_work_reports(db)
+        columns = {
+            row["name"]
+            for row in db.execute("PRAGMA table_info(material_consumptions)").fetchall()
+        }
+        assert "source_work_record_id" in columns
+        db.execute("INSERT INTO work_records (id) VALUES (8)")
+        db.execute("INSERT INTO material_consumptions (material_id, source_work_record_id) VALUES (1, 8)")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO material_consumptions (material_id, source_work_record_id) VALUES (1, 8)")
+        db.execute("INSERT INTO material_consumptions (material_id, source_work_record_id) VALUES (2, 8)")
+    finally:
+        db.close()
+
+
 def test_process_quality_remediation_migration_repairs_invariants():
     from modules.migration_process_quality import m037_process_quality_review_remediation
 

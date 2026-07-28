@@ -73,6 +73,22 @@ def m042_material_stock_ledger(db):
     )
 
 
+def m043_link_material_consumptions_to_work_reports(db):
+    """Give automatic deductions a stable, unique work-report source."""
+    add_column_if_missing(
+        db,
+        "material_consumptions",
+        "source_work_record_id",
+        "INTEGER REFERENCES work_records(id) ON DELETE SET NULL",
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_material_consumption_work_source "
+        "ON material_consumptions(source_work_record_id, material_id) "
+        "WHERE source_work_record_id IS NOT NULL"
+    )
+
+
 MIGRATIONS = [
     (42, "Establish material stock ledger baseline", m042_material_stock_ledger),
+    (43, "Link material deductions to work reports", m043_link_material_consumptions_to_work_reports),
 ]

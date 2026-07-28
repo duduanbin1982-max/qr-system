@@ -303,11 +303,32 @@ class MaterialService:
         }
 
     @staticmethod
-    def deduct_for_process(order_id, process_id, quantity, user_id, user_name, db):
+    def deduct_for_process(
+        order_id,
+        process_id,
+        quantity,
+        user_id,
+        user_name,
+        db,
+        work_record_id=None,
+    ):
         """Apply approved-report material deductions through the stock ledger."""
         material_rows = MaterialConsumptionRepository.deduction_candidates(
             order_id, process_id, db=db
         )
+        if material_rows and work_record_id is not None:
+            existing = MaterialRepository.find_consumptions_by_work_record(
+                work_record_id,
+                db=db,
+            )
+            if existing:
+                raise ConflictError(
+                    '该报工记录的物料已经扣减，请勿重复处理',
+                    details={
+                        'work_record_id': work_record_id,
+                        'consumption_ids': [row['id'] for row in existing],
+                    },
+                )
         requirements = []
         shortages = []
         for material in material_rows:
@@ -357,6 +378,7 @@ class MaterialService:
                 user_id,
                 user_name,
                 'auto-deduct from order BOM',
+                source_work_record_id=work_record_id,
                 db=db,
             )
             MaterialRepository.insert_log(

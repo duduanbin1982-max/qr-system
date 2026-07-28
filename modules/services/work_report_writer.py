@@ -177,6 +177,7 @@ class WorkReportWriter:
             command.effective_quantity,
             command.serial_no,
             db,
+            work_record_id,
         )
         if command.serial_no:
             WorkReportWriter._advance_serial_item(
@@ -206,7 +207,7 @@ class WorkReportWriter:
 
     @staticmethod
     def _apply_approved_normal_effects(helper, order_id, process_id, user_id, user_name,
-                                       quantity_local, serial_no, db):
+                                       quantity_local, serial_no, db, work_record_id=None):
         op = helper.get_order_process(order_id, process_id, db=db)
         if op:
             new_completed = (op["completed"] or 0) + quantity_local
@@ -219,6 +220,7 @@ class WorkReportWriter:
             user_id,
             user_name,
             db=db,
+            work_record_id=work_record_id,
         )
 
         if not serial_no and op:

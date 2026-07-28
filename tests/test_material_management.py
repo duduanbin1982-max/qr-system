@@ -213,6 +213,60 @@ def test_mobile_report_stock_shortage_returns_chinese_conflict_and_rolls_back(
     assert consumption_count == 0
 
 
+def test_mobile_report_links_material_consumption_to_work_record(
+    client,
+    worker_auth_headers,
+):
+    suffix = uuid.uuid4().hex[:8]
+    with client.application.app_context():
+        db = get_db()
+        process_id = ensure_process(db, name=f"Material Source Process {suffix}")
+        order_id = create_order(
+            db,
+            [process_id],
+            quantity=5,
+            product_code=f"MATERIAL-SOURCE-{suffix}",
+        )
+        db.execute("UPDATE orders SET status = 'producing' WHERE id = ?", (order_id,))
+        material_id = create_material(db, quantity=10, name=f"Source Material {suffix}")
+        add_order_material(db, order_id, material_id, process_id, quantity_per_unit=1.5)
+        db.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('auto_deduct_material', '1')"
+        )
+        db.commit()
+
+    response = client.post(
+        "/api/mobile/report",
+        json={
+            "order_id": order_id,
+            "process_id": process_id,
+            "quantity": 2,
+            "report_type": "normal",
+        },
+        headers=worker_auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    with client.application.app_context():
+        db = get_db()
+        work_record = db.execute(
+            "SELECT id FROM work_records WHERE order_id = ? AND process_id = ?",
+            (order_id, process_id),
+        ).fetchone()
+        consumption = db.execute(
+            "SELECT quantity, source_work_record_id FROM material_consumptions "
+            "WHERE order_id = ? AND material_id = ?",
+            (order_id, material_id),
+        ).fetchone()
+        balance = db.execute(
+            "SELECT quantity FROM materials WHERE id = ?",
+            (material_id,),
+        ).fetchone()["quantity"]
+    assert consumption["quantity"] == 3
+    assert consumption["source_work_record_id"] == work_record["id"]
+    assert balance == 7
+
+
 def test_material_impact_counts_every_traceability_reference(client, auth_headers):
     suffix = uuid.uuid4().hex[:8]
     with client.application.app_context():
