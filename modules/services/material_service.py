@@ -130,19 +130,28 @@ class MaterialService:
         mat = MaterialRepository.find_by_id(mid)
         if not mat:
             raise MaterialNotFoundError('物料不存在')
-        refs = MaterialRepository.count_refs(mid)
-        return {"material_id": mid, "name": mat["name"], "refs": refs}
+        references = MaterialRepository.reference_counts(mid)
+        return {
+            "material_id": mid,
+            "name": mat["name"],
+            "refs": sum(references.values()),
+            "references": references,
+        }
 
     @staticmethod
     def delete_material(mid):
         """Delete a material only when no business records reference it."""
-        mat = MaterialRepository.find_by_id(mid)
-        if not mat:
-            raise MaterialNotFoundError('物料不存在')
-        refs = MaterialRepository.count_refs(mid)
-        if refs > 0:
-            raise ConflictError(f'物料「{mat["name"]}」已有 {refs} 条关联记录，无法删除')
         with BaseService.transaction() as txn:
+            mat = MaterialRepository.find_by_id(mid, db=txn)
+            if not mat:
+                raise MaterialNotFoundError('物料不存在')
+            references = MaterialRepository.reference_counts(mid, db=txn)
+            refs = sum(references.values())
+            if refs > 0:
+                raise ConflictError(
+                    f'物料「{mat["name"]}」已有 {refs} 条关联记录，无法删除',
+                    details={'references': references},
+                )
             MaterialRepository.delete_logs_by_material(mid, db=txn)
             MaterialRepository.delete(mid, db=txn)
 
@@ -415,11 +424,15 @@ class SupplierService:
     @staticmethod
     def delete_supplier(sid):
         """Delete a supplier only when no materials reference it."""
-        sup = SupplierRepository.find_by_id(sid)
-        if not sup:
-            raise NotFoundError('供应商不存在')
-        refs = SupplierRepository.count_refs(sid)
-        if refs > 0:
-            raise ConflictError(f'供应商「{sup["name"]}」被 {refs} 条物料记录引用，无法删除')
         with BaseService.transaction() as txn:
+            sup = SupplierRepository.find_by_id(sid, db=txn)
+            if not sup:
+                raise NotFoundError('供应商不存在')
+            references = SupplierRepository.reference_counts(sid, db=txn)
+            refs = sum(references.values())
+            if refs > 0:
+                raise ConflictError(
+                    f'供应商「{sup["name"]}」已有 {refs} 条关联记录，无法删除',
+                    details={'references': references},
+                )
             SupplierRepository.delete(sid, db=txn)

@@ -155,11 +155,23 @@ class MaterialRepository:
     @staticmethod
     def count_refs(mid, db=None):
         """Count business records that prevent material deletion."""
+        return sum(MaterialRepository.reference_counts(mid, db=db).values())
+
+    @staticmethod
+    def reference_counts(mid, db=None):
+        """Return material references grouped by business source."""
         db = resolve_db(db)
         row = db.execute(
-            'SELECT COUNT(*) as cnt FROM material_consumptions WHERE material_id = ?', (mid,)
+            'SELECT '
+            '(SELECT COUNT(*) FROM material_consumptions WHERE material_id = ?) AS consumptions, '
+            '(SELECT COUNT(*) FROM product_bom WHERE material_id = ?) AS product_bom, '
+            '(SELECT COUNT(*) FROM order_materials WHERE material_id = ?) AS order_materials, '
+            '(SELECT COUNT(*) FROM quality_inspection_tasks WHERE material_id = ?) AS inspection_tasks, '
+            '(SELECT COUNT(*) FROM quality_nonconformances WHERE material_id = ?) AS nonconformances, '
+            '(SELECT COUNT(*) FROM quality_supplier_inspections WHERE material_id = ?) AS supplier_inspections',
+            (mid, mid, mid, mid, mid, mid),
         ).fetchone()
-        return row['cnt'] if row else 0
+        return dict(row) if row else {}
 
     # ============================================================
     # Mutations
@@ -362,11 +374,21 @@ class SupplierRepository:
     @staticmethod
     def count_refs(sid, db=None):
         """Count materials that reference a supplier."""
+        return sum(SupplierRepository.reference_counts(sid, db=db).values())
+
+    @staticmethod
+    def reference_counts(sid, db=None):
+        """Return supplier references grouped by business source."""
         db = resolve_db(db)
         row = db.execute(
-            'SELECT COUNT(*) as cnt FROM materials WHERE supplier_id = ?', (sid,)
+            'SELECT '
+            '(SELECT COUNT(*) FROM materials WHERE supplier_id = ?) AS materials, '
+            '(SELECT COUNT(*) FROM quality_inspection_tasks WHERE supplier_id = ?) AS inspection_tasks, '
+            '(SELECT COUNT(*) FROM quality_nonconformances WHERE supplier_id = ?) AS nonconformances, '
+            '(SELECT COUNT(*) FROM quality_supplier_inspections WHERE supplier_id = ?) AS supplier_inspections',
+            (sid, sid, sid, sid),
         ).fetchone()
-        return row['cnt'] if row else 0
+        return dict(row) if row else {}
 
     @staticmethod
     def insert(data_tuple, db=None):
