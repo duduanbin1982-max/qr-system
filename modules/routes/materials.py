@@ -30,7 +30,7 @@ def list_materials():
 @validate_json('create_material')
 def create_material():
     data = get_json_body()
-    mid = MaterialService.create_material(data)
+    mid = MaterialService.create_material(data, g.current_user)
     safe_audit_log('create', 'material', mid, f"material: {data.get('name', '').strip()}")
     return jsonify({'message': 'created', 'id': mid})
 
@@ -84,8 +84,16 @@ def material_stock(mid):
     change_type = data.get('type', '').strip()
     quantity = float(data.get('quantity', 0))
     remark = data.get('remark', '').strip()
-    operator_name = data.get('operator_name', '').strip()
-    new_qty = MaterialService.stock_change(mid, change_type, quantity, remark, operator_name)
+    operator_name = g.current_user.get('name') or g.current_user.get('username', '')
+    operator_id = g.current_user.get('id')
+    new_qty = MaterialService.stock_change(
+        mid,
+        change_type,
+        quantity,
+        remark,
+        operator_name,
+        operator_id,
+    )
     safe_audit_log('stock', 'material', mid, f'{change_type}: {quantity}, new: {new_qty}')
     return jsonify({'ok': True, 'new_quantity': new_qty})
 
@@ -127,9 +135,19 @@ def create_consumption(mid):
 @check_auth
 @check_permission('materials:manage')
 def delete_consumption(cid):
-    MaterialService.delete_consumption(cid)
-    safe_audit_log('unconsume', 'material', cid, f'undone consumption {cid}')
-    return jsonify({'ok': True, 'message': '消耗记录已撤销'})
+    data = get_json_body()
+    result = MaterialService.delete_consumption(
+        cid,
+        data.get('reason', ''),
+        g.current_user,
+    )
+    safe_audit_log(
+        'unconsume',
+        'material',
+        result['material_id'],
+        f'consumption={cid} reason={data.get("reason", "").strip()[:120]}',
+    )
+    return jsonify({'ok': True, 'message': '消耗记录已撤销', **result})
 
 
 # ============================================================

@@ -143,6 +143,16 @@ class MaterialRepository:
         ).fetchone()
 
     @staticmethod
+    def find_log_for_source(source_type, source_id, db=None):
+        """Find the latest ledger entry for a business source."""
+        db = resolve_db(db)
+        return db.execute(
+            'SELECT * FROM material_logs WHERE source_type = ? AND source_id = ? '
+            'ORDER BY id DESC LIMIT 1',
+            (source_type, source_id),
+        ).fetchone()
+
+    @staticmethod
     def count_refs(mid, db=None):
         """Count business records that prevent material deletion."""
         db = resolve_db(db)
@@ -172,8 +182,8 @@ class MaterialRepository:
     def update(mid, set_clauses, params, db=None):
         """Update a material using validated SET clauses and parameters."""
         db = resolve_db(db)
-        params.append(mid)
-        db.execute(f'UPDATE materials SET {", ".join(set_clauses)} WHERE id = ?', params)
+        update_params = list(params) + [mid]
+        db.execute(f'UPDATE materials SET {", ".join(set_clauses)} WHERE id = ?', update_params)
 
     @staticmethod
     def delete(mid, db=None):
@@ -208,22 +218,81 @@ class MaterialRepository:
         )
 
     @staticmethod
-    def insert_log(material_id, log_type, quantity, remark, operator_name, db=None):
+    def apply_quantity_delta(mid, delta, db=None):
+        """Apply a stock delta and return the balance transition."""
+        db = resolve_db(db)
+        row = db.execute(
+            'SELECT id, COALESCE(quantity, 0) AS quantity FROM materials WHERE id = ?',
+            (mid,),
+        ).fetchone()
+        if not row:
+            return None
+        balance_before = float(row['quantity'] or 0)
+        balance_after = balance_before + float(delta)
+        if balance_after < 0:
+            return {
+                'material_id': mid,
+                'balance_before': balance_before,
+                'balance_after': balance_before,
+                'insufficient': True,
+            }
+        db.execute(
+            "UPDATE materials SET quantity = ?, "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (balance_after, mid),
+        )
+        return {
+            'material_id': mid,
+            'balance_before': balance_before,
+            'balance_after': balance_after,
+            'insufficient': False,
+        }
+
+    @staticmethod
+    def insert_log(
+        material_id,
+        log_type,
+        quantity,
+        remark,
+        operator_name,
+        *,
+        operator_id=None,
+        balance_before=None,
+        balance_after=None,
+        source_type='manual_stock',
+        source_id=None,
+        reversal_of_log_id=None,
+        db=None,
+    ):
         """Insert a material inventory movement."""
         db = resolve_db(db)
-        db.execute(
+        cursor = db.execute(
             'INSERT INTO material_logs '
-            '(material_id, type, quantity, remark, operator_name) '
-            'VALUES (?, ?, ?, ?, ?)',
-            (material_id, log_type, quantity, remark, operator_name)
+            '(material_id, type, quantity, remark, operator_id, operator_name, '
+            'balance_before, balance_after, source_type, source_id, reversal_of_log_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                material_id,
+                log_type,
+                quantity,
+                remark,
+                operator_id,
+                operator_name,
+                balance_before,
+                balance_after,
+                source_type,
+                source_id,
+                reversal_of_log_id,
+            ),
         )
+        return cursor.lastrowid
 
     @staticmethod
     def insert_consumption(material_id, order_id, process_id, quantity,
                            user_id, operator_name, notes, db=None):
         """Insert a material consumption record."""
         db = resolve_db(db)
-        db.execute(
+        cursor = db.execute(
             'INSERT INTO material_consumptions '
             '(material_id, order_id, process_id, quantity, '
             'operator_id, operator_name, notes) '
@@ -231,12 +300,32 @@ class MaterialRepository:
             (material_id, order_id or None, process_id or None, quantity,
              user_id, operator_name, notes)
         )
+        return cursor.lastrowid
 
     @staticmethod
     def delete_consumption_by_id(cid, db=None):
         """Delete a material consumption record."""
         db = resolve_db(db)
         db.execute('DELETE FROM material_consumptions WHERE id = ?', (cid,))
+
+    @staticmethod
+    def mark_consumption_reversed(
+        cid,
+        reversed_by,
+        reversal_reason,
+        reversal_log_id,
+        db=None,
+    ):
+        """Mark a consumption as reversed while preserving its audit history."""
+        db = resolve_db(db)
+        cursor = db.execute(
+            "UPDATE material_consumptions SET status = 'reversed', "
+            "reversed_at = datetime('now','localtime'), reversed_by = ?, "
+            "reversal_reason = ?, reversal_log_id = ? "
+            "WHERE id = ? AND COALESCE(status, 'active') = 'active'",
+            (reversed_by, reversal_reason, reversal_log_id, cid),
+        )
+        return cursor.rowcount
 
 
 class SupplierRepository:

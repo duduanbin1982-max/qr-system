@@ -2,6 +2,7 @@
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.material_repository import MaterialRepository, SupplierRepository
+from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
 
 
 class MaterialNotFoundError(NotFoundError):
@@ -11,6 +12,14 @@ class MaterialNotFoundError(NotFoundError):
 
 class MaterialService:
     """Material management business operations."""
+
+    @staticmethod
+    def _actor(user):
+        user = user or {}
+        return (
+            user.get('id'),
+            user.get('name') or user.get('username') or '系统',
+        )
 
     @staticmethod
     def list_materials(page=1, limit=100):
@@ -24,7 +33,7 @@ class MaterialService:
         }
 
     @staticmethod
-    def create_material(data):
+    def create_material(data, user=None):
         """Create material. Raises ValueError on empty name or duplicate name+spec+material_type."""
         name = data.get('name', '').strip()
         if not name:
@@ -40,11 +49,12 @@ class MaterialService:
                     info += ', ' + '材质' + ':' + mt
                 info += ')'
             raise ConflictError('物料' + info + '已存在')
+        opening_quantity = float(data.get('quantity', 0))
         data_tuple = (
             name,
             spec,
             data.get('unit', '件').strip(),
-            float(data.get('quantity', 0)),
+            opening_quantity,
             float(data.get('unit_price', 0)),
             float(data.get('safe_stock', 0)),
             data.get('location', '').strip(),
@@ -53,7 +63,23 @@ class MaterialService:
             mt
         )
         with BaseService.transaction() as txn:
-            return MaterialRepository.insert(data_tuple, db=txn)
+            material_id = MaterialRepository.insert(data_tuple, db=txn)
+            if opening_quantity > 0:
+                operator_id, operator_name = MaterialService._actor(user)
+                MaterialRepository.insert_log(
+                    material_id,
+                    'in',
+                    opening_quantity,
+                    '期初库存',
+                    operator_name,
+                    operator_id=operator_id,
+                    balance_before=0,
+                    balance_after=opening_quantity,
+                    source_type='opening_balance',
+                    source_id=material_id,
+                    db=txn,
+                )
+            return material_id
 
     @staticmethod
     def update_material(mid, data):
@@ -61,6 +87,8 @@ class MaterialService:
         row = MaterialRepository.find_by_id(mid)
         if not row:
             raise MaterialNotFoundError('物料不存在')
+        if 'quantity' in data:
+            raise ValidationError('库存数量请通过出入库功能调整')
 
         # Validate the effective unique material identity before updating.
         if 'name' in data:
@@ -83,7 +111,7 @@ class MaterialService:
             if k in data:
                 set_clauses.append(f'{k} = ?')
                 params.append(str(data[k]).strip())
-        for k in ['quantity', 'unit_price', 'safe_stock', 'supplier_id']:
+        for k in ['unit_price', 'safe_stock', 'supplier_id']:
             if k in data:
                 if data[k] is None and k == 'supplier_id':
                     set_clauses.append(f'{k} = NULL')
@@ -124,34 +152,51 @@ class MaterialService:
         total = MaterialRepository.count_logs_by_material(mid)
         offset = (page - 1) * limit
         rows = MaterialRepository.find_logs_by_material_paginated(mid, limit, offset)
+        logs = []
+        for row in rows:
+            item = dict(row)
+            item['operator_name'] = item.get('operator_name_from_fk') or item.get('operator_name') or ''
+            logs.append(item)
         return {
-            'logs': [dict(r) for r in rows],
+            'logs': logs,
             'total': total, 'page': page, 'limit': limit
         }
 
     @staticmethod
-    def stock_change(mid, change_type, quantity, remark='', operator_name=''):
+    def stock_change(
+        mid,
+        change_type,
+        quantity,
+        remark='',
+        operator_name='',
+        operator_id=None,
+    ):
         """Apply a validated inbound or outbound stock movement."""
         if change_type not in ('in', 'out'):
             raise ValidationError('库存变动类型必须是 in 或 out')
         if quantity <= 0:
             raise ValidationError('数量必须大于 0')
 
-        row = MaterialRepository.find_quantity_by_id(mid)
-        if not row:
-            raise MaterialNotFoundError('物料不存在')
-
-        new_qty = (row['quantity'] + quantity if change_type == 'in'
-                   else row['quantity'] - quantity)
-        if new_qty < 0 and change_type == 'out':
-            raise ConflictError(f'库存不足，当前库存为 {row["quantity"]}')
-
         with BaseService.transaction() as txn:
-            MaterialRepository.update_quantity(mid, new_qty, db=txn)
+            delta = quantity if change_type == 'in' else -quantity
+            transition = MaterialRepository.apply_quantity_delta(mid, delta, db=txn)
+            if transition is None:
+                raise MaterialNotFoundError('物料不存在')
+            if transition['insufficient']:
+                raise ConflictError(f'库存不足，当前库存为 {transition["balance_before"]}')
             MaterialRepository.insert_log(
-                mid, change_type, quantity, remark, operator_name, db=txn
+                mid,
+                change_type,
+                quantity,
+                remark,
+                operator_name,
+                operator_id=operator_id,
+                balance_before=transition['balance_before'],
+                balance_after=transition['balance_after'],
+                source_type='manual_stock',
+                db=txn,
             )
-        return new_qty
+        return transition['balance_after']
 
     @staticmethod
     def list_consumptions(mid, page=1, limit=100):
@@ -159,8 +204,13 @@ class MaterialService:
         total = MaterialRepository.count_consumptions_by_material(mid)
         offset = (page - 1) * limit
         rows = MaterialRepository.find_consumptions_by_material_paginated(mid, limit, offset)
+        consumptions = []
+        for row in rows:
+            item = dict(row)
+            item['operator_name'] = item.get('operator_name_from_fk') or item.get('operator_name') or ''
+            consumptions.append(item)
         return {
-            'consumptions': [dict(r) for r in rows],
+            'consumptions': consumptions,
             'total': total, 'page': page, 'limit': limit
         }
 
@@ -171,38 +221,122 @@ class MaterialService:
         if quantity <= 0:
             raise ValidationError('数量必须大于 0')
 
-        mat = MaterialRepository.find_quantity_by_id(mid)
-        if not mat:
-            raise MaterialNotFoundError('物料不存在')
-        if mat['quantity'] < quantity:
-            raise ConflictError(f'库存不足，当前库存为 {mat["quantity"]}')
-
         with BaseService.transaction() as txn:
-            MaterialRepository.insert_consumption(
+            transition = MaterialRepository.apply_quantity_delta(mid, -quantity, db=txn)
+            if transition is None:
+                raise MaterialNotFoundError('物料不存在')
+            if transition['insufficient']:
+                raise ConflictError(f'库存不足，当前库存为 {transition["balance_before"]}')
+            consumption_id = MaterialRepository.insert_consumption(
                 mid, order_id, process_id, quantity,
                 user_id, operator_name, notes, db=txn
             )
-            new_qty = mat['quantity'] - quantity
-            MaterialRepository.update_quantity(mid, new_qty, db=txn)
             MaterialRepository.insert_log(
-                mid, 'out', quantity,
+                mid,
+                'out',
+                quantity,
                 f'消耗: {notes}' if notes else '消耗',
-                operator_name, db=txn
+                operator_name,
+                operator_id=user_id,
+                balance_before=transition['balance_before'],
+                balance_after=transition['balance_after'],
+                source_type='consumption',
+                source_id=consumption_id,
+                db=txn,
             )
-        return new_qty
+        return transition['balance_after']
 
     @staticmethod
-    def delete_consumption(cid):
-        """Undo a material consumption and restore stock atomically."""
-        mc = MaterialRepository.find_consumption_by_id(cid)
-        if not mc:
-            raise NotFoundError('物料消耗记录不存在')
-
+    def delete_consumption(cid, reason, user=None):
+        """Reverse a material consumption and preserve the original record."""
+        reason = (reason or '').strip()
+        if not reason:
+            raise ValidationError('请填写撤销原因')
+        operator_id, operator_name = MaterialService._actor(user)
         with BaseService.transaction() as txn:
-            MaterialRepository.increment_quantity(
+            mc = MaterialRepository.find_consumption_by_id(cid, db=txn)
+            if not mc:
+                raise NotFoundError('物料消耗记录不存在')
+            if (mc['status'] or 'active') != 'active':
+                raise ConflictError('该消耗记录已经撤销')
+            transition = MaterialRepository.apply_quantity_delta(
                 mc['material_id'], mc['quantity'], db=txn
             )
-            MaterialRepository.delete_consumption_by_id(cid, db=txn)
+            original_log = MaterialRepository.find_log_for_source(
+                'consumption', cid, db=txn
+            )
+            reversal_log_id = MaterialRepository.insert_log(
+                mc['material_id'],
+                'reversal',
+                mc['quantity'],
+                f'撤销消耗: {reason}',
+                operator_name,
+                operator_id=operator_id,
+                balance_before=transition['balance_before'],
+                balance_after=transition['balance_after'],
+                source_type='consumption_reversal',
+                source_id=cid,
+                reversal_of_log_id=original_log['id'] if original_log else None,
+                db=txn,
+            )
+            if not MaterialRepository.mark_consumption_reversed(
+                cid,
+                operator_id,
+                reason,
+                reversal_log_id,
+                db=txn,
+            ):
+                raise ConflictError('该消耗记录已经撤销')
+        return {
+            'material_id': mc['material_id'],
+            'new_quantity': transition['balance_after'],
+            'reversal_log_id': reversal_log_id,
+        }
+
+    @staticmethod
+    def deduct_for_process(order_id, process_id, quantity, user_id, user_name, db):
+        """Apply approved-report material deductions through the stock ledger."""
+        material_rows = MaterialConsumptionRepository.deduction_candidates(
+            order_id, process_id, db=db
+        )
+        shortages = []
+        for material in material_rows:
+            deduct_quantity = quantity * material['quantity_per_unit']
+            stock_quantity = material['stock_qty'] or 0
+            if stock_quantity < deduct_quantity:
+                shortages.append({
+                    'material_id': material['material_id'],
+                    'required_quantity': deduct_quantity,
+                    'available_quantity': stock_quantity,
+                })
+                continue
+            transition = MaterialRepository.apply_quantity_delta(
+                material['material_id'], -deduct_quantity, db=db
+            )
+            consumption_id = MaterialRepository.insert_consumption(
+                material['material_id'],
+                order_id,
+                process_id,
+                deduct_quantity,
+                user_id,
+                user_name,
+                'auto-deduct from order BOM',
+                db=db,
+            )
+            MaterialRepository.insert_log(
+                material['material_id'],
+                'out',
+                deduct_quantity,
+                'auto-deduct',
+                user_name,
+                operator_id=user_id,
+                balance_before=transition['balance_before'],
+                balance_after=transition['balance_after'],
+                source_type='auto_consumption',
+                source_id=consumption_id,
+                db=db,
+            )
+        return shortages
 
 
 class SupplierService:

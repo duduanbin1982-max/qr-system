@@ -51,6 +51,7 @@
             <td style="white-space:nowrap">
               <button v-if="canEdit" class="btn btn-sm" @click="openStock(m)" style="margin-right:4px">出入库</button>
               <button v-if="canEdit" class="btn btn-sm" @click="openConsume(m)" style="margin-right:4px;background:#e67e22;color:white">消耗</button>
+              <button class="btn btn-sm" @click="viewLogs(m)" style="margin-right:4px">流水</button>
               <button class="btn btn-sm" @click="openDetail(m)" style="margin-right:4px;background:var(--teal);color:#fff">详情</button>
               <button class="btn btn-sm" @click="openEdit(m)" v-if="canEdit" style="margin-right:4px">编辑</button>
               <button class="btn btn-sm" style="background:#fff;color:#e74c3c;border:1px solid #e74c3c" @click="remove(m)" v-if="canDelete">删除</button>
@@ -92,9 +93,9 @@
               <input v-model="form.unit" class="form-input" placeholder="件/kg/m">
             </div>
             <div class="form-group" style="flex:1">
-              <label>初始库存</label>
+              <label>{{ editing ? '当前库存' : '初始库存' }}</label>
               <div style="display:flex;align-items:center;gap:6px">
-                <input v-model.number="form.quantity" type="number" class="form-input" step="0.01" style="flex:1">
+                <input v-model.number="form.quantity" type="number" class="form-input" step="0.01" style="flex:1" :disabled="!!editing">
                 <span style="font-size:var(--text-xs);color:var(--text-placeholder);white-space:nowrap">{{ form.unit }}</span>
               </div>
             </div>
@@ -177,7 +178,6 @@
             </select>
           </div>
           <div class="form-group"><label>数量</label><input v-model.number="stockForm.quantity" type="number" class="form-input" step="0.01" min="0.01"></div>
-          <div class="form-group"><label>操作人</label><input v-model="stockForm.operator_name" class="form-input" placeholder="姓名"></div>
           <div class="form-group"><label>备注</label><input v-model="stockForm.remark" class="form-input" placeholder="原因/用途"></div>
         </div>
         <div class="modal-footer">
@@ -188,7 +188,7 @@
     </div>
 
     <!-- Logs Modal -->
-    <div class="modal-overlay" v-if="logs.length" >
+    <div class="modal-overlay" v-if="showLogs" >
       <div class="modal" style="max-width:600px">
         <div class="modal-header">出入库记录 — {{ selectedMaterial?.name }}</div>
         <div class="modal-body">
@@ -196,8 +196,8 @@
             <thead><tr><th>类型</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
             <tbody>
               <tr v-for="l in logs" :key="l.id">
-                <td><span :style="{color: l.type==='in'?'var(--success)':'var(--danger)',fontWeight:'600'}">{{ l.type==='in' ? '入库' : '出库' }}</span></td>
-                <td>{{ l.type==='in' ? '+' : '-' }}{{ l.quantity }}</td>
+                <td><span :style="{color: ['in','reversal'].includes(l.type)?'var(--success)':l.type==='out'?'var(--danger)':'var(--text-secondary)',fontWeight:'600'}">{{ logTypeText(l.type) }}</span></td>
+                <td>{{ logQuantityText(l) }}<div v-if="l.balance_after != null" style="font-size:11px;color:var(--text-placeholder)">余额 {{ l.balance_after }}</div></td>
                 <td>{{ l.operator_name || '-' }}</td>
                 <td>{{ l.remark || '-' }}</td>
                 <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ l.created_at }}</td>
@@ -206,7 +206,7 @@
           </table>
         </div>
         <div class="modal-footer">
-          <button class="btn" @click="logs=[]">关闭</button>
+          <button class="btn" @click="showLogs=false">关闭</button>
         </div>
       </div>
     </div>
@@ -235,12 +235,10 @@
             </div>
           </div>
           <div class="form-group"><label>备注</label><input v-model="consumeForm.notes" class="form-input" placeholder="用途说明"></div>
-          <div class="form-group"><label>操作人</label><input v-model="consumeForm.operator_name" class="form-input" placeholder="姓名（留空用当前用户）"></div>
-
           <div v-if="consumptions.length" style="margin-top:16px;border-top:1px solid var(--bg-hover);padding-top:12px">
             <label style="font-size:var(--text-sm);font-weight:600;margin-bottom:var(--space-2);display:block">消耗记录</label>
             <table class="data-table" style="font-size:var(--text-xs)">
-              <thead><tr><th>订单</th><th>产品</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th><th></th></tr></thead>
+              <thead><tr><th>订单</th><th>产品</th><th>数量</th><th>操作人</th><th>备注</th><th>状态</th><th>时间</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="c in consumptions" :key="c.id">
                   <td><span style="font-weight:600;color:var(--primary)">{{ c.order_no || '-' }}</span></td>
@@ -248,8 +246,9 @@
                   <td style="font-weight:600;color:var(--danger)">-{{ c.quantity }}</td>
                   <td>{{ c.operator_name || '-' }}</td>
                   <td style="color:var(--text-placeholder);font-size:var(--text-xs-alt)">{{ c.notes || '-' }}</td>
+                  <td><span class="badge" :class="c.status === 'reversed' ? 'badge-info' : 'badge-success'">{{ c.status === 'reversed' ? '已撤销' : '有效' }}</span><div v-if="c.reversal_reason" style="font-size:11px;color:var(--text-placeholder)">{{ c.reversal_reason }}</div></td>
                   <td style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ fmtDate(c.created_at) }}</td>
-                  <td><button class="btn btn-sm" style="color:var(--danger);font-size:var(--text-xs-alt);padding:var(--space-1) 8px" @click="undoConsume(c)">撤销</button></td>
+                  <td><button v-if="c.status !== 'reversed'" class="btn btn-sm" style="color:var(--danger);font-size:var(--text-xs-alt);padding:var(--space-1) 8px" @click="undoConsume(c)">撤销</button></td>
                 </tr>
               </tbody>
             </table>

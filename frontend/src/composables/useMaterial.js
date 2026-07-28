@@ -10,6 +10,7 @@ export function useMaterial() {
 
   const materials = ref([])
   const logs = ref([])
+  const showLogs = ref(false)
   const suppliers = ref([])
   const loading = ref(true)
   const showForm = ref(false)
@@ -113,7 +114,18 @@ export function useMaterial() {
 
   function openEdit(m) {
     editing.value = m.id
-    const f = { ...m }
+    const f = {
+      name: m.name || '',
+      spec: m.spec || '',
+      unit: m.unit || '件',
+      quantity: Number(m.quantity || 0),
+      unit_price: Number(m.unit_price || 0),
+      safe_stock: Number(m.safe_stock || 0),
+      location: m.location || '',
+      supplier_id: m.supplier_id,
+      material_type: m.material_type || '',
+      remark: m.remark || '',
+    }
     if (f.supplier_id === '' || f.supplier_id === 0) f.supplier_id = null
     form.value = f
     showForm.value = true
@@ -128,6 +140,7 @@ export function useMaterial() {
       }
       if (payload.supplier_id === '' || payload.supplier_id === 0) payload.supplier_id = null
       if (editing.value) {
+        delete payload.quantity
         await api.domains.materials.updateMaterial(editing.value, payload)
       } else {
         await api.domains.materials.createMaterial(payload)
@@ -170,10 +183,14 @@ export function useMaterial() {
 
   async function viewLogs(m) {
     selectedMaterial.value = m
+    showLogs.value = true
     try {
       const d = await api.domains.materials.getMaterialLogs(m.id)
       logs.value = d.logs || []
-    } catch (e) { logs.value = [] }
+    } catch (e) {
+      logs.value = []
+      showToast(e.message || '库存流水加载失败', 'error')
+    }
   }
 
   async function openConsume(m) {
@@ -214,9 +231,11 @@ export function useMaterial() {
   }
 
   async function undoConsume(c) {
-    if (!confirm('撤销消耗将恢复库存，确定？')) return
+    const reason = prompt('请输入撤销原因')
+    if (reason === null) return
+    if (!reason.trim()) { showToast('请填写撤销原因', 'error'); return }
     try {
-      await api.domains.materials.deleteMaterialConsumption(c.id)
+      await api.domains.materials.deleteMaterialConsumption(c.id, { reason: reason.trim() })
       showToast('已撤销')
       openConsume(selectedMaterial.value)
       await load()
@@ -264,6 +283,20 @@ export function useMaterial() {
 
   function getAbcClass(m) {
     return abcRanks.value[m.id] || "C"
+  }
+
+  function logTypeText(type) {
+    return {
+      in: '入库',
+      out: '出库',
+      baseline: '历史基线',
+      reversal: '撤销回补',
+    }[type] || type
+  }
+
+  function logQuantityText(log) {
+    if (log.type === 'baseline') return '=' + log.quantity
+    return (['in', 'reversal'].includes(log.type) ? '+' : '-') + log.quantity
   }
 
   async function openDetail(m) {
@@ -318,13 +351,14 @@ export function useMaterial() {
   onMounted(() => { load(); loadSuppliers() })
 
   _instance = {
-    materials, logs, suppliers, loading, showForm, showStock, showConsume, editing, selectedMaterial,
+    materials, logs, showLogs, suppliers, loading, showForm, showStock, showConsume, editing, selectedMaterial,
     form, stockForm, lowStock, searchText,
     consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
     openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
     openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
     showSupplierForm, supplierForm, openSupplierAdd, addSupplier, deleteSupplier,
     abcRanks, getAbcClass,
+    logTypeText, logQuantityText,
     showDetail, detailConsumptions, trendChart, openDetail, renderTrendChart,
     canEdit, canDelete, canCreate, filteredMaterials, stockGap, stockStatus, showStockWarning,
     totalInventoryValue, materialTypeFilter, materialTypeOptions,

@@ -64,6 +64,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
         "modules.migration_order_completion",
         "modules.migration_process_quality",
         "modules.migration_quality_management",
+        "modules.migration_materials",
     }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -157,6 +158,57 @@ def test_database_at_version_29_runs_all_pending_migrations():
         }
         assert "idx_wt_records_route_process" in index_names
         assert "idx_wt_records_standard_missing" in index_names
+    finally:
+        db.close()
+
+
+def test_material_stock_ledger_migration_creates_one_baseline_per_material():
+    from modules.migration_materials import m042_material_stock_ledger
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE materials (
+                id INTEGER PRIMARY KEY,
+                quantity REAL DEFAULT 0
+            );
+            CREATE TABLE material_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                material_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                remark TEXT DEFAULT '',
+                operator_id INTEGER,
+                operator_name TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE material_consumptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                material_id INTEGER NOT NULL,
+                quantity REAL NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO materials (id, quantity) VALUES (1, 12.5), (2, 0);
+            """
+        )
+
+        m042_material_stock_ledger(db)
+        m042_material_stock_ledger(db)
+
+        rows = db.execute(
+            "SELECT material_id, type, quantity, balance_before, balance_after "
+            "FROM material_logs ORDER BY material_id"
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [
+            (1, "baseline", 12.5, 12.5, 12.5),
+            (2, "baseline", 0.0, 0.0, 0.0),
+        ]
+        consumption_columns = {
+            row[1] for row in db.execute("PRAGMA table_info(material_consumptions)")
+        }
+        assert {"status", "reversed_at", "reversed_by", "reversal_reason", "reversal_log_id"} <= consumption_columns
     finally:
         db.close()
 

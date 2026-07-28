@@ -41,6 +41,11 @@ class SlidingWindow:
             remaining = self.max_requests - count - 1
             return True, remaining
 
+    def clear(self):
+        """Clear in-memory counters, primarily for isolated test cases."""
+        with self._lock:
+            self._buckets.clear()
+
 
 # ============================================================
 # 预设限流策略
@@ -48,6 +53,13 @@ class SlidingWindow:
 _global_limiter = SlidingWindow(max_requests=300, window_seconds=60)   # 全局 300 req/min
 _write_limiter  = SlidingWindow(max_requests=60,  window_seconds=60)   # 写操作 60 req/min
 _scan_limiter   = SlidingWindow(max_requests=120, window_seconds=60)   # 扫码 120 req/min
+
+
+def reset_rate_limiters():
+    """Reset shared limiter state between isolated test cases."""
+    _global_limiter.clear()
+    _write_limiter.clear()
+    _scan_limiter.clear()
 
 
 def _get_key(prefix: str) -> str:
@@ -103,4 +115,3 @@ def apply_global_rate_limit():
     if not allowed:
         return jsonify({'error': '请求过于频繁，请稍后再试', 'retry_after': 60}), 429
     return None
-

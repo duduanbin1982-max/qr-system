@@ -75,6 +75,7 @@ _reset_test_db()
 
 from modules.app import app
 from modules.db import clear_settings_cache, close_db, get_db
+from modules.middleware.rate_limit import reset_rate_limiters
 from factories import (
     TEST_HASH,
     TEST_PASS,
@@ -108,8 +109,10 @@ def pytest_collection_modifyitems(items):
 def isolated_test_db():
     _reset_test_db()
     clear_settings_cache()
+    reset_rate_limiters()
     yield
     clear_settings_cache()
+    reset_rate_limiters()
 
 
 @pytest.fixture

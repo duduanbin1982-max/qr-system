@@ -1,6 +1,6 @@
 import sqlite3
 
-from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
+from modules.services.material_service import MaterialService
 
 
 def _database():
@@ -43,7 +43,12 @@ def _database():
             quantity REAL,
             remark TEXT,
             operator_id INTEGER,
-            operator_name TEXT
+            operator_name TEXT,
+            balance_before REAL,
+            balance_after REAL,
+            source_type TEXT,
+            source_id INTEGER,
+            reversal_of_log_id INTEGER
         );
         """
     )
@@ -60,7 +65,7 @@ def test_deduct_for_process_prefers_order_material_snapshot():
     db.execute("INSERT INTO order_materials VALUES (10, 30, 2, 40)")
     db.execute("INSERT INTO product_bom VALUES (20, 31, 5, 40)")
 
-    MaterialConsumptionRepository.deduct_for_process(10, 40, 3, 50, "Worker", db=db)
+    MaterialService.deduct_for_process(10, 40, 3, 50, "Worker", db=db)
 
     assert db.execute("SELECT quantity FROM materials WHERE id = 30").fetchone()[0] == 14
     assert db.execute("SELECT quantity FROM materials WHERE id = 31").fetchone()[0] == 20
@@ -86,7 +91,7 @@ def test_deduct_for_process_falls_back_to_matching_product_bom():
     db.execute("INSERT INTO product_bom VALUES (20, 30, 1.5, NULL)")
     db.execute("INSERT INTO product_bom VALUES (20, 31, 2, 99)")
 
-    MaterialConsumptionRepository.deduct_for_process(10, 40, 2, 50, "Worker", db=db)
+    MaterialService.deduct_for_process(10, 40, 2, 50, "Worker", db=db)
 
     assert db.execute("SELECT quantity FROM materials WHERE id = 30").fetchone()[0] == 7
     assert db.execute("SELECT quantity FROM materials WHERE id = 31").fetchone()[0] == 10
@@ -98,4 +103,9 @@ def test_deduct_for_process_falls_back_to_matching_product_bom():
         "remark": "auto-deduct",
         "operator_id": 50,
         "operator_name": "Worker",
+        "balance_before": 10.0,
+        "balance_after": 7.0,
+        "source_type": "auto_consumption",
+        "source_id": 1,
+        "reversal_of_log_id": None,
     }

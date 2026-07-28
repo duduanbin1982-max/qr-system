@@ -7,7 +7,8 @@ class MaterialConsumptionRepository:
     """Owns automatic material deduction as one transactional operation."""
 
     @staticmethod
-    def deduct_for_process(order_id, process_id, quantity, user_id, user_name, db=None):
+    def deduction_candidates(order_id, process_id, db=None):
+        """Return the order snapshot or fallback BOM rows for one process."""
         db = resolve_db(db)
         material_rows = db.execute(
             "SELECT om.material_id, om.quantity_per_unit, m.quantity AS stock_qty "
@@ -28,36 +29,7 @@ class MaterialConsumptionRepository:
                 (order_id, process_id),
             ).fetchall()
 
-        for material in material_rows:
-            deduct_quantity = quantity * material["quantity_per_unit"]
-            stock_quantity = material["stock_qty"] or 0
-            if stock_quantity < deduct_quantity:
-                continue
-
-            db.execute(
-                "UPDATE materials SET quantity = quantity - ?, "
-                "updated_at = datetime('now','localtime') WHERE id = ?",
-                (deduct_quantity, material["material_id"]),
-            )
-            db.execute(
-                "INSERT INTO material_consumptions "
-                "(material_id, order_id, process_id, quantity, operator_id, operator_name, notes) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'auto-deduct from order BOM')",
-                (
-                    material["material_id"],
-                    order_id,
-                    process_id,
-                    deduct_quantity,
-                    user_id,
-                    user_name,
-                ),
-            )
-            db.execute(
-                "INSERT INTO material_logs "
-                "(material_id, type, quantity, remark, operator_id, operator_name) "
-                "VALUES (?, 'out', ?, 'auto-deduct', ?, ?)",
-                (material["material_id"], deduct_quantity, user_id, user_name),
-            )
+        return material_rows
 
     @staticmethod
     def _auto_deduction_enabled(db):

@@ -263,7 +263,7 @@ def test_approval_side_effect_failure_rolls_back_all_status_changes(client, monk
         raise RuntimeError("forced material failure")
 
     monkeypatch.setattr(
-        work_report_writer_module.MaterialConsumptionRepository,
+        work_report_writer_module.MaterialService,
         "deduct_for_process",
         staticmethod(fail_material_deduction),
     )

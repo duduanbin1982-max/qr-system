@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime
 
-from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
+from modules.services.material_service import MaterialService
 from modules.repositories.scan_repository import ScanRepository
 from modules.services import BaseService
 from modules.services.inventory_auto_inbound_service import InventoryAutoInboundService
@@ -212,7 +212,7 @@ class WorkReportWriter:
             new_completed = (op["completed"] or 0) + quantity_local
             helper.update_order_process_completed(order_id, process_id, new_completed, db=db)
 
-        MaterialConsumptionRepository.deduct_for_process(
+        MaterialService.deduct_for_process(
             order_id,
             process_id,
             quantity_local,
