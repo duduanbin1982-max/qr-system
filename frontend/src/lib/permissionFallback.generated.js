@@ -401,19 +401,39 @@ export const IMPLIED_PERMISSIONS = {
     "suppliers:edit",
     "suppliers:delete"
   ],
+  "materials:view": [
+    "suppliers:view"
+  ],
   "materials:create": [
+    "materials:view",
     "suppliers:view"
   ],
   "materials:edit": [
+    "materials:view",
     "suppliers:view"
   ],
+  "materials:delete": [
+    "materials:view"
+  ],
+  "materials:stock": [
+    "materials:view"
+  ],
+  "materials:consume": [
+    "materials:view"
+  ],
+  "suppliers:view": [
+    "materials:view"
+  ],
   "suppliers:create": [
+    "materials:view",
     "suppliers:view"
   ],
   "suppliers:edit": [
+    "materials:view",
     "suppliers:view"
   ],
   "suppliers:delete": [
+    "materials:view",
     "suppliers:view"
   ]
 }

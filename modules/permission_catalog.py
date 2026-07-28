@@ -251,11 +251,16 @@ PERMISSION_IMPLICATIONS = {
         "suppliers:edit",
         "suppliers:delete",
     ],
-    "materials:create": ["suppliers:view"],
-    "materials:edit": ["suppliers:view"],
-    "suppliers:create": ["suppliers:view"],
-    "suppliers:edit": ["suppliers:view"],
-    "suppliers:delete": ["suppliers:view"],
+    "materials:view": ["suppliers:view"],
+    "materials:create": ["materials:view", "suppliers:view"],
+    "materials:edit": ["materials:view", "suppliers:view"],
+    "materials:delete": ["materials:view"],
+    "materials:stock": ["materials:view"],
+    "materials:consume": ["materials:view"],
+    "suppliers:view": ["materials:view"],
+    "suppliers:create": ["materials:view", "suppliers:view"],
+    "suppliers:edit": ["materials:view", "suppliers:view"],
+    "suppliers:delete": ["materials:view", "suppliers:view"],
 }
 
 
