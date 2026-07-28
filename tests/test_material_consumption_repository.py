@@ -1,5 +1,8 @@
 import sqlite3
 
+import pytest
+
+from modules.domain.errors import ConflictError
 from modules.services.material_service import MaterialService
 
 
@@ -14,7 +17,9 @@ def _database():
         CREATE TABLE materials (
             id INTEGER PRIMARY KEY,
             quantity REAL,
-            updated_at TEXT
+            updated_at TEXT,
+            name TEXT DEFAULT '',
+            unit TEXT DEFAULT '件'
         );
         CREATE TABLE order_materials (
             order_id INTEGER,
@@ -60,8 +65,8 @@ def test_deduct_for_process_prefers_order_material_snapshot():
     db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
     db.execute("INSERT INTO orders VALUES (10, 'PRODUCT-1')")
     db.execute("INSERT INTO products VALUES (20, 'PRODUCT-1')")
-    db.execute("INSERT INTO materials VALUES (30, 20, NULL)")
-    db.execute("INSERT INTO materials VALUES (31, 20, NULL)")
+    db.execute("INSERT INTO materials VALUES (30, 20, NULL, 'Steel', 'kg')")
+    db.execute("INSERT INTO materials VALUES (31, 20, NULL, 'Wire', 'm')")
     db.execute("INSERT INTO order_materials VALUES (10, 30, 2, 40)")
     db.execute("INSERT INTO product_bom VALUES (20, 31, 5, 40)")
 
@@ -86,8 +91,8 @@ def test_deduct_for_process_falls_back_to_matching_product_bom():
     db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
     db.execute("INSERT INTO orders VALUES (10, 'PRODUCT-1')")
     db.execute("INSERT INTO products VALUES (20, 'PRODUCT-1')")
-    db.execute("INSERT INTO materials VALUES (30, 10, NULL)")
-    db.execute("INSERT INTO materials VALUES (31, 10, NULL)")
+    db.execute("INSERT INTO materials VALUES (30, 10, NULL, 'Steel', 'kg')")
+    db.execute("INSERT INTO materials VALUES (31, 10, NULL, 'Wire', 'm')")
     db.execute("INSERT INTO product_bom VALUES (20, 30, 1.5, NULL)")
     db.execute("INSERT INTO product_bom VALUES (20, 31, 2, 99)")
 
@@ -109,3 +114,48 @@ def test_deduct_for_process_falls_back_to_matching_product_bom():
         "source_id": 1,
         "reversal_of_log_id": None,
     }
+
+
+def test_deduct_for_process_is_disabled_by_setting_even_with_order_snapshot():
+    db = _database()
+    db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '0')")
+    db.execute("INSERT INTO materials VALUES (30, 10, NULL, 'Steel', 'kg')")
+    db.execute("INSERT INTO order_materials VALUES (10, 30, 2, 40)")
+
+    MaterialService.deduct_for_process(10, 40, 3, 50, "Worker", db=db)
+
+    assert db.execute("SELECT quantity FROM materials WHERE id = 30").fetchone()[0] == 10
+    assert db.execute("SELECT COUNT(*) FROM material_consumptions").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM material_logs").fetchone()[0] == 0
+
+
+def test_deduct_for_process_blocks_all_materials_when_any_stock_is_short():
+    db = _database()
+    db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
+    db.execute("INSERT INTO materials VALUES (30, 20, NULL, 'Steel', 'kg')")
+    db.execute("INSERT INTO materials VALUES (31, 2, NULL, 'Wire', 'm')")
+    db.execute("INSERT INTO order_materials VALUES (10, 30, 2, 40)")
+    db.execute("INSERT INTO order_materials VALUES (10, 31, 1, 40)")
+
+    with pytest.raises(ConflictError, match='物料库存不足，报工未提交') as error:
+        MaterialService.deduct_for_process(10, 40, 3, 50, "Worker", db=db)
+
+    assert error.value.details == {
+        'shortages': [{
+            'material_id': 31,
+            'material_name': 'Wire',
+            'unit': 'm',
+            'required_quantity': 3.0,
+            'available_quantity': 2.0,
+        }]
+    }
+    balances = [
+        tuple(row)
+        for row in db.execute("SELECT id, quantity FROM materials ORDER BY id").fetchall()
+    ]
+    assert balances == [
+        (30, 20.0),
+        (31, 2.0),
+    ]
+    assert db.execute("SELECT COUNT(*) FROM material_consumptions").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM material_logs").fetchone()[0] == 0

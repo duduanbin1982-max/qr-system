@@ -1,6 +1,6 @@
 import uuid
 
-from factories import create_material
+from factories import add_order_material, create_material, create_order, ensure_process
 from modules.db import get_db
 
 
@@ -142,3 +142,65 @@ def test_reversing_consumption_preserves_history_and_creates_reversal_log(
         headers=auth_headers,
     )
     assert duplicate_response.status_code == 409
+
+
+def test_mobile_report_stock_shortage_returns_chinese_conflict_and_rolls_back(
+    client,
+    worker_auth_headers,
+):
+    suffix = uuid.uuid4().hex[:8]
+    with client.application.app_context():
+        db = get_db()
+        process_id = ensure_process(db, name=f"Material Shortage Process {suffix}")
+        order_id = create_order(
+            db,
+            [process_id],
+            quantity=5,
+            product_code=f"MATERIAL-SHORTAGE-{suffix}",
+        )
+        db.execute("UPDATE orders SET status = 'producing' WHERE id = ?", (order_id,))
+        material_id = create_material(db, quantity=2, name=f"Short Wire {suffix}")
+        add_order_material(db, order_id, material_id, process_id, quantity_per_unit=1)
+        db.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('auto_deduct_material', '1')"
+        )
+        db.commit()
+
+    response = client.post(
+        "/api/mobile/report",
+        json={
+            "order_id": order_id,
+            "process_id": process_id,
+            "quantity": 3,
+            "report_type": "normal",
+        },
+        headers=worker_auth_headers,
+    )
+
+    assert response.status_code == 409, response.get_json()
+    payload = response.get_json()
+    assert payload.get("code") == "conflict", payload
+    assert payload["error"].startswith("物料库存不足，报工未提交")
+    assert payload["details"]["shortages"][0]["material_id"] == material_id
+    with client.application.app_context():
+        db = get_db()
+        balance = db.execute(
+            "SELECT quantity FROM materials WHERE id = ?",
+            (material_id,),
+        ).fetchone()["quantity"]
+        process_completed = db.execute(
+            "SELECT completed FROM order_processes WHERE order_id = ? AND process_id = ?",
+            (order_id, process_id),
+        ).fetchone()["completed"]
+        report_count = db.execute(
+            "SELECT COUNT(*) AS count FROM work_records WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()["count"]
+        consumption_count = db.execute(
+            "SELECT COUNT(*) AS count FROM material_consumptions WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()["count"]
+    assert balance == 2
+    assert process_completed == 0
+    assert report_count == 0
+    assert consumption_count == 0

@@ -10,22 +10,29 @@ class MaterialConsumptionRepository:
     def deduction_candidates(order_id, process_id, db=None):
         """Return the order snapshot or fallback BOM rows for one process."""
         db = resolve_db(db)
+        if not MaterialConsumptionRepository._auto_deduction_enabled(db):
+            return []
+
         material_rows = db.execute(
-            "SELECT om.material_id, om.quantity_per_unit, m.quantity AS stock_qty "
+            "SELECT om.material_id, SUM(om.quantity_per_unit) AS quantity_per_unit, "
+            "m.quantity AS stock_qty, m.name AS material_name, m.unit "
             "FROM order_materials om "
             "JOIN materials m ON m.id = om.material_id "
-            "WHERE om.order_id = ? AND om.process_id = ?",
+            "WHERE om.order_id = ? AND om.process_id = ? "
+            "GROUP BY om.material_id, m.quantity, m.name, m.unit",
             (order_id, process_id),
         ).fetchall()
 
-        if not material_rows and MaterialConsumptionRepository._auto_deduction_enabled(db):
+        if not material_rows:
             material_rows = db.execute(
-                "SELECT pb.material_id, pb.quantity_per_unit, m.quantity AS stock_qty "
+                "SELECT pb.material_id, SUM(pb.quantity_per_unit) AS quantity_per_unit, "
+                "m.quantity AS stock_qty, m.name AS material_name, m.unit "
                 "FROM orders o "
                 "JOIN products p ON p.product_code = o.product_code "
                 "JOIN product_bom pb ON pb.product_id = p.id "
                 "JOIN materials m ON m.id = pb.material_id "
-                "WHERE o.id = ? AND (pb.process_id = ? OR COALESCE(pb.process_id, 0) = 0)",
+                "WHERE o.id = ? AND (pb.process_id = ? OR COALESCE(pb.process_id, 0) = 0) "
+                "GROUP BY pb.material_id, m.quantity, m.name, m.unit",
                 (order_id, process_id),
             ).fetchall()
 

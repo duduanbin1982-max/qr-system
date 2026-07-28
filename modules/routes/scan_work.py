@@ -17,7 +17,7 @@ from modules.services.scan_helper_service import ScanHelperService
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
-from modules.domain.errors import RequiredQualityEvaluationError
+from modules.domain.errors import DomainError, RequiredQualityEvaluationError
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
 import qrcode as qrcode_lib
@@ -209,6 +209,8 @@ def mobile_report():
         payload = e.to_payload()
         payload["action"] = "open_quality_evaluation"
         return jsonify(payload), e.status_code
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
 
@@ -259,6 +261,8 @@ def work_report():
         )
 
         return jsonify({"message": "report OK"})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({"error": str(e)}), 409
 

@@ -299,34 +299,61 @@ class MaterialService:
         material_rows = MaterialConsumptionRepository.deduction_candidates(
             order_id, process_id, db=db
         )
+        requirements = []
         shortages = []
         for material in material_rows:
-            deduct_quantity = quantity * material['quantity_per_unit']
-            stock_quantity = material['stock_qty'] or 0
+            deduct_quantity = float(quantity) * float(material['quantity_per_unit'] or 0)
+            material_name = material['material_name'] or f"物料#{material['material_id']}"
+            unit = material['unit'] or ''
+            if deduct_quantity <= 0:
+                raise ValidationError(f'物料「{material_name}」的工序用量必须大于 0')
+            stock_quantity = float(material['stock_qty'] or 0)
+            requirement = {
+                'material_id': material['material_id'],
+                'material_name': material_name,
+                'unit': unit,
+                'required_quantity': deduct_quantity,
+                'available_quantity': stock_quantity,
+            }
+            requirements.append(requirement)
             if stock_quantity < deduct_quantity:
-                shortages.append({
-                    'material_id': material['material_id'],
-                    'required_quantity': deduct_quantity,
-                    'available_quantity': stock_quantity,
-                })
-                continue
-            transition = MaterialRepository.apply_quantity_delta(
-                material['material_id'], -deduct_quantity, db=db
+                shortages.append(requirement)
+
+        if shortages:
+            shortage_text = '；'.join(
+                f"{item['material_name']}需{item['required_quantity']:g}{item['unit']}，"
+                f"现有{item['available_quantity']:g}{item['unit']}"
+                for item in shortages
             )
+            raise ConflictError(
+                f'物料库存不足，报工未提交：{shortage_text}',
+                details={'shortages': shortages},
+            )
+
+        for requirement in requirements:
+            transition = MaterialRepository.apply_quantity_delta(
+                requirement['material_id'],
+                -requirement['required_quantity'],
+                db=db,
+            )
+            if transition is None:
+                raise MaterialNotFoundError('物料不存在')
+            if transition['insufficient']:
+                raise ConflictError(f"物料「{requirement['material_name']}」库存已发生变化，请重新提交")
             consumption_id = MaterialRepository.insert_consumption(
-                material['material_id'],
+                requirement['material_id'],
                 order_id,
                 process_id,
-                deduct_quantity,
+                requirement['required_quantity'],
                 user_id,
                 user_name,
                 'auto-deduct from order BOM',
                 db=db,
             )
             MaterialRepository.insert_log(
-                material['material_id'],
+                requirement['material_id'],
                 'out',
-                deduct_quantity,
+                requirement['required_quantity'],
                 'auto-deduct',
                 user_name,
                 operator_id=user_id,
@@ -336,7 +363,7 @@ class MaterialService:
                 source_id=consumption_id,
                 db=db,
             )
-        return shortages
+        return []
 
 
 class SupplierService:
