@@ -397,6 +397,7 @@
 
 <script>
 import { computed, ref } from 'vue'
+import { useTraceSearch } from '@/composables/useTraceSearch.js'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
@@ -404,8 +405,7 @@ export default {
   setup() {
     const traceCode = ref('')
     const traceMode = ref('serial')
-    const searching = ref(false)
-    const result = ref(null)
+    const { searching, result, search } = useTraceSearch(api.domains.trace)
     const reworkRecords = computed(() => result.value?.item
       ? result.value.order_scope?.rework_records || []
       : result.value?.rework_records || [])
@@ -479,19 +479,14 @@ const traceHistory = ref(_history)
     async function doTrace(requestedPage = 1) {
       const code = traceCode.value.trim()
       if (!code) { showToast(traceMode.value==='serial'?'请输入产品序列号':'请输入订单号','error'); return }
-      searching.value = true
-      try {
-        const d = traceMode.value === 'serial'
-          ? await api.domains.trace.trace(code)
-          : await api.domains.trace.traceByOrder(code, { page: requestedPage, per_page: 100 })
-        result.value = d
-        saveHistory(code, traceMode.value)
-      } catch(e) {
-        showToast(e.message || '查询失败','error')
-        result.value = null
-      } finally {
-        searching.value = false
+      const mode = traceMode.value
+      const outcome = await search({ code, mode, page: requestedPage, perPage: 100 })
+      if (!outcome.applied) return
+      if (outcome.error) {
+        showToast(outcome.error.message || '查询失败', 'error')
+        return
       }
+      saveHistory(code, mode)
     }
 
     return {
