@@ -1,5 +1,5 @@
 """Product and order traceability service."""
-from modules.domain.errors import ValidationError
+from modules.domain.errors import NotFoundError, ValidationError
 from modules.repositories.trace_repository import TraceRepository
 
 # Public product-item fields returned by trace APIs.
@@ -36,12 +36,7 @@ class TraceService:
         # 1. Load the product item and joined order fields.
         item_row = TraceRepository.find_product_item_by_serial(serial_no)
         if not item_row:
-            return {
-                'item': None, 'order': None,
-                'work_records': [], 'rework_records': [], 'shipments': [],
-                'quality_inspections': [], 'quality_tasks': [],
-                'quality_nonconformances': [], 'quality_capa': [],
-            }
+            raise NotFoundError('产品序列号不存在')
 
         item_dict = dict(item_row)
 
@@ -150,18 +145,14 @@ class TraceService:
         """
         order_no = order_no.strip()
         if not order_no:
-            raise ValueError("订单号不能为空")
+            raise ValidationError("订单号不能为空")
         if len(order_no) > 100:
-            raise ValueError("订单号过长")
+            raise ValidationError("订单号过长")
 
         # 1. 查订单
         order_row = TraceRepository.find_order_by_no(order_no)
         if not order_row:
-            return {
-                "order": None, "items": [], "work_records": [], "rework_records": [], "shipments": [],
-                "quality_inspections": [], "quality_tasks": [],
-                "quality_nonconformances": [], "quality_capa": [],
-            }
+            raise NotFoundError("订单不存在")
 
         order = dict(order_row)
         order_id = order["id"]

@@ -281,9 +281,11 @@ class TestScanEdgeCases:
 class TestScanReportVerification:
     """Verify scan data flows to reports and wages."""
 
-    def test_order_trace(self, client, auth_headers):
-        resp = client.get("/api/trace/26061201", headers=auth_headers)
-        assert resp.status_code == 200
+    def test_order_trace(self, client, auth_headers, test_order_id):
+        order_no = _order_no_for(client, test_order_id)
+        resp = client.get(f"/api/trace/order/{order_no}", headers=auth_headers)
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["order"]["order_no"] == order_no
 
     def test_work_records_list(self, client, auth_headers, test_order_id):
         resp = client.get(f"/api/orders/{test_order_id}/work-records", headers=auth_headers)

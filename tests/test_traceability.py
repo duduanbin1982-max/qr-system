@@ -66,6 +66,28 @@ def test_existing_serial_trace_returns_item_order_and_work_history(client, auth_
     assert payload["work_records"][0]["quantity"] == 1
 
 
+def test_missing_trace_targets_return_not_found(client, auth_headers):
+    missing_serial = client.get(
+        "/api/trace/TRACE-MISSING-SERIAL",
+        headers=auth_headers,
+    )
+    missing_order = client.get(
+        "/api/trace/order/TRACE-MISSING-ORDER",
+        headers=auth_headers,
+    )
+
+    assert missing_serial.status_code == 404
+    assert missing_serial.get_json() == {
+        "error": "产品序列号不存在",
+        "code": "not_found",
+    }
+    assert missing_order.status_code == 404
+    assert missing_order.get_json() == {
+        "error": "订单不存在",
+        "code": "not_found",
+    }
+
+
 def test_serial_trace_separates_item_and_order_scope(client, auth_headers):
     fixture = _create_serial_trace_fixture(client, serial_count=2)
     suffix = uuid.uuid4().hex[:8].upper()
