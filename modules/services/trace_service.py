@@ -77,24 +77,32 @@ class TraceService:
         # 6. 质检记录
         quality_inspections = []
         if order_id:
-            rows = TraceRepository.find_quality_inspections_by_order(order_id)
+            rows = TraceRepository.find_quality_inspections_by_serial(serial_no, order_id)
             quality_inspections = [dict(r) for r in rows]
 
         quality_tasks = []
         quality_nonconformances = []
         quality_capa = []
         if order_id:
-            quality_tasks = [dict(row) for row in TraceRepository.find_quality_tasks_by_order(order_id)]
-            quality_nonconformances = [
-                dict(row) for row in TraceRepository.find_quality_nonconformances_by_order(order_id)
+            quality_tasks = [
+                dict(row) for row in TraceRepository.find_quality_tasks_by_serial(serial_no, order_id)
             ]
-            quality_capa = [dict(row) for row in TraceRepository.find_quality_capa_by_order(order_id)]
+            quality_nonconformances = [
+                dict(row)
+                for row in TraceRepository.find_quality_nonconformances_by_serial(serial_no, order_id)
+            ]
+            quality_capa = [
+                dict(row) for row in TraceRepository.find_quality_capa_by_serial(serial_no, order_id)
+            ]
 
         # 7. 物料消耗
         material_consumptions = []
+        manual_material_consumptions = []
         if order_id:
-            rows = TraceRepository.find_material_consumptions_by_order(order_id)
+            rows = TraceRepository.find_material_consumptions_by_serial(serial_no, order_id)
             material_consumptions = [dict(r) for r in rows]
+            rows = TraceRepository.find_order_scope_material_consumptions(order_id)
+            manual_material_consumptions = [dict(r) for r in rows]
 
         # 8. 入库记录
         inventory_logs = []
@@ -108,18 +116,30 @@ class TraceService:
             rows = TraceRepository.find_shipments_by_order_id(order_id)
             shipments = [dict(r) for r in rows]
 
-        return {
-            'item': clean_item,
-            'order': order,
+        serial_scope = {
             'work_records': work_records,
-            'rework_records': rework_records,
             'quality_inspections': quality_inspections,
             'quality_tasks': quality_tasks,
             'quality_nonconformances': quality_nonconformances,
             'quality_capa': quality_capa,
             'material_consumptions': material_consumptions,
+        }
+        order_scope = {
+            'rework_records': rework_records,
+            'manual_material_consumptions': manual_material_consumptions,
             'inventory_logs': inventory_logs,
             'shipments': shipments,
+        }
+
+        return {
+            'item': clean_item,
+            'order': order,
+            'serial_scope': serial_scope,
+            'order_scope': order_scope,
+            **serial_scope,
+            'rework_records': [],
+            'inventory_logs': [],
+            'shipments': [],
         }
     @staticmethod
     def trace_by_order(order_no):
