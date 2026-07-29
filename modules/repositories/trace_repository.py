@@ -10,9 +10,13 @@ class TraceRepository:
         db = resolve_db(db)
         return db.execute('''
             SELECT pi.*,
-                   o.order_no, o.product_name, o.quantity as order_quantity,
-                   o.completed, o.status as order_status, o.created_at as order_created,
-                   COALESCE(c.name, o.customer) as customer
+                   o.order_no AS trace_order_no,
+                   o.product_name AS trace_product_name,
+                   o.quantity AS trace_order_quantity,
+                   o.completed AS trace_completed,
+                   o.status AS trace_order_status,
+                   o.created_at AS trace_order_created,
+                   COALESCE(c.name, o.customer) AS trace_customer
             FROM product_items pi
             LEFT JOIN orders o ON pi.order_id = o.id AND o.deleted_at IS NULL
             LEFT JOIN customers c ON o.customer_id = c.id

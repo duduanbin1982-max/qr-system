@@ -50,13 +50,13 @@ class TraceService:
         order_id = item_row['order_id']
         if order_id:
             order = {
-                'order_no': item_row.get('order_no', ''),
-                'product_name': item_row.get('product_name', ''),
-                'quantity': item_row.get('order_quantity', 0),
-                'completed': item_row.get('completed', 0),
-                'status': item_row.get('order_status', ''),
-                'created_at': item_row.get('order_created', ''),
-                'customer': item_row.get('customer', ''),
+                'order_no': item_dict.get('trace_order_no', ''),
+                'product_name': item_dict.get('trace_product_name', ''),
+                'quantity': item_dict.get('trace_order_quantity', 0),
+                'completed': item_dict.get('trace_completed', 0),
+                'status': item_dict.get('trace_order_status', ''),
+                'created_at': item_dict.get('trace_order_created', ''),
+                'customer': item_dict.get('trace_customer', ''),
             }
 
         # 3. Keep only public product-item fields.
