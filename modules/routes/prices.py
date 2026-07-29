@@ -18,6 +18,7 @@ from modules.route_decorators import (
 )
 from modules.services.price_service import RoutePriceService
 from modules.services.wage_service import WageService
+from modules.domain.reporting_day import current_reporting_day
 
 # ============================================================
 # Product Route Pricing (产品路线工价)
@@ -129,7 +130,7 @@ def calculate_wages():
 @check_auth
 @check_permission('wages:view')
 def daily_report():
-    date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+    date = request.args.get('date', '') or current_reporting_day()
     export = request.args.get('export', '')
 
     result = WageService.daily_report(date)

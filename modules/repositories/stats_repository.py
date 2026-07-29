@@ -3,6 +3,7 @@
 All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
 from modules.repositories.context import resolve_db
+from modules.domain.reporting_day import reporting_day_bounds
 
 
 class StatsRepository:
@@ -13,13 +14,15 @@ class StatsRepository:
     # ============================================================
     @staticmethod
     def _daily_where(date, product_code):
+        period_start, period_end = reporting_day_bounds(date)
         where_parts = [
             "wr.status='approved'",
-            "DATE(wr.created_at)=?",
+            "wr.created_at >= ?",
+            "wr.created_at < ?",
             "o.deleted_at IS NULL",
             "o.status != 'cancelled'"
         ]
-        params = [date]
+        params = [period_start, period_end]
         if product_code:
             where_parts.append("o.product_code = ?")
             params.append(product_code)

@@ -1,6 +1,7 @@
 """Work time management data access."""
 
 from modules.repositories.context import resolve_db
+from modules.domain.reporting_day import reporting_day_bounds
 
 
 class WorkTimeRepository:
@@ -460,8 +461,14 @@ class WorkTimeRepository:
     @staticmethod
     def daily_summary(date, product_code='', db=None):
         db = resolve_db(db)
-        where = ["wr.review_status = 'approved'", "substr(COALESCE(NULLIF(wr.end_time, ''), wr.start_time, wr.created_at), 1, 10) = ?"]
-        params = [date]
+        period_start, period_end = reporting_day_bounds(date)
+        record_time = "COALESCE(NULLIF(wr.end_time, ''), NULLIF(wr.start_time, ''), wr.created_at)"
+        where = [
+            "wr.review_status = 'approved'",
+            record_time + " >= ?",
+            record_time + " < ?",
+        ]
+        params = [period_start, period_end]
         product_code = (product_code or '').strip()
         if product_code:
             where.append("(wr.product_code = ? OR o.product_code = ?)")

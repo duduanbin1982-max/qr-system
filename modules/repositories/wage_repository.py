@@ -2,6 +2,7 @@
 qr-system — WageRepository（工资核算数据访问层）
 """
 from modules.repositories.context import resolve_db
+from modules.domain.reporting_day import reporting_day_bounds
 
 
 class WageRepository:
@@ -110,6 +111,7 @@ class WageRepository:
     @classmethod
     def get_daily_report_rows(cls, date, db=None):
         db = resolve_db(db)
+        period_start, period_end = reporting_day_bounds(date)
         query = (
             """
             SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name,
@@ -128,7 +130,7 @@ class WageRepository:
             ORDER BY wr.user_id, wr.process_id
             """
         )
-        return db.execute(query, (date, date + " 23:59:59")).fetchall()
+        return db.execute(query, (period_start, period_end)).fetchall()
 
     @staticmethod
     def count_active_orders(db=None):

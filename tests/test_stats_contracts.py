@@ -1,6 +1,8 @@
 import uuid
+from datetime import datetime
 
 from modules.db import get_db
+from modules.domain.reporting_day import current_reporting_day, reporting_day_bounds
 
 
 def _active_process_id(db):
@@ -52,6 +54,16 @@ def _insert_daily_record(
             (order_id, process_id, user_id, quantity, serial_no, created_at),
         )
     return order_id, product_code
+
+
+def _insert_work_time_record(db, order_id, process_id, user_id, recorded_at, quantity):
+    db.execute(
+        "INSERT INTO work_time_records ("
+        "order_id, process_id, user_id, quantity, standard_minutes, actual_minutes, "
+        "effective_minutes, end_time, status, review_status"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'approved')",
+        (order_id, process_id, user_id, quantity, quantity * 10, quantity * 10, quantity * 10, recorded_at),
+    )
 
 
 def test_daily_records_display_order_number_or_serial(client, auth_headers):
@@ -194,3 +206,66 @@ def test_daily_records_cache_isolated_by_query_string(client, auth_headers):
     assert second_order_no not in first_orders
     assert second_order_no in second_orders
     assert first_order_no not in second_orders
+
+
+def test_reporting_day_uses_seven_am_boundary(client, auth_headers):
+    prefix = f"TEST-REPORTING-DAY-{uuid.uuid4().hex[:8].upper()}"
+    samples = [
+        (f"{prefix}-BEFORE", "2026-06-30 06:59:59", 1),
+        (f"{prefix}-START", "2026-06-30 07:00:00", 2),
+        (f"{prefix}-END", "2026-07-01 06:59:59", 3),
+        (f"{prefix}-AFTER", "2026-07-01 07:00:00", 4),
+    ]
+
+    with client.application.app_context():
+        db = get_db()
+        process_id = _active_process_id(db)
+        user_id = db.execute("SELECT id FROM users WHERE username = 'testrunner'").fetchone()["id"]
+        for order_no, recorded_at, quantity in samples:
+            order_id, _product_code = _insert_daily_record(
+                db,
+                process_id,
+                user_id,
+                order_no,
+                "",
+                "",
+                recorded_at,
+                quantity=quantity,
+            )
+            _insert_work_time_record(db, order_id, process_id, user_id, recorded_at, quantity)
+        db.commit()
+
+    response = client.get("/api/stats/daily?date=2026-06-30", headers=auth_headers)
+
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()
+    matching_orders = {
+        row["order_no"] for row in data["records"] if row["order_no"].startswith(prefix)
+    }
+    assert matching_orders == {f"{prefix}-START", f"{prefix}-END"}
+    assert data["total"] == 2
+    assert data["summary_totals"]["record_count"] == 2
+    assert data["summary_totals"]["total_quantity"] == 5
+    assert sum(group["record_count"] for group in data["employee_groups"]) == 2
+    assert data["work_time_summary"]["record_count"] == 2
+    assert data["work_time_summary"]["quantity"] == 5
+    assert data["period_start"] == "2026-06-30 07:00:00"
+    assert data["period_end"] == "2026-07-01 07:00:00"
+
+    legacy_response = client.get("/api/daily-report?date=2026-06-30", headers=auth_headers)
+    assert legacy_response.status_code == 200, legacy_response.get_json()
+    legacy_quantity = sum(
+        process["quantity"]
+        for employee in legacy_response.get_json()["report"]
+        for process in employee["processes"].values()
+    )
+    assert legacy_quantity == 5
+
+
+def test_reporting_day_helpers_handle_pre_shift_time():
+    assert reporting_day_bounds("2026-06-30") == (
+        "2026-06-30 07:00:00",
+        "2026-07-01 07:00:00",
+    )
+    assert current_reporting_day(datetime(2026, 7, 1, 6, 59, 59)) == "2026-06-30"
+    assert current_reporting_day(datetime(2026, 7, 1, 7, 0, 0)) == "2026-07-01"

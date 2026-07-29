@@ -5,6 +5,7 @@ from modules.route_decorators import app, check_auth, check_permission
 from modules.services.stats_service import StatsService
 from modules.services.reports_service import ReportsService
 from modules.cache_utils import ttl_cache
+from modules.domain.reporting_day import current_reporting_day
 
 
 @app.route('/api/stats/daily', methods=['GET'])
@@ -12,11 +13,14 @@ from modules.cache_utils import ttl_cache
 @check_permission('stats:view')
 @ttl_cache(ttl_seconds=30)
 def stats_daily():
-    date = request.args.get('date', '') or datetime.now().strftime('%Y-%m-%d')
+    date = request.args.get('date', '') or current_reporting_day()
     product_code = request.args.get('product_code', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 500, type=int)
-    result = StatsService.get_daily_records(date, product_code, page, per_page)
+    try:
+        result = StatsService.get_daily_records(date, product_code, page, per_page)
+    except ValueError:
+        return jsonify({'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
     return jsonify(result)
 
 

@@ -1,6 +1,7 @@
 """qr-system - StatsService"""
 from modules.repositories.stats_repository import StatsRepository
 from modules.repositories.work_time_repository import WorkTimeRepository
+from modules.domain.reporting_day import reporting_day_bounds
 
 
 class StatsService:
@@ -95,6 +96,7 @@ class StatsService:
 
     @staticmethod
     def get_daily_records(date, product_code="", page_param=1, per_page_param=500):
+        period_start, period_end = reporting_day_bounds(date)
         page = int(page_param or 1)
         per_page = min(int(per_page_param or 500), 5000)
         offset = (page - 1) * per_page
@@ -113,6 +115,8 @@ class StatsService:
             "page": page,
             "per_page": per_page,
             "is_truncated": total > len(records) + offset,
+            "period_start": period_start,
+            "period_end": period_end,
         }
 
     @staticmethod

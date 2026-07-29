@@ -64,11 +64,18 @@ export default {
   setup() {
     function local(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') }
 
+    function reportingDayDate(now = new Date()) {
+      const result = new Date(now)
+      if (result.getHours() < 7) result.setDate(result.getDate() - 1)
+      return result
+    }
+
     function defaultDateRange() {
       const now = new Date()
+      const reportingDate = reportingDayDate(now)
       return {
-        end: local(now),
-        start: local(new Date(now - 30*86400000)),
+        end: local(reportingDate),
+        start: local(new Date(reportingDate.getTime() - 30*86400000)),
       }
     }
 
@@ -92,8 +99,8 @@ export default {
       const now = new Date()
       switch(preset) {
         case 'today':
-          reportStart.value = local(now)
-          reportEnd.value = local(now)
+          reportStart.value = local(reportingDayDate(now))
+          reportEnd.value = local(reportingDayDate(now))
           break
         case 'week': {
           const d = new Date(now)
