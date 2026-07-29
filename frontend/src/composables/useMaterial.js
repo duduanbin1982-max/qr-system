@@ -1,88 +1,36 @@
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+
+import { can } from '@/lib/auth.js'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
-import { can } from '@/lib/auth.js'
+import { useMaterialActivity } from '@/composables/material/useMaterialActivity.js'
+import { useMaterialCatalog } from '@/composables/material/useMaterialCatalog.js'
+import { useSupplierCatalog } from '@/composables/material/useSupplierCatalog.js'
 
-let _instance = null
 
 export function useMaterial() {
-  if (_instance) return _instance
+  const catalog = useMaterialCatalog()
+  const supplierCatalog = useSupplierCatalog()
+  const selectedMaterial = ref(null)
+  const activity = useMaterialActivity(selectedMaterial)
 
-  const materials = ref([])
-  const logs = ref([])
-  const showLogs = ref(false)
-  const suppliers = ref([])
-  const loading = ref(true)
   const showForm = ref(false)
   const showStock = ref(false)
-  const showConsume = ref(false)
-  const editing = ref(null)
-  const selectedMaterial = ref(null)
-  const showDetail = ref(false)
-  const detailConsumptions = ref([])
-  const trendChart = ref(null)
-  const searchText = ref('')
-  const materialTypeFilter = ref('')
   const showSupplierForm = ref(false)
+  const editing = ref(null)
+  const saving = ref(false)
+  const stockSaving = ref(false)
+  const consumeSaving = ref(false)
+  const supplierSaving = ref(false)
+
+  const form = ref(emptyMaterialForm())
+  const stockForm = ref({ type: 'in', quantity: 0, remark: '' })
   const supplierForm = ref({ name: '', contact: '', phone: '' })
-
-  const form = ref({ name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' })
-  const stockForm = ref({ type: 'in', quantity: 0, remark: '', operator_name: '' })
-
-  // Consumption state
-  const consumptions = ref([])
-  const consumeForm = ref({ order_id: null, process_id: null, quantity: 0, notes: '', operator_name: '' })
+  const consumeForm = ref({ order_id: null, process_id: null, quantity: 0, notes: '' })
   const orderSearch = ref('')
   const orderResults = ref([])
   const orderDropdown = ref(false)
 
-  const lowStock = computed(() => materials.value.filter(m => m.quantity <= (m.safe_stock || 0)))
-  
-  const abcRanks = computed(() => {
-    const sorted = [...materials.value]
-      .map(m => ({ id: m.id, val: (m.quantity || 0) * (m.unit_price || 0) }))
-      .sort((a, b) => b.val - a.val)
-    const totalVal = sorted.reduce((s, x) => s + x.val, 0)
-    const map = {}
-    let cumulative = 0
-    sorted.forEach((item) => {
-      cumulative += item.val
-      const pct = totalVal > 0 ? cumulative / totalVal : 0
-      if (pct <= 0.70) map[item.id] = "A"
-      else if (pct <= 0.90) map[item.id] = "B"
-      else map[item.id] = "C"
-    })
-    return map
-  })
-
-  const totalInventoryValue = computed(() => {
-    const total = materials.value.reduce((sum, m) => sum + (m.quantity || 0) * (m.unit_price || 0), 0)
-    return total.toFixed(2)
-  })
-
-  const materialTypeOptions = computed(() => {
-    const types = new Set()
-    materials.value.forEach(m => { if (m.material_type) types.add(m.material_type) })
-    return [...types].sort()
-  })
-
-  const filteredMaterials = computed(() => {
-    let arr = materials.value
-    if (searchText.value) {
-      const q = searchText.value.toLowerCase()
-      arr = arr.filter(m =>
-        (m.name || '').toLowerCase().includes(q) ||
-        (m.spec || '').toLowerCase().includes(q) ||
-        (m.location || '').toLowerCase().includes(q)
-      )
-    }
-    if (materialTypeFilter.value) {
-      arr = arr.filter(m => m.material_type === materialTypeFilter.value)
-    }
-    return arr
-  })
-
-  // RBAC
   const canEdit = computed(() => can('materials:edit'))
   const canDelete = computed(() => can('materials:delete'))
   const canCreate = computed(() => can('materials:create'))
@@ -92,58 +40,68 @@ export function useMaterial() {
   const canCreateSupplier = computed(() => can('suppliers:create'))
   const canDeleteSupplier = computed(() => can('suppliers:delete'))
 
-  // Dialog low stock warning computed properties
   const stockGap = computed(() => (form.value.quantity || 0) - (form.value.safe_stock || 0))
   const stockStatus = computed(() => {
     const gap = stockGap.value
-    if (gap > 0) return { icon: 'passed', cls: 'stock-ok', text: 'Stock OK' }
-    if (gap === 0) return { icon: 'warn', cls: 'stock-warn', text: 'Stock tight' }
-    return { icon: 'danger', cls: 'stock-danger', text: 'Below safety by ' + Math.abs(gap) }
+    if (gap > 0) return { icon: 'passed', cls: 'stock-ok', text: '库存充足' }
+    if (gap === 0) return { icon: 'warn', cls: 'stock-warn', text: '库存紧张' }
+    return { icon: 'danger', cls: 'stock-danger', text: `低于安全库存 ${Math.abs(gap)}` }
   })
   const showStockWarning = computed(() => editing.value && stockGap.value < 0)
 
-  async function load() {
-    loading.value = true
-    try {
-      const d = await api.domains.materials.listMaterials()
-      materials.value = d.materials || []
-    } catch (e) { showToast(e.message, 'error') }
-    finally { loading.value = false }
+  function emptyMaterialForm() {
+    return {
+      name: '',
+      spec: '',
+      unit: '件',
+      quantity: 0,
+      unit_price: 0,
+      safe_stock: 0,
+      location: '',
+      supplier_id: null,
+      material_type: '',
+      remark: '',
+    }
   }
 
   function openCreate() {
     editing.value = null
-    form.value = { name: '', spec: '', unit: '件', quantity: 0, unit_price: 0, safe_stock: 0, location: '', supplier_id: null, material_type: '', remark: '' }
+    form.value = emptyMaterialForm()
     showForm.value = true
   }
 
-  function openEdit(m) {
-    editing.value = m.id
-    const f = {
-      name: m.name || '',
-      spec: m.spec || '',
-      unit: m.unit || '件',
-      quantity: Number(m.quantity || 0),
-      unit_price: Number(m.unit_price || 0),
-      safe_stock: Number(m.safe_stock || 0),
-      location: m.location || '',
-      supplier_id: m.supplier_id,
-      material_type: m.material_type || '',
-      remark: m.remark || '',
+  function openEdit(material) {
+    editing.value = material.id
+    form.value = {
+      name: material.name || '',
+      spec: material.spec || '',
+      unit: material.unit || '件',
+      quantity: Number(material.quantity || 0),
+      unit_price: Number(material.unit_price || 0),
+      safe_stock: Number(material.safe_stock || 0),
+      location: material.location || '',
+      supplier_id: material.supplier_id || null,
+      material_type: material.material_type || '',
+      remark: material.remark || '',
     }
-    if (f.supplier_id === '' || f.supplier_id === 0) f.supplier_id = null
-    form.value = f
     showForm.value = true
   }
 
   async function save() {
-    if (!form.value.name.trim()) { showToast('名称必填', 'error'); return }
+    if (saving.value) return
+    if (!form.value.name.trim()) {
+      showToast('名称必填', 'error')
+      return
+    }
+    saving.value = true
     try {
       const payload = { ...form.value }
-      for (const k of ['quantity', 'unit_price', 'safe_stock']) {
-        if (payload[k] == null || payload[k] === '' || isNaN(payload[k])) payload[k] = 0
+      for (const field of ['quantity', 'unit_price', 'safe_stock']) {
+        if (payload[field] == null || payload[field] === '' || Number.isNaN(payload[field])) {
+          payload[field] = 0
+        }
       }
-      if (payload.supplier_id === '' || payload.supplier_id === 0) payload.supplier_id = null
+      if (!payload.supplier_id) payload.supplier_id = null
       if (editing.value) {
         delete payload.quantity
         await api.domains.materials.updateMaterial(editing.value, payload)
@@ -152,142 +110,178 @@ export function useMaterial() {
       }
       showForm.value = false
       showToast('保存成功')
-      await load()
-    } catch (e) { showToast(e.message || '保存失败', 'error') }
+      await catalog.load()
+    } catch (error) {
+      showToast(error.message || '保存失败', 'error')
+    } finally {
+      saving.value = false
+    }
   }
 
-  async function remove(m) {
-    if (!confirm('确定删除物料「' + m.name + '」？')) return
+  async function remove(material) {
+    if (!confirm(`确定删除物料「${material.name}」？`)) return
     try {
-      const res = await api.domains.materials.getMaterialImpact(m.id)
-      if (res && (res.refs || 0) > 0) {
-        showToast('该物料正在被 ' + res.refs + ' 个地方引用，无法删除', 'error')
+      const impact = await api.domains.materials.getMaterialImpact(material.id)
+      if (impact && Number(impact.refs || 0) > 0) {
+        showToast(`该物料正在被 ${impact.refs} 个地方引用，无法删除`, 'error')
         return
       }
-      await api.domains.materials.deleteMaterial(m.id)
+      await api.domains.materials.deleteMaterial(material.id)
       showToast('已删除')
-      await load()
-    } catch (e) { showToast(e.message || '删除失败', 'error') }
+      await catalog.refreshAfterDelete()
+    } catch (error) {
+      showToast(error.message || '删除失败', 'error')
+    }
   }
 
-  function openStock(m) {
-    selectedMaterial.value = m
-    stockForm.value = { type: 'in', quantity: 0, remark: '', operator_name: '' }
+  function openStock(material) {
+    selectedMaterial.value = material
+    stockForm.value = { type: 'in', quantity: 0, remark: '' }
     showStock.value = true
   }
 
   async function doStock() {
-    if (stockForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
+    if (stockSaving.value) return
+    if (stockForm.value.quantity <= 0) {
+      showToast('数量必须大于0', 'error')
+      return
+    }
+    stockSaving.value = true
     try {
-      await api.domains.materials.materialStockChange(selectedMaterial.value.id, stockForm.value)
+      const result = await api.domains.materials.materialStockChange(
+        selectedMaterial.value.id,
+        stockForm.value,
+      )
+      selectedMaterial.value.quantity = result.new_quantity
       showStock.value = false
       showToast('操作成功')
-      await load()
-    } catch (e) { showToast(e.message, 'error') }
-  }
-
-  async function viewLogs(m) {
-    selectedMaterial.value = m
-    showLogs.value = true
-    try {
-      const d = await api.domains.materials.getMaterialLogs(m.id)
-      logs.value = d.logs || []
-    } catch (e) {
-      logs.value = []
-      showToast(e.message || '库存流水加载失败', 'error')
+      await catalog.load()
+    } catch (error) {
+      showToast(error.message || '库存调整失败', 'error')
+    } finally {
+      stockSaving.value = false
     }
   }
 
-  async function openConsume(m) {
-    selectedMaterial.value = m
-    showConsume.value = true
-    consumeForm.value = { order_id: null, process_id: null, quantity: 0, notes: '', operator_name: '' }
-    try {
-      const d = await api.domains.materials.getMaterialConsumptions(m.id)
-      consumptions.value = d.consumptions || []
-    } catch (e) { consumptions.value = [] }
+  function openConsume(material) {
+    consumeForm.value = { order_id: null, process_id: null, quantity: 0, notes: '' }
+    orderSearch.value = ''
+    orderResults.value = []
+    orderDropdown.value = false
+    return activity.openConsume(material)
   }
 
   async function searchOrders() {
-    if (!orderSearch.value.trim()) { orderResults.value = []; return }
+    if (!orderSearch.value.trim()) {
+      orderResults.value = []
+      orderDropdown.value = false
+      return
+    }
     try {
-      const r = await api.domains.orders.listOrders({ keyword: orderSearch.value, limit: 8 })
-      orderResults.value = r.orders || []
+      const result = await api.domains.orders.listOrders({
+        keyword: orderSearch.value.trim(),
+        limit: 8,
+      })
+      orderResults.value = result.orders || []
       orderDropdown.value = true
-    } catch (e) { orderResults.value = [] }
+    } catch {
+      orderResults.value = []
+      orderDropdown.value = false
+    }
   }
 
-  function selectOrder(o) {
-    consumeForm.value.order_id = o.id
-    orderSearch.value = o.order_no + ' ' + (o.product_name || '')
+  function selectOrder(order) {
+    consumeForm.value.order_id = order.id
+    orderSearch.value = `${order.order_no} ${order.product_name || ''}`.trim()
     orderDropdown.value = false
   }
 
-  function fmtDate(s) { if (!s) return ''; const m = s.match(/^\d{4}-\d{2}-\d{2}/); return m ? m[0] : s }
-
   async function doConsume() {
-    if (consumeForm.value.quantity <= 0) { showToast('数量必须大于0', 'error'); return }
+    if (consumeSaving.value) return
+    if (consumeForm.value.quantity <= 0) {
+      showToast('数量必须大于0', 'error')
+      return
+    }
+    consumeSaving.value = true
     try {
-      await api.domains.materials.createMaterialConsumption(selectedMaterial.value.id, consumeForm.value)
+      const result = await api.domains.materials.createMaterialConsumption(
+        selectedMaterial.value.id,
+        consumeForm.value,
+      )
+      selectedMaterial.value.quantity = result.new_quantity
       showToast('消耗已记录')
-      openConsume(selectedMaterial.value)
-      await load()
-    } catch (e) { showToast('操作失败', 'error') }
+      consumeForm.value.quantity = 0
+      consumeForm.value.notes = ''
+      await Promise.all([activity.refreshConsumptions(), catalog.load()])
+    } catch (error) {
+      showToast(error.message || '消耗记录失败', 'error')
+    } finally {
+      consumeSaving.value = false
+    }
   }
 
-  async function undoConsume(c) {
+  async function undoConsume(consumption) {
     const reason = prompt('请输入撤销原因')
     if (reason === null) return
-    if (!reason.trim()) { showToast('请填写撤销原因', 'error'); return }
+    if (!reason.trim()) {
+      showToast('请填写撤销原因', 'error')
+      return
+    }
     try {
-      await api.domains.materials.deleteMaterialConsumption(c.id, { reason: reason.trim() })
+      const result = await api.domains.materials.deleteMaterialConsumption(
+        consumption.id,
+        { reason: reason.trim() },
+      )
+      selectedMaterial.value.quantity = result.new_quantity
       showToast('已撤销')
-      openConsume(selectedMaterial.value)
-      await load()
-    } catch (e) { showToast('操作失败', 'error') }
-  }
-
-  async function loadSuppliers() {
-    try {
-      const d = await api.domains.materials.listSuppliers()
-      suppliers.value = d.suppliers || []
-    } catch (e) {
-      suppliers.value = []
-      showToast(e.message || '加载供应商失败', 'error')
+      await Promise.all([activity.refreshConsumptions(), catalog.load()])
+    } catch (error) {
+      showToast(error.message || '撤销失败', 'error')
     }
   }
 
   function openSupplierAdd() {
     supplierForm.value = { name: '', contact: '', phone: '' }
     showSupplierForm.value = true
+    return supplierCatalog.loadSuppliers()
   }
 
   async function addSupplier() {
-    if (!supplierForm.value.name.trim()) { showToast('供应商名称必填', 'error'); return }
+    if (supplierSaving.value) return
+    if (!supplierForm.value.name.trim()) {
+      showToast('供应商名称必填', 'error')
+      return
+    }
+    supplierSaving.value = true
     try {
-      const r = await api.domains.materials.createSupplier(supplierForm.value)
-      showSupplierForm.value = false
-      await loadSuppliers()
-      if (r.id) {
-        form.value.supplier_id = r.id
-      } else if (suppliers.value.length > 0) {
-        form.value.supplier_id = suppliers.value[suppliers.value.length - 1].id
-      }
+      const result = await api.domains.materials.createSupplier(supplierForm.value)
+      supplierForm.value = { name: '', contact: '', phone: '' }
+      supplierCatalog.supplierPage.value = 1
+      await supplierCatalog.refreshSuppliersAfterMutation()
+      if (result.id) form.value.supplier_id = result.id
       showToast('供应商已添加')
-    } catch (e) { showToast(e.message || '添加失败', 'error') }
+    } catch (error) {
+      showToast(error.message || '添加失败', 'error')
+    } finally {
+      supplierSaving.value = false
+    }
   }
 
-  async function deleteSupplier(s) {
-    if (!confirm('确定删除供应商「' + s.name + '」？如有物料关联将无法删除。')) return
+  async function deleteSupplier(supplier) {
+    if (!confirm(`确定删除供应商「${supplier.name}」？如有业务关联将无法删除。`)) return
     try {
-      await api.domains.materials.deleteSupplier(s.id)
-      await loadSuppliers()
+      await api.domains.materials.deleteSupplier(supplier.id)
+      await supplierCatalog.refreshSuppliersAfterMutation()
       showToast('供应商已删除')
-    } catch (e) { showToast(e.message || '删除失败', 'error') }
+    } catch (error) {
+      showToast(error.message || '删除失败', 'error')
+    }
   }
 
-  function getAbcClass(m) {
-    return abcRanks.value[m.id] || "C"
+  function fmtDate(value) {
+    if (!value) return ''
+    const match = value.match(/^\d{4}-\d{2}-\d{2}/)
+    return match ? match[0] : value
   }
 
   function logTypeText(type) {
@@ -300,78 +294,65 @@ export function useMaterial() {
   }
 
   function logQuantityText(log) {
-    if (log.type === 'baseline') return '=' + log.quantity
-    return (['in', 'reversal'].includes(log.type) ? '+' : '-') + log.quantity
-  }
-
-  async function openDetail(m) {
-    selectedMaterial.value = m
-    showDetail.value = true
-    try {
-      const d = await api.domains.materials.getMaterialConsumptions(m.id)
-      detailConsumptions.value = (d.consumptions || []).slice(0, 20)
-    } catch (e) { detailConsumptions.value = [] }
-    setTimeout(() => renderTrendChart(), 200)
-  }
-
-  function renderTrendChart() {
-    if (!trendChart.value) return
-    const ctx = trendChart.value.getContext("2d")
-    if (trendChart.value._chart) trendChart.value._chart.destroy()
-    const data = detailConsumptions.value
-    if (!data.length) return
-    const byDate = {}
-    data.forEach(c => {
-      const d = (c.created_at || "").slice(0, 10)
-      if (!byDate[d]) byDate[d] = 0
-      byDate[d] += Number(c.quantity || 0)
-    })
-    const dates = Object.keys(byDate).sort()
-    const amounts = dates.map(d => byDate[d])
-    if (typeof Chart === 'undefined') return
-    trendChart.value._chart = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: dates,
-        datasets: [{
-          label: "消耗量",
-          data: amounts,
-          backgroundColor: "rgba(239,68,68,0.6)",
-          borderColor: "rgba(239,68,68,1)",
-          borderWidth: 1,
-          borderRadius: 4,
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { beginAtZero: true, title: { display: true, text: "消耗数量" } },
-          x: { title: { display: true, text: "日期" } }
-        }
-      }
-    })
+    if (log.type === 'baseline') return `=${log.quantity}`
+    return `${['in', 'reversal'].includes(log.type) ? '+' : '-'}${log.quantity}`
   }
 
   onMounted(() => {
-    load()
-    if (canViewSuppliers.value) loadSuppliers()
+    catalog.load()
+    if (canViewSuppliers.value) {
+      supplierCatalog.loadSuppliers()
+      supplierCatalog.loadSupplierOptions()
+    }
   })
 
-  _instance = {
-    materials, logs, showLogs, suppliers, loading, showForm, showStock, showConsume, editing, selectedMaterial,
-    form, stockForm, lowStock, searchText,
-    consumptions, consumeForm, orderSearch, orderResults, orderDropdown,
-    openCreate, openEdit, save, remove, openStock, doStock, viewLogs,
-    openConsume, searchOrders, selectOrder, fmtDate, doConsume, undoConsume,
-    showSupplierForm, supplierForm, openSupplierAdd, addSupplier, deleteSupplier,
-    abcRanks, getAbcClass,
-    logTypeText, logQuantityText,
-    showDetail, detailConsumptions, trendChart, openDetail, renderTrendChart,
-    canEdit, canDelete, canCreate, canStock, canConsume,
-    canViewSuppliers, canCreateSupplier, canDeleteSupplier,
-    filteredMaterials, stockGap, stockStatus, showStockWarning,
-    totalInventoryValue, materialTypeFilter, materialTypeOptions,
+  return {
+    ...catalog,
+    ...supplierCatalog,
+    ...activity,
+    selectedMaterial,
+    showForm,
+    showStock,
+    showSupplierForm,
+    editing,
+    saving,
+    stockSaving,
+    consumeSaving,
+    supplierSaving,
+    form,
+    stockForm,
+    supplierForm,
+    consumeForm,
+    orderSearch,
+    orderResults,
+    orderDropdown,
+    canEdit,
+    canDelete,
+    canCreate,
+    canStock,
+    canConsume,
+    canViewSuppliers,
+    canCreateSupplier,
+    canDeleteSupplier,
+    stockGap,
+    stockStatus,
+    showStockWarning,
+    openCreate,
+    openEdit,
+    save,
+    remove,
+    openStock,
+    doStock,
+    openConsume,
+    searchOrders,
+    selectOrder,
+    doConsume,
+    undoConsume,
+    openSupplierAdd,
+    addSupplier,
+    deleteSupplier,
+    fmtDate,
+    logTypeText,
+    logQuantityText,
   }
-  return _instance
 }

@@ -16,6 +16,85 @@ class MaterialRepository:
         return db.execute('SELECT COUNT(*) FROM materials').fetchone()[0]
 
     @staticmethod
+    def _list_filter(keyword='', material_type=''):
+        clauses = []
+        params = []
+        keyword = (keyword or '').strip().lower()
+        material_type = (material_type or '').strip()
+        if keyword:
+            pattern = f'%{keyword}%'
+            clauses.append(
+                "(LOWER(COALESCE(m.name, '')) LIKE ? OR "
+                "LOWER(COALESCE(m.spec, '')) LIKE ? OR "
+                "LOWER(COALESCE(m.material_type, '')) LIKE ? OR "
+                "LOWER(COALESCE(m.location, '')) LIKE ? OR "
+                "LOWER(COALESCE(s.name, '')) LIKE ?)"
+            )
+            params.extend([pattern] * 5)
+        if material_type:
+            clauses.append('m.material_type = ?')
+            params.append(material_type)
+        where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ''
+        return where_sql, params
+
+    @staticmethod
+    def count_filtered(keyword='', material_type='', db=None):
+        """Count materials matching the list filters."""
+        db = resolve_db(db)
+        where_sql, params = MaterialRepository._list_filter(keyword, material_type)
+        return db.execute(
+            'SELECT COUNT(*) FROM materials m '
+            'LEFT JOIN suppliers s ON m.supplier_id = s.id' + where_sql,
+            params,
+        ).fetchone()[0]
+
+    @staticmethod
+    def inventory_summary(db=None):
+        """Return global inventory metrics independent of list pagination."""
+        db = resolve_db(db)
+        row = db.execute('''
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(
+                       CASE WHEN COALESCE(quantity, 0) <= COALESCE(safe_stock, 0)
+                            THEN 1 ELSE 0 END
+                   ), 0) AS low_stock,
+                   COALESCE(SUM(
+                       COALESCE(quantity, 0) * COALESCE(unit_price, 0)
+                   ), 0) AS inventory_value
+            FROM materials
+        ''').fetchone()
+        return dict(row) if row else {
+            'total': 0,
+            'low_stock': 0,
+            'inventory_value': 0,
+        }
+
+    @staticmethod
+    def list_material_types(db=None):
+        """Return all non-empty material types for the list filter."""
+        db = resolve_db(db)
+        return [
+            row['material_type']
+            for row in db.execute('''
+                SELECT DISTINCT TRIM(material_type) AS material_type
+                FROM materials
+                WHERE TRIM(COALESCE(material_type, '')) != ''
+                ORDER BY material_type
+            ''').fetchall()
+        ]
+
+    @staticmethod
+    def find_inventory_values(db=None):
+        """Return the lightweight value ordering used by global ABC ranking."""
+        db = resolve_db(db)
+        return db.execute('''
+            SELECT id,
+                   COALESCE(quantity, 0) * COALESCE(unit_price, 0) AS inventory_value
+            FROM materials
+            ORDER BY inventory_value DESC, id DESC
+        ''').fetchall()
+
+    @staticmethod
     def find_all_with_supplier(db=None):
         """Return all materials with supplier names."""
         db = resolve_db(db)
@@ -26,14 +105,22 @@ class MaterialRepository:
         ''').fetchall()
 
     @staticmethod
-    def find_all_with_supplier_paginated(limit, offset, db=None):
-        """Return paginated materials with supplier names."""
+    def find_all_with_supplier_paginated(
+        limit,
+        offset,
+        keyword='',
+        material_type='',
+        db=None,
+    ):
+        """Return filtered, paginated materials with supplier names."""
         db = resolve_db(db)
+        where_sql, params = MaterialRepository._list_filter(keyword, material_type)
         return db.execute('''
             SELECT m.*, s.name as supplier_name
             FROM materials m LEFT JOIN suppliers s ON m.supplier_id = s.id
+        ''' + where_sql + '''
             ORDER BY m.id DESC LIMIT ? OFFSET ?
-        ''', (limit, offset)).fetchall()
+        ''', params + [limit, offset]).fetchall()
 
     @staticmethod
     def check_duplicate(name, spec, material_type, exclude_id=None, db=None):
@@ -361,15 +448,40 @@ class SupplierRepository:
         return db.execute('SELECT COUNT(*) FROM suppliers').fetchone()[0]
 
     @staticmethod
+    def count_filtered(keyword='', db=None):
+        """Count suppliers matching name or contact details."""
+        db = resolve_db(db)
+        keyword = (keyword or '').strip().lower()
+        if not keyword:
+            return SupplierRepository.count_all(db=db)
+        pattern = f'%{keyword}%'
+        return db.execute('''
+            SELECT COUNT(*) FROM suppliers
+            WHERE LOWER(COALESCE(name, '')) LIKE ?
+               OR LOWER(COALESCE(contact, '')) LIKE ?
+               OR LOWER(COALESCE(phone, '')) LIKE ?
+        ''', (pattern, pattern, pattern)).fetchone()[0]
+
+    @staticmethod
     def find_all(db=None):
         """Return all suppliers ordered by name."""
         db = resolve_db(db)
         return db.execute('SELECT * FROM suppliers ORDER BY name').fetchall()
 
     @staticmethod
-    def find_all_paginated(limit, offset, db=None):
-        """Return paginated suppliers ordered by name."""
+    def find_all_paginated(limit, offset, keyword='', db=None):
+        """Return filtered, paginated suppliers ordered by name."""
         db = resolve_db(db)
+        keyword = (keyword or '').strip().lower()
+        if keyword:
+            pattern = f'%{keyword}%'
+            return db.execute('''
+                SELECT * FROM suppliers
+                WHERE LOWER(COALESCE(name, '')) LIKE ?
+                   OR LOWER(COALESCE(contact, '')) LIKE ?
+                   OR LOWER(COALESCE(phone, '')) LIKE ?
+                ORDER BY name LIMIT ? OFFSET ?
+            ''', (pattern, pattern, pattern, limit, offset)).fetchall()
         return db.execute(
             'SELECT * FROM suppliers ORDER BY name LIMIT ? OFFSET ?', (limit, offset)
         ).fetchall()

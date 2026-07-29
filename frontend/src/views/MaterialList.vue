@@ -2,8 +2,8 @@
 <template>
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ materials.length }}</div><div class="s-label">物料总数</div></div></div>
-      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val text-danger">{{ lowStock.length }}</div><div class="s-label">低库存预警</div></div></div>
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ totalCount }}</div><div class="s-label">物料总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val text-danger">{{ lowStockCount }}</div><div class="s-label">低库存预警</div></div></div>
       <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val">¥{{ totalInventoryValue }}</div><div class="s-label">库存总值</div></div></div>
     </div>
 
@@ -16,8 +16,9 @@
             <span class="abc-badge abc-B" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#f59e0b"></span>B 中值
             <span class="abc-badge abc-C" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;background:#10b981"></span>C 低值
           </span>
-          <input v-model="searchText" placeholder="搜索物料..." style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
-          <select v-model="materialTypeFilter" style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:140px">
+          <input v-model="searchText" placeholder="搜索名称/规格/供应商..." @keyup.enter="searchAndLoad" style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:200px">
+          <button class="btn btn-default btn-sm" :disabled="loading" @click="searchAndLoad">搜索</button>
+          <select v-model="materialTypeFilter" @change="filterAndLoad" style="padding:6px 12px;border:1px solid #d9d9d9;border-radius:var(--radius-sm);font-size:var(--text-base);width:140px">
             <option value="">全部材质</option>
             <option v-for="mt in materialTypeOptions" :key="mt" :value="mt">{{ mt }}</option>
           </select>
@@ -25,14 +26,15 @@
           <button v-if="canViewSuppliers" class="btn" style="background:#0891B2;color:#fff" @click="openSupplierAdd">🏭 供应商管理</button>
         </div>
       </div>
-      <table class="data-table" v-if="materials.length">
+      <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">正在加载物料数据...</div>
+      <table class="data-table" v-else-if="materials.length">
         <thead>
           <tr>
             <th>名称</th><th>规格</th><th>材质</th><th>单位</th><th>库存量</th><th>单价</th><th>安全库存</th><th>供应商</th><th>库位</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in filteredMaterials" :key="m.id" :class="{ 'row-warn': m.quantity <= (m.safe_stock || 0) }">
+          <tr v-for="m in materials" :key="m.id" :class="{ 'row-warn': m.quantity <= (m.safe_stock || 0) }">
             <td>
               <span :class="'abc-badge abc-' + getAbcClass(m)" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span>
               <strong>{{ m.name }}</strong>
@@ -59,7 +61,16 @@
           </tr>
         </tbody>
       </table>
-      <p v-else style="text-align:center;padding:40px;color:var(--text-placeholder)">暂无物料，点击「新增物料」开始</p>
+      <div v-else-if="loadError" style="text-align:center;padding:40px;color:var(--danger)">
+        <div>{{ loadError }}</div>
+        <button class="btn btn-default btn-sm" style="margin-top:12px" @click="load">重试</button>
+      </div>
+      <p v-else style="text-align:center;padding:40px;color:var(--text-placeholder)">{{ searchText || materialTypeFilter ? '没有符合条件的物料' : '暂无物料，点击「新增物料」开始' }}</p>
+      <div v-if="total > pageSize" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-3) 16px;border-top:1px solid var(--border)">
+        <button class="btn btn-sm btn-default" :disabled="page <= 1 || loading" @click="previousPage">上一页</button>
+        <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ page }} / {{ Math.ceil(total / pageSize) }} 页（共 {{ total }} 条）</span>
+        <button class="btn btn-sm btn-default" :disabled="page * pageSize >= total || loading" @click="nextPage">下一页</button>
+      </div>
     </div>
 
     <!-- Form Modal -->
@@ -121,7 +132,7 @@
             <div style="display:flex;gap:8px">
               <select v-model="form.supplier_id" class="form-input" style="flex:1">
                 <option :value="null">-- 无 --</option>
-                <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+                <option v-for="s in supplierOptions" :key="s.id" :value="s.id">{{ s.name }}</option>
               </select>
               <button v-if="canCreateSupplier" type="button" class="btn btn-sm" style="white-space:nowrap;padding:8px 12px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm)" @click="openSupplierAdd">+ 新增</button>
             </div>
@@ -131,7 +142,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showForm=false">取消</button>
-          <button class="btn btn-primary" @click="save">保存</button>
+          <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -146,9 +157,15 @@
             <input v-model="supplierForm.contact" class="form-input" placeholder="联系人" style="flex:1">
             <input v-model="supplierForm.phone" class="form-input" placeholder="电话" style="flex:1">
           </div>
-          <button v-if="canCreateSupplier" class="btn btn-primary btn-sm" @click="addSupplier" style="width:100%;margin-bottom:16px">➕ 新增供应商</button>
-          <div v-if="suppliers.length" style="border-top:1px solid var(--border-light);padding-top:12px">
-            <div style="font-size:13px;color:var(--text-placeholder);margin-bottom:8px">已有供应商 ({{ suppliers.length }})</div>
+          <button v-if="canCreateSupplier" class="btn btn-primary btn-sm" :disabled="supplierSaving" @click="addSupplier" style="width:100%;margin-bottom:16px">{{ supplierSaving ? '保存中...' : '新增供应商' }}</button>
+          <div style="display:flex;gap:8px;border-top:1px solid var(--border-light);padding-top:12px;margin-bottom:8px">
+            <input v-model="supplierSearchText" class="form-input" placeholder="搜索名称/联系人/电话" @keyup.enter="searchSuppliers">
+            <button class="btn btn-default btn-sm" :disabled="supplierLoading" @click="searchSuppliers">搜索</button>
+          </div>
+          <div v-if="supplierLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">正在加载供应商...</div>
+          <div v-else-if="supplierError" style="text-align:center;padding:24px;color:var(--danger)">{{ supplierError }}</div>
+          <div v-else-if="suppliers.length">
+            <div style="font-size:13px;color:var(--text-placeholder);margin-bottom:8px">已有供应商 ({{ supplierTotal }})</div>
             <div v-for="s in suppliers" :key="s.id" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-hover);border-radius:6px;margin-bottom:4px">
               <div>
                 <span style="font-weight:500">{{ s.name }}</span>
@@ -157,6 +174,12 @@
               </div>
               <button v-if="canDeleteSupplier" class="btn btn-sm" style="background:var(--danger);color:#fff;padding:4px 10px;font-size:12px" @click="deleteSupplier(s)">删除</button>
             </div>
+          </div>
+          <div v-else style="text-align:center;padding:24px;color:var(--text-placeholder)">暂无供应商</div>
+          <div v-if="supplierTotal > supplierPageSize" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:12px">
+            <button class="btn btn-sm btn-default" :disabled="supplierPage <= 1 || supplierLoading" @click="previousSupplierPage">上一页</button>
+            <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ supplierPage }} / {{ Math.ceil(supplierTotal / supplierPageSize) }} 页</span>
+            <button class="btn btn-sm btn-default" :disabled="supplierPage * supplierPageSize >= supplierTotal || supplierLoading" @click="nextSupplierPage">下一页</button>
           </div>
         </div>
         <div class="modal-footer">
@@ -182,7 +205,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showStock=false">取消</button>
-          <button class="btn btn-primary" @click="doStock">确认</button>
+          <button class="btn btn-primary" :disabled="stockSaving" @click="doStock">{{ stockSaving ? '处理中...' : '确认' }}</button>
         </div>
       </div>
     </div>
@@ -192,7 +215,9 @@
       <div class="modal" style="max-width:600px">
         <div class="modal-header">出入库记录 — {{ selectedMaterial?.name }}</div>
         <div class="modal-body">
-          <table class="data-table" style="font-size:var(--text-sm)">
+          <div v-if="logsLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">正在加载库存流水...</div>
+          <div v-else-if="logsError" style="text-align:center;padding:24px;color:var(--danger)">{{ logsError }}</div>
+          <table v-else-if="logs.length" class="data-table" style="font-size:var(--text-sm)">
             <thead><tr><th>类型</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
             <tbody>
               <tr v-for="l in logs" :key="l.id">
@@ -204,6 +229,12 @@
               </tr>
             </tbody>
           </table>
+          <div v-else style="text-align:center;padding:24px;color:var(--text-placeholder)">暂无库存流水</div>
+          <div v-if="logsTotal > logsPageSize" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:12px">
+            <button class="btn btn-sm btn-default" :disabled="logsPage <= 1 || logsLoading" @click="previousLogsPage">上一页</button>
+            <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ logsPage }} / {{ Math.ceil(logsTotal / logsPageSize) }} 页（共 {{ logsTotal }} 条）</span>
+            <button class="btn btn-sm btn-default" :disabled="logsPage * logsPageSize >= logsTotal || logsLoading" @click="nextLogsPage">下一页</button>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showLogs=false">关闭</button>
@@ -235,7 +266,9 @@
             </div>
           </div>
           <div class="form-group"><label>备注</label><input v-model="consumeForm.notes" class="form-input" placeholder="用途说明"></div>
-          <div v-if="consumptions.length" style="margin-top:16px;border-top:1px solid var(--bg-hover);padding-top:12px">
+          <div v-if="consumptionsLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">正在加载消耗记录...</div>
+          <div v-else-if="consumptionsError" style="text-align:center;padding:24px;color:var(--danger)">{{ consumptionsError }}</div>
+          <div v-else-if="consumptions.length" style="margin-top:16px;border-top:1px solid var(--bg-hover);padding-top:12px">
             <label style="font-size:var(--text-sm);font-weight:600;margin-bottom:var(--space-2);display:block">消耗记录</label>
             <table class="data-table" style="font-size:var(--text-xs)">
               <thead><tr><th>订单</th><th>产品</th><th>数量</th><th>操作人</th><th>备注</th><th>状态</th><th>时间</th><th></th></tr></thead>
@@ -253,10 +286,16 @@
               </tbody>
             </table>
           </div>
+          <div v-else style="text-align:center;padding:24px;color:var(--text-placeholder)">暂无消耗记录</div>
+          <div v-if="consumptionsTotal > consumptionsPageSize" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:12px">
+            <button class="btn btn-sm btn-default" :disabled="consumptionsPage <= 1 || consumptionsLoading" @click="previousConsumptionsPage">上一页</button>
+            <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ consumptionsPage }} / {{ Math.ceil(consumptionsTotal / consumptionsPageSize) }} 页（共 {{ consumptionsTotal }} 条）</span>
+            <button class="btn btn-sm btn-default" :disabled="consumptionsPage * consumptionsPageSize >= consumptionsTotal || consumptionsLoading" @click="nextConsumptionsPage">下一页</button>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showConsume=false">关闭</button>
-          <button class="btn btn-primary" @click="doConsume">确认消耗</button>
+          <button class="btn btn-primary" :disabled="consumeSaving" @click="doConsume">{{ consumeSaving ? '处理中...' : '确认消耗' }}</button>
         </div>
       </div>
     </div>
@@ -278,6 +317,9 @@
             <div><span style="color:var(--text-placeholder);font-size:12px">供应商</span><div style="color:var(--teal)">{{ selectedMaterial?.supplier_name || "-" }}</div></div>
             <div><span style="color:var(--text-placeholder);font-size:12px">库位</span><div>{{ selectedMaterial?.location || "-" }}</div></div>
           </div>
+          <div v-if="detailLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">正在加载消耗趋势...</div>
+          <div v-else-if="detailError" style="text-align:center;padding:24px;color:var(--danger)">{{ detailError }}</div>
+          <template v-else>
           <h4 style="margin-bottom:12px;font-size:14px">📈 消耗趋势</h4>
           <canvas ref="trendChart" style="max-height:250px;margin-bottom:16px"></canvas>
           <div v-if="detailConsumptions.length" style="border-top:1px solid var(--bg-hover);padding-top:12px">
@@ -295,6 +337,8 @@
               </tbody>
             </table>
           </div>
+          <div v-else style="text-align:center;padding:24px;color:var(--text-placeholder)">暂无近期消耗记录</div>
+          </template>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showDetail=false">关闭</button>

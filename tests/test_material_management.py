@@ -350,3 +350,91 @@ def test_supplier_delete_blocks_quality_history_reference(client, auth_headers):
         "nonconformances": 0,
         "supplier_inspections": 1,
     }
+
+
+def test_material_list_uses_server_filters_pagination_and_global_summary(
+    client,
+    auth_headers,
+):
+    suffix = uuid.uuid4().hex[:8]
+    with client.application.app_context():
+        db = get_db()
+        supplier_id = db.execute(
+            "INSERT INTO suppliers (name) VALUES (?)",
+            (f"分页供应商 {suffix}",),
+        ).lastrowid
+        for index in range(25):
+            db.execute(
+                "INSERT INTO materials "
+                "(name, spec, unit, quantity, unit_price, safe_stock, location, "
+                " supplier_id, material_type) "
+                "VALUES (?, ?, '件', ?, 2, 5, ?, ?, ?)",
+                (
+                    f"分页物料 {suffix} {index:02d}",
+                    f"SPEC-{index:02d}",
+                    index + 1,
+                    f"A-{index:02d}",
+                    supplier_id,
+                    "钢材" if index % 2 == 0 else "铝材",
+                ),
+            )
+        db.commit()
+        expected_summary = dict(db.execute('''
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN COALESCE(quantity, 0) <= COALESCE(safe_stock, 0)
+                            THEN 1 ELSE 0 END) AS low_stock,
+                   SUM(COALESCE(quantity, 0) * COALESCE(unit_price, 0)) AS inventory_value
+            FROM materials
+        ''').fetchone())
+
+    response = client.get(
+        "/api/materials",
+        query_string={
+            "page": 2,
+            "limit": 10,
+            "keyword": suffix,
+            "material_type": "钢材",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["page"] == 2
+    assert payload["limit"] == 10
+    assert payload["total"] == 13
+    assert len(payload["materials"]) == 3
+    assert all(item["material_type"] == "钢材" for item in payload["materials"])
+    assert all(item["abc_class"] in {"A", "B", "C"} for item in payload["materials"])
+    assert payload["summary"] == expected_summary
+    assert {"钢材", "铝材"}.issubset(set(payload["material_types"]))
+
+
+def test_supplier_list_supports_server_search_and_pagination(client, auth_headers):
+    suffix = uuid.uuid4().hex[:8]
+    with client.application.app_context():
+        db = get_db()
+        for index in range(25):
+            prefix = "目标供应商" if index % 2 == 0 else "其他供应商"
+            db.execute(
+                "INSERT INTO suppliers (name, contact, phone) VALUES (?, ?, ?)",
+                (
+                    f"{prefix} {suffix} {index:02d}",
+                    f"联系人 {index:02d}",
+                    f"1380000{index:04d}",
+                ),
+            )
+        db.commit()
+
+    response = client.get(
+        "/api/suppliers",
+        query_string={"page": 2, "limit": 10, "keyword": f"目标供应商 {suffix}"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["total"] == 13
+    assert payload["page"] == 2
+    assert len(payload["suppliers"]) == 3
+    assert all("目标供应商" in supplier["name"] for supplier in payload["suppliers"])

@@ -22,14 +22,37 @@ class MaterialService:
         )
 
     @staticmethod
-    def list_materials(page=1, limit=100):
-        """Return a paginated material list with supplier names."""
-        total = MaterialRepository.count_all()
+    def list_materials(page=1, limit=100, keyword='', material_type=''):
+        """Return a filtered material page with global inventory metrics."""
+        total = MaterialRepository.count_filtered(keyword, material_type)
         offset = (page - 1) * limit
-        rows = MaterialRepository.find_all_with_supplier_paginated(limit, offset)
+        rows = MaterialRepository.find_all_with_supplier_paginated(
+            limit,
+            offset,
+            keyword=keyword,
+            material_type=material_type,
+        )
+        value_rows = MaterialRepository.find_inventory_values()
+        total_value = sum(float(row['inventory_value'] or 0) for row in value_rows)
+        cumulative = 0
+        abc_ranks = {}
+        for row in value_rows:
+            cumulative += float(row['inventory_value'] or 0)
+            ratio = cumulative / total_value if total_value > 0 else 1
+            abc_ranks[row['id']] = 'A' if ratio <= 0.70 else 'B' if ratio <= 0.90 else 'C'
+
+        materials = []
+        for row in rows:
+            item = dict(row)
+            item['abc_class'] = abc_ranks.get(item['id'], 'C')
+            materials.append(item)
         return {
-            'materials': [dict(r) for r in rows],
-            'total': total, 'page': page, 'limit': limit
+            'materials': materials,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'summary': MaterialRepository.inventory_summary(),
+            'material_types': MaterialRepository.list_material_types(),
         }
 
     @staticmethod
@@ -401,11 +424,11 @@ class SupplierService:
     """Supplier management business operations."""
 
     @staticmethod
-    def list_suppliers(page=1, limit=100):
-        """Return a paginated supplier list."""
-        total = SupplierRepository.count_all()
+    def list_suppliers(page=1, limit=100, keyword=''):
+        """Return a filtered, paginated supplier list."""
+        total = SupplierRepository.count_filtered(keyword)
         offset = (page - 1) * limit
-        rows = SupplierRepository.find_all_paginated(limit, offset)
+        rows = SupplierRepository.find_all_paginated(limit, offset, keyword=keyword)
         return {
             'suppliers': [dict(r) for r in rows],
             'total': total, 'page': page, 'limit': limit

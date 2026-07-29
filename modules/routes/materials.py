@@ -20,7 +20,14 @@ from modules.services.material_service import MaterialService, SupplierService, 
 def list_materials():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-    result = MaterialService.list_materials(page=page, limit=limit)
+    keyword = request.args.get('keyword', '').strip()
+    material_type = request.args.get('material_type', '').strip()
+    result = MaterialService.list_materials(
+        page=page,
+        limit=limit,
+        keyword=keyword,
+        material_type=material_type,
+    )
     return jsonify(result)
 
 
@@ -160,7 +167,8 @@ def delete_consumption(cid):
 def list_suppliers():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-    result = SupplierService.list_suppliers(page=page, limit=limit)
+    keyword = request.args.get('keyword', '').strip()
+    result = SupplierService.list_suppliers(page=page, limit=limit, keyword=keyword)
     return jsonify(result)
 
 
