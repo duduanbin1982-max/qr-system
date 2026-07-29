@@ -10,9 +10,9 @@
         <div style="display:flex;gap:var(--space-3);align-items:center">
           <div style="flex:1;position:relative">
             <input class="form-input" v-model="traceCode" :placeholder="traceMode==='serial'?'🔍 输入产品序列号进行追溯...':'🔍 输入订单号进行追溯...'"
-              @keyup.enter="doTrace" style="font-size:var(--text-lg);padding:var(--space-3) 16px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
+              @keyup.enter="doTrace()" style="font-size:var(--text-lg);padding:var(--space-3) 16px;border:2px solid var(--primary);border-radius:var(--radius-lg)" autofocus>
           </div>
-          <button class="btn btn-primary" @click="doTrace" :disabled="searching" style="padding:var(--space-3) 32px;font-size:15px;white-space:nowrap">
+          <button class="btn btn-primary" @click="doTrace()" :disabled="searching" style="padding:var(--space-3) 32px;font-size:15px;white-space:nowrap">
             <span v-if="searching">⏳ 查询中...</span>
             <span v-else>🔍 追溯</span>
           </button>
@@ -44,28 +44,34 @@
             <div><span style="color:var(--text-placeholder)">订单号：</span><code style="font-weight:600">{{ result.order?.order_no || '-' }}</code></div>
             <div><span style="color:var(--text-placeholder)">产品：</span>{{ result.order?.product_name || '-' }}</div>
             <div><span style="color:var(--text-placeholder)">位置序号：</span>{{ result.item.position_no || '-' }}</div>
-            <div><span style="color:var(--text-placeholder)">当前工序ID：</span>{{ result.item.current_process_id || '-' }}</div>
+            <div><span style="color:var(--text-placeholder)">当前工序：</span>{{ result.item.current_process_name || '-' }}</div>
           </div>
         </div>
       </div>
 
       <!-- Items list (order trace mode) -->
       <div class="card" style="margin-bottom:var(--space-5)" v-if="result.items && result.items.length">
-        <div class="card-header"><h3>📦 产品列表 ({{ result.items.length }})</h3></div>
+        <div class="card-header"><h3>📦 产品列表 ({{ result.meta?.totals?.items ?? result.items.length }})</h3></div>
         <div class="card-body">
           <table class="data-table" style="font-size:var(--text-xs)">
-            <thead><tr><th>序列号</th><th>位置</th><th>状态</th><th>当前工序ID</th><th>创建时间</th></tr></thead>
+            <thead><tr><th>序列号</th><th>位置</th><th>状态</th><th>当前工序</th><th>创建时间</th></tr></thead>
             <tbody>
-              <tr v-for="it in result.items" :key="it.id" :style="{cursor:'pointer'}" @click="traceCode=it.serial_no;traceMode='serial';doTrace()" title="点击追溯该产品">
+              <tr v-for="it in result.items" :key="it.serial_no" :style="{cursor:'pointer'}" @click="traceCode=it.serial_no;traceMode='serial';doTrace()" title="点击追溯该产品">
                 <td><code style="font-weight:600;color:var(--primary)">{{ it.serial_no }}</code></td>
                 <td>{{ it.position_no || "-" }}</td>
                 <td><span class="badge" :class="it.status==='completed'?'badge-success':it.status==='in_progress'?'badge-warning':'badge-info'" style="font-size:var(--text-2xs)">{{ it.status==='completed'?'已完成':it.status==='in_progress'?'生产中':'待处理' }}</span></td>
-                <td>{{ it.current_process_id || "-" }}</td>
+                <td>{{ it.current_process_name || "-" }}</td>
                 <td style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ it.created_at }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div v-if="result.items && tracePagination.total_pages > 1" style="display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);margin-bottom:var(--space-5)">
+        <button class="btn btn-sm" :disabled="tracePagination.page <= 1 || searching" title="上一页" @click="doTrace(tracePagination.page - 1)">←</button>
+        <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ tracePagination.page }} / {{ tracePagination.total_pages }} 页</span>
+        <button class="btn btn-sm" :disabled="tracePagination.page >= tracePagination.total_pages || searching" title="下一页" @click="doTrace(tracePagination.page + 1)">→</button>
       </div>
 
       <!-- Back to order (serial mode only, if order exists) -->
@@ -412,6 +418,10 @@ export default {
     const shipmentRecords = computed(() => result.value?.item
       ? result.value.order_scope?.shipments || []
       : result.value?.shipments || [])
+    const tracePagination = computed(() => result.value?.meta || {
+      page: 1,
+      total_pages: 1,
+    })
 
     // Trace history (localStorage)
     const HISTORY_KEY = 'qr_trace_history'
@@ -466,14 +476,14 @@ const traceHistory = ref(_history)
       return ({ pending: '待处置', rework: '返修', scrap: '报废', concession: '让步接收', isolate: '隔离', return: '退货' })[value] || value || '-'
     }
 
-    async function doTrace() {
+    async function doTrace(requestedPage = 1) {
       const code = traceCode.value.trim()
       if (!code) { showToast(traceMode.value==='serial'?'请输入产品序列号':'请输入订单号','error'); return }
       searching.value = true
       try {
         const d = traceMode.value === 'serial'
           ? await api.domains.trace.trace(code)
-          : await api.domains.trace.traceByOrder(code)
+          : await api.domains.trace.traceByOrder(code, { page: requestedPage, per_page: 100 })
         result.value = d
         saveHistory(code, traceMode.value)
       } catch(e) {
@@ -487,6 +497,7 @@ const traceHistory = ref(_history)
     return {
       traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff, printReport,
       reworkRecords, manualMaterialConsumptions, inventoryLogs, shipmentRecords,
+      tracePagination,
       qualityResultLabel, qualityResultClass, qualityTaskStatusLabel, qualityTaskStatusClass,
       qualityDispositionLabel,
     }

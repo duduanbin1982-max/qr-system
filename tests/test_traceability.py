@@ -61,6 +61,8 @@ def test_existing_serial_trace_returns_item_order_and_work_history(client, auth_
     assert response.status_code == 200, response.get_json()
     payload = response.get_json()
     assert payload["item"]["serial_no"] == fixture["serial_numbers"][0]
+    assert "qr_content" not in payload["item"]
+    assert "order_id" not in payload["item"]
     assert payload["order"]["order_no"] == fixture["order_no"]
     assert len(payload["work_records"]) == 1
     assert payload["work_records"][0]["quantity"] == 1
@@ -86,6 +88,67 @@ def test_missing_trace_targets_return_not_found(client, auth_headers):
         "error": "订单不存在",
         "code": "not_found",
     }
+
+
+def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(
+    client,
+    auth_headers,
+):
+    fixture = _create_serial_trace_fixture(client, serial_count=3)
+
+    response = client.get(
+        f"/api/trace/order/{fixture['order_no']}?page=2&per_page=1",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert set(payload["order"]) == {
+        "order_no",
+        "customer",
+        "product_name",
+        "product_code",
+        "quantity",
+        "completed",
+        "scrapped",
+        "rework",
+        "status",
+        "plan_start",
+        "plan_end",
+        "deadline",
+        "remark",
+        "qr_mode",
+        "delivery_status",
+        "created_at",
+        "updated_at",
+    }
+    assert [item["serial_no"] for item in payload["items"]] == [
+        fixture["serial_numbers"][1]
+    ]
+    assert "qr_content" not in payload["items"][0]
+    assert "order_id" not in payload["items"][0]
+    assert [record["serial_no"] for record in payload["work_records"]] == [
+        fixture["serial_numbers"][1]
+    ]
+    assert payload["meta"]["scope"] == "order"
+    assert payload["meta"]["snapshot_at"]
+    assert payload["meta"]["page"] == 2
+    assert payload["meta"]["per_page"] == 1
+    assert payload["meta"]["total_pages"] == 3
+    assert payload["meta"]["totals"]["items"] == 3
+    assert payload["meta"]["totals"]["work_records"] == 3
+
+
+def test_order_trace_rejects_invalid_pagination(client, auth_headers):
+    fixture = _create_serial_trace_fixture(client)
+
+    response = client.get(
+        f"/api/trace/order/{fixture['order_no']}?page=0&per_page=201",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "validation_error"
 
 
 def test_serial_trace_separates_item_and_order_scope(client, auth_headers):

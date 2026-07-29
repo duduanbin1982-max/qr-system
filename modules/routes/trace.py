@@ -1,5 +1,5 @@
 """Product and order traceability HTTP routes."""
-from flask import jsonify
+from flask import jsonify, request
 from modules.route_decorators import app, check_auth, check_permission
 from modules.services.trace_service import TraceService
 @app.route('/api/trace/<code>', methods=['GET'])
@@ -14,5 +14,9 @@ def trace_product(code):
 @check_permission("trace:view")
 def trace_order(order_no):
     """按订单号追溯整个订单的全部产品"""
-    result = TraceService.trace_by_order(order_no)
+    result = TraceService.trace_by_order(
+        order_no,
+        page=request.args.get("page", 1),
+        per_page=request.args.get("per_page", 100),
+    )
     return jsonify(result)
