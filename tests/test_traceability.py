@@ -1,6 +1,6 @@
 import uuid
 
-from factories import create_material, create_order, ensure_process
+from factories import create_inventory_item, create_material, create_order, ensure_process
 from modules.db import get_db
 
 
@@ -180,3 +180,67 @@ def test_serial_trace_separates_item_and_order_scope(client, auth_headers):
     assert [row["id"] for row in payload["order_scope"]["manual_material_consumptions"]] == [
         manual_consumption.lastrowid
     ]
+
+
+def test_serial_trace_returns_complete_order_scope_lifecycle(client, auth_headers):
+    fixture = _create_serial_trace_fixture(client)
+    suffix = uuid.uuid4().hex[:8].upper()
+    with client.application.app_context():
+        db = get_db()
+        inventory_id = create_inventory_item(
+            db,
+            order_id=fixture["order_id"],
+            product_model=f"TRACE-INV-{suffix}",
+            product_name="Trace Inventory Product",
+        )
+        rework = db.execute(
+            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) "
+            "VALUES (?, ?, ?, 1, 'trace lifecycle')",
+            (fixture["order_id"], fixture["process_id"], fixture["user_id"]),
+        )
+        inventory_log = db.execute(
+            "INSERT INTO inventory_logs "
+            "(inventory_id, type, quantity, order_id, order_no, operator_id, operator_name) "
+            "VALUES (?, 'in', 1, ?, ?, ?, 'Trace Operator')",
+            (
+                inventory_id,
+                fixture["order_id"],
+                fixture["order_no"],
+                fixture["user_id"],
+            ),
+        )
+        shipment_ids = []
+        for index in range(11):
+            shipment = db.execute(
+                "INSERT INTO shipments "
+                "(shipment_no, customer, status, total_quantity) VALUES (?, 'Trace Customer', 'completed', 1)",
+                (f"TRACE-SHIP-{suffix}-{index:02d}",),
+            )
+            shipment_ids.append(shipment.lastrowid)
+            db.execute(
+                "INSERT INTO shipment_items "
+                "(shipment_id, inventory_id, product_model, product_name, quantity, order_id, order_no) "
+                "VALUES (?, ?, ?, 'Trace Inventory Product', 1, ?, ?)",
+                (
+                    shipment.lastrowid,
+                    inventory_id,
+                    f"TRACE-INV-{suffix}",
+                    fixture["order_id"],
+                    fixture["order_no"],
+                ),
+            )
+        db.commit()
+
+    response = client.get(
+        f"/api/trace/{fixture['serial_numbers'][0]}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    order_scope = response.get_json()["order_scope"]
+    assert [row["id"] for row in order_scope["rework_records"]] == [rework.lastrowid]
+    assert [row["id"] for row in order_scope["inventory_logs"]] == [inventory_log.lastrowid]
+    assert order_scope["inventory_logs"][0]["product_model"] == f"TRACE-INV-{suffix}"
+    assert len(order_scope["shipments"]) == 11
+    assert {row["id"] for row in order_scope["shipments"]} == set(shipment_ids)
+    assert all(row["order_quantity"] == 1 for row in order_scope["shipments"])

@@ -155,6 +155,24 @@
                 <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">抽检 {{ qi.quantity_checked }} / 合格 {{ qi.quantity_passed }} {{ qi.inspected_at }}</div>
               </div>
             </div>
+            <div v-for="log in inventoryLogs" :key="'inventory-'+log.id" class="tl-item" style="display:flex;gap:var(--space-4);padding:var(--space-3) 0;border-bottom:1px solid var(--bg-hover)">
+              <div style="min-width:60px;text-align:center">
+                <div style="width:32px;height:32px;border-radius:50%;background:#e8f5e9;display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:14px">📦</div>
+              </div>
+              <div style="flex:1">
+                <div style="font-weight:500">{{ result.item ? '订单入库' : '入库' }} · {{ log.product_name || log.product_model || '-' }}</div>
+                <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">{{ log.type === 'in' ? '+' : '-' }}{{ log.quantity }} {{ log.created_at }}</div>
+              </div>
+            </div>
+            <div v-for="shipment in shipmentRecords" :key="'shipment-'+shipment.id" class="tl-item" style="display:flex;gap:var(--space-4);padding:var(--space-3) 0;border-bottom:1px solid var(--bg-hover)">
+              <div style="min-width:60px;text-align:center">
+                <div style="width:32px;height:32px;border-radius:50%;background:#e3f2fd;display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:14px">🚚</div>
+              </div>
+              <div style="flex:1">
+                <div style="font-weight:500">{{ result.item ? '订单发货' : '发货' }} · {{ shipment.shipment_no }}</div>
+                <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">数量 {{ shipment.order_quantity || shipment.total_quantity }} {{ shipment.completed_at || shipment.created_at }}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -241,7 +259,7 @@
 
       <!-- Material Consumptions -->
       <div class="card" style="margin-bottom:var(--space-5)">
-        <div class="card-header"><h3>🧱 物料消耗 ({{ (result.material_consumptions||[]).length }})</h3></div>
+        <div class="card-header"><h3>🧱 {{ result.item ? '工件物料消耗' : '物料消耗' }} ({{ (result.material_consumptions||[]).length }})</h3></div>
         <div class="card-body">
           <table v-if="result.material_consumptions && result.material_consumptions.length" class="data-table" style="font-size:var(--text-xs)">
             <thead><tr><th>物料</th><th>规格</th><th>工序</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
@@ -261,15 +279,36 @@
         </div>
       </div>
 
+      <div v-if="result.item" class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>订单级手工物料消耗 ({{ manualMaterialConsumptions.length }})</h3></div>
+        <div class="card-body">
+          <table v-if="manualMaterialConsumptions.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>物料</th><th>规格</th><th>工序</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
+            <tbody>
+              <tr v-for="mc in manualMaterialConsumptions" :key="mc.id">
+                <td style="font-weight:500">{{ mc.material_name }}</td>
+                <td>{{ mc.material_spec || '-' }}</td>
+                <td>{{ mc.process_name || '-' }}</td>
+                <td style="color:var(--danger);font-weight:600">{{ mc.quantity }}</td>
+                <td>{{ mc.operator_name || '-' }}</td>
+                <td style="color:var(--text-placeholder);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="mc.notes">{{ mc.notes || '-' }}</td>
+                <td style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">{{ mc.created_at }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无订单级手工物料消耗</p>
+        </div>
+      </div>
+
       <!-- Rework Records -->
       <div class="card" style="margin-bottom:var(--space-5)">
-        <div class="card-header"><h3>🔄 返工记录 ({{ (result.rework_records||[]).length }})</h3></div>
+        <div class="card-header"><h3>🔄 {{ result.item ? '订单级返工记录' : '返工记录' }} ({{ reworkRecords.length }})</h3></div>
         <div class="card-body">
-          <div v-if="result.rework_records && result.rework_records.length">
+          <div v-if="reworkRecords.length">
             <table class="data-table" style="font-size:var(--text-xs)">
               <thead><tr><th>工序</th><th>数量</th><th>原因</th><th>操作人</th><th>状态</th><th>创建时间</th><th>完成时间</th></tr></thead>
               <tbody>
-                <tr v-for="r in result.rework_records" :key="r.id">
+                <tr v-for="r in reworkRecords" :key="r.id">
                   <td style="font-weight:500">{{ r.process_name }}</td>
                   <td style="color:var(--danger);font-weight:600">{{ r.quantity }}</td>
                   <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="r.reason">{{ r.reason || "-" }}</td>
@@ -285,18 +324,41 @@
         </div>
       </div>
 
+      <!-- Inventory Logs -->
+      <div class="card" style="margin-bottom:var(--space-5)">
+        <div class="card-header"><h3>📦 {{ result.item ? '订单级库存流水' : '库存流水' }} ({{ inventoryLogs.length }})</h3></div>
+        <div class="card-body">
+          <table v-if="inventoryLogs.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>产品编码</th><th>产品名称</th><th>类型</th><th>数量</th><th>操作人</th><th>备注</th><th>时间</th></tr></thead>
+            <tbody>
+              <tr v-for="log in inventoryLogs" :key="log.id">
+                <td><code>{{ log.product_model || '-' }}</code></td>
+                <td>{{ log.product_name || '-' }}</td>
+                <td><span class="badge" :class="log.type==='in'?'badge-success':'badge-warning'">{{ log.type==='in'?'入库':'出库' }}</span></td>
+                <td style="font-weight:600">{{ log.quantity }}</td>
+                <td>{{ log.operator_name || '-' }}</td>
+                <td>{{ log.remark || '-' }}</td>
+                <td>{{ log.created_at }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else style="text-align:center;color:var(--text-placeholder);padding:var(--space-5)">暂无库存流水</p>
+        </div>
+      </div>
+
       <!-- Shipments -->
       <div class="card">
-        <div class="card-header"><h3>🚚 发货记录 ({{ (result.shipments||[]).length }})</h3></div>
+        <div class="card-header"><h3>🚚 {{ result.item ? '订单级发货记录' : '发货记录' }} ({{ shipmentRecords.length }})</h3></div>
         <div class="card-body">
-          <table v-if="result.shipments && result.shipments.length" class="data-table" style="font-size:var(--text-xs)">
-            <thead><tr><th>出库单号</th><th>客户</th><th>状态</th><th>总量</th><th>出库时间</th></tr></thead>
+          <table v-if="shipmentRecords.length" class="data-table" style="font-size:var(--text-xs)">
+            <thead><tr><th>出库单号</th><th>客户</th><th>状态</th><th>订单数量</th><th>出库单总量</th><th>出库时间</th></tr></thead>
             <tbody>
-              <tr v-for="s in result.shipments" :key="s.id">
+              <tr v-for="s in shipmentRecords" :key="s.id">
                 <td><code style="font-size:var(--text-xs-alt)">{{ s.shipment_no }}</code></td>
                 <td>{{ s.customer || '-' }}</td>
                 <td><span class="badge" :class="s.status==='completed'?'badge-success':'badge-info'" style="font-size:var(--text-2xs)">{{ s.status==='completed'?'已出库':'待出库' }}</span></td>
-                <td style="text-align:center;font-weight:600">{{ s.total_quantity }}</td>
+                <td style="text-align:center;font-weight:600">{{ s.order_quantity || s.total_quantity }}</td>
+                <td style="text-align:center">{{ s.total_quantity }}</td>
                 <td style="font-size:var(--text-xs-alt)">{{ s.completed_at || '-' }}</td>
               </tr>
             </tbody>
@@ -328,7 +390,7 @@
 </style>
 
 <script>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
@@ -338,6 +400,18 @@ export default {
     const traceMode = ref('serial')
     const searching = ref(false)
     const result = ref(null)
+    const reworkRecords = computed(() => result.value?.item
+      ? result.value.order_scope?.rework_records || []
+      : result.value?.rework_records || [])
+    const manualMaterialConsumptions = computed(() => result.value?.item
+      ? result.value.order_scope?.manual_material_consumptions || []
+      : [])
+    const inventoryLogs = computed(() => result.value?.item
+      ? result.value.order_scope?.inventory_logs || []
+      : result.value?.inventory_logs || [])
+    const shipmentRecords = computed(() => result.value?.item
+      ? result.value.order_scope?.shipments || []
+      : result.value?.shipments || [])
 
     // Trace history (localStorage)
     const HISTORY_KEY = 'qr_trace_history'
@@ -412,6 +486,7 @@ const traceHistory = ref(_history)
 
     return {
       traceCode, traceMode, searching, result, doTrace, traceHistory, getTimeDiff, printReport,
+      reworkRecords, manualMaterialConsumptions, inventoryLogs, shipmentRecords,
       qualityResultLabel, qualityResultClass, qualityTaskStatusLabel, qualityTaskStatusClass,
       qualityDispositionLabel,
     }

@@ -69,13 +69,15 @@ class TraceRepository:
     def find_shipments_by_order_id(order_id, db=None):
         db = resolve_db(db)
         return db.execute("""
-            SELECT DISTINCT s.id, s.shipment_no, s.customer, s.status,
-                   s.total_quantity, s.completed_at
+            SELECT s.id, s.shipment_no, s.customer, s.status,
+                   s.total_quantity, SUM(si.quantity) AS order_quantity,
+                   s.created_at, s.completed_at
             FROM shipments s
             JOIN shipment_items si ON si.shipment_id = s.id
             WHERE si.order_id = ?
+            GROUP BY s.id, s.shipment_no, s.customer, s.status,
+                     s.total_quantity, s.created_at, s.completed_at
             ORDER BY s.created_at DESC
-            LIMIT 10
         """, (order_id,)).fetchall()
 
     @staticmethod
@@ -193,8 +195,10 @@ class TraceRepository:
         """查订单入库记录"""
         db = resolve_db(db)
         return db.execute("""
-            SELECT il.id, il.type, il.quantity, il.remark, il.operator_name, il.created_at
+            SELECT il.id, il.type, il.quantity, il.remark, il.operator_name, il.created_at,
+                   inventory.product_model, inventory.product_name
             FROM inventory_logs il
+            LEFT JOIN inventory ON inventory.id = il.inventory_id
             WHERE il.order_id = ?
             ORDER BY il.created_at ASC
         """, (order_id,)).fetchall()
