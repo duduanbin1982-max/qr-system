@@ -17,6 +17,7 @@ os.environ["ENABLE_SWAGGER"] = "false"
 os.environ["DB_PATH"] = TEST_DB
 
 UNIT_TEST_FILES = {
+    "test_quality_evaluation_policy.py",
     "test_refactor_services.py",
     "test_scan_helper.py",
     "test_work_report_command.py",

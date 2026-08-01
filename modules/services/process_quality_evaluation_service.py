@@ -9,6 +9,7 @@ from modules.domain.errors import (
     StaleQualityEvaluationTaskError,
 )
 from modules.domain.quality_rules import PROCESS_QUALITY_EVALUATION_DEFAULT_RULES
+from modules.domain.quality_evaluation import LEGACY_DIMENSIONS, QualityEvaluationPolicy
 from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
 from modules.repositories.process_quality_evaluation_task_repository import (
     ProcessQualityEvaluationTaskRepository,
@@ -19,13 +20,7 @@ from modules.services.legacy_handoff_adapter import LegacyHandoffAdapter
 
 
 class ProcessQualityEvaluationService:
-    DIMENSIONS = (
-        ("processing_quality", "加工质量"),
-        ("dimensional_accuracy", "尺寸或精度"),
-        ("appearance_quality", "外观质量"),
-        ("process_continuity", "工序可接续性"),
-        ("cleanliness_protection", "清洁及防护"),
-    )
+    DIMENSIONS = LEGACY_DIMENSIONS
     @classmethod
     def rules(cls, db=None):
         raw = SettingRepository.get_value("process_quality_evaluation_rules", "", db=db)
@@ -84,40 +79,19 @@ class ProcessQualityEvaluationService:
 
     @staticmethod
     def _score_threshold(value, default=60):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
+        return QualityEvaluationPolicy.score_threshold(value, default)
 
     @staticmethod
     def _positive_int(value, default=1):
-        try:
-            result = int(value)
-        except (TypeError, ValueError):
-            return default
-        return result if result > 0 else default
+        return QualityEvaluationPolicy.positive_int(value, default)
 
     @staticmethod
     def _rating(value, label):
-        try:
-            rating = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{label}必须是1-5分") from exc
-        if rating < 1 or rating > 5:
-            raise ValueError(f"{label}必须是1-5分")
-        return rating
+        return QualityEvaluationPolicy.rating(value, label)
 
     @staticmethod
     def _grade(total_score):
-        if total_score >= 90:
-            return "优秀"
-        if total_score >= 80:
-            return "良好"
-        if total_score >= 60:
-            return "合格"
-        if total_score >= 40:
-            return "待改进"
-        return "不合格"
+        return QualityEvaluationPolicy.grade(total_score)
 
     @classmethod
     def _default_template(cls, rules):
@@ -374,32 +348,7 @@ class ProcessQualityEvaluationService:
     @classmethod
     def _evaluate_dimensions(cls, entry, template_snapshot):
         configured = template_snapshot.get("dimensions") or cls._default_template(cls.rules())["dimensions"]
-        supplied = entry.get("dimension_scores")
-        if not isinstance(supplied, dict):
-            supplied = {key: entry.get(key) for key, _ in cls.DIMENSIONS if entry.get(key) is not None}
-        scores = {}
-        weighted_total = 0
-        weight_total = 0
-        for dimension in configured:
-            key = dimension["key"]
-            if key not in supplied and dimension.get("required", True):
-                raise ValueError(f"{dimension['label']}必须评分")
-            if key not in supplied:
-                continue
-            rating = cls._rating(supplied.get(key), dimension["label"])
-            weight = cls._positive_int(dimension.get("weight"), 1)
-            scores[key] = rating
-            weighted_total += rating * weight
-            weight_total += weight
-        if not scores or weight_total <= 0:
-            raise ValueError("至少填写一个评分维度")
-        total_score = round(weighted_total / (5 * weight_total) * 100, 1)
-        fallback_rating = max(1, min(5, round(total_score / 20)))
-        legacy = {
-            key: scores.get(key, fallback_rating)
-            for key, _ in cls.DIMENSIONS
-        }
-        return scores, legacy, total_score
+        return QualityEvaluationPolicy.evaluate_dimensions(entry, configured, cls.DIMENSIONS)
 
     @classmethod
     def submit(cls, data, current_user):
@@ -428,29 +377,16 @@ class ProcessQualityEvaluationService:
                         details={"task_id": task["id"], "task_status": task["status"]},
                     )
                 template_snapshot = task.get("template_snapshot") or cls._default_template(rules)
-                dimension_scores, legacy_dimensions, total_score = cls._evaluate_dimensions(
-                    entry, template_snapshot
+                configured_dimensions = (
+                    template_snapshot.get("dimensions")
+                    or cls._default_template(rules)["dimensions"]
                 )
-                issue_tags = entry.get("issue_tags", [])
-                if isinstance(issue_tags, str):
-                    issue_tags = [issue_tags.strip()] if issue_tags.strip() else []
-                if not isinstance(issue_tags, list):
-                    raise ValueError("问题标签格式不正确")
-                issue_tags = [str(tag).strip() for tag in issue_tags if str(tag).strip()]
-                comment = str(entry.get("comment") or "").strip()
-                threshold = cls._score_threshold(
-                    template_snapshot.get("low_score_threshold"), rules["low_score_threshold"]
+                decision = QualityEvaluationPolicy.decide(
+                    entry,
+                    template_snapshot,
+                    rules,
+                    configured_dimensions,
                 )
-                critical_threshold = cls._score_threshold(
-                    template_snapshot.get("critical_score_threshold"), rules["critical_score_threshold"]
-                )
-                critical_tags = set(template_snapshot.get("critical_issue_tags") or rules.get("critical_issue_tags") or [])
-                if total_score < threshold and not (issue_tags or comment):
-                    raise ValueError("低分评价必须填写问题标签或备注")
-                severity = "critical" if total_score < critical_threshold or critical_tags.intersection(issue_tags) else (
-                    "warning" if total_score < threshold else "normal"
-                )
-                status = "pending_verification" if severity in {"warning", "critical"} else "confirmed"
                 evaluation_id = ProcessQualityEvaluationRepository.insert_evaluation({
                     "task_id": task["id"],
                     "order_id": task["order_id"],
@@ -463,19 +399,19 @@ class ProcessQualityEvaluationService:
                     "evaluator_user_id": user_id,
                     "quantity": task["quantity"],
                     "attribution_type": task["attribution_type"],
-                    **legacy_dimensions,
-                    "total_score": total_score,
-                    "grade": cls._grade(total_score),
-                    "issue_tags": issue_tags,
-                    "comment": comment,
-                    "status": status,
+                    **decision.legacy_dimensions,
+                    "total_score": decision.total_score,
+                    "grade": decision.grade,
+                    "issue_tags": decision.issue_tags,
+                    "comment": decision.comment,
+                    "status": decision.status,
                     "template_id": task.get("template_id"),
-                    "dimension_scores": dimension_scores,
+                    "dimension_scores": decision.dimension_scores,
                     "template_snapshot": template_snapshot,
-                    "severity": severity,
+                    "severity": decision.severity,
                 }, db)
                 ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
-                if status == "pending_verification":
+                if decision.status == "pending_verification":
                     from modules.services.quality_management_service import QualityManagementService
                     QualityManagementService.generate_for_low_evaluation({
                         "id": evaluation_id,
@@ -484,11 +420,14 @@ class ProcessQualityEvaluationService:
                         "target_process_id": task["target_process_id"],
                         "target_work_record_id": task["target_work_record_id"],
                         "quantity": task["quantity"],
-                        "severity": severity,
+                        "severity": decision.severity,
                     }, user_id, db)
                 results.append({
-                    "id": evaluation_id, "task_id": task["id"], "status": status,
-                    "total_score": total_score, "severity": severity,
+                    "id": evaluation_id,
+                    "task_id": task["id"],
+                    "status": decision.status,
+                    "total_score": decision.total_score,
+                    "severity": decision.severity,
                 })
         return {"ok": True, "items": results}
 
@@ -644,8 +583,13 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def _record_legacy_handoff(cls, review_id, data, db):
-        rating = cls._rating(data.get("rating"), "评分")
         rules = cls.rules(db)
+        decision = QualityEvaluationPolicy.from_legacy(
+            data.get("rating"),
+            [data["issue_type"]] if data.get("issue_type") else [],
+            data.get("status"),
+            rules,
+        )
         task = ProcessQualityEvaluationTaskRepository.find_matching_pending_task({
             "order_id": data["order_id"],
             "serial_no": data.get("serial_no", ""),
@@ -653,10 +597,7 @@ class ProcessQualityEvaluationService:
             "evaluator_process_id": data["to_process_id"],
             "evaluator_user_id": data["evaluator_user_id"],
         }, db)
-        issue_tags = [data["issue_type"]] if data.get("issue_type") else []
-        total_score = rating * 20.0
         template_snapshot = cls._default_template(rules)
-        dimension_scores = {key: rating for key, _ in cls.DIMENSIONS}
         evaluation_id = ProcessQualityEvaluationRepository.insert_evaluation({
             "task_id": task["id"] if task else None,
             "order_id": data["order_id"],
@@ -669,21 +610,17 @@ class ProcessQualityEvaluationService:
             "evaluator_user_id": data["evaluator_user_id"],
             "quantity": data.get("quantity", 1),
             "attribution_type": "worker",
-            "processing_quality": rating,
-            "dimensional_accuracy": rating,
-            "appearance_quality": rating,
-            "process_continuity": rating,
-            "cleanliness_protection": rating,
-            "total_score": total_score,
-            "grade": cls._grade(total_score),
-            "issue_tags": issue_tags,
+            **decision.legacy_dimensions,
+            "total_score": decision.total_score,
+            "grade": decision.grade,
+            "issue_tags": decision.issue_tags,
             "comment": data.get("comment", ""),
-            "status": "pending_verification" if data.get("status") == "pending" else "confirmed",
+            "status": decision.status,
             "source_type": "legacy_handoff",
             "source_handoff_review_id": review_id,
-            "dimension_scores": dimension_scores,
+            "dimension_scores": decision.dimension_scores,
             "template_snapshot": template_snapshot,
-            "severity": "warning" if total_score < rules["low_score_threshold"] else "normal",
+            "severity": decision.severity,
         }, db)
         if task:
             ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
