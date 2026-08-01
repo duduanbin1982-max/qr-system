@@ -175,6 +175,21 @@ class ApprovalService:
         )
 
     @staticmethod
+    def _decide_workflow(action, config, current_level, current_role, txn):
+        try:
+            return ApprovalWorkflow.decide(
+                action, config, current_level, current_role
+            )
+        except ConflictError:
+            return ApprovalWorkflow.decide(
+                action,
+                config,
+                current_level,
+                current_role,
+                ApprovalService._role_name_map(db=txn),
+            )
+
+    @staticmethod
     def _current_user_role(approver, db=None):
         approver_id = approver.get('id')
         if approver_id is not None:
@@ -227,12 +242,12 @@ class ApprovalService:
                 work_record.get('process_id'), db=txn
             )
             current_role = ApprovalService._current_user_role(approver, db=txn)
-            decision = ApprovalWorkflow.decide(
+            decision = ApprovalService._decide_workflow(
                 action,
                 dict(cfg_row) if cfg_row else None,
                 record.get('current_level', 1),
                 current_role,
-                ApprovalService._role_name_map(db=txn),
+                txn,
             )
             if decision.is_final:
                 ApprovalService._apply_final_approval(
