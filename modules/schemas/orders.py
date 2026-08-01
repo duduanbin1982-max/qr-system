@@ -48,4 +48,14 @@ orders_schemas = {
                 'route_id': {'type': ['integer', 'null']},
                 'status': {'enum': ['pending', 'producing', 'cancelled', 'paused'], 'type': 'string'}},
  'type': 'object'},
+    'qr_print_record': {
+        'additionalProperties': False,
+        'properties': {
+            'mode': {'enum': ['order', 'serial'], 'type': 'string'},
+            'copies': {'maximum': 10, 'minimum': 1, 'type': 'integer'},
+            'label_count': {'maximum': 999999, 'minimum': 1, 'type': 'integer'},
+        },
+        'required': ['mode', 'copies', 'label_count'],
+        'type': 'object',
+    },
 }

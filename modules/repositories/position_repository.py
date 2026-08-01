@@ -87,13 +87,26 @@ class PositionRepository:
         )
 
     @staticmethod
-    def find_valid_process_ids(process_ids, db=None):
+    def find_valid_process_ids(process_ids, db=None, active_only=False):
         db = resolve_db(db)
         placeholders = ','.join('?' for _ in process_ids)
+        status_clause = " AND status = 'active'" if active_only else ""
         rows = db.execute(
-            'SELECT id FROM processes WHERE id IN (' + placeholders + ')', process_ids
+            'SELECT id FROM processes WHERE id IN (' + placeholders + ')' + status_clause,
+            process_ids
         ).fetchall()
         return {r[0] for r in rows}
+
+    @staticmethod
+    def find_process_ids_by_position(pos_id, db=None):
+        db = resolve_db(db)
+        return {
+            row["process_id"]
+            for row in db.execute(
+                "SELECT process_id FROM position_processes WHERE position_id = ?",
+                (pos_id,),
+            ).fetchall()
+        }
 
     @staticmethod
     def count_users_by_position(pos_id, db=None):
@@ -114,3 +127,21 @@ class PositionRepository:
             "SELECT id, name FROM positions WHERE id = ?", (pos_id,)
         ).fetchone()
         return row
+
+    @staticmethod
+    def find_active_positions_for_process_ids(process_ids, db=None):
+        db = resolve_db(db)
+        if process_ids is None:
+            return db.execute(
+                "SELECT * FROM positions WHERE status = 'active' ORDER BY id"
+            ).fetchall()
+        if not process_ids:
+            return []
+        placeholders = ",".join("?" for _ in process_ids)
+        return db.execute(
+            "SELECT DISTINCT p.* FROM positions p "
+            "JOIN position_processes pp ON pp.position_id = p.id "
+            f"WHERE p.status = 'active' AND pp.process_id IN ({placeholders}) "
+            "ORDER BY p.id",
+            list(process_ids),
+        ).fetchall()

@@ -64,8 +64,8 @@ s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity
 t("dup->409", s==409, f"{s}:{d}")
 t("msg:dup", "不可重复" in str(d.get("error","")), str(d.get("error")))
 
-# 2. cross-process dup [KEY FIX]
-hdr("2. cross-process dup [KEY]")
+# 2. same worker may report the serial at a later process
+hdr("2. cross-process report is allowed")
 # Find second process for same order
 PID2 = None
 for o in orders.get("orders", []):
@@ -80,8 +80,7 @@ if PID2:
     s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID,"quantity":1,"report_type":"normal","serial_no":s2},token)
     t("procA ok", s==200, f"{s}:{d}")
     s,d = api("POST","/api/mobile/report",{"order_id":OID,"process_id":PID2,"quantity":1,"report_type":"normal","serial_no":s2},token)
-    t("procB cross->409", s==409, f"{s}:{d}")
-    t("msg:cross", "在此订单已报工" in str(d.get("error","")), str(d.get("error")))
+    t("procB cross-process ok", s==200, f"{s}:{d}")
 else:
     t("cross-process", False, "no second process available")
 

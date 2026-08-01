@@ -3,7 +3,7 @@
 <div style="padding:var(--space-6)">
     <!-- 统计卡 -->
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val" style="color:var(--warning)">{{ approvals.length }}</div><div class="s-label">待审批</div></div></div>
+      <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val" style="color:var(--warning)">{{ approvalTotal }}</div><div class="s-label">待审批</div></div></div>
       <div class="summary-item"><span class="s-icon">📋</span><div><div class="s-val">{{ historyTotal }}</div><div class="s-label">已处理</div></div></div>
       <div class="summary-item"><span class="s-icon">⏱</span><div><div class="s-val">{{ stats.avg_hours }}h</div><div class="s-label">平均审批</div></div></div>
       <div class="summary-item" v-if="stats.pending_over_24h > 0"><span class="s-icon">🔴</span><div><div class="s-val text-danger">{{ stats.pending_over_24h }}</div><div class="s-label">超24h未批</div></div></div>
@@ -27,7 +27,7 @@
       <input v-model="filterOrderNo" placeholder="订单号..." style="padding:5px 10px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:140px">
       <input v-model="filterWorker" placeholder="工人..." style="padding:5px 10px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100px">
       <input v-model="filterProcess" placeholder="工序..." style="padding:5px 10px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px">
-      <span style="font-size:12px;color:var(--text-placeholder);line-height:30px">筛选 {{ filteredApprovals.length }} / {{ approvals.length }}</span>
+      <span style="font-size:12px;color:var(--text-placeholder);line-height:30px">当前页筛选 {{ filteredApprovals.length }} / {{ approvals.length }}，共 {{ approvalTotal }} 条</span>
     </div>
 
     <!-- 待审批列表 -->
@@ -37,7 +37,7 @@
         <p style="font-size:48px;margin:0">📋</p>
         <p style="margin-top:12px">暂无待审批记录</p>
       </div>
-      <div v-if="approvals.length > 0 && filteredApprovals.length > 0" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <div v-if="canApprove && approvals.length > 0 && filteredApprovals.length > 0" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <label style="font-size:12px;cursor:pointer"><input type="checkbox" v-model="selectAll" @change="toggleSelectAll" style="margin-right:4px">全选</label>
         <span style="font-size:12px;color:var(--text-placeholder)">已选 {{ selectedIds.length }}</span>
         <button class="btn btn-success btn-sm" @click="batchHandle('approve')" :disabled="selectedIds.length===0">✅ 批量通过</button>
@@ -47,11 +47,12 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th style="width:40px">选</th>
+              <th v-if="canApprove" style="width:40px">选</th>
               <th>订单号</th>
               <th>工序</th>
               <th>工人</th>
               <th>数量</th>
+              <th>报工信息</th>
               <th>级别</th>
               <th>提交时间</th>
               <th v-if="canApprove">拒绝原因</th>
@@ -60,14 +61,27 @@
           </thead>
           <tbody>
             <tr v-for="a in filteredApprovals" :key="a.id">
-              <td><input type="checkbox" :value="a.id" v-model="selectedIds" style="cursor:pointer"></td>
+              <td v-if="canApprove"><input type="checkbox" :value="a.id" v-model="selectedIds" style="cursor:pointer"></td>
               <td><span style="font-weight:600;color:var(--primary)">{{ a.order_no || '-' }}</span></td>
               <td>{{ a.process_name || '-' }}</td>
               <td>{{ a.worker_name || '-' }}</td>
               <td>{{ a.quantity }}</td>
+              <td class="approval-detail">
+                <span class="report-source-badge" :class="{ backfill: a.report_source === 'serial_backfill' }">
+                  {{ a.report_source === 'serial_backfill' ? '序列号补报' : '正常报工' }}
+                </span>
+                <template v-if="a.report_source === 'serial_backfill'">
+                  <div>序列号：{{ a.serial_no || '-' }}</div>
+                  <div>提交岗位：{{ a.submit_position_name || '-' }}</div>
+                  <template v-if="a.actual_completed_at || a.backfill_reason">
+                    <div>实际完成：{{ a.actual_completed_at || '-' }}</div>
+                    <div class="backfill-reason">原因：{{ a.backfill_reason || '-' }}</div>
+                  </template>
+                </template>
+              </td>
               <td><span style="font-size:11px;background:var(--primary-light);color:var(--primary);padding:1px 6px;border-radius:8px">L{{ a.current_level || 1 }}</span></td>
               <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ a.created_at }}</td>
-              <td v-if="canApprove">
+              <td v-if="canApprove" class="approval-actions">
                 <input class="form-input" v-model="rejectComment[a.id]" placeholder="拒绝原因(可选)" style="font-size:var(--text-xs);padding:var(--space-1) 8px;width:120px" @keyup.enter="handle(a.id,'reject')">
               </td>
               <td v-if="canApprove">
@@ -81,6 +95,11 @@
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="approvalTotal > approvalLimit" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
+        <button class="btn btn-default btn-sm" @click="changeApprovalPage(-1)" :disabled="loading || approvalPage <= 1">上一页</button>
+        <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ approvalPage }} / {{ Math.ceil(approvalTotal / approvalLimit) }} 页</span>
+        <button class="btn btn-default btn-sm" @click="changeApprovalPage(1)" :disabled="loading || approvalPage * approvalLimit >= approvalTotal">下一页</button>
       </div>
     </div>
 
@@ -99,6 +118,7 @@
               <th>工序</th>
               <th>工人</th>
               <th>数量</th>
+              <th>报工信息</th>
               <th>状态</th>
               <th>审批人</th>
               <th>备注</th>
@@ -111,6 +131,19 @@
               <td>{{ a.process_name || '-' }}</td>
               <td>{{ a.worker_name || '-' }}</td>
               <td>{{ a.quantity }}</td>
+              <td class="approval-detail">
+                <span class="report-source-badge" :class="{ backfill: a.report_source === 'serial_backfill' }">
+                  {{ a.report_source === 'serial_backfill' ? '序列号补报' : '正常报工' }}
+                </span>
+                <template v-if="a.report_source === 'serial_backfill'">
+                  <div>序列号：{{ a.serial_no || '-' }}</div>
+                  <div>提交岗位：{{ a.submit_position_name || '-' }}</div>
+                  <template v-if="a.actual_completed_at || a.backfill_reason">
+                    <div>实际完成：{{ a.actual_completed_at || '-' }}</div>
+                    <div class="backfill-reason">原因：{{ a.backfill_reason || '-' }}</div>
+                  </template>
+                </template>
+              </td>
               <td>
                 <span class="badge" :class="a.status==='approved'?'badge-success':'badge-danger'" style="font-size:var(--text-xs-alt)">
                   {{ a.status==='approved'?'已批准':'已拒绝' }}
@@ -118,7 +151,7 @@
               </td>
               <td>{{ a.approver_name || '-' }}</td>
               <td style="font-size:var(--text-xs);color:var(--text-placeholder);max-width:150px">{{ a.comment || '-' }}</td>
-              <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ a.created_at }}</td>
+              <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ a.processed_at || a.created_at }}</td>
             </tr>
           </tbody>
         </table>
@@ -138,33 +171,27 @@
           <table class="data-table" v-if="configProcesses.length">
             <thead><tr><th>工序名称</th><th>分类</th><th>需审批</th><th>一级审批</th><th>二级审批</th><th>三级审批</th></tr></thead>
             <tbody>
-              <tr v-for="p in configProcesses" :key="p.id">
-                <td style="font-weight:500">{{ p.name }}</td>
+              <tr v-for="p in configProcesses" :key="p.process_id">
+                <td style="font-weight:500">{{ p.process_name || '-' }}</td>
                 <td style="color:var(--text-placeholder);font-size:12px">{{ p.category || '-' }}</td>
                 <td>
                   <input type="checkbox" v-model="p.require_approval" :true-value="1" :false-value="0" @change="saveConfig(p)" style="accent-color:var(--primary);cursor:pointer">
                 </td>
                 <td>
-                  <select v-model="p.approver_role" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-                    <option value="admin">管理员</option>
-                    <option value="supervisor">主管</option>
-                    <option value="quality">质检员</option>
+                  <select v-model="p.approver_role" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
                   </select>
                 </td>
                 <td>
-                  <select v-model="p.approver_role_2" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                  <select v-model="p.approver_role_2" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
                     <option value="">-- 无 --</option>
-                    <option value="admin">管理员</option>
-                    <option value="supervisor">主管</option>
-                    <option value="quality">质检员</option>
+                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
                   </select>
                 </td>
                 <td>
-                  <select v-model="p.approver_role_3" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                  <select v-model="p.approver_role_3" :disabled="!p.require_approval || !p.approver_role_2" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
                     <option value="">-- 无 --</option>
-                    <option value="admin">管理员</option>
-                    <option value="supervisor">主管</option>
-                    <option value="quality">质检员</option>
+                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
                   </select>
                 </td>
               </tr>
@@ -186,6 +213,9 @@ import { can } from '@/lib/auth.js'
 export default {
   setup() {
     const approvals = ref([])
+    const approvalTotal = ref(0)
+    const approvalPage = ref(1)
+    const approvalLimit = 20
     const loading = ref(true)
     const filterOrderNo = ref('')
     const filterWorker = ref('')
@@ -196,6 +226,7 @@ export default {
     const activeTab = ref('pending')  // 'pending' | 'history' | 'config'
     const stats = ref({ pending: 0, avg_hours: 0, pending_over_24h: 0, total: 0 })
     const configProcesses = ref([])
+    const roleOptions = ref([])
     const history = ref([])
     const historyTotal = ref(0)
     const historyPage = ref(1)
@@ -220,13 +251,24 @@ export default {
       return arr
     })
 
-    async function load() {
+    async function load(page = approvalPage.value) {
       loading.value = true
+      selectedIds.value = []
+      selectAll.value = false
       try {
-        const d = await api.domains.approvals.pendingApprovals()
+        const d = await api.domains.approvals.pendingApprovals({ page, limit: approvalLimit })
+        approvalPage.value = d.page || page
         approvals.value = d.approvals || []
+        approvalTotal.value = d.total || 0
       } catch(e) { showToast(e.message || '加载失败', 'error') }
       finally { loading.value = false }
+    }
+
+    function changeApprovalPage(offset) {
+      const nextPage = approvalPage.value + offset
+      const maxPage = Math.max(1, Math.ceil(approvalTotal.value / approvalLimit))
+      if (nextPage < 1 || nextPage > maxPage) return
+      load(nextPage)
     }
 
     async function loadHistory() {
@@ -266,7 +308,7 @@ export default {
         }
         selectedIds.value = []
         selectAll.value = false
-        await load()
+        await Promise.all([load(), loadStats()])
       } catch(e) { showToast(e.message || '操作失败', 'error') }
     }
 
@@ -287,6 +329,7 @@ export default {
       try {
         const d = await api.domains.approvals.approvalConfig()
         configProcesses.value = d.configs || []
+        roleOptions.value = d.role_options || []
       } catch(e) { showToast('加载配置失败', 'error') }
     }
 
@@ -294,14 +337,17 @@ export default {
       try {
         const level = p.approver_role_3 ? 3 : (p.approver_role_2 ? 2 : 1)
         await api.domains.approvals.saveApprovalConfig({
-          process_id: p.process_id || p.id,
+          process_id: p.process_id,
           require_approval: p.require_approval,
           approver_role: p.approver_role || 'admin',
           approver_role_2: p.approver_role_2 || '',
           approver_role_3: p.approver_role_3 || '',
           approval_level: level
         })
-      } catch(e) { showToast('保存失败', 'error') }
+      } catch(e) {
+        showToast(e.message || '保存失败', 'error')
+        await loadConfig()
+      }
     }
 
     async function handle(id, action) {
@@ -312,7 +358,7 @@ export default {
         await api.domains.approvals.handleApproval(id, action, comment)
         showToast(action === 'approve' ? '已批准' : '已拒绝')
         delete rejectComment.value[id]
-        await load()
+        await Promise.all([load(), loadStats()])
       } catch(e) { showToast(e.message || '操作失败', 'error') }
       finally { processing.value[id] = false }
     }
@@ -320,12 +366,43 @@ export default {
     onMounted(() => { load(); loadStats() })
 
     return {
-      approvals, loading, processing, canApprove, filteredApprovals,
+      approvals, approvalTotal, approvalPage, approvalLimit, loading, processing, canApprove, filteredApprovals,
       filterOrderNo, filterWorker, filterProcess,
       activeTab, setTab, history, historyTotal, historyPage, historyLoading, loadHistory,
       rejectComment, handle, selectedIds, selectAll, toggleSelectAll, batchHandle,
-      stats, configProcesses, loadConfig, saveConfig
+      stats, configProcesses, roleOptions, loadConfig, saveConfig, changeApprovalPage
     }
   }
 }
 </script>
+
+<style scoped>
+.approval-actions {
+  white-space: nowrap;
+}
+
+.approval-detail {
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  min-width: 190px;
+}
+
+.report-source-badge {
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  display: inline-block;
+  margin-bottom: var(--space-1);
+  padding: 2px 7px;
+}
+
+.report-source-badge.backfill {
+  background: var(--warning-light);
+  color: var(--warning-dark);
+}
+
+.backfill-reason {
+  max-width: 260px;
+  white-space: normal;
+}
+</style>

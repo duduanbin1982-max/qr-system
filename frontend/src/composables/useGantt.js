@@ -11,48 +11,16 @@ async function getHtml2canvas() {
   return _html2canvas
 }
 
-let _instance = null
-let _mountCount = 0
-let _globalKbdRegistered = false
-
 export function useGantt() {
-  // Return existing singleton immediately on subsequent mounts
-  if (_instance) {
-    _mountCount++
-    return _instance
-  }
-
-  const isFirstMount = _mountCount === 0
-  _mountCount++
-
-  onMounted(() => {
-    // _instance is guaranteed to be set by this point (assigned before return)
-    if (_instance && _instance.load) {
-      _instance.load()
-      _instance.loadLines()
-    }
-    if (!_globalKbdRegistered) {
-      document.addEventListener('keydown', _instance.onKeyDown)
-      _globalKbdRegistered = true
-    }
-  })
-  onBeforeUnmount(() => {
-    _mountCount--
-    if (_mountCount <= 0) {
-      document.removeEventListener('keydown', _instance?.onKeyDown || (() => {}))
-      _globalKbdRegistered = false
-      _mountCount = 0
-    }
-  })
-
   const orders = ref([])
   const loading = ref(true)
   const dayWidth = ref(38)
   const scheduleScope = ref('active')
   const wsFilter = ref('')
+  const serverStats = ref({ total: 0, producing: 0, pending: 0, completed: 0 })
 
   const canEdit = computed(() => can('schedule:edit'))
-  const canCreate = computed(() => can('schedule:create'))
+  const canManageLines = computed(() => can('settings:edit'))
 
   function isCompleted(order) {
     if (!order) return false
@@ -66,18 +34,14 @@ export function useGantt() {
   }
 
   const stats = computed(() => {
-    const all = orders.value
-    return {
-      total: all.length,
-      producing: all.filter(o => o.status === 'producing' && !isCompleted(o)).length,
-      pending: all.filter(o => o.status === 'pending' && !isCompleted(o)).length,
-      completed: all.filter(o => isCompleted(o)).length,
-    }
+    return serverStats.value
   })
 
   const filteredOrders = computed(() => {
     let arr = orders.value
-    if (wsFilter.value) arr = arr.filter(o => (o.production_line || '') === wsFilter.value)
+    if (wsFilter.value) {
+      arr = arr.filter(o => String(o.production_line_id || '') === String(wsFilter.value))
+    }
     return arr
   })
 
@@ -107,28 +71,38 @@ export function useGantt() {
 
   // Capacity: daily load per production line
   const dailyLoad = computed(() => {
-    const map = {} // key: '2026-06-17|产线A'
+    const map = {}
     filteredOrders.value.forEach(o => {
-      if (!o.plan_start || !o.plan_end || !o.production_line) return
+      if (!o.plan_start || !o.plan_end || !o.production_line_id) return
       const start = new Date(o.plan_start), end = new Date(o.plan_end)
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const key = d.toISOString().slice(0,10) + '|' + o.production_line
-        if (!map[key]) map[key] = { date: d.toISOString().slice(0,10), line: o.production_line, count: 0, capacity: 999 }
+        const date = d.toISOString().slice(0,10)
+        const key = date + '|' + o.production_line_id
+        if (!map[key]) {
+          map[key] = {
+            date,
+            lineId: o.production_line_id,
+            line: o.production_line,
+            count: 0,
+            capacity: Number(o.line_capacity) > 0 ? Number(o.line_capacity) : 999,
+          }
+        }
         map[key].count++
       }
     })
-    // Merge capacity from production lines
     productionLines.value.forEach(pl => {
       Object.values(map).forEach(v => {
-        if (v.line === pl.name && pl.capacity > 0) v.capacity = pl.capacity
+        if (String(v.lineId) === String(pl.id) && Number(pl.capacity_per_day) > 0) {
+          v.capacity = Number(pl.capacity_per_day)
+        }
       })
     })
     return Object.values(map).filter(v => v.count > v.capacity)
   })
 
-  function isOverloaded(date, line) {
-    if (!line || !date) return false
-    return dailyLoad.value.some(v => v.date === date && v.line === line)
+  function isOverloaded(date, lineId) {
+    if (!lineId || !date) return false
+    return dailyLoad.value.some(v => v.date === date && String(v.lineId) === String(lineId))
   }
 
   function barWidth(order) {
@@ -151,13 +125,10 @@ export function useGantt() {
   function zoomOut() { dayWidth.value = Math.max(dayWidth.value - 6, 20) }
 
   // ── Drag Resize ──
-  const snapLeft = ref(0)
-  const snapRight = ref(0)
   const dragTarget = ref(null)
   const dragPreviewLeft = ref(0)
   const dragPreviewWidth = ref(0)
-  let _dragStartX = 0, _dragStartLeft = 0, _dragStartWidth = 0, _dragResizeEdge = null
-  let _dragSnapshot = null
+  let _dragStartX = 0, _dragStartWidth = 0, _dragResizeEdge = null
 
   function onBarMouseDown(e, order) {
     if (!canAdjustOrder(order)) return
@@ -176,12 +147,9 @@ export function useGantt() {
 
     e.preventDefault()
     _dragStartX = e.clientX
-    _dragStartLeft = rect.left
     _dragStartWidth = rect.width
-    _dragSnapshot = { plan_start: order.plan_start, plan_end: order.plan_end }
     dragTarget.value = order
 
-    const ganttRect = bar.closest('.gantt-scroll')?.getBoundingClientRect() || bar.parentElement.getBoundingClientRect()
     const dayW = dayWidth.value
     const minDate = ganttData.value.minDate
     const orderStart = new Date(order.plan_start)
@@ -206,7 +174,6 @@ export function useGantt() {
     if (_dragResizeEdge === 'right') {
       const newWidth = Math.max(dayW, _dragStartWidth + dx)
       dragPreviewWidth.value = newWidth
-      snapRight.value = _dragStartLeft - (document.querySelector('.gantt-scroll')?.getBoundingClientRect()?.left || 0) + newWidth
     } else if (_dragResizeEdge === 'left') {
       const startPx = barLeft(dragTarget.value)
       const newLeft = startPx + dx
@@ -241,9 +208,10 @@ export function useGantt() {
         order.plan_start = startStr
         showToast('开始日期已调整')
       }
-    } catch (e) { showToast('调整失败', 'error') }
+    } catch (e) { showToast(e.message || '调整失败', 'error') }
 
-    dragTarget.value = null; snapLeft.value = 0; snapRight.value = 0; _dragResizeEdge = null; _dragSnapshot = null
+    dragTarget.value = null
+    _dragResizeEdge = null
   }
 
   // ── Double-click Edit ──
@@ -268,7 +236,9 @@ export function useGantt() {
       dragTarget.value.plan_start = editForm.value.plan_start
       dragTarget.value.plan_end = editForm.value.plan_end
       if (editForm.value.production_line_id) {
-        const pl = productionLines.value.find(p => p.id === editForm.value.production_line_id)
+        const pl = productionLines.value.find(
+          p => String(p.id) === String(editForm.value.production_line_id),
+        )
         dragTarget.value.production_line = pl ? pl.name : ''
         dragTarget.value.production_line_id = editForm.value.production_line_id
       } else {
@@ -277,15 +247,12 @@ export function useGantt() {
       }
       showToast('已保存')
       showEditModal.value = false
-    } catch (e) { showToast('保存失败', 'error') }
+    } catch (e) { showToast(e.message || '保存失败', 'error') }
   }
 
   function undoLastDrag() {
-    if (_dragSnapshot && dragTarget.value) {
-      dragTarget.value.plan_start = _dragSnapshot.plan_start
-      dragTarget.value.plan_end = _dragSnapshot.plan_end
-    }
-    dragTarget.value = null; snapLeft.value = 0; snapRight.value = 0; showEditModal.value = false
+    dragTarget.value = null
+    showEditModal.value = false
   }
 
   // ── Production Lines ──
@@ -299,12 +266,14 @@ export function useGantt() {
   }
 
   async function addLine() {
+    if (!canManageLines.value) return
     if (!lineForm.value.name.trim()) { showToast('产线名称必填', 'error'); return }
     try { await api.domains.production.createProductionLine(lineForm.value); showToast('产线已添加'); lineForm.value = { name: '', remark: '', capacity_per_day: 10 }; await loadLines() }
     catch (e) { showToast(e.message || '添加失败', 'error') }
   }
 
   async function delLine(line) {
+    if (!canManageLines.value) return
     if (!confirm('确定删除产线「' + line.name + '」？')) return
     try { await api.domains.production.deleteProductionLine(line.id); showToast('已删除'); await loadLines() }
     catch (e) { showToast(e.message || '删除失败', 'error') }
@@ -316,6 +285,7 @@ export function useGantt() {
   const allSelected = ref(false)
 
   function toggleAll() {
+    if (!canEdit.value) return
     allSelected.value = !allSelected.value
     selectedOrderIds.value = allSelected.value
       ? filteredOrders.value.filter(o => !isCompleted(o)).map(o => o.id)
@@ -323,11 +293,13 @@ export function useGantt() {
   }
 
   function toggleOrder(order) {
-    if (isCompleted(order)) return
+    if (!canAdjustOrder(order)) return
     const id = typeof order === 'object' ? order.id : order
     const idx = selectedOrderIds.value.indexOf(id)
     if (idx >= 0) selectedOrderIds.value.splice(idx, 1)
     else selectedOrderIds.value.push(id)
+    const editableIds = filteredOrders.value.filter(o => canAdjustOrder(o)).map(o => o.id)
+    allSelected.value = editableIds.length > 0 && editableIds.every(item => selectedOrderIds.value.includes(item))
   }
 
   async function batchShift(direction) {
@@ -348,9 +320,33 @@ export function useGantt() {
   async function load() {
     loading.value = true
     try {
-      const r = await api.domains.production.getScheduleGantt({ status: scheduleScope.value })
-      if (r.ok !== false) { orders.value = r.orders || []; dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' } }
-    } catch (e) { showToast('加载排程失败', 'error') }
+      const pageSize = 200
+      let offset = 0
+      let hasMore = true
+      let loadedOrders = []
+      while (hasMore) {
+        const r = await api.domains.production.getScheduleGantt({
+          status: scheduleScope.value,
+          limit: pageSize,
+          offset,
+        })
+        if (r.ok === false) throw new Error(r.error || '加载排程失败')
+        const pageOrders = r.orders || []
+        loadedOrders = loadedOrders.concat(pageOrders)
+        if (offset === 0) {
+          dateRange.value = { minDate: r.min_date || '', maxDate: r.max_date || '' }
+          serverStats.value = r.stats || {
+            total: r.total || pageOrders.length,
+            producing: pageOrders.filter(o => o.status === 'producing' && !isCompleted(o)).length,
+            pending: pageOrders.filter(o => o.status === 'pending' && !isCompleted(o)).length,
+            completed: pageOrders.filter(o => isCompleted(o)).length,
+          }
+        }
+        offset = loadedOrders.length
+        hasMore = Boolean(r.has_more) && pageOrders.length > 0
+      }
+      orders.value = loadedOrders
+    } catch (e) { showToast(e.message || '加载排程失败', 'error') }
     finally { loading.value = false }
   }
 
@@ -363,7 +359,7 @@ export function useGantt() {
   }
 
   function onKeyDown(e) {
-    if (e.key === 'Escape') { dragTarget.value = null; snapLeft.value = 0; snapRight.value = 0 }
+    if (e.key === 'Escape') undoLastDrag()
   }
 
   // ── Shortcuts ──
@@ -378,10 +374,10 @@ export function useGantt() {
       showToast(r.message || ('Shifted ' + (r.count || 0) + ' orders'))
       selectedOrderIds.value = []
       await load()
-    } catch (e) { showToast(e.message || 'Shift failed', 'error') }
+    } catch (e) { showToast(e.message || '批量调整失败', 'error') }
   }
 
-    async function exportImage() {
+  async function exportImage() {
     const el = document.querySelector('.gantt-scroll')
     if (!el) { showToast('未找到甘特图', 'error'); return }
     try {
@@ -395,15 +391,26 @@ export function useGantt() {
     } catch (e) { showToast('导出失败', 'error') }
   }
 
-  _instance = {
+  onMounted(() => {
+    load()
+    loadLines()
+    document.addEventListener('keydown', onKeyDown)
+  })
+
+  onBeforeUnmount(() => {
+    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('mousemove', onDragMove)
+    document.removeEventListener('mouseup', onDragEnd)
+  })
+
+  return {
     orders, stats, loading, dayWidth, scheduleScope, setScheduleScope, wsFilter,
     filteredOrders, ganttData, barLeft, barWidth, barColor, statusLabel, zoomIn, zoomOut,
-    isCompleted, canAdjustOrder, snapLeft, snapRight, dragTarget, dragPreviewLeft, dragPreviewWidth, onBarMouseDown,
+    isCompleted, canAdjustOrder, dragTarget, dragPreviewLeft, dragPreviewWidth, onBarMouseDown,
     showEditModal, editForm, editOrderDates, saveEditDates, undoLastDrag,
     productionLines, showLineMgr, lineForm, addLine, delLine,
     selectedOrderIds, batchDays, batchShift, allSelected, toggleAll, toggleOrder,
-    canEdit, canCreate, shiftDays, exportImage, dailyLoad, isOverloaded,
+    canEdit, canManageLines, shiftDays, exportImage, dailyLoad, isOverloaded,
     load, loadLines, onKeyDown
   }
-  return _instance
 }

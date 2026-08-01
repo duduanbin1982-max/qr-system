@@ -45,6 +45,7 @@ class WorkReportWriter:
                     command.quantity,
                     command.user_id,
                     db,
+                    skip_sequence=command.report_source == "serial_backfill",
                 )
                 WorkReportWriter._write_normal_report(
                     ScanHelperService,
@@ -63,7 +64,6 @@ class WorkReportWriter:
                 )
             elif command.report_type == "rework":
                 WorkReportWriter._write_rework_report(
-                    ScanHelperService,
                     command.order_id,
                     command.process_id,
                     command.user_id,
@@ -104,17 +104,26 @@ class WorkReportWriter:
         return current_op
 
     @staticmethod
-    def _check_normal_limits(helper, order_id, current_op, quantity, user_id, db):
+    def _check_normal_limits(
+        helper,
+        order_id,
+        current_op,
+        quantity,
+        user_id,
+        db,
+        skip_sequence=False,
+    ):
         from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
         ProcessQualityEvaluationService.assert_required_tasks_completed(user_id, db)
-        err, code = helper.check_process_order(
-            order_id,
-            current_op.get("seq_order", 0),
-            db=db,
-        )
-        if err:
-            raise ValueError(err.get("error", "工序顺序校验失败，请按工艺路线顺序报工"))
+        if not skip_sequence:
+            err, code = helper.check_process_order(
+                order_id,
+                current_op.get("seq_order", 0),
+                db=db,
+            )
+            if err:
+                raise ValueError(err.get("error", "工序顺序校验失败，请按工艺路线顺序报工"))
 
         order = dict(helper.get_order(order_id, db=db) or {})
         if not order:
@@ -123,16 +132,20 @@ class WorkReportWriter:
         from modules.services.quality_management_service import QualityManagementService
         QualityManagementService.assert_report_allowed(order_id, current_op.get("process_id"), db=db)
 
-        err, code = helper.check_quantity_limits(
-            order_id,
-            current_op.get("seq_order", 0),
-            current_op.get("completed", 0) or 0,
-            quantity,
-            order.get("quantity", 0),
-            db=db,
-        )
-        if err:
-            raise ValueError(err.get("error", "报工数量超出订单总量限制"))
+        if skip_sequence:
+            if (current_op.get("completed", 0) or 0) + quantity > (order.get("quantity", 0) or 0):
+                raise ValueError("报工数量超出订单总量限制")
+        else:
+            err, code = helper.check_quantity_limits(
+                order_id,
+                current_op.get("seq_order", 0),
+                current_op.get("completed", 0) or 0,
+                quantity,
+                order.get("quantity", 0),
+                db=db,
+            )
+            if err:
+                raise ValueError(err.get("error", "报工数量超出订单总量限制"))
 
     @staticmethod
     def _write_normal_report(helper, command, db):
@@ -146,6 +159,11 @@ class WorkReportWriter:
             command.remark,
             work_status,
             command.serial_no,
+            command.report_source,
+            command.actual_completed_at,
+            command.backfill_reason,
+            command.submit_position_id,
+            command.submit_position_name,
             db=db,
         )
 
@@ -153,20 +171,40 @@ class WorkReportWriter:
             helper.insert_approval_record(wr_id, db=db)
 
         if work_status == "approved":
-            WorkReportWriter.apply_approved_normal_report(
-                command,
-                db,
-                wr_id,
-            )
+                WorkReportWriter.apply_approved_normal_report(
+                    command,
+                    db,
+                    wr_id,
+                    validate_policy=False,
+                )
 
     @staticmethod
-    def apply_approved_normal_report(command, db, work_record_id=None):
+    def apply_approved_normal_report(command, db, work_record_id=None, validate_policy=True):
         from modules.services.scan_helper_service import ScanHelperService
         from modules.services.quality_management_service import QualityManagementService
         from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 
-        ProcessQualityEvaluationService.assert_required_tasks_completed(command.user_id, db)
-        QualityManagementService.assert_report_allowed(command.order_id, command.process_id, db=db)
+        if validate_policy:
+            current_op = WorkReportWriter._load_current_operation(
+                ScanHelperService,
+                command.order_id,
+                command.process_id,
+                db,
+            )
+            WorkReportWriter._check_normal_limits(
+                ScanHelperService,
+                command.order_id,
+                current_op,
+                command.effective_quantity,
+                command.user_id,
+                db,
+                skip_sequence=command.report_source == "serial_backfill",
+            )
+        else:
+            ProcessQualityEvaluationService.assert_required_tasks_completed(command.user_id, db)
+            QualityManagementService.assert_report_allowed(
+                command.order_id, command.process_id, db=db
+            )
 
         WorkReportWriter._apply_approved_normal_effects(
             ScanHelperService,
@@ -180,16 +218,27 @@ class WorkReportWriter:
             work_record_id,
         )
         if command.serial_no:
-            WorkReportWriter._advance_serial_item(
+            WorkReportWriter._reconcile_serial_item(
                 ScanHelperService,
                 command.order_id,
-                command.process_id,
                 command.user_id,
                 command.user_name,
                 command.serial_no,
                 db,
             )
-        ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
+            ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
+            if ScanHelperService.has_approved_serial_backfill(
+                command.order_id, command.serial_no, db=db
+            ):
+                WorkReportWriter._rebuild_serial_quality_tasks(
+                    ScanHelperService,
+                    command.order_id,
+                    command.serial_no,
+                    ProcessQualityEvaluationService,
+                    db,
+                )
+        else:
+            ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
         QualityManagementService.generate_for_report(
             command.order_id,
             command.process_id,
@@ -247,30 +296,19 @@ class WorkReportWriter:
                 )
 
     @staticmethod
-    def _advance_serial_item(helper, order_id, process_id, user_id, user_name, serial_no, db):
-        current_op = dict(helper.get_order_process(order_id, process_id, db=db) or {})
-        if current_op:
-            item = helper.get_product_item(serial_no, db=db)
-            if item:
-                WorkReportWriter._move_item_to_next_step(
-                    helper,
-                    order_id,
-                    current_op,
-                    item,
-                    user_id,
-                    user_name,
-                    serial_no,
-                    db,
-                )
-
-    @staticmethod
-    def _move_item_to_next_step(helper, order_id, current_op, item, user_id, user_name,
-                                serial_no, db):
-        current_seq = current_op["seq_order"]
-        next_op = helper.find_next_process(order_id, current_seq, db=db)
+    def _reconcile_serial_item(helper, order_id, user_id, user_name, serial_no, db):
+        item = helper.get_product_item(serial_no, db=db)
+        if not item:
+            return
+        next_op = helper.find_first_unreported_serial_process(order_id, serial_no, db=db)
         item_version = item["version"] or 1
         if next_op:
-            cur = helper.advance_product_item(
+            if (
+                item["status"] == "in_progress"
+                and int(item["current_process_id"] or 0) == int(next_op["process_id"])
+            ):
+                return
+            cur = helper.set_product_item_current_process(
                 item["id"],
                 next_op["process_id"],
                 item_version,
@@ -280,6 +318,8 @@ class WorkReportWriter:
                 raise ValueError(f"序列号 {serial_no} 已被其他操作修改，请刷新后重试")
             return
 
+        if item["status"] == "completed":
+            return
         cur = helper.complete_product_item(item["id"], item_version, db=db)
         if cur.rowcount == 0:
             raise ValueError(f"序列号 {serial_no} 已被其他操作修改，请刷新后重试")
@@ -292,6 +332,18 @@ class WorkReportWriter:
         )
 
     @staticmethod
+    def _rebuild_serial_quality_tasks(helper, order_id, serial_no, service, db):
+        from modules.domain.work_report import WorkReportCommand
+
+        for row in helper.list_approved_serial_work_records(order_id, serial_no, db=db):
+            record = dict(row)
+            service.generate_tasks(
+                WorkReportCommand.from_approved_record(record),
+                record["id"],
+                db,
+            )
+
+    @staticmethod
     def _write_scrap_report(helper, order_id, process_id, user_id, quantity, remark, db):
         reason = remark or ""
         helper.insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=db)
@@ -302,11 +354,15 @@ class WorkReportWriter:
         helper.update_order_scrapped(order_id, db=db)
 
     @staticmethod
-    def _write_rework_report(helper, order_id, process_id, user_id, quantity, remark, db):
-        reason = remark or ""
-        helper.insert_rework_record(order_id, process_id, user_id, quantity, reason, db=db)
-        op = helper.get_order_process(order_id, process_id, db=db)
-        if op:
-            new_rework = (op["rework"] or 0) + quantity
-            helper.update_order_process_rework(order_id, process_id, new_rework, db=db)
-        helper.update_order_rework(order_id, db=db)
+    def _write_rework_report(order_id, process_id, user_id, quantity, remark, db):
+        from modules.services.rework_service import ReworkService
+
+        ReworkService.create_rework(
+            order_id,
+            process_id,
+            user_id,
+            quantity,
+            remark,
+            db=db,
+            reject_recent_duplicate=True,
+        )

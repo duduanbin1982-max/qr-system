@@ -9,6 +9,18 @@ from modules.route_decorators import app, get_json_body, safe_audit_log, validat
 from modules.middleware.auth import check_auth, get_user_permissions, has_permission
 from modules.constants import SECONDS_PER_DAY, SECONDS_PER_WEEK
 from modules.services.auth_service import AuthService
+from modules.services.active_position_service import ActivePositionService
+
+
+def _attach_position_context(user):
+    context = ActivePositionService.get_context(user)
+    primary_position = context["primary_position"] or {}
+    active_position = context["active_position"] or {}
+    user["position_name"] = primary_position.get("name", "")
+    user["active_position_id"] = context["active_position_id"]
+    user["active_position_name"] = active_position.get("name", "")
+    user["available_positions"] = context["available_positions"]
+    return user
 
 
 
@@ -77,7 +89,9 @@ def login():
 
     # --- 登录成功 ---
     token = secrets.token_hex(32)
-    AuthService.create_session(user["id"], token, ip, ua)
+    AuthService.create_session(
+        user["id"], token, ip, ua, active_position_id=user["position_id"]
+    )
     AuthService.insert_login_log(username, ip, ua, 1, user_id=user["id"])
 
     u = dict(user)
@@ -85,6 +99,7 @@ def login():
     del u["password"]
     u["role"] = AuthService.get_user_role_code(user["id"]) or u.get("role", "worker")
     u["permissions"] = get_user_permissions(u)
+    _attach_position_context(u)
 
     resp = jsonify({"user": u, "must_change_password": bool(u.get("must_change_password", 0))})
     resp.set_cookie("qr_token", token, httponly=True, secure=True,
@@ -139,7 +154,38 @@ def auth_info():
     u.pop("password_version", None)
     u["role"] = AuthService.get_user_role_code(u["id"]) or u.get("role", "worker")
     u["permissions"] = get_user_permissions(g.current_user)
+    _attach_position_context(u)
     return jsonify({"user": u, "must_change_password": bool(u.get("must_change_password", 0))})
+
+
+@app.route("/api/auth/active-position", methods=["GET"])
+@check_auth
+def active_position():
+    return jsonify(ActivePositionService.get_context(g.current_user))
+
+
+@app.route("/api/auth/active-position", methods=["PUT"])
+@check_auth
+def update_active_position():
+    data = get_json_body()
+    raw_position_id = data.get("position_id")
+    if isinstance(raw_position_id, bool):
+        raise ValueError("请选择有效岗位")
+    try:
+        position_id = int(raw_position_id)
+    except (TypeError, ValueError):
+        raise ValueError("请选择有效岗位")
+    context = ActivePositionService.set_active_position(
+        g.current_user, g.token, position_id
+    )
+    active = context["active_position"] or {}
+    safe_audit_log(
+        "switch_active_position",
+        "user_session",
+        g.current_user["id"],
+        f"当前岗位切换为 {active.get('name', '')}",
+    )
+    return jsonify({"message": "当前岗位已切换", **context})
 
 
 @app.route("/api/auth/change-password", methods=["POST"])

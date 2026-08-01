@@ -4,19 +4,106 @@
 // ═══════════════════════════════════════════
 
 var _loginBusy = false;
+
+function persistMobileUser(serverUser) {
+  var previous = user() || {};
+  var merged = Object.assign({}, previous, serverUser || {});
+  if (!merged.token && previous.token) merged.token = previous.token;
+  window.__qr_user = merged;
+  var safe = {
+    id: merged.id,
+    name: merged.name,
+    username: merged.username,
+    token: merged.token,
+    role: merged.role,
+    permissions: merged.permissions || [],
+    position_id: merged.position_id || null,
+    position_name: merged.position_name || '',
+    active_position_id: merged.active_position_id || null,
+    active_position_name: merged.active_position_name || '',
+    available_positions: merged.available_positions || []
+  };
+  try { sessionStorage.setItem('qr_user', JSON.stringify(safe)); } catch(e) {}
+  return merged;
+}
+
+function applyPositionContext(context) {
+  if (!context) return;
+  var primary = context.primary_position || {};
+  var active = context.active_position || {};
+  persistMobileUser({
+    position_id: primary.id || (user() && user().position_id) || null,
+    position_name: primary.name || '',
+    active_position_id: context.active_position_id || null,
+    active_position_name: active.name || '',
+    available_positions: context.available_positions || []
+  });
+  renderActivePosition();
+}
+
+function renderActivePosition() {
+  var container = $('position-context');
+  var select = $('active-position-select');
+  var hint = $('active-position-hint');
+  if (!container || !select || !hint) return;
+  var currentUser = user();
+  var positions = currentUser && currentUser.available_positions || [];
+  container.hidden = false;
+  select.innerHTML = '';
+  if (!positions.length) {
+    var emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '未配置岗位';
+    select.appendChild(emptyOption);
+    select.disabled = true;
+    hint.textContent = '将按个人工序授权判定';
+    return;
+  }
+  positions.forEach(function(position) {
+    var option = document.createElement('option');
+    option.value = String(position.id);
+    option.textContent = position.name + (position.is_primary ? '（主岗位）' : '');
+    option.selected = String(position.id) === String(currentUser.active_position_id);
+    select.appendChild(option);
+  });
+  select.disabled = positions.length < 2;
+  var active = positions.find(function(position) {
+    return String(position.id) === String(currentUser.active_position_id);
+  }) || positions[0];
+  hint.textContent = active.process_ids && active.process_ids.length
+    ? '关联 ' + active.process_ids.length + ' 道工序'
+    : '暂无关联工序';
+}
+
+function changeActivePosition() {
+  var select = $('active-position-select');
+  if (!select || !select.value) return;
+  var previousId = user() && user().active_position_id;
+  if (String(select.value) === String(previousId)) return;
+  select.disabled = true;
+  api.setActivePosition({ position_id: parseInt(select.value, 10) })
+    .then(function(context) {
+      applyPositionContext(context);
+      toast('当前岗位已切换为' + ((context.active_position || {}).name || '所选岗位'));
+    })
+    .catch(function(error) {
+      renderActivePosition();
+      toast((error && error.message) || '岗位切换失败');
+    });
+}
+
 function doLogin() {
   const u = $('inp-user').value.trim(), p = $('inp-pwd').value;
   if (_loginBusy) return;
   if (!u || !p) { toast('请输入用户名和密码'); return; }
   const btn = $('btn-login');
+  _loginBusy = true;
   btn.disabled = true; btn.innerHTML = '<span class=\"spin\"></span>登录中...';
   api.login({ username: u, password: p })
   .then(function(d) {
     btn.disabled = false; btn.textContent = '登 录'; _loginBusy = false;
     if (d.error) { $('login-err').textContent = d.error; return; }
-    window.__qr_user = d.user;
-    var _safe = { id: d.user.id, name: d.user.name, username: d.user.username, token: d.user.token, permissions: d.user.permissions };
-    try { sessionStorage.setItem('qr_user', JSON.stringify(_safe)); } catch(e) {}
+    persistMobileUser(d.user);
     if (d.must_change_password) {
       showChangePassword();
       return;
@@ -40,6 +127,7 @@ function goMain() {
   setReportType('normal');
   var u = user();
   $('top-user').textContent = (u ? (u.name || u.username) : '扫码报工');
+  renderActivePosition();
   $('manual-row').style.display = 'none';
   show('main');
   loadStats();

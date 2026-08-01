@@ -45,6 +45,46 @@ def test_approved_record_command_preserves_report_owner_and_quantity():
     assert command.need_approval is False
 
 
+def test_backfill_command_does_not_require_manual_completion_metadata():
+    command = WorkReportCommand.from_submission(
+        {
+            "report_type": "normal",
+            "order_id": 11,
+            "process_id": 5,
+            "report_source": "serial_backfill",
+            "submit_position_id": 7,
+            "submit_position_name": "喷漆工",
+        },
+        {"id": 13, "name": "Worker"},
+        quantity=1,
+        serial_no="SN-001",
+        need_approval=True,
+    )
+
+    assert command.report_source == "serial_backfill"
+    assert command.actual_completed_at is None
+    assert command.backfill_reason == ""
+    assert command.submit_position_id == 7
+    assert command.submit_position_name == "喷漆工"
+
+
+def test_approved_backfill_record_preserves_position_snapshot():
+    command = WorkReportCommand.from_approved_record({
+        "order_id": 11,
+        "process_id": 5,
+        "user_id": 13,
+        "user_name": "Worker",
+        "quantity": 1,
+        "serial_no": "SN-001",
+        "report_source": "serial_backfill",
+        "submit_position_id": 7,
+        "submit_position_name": "喷漆工",
+    })
+
+    assert command.submit_position_id == 7
+    assert command.submit_position_name == "喷漆工"
+
+
 @pytest.mark.parametrize(
     ("changes", "message"),
     [

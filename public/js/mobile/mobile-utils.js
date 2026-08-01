@@ -13,8 +13,10 @@ let camStream  = null;
 let scanTimer  = null;
 let lastCode   = '';
 let lastTime   = 0;
+let currentScanCode = '';
 let reportMode = 'auto';
 let reportType = 'normal';
+let serialBackfillMode = false;
 let flashOn    = false;
 
 // ── 工具函数 ──────────────────────────────

@@ -8,7 +8,7 @@
     // Verify cookie is still valid with a lightweight API call
     api.authInfo()
       .then(function(d) {
-        if (d && d.user) { goMain(); }
+        if (d && d.user) { persistMobileUser(d.user); goMain(); }
         else { doLogout(); }
       })
       .catch(function() { doLogout(); });
@@ -41,6 +41,9 @@
   
   _el = document.querySelector('.bottom-link');
   if (_el) _el.addEventListener('click', doLogout);
+
+  _el = document.getElementById('active-position-select');
+  if (_el) _el.addEventListener('change', changeActivePosition);
   
   _el = document.querySelector('.top-btn');
   if (_el) _el.addEventListener('click', goBack);
@@ -62,6 +65,12 @@
   
   _el = document.getElementById('btn-report');
   if (_el) _el.addEventListener('click', doReport);
+  _el = document.getElementById('btn-backfill-return');
+  if (_el) _el.addEventListener('click', exitSerialBackfill);
+  _el = document.getElementById('backfill-completed-at');
+  if (_el) _el.addEventListener('input', updateReportBtn);
+  _el = document.getElementById('backfill-reason');
+  if (_el) _el.addEventListener('input', updateReportBtn);
   
 
   _el = document.getElementById('quality-evaluation-entry');

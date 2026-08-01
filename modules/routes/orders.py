@@ -46,6 +46,28 @@ def get_next_order_no():
     return jsonify({'order_no': OrderService.next_order_no()})
 
 
+@app.route('/api/orders/<int:oid>/qr-print', methods=['POST'])
+@check_auth
+@check_permission('scan:view')
+@validate_json('qr_print_record')
+def record_order_qr_print(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({'error': '无权限访问此订单'}), 403
+    try:
+        result = OrderService.record_qr_print(oid, get_json_body(), g.current_user)
+        safe_audit_log(
+            'print_order_qr',
+            'order',
+            oid,
+            f"order_no={result['order_no']}; mode={result['mode']}; "
+            f"copies={result['copies']}; labels={result['label_count']}; "
+            f"print_count={result['qr_print_count']}",
+        )
+        return jsonify({'message': '打印状态已记录', 'print_status': result})
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+
+
 @app.route('/api/orders', methods=['POST'])
 @check_auth
 @check_permission('orders:create')

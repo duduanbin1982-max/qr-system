@@ -52,29 +52,63 @@ class ScheduleRepository:
 
     @staticmethod
     def count_scheduled_orders(schedule_scope="active", db=None):
+        return ScheduleRepository.get_schedule_summary(
+            schedule_scope=schedule_scope,
+            db=db,
+        )["total"]
+
+    @staticmethod
+    def get_schedule_summary(schedule_scope="active", db=None):
         db = resolve_db(db)
         scope_clause = ScheduleRepository._schedule_scope_clause(schedule_scope)
+        completed_expr = ScheduleRepository._completed_expr("o")
         return db.execute(f"""
-            SELECT COUNT(*) FROM orders o
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(CASE WHEN {completed_expr} THEN 1 ELSE 0 END), 0) AS completed,
+                   COALESCE(SUM(CASE WHEN o.status = 'producing' AND NOT {completed_expr}
+                                     THEN 1 ELSE 0 END), 0) AS producing,
+                   COALESCE(SUM(CASE WHEN o.status = 'pending' AND NOT {completed_expr}
+                                     THEN 1 ELSE 0 END), 0) AS pending,
+                   MIN(o.plan_start) AS min_date,
+                   MAX(NULLIF(o.plan_end, '')) AS max_date
+            FROM orders o
             WHERE o.plan_start IS NOT NULL AND o.plan_start != '' AND o.deleted_at IS NULL
               {scope_clause}
-        """).fetchone()[0]
+        """).fetchone()
 
     @staticmethod
     def find_order_by_id(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, status, quantity, completed FROM orders WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, status, quantity, completed, production_line_id "
+            "FROM orders WHERE id = ? AND deleted_at IS NULL",
             (order_id,),
         ).fetchone()
 
     @staticmethod
-    def update_order_schedule_txn(order_id, plan_start, plan_end, production_line_id, db):
-        db.execute(
-            "UPDATE orders SET plan_start = ?, plan_end = ?, production_line_id = ?, "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            (plan_start, plan_end, production_line_id, order_id)
+    def update_order_schedule_txn(
+        order_id,
+        plan_start,
+        plan_end,
+        production_line_id,
+        *,
+        update_production_line,
+        db,
+    ):
+        assignments = ["plan_start = ?", "plan_end = ?"]
+        params = [plan_start, plan_end]
+        if update_production_line:
+            assignments.append("production_line_id = ?")
+            params.append(production_line_id)
+        assignments.append("updated_at = datetime('now','localtime')")
+        params.append(order_id)
+        completed_expr = ScheduleRepository._completed_expr("orders")
+        cursor = db.execute(
+            f"UPDATE orders SET {', '.join(assignments)} "
+            f"WHERE id = ? AND deleted_at IS NULL AND NOT {completed_expr}",
+            params,
         )
+        return cursor.rowcount
 
     @staticmethod
     def shift_order_dates_txn(order_id, days, db):

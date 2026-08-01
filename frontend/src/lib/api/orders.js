@@ -14,6 +14,7 @@ export const ordersApi = {
   restoreOrder:     (id)     => request("POST", ORDERS_API + "/" + id + "/restore"),
   purgeOrder:       (id)     => request("DELETE", ORDERS_API + "/" + id + "/purge"),
   getWorkpieceProgress: (id)  => request('GET', ORDERS_API + '/' + id + '/workpiece-progress'),
+  recordQrPrint:    (id,data)=> request('POST', ORDERS_API + '/' + id + '/qr-print', data),
   getCompletionFocus: (params) => request('GET', ORDERS_API + '/completion-focus' + buildQuery(params || {})),
   getCompletionFocusConfig: () => request('GET', ORDERS_API + '/completion-focus/config'),
   saveCompletionFocusConfig: (data) => request('POST', ORDERS_API + '/completion-focus/config', data),

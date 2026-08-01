@@ -82,17 +82,22 @@
         <div class="card" style="margin-bottom:var(--space-5)">
           <div class="card-header"><h3>📝 提交报工</h3></div>
           <div class="card-body">
-            <div class="form-group"><label>工序</label>
-              <select class="form-input" v-model="reportProcess">
+            <div class="form-group"><label>工序 <span class="badge">{{ processOrderLabel() }}</span></label>
+              <select class="form-input" v-model="reportProcess" @change="syncReportQuantity">
                 <option value="">-- 选择工序 --</option>
-                <option v-for="p in (order.processes||[])" :key="p.id" :value="p.process_id">
-                  {{ p.seq_order }}. {{ p.process_name }}
+                <option
+                  v-for="p in (order.processes||[])"
+                  :key="p.id"
+                  :value="p.process_id"
+                  :disabled="reportType === 'normal' && !p.normal_reportable"
+                >
+                  {{ p.seq_order }}. {{ p.process_name }}{{ reportType === 'normal' && !p.normal_reportable ? '（当前不可报）' : '' }}
                 </option>
               </select>
             </div>
             <div class="form-row">
               <div class="form-col" style="flex:1">
-                <div class="form-group"><label>数量</label><input class="form-input" v-model.number="reportQty" min="1" :max="order?.quantity || 9999" type="number"></div>
+                <div class="form-group"><label>数量</label><input class="form-input" v-model.number="reportQty" min="1" :max="selectedProcess()?.max_report_quantity || order?.quantity || 9999" type="number"></div>
               </div>
               <div class="form-col" style="flex:2">
                 <div class="form-group"><label>类型</label>
@@ -100,7 +105,7 @@
                     <label v-for="t in [{v:'normal',l:'正常'},{v:'scrap',l:'报废'},{v:'rework',l:'返工'}]" :key="t.v"
                       style="flex:1;text-align:center;padding:var(--space-2);border-radius:var(--radius-md);border:2px solid;cursor:pointer;font-size:var(--text-sm)"
                       :style="{borderColor: reportType===t.v?'var(--primary)':'var(--border-light)',background:reportType===t.v?'var(--primary-light)':'var(--bg-surface)',color:reportType===t.v?'var(--primary)':'var(--text-placeholder)'}">
-                      <input type="radio" v-model="reportType" :value="t.v" style="display:none">{{ t.l }}
+                      <input type="radio" v-model="reportType" :value="t.v" @change="syncReportSelection" style="display:none">{{ t.l }}
                     </label>
                   </div>
                 </div>
@@ -175,16 +180,8 @@ export default {
         const d = await api.domains.scan.scan({ code })
         order.value = d.order
         serialNo.value = (d.item && d.item.serial_no) || null
-        // 自动选当前工序
-        if (order.value.processes && order.value.processes.length) {
-          const limit = serialNo.value ? 1 : (order.value.quantity || 0)
-          for (const p of order.value.processes) {
-            if ((p.completed || 0) < limit) { reportProcess.value = p.process_id; break }
-          }
-          if (!reportProcess.value) reportProcess.value = order.value.processes[0].process_id
-        }
         reportType.value = 'normal'
-        reportQty.value = 1
+        selectDefaultProcess()
         reportRemark.value = ''
       } catch(e) {
         showToast(e.message || '扫描失败','error')
@@ -197,6 +194,11 @@ export default {
     async function doReport() {
       if (!order.value) { showToast('请先扫描订单','error'); return }
       if (!reportProcess.value) { showToast('请选择工序','error'); return }
+      const process = selectedProcess()
+      if (reportType.value === 'normal' && !process?.normal_reportable) {
+        showToast('当前工序不满足报工顺序或数量条件','error')
+        return
+      }
       const qty = parseInt(reportQty.value)
       if (!qty || qty <= 0) { showToast('请输入有效数量','error'); return }
 
@@ -220,6 +222,7 @@ export default {
             if (d.order) {
               order.value = d.order
               serialNo.value = (d.item && d.item.serial_no) || null
+              selectDefaultProcess()
             }
           } catch(e) { /* keep existing order data */ }
         }
@@ -235,10 +238,40 @@ export default {
       return Math.min(100, Math.round((order.value.completed || 0) / order.value.quantity * 100))
     }
 
+    function selectedProcess() {
+      return (order.value?.processes || []).find(p => String(p.process_id) === String(reportProcess.value))
+    }
+
+    function syncReportQuantity() {
+      const process = selectedProcess()
+      const maximum = process?.max_report_quantity || order.value?.quantity || 1
+      reportQty.value = serialNo.value ? 1 : Math.max(1, Math.min(parseInt(reportQty.value) || 1, maximum))
+    }
+
+    function selectDefaultProcess() {
+      const processes = order.value?.processes || []
+      const preferred = processes.find(p => p.normal_reportable)
+      reportProcess.value = preferred?.process_id || order.value?.current_process?.process_id || ''
+      syncReportQuantity()
+    }
+
+    function syncReportSelection() {
+      if (reportType.value === 'normal' && !selectedProcess()?.normal_reportable) {
+        selectDefaultProcess()
+        return
+      }
+      syncReportQuantity()
+    }
+
+    function processOrderLabel() {
+      if (order.value?.process_order_scope === 'serial_sequential') return '序列号当前工序'
+      return order.value?.process_order_mode === 'out_of_order' ? '跨工序补报' : '按工艺顺序'
+    }
+
     return {
       scanCode, scanning, order, doScan,
       reportProcess, reportQty, reportType, reportRemark, serialNo, reporting, doReport,
-      pctDone
+      pctDone, selectedProcess, syncReportQuantity, syncReportSelection, processOrderLabel
     }
   }
 }

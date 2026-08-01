@@ -12,6 +12,10 @@ from modules.migration_order_completion import MIGRATIONS as ORDER_COMPLETION_MI
 from modules.migration_process_quality import MIGRATIONS as PROCESS_QUALITY_MIGRATIONS
 from modules.migration_quality_management import MIGRATIONS as QUALITY_MANAGEMENT_MIGRATIONS
 from modules.migration_materials import MIGRATIONS as MATERIAL_MIGRATIONS
+from modules.migration_approval_workflow import MIGRATIONS as APPROVAL_WORKFLOW_MIGRATIONS
+from modules.migration_order_qr_print import MIGRATIONS as ORDER_QR_PRINT_MIGRATIONS
+from modules.migration_serial_backfill import MIGRATIONS as SERIAL_BACKFILL_MIGRATIONS
+from modules.migration_process_management import MIGRATIONS as PROCESS_MANAGEMENT_MIGRATIONS
 
 
 MIGRATIONS = sorted([
@@ -24,6 +28,10 @@ MIGRATIONS = sorted([
     *PROCESS_QUALITY_MIGRATIONS,
     *QUALITY_MANAGEMENT_MIGRATIONS,
     *MATERIAL_MIGRATIONS,
+    *APPROVAL_WORKFLOW_MIGRATIONS,
+    *ORDER_QR_PRINT_MIGRATIONS,
+    *SERIAL_BACKFILL_MIGRATIONS,
+    *PROCESS_MANAGEMENT_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]

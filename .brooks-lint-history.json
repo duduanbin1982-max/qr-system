@@ -317,5 +317,27 @@
       "suggestion": 2
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD b6f0569; customer management frontend, API, route, service, repository, schema, permissions, data scope, production constraints, and related tests"
+  },
+  {
+    "date": "2026-07-29T21:09:02.668931+08:00",
+    "mode": "PR Review",
+    "score": 49,
+    "findings": {
+      "critical": 2,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 41c1af7; approval module review across routes, service, repository, schema, frontend UI/API, runtime DB role/config snapshot, and approval tests"
+  },
+  {
+    "date": "2026-07-31T07:00:20+08:00",
+    "mode": "PR Review",
+    "score": 44,
+    "findings": {
+      "critical": 2,
+      "warning": 5,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed worktree over HEAD 41c1af7; rework routes, service, repository, Vue page/API/composable, scan writer and validation, quality trigger, production data snapshot, and focused tests"
   }
 ]

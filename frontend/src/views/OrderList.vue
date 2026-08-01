@@ -59,7 +59,14 @@
               <template v-for="o in orders" :key="o.id">
                 <tr @click="toggleExpandAndLoad(o.id)" style="cursor:pointer" :class="{ 'row-expanded': expandedId === o.id }">
                   <td class="td-expand">{{ expandedId === o.id ? '▼' : '▶' }}</td>
-                  <td class="td-order-no"><code>{{ o.order_no }}</code></td>
+                  <td class="td-order-no">
+                    <div style="display:flex;align-items:center;gap:5px;white-space:nowrap">
+                      <code>{{ o.order_no }}</code>
+                      <span v-if="qrPrintCount(o) > 0" class="badge badge-success" style="font-size:10px;padding:1px 5px" :title="qrPrintTitle(o)">
+                        {{ qrPrintCount(o) > 1 ? `已印×${qrPrintCount(o)}` : '已印' }}
+                      </span>
+                    </div>
+                  </td>
                   <td class="td-customer">{{ o.customer_name || o.customer || '-' }}</td>
                   <td class="td-product">{{ o.product_name }}<span v-if="o.product_code" class="td-product-code">({{ o.product_code }})</span></td>
                   <td class="td-progress">
@@ -78,7 +85,9 @@
                     <div class="o-actions" style="justify-content:center" @click.stop>
                       <span class="o-abtn" style="color:var(--primary-accent)" @click="openProgress(o)" title="工件进度">📊</span>
                       <span v-if="canEdit && !isCompletedOrder(o)" class="o-abtn o-edit" @click="openEdit(o)" title="编辑">✏️</span>
-                      <span v-if="canScanView" class="o-abtn text-success" @click="openQrPrint(o)" title="打印二维码">🖨️</span>
+                      <span v-if="canScanView" class="o-abtn" :style="{color:qrPrintCount(o)>0?'var(--warning)':'var(--success)',position:'relative'}" @click="openQrPrint(o)" :title="qrPrintTitle(o)">
+                        🖨️<span v-if="qrPrintCount(o)>0" style="position:absolute;right:-3px;top:-4px;font-size:10px;color:var(--success);font-weight:700">✓</span>
+                      </span>
                       <span v-if="canReport && !isCompletedOrder(o)" class="o-abtn" style="color:var(--warning)" @click="openRework(o)" title="申请返工">🔧</span>
                       <span v-if="canDelete && !isCompletedOrder(o)" class="o-abtn o-del" @click="del(o)" title="删除">🗑️</span>
                       <span v-if="canEdit && isCompletedOrder(o)" class="o-abtn" style="color:var(--primary)" @click="reopenOrder(o)" title="重新打开">🔓</span>
@@ -473,6 +482,10 @@
             <span>🔢 数量: <strong>{{ qrPrintOrder.quantity }}</strong></span>
             <span v-if="qrPrintOrder.product_code" style="font-size:var(--text-xs-alt);color:var(--text-placeholder)">编码: {{ qrPrintOrder.product_code }}</span>
           </div>
+          <div v-if="qrPrintCount(qrPrintOrder) > 0" class="no-print" style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 14px;padding:10px 12px;border:1px solid var(--warning);background:var(--warning-light);border-radius:var(--radius-sm);font-size:var(--text-sm);color:var(--text-secondary)">
+            <strong style="color:var(--warning)">该订单二维码已打印 {{ qrPrintCount(qrPrintOrder) }} 次</strong>
+            <span>最近：{{ formatQrPrintTime(qrPrintOrder?.qr_printed_at) }} · {{ qrPrintOrder?.qr_printed_by_name || '未知人员' }}</span>
+          </div>
 
           <!-- 模式选择 -->
           <div class="qr-mode-tabs no-print">
@@ -489,7 +502,9 @@
               <span>📄 份数</span>
               <input type="number" v-model.number="qrPrintCopies" min="1" max="10" style="width:55px;text-align:center">
             </div>
-            <button v-if="qrCodes.length" class="btn btn-success" @click="printQrCodes" style="padding:var(--space-3) 20px;font-size:15px">🖨️ 打印</button>
+            <button v-if="qrCodes.length" class="btn btn-success" @click="printQrCodes" :disabled="qrPrintRecording" style="padding:var(--space-3) 20px;font-size:15px">
+              {{ qrPrintRecording ? '⏳ 记录中...' : (qrPrintCount(qrPrintOrder) > 0 ? '🖨️ 重新打印' : '🖨️ 打印') }}
+            </button>
           </div>
 
           <!-- 预览区 -->

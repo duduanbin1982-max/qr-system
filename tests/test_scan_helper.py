@@ -3,6 +3,7 @@
 import sqlite3
 
 import modules.services.scan_helper_service as scan_helper_module
+import modules.services.process_order_service as process_order_module
 from modules.services.scan_helper_service import ScanHelperService
 
 
@@ -124,7 +125,7 @@ class TestCheckProcessOrder:
         db = _scan_db()
         _add_process(db, 10, "??", 1)
         _add_process(db, 30, "??", 3)
-        monkeypatch.setattr(scan_helper_module, "get_setting", lambda key, default=None: "sequential")
+        monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "sequential")
 
         error, status = ScanHelperService.check_process_order(1, 3, db)
 
@@ -136,7 +137,7 @@ class TestCheckProcessOrder:
         db = _scan_db()
         _add_process(db, 10, "??", 1)
         _add_process(db, 30, "??", 3)
-        monkeypatch.setattr(scan_helper_module, "get_setting", lambda key, default=None: "out_of_order")
+        monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "out_of_order")
 
         error, status = ScanHelperService.check_process_order(1, 3, db)
 
@@ -146,12 +147,38 @@ class TestCheckProcessOrder:
     def test_sequential_no_prev_ok(self, monkeypatch):
         db = _scan_db()
         _add_process(db, 10, "??", 1)
-        monkeypatch.setattr(scan_helper_module, "get_setting", lambda key, default=None: "sequential")
+        monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "sequential")
 
         error, status = ScanHelperService.check_process_order(1, 1, db)
 
         assert error is None
         assert status is None
+
+    def test_out_of_order_ignores_previous_quantity_limit(self, monkeypatch):
+        db = _scan_db()
+        _add_process(db, 10, "A", 1, completed=0)
+        _add_process(db, 20, "B", 2, completed=0)
+        setting = lambda key, default=None: "out_of_order" if key == "process_order_mode" else "1"
+        monkeypatch.setattr(process_order_module, "get_setting", setting)
+        monkeypatch.setattr(scan_helper_module, "get_setting", setting)
+
+        error, status = ScanHelperService.check_quantity_limits(1, 2, 0, 1, 10, db)
+
+        assert error is None
+        assert status is None
+
+    def test_sequential_applies_previous_quantity_limit(self, monkeypatch):
+        db = _scan_db()
+        _add_process(db, 10, "A", 1, completed=0)
+        _add_process(db, 20, "B", 2, completed=0)
+        setting = lambda key, default=None: "sequential" if key == "process_order_mode" else "1"
+        monkeypatch.setattr(process_order_module, "get_setting", setting)
+        monkeypatch.setattr(scan_helper_module, "get_setting", setting)
+
+        error, status = ScanHelperService.check_quantity_limits(1, 2, 0, 1, 10, db)
+
+        assert error == {"error": "报工数量不能超过上道工序(A)的累计数量 0"}
+        assert status == 400
 
 
 class TestGetOrderProcesses:

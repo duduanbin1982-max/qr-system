@@ -4,6 +4,7 @@ CRITICAL FIX: 所有写操作事务化 — 消除 23 个裸 db.commit()，统一
 from modules.services import BaseService
 from modules.repositories.scan_repository import ScanRepository
 from modules.setting_reader import get_setting
+from modules.services.process_order_service import ProcessOrderService
 
 
 class ScanHelperService:
@@ -69,8 +70,8 @@ class ScanHelperService:
     @staticmethod
     def check_process_order(order_id, current_seq, db=None):
         """Check sequential process order. Returns (None, None) if OK, or (error_json, status_code)."""
-        mode = get_setting("process_order_mode", "sequential")
-        if mode == "out_of_order":
+        policy = ProcessOrderService.policy()
+        if policy["mode"] == ProcessOrderService.OUT_OF_ORDER:
             return None, None
         prev = ScanHelperService.get_prev_incomplete_processes(order_id, current_seq, db)
         if prev:
@@ -81,7 +82,8 @@ class ScanHelperService:
     @staticmethod
     def check_quantity_limits(order_id, current_seq, current_completed, quantity, order_quantity, db=None):
         """Check quantity limits. Returns (None, None) or (error_json, status_code)."""
-        if get_setting("limit_by_prev_process", "1") == "1" and current_seq > 1:
+        policy = ProcessOrderService.policy()
+        if policy["effective_previous_limit"] and current_seq > 1:
             prev_op = ScanHelperService.get_prev_order_process(order_id, current_seq, db)
             if prev_op:
                 new_completed = (current_completed or 0) + quantity
@@ -132,11 +134,6 @@ class ScanHelperService:
         )
 
     @staticmethod
-    def check_serial_duplicate_in_order(order_id, serial_no, user_id, db=None):
-        """Check if a serial_no has been reported by this user on ANY process in this order."""
-        return ScanRepository.has_serial_duplicate_in_order(order_id, serial_no, user_id, db=ScanHelperService._db(db))
-
-    @staticmethod
     def check_duplicate_defect_report(order_id, process_id, user_id, report_type, db=None):
         return ScanRepository.find_duplicate_defect_report(
             order_id, process_id, user_id, report_type, db=ScanHelperService._db(db)
@@ -151,7 +148,22 @@ class ScanHelperService:
     # ======================== 报工写入操作（全部接受 db 参数，不自行 commit） ========================
 
     @staticmethod
-    def insert_work_record(order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no, db=None):
+    def insert_work_record(
+        order_id,
+        process_id,
+        user_id,
+        report_type,
+        quantity,
+        remark,
+        work_status,
+        serial_no,
+        report_source="standard",
+        actual_completed_at=None,
+        backfill_reason="",
+        submit_position_id=None,
+        submit_position_name="",
+        db=None,
+    ):
         return ScanRepository.insert_report_work_record(
             order_id,
             process_id,
@@ -161,7 +173,36 @@ class ScanHelperService:
             remark,
             work_status,
             serial_no,
+            report_source,
+            actual_completed_at,
+            backfill_reason,
+            submit_position_id,
+            submit_position_name,
             db=ScanHelperService._db(db),
+        )
+
+    @staticmethod
+    def list_serial_report_states(order_id, serial_no, db=None):
+        return ScanRepository.list_serial_report_states(
+            order_id, serial_no, db=ScanHelperService._db(db)
+        )
+
+    @staticmethod
+    def list_approved_serial_work_records(order_id, serial_no, db=None):
+        return ScanRepository.list_approved_serial_work_records(
+            order_id, serial_no, db=ScanHelperService._db(db)
+        )
+
+    @staticmethod
+    def has_approved_serial_backfill(order_id, serial_no, db=None):
+        return ScanRepository.has_approved_serial_backfill(
+            order_id, serial_no, db=ScanHelperService._db(db)
+        )
+
+    @staticmethod
+    def find_first_unreported_serial_process(order_id, serial_no, db=None):
+        return ScanRepository.find_first_unreported_serial_process(
+            order_id, serial_no, db=ScanHelperService._db(db)
         )
 
     @staticmethod
@@ -183,6 +224,15 @@ class ScanHelperService:
         return ScanRepository.advance_product_item(
             item_id,
             next_process_id,
+            version,
+            db=ScanHelperService._db(db),
+        )
+
+    @staticmethod
+    def set_product_item_current_process(item_id, process_id, version, db=None):
+        return ScanRepository.set_product_item_current_process(
+            item_id,
+            process_id,
             version,
             db=ScanHelperService._db(db),
         )

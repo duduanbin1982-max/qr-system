@@ -92,7 +92,16 @@ class QualityNonconformanceService(QualityManagementBase):
             if disposition == "rework":
                 if not ncr.get("order_id") or not ncr.get("process_id"):
                     raise ValidationError("返修处置必须关联订单和工序")
-                rework_id = QualityManagementRepository.insert_rework_for_ncr(ncr, user_id, db)
+                from modules.services.rework_service import ReworkService
+                rework_id = ReworkService.create_rework(
+                    ncr["order_id"],
+                    ncr["process_id"],
+                    ncr.get("responsible_user_id") or user_id,
+                    max(int(ncr.get("defect_quantity") or 1), 1),
+                    f"质量不合格单 {ncr['ncr_no']} 返修",
+                    db=db,
+                    source_ncr_id=ncr["id"],
+                )
             if disposition in {"rework", "isolate", "scrap"} and ncr.get("order_id"):
                 quality_status = "quarantined" if disposition in {"rework", "isolate"} else "nonconforming"
                 QualityManagementRepository.set_inventory_quality(

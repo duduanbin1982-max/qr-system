@@ -79,6 +79,20 @@ def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_head
 
     with client.application.app_context():
         db = get_db()
+        rework = db.execute(
+            "SELECT quantity, source_ncr_id FROM rework_records WHERE id=?", (rework_id,)
+        ).fetchone()
+        process_totals = db.execute(
+            "SELECT rework FROM order_processes WHERE order_id=? AND process_id=?",
+            (order_id, process_id),
+        ).fetchone()
+        order_totals = db.execute(
+            "SELECT rework FROM orders WHERE id=?", (order_id,)
+        ).fetchone()
+        assert rework["quantity"] == 1
+        assert rework["source_ncr_id"] == failed["ncr_id"]
+        assert process_totals["rework"] == 1
+        assert order_totals["rework"] == 1
         db.execute(
             "UPDATE rework_records SET status='completed',completed_at=datetime('now','localtime') WHERE id=?",
             (rework_id,),

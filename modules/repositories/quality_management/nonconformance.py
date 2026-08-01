@@ -122,18 +122,6 @@ class QualityNonconformanceRepository:
             (ncr_id, action, from_status, to_status, note, actor_id),
         )
 
-    @staticmethod
-    def insert_rework_for_ncr(ncr, user_id, db):
-        cursor = db.execute(
-            "INSERT INTO rework_records (order_id,process_id,user_id,quantity,reason,status,source_ncr_id) VALUES (?,?,?,?,?,'pending',?)",
-            (
-                ncr["order_id"], ncr["process_id"], ncr.get("responsible_user_id") or user_id,
-                max(int(ncr.get("defect_quantity") or 1), 1), f"质量不合格单 {ncr['ncr_no']} 返修", ncr["id"],
-            ),
-        )
-        return cursor.lastrowid
-
-    @staticmethod
     def list_capa(status="", keyword="", page=1, limit=100, db=None):
         db = resolve_db(db)
         where = []

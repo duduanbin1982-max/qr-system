@@ -77,61 +77,84 @@ class ReworkRepository:
         ).fetchone()
 
     @staticmethod
-    def find_order(order_id, db=None):
+    def find_order_process_context(order_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id FROM orders WHERE id = ? AND deleted_at IS NULL", (order_id,)
+            "SELECT o.id AS order_id, o.status AS order_status, o.deleted_at, "
+            "op.id AS order_process_id "
+            "FROM orders o LEFT JOIN order_processes op "
+            "ON op.order_id = o.id AND op.process_id = ? WHERE o.id = ?",
+            (process_id, order_id),
         ).fetchone()
 
     @staticmethod
-    def find_process(process_id, db=None):
+    def find_recent_duplicate(order_id, process_id, user_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, name FROM processes WHERE id = ?", (process_id,)
+            "SELECT id FROM rework_records WHERE order_id = ? AND process_id = ? "
+            "AND user_id = ? AND created_at > datetime('now', '-10 seconds') "
+            "ORDER BY id DESC LIMIT 1",
+            (order_id, process_id, user_id),
         ).fetchone()
 
     @staticmethod
-    def insert_rework_txn(order_id, process_id, user_id, quantity, reason, db):
+    def find_by_source_ncr_id(source_ncr_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id FROM rework_records WHERE source_ncr_id = ? ORDER BY id LIMIT 1",
+            (source_ncr_id,),
+        ).fetchone()
+
+    @staticmethod
+    def insert_rework_txn(
+        order_id, process_id, user_id, quantity, reason, db, source_ncr_id=None
+    ):
         cur = db.execute(
-            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) "
-            "VALUES (?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason)
+            "INSERT INTO rework_records "
+            "(order_id, process_id, user_id, quantity, reason, source_ncr_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (order_id, process_id, user_id, quantity, reason, source_ncr_id)
         )
         return cur.lastrowid
 
     @staticmethod
     def increment_order_process_rework_txn(order_id, process_id, quantity, db):
-        db.execute(
+        cursor = db.execute(
             "UPDATE order_processes SET rework = COALESCE(rework,0) + ? "
             "WHERE order_id = ? AND process_id = ?",
             (quantity, order_id, process_id)
         )
+        return cursor.rowcount
 
     @staticmethod
     def sync_order_rework_txn(order_id, db):
-        db.execute(
+        cursor = db.execute(
             "UPDATE orders SET rework = ("
             "SELECT COALESCE(SUM(rework),0) FROM order_processes WHERE order_id = ?"
             "), updated_at = datetime('now','localtime') WHERE id = ?",
             (order_id, order_id)
         )
+        return cursor.rowcount
 
     @staticmethod
-    def update_reason(rework_id, reason, db=None):
+    def update_reason_pending(rework_id, reason, db=None):
         db = resolve_db(db)
-        db.execute(
-            "UPDATE rework_records SET reason = ? WHERE id = ?", (reason, rework_id)
+        cursor = db.execute(
+            "UPDATE rework_records SET reason = ? WHERE id = ? AND status = 'pending'",
+            (reason, rework_id)
         )
+        return cursor.rowcount
 
     @staticmethod
     def complete_rework_txn(rework_id, reason, user_id, result, result_remark, duration, db):
-        db.execute(
+        cursor = db.execute(
             "UPDATE rework_records SET status = 'completed', reason = ?, "
             "completed_by = ?, result = ?, result_remark = ?, "
             "completed_at = datetime('now','localtime'), duration_hours = ? "
-            "WHERE id = ?",
+            "WHERE id = ? AND status = 'pending'",
             (reason, user_id, result, result_remark, duration, rework_id)
         )
+        return cursor.rowcount
 
     @staticmethod
     def get_stats(db=None):
@@ -211,7 +234,7 @@ class ReworkRepository:
     def top_rework_processes(top_n=5, db=None):
         db = resolve_db(db)
         rows = db.execute(
-            "SELECT p.name as process_name, COUNT(*) as rework_count, "
+            "SELECT p.id as process_id, p.name as process_name, COUNT(*) as rework_count, "
             "COALESCE(SUM(rw.quantity),0) as rework_qty "
             "FROM rework_records rw "
             "JOIN processes p ON rw.process_id = p.id "
@@ -220,19 +243,20 @@ class ReworkRepository:
             (top_n,)
         ).fetchall()
         total_work = db.execute(
-            "SELECT p.name, COALESCE(SUM(wr.quantity),0) as total_qty "
+            "SELECT p.id as process_id, COALESCE(SUM(wr.quantity),0) as total_qty "
             "FROM work_records wr "
             "JOIN processes p ON wr.process_id = p.id "
             "WHERE wr.type != 'scrap' "
             "GROUP BY wr.process_id"
         ).fetchall()
-        work_map = {r["name"]: r["total_qty"] for r in total_work}
+        work_map = {r["process_id"]: r["total_qty"] for r in total_work}
         result = []
         for r in rows:
-            total = work_map.get(r["process_name"], 0)
+            total = work_map.get(r["process_id"], 0)
             rate = round(r["rework_qty"] / total * 100, 1) if total > 0 else 0
             result.append({
                 "process_name": r["process_name"],
+                "process_id": r["process_id"],
                 "rework_count": r["rework_count"],
                 "rework_qty": r["rework_qty"],
                 "total_qty": total,
@@ -256,16 +280,16 @@ class ReworkRepository:
             "ORDER BY rework_count DESC"
         ).fetchall()
         total_work = db.execute(
-            "SELECT u.name, COALESCE(SUM(wr.quantity),0) as total_qty "
+            "SELECT u.id as worker_id, COALESCE(SUM(wr.quantity),0) as total_qty "
             "FROM work_records wr "
             "JOIN users u ON wr.user_id = u.id "
             "WHERE wr.type != 'scrap' "
             "GROUP BY wr.user_id"
         ).fetchall()
-        work_map = {r["name"]: r["total_qty"] for r in total_work}
+        work_map = {r["worker_id"]: r["total_qty"] for r in total_work}
         result = []
         for r in rows:
-            total = work_map.get(r["worker_name"], 0)
+            total = work_map.get(r["worker_id"], 0)
             rate = round(r["rework_qty"] / total * 100, 1) if total > 0 else 0
             result.append({
                 "worker_name": r["worker_name"],

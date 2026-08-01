@@ -50,3 +50,5 @@ test-results/
 data/*.db-wal
 data/*.db-shm
 data/*.db.bak-*
+.process-fix-backup-*/
+.process-fix-static-backup-*/

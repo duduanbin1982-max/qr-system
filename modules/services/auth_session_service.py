@@ -62,6 +62,8 @@ class AuthSessionService:
         user = dict(row)
         session_created_at = user.pop("_session_created_at", None)
         session_last_active = user.pop("_session_last_active", None)
+        active_position_id = user.pop("_active_position_id", None)
+        user["active_position_id"] = active_position_id or user.get("position_id")
         now = now or datetime.now()
         timeout_hours = cls._setting_int("session_timeout_hours", SESSION_TIMEOUT_HOURS)
         idle_minutes = cls._setting_int("session_idle_minutes", SESSION_IDLE_MINUTES)

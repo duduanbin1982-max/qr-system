@@ -1,11 +1,12 @@
 """
 qr-system — 工序路线管理
 """
-from flask import request, jsonify
+from flask import request, jsonify, g
 
 from modules.route_decorators import (
     app,
     check_auth,
+    check_order_data_scope,
     check_permission,
     get_json_body,
     safe_audit_log,
@@ -87,20 +88,15 @@ def delete_process_route(rid):
 @app.route('/api/process-routes/<int:rid>/apply', methods=['POST'])
 @check_auth
 @check_permission('routes:edit')
+@check_permission('orders:edit')
 def apply_process_route(rid):
     """将工序路线应用到订单"""
     data = get_json_body()
     order_id = data.get('order_id')
     if not order_id:
         return jsonify({'error': '请指定订单'}), 400
-    # 验证订单存在且未被删除
-    try:
-        ProcessRouteService.check_order_exists(order_id)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
-    try:
-        count = ProcessRouteService.apply_route(rid, order_id)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    if not check_order_data_scope(order_id, g.current_user):
+        return jsonify({'error': '无权限访问此订单'}), 403
+    count = ProcessRouteService.apply_route(rid, order_id)
     safe_audit_log('apply_process_route', 'order', order_id, f'route={rid}')
     return jsonify({'message': '应用成功', 'processes_count': count})

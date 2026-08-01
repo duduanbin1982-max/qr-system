@@ -47,7 +47,7 @@
           <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
           <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
           <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="applyFilter">
-          <button v-if="statusFilter==='pending' && selectedIds.length && canEdit" @click="showBatchModal=true" class="btn-success btn-sm" style="padding:6px 12px;white-space:nowrap">✅ 批量完成 ({{ selectedIds.length }})</button>
+          <button v-if="statusFilter==='pending' && selectedIds.length && canEdit" @click="openBatchComplete" class="btn-success btn-sm" style="padding:6px 12px;white-space:nowrap">✅ 批量完成 ({{ selectedIds.length }})</button>
           <button @click="exportData" class="btn-sm" style="background:var(--primary-light);color:var(--primary);border:1px solid var(--primary-light);padding:6px 12px;white-space:nowrap;cursor:pointer">📥 导出</button>
         </div>
       </div>
@@ -86,9 +86,9 @@
               <td style="padding:var(--space-3) 12px;text-align:center;font-weight:600">{{ it.quantity }}</td>
               <td style="padding:var(--space-3) 12px">
                 <div v-if="editing===it.id" style="display:flex;gap:var(--space-1);align-items:center">
-                  <input v-model="it.reason" class="form-input" style="width:110px;font-size:var(--text-xs);padding:var(--space-1) 6px" @keyup.enter="saveEdit(it)">
-                  <button class="btn-success btn-sm" style="padding:3px 8px;font-size:var(--text-xs-alt)" @click="saveEdit(it)">保存</button>
-                  <button class="btn-sm" style="padding:3px 8px;font-size:var(--text-xs-alt);background:var(--bg-hover);border:1px solid var(--border-light);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-placeholder)" @click="cancelEdit">取消</button>
+                  <input v-model="editReason" class="form-input" style="width:110px;font-size:var(--text-xs);padding:var(--space-1) 6px" @keyup.enter="saveEdit(it)">
+                  <button class="btn-success btn-sm" :disabled="editSubmitting" style="padding:3px 8px;font-size:var(--text-xs-alt)" @click="saveEdit(it)">{{ editSubmitting ? '保存中' : '保存' }}</button>
+                  <button class="btn-sm" :disabled="editSubmitting" style="padding:3px 8px;font-size:var(--text-xs-alt);background:var(--bg-hover);border:1px solid var(--border-light);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-placeholder)" @click="cancelEdit">取消</button>
                 </div>
                 <div v-else style="display:flex;align-items:center;gap:var(--space-1)">
                   <span v-if="it.reason" style="background:var(--warning-lighter);color:var(--warning);padding:var(--space-1) 8px;border-radius:var(--radius-sm);font-size:var(--text-xs);max-width:120px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.reason }}</span>
@@ -118,9 +118,6 @@
         <div v-if="!items.length" style="text-align:center;padding:50px;color:var(--text-placeholder)">暂无已完成记录</div>
         <table v-else style="width:100%;border-collapse:collapse">
           <thead><tr style="border-bottom:1px solid var(--border-light);color:var(--text-placeholder);font-size:var(--text-xs)">
-            <th style="padding:var(--space-3) 4px;text-align:center;font-weight:500;width:30px">
-              <input type="checkbox" @change="toggleSelectAll" :checked="allSelected">
-            </th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:130px">订单号</th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500">产品 / 客户</th>
             <th style="padding:var(--space-3) 12px;text-align:left;font-weight:500;width:80px">工序</th>
@@ -188,10 +185,13 @@
           <div style="font-size:var(--text-xs);color:var(--text-placeholder);padding:8px;background:var(--bg-hover);border-radius:8px">
             将对选中的 {{ selectedIds.length }} 条待处理返工统一标记完成
           </div>
+          <div v-if="batchErrors.length" style="margin-top:10px;padding:8px;border:1px solid var(--danger-light);background:var(--danger-lighter);color:var(--danger);font-size:var(--text-xs);max-height:120px;overflow:auto">
+            <div v-for="error in batchErrors" :key="error.id">记录 {{ error.id }}：{{ error.error }}</div>
+          </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-default" @click="showBatchModal=false">取消</button>
-          <button class="btn btn-primary" @click="doBatchComplete">确认批量完成</button>
+          <button class="btn btn-default" :disabled="batchSubmitting" @click="showBatchModal=false">取消</button>
+          <button class="btn btn-primary" :disabled="batchSubmitting" @click="doBatchComplete">{{ batchSubmitting ? '处理中...' : '确认批量完成' }}</button>
         </div>
       </div>
     </div>
@@ -219,8 +219,8 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-default" @click="closeComplete">取消</button>
-          <button class="btn btn-primary" @click="doComplete">确认完成</button>
+          <button class="btn btn-default" :disabled="completeSubmitting" @click="closeComplete">取消</button>
+          <button class="btn btn-primary" :disabled="completeSubmitting" @click="doComplete">{{ completeSubmitting ? '提交中...' : '确认完成' }}</button>
         </div>
       </div>
     </div>
@@ -246,8 +246,12 @@ export default {
     const showBatchModal = ref(false)
     const batchReason = ref('')
     const batchResult = ref('ok')
+    const batchErrors = ref([])
+    const batchSubmitting = ref(false)
     const stats = ref({ pending_count:0, pending_qty:0, today_count:0, today_qty:0, today_done:0, today_done_qty:0 })
     const editing = ref(null)
+    const editReason = ref('')
+    const editSubmitting = ref(false)
     const dateFrom = ref('')
     const dateTo = ref('')
     const page = ref(1)
@@ -256,8 +260,6 @@ export default {
 
     // RBAC
     const canEdit   = computed(() => can('rework:edit'))
-    const canCreate = computed(() => can('rework:create'))
-
     const allSelected = computed(() => {
       return items.value.length > 0 && items.value.every(it => selectedIds.value.includes(it.id))
     })
@@ -285,19 +287,22 @@ export default {
       return Math.round((now - created) / (60 * 60 * 1000))
     }
 
+    let loadRequestId = 0
     async function load(p = 1) {
-      loading.value = true; page.value = p
-      const qs = []
-      if (statusFilter.value) qs.push('status=' + statusFilter.value)
-      if (search.value) qs.push('search=' + encodeURIComponent(search.value))
-      if (dateFrom.value) qs.push('from=' + dateFrom.value)
-      if (dateTo.value) qs.push('to=' + dateTo.value)
-      qs.push('page=' + p, 'per_page=' + perPage)
+      const requestId = ++loadRequestId
+      loading.value = true
+      page.value = p
       try {
         const r = await api.domains.rework.listRework({status: statusFilter.value || undefined, search: search.value || undefined, from: dateFrom.value || undefined, to: dateTo.value || undefined, worker_id: filterWorker.value || undefined, process_id: filterProcess.value || undefined, page: p, per_page: perPage})
-        if (r.ok) { items.value = r.items; total.value = r.total }
-      } catch (e) { showToast('加载失败', 'error') }
-      finally { loading.value = false }
+        if (requestId === loadRequestId && r.ok) {
+          items.value = r.items
+          total.value = r.total
+        }
+      } catch (e) {
+        if (requestId === loadRequestId) showToast(e.message || '加载失败', 'error')
+      } finally {
+        if (requestId === loadRequestId) loading.value = false
+      }
     }
 
     async function loadStats() {
@@ -308,6 +313,7 @@ export default {
     const completingItem = ref(null)
     const completeResult = ref('ok')
     const completeResultRemark = ref('')
+    const completeSubmitting = ref(false)
 
     function openComplete(item) {
       completingItem.value = item
@@ -318,27 +324,52 @@ export default {
 
     async function doComplete() {
       const item = completingItem.value
-      if (!item) return
+      if (!item || completeSubmitting.value) return
+      completeSubmitting.value = true
       try {
         const d = await api.domains.rework.completeRework(item.id, {
           reason: item.reason,
           result: completeResult.value,
           result_remark: completeResultRemark.value
         })
-        if (d.ok) { showToast('返工完成'); completingItem.value = null; load(page.value); loadStats() }
+        if (d.ok) {
+          showToast('返工完成')
+          completingItem.value = null
+          await Promise.all([load(page.value), loadStats()])
+        }
         else showToast(d.error || '失败', 'error')
-      } catch (e) { showToast('操作失败', 'error') }
+      } catch (e) {
+        showToast(e.message || '操作失败', 'error')
+      } finally {
+        completeSubmitting.value = false
+      }
     }
 
-    function startEdit(item) { editing.value = item.id }
-    function cancelEdit() { editing.value = null }
+    function startEdit(item) {
+      editing.value = item.id
+      editReason.value = item.reason || ''
+    }
+    function cancelEdit() {
+      editing.value = null
+      editReason.value = ''
+    }
 
     async function saveEdit(item) {
+      if (editSubmitting.value) return
+      editSubmitting.value = true
       try {
-        const r = await api.domains.rework.updateRework(item.id, { reason: item.reason })
-        if (r.ok) { showToast('已更新'); editing.value = null }
+        const r = await api.domains.rework.updateRework(item.id, { reason: editReason.value })
+        if (r.ok) {
+          item.reason = editReason.value.trim()
+          showToast('已更新')
+          cancelEdit()
+        }
         else showToast(r.error || '失败', 'error')
-      } catch (e) { showToast('保存失败', 'error') }
+      } catch (e) {
+        showToast(e.message || '保存失败', 'error')
+      } finally {
+        editSubmitting.value = false
+      }
     }
 
     function toggleSelect(id) {
@@ -350,8 +381,17 @@ export default {
       if (allSelected.value) selectedIds.value = []
       else selectedIds.value = items.value.map(it => it.id)
     }
+    function openBatchComplete() {
+      batchErrors.value = []
+      batchReason.value = ''
+      batchResult.value = 'ok'
+      showBatchModal.value = true
+    }
     async function doBatchComplete() {
       if (!selectedIds.value.length) { showToast('请选择返工记录', 'error'); return }
+      if (batchSubmitting.value) return
+      batchSubmitting.value = true
+      batchErrors.value = []
       try {
         const d = await api.domains.rework.batchCompleteRework({
           ids: selectedIds.value,
@@ -360,17 +400,25 @@ export default {
           result_remark: ''
         })
         if (d.ok) {
-          const msg = d.errors && d.errors.length
-            ? `已完成 ${d.completed} 条，${d.errors.length} 条失败`
+          batchErrors.value = d.errors || []
+          const hasErrors = batchErrors.value.length > 0
+          const msg = hasErrors
+            ? `已完成 ${d.completed} 条，${batchErrors.value.length} 条失败`
             : `已完成 ${d.completed} 条返工`
-          showToast(msg)
+          showToast(msg, hasErrors ? 'warn' : 'success')
           selectedIds.value = []
-          showBatchModal.value = false
-          batchReason.value = ''
+          if (!hasErrors) {
+            showBatchModal.value = false
+            batchReason.value = ''
+          }
           await load(page.value)
           await loadStats()
         }
-      } catch (e) { showToast(e.message || '操作失败', 'error') }
+      } catch (e) {
+        showToast(e.message || '操作失败', 'error')
+      } finally {
+        batchSubmitting.value = false
+      }
     }
     function exportData() {
       const qs = []
@@ -399,7 +447,7 @@ export default {
 
     onMounted(() => { loadDropdowns(); load(); loadStats() })
 
-    return { items, loading, statusFilter, search, filterWorker, filterProcess, workers, processes, stats, editing, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, isOverdue, overdueHours, load, loadStats, completingItem, completeResult, completeResultRemark, openComplete, closeComplete, doComplete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter, canEdit, canCreate, selectedIds, allSelected, showBatchModal, batchReason, batchResult, toggleSelect, toggleSelectAll, doBatchComplete, exportData }
+    return { items, loading, statusFilter, search, filterWorker, filterProcess, workers, processes, stats, editing, editReason, editSubmitting, dateFrom, dateTo, page, total, perPage, fmtDate, fmtDatetime, isOverdue, overdueHours, load, loadStats, completingItem, completeResult, completeResultRemark, completeSubmitting, openComplete, closeComplete, doComplete, startEdit, cancelEdit, saveEdit, switchTab, applyFilter, canEdit, selectedIds, allSelected, showBatchModal, batchReason, batchResult, batchErrors, batchSubmitting, openBatchComplete, toggleSelect, toggleSelectAll, doBatchComplete, exportData }
   }
 }
 </script>

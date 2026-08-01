@@ -5,7 +5,6 @@ Run via cron: 0 2 * * * /home/dubin/qr-system/scripts/db-maintenance.sh
 """
 import sqlite3
 import os
-import shutil
 import logging
 from datetime import datetime
 
@@ -27,12 +26,18 @@ def get_db_size_mb(path):
     return round(os.path.getsize(path) / (1024 * 1024), 2) if os.path.exists(path) else 0
 
 
-def backup_database():
+def backup_database(source_conn):
     """Create timestamped backup."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
+    os.chmod(BACKUP_DIR, 0o700)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_path = os.path.join(BACKUP_DIR, f'production_backup_{ts}.db')
-    shutil.copy2(DB_PATH, backup_path)
+    backup_conn = sqlite3.connect(backup_path)
+    try:
+        source_conn.backup(backup_conn)
+    finally:
+        backup_conn.close()
+    os.chmod(backup_path, 0o600)
     logger.info(f'Backup created: {backup_path} ({get_db_size_mb(backup_path)}MB)')
 
 
@@ -56,6 +61,16 @@ def check_integrity(conn):
     else:
         logger.error(f'Integrity check FAILED: {result[0]}')
         return False
+
+
+def check_foreign_keys(conn):
+    """Abort maintenance when logical referential integrity is broken."""
+    violations = conn.execute('PRAGMA foreign_key_check').fetchall()
+    if violations:
+        logger.error(f'Foreign-key check FAILED: {violations}')
+        return False
+    logger.info('Foreign-key check: PASSED')
+    return True
 
 
 def vacuum_database(conn):
@@ -140,11 +155,16 @@ def main():
     
     try:
         # Step 1: Backup
-        backup_database()
+        backup_database(conn)
         
         # Step 2: Integrity check
         if not check_integrity(conn):
             logger.critical('Integrity check failed - aborting maintenance!')
+            conn.close()
+            return 1
+
+        if not check_foreign_keys(conn):
+            logger.critical('Foreign-key check failed - aborting maintenance!')
             conn.close()
             return 1
         

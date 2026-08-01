@@ -96,8 +96,8 @@ if [[ -d public/static ]]; then
     cp -a public/static "$rollback_dir/static"
 fi
 
-log "building frontend"
-npm run build
+log "building and atomically publishing frontend"
+bash scripts/publish-frontend.sh
 
 log "installing authoritative user service"
 install_user_service

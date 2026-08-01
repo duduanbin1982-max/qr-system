@@ -47,6 +47,30 @@ class OrderRepository:
             (status, order_id),
         )
 
+    @staticmethod
+    def record_qr_print(order_id, user_id, user_name, db=None):
+        """Record one QR-code print action and retain its latest operator."""
+        db = resolve_db(db)
+        cursor = db.execute(
+            "UPDATE orders SET "
+            "qr_print_count = COALESCE(qr_print_count, 0) + 1, "
+            "qr_printed_at = datetime('now','localtime'), "
+            "qr_printed_by = ?, qr_printed_by_name = ? "
+            "WHERE id = ? AND deleted_at IS NULL",
+            (user_id, user_name, order_id),
+        )
+        return cursor.rowcount
+
+    @staticmethod
+    def get_qr_print_status(order_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT qr_printed_at, COALESCE(qr_print_count, 0) AS qr_print_count, "
+            "qr_printed_by, COALESCE(qr_printed_by_name, '') AS qr_printed_by_name "
+            "FROM orders WHERE id = ? AND deleted_at IS NULL",
+            (order_id,),
+        ).fetchone()
+
 
     @staticmethod
     def find_by_order_no(order_no, db=None):

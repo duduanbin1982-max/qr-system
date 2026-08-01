@@ -1,4 +1,4 @@
-"""qr-system — RoleRepository（角色组 + 角色管理数据访问层）"""
+"""角色组与角色管理的数据访问层。"""
 from modules.repositories.context import resolve_db
 
 
@@ -73,6 +73,17 @@ class RoleRepository:
             "SELECT r.*, rg.name as group_name "
             "FROM roles r LEFT JOIN role_groups rg ON r.group_id = rg.id "
             "ORDER BY r.level, r.id"
+        ).fetchall()
+
+    @staticmethod
+    def list_approval_roles(db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, name, code, group_id, level, status, is_builtin "
+            "FROM roles "
+            "WHERE status = 'active' AND code <> 'worker' "
+            "AND (code = 'admin' OR permissions LIKE '%\"approvals:edit\"%') "
+            "ORDER BY CASE WHEN code = 'admin' THEN 0 ELSE 1 END, level, id"
         ).fetchall()
 
     @staticmethod

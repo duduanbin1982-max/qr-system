@@ -5,7 +5,9 @@ from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
+    get_json_body,
     safe_audit_log,
+    validate_json,
 )
 from modules.services.rework_service import ReworkService
 
@@ -20,8 +22,8 @@ def rework_list():
     date_to = request.args.get('to', '')
     worker_id = request.args.get('worker_id', type=int)
     process_id = request.args.get('process_id', type=int)
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 50))
+    page = request.args.get('page', 1)
+    per_page = request.args.get('per_page', 50)
     result = ReworkService.list_rework(
         status=status, search=search, date_from=date_from, date_to=date_to,
         page=page, per_page=per_page, worker_id=worker_id, process_id=process_id
@@ -32,39 +34,31 @@ def rework_list():
 @app.route('/api/rework', methods=['POST'])
 @check_auth
 @check_permission('rework:create')
+@validate_json('create_rework')
 def rework_create():
-    try:
-        data = request.get_json() or {}
-        required = ['order_id', 'process_id', 'quantity']
-        for field in required:
-            if field not in data:
-                return jsonify({'error': f'缺少必填字段: {field}'}), 400
-        user = g.current_user if hasattr(g, 'current_user') else {}
-        rework_id = ReworkService.create_rework(
-            order_id=data['order_id'],
-            process_id=data['process_id'],
-            user_id=user.get('id'),
-            quantity=data['quantity'],
-            reason=data.get('reason', '')
-        )
-        safe_audit_log('rework_create', 'rework', rework_id, f'order={data["order_id"]}')
-        return jsonify({'ok': True, 'id': rework_id, 'message': '返工记录已创建'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    data = get_json_body()
+    rework_id = ReworkService.create_rework(
+        order_id=data['order_id'],
+        process_id=data['process_id'],
+        user_id=g.current_user['id'],
+        quantity=data['quantity'],
+        reason=data.get('reason', ''),
+        reject_recent_duplicate=True,
+    )
+    safe_audit_log('rework_create', 'rework', rework_id, f'order={data["order_id"]}')
+    return jsonify({'ok': True, 'id': rework_id, 'message': '返工记录已创建'})
 
 
 @app.route('/api/rework/batch-complete', methods=['POST'])
 @check_auth
 @check_permission('rework:edit')
+@validate_json('batch_complete_rework')
 def rework_batch_complete():
-    data = request.get_json() or {}
-    ids = data.get('ids', [])
-    if not ids:
-        return jsonify({'error': '请选择返工记录'}), 400
-    user = g.current_user if hasattr(g, 'current_user') else {}
+    data = get_json_body()
+    ids = data['ids']
     result = ReworkService.batch_complete(
-        ids, data.get('reason', ''), user.get('id'),
-        data.get('result', 'ok'), data.get('result_remark', '')
+        ids, data.get('reason', ''), g.current_user['id'],
+        data['result'], data.get('result_remark', '')
     )
     safe_audit_log('rework_batch', 'rework', 0, f'completed {result["completed"]} items')
     return jsonify({'ok': True, 'completed': result['completed'], 'errors': result['errors']})
@@ -123,33 +117,24 @@ def rework_stats():
 @app.route('/api/rework/<int:rework_id>', methods=['PUT'])
 @check_auth
 @check_permission('rework:edit')
+@validate_json('update_rework')
 def rework_update(rework_id):
-    try:
-        data = request.get_json() or {}
-        if 'reason' not in data:
-            return jsonify({'error': '缺少必填字段: reason'}), 400
-        ReworkService.update_rework(rework_id, data['reason'])
-        safe_audit_log('rework_edit', 'rework', rework_id, 'reason updated')
-        return jsonify({'ok': True})
-    except ValueError as e:
-        msg = str(e)
-        code = 404 if '不存在' in msg else 400
-        return jsonify({'error': msg}), code
+    data = get_json_body()
+    ReworkService.update_rework(rework_id, data['reason'])
+    safe_audit_log('rework_edit', 'rework', rework_id, 'reason updated')
+    return jsonify({'ok': True, 'message': '返工原因已更新'})
 
 
 @app.route('/api/rework/<int:rework_id>/complete', methods=['POST'])
 @check_auth
 @check_permission('rework:edit')
+@validate_json('complete_rework')
 def rework_complete(rework_id):
-    try:
-        data = request.get_json() or {}
-        user = g.current_user if hasattr(g, 'current_user') else {}
-        ReworkService.complete_rework(
-            rework_id, data.get('reason', ''),
-            user.get('id'), data.get('result', ''),
-            data.get('result_remark', '')
-        )
-        safe_audit_log('rework_complete', 'rework', rework_id, 'completed')
-        return jsonify({'ok': True, 'message': '返工完成'})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    data = get_json_body()
+    ReworkService.complete_rework(
+        rework_id, data.get('reason', ''),
+        g.current_user['id'], data['result'],
+        data.get('result_remark', '')
+    )
+    safe_audit_log('rework_complete', 'rework', rework_id, 'completed')
+    return jsonify({'ok': True, 'message': '返工完成'})

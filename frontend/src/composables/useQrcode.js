@@ -11,13 +11,34 @@ export function useQrcode() {
   const qrPrintLoading = ref(false)
   const qrPrintCopies = ref(1)
   const qrPrintSize = ref('small')
+  const qrPrintRecording = ref(false)
+
+  function qrPrintCount(order) {
+    const count = Number(order?.qr_print_count || 0)
+    return Number.isFinite(count) && count > 0 ? count : 0
+  }
+
+  function formatQrPrintTime(value) {
+    return value ? String(value).slice(0, 16) : '-'
+  }
+
+  function qrPrintTitle(order) {
+    const count = qrPrintCount(order)
+    if (!count) return '打印二维码'
+    const operator = order?.qr_printed_by_name || '未知人员'
+    return `已打印 ${count} 次；最近 ${formatQrPrintTime(order?.qr_printed_at)}，${operator}`
+  }
 
   function openQrPrint(o) {
     qrPrintOrder.value = o
     const existingMode = (o.qr_mode || '').trim()
     qrMode.value = existingMode || 'order'
     qrCodes.value = []
+    qrPrintCopies.value = 1
     showQrPrint.value = true
+    if (qrPrintCount(o) > 0) {
+      showToast(`该订单二维码已打印 ${qrPrintCount(o)} 次，本次属于重新打印`, 'warn')
+    }
   }
 
   async function generateQrCodes() {
@@ -62,8 +83,14 @@ export function useQrcode() {
 
   function printQrCodes() {
     if (!qrCodes.value.length) { showToast('请先生成二维码', 'warn'); return }
+    if (qrPrintRecording.value) return
+    const previousPrints = qrPrintCount(qrPrintOrder.value)
+    if (previousPrints > 0 && !window.confirm(
+      `该订单二维码已打印 ${previousPrints} 次，确定要重新打印吗？`
+    )) return
     const root = document.getElementById('qr-print-root')
     if (!root) { showToast('打印容器未找到', 'error'); return }
+    qrPrintRecording.value = true
     root.innerHTML = ''
     const grid = document.createElement('div')
     grid.className = 'qr-print-grid'
@@ -99,8 +126,21 @@ export function useQrcode() {
     var oldNext = root.nextSibling
     document.body.appendChild(root)
 
-    function doPrint() {
-      window.print()
+    async function doPrint() {
+      try {
+        window.print()
+        const result = await api.domains.orders.recordQrPrint(qrPrintOrder.value.id, {
+          mode: qrMode.value,
+          copies: qrPrintCopies.value,
+          label_count: qrCodes.value.length * qrPrintCopies.value
+        })
+        Object.assign(qrPrintOrder.value, result.print_status || {})
+        showToast(previousPrints > 0 ? '重新打印已记录' : '打印状态已记录')
+      } catch (error) {
+        showToast('打印已发起，但状态记录失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        qrPrintRecording.value = false
+      }
       setTimeout(function() {
         if (oldParent) {
           if (oldNext) oldParent.insertBefore(root, oldNext)
@@ -126,7 +166,8 @@ export function useQrcode() {
 
   return {
     showQrPrint, qrPrintOrder, qrMode, qrCodes, qrPrintLoading,
-    qrPrintCopies, qrPrintSize,
-    openQrPrint, generateQrCodes, switchQrMode, printQrCodes
+    qrPrintCopies, qrPrintSize, qrPrintRecording,
+    openQrPrint, generateQrCodes, switchQrMode, printQrCodes,
+    qrPrintCount, qrPrintTitle, formatQrPrintTime
   }
 }

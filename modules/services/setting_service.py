@@ -13,6 +13,7 @@ ALLOWED_KEYS = {
     'default_password', 'approval_enabled', 'auto_order_no', 'page_size',
     'process_order_mode', 'delivery_warning_days',
     'limit_by_prev_process', 'limit_by_order_qty',
+    'serial_process_report_mode',
     'session_timeout_hours', 'session_idle_minutes',
     'board_token', 'board_token_created_at',
     'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password',
@@ -28,6 +29,7 @@ SETTING_VALIDATORS = {
     'page_size': (int, 1, 500, 'Page size must be 1-500'),
     'delivery_warning_days': (int, 0, 365, 'Delivery warning days must be 0-365'),
     'process_order_mode': (str, None, None, 'Process order mode must be sequential or out_of_order'),
+    'serial_process_report_mode': (str, None, None, 'Serial process report mode must be strict or controlled_backfill'),
     'limit_by_prev_process': (str, None, None, 'Must be 0 or 1'),
     'limit_by_order_qty': (str, None, None, 'Must be 0 or 1'),
     'approval_enabled': (str, None, None, 'Must be 0 or 1'),
@@ -51,6 +53,9 @@ def validate_setting(key, value):
         return None, err_msg
     if key == 'process_order_mode':
         if parsed not in ('sequential', 'out_of_order'):
+            return None, err_msg
+    elif key == 'serial_process_report_mode':
+        if parsed not in ('strict', 'controlled_backfill'):
             return None, err_msg
     elif key == COMPLETION_FOCUS_MODE_KEY:
         if parsed not in COMPLETION_FOCUS_MODES:

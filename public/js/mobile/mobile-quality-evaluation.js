@@ -140,20 +140,47 @@ function loadMyQualityEvaluations() {
   });
 }
 
+function requiredQualityTaskFirst(left, right) {
+  var requiredDifference = Number(!!right.task.is_required) - Number(!!left.task.is_required);
+  return requiredDifference || left.sourceIndex - right.sourceIndex;
+}
+
+function requiredQualityGroupFirst(left, right) {
+  var requiredDifference = Number(right.hasRequired) - Number(left.hasRequired);
+  return requiredDifference || left.sourceIndex - right.sourceIndex;
+}
+
+function groupQualityEvaluationTasks(tasks) {
+  var groups = [];
+  var groupsByKey = {};
+  tasks.forEach(function(task, sourceIndex) {
+    var key = task.trigger_work_record_id == null
+      ? 'task:' + task.id
+      : 'work:' + task.trigger_work_record_id;
+    var group = groupsByKey[key];
+    if (!group) {
+      group = { key: key, rows: [], hasRequired: false, sourceIndex: sourceIndex };
+      groupsByKey[key] = group;
+      groups.push(group);
+    }
+    group.rows.push({ task: task, sourceIndex: sourceIndex });
+    group.hasRequired = group.hasRequired || !!task.is_required;
+  });
+  groups.forEach(function(group) {
+    group.rows = group.rows.sort(requiredQualityTaskFirst).map(function(entry) { return entry.task; });
+  });
+  return groups.sort(requiredQualityGroupFirst);
+}
+
 function renderQualityEvaluationTasks(tasks) {
   var list = $('quality-task-list');
   if (!tasks.length) {
     list.innerHTML = '<div class="quality-empty"><strong>暂无待评价任务</strong><span>完成下道工序报工后，符合条件的上游工序会出现在这里。</span></div>';
     return;
   }
-  var groups = {};
-  tasks.forEach(function(task) {
-    var key = task.trigger_work_record_id;
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(task);
-  });
-  list.innerHTML = Object.keys(groups).map(function(key) {
-    var rows = groups[key];
+  var groups = groupQualityEvaluationTasks(tasks);
+  list.innerHTML = groups.map(function(group) {
+    var rows = group.rows;
     var first = rows[0];
     return '<section class="quality-group">' +
       '<div class="quality-group-head"><div><strong>' + esc(first.order_no || '') + '</strong><span>' + esc(first.product_name || '') + '</span></div>' +

@@ -51,12 +51,13 @@ def test_mobile_quality_evaluation_assets_are_cache_busted_and_network_first():
     mobile_html = (PROJECT_ROOT / "public" / "mobile.html").read_text(encoding="utf-8")
     sw_content = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
+    assert _asset_version(mobile_html, "mobile.css") >= 18
     assert _asset_version(mobile_html, "mobile-utils.js") >= 27
-    assert _asset_version(mobile_html, "mobile-order.js") >= 36
+    assert _asset_version(mobile_html, "mobile-order.js") >= 42
     assert _asset_version(mobile_html, "mobile-init.js") >= 31
-    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 2
+    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 7
     cache_match = re.search(r'CACHE_NAME = "qr-system-v3\.(\d+)"', sw_content)
-    assert cache_match and int(cache_match.group(1)) >= 5
+    assert cache_match and int(cache_match.group(1)) >= 16
     assert 'url.pathname.startsWith("/js/mobile/")' in sw_content
     assert "Mobile business JS: network-first" in sw_content
 
@@ -69,6 +70,68 @@ def test_mobile_uses_independent_quality_evaluation_center():
     assert 'id="s-quality-evaluation"' in mobile_html
     assert "handoffPending" not in order_script
     assert "openHandoffReview" not in order_script
+
+
+def test_mobile_process_order_selection_is_wired():
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+
+    assert "requires_process_selection" in order_script
+    assert "normal_reportable" in order_script
+    assert "max_report_quantity" in order_script
+    assert "selectReportProcess" in order_script
+
+
+def test_mobile_controlled_serial_backfill_is_wired():
+    mobile_html = (PROJECT_ROOT / "public" / "mobile.html").read_text(encoding="utf-8")
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+
+    assert 'id="serial-backfill-fields"' in mobile_html
+    assert "serial_backfill_reportable" in order_script
+    assert "补报申请已提交" in order_script
+    assert "申请时间: 系统自动记录" in order_script
+    assert "backfill-completed-at" not in mobile_html
+    assert "backfill-reason" not in mobile_html
+
+
+def test_mobile_backfill_selection_never_uses_auto_report():
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+
+    assert "canAutoReportSelectedProcess()" in order_script
+    assert "reportMode === 'auto' && !serialBackfillMode" in order_script
+    assert "isNormalReportProcessSelectable(getSelectedReportProcess())" in order_script
+    assert "focusFirstBackfillCandidate()" in order_script
+    assert "window.confirm" in order_script
+
+
+def test_mobile_process_list_is_explicit_and_numbered_from_one():
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+    mobile_css = (PROJECT_ROOT / "public" / "css" / "mobile.css").read_text(encoding="utf-8")
+
+    assert "选择报工工序" in order_script
+    assert "data-backfill-candidate" in order_script
+    assert "index + 1" in order_script
+    assert '<button type="button" class="proc-item ' in order_script
+    assert "订单进度：已完成" in order_script
+    assert ".order-body::-webkit-scrollbar{width:6px}" in mobile_css
+    assert ".order-body>*{flex-shrink:0}" in mobile_css
+    assert ".proc-card{background:#fff;border-radius:var(--radius-lg);overflow:visible" in mobile_css
+
+
+def test_mobile_active_position_selection_is_wired():
+    mobile_html = (PROJECT_ROOT / "public" / "mobile.html").read_text(encoding="utf-8")
+    api_script = (MOBILE_DIR / "mobile-api.js").read_text(encoding="utf-8")
+    auth_script = (MOBILE_DIR / "mobile-auth.js").read_text(encoding="utf-8")
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+
+    assert 'id="active-position-select"' in mobile_html
+    assert 'id="active-position-hint"' in mobile_html
+    assert "/auth/active-position" in api_script
+    assert "changeActivePosition" in auth_script
+    assert "available_positions" in auth_script
+    assert "position_reportable" in order_script
+    assert "process_selection_source" in order_script
+    assert "changeOrderActivePosition" in order_script
+    assert "serial_backfill_selection_source" in order_script
 
 
 def test_mobile_quality_evaluation_b_workflow_is_wired():

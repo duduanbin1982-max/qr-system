@@ -16,7 +16,7 @@ def test_deploy_script_has_required_release_gates():
     assert "scripts/backup-db.sh" in content
     assert "load_dotenv('.env')" in content
     assert "from modules.migrations import run_migrations" in content
-    assert "npm run build" in content
+    assert "scripts/publish-frontend.sh" in content
     assert "systemctl --user reload" in content
     assert "health_is_ok" in content
     assert "> .deployed_commit" in content
@@ -25,8 +25,27 @@ def test_deploy_script_has_required_release_gates():
 
     backup_index = content.index("scripts/backup-db.sh")
     migration_index = content.index("from modules.migrations import run_migrations")
-    build_index = content.rindex("npm run build")
+    build_index = content.rindex("scripts/publish-frontend.sh")
     assert backup_index < migration_index < build_index
+
+
+def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
+    publisher = (PROJECT_ROOT / "scripts" / "publish-frontend.sh").read_text(encoding="utf-8")
+    e2e_script = (PROJECT_ROOT / "scripts" / "test-e2e.sh").read_text(encoding="utf-8")
+    app_module = (PROJECT_ROOT / "modules" / "app.py").read_text(encoding="utf-8")
+    manifest = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
+
+    assert '--outDir "$STAGING_DIR"' in publisher
+    assert '"$STATIC_DIR/.index.html.new"' in publisher
+    assert 'mv -f "$STATIC_DIR/.index.html.new" "$STATIC_DIR/index.html"' in publisher
+    assert 'mtime "+$RETENTION_DAYS"' in publisher
+
+    assert manifest["scripts"]["test:e2e"] == "bash scripts/test-e2e.sh"
+    assert 'E2E_PUBLIC_DIR="$(mktemp -d' in e2e_script
+    assert 'cp -a "$PROJECT_ROOT/public"/. "$E2E_PUBLIC_DIR"/' in e2e_script
+    assert '--outDir "$E2E_PUBLIC_DIR/static"' in e2e_script
+    assert 'export PUBLIC_DIR="$E2E_PUBLIC_DIR"' in e2e_script
+    assert "os.environ.get('PUBLIC_DIR')" in app_module
 
 
 def test_pytest_suite_declares_test_layers():

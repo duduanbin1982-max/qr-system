@@ -159,6 +159,49 @@ class OrderService:
         with BaseService.transaction() as txn:
             return _generate_order_no(txn)
 
+    @staticmethod
+    def record_qr_print(oid, data, user):
+        """Persist one QR-code print action for an order."""
+        mode = (data.get('mode') or '').strip().lower()
+        if mode not in {'order', 'serial'}:
+            raise ValidationError('二维码模式必须是订单模式或序列号模式')
+        try:
+            copies = int(data.get('copies', 1))
+            label_count = int(data.get('label_count', 0))
+        except (TypeError, ValueError):
+            raise ValidationError('打印份数和标签数量必须是整数')
+        if copies < 1 or copies > 10:
+            raise ValidationError('打印份数必须在 1 到 10 之间')
+        if label_count < 1 or label_count > 999999:
+            raise ValidationError('打印标签数量无效')
+
+        with BaseService.transaction() as txn:
+            order = OrderRepository.find_by_id(oid, db=txn)
+            if not order:
+                raise NotFoundError('订单不存在或已删除')
+            existing_mode = (order['qr_mode'] or '').strip()
+            if existing_mode and existing_mode != mode:
+                raise ConflictError('打印模式与订单已锁定的二维码模式不一致')
+            user_name = user.get('name') or user.get('username') or ''
+            updated = OrderRepository.record_qr_print(
+                oid,
+                user.get('id'),
+                user_name,
+                db=txn,
+            )
+            if updated != 1:
+                raise ConflictError('订单打印状态已变化，请刷新后重试')
+            status = OrderRepository.get_qr_print_status(oid, db=txn)
+
+        result = dict(status)
+        result.update({
+            'order_no': order['order_no'],
+            'mode': mode,
+            'copies': copies,
+            'label_count': label_count,
+        })
+        return result
+
     # ============================================================
     # 创建
     # ============================================================

@@ -30,44 +30,61 @@ class _ApprovalRepoStub:
     advanced_level = None
     rejected = False
     approved = False
+    steps = []
 
     @staticmethod
-    def find_by_id(record_id):
+    def find_by_id(record_id, db=None):
         return _ApprovalRepoStub.record
 
     @staticmethod
-    def find_work_record(work_record_id):
+    def find_work_record(work_record_id, db=None):
         return _ApprovalRepoStub.work_record
 
     @staticmethod
-    def find_order(order_id):
+    def find_order(order_id, db=None):
         return _ApprovalRepoStub.order
 
     @staticmethod
-    def find_approval_config(process_id):
+    def find_approval_config(process_id, db=None):
         return _ApprovalRepoStub.config
 
     @staticmethod
-    def find_order_process(order_id, process_id):
+    def find_order_process(order_id, process_id, db=None):
         return _ApprovalRepoStub.order_process
 
     @staticmethod
     def approve(record_id, approver_id, approver_name, comment, db=None):
         _ApprovalRepoStub.approved = True
         _ApprovalRepoStub.approval_status = "approved"
+        return 1
 
     @staticmethod
     def update_work_record_status(work_record_id, status, db=None):
         _ApprovalRepoStub.work_record_status = status
+        return 1
 
     @staticmethod
-    def advance_level(record_id, approver_id, approver_name, comment, next_level, db=None):
+    def advance_level(record_id, approver_id, approver_name, comment, next_level, current_level, db=None):
         _ApprovalRepoStub.advanced_level = next_level
+        return 1
 
     @staticmethod
     def reject(record_id, approver_id, approver_name, comment, db=None):
         _ApprovalRepoStub.rejected = True
         _ApprovalRepoStub.approval_status = "rejected"
+        return 1
+
+    @staticmethod
+    def insert_approval_step(approval_record_id, step_level, approver_id, approver_name,
+                             approver_role, action, comment, db=None):
+        _ApprovalRepoStub.steps.append({
+            "approval_record_id": approval_record_id,
+            "step_level": step_level,
+            "approver_role": approver_role,
+            "action": action,
+            "comment": comment,
+        })
+        return len(_ApprovalRepoStub.steps)
 
 
 def _install_stub(monkeypatch):
@@ -76,8 +93,14 @@ def _install_stub(monkeypatch):
     _ApprovalRepoStub.advanced_level = None
     _ApprovalRepoStub.rejected = False
     _ApprovalRepoStub.approved = False
-    applied = {"command": None}
+    _ApprovalRepoStub.steps = []
+    applied = {"command": None, "validate_policy": None}
     monkeypatch.setattr(approval_service_module, "ApprovalRepository", _ApprovalRepoStub)
+    monkeypatch.setattr(
+        approval_service_module.AuthRepository,
+        "get_user_role_code",
+        staticmethod(lambda user_id, db=None: "admin"),
+    )
     monkeypatch.setattr(
         approval_service_module.BaseService,
         "transaction",
@@ -86,9 +109,10 @@ def _install_stub(monkeypatch):
     monkeypatch.setattr(
         approval_service_module.WorkReportWriter,
         "apply_approved_normal_report",
-        staticmethod(lambda command, db, work_record_id=None: applied.update(
+        staticmethod(lambda command, db, work_record_id=None, validate_policy=True: applied.update(
             command=command,
             work_record_id=work_record_id,
+            validate_policy=validate_policy,
         )),
     )
     return applied
@@ -123,7 +147,7 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
     result = ApprovalService.handle(
         1,
         "approve",
-        approver={"id": 99, "name": "Admin"},
+        approver={"id": 99, "name": "Admin", "role": "admin"},
         comment="ok",
     )
 
@@ -136,6 +160,7 @@ def test_handle_approve_accepts_sqlite_rows(monkeypatch):
     assert applied["command"].effective_quantity == 1
     assert applied["command"].serial_no == "SERIAL-001"
     assert applied["work_record_id"] == 7
+    assert applied["validate_policy"] is True
 
 
 def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
@@ -167,7 +192,7 @@ def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
     result = ApprovalService.handle(
         2,
         "approve",
-        approver={"id": 99, "name": "Admin"},
+        approver={"id": 99, "name": "Admin", "role": "admin"},
         comment="level1",
     )
 
@@ -176,3 +201,38 @@ def test_handle_approve_advances_multilevel_sqlite_rows(monkeypatch):
     assert _ApprovalRepoStub.approved is False
     assert _ApprovalRepoStub.work_record_status is None
     assert applied["command"] is None
+
+
+def test_handle_reject_does_not_require_valid_order_state(monkeypatch):
+    _install_stub(monkeypatch)
+    _ApprovalRepoStub.record = _row({
+        "id": 3,
+        "work_record_id": 9,
+        "status": "pending",
+        "current_level": 1,
+    })
+    _ApprovalRepoStub.work_record = _row({
+        "id": 9,
+        "quantity": 1,
+        "order_id": 13,
+        "status": "pending",
+        "process_id": 7,
+        "user_id": 15,
+        "user_name": "Worker 3",
+        "serial_no": "",
+    })
+    _ApprovalRepoStub.order = None
+    _ApprovalRepoStub.order_process = None
+    _ApprovalRepoStub.config = _row({"approval_level": 1})
+
+    result = ApprovalService.handle(
+        3,
+        "reject",
+        approver={"id": 99, "name": "Admin", "role": "admin"},
+        comment="invalid order",
+    )
+
+    assert result == "reject"
+    assert _ApprovalRepoStub.rejected is True
+    assert _ApprovalRepoStub.work_record_status == "rejected"
+    assert _ApprovalRepoStub.steps[0]["action"] == "reject"

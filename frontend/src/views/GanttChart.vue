@@ -27,9 +27,9 @@
         </div>
         <select v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
           <option value="">全部产线</option>
-          <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
+          <option v-for="pl in productionLines" :key="pl.id" :value="String(pl.id)">{{ pl.name }}</option>
         </select>
-        <button class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showLineMgr=true">🏭 产线管理</button>
+        <button v-if="canManageLines" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showLineMgr=true">🏭 产线管理</button>
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
         <button @click="zoomIn" title="放大" class="btn-default btn-sm">+</button>
         <button class="btn btn-sm" style="background:var(--success);color:#fff" @click="exportImage" title="导出PNG">📥 导出</button>
@@ -60,7 +60,7 @@
       <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 360, 100) + 'px', minWidth:'100%'}">
         <!-- Date Header -->
         <div style="display:flex;border-bottom:2px solid var(--border-light);position:sticky;top:0;background:var(--bg-surface);z-index:2">
-          <div style="min-width:360px;max-width:360px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light);display:flex;gap:10px;align-items:center"><span style="width:18px"></span><span style="width:85px;white-space:nowrap">订单号</span><span style="width:80px">客户</span><span style="width:56px">状态</span><span style="width:50px">交期</span></div>
+          <div style="min-width:360px;max-width:360px;padding:8px 14px;font-weight:600;font-size:var(--text-xs);color:var(--text-placeholder);border-right:1px solid var(--border-light);display:flex;gap:10px;align-items:center"><input v-if="canEdit" type="checkbox" :checked="allSelected" @change="toggleAll" style="width:18px;flex-shrink:0" title="全选当前列表中的未完成订单"><span v-else style="width:18px"></span><span style="width:85px;white-space:nowrap">订单号</span><span style="width:80px">客户</span><span style="width:56px">状态</span><span style="width:50px">交期</span></div>
           <div style="display:flex;flex:1" v-if="ganttData.days.length">
             <div v-for="d in ganttData.days" :key="d.date"
               :style="{width:dayWidth+'px',textAlign:'center',padding:'8px 2px',fontSize:'10px',borderRight:'1px solid var(--bg-hover)',background:d.isWeekend?'var(--bg-hover)':d.isToday?'var(--primary-light)':'',color:d.isToday?'var(--primary)':'var(--text-placeholder)'}">
@@ -76,7 +76,7 @@
             <div style="min-width:360px;max-width:360px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
               <!-- 第一行：复选框 + 订单号 + 客户 + 状态 + 交期 -->
               <div style="display:flex;align-items:center;gap:10px">
-                <input type="checkbox" :checked="selectedOrderIds.includes(order.id)" :disabled="isCompleted(order)" @change="toggleOrder(order)" style="width:18px;flex-shrink:0" :title="isCompleted(order) ? '已完成订单只读，不参与批量调整' : ''">
+                <input v-if="canEdit" type="checkbox" :checked="selectedOrderIds.includes(order.id)" :disabled="isCompleted(order)" @change="toggleOrder(order)" style="width:18px;flex-shrink:0" :title="isCompleted(order) ? '已完成订单只读，不参与批量调整' : ''"><span v-else style="width:18px;flex-shrink:0"></span>
                 <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:85px;text-align:left" :title="order.order_no">{{ order.order_no }}</span>
                 <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80px;text-align:left" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
                 <span :style="{flexShrink:0,fontSize:'12px',padding:'1px 6px',borderRadius:'3px',textAlign:'left',minWidth:'56px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
@@ -109,13 +109,13 @@
                   cursor: canAdjustOrder(order) ? 'col-resize' : 'default',
                   display:'flex',alignItems:'center',justifyContent:'center',
                   color:'#fff',fontSize:'10px',fontWeight:600,
-                  boxShadow: isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line) ? '0 0 0 2px var(--danger), 0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.15)',zIndex:1,
+                  boxShadow: isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? '0 0 0 2px var(--danger), 0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.15)',zIndex:1,
                   transition: dragTarget===order ? 'none' : 'box-shadow 0.15s',
                   userSelect:'none'
                 }"
                 @mousedown="onBarMouseDown($event, order)"
                 @dblclick="editOrderDates(order)"
-                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
+                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
                 <span v-if="order.quantity" style="margin-right:4px">{{ order.completed_qty||0 }}/{{ order.quantity }}</span>
                 {{ order.production_line || statusLabel(order.status) }}
               </div>
@@ -125,8 +125,6 @@
             </div>
           </div>
         </div>
-
-        <div v-if="snapLeft" :style="{position:'absolute',left:snapLeft+'px',top:0,width:'2px',height:'100%',background:'#2563eb',zIndex:5,pointerEvents:'none'}"></div>
       </div>
     </div>
 

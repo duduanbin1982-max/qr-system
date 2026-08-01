@@ -10,6 +10,7 @@ from modules.schemas.positions import positions_schemas
 from modules.schemas.processes import processes_schemas
 from modules.schemas.products import products_schemas
 from modules.schemas.quality import quality_schemas
+from modules.schemas.rework import rework_schemas
 from modules.schemas.scan import scan_schemas
 from modules.schemas.suppliers import suppliers_schemas
 from modules.schemas.users import users_schemas
@@ -26,6 +27,7 @@ SCHEMAS.update(positions_schemas)
 SCHEMAS.update(processes_schemas)
 SCHEMAS.update(products_schemas)
 SCHEMAS.update(quality_schemas)
+SCHEMAS.update(rework_schemas)
 SCHEMAS.update(scan_schemas)
 SCHEMAS.update(suppliers_schemas)
 SCHEMAS.update(users_schemas)

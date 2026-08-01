@@ -15,7 +15,7 @@ if os.path.exists(_env_file):
     load_dotenv(_env_file)
 
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PUBLIC_DIR = os.path.join(_base, 'public')
+PUBLIC_DIR = os.environ.get('PUBLIC_DIR') or os.path.join(_base, 'public')
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, template_folder=PUBLIC_DIR)
 app.config['TEMPLATES_AUTO_RELOAD'] = True

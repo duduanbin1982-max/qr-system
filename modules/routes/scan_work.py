@@ -17,6 +17,7 @@ from modules.services.scan_helper_service import ScanHelperService
 from modules.services.mobile_scan_service import MobileScanService
 from modules.services.scan_report_service import ScanReportService
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+from modules.services.process_order_service import ProcessOrderService
 from modules.domain.errors import DomainError, RequiredQualityEvaluationError
 # (scan_helpers functions migrated to ScanHelperService - see scan_helper_service.py)
 from modules.services.setting_service import SettingsService
@@ -42,6 +43,7 @@ def scan_order():
         item = ScanHelperService.get_product_item(code)
         if item:
             item_info = dict(item)
+            serial_no = item["serial_no"] or code
             order = ScanHelperService.get_order(item["order_id"])
             if order and item_info:
                 try:
@@ -80,7 +82,16 @@ def scan_order():
     procs = ScanHelperService.get_order_processes(o["id"])
     all_procs = [dict(p) for p in procs]
     user_pids = get_user_process_ids(g.current_user)
-    o["processes"] = [p for p in all_procs if p["process_id"] in user_pids] if user_pids is not None else all_procs
+    o["processes"] = all_procs
+    ProcessOrderService.attach_context(
+        o,
+        item_info=item_info,
+        serial_no=serial_no,
+        user_process_ids=user_pids,
+    )
+    o["processes"] = [
+        process for process in o["processes"] if process["process_authorized"]
+    ]
 
     records = ScanHelperService.get_work_records(o["id"])
     o["records"] = [dict(r) for r in records]
@@ -175,16 +186,23 @@ def mobile_report():
         report_type = data.get("report_type", "normal")
         remark = data.get("remark", "")
         user = g.current_user
+        serial_backfill = ScanReportService.prepare_submission(data, user)
 
         # Shared validation
         (err, code), quantity, serial_no = ScanReportService.validate_report(
-            order_id, process_id, user, quantity, serial_no, report_type
+            order_id,
+            process_id,
+            user,
+            quantity,
+            serial_no,
+            report_type,
+            serial_backfill=serial_backfill,
         )
         if err:
             return jsonify(err), code
 
         # Approval check
-        need_approval = ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
 
         # Execute report write
         command = ScanReportService.build_command(
@@ -200,7 +218,12 @@ def mobile_report():
         )
         evaluation_rules = ProcessQualityEvaluationService.rules()
         return jsonify({
-            "message": "report OK",
+            "message": (
+                "跨工序补报申请已提交，等待审批"
+                if serial_backfill else "报工成功"
+            ),
+            "serial_backfill": serial_backfill,
+            "approval_required": need_approval,
             "quality_evaluation_pending_count": ProcessQualityEvaluationService.pending_count(user["id"]),
             "quality_evaluation_required_count": ProcessQualityEvaluationService.pending_required_count(user["id"]),
             "quality_evaluation_auto_open": bool(evaluation_rules.get("auto_open_mobile", True)),
@@ -233,19 +256,26 @@ def work_report():
         report_type = data.get("report_type", "normal")
         remark = data.get("remark", "")
         user = g.current_user
+        serial_backfill = ScanReportService.prepare_submission(data, user)
 
         if not isinstance(quantity, (int, float)) or quantity <= 0:
             return jsonify({"error": "quantity must be > 0"}), 400
 
         # Shared validation
         (err, code), quantity, serial_no = ScanReportService.validate_report(
-            order_id, process_id, user, quantity, serial_no, report_type
+            order_id,
+            process_id,
+            user,
+            quantity,
+            serial_no,
+            report_type,
+            serial_backfill=serial_backfill,
         )
         if err:
             return jsonify(err), code
 
         # Approval check
-        need_approval = ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
 
         # Execute report write
         command = ScanReportService.build_command(
@@ -260,7 +290,14 @@ def work_report():
             "process=" + str(process_id) + " qty=" + str(quantity) + " type=" + report_type
         )
 
-        return jsonify({"message": "report OK"})
+        return jsonify({
+            "message": (
+                "跨工序补报申请已提交，等待审批"
+                if serial_backfill else "报工成功"
+            ),
+            "serial_backfill": serial_backfill,
+            "approval_required": need_approval,
+        })
     except DomainError as e:
         return jsonify(e.to_payload()), e.status_code
     except ValueError as e:

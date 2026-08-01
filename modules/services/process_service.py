@@ -6,17 +6,20 @@ from modules.repositories.process_repository import ProcessRepository
 
 
 class ProcessService:
-    RELATED_TABLES = [
-        "work_records", "scrap_records", "rework_records",
-        "quality_inspections", "process_route_items",
-        "order_processes", "position_processes", "material_consumptions"
-    ]
+    VALID_CATEGORIES = ("结构件", "机加工")
+    VALID_STATUSES = ("active", "inactive")
 
     @staticmethod
-    def _validate_table_name(table_name):
-        if table_name not in ProcessService.RELATED_TABLES:
-            raise ValueError("Invalid table name: " + table_name)
-        return table_name
+    def _validate_category(category):
+        if category not in ProcessService.VALID_CATEGORIES:
+            raise ValueError("工序分类只能是结构件或机加工")
+        return category
+
+    @staticmethod
+    def _validate_status(status):
+        if status not in ProcessService.VALID_STATUSES:
+            raise ValueError("工序状态只能是 active 或 inactive")
+        return status
 
     @staticmethod
     def list_processes(category="", search="", sort_by="seq_order", sort_dir="asc", limit=500, offset=0):
@@ -62,14 +65,15 @@ class ProcessService:
             except (ValueError, TypeError):
                 seq_order = None
 
-        category = data.get("category", "structural")
+        category = ProcessService._validate_category(data.get("category", "结构件"))
+        status = ProcessService._validate_status(data.get("status", "active"))
         if seq_order is None:
             seq_order = ProcessRepository.get_max_seq(category) + 1
 
         with BaseService.transaction() as txn:
             return ProcessRepository.insert_txn(
                 name, data.get("description", ""), category,
-                seq_order, data.get("status", "active"), db=txn
+                seq_order, status, db=txn
             )
 
     @staticmethod
@@ -85,6 +89,13 @@ class ProcessService:
             if re.search(r"[';<>]", name):
                 raise ValueError("Process name contains invalid characters")
             data["name"] = name
+
+        if "category" in data:
+            ProcessService._validate_category(data["category"])
+            if ProcessRepository.count_route_category_conflicts(pid, data["category"]):
+                raise ConflictError("工序已被其他分类的工艺路线引用，不能修改分类")
+        if "status" in data:
+            ProcessService._validate_status(data["status"])
 
         field_map = {
             "name": "name", "description": "description",
@@ -114,7 +125,7 @@ class ProcessService:
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
             raise NotFoundError("Process not found")
-        impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
+        impact = ProcessRepository.check_impact(pid)
         return {"process_id": pid, "name": existing["name"], "impact": impact}
 
     @staticmethod
@@ -123,15 +134,13 @@ class ProcessService:
         if not existing:
             raise NotFoundError("Not found")
 
-        impact = ProcessRepository.check_impact(pid, ProcessService.RELATED_TABLES)
+        impact = ProcessRepository.check_impact(pid)
         if impact:
-            critical_tables = ["work_records", "order_processes", "process_route_items", "quality_inspections"]
-            blockers = {k: v for k, v in impact.items() if k in critical_tables}
-            if blockers:
-                details = ", ".join(k + ": " + str(v) for k, v in blockers.items())
-                raise ConflictError("Process has related data: " + details)
-            raise ConflictError("Process has " + str(sum(impact.values())) + " related records, cannot delete")
+            details = ", ".join(k + ": " + str(v) for k, v in impact.items())
+            raise ConflictError("工序已有关联数据，只能停用，不能删除：" + details)
 
         with BaseService.transaction() as txn:
-            ProcessRepository.delete_txn(pid, db=txn)
+            deleted = ProcessRepository.delete_txn(pid, db=txn)
+            if not deleted:
+                raise ConflictError("工序已被业务数据引用，请改为停用")
         return {"name": existing["name"], "impact": {}}

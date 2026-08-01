@@ -39,13 +39,61 @@ class RouteRepository:
         db = resolve_db(db)
         placeholders = ",".join("?" for _ in route_ids)
         return db.execute(
-            "SELECT pri.*, p.name as process_name, p.category as category "
+            "SELECT pri.*, p.name as process_name, p.category as category, "
+            "p.status as process_status "
             "FROM process_route_items pri "
             "LEFT JOIN processes p ON pri.process_id = p.id "
             "WHERE pri.route_id IN (" + placeholders + ") "
             "ORDER BY pri.route_id, pri.seq_order",
             route_ids
         ).fetchall()
+
+    @staticmethod
+    def get_route_summary(db=None):
+        db = resolve_db(db)
+        category_counts = {
+            row["category"]: row["cnt"]
+            for row in db.execute(
+                "SELECT category, COUNT(*) AS cnt FROM process_routes GROUP BY category"
+            ).fetchall()
+        }
+        return {
+            "total_routes": sum(category_counts.values()),
+            "category_counts": category_counts,
+            "process_nodes_total": db.execute(
+                "SELECT COUNT(*) FROM process_route_items"
+            ).fetchone()[0],
+        }
+
+    @staticmethod
+    def get_route_usage_counts(route_ids, db=None):
+        """批量统计路线引用；回收站记录仍可恢复，因此也计入引用。"""
+        db = resolve_db(db)
+        normalized_ids = list(dict.fromkeys(int(route_id) for route_id in route_ids))
+        usage = {
+            route_id: {"used_orders": 0, "used_products": 0, "is_locked": False}
+            for route_id in normalized_ids
+        }
+        if not normalized_ids:
+            return usage
+
+        placeholders = ",".join("?" for _ in normalized_ids)
+        for table, count_key in (("orders", "used_orders"), ("products", "used_products")):
+            rows = db.execute(
+                f"SELECT route_id, COUNT(*) AS cnt FROM {table} "
+                f"WHERE route_id IN ({placeholders}) GROUP BY route_id",
+                normalized_ids,
+            ).fetchall()
+            for row in rows:
+                usage[row["route_id"]][count_key] = row["cnt"]
+
+        for counts in usage.values():
+            counts["is_locked"] = bool(counts["used_orders"] or counts["used_products"])
+        return usage
+
+    @staticmethod
+    def get_route_usage(rid, db=None):
+        return RouteRepository.get_route_usage_counts([rid], db=db)[int(rid)]
 
     @staticmethod
     def find_route_by_name(name, db=None):
@@ -74,7 +122,8 @@ class RouteRepository:
         db = resolve_db(db)
         placeholders = ",".join("?" for _ in pids)
         return db.execute(
-            "SELECT id FROM processes WHERE id IN (" + placeholders + ")", pids
+            "SELECT id, name, category, status FROM processes WHERE id IN ("
+            + placeholders + ")", pids
         ).fetchall()
 
     @staticmethod
@@ -100,10 +149,8 @@ class RouteRepository:
 
     @staticmethod
     def count_orders_using_route(rid, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT COUNT(*) as cnt FROM orders WHERE deleted_at IS NULL AND route_id = ?", (rid,)
-        ).fetchone()
+        usage = RouteRepository.get_route_usage(rid, db=db)
+        return {"cnt": usage["used_orders"]}
 
     @staticmethod
     def find_orders_using_route_txn(rid, db):
@@ -113,10 +160,8 @@ class RouteRepository:
 
     @staticmethod
     def count_products_using_route(rid, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT COUNT(*) as cnt FROM products WHERE deleted_at IS NULL AND route_id = ?", (rid,)
-        ).fetchone()
+        usage = RouteRepository.get_route_usage(rid, db=db)
+        return {"cnt": usage["used_products"]}
 
     @staticmethod
     def find_route_name(rid, db=None):
@@ -135,6 +180,17 @@ class RouteRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT * FROM process_route_items WHERE route_id = ? ORDER BY seq_order", (rid,)
+        ).fetchall()
+
+    @staticmethod
+    def find_route_items_with_processes(rid, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT pri.*, p.name AS process_name, p.category AS process_category, "
+            "p.status AS process_status FROM process_route_items pri "
+            "JOIN processes p ON p.id = pri.process_id "
+            "WHERE pri.route_id = ? ORDER BY pri.seq_order, pri.id",
+            (rid,),
         ).fetchall()
 
     @staticmethod

@@ -1,8 +1,8 @@
-import { request, buildQuery, uploadFile } from './client.js'
+import { request, buildQuery } from './client.js'
 
 export const approvalsApi = {
   // ========== 审批 ==========
-  pendingApprovals:  ()       => request('GET', '/api/approvals/pending'),
+  pendingApprovals:  (params = {}) => request('GET', '/api/approvals/pending' + buildQuery(params)),
   approvalHistory:  (params) => request('GET', '/api/approvals/history' + buildQuery(params)),
   handleApproval:   (id,action,comment) => request('POST', '/api/approvals/' + id + '/' + action, {comment: comment || ''}),
   batchApproval:    (ids, action) => request('POST', '/api/approvals/batch', {ids: ids, action: action}),

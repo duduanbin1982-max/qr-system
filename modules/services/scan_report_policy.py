@@ -27,15 +27,6 @@ class ScanReportPolicy:
         return None
 
     @staticmethod
-    def duplicate_serial_order_error(order_has_user_serial_report, serial_no):
-        if order_has_user_serial_report:
-            return (
-                {"error": "序列号 " + str(serial_no) + " 在此订单中已报工", "can_scrap_rework": True},
-                409,
-            )
-        return None
-
-    @staticmethod
     def duplicate_normal_report_error(duplicate_row, serial_no):
         if not duplicate_row:
             return None

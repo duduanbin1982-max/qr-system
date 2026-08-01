@@ -1,5 +1,5 @@
 """Approval workflow HTTP routes."""
-from flask import request, jsonify, g
+from flask import g, jsonify
 
 from modules.route_decorators import (
     app,
@@ -11,6 +11,8 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.approval_service import ApprovalService
+
+
 @app.route('/api/approvals/pending', methods=['GET'])
 @check_auth
 @check_permission('approvals:view')
@@ -36,8 +38,13 @@ def get_approval_history():
 def handle_approval(record_id, action):
     data = get_json_body()
     ApprovalService.handle(
-        record_id, action,
-        approver={'id': g.current_user['id'], 'name': g.current_user['name']},
+        record_id,
+        action,
+        approver={
+            'id': g.current_user['id'],
+            'name': g.current_user['name'],
+            'role': g.current_user.get('role', ''),
+        },
         comment=data.get('comment', '')
     )
     safe_audit_log(
@@ -58,29 +65,34 @@ def get_approval_config():
 @app.route('/api/approvals/config', methods=['POST'])
 @check_auth
 @check_permission('approvals:edit')
+@validate_json('approval_config_payload')
 def save_approval_config():
     """Save approval_config: {process_id: int, require_approval: 1|0, approver_role: str, approval_level: int}
     Also supports batch: {"configs": [{...}, ...]}
     """
     data = get_json_body()
-    configs = data.get("configs", [data] if "process_id" in data else [])
+    configs = data.get('configs', [data] if 'process_id' in data else [])
     ApprovalService.save_configs(configs)
-    return jsonify({"message": "保存成功"})
+    return jsonify({'message': '保存成功'})
 
-@app.route("/api/approvals/batch", methods=["POST"])
+
+@app.route('/api/approvals/batch', methods=['POST'])
 @check_auth
-@check_permission("approvals:edit")
+@check_permission('approvals:edit')
+@validate_json('approval_batch_payload')
 def batch_approval():
     """Batch approve/reject: {"ids": [1,2,3], "action": "approve|reject"}"""
     data = get_json_body()
-    ids = data.get("ids", [])
-    action = data.get("action", "")
-    if not ids or action not in ("approve", "reject"):
-        return jsonify({"error": "参数错误"}), 400
+    ids = data.get('ids', [])
+    action = data.get('action', '')
     count, failed = ApprovalService.batch_handle(
         ids, action,
-        approver={"id": g.current_user["id"], "name": g.current_user["name"]},
-        comment=data.get("comment", "")
+        approver={
+            'id': g.current_user['id'],
+            'name': g.current_user['name'],
+            'role': g.current_user.get('role', ''),
+        },
+        comment=data.get('comment', '')
     )
     if failed:
         return jsonify({
@@ -91,9 +103,10 @@ def batch_approval():
         })
     return jsonify({"message": f"已处理 {count} 条", "count": count, "total": len(ids)})
 
-@app.route("/api/approvals/stats", methods=["GET"])
+
+@app.route('/api/approvals/stats', methods=['GET'])
 @check_auth
-@check_permission("approvals:view")
+@check_permission('approvals:view')
 def approval_stats():
     """Approval statistics: avg time, pending > 24h, etc."""
     return jsonify(ApprovalService.get_stats())

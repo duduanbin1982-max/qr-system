@@ -11,7 +11,7 @@
   <title>扫码报工</title>
 <link rel="manifest" href="/manifest.json">
 <script src="jsQR.js"></script>
-<link rel="stylesheet" href="/css/mobile.css?v=12">
+<link rel="stylesheet" href="/css/mobile.css?v=18">
 </head>
 <body>
 
@@ -41,6 +41,11 @@
 <!-- MAIN -->
 <div id="s-main" class="screen">
 <div class="top-bar"><span class="top-user" id="top-user">扫码报工</span></div>
+<div id="position-context" class="position-context" hidden>
+<label for="active-position-select">当前岗位</label>
+<select id="active-position-select" aria-label="当前岗位"></select>
+<span id="active-position-hint"></span>
+</div>
 <div class="main-body">
 <div class="hero-area">
 <button class="hero-scan"><span class="hero-icon">📷</span><span class="hero-label">扫码报工</span></button>
@@ -88,6 +93,9 @@
 <div class="rf-row" id="reason-row" style="display:none">
 <div class="rf-col"><label>原因说明</label><input type="text" id="rpt-reason" placeholder="报废/返修原因"></div>
 </div>
+<div id="serial-backfill-fields" class="serial-backfill-fields" style="display:none">
+<div class="serial-backfill-tip">该工序不是工件当前工序，提交后必须由有权限的审批人通过才会生效。申请时间和提交岗位由系统自动记录。</div>
+</div>
 </div>
 <button class="btn-report" id="btn-report">提交报工</button>
 </div>
@@ -97,7 +105,7 @@
 <div id="s-ok" class="screen success-screen">
 <div class="success-box">
 <div class="success-icon">✓</div>
-<h2>报工成功!</h2>
+<h2 id="ok-title">报工成功!</h2>
 <p id="ok-msg"></p>
 <div class="detail" id="ok-detail"></div>
 <button class="btn-done">继续扫码</button>
@@ -143,13 +151,13 @@
 </div>
 
 <!-- Shared API helper -->
-  <script src="/js/mobile/mobile-api.js?v=6"></script>
-  <script src="/js/mobile/mobile-utils.js?v=28"></script>
-<script src="/js/mobile/mobile-auth.js?v=28"></script>
+  <script src="/js/mobile/mobile-api.js?v=7"></script>
+  <script src="/js/mobile/mobile-utils.js?v=30"></script>
+<script src="/js/mobile/mobile-auth.js?v=29"></script>
 <script src="/js/mobile/mobile-scan.js?v=26"></script>
-<script src="/js/mobile/mobile-order.js?v=37"></script>
-<script src="/js/mobile/mobile-quality-evaluation.js?v=6"></script>
-<script src="/js/mobile/mobile-init.js?v=32"></script>
+	<script src="/js/mobile/mobile-order.js?v=42"></script>
+<script src="/js/mobile/mobile-quality-evaluation.js?v=7"></script>
+<script src="/js/mobile/mobile-init.js?v=34"></script>
 
 
 

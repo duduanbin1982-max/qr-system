@@ -103,5 +103,7 @@ var api = {
   logout: function() { return apiRequest("POST", "/auth/logout"); },
   changePassword: function(data) { return apiRequest("POST", "/auth/change-password", data); },
   authInfo: function() { return apiRequest("GET", "/auth/info"); },
+  activePosition: function() { return apiRequest("GET", "/auth/active-position"); },
+  setActivePosition: function(data) { return apiRequest("PUT", "/auth/active-position", data); },
   personalStats: function() { return apiRequest("GET", "/personal/stats"); }
 };

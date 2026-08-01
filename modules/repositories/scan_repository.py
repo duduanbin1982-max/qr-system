@@ -193,14 +193,6 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
-    def has_serial_duplicate_in_order(order_id, serial_no, user_id, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT id FROM work_records WHERE order_id = ? AND serial_no = ? AND user_id = ? LIMIT 1",
-            (order_id, serial_no, user_id)
-        ).fetchone() is not None
-
-    @staticmethod
     def find_duplicate_defect_report(order_id, process_id, user_id, report_type, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -228,15 +220,87 @@ class ScanRepository:
         remark,
         work_status,
         serial_no,
+        report_source="standard",
+        actual_completed_at=None,
+        backfill_reason="",
+        submit_position_id=None,
+        submit_position_name="",
         db=None,
     ):
         db = resolve_db(db)
         cur = db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, remark, status, serial_no) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (order_id, process_id, user_id, report_type, quantity, remark, work_status, serial_no),
+            "INSERT INTO work_records "
+            "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
+            "report_source, actual_completed_at, backfill_reason, "
+            "submit_position_id, submit_position_name) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                order_id,
+                process_id,
+                user_id,
+                report_type,
+                quantity,
+                remark,
+                work_status,
+                serial_no,
+                report_source,
+                actual_completed_at,
+                backfill_reason,
+                submit_position_id,
+                submit_position_name,
+            ),
         )
         return cur.lastrowid
+
+    @staticmethod
+    def list_serial_report_states(order_id, serial_no, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT process_id, status, report_source FROM work_records "
+            "WHERE order_id = ? AND serial_no = ? AND type = 'normal' "
+            "AND status != 'rejected' ORDER BY id DESC",
+            (order_id, serial_no),
+        ).fetchall()
+
+    @staticmethod
+    def list_approved_serial_work_records(order_id, serial_no, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT wr.id, wr.order_id, wr.process_id, wr.user_id, wr.serial_no, "
+            "wr.quantity, wr.report_source, wr.actual_completed_at, wr.backfill_reason, "
+            "wr.submit_position_id, wr.submit_position_name, "
+            "COALESCE(u.name, u.username, '') AS user_name "
+            "FROM work_records wr LEFT JOIN users u ON u.id = wr.user_id "
+            "LEFT JOIN order_processes op ON op.order_id = wr.order_id "
+            "AND op.process_id = wr.process_id "
+            "WHERE wr.order_id = ? AND wr.serial_no = ? AND wr.type = 'normal' "
+            "AND wr.status = 'approved' ORDER BY op.seq_order, wr.id",
+            (order_id, serial_no),
+        ).fetchall()
+
+    @staticmethod
+    def has_approved_serial_backfill(order_id, serial_no, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM work_records WHERE order_id = ? AND serial_no = ? "
+            "AND type = 'normal' AND status = 'approved' "
+            "AND report_source = 'serial_backfill' LIMIT 1",
+            (order_id, serial_no),
+        ).fetchone() is not None
+
+    @staticmethod
+    def find_first_unreported_serial_process(order_id, serial_no, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT op.*, p.name AS process_name FROM order_processes op "
+            "JOIN processes p ON p.id = op.process_id "
+            "WHERE op.order_id = ? AND NOT EXISTS ("
+            "SELECT 1 FROM work_records wr WHERE wr.order_id = op.order_id "
+            "AND wr.process_id = op.process_id AND wr.serial_no = ? "
+            "AND wr.type = 'normal' AND wr.status = 'approved') "
+            "ORDER BY op.seq_order, op.id LIMIT 1",
+            (order_id, serial_no),
+        ).fetchone()
 
     @staticmethod
     def insert_approval_record(work_record_id, db=None):
@@ -273,6 +337,15 @@ class ScanRepository:
             "UPDATE product_items SET current_process_id = ?, status = 'in_progress', version = version + 1 "
             "WHERE id = ? AND version = ?",
             (next_process_id, item_id, version),
+        )
+
+    @staticmethod
+    def set_product_item_current_process(item_id, process_id, version, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "UPDATE product_items SET current_process_id = ?, status = 'in_progress', "
+            "completed_at = NULL, version = version + 1 WHERE id = ? AND version = ?",
+            (process_id, item_id, version),
         )
 
     @staticmethod

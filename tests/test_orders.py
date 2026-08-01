@@ -220,6 +220,53 @@ class TestOrderCRUD:
         data = resp.get_json()
         assert data["message"]
 
+    def test_record_qr_print_marks_order_and_counts_reprints(
+        self,
+        client,
+        auth_headers,
+        test_order_id,
+    ):
+        first_response = client.post(
+            f"/api/orders/{test_order_id}/qr-print",
+            headers=auth_headers,
+            json={"mode": "order", "copies": 1, "label_count": 1},
+        )
+
+        assert first_response.status_code == 200, first_response.get_json()
+        first_status = first_response.get_json()["print_status"]
+        assert first_status["qr_print_count"] == 1
+        assert first_status["qr_printed_at"]
+        assert first_status["qr_printed_by"]
+        assert first_status["qr_printed_by_name"]
+
+        second_response = client.post(
+            f"/api/orders/{test_order_id}/qr-print",
+            headers=auth_headers,
+            json={"mode": "order", "copies": 2, "label_count": 2},
+        )
+
+        assert second_response.status_code == 200, second_response.get_json()
+        second_status = second_response.get_json()["print_status"]
+        assert second_status["qr_print_count"] == 2
+        assert second_status["copies"] == 2
+        assert second_status["label_count"] == 2
+
+        list_response = client.get(
+            f"/api/orders?archive=all&keyword={_order_no(client, test_order_id)}",
+            headers=auth_headers,
+        )
+        listed_order = next(
+            order for order in list_response.get_json()["orders"]
+            if order["id"] == test_order_id
+        )
+        assert listed_order["qr_print_count"] == 2
+        assert listed_order["qr_printed_at"]
+        assert "print_count=2" in _audit_detail(
+            client,
+            "print_order_qr",
+            test_order_id,
+        )
+
     def test_order_lifecycle_audits_use_actual_order_number(self, client, auth_headers):
         create_response = client.post(
             "/api/orders",

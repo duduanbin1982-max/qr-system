@@ -67,11 +67,18 @@ class AuthService:
             d.commit()
 
     @staticmethod
-    def create_session(user_id, token, ip, ua, db=None):
+    def create_session(user_id, token, ip, ua, active_position_id=None, db=None):
         d = AuthService._db(db)
         AuthRepository.deactivate_user_sessions(user_id, db=d)
         AuthRepository.create_session_update_user(user_id, token, db=d)
-        AuthRepository.create_session_insert(user_id, token, ip, ua, db=d)
+        AuthRepository.create_session_insert(
+            user_id,
+            token,
+            ip,
+            ua,
+            active_position_id=active_position_id,
+            db=d,
+        )
         if db is None:
             d.commit()
 

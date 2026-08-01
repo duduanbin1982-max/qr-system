@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
 # QR System DB Backup with integrity verification
 # cron: 0 3 * * * /home/dubin/qr-system/scripts/backup-db.sh >> /home/dubin/qr-system/data/backups/backup.log 2>&1
 
@@ -8,42 +10,51 @@ BACKUP_DIR="/home/dubin/qr-system/data/backups"
 KEEP_DAYS=30
 LOG_TAG="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
-mkdir -p "$BACKUP_DIR"
+install -d -m 0700 "$BACKUP_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 WEEKDAY=$(date +%u)
 BACKUP_FILE="$BACKUP_DIR/production_${TIMESTAMP}.db"
+TEMP_FILE="$BACKUP_FILE.partial"
+trap 'rm -f "$TEMP_FILE"' EXIT
 
-/usr/bin/sqlite3 "$DB_PATH" ".backup $BACKUP_FILE" 2>&1
-if [ $? -ne 0 ] || [ ! -f "$BACKUP_FILE" ]; then
+/usr/bin/sqlite3 "$DB_PATH" ".backup $TEMP_FILE" 2>&1
+if [ ! -f "$TEMP_FILE" ]; then
     echo "$LOG_TAG BACKUP FAILED"
     exit 1
 fi
 
-INTEGRITY=$(/usr/bin/sqlite3 "$BACKUP_FILE" "PRAGMA integrity_check" 2>&1)
+INTEGRITY=$(/usr/bin/sqlite3 "$TEMP_FILE" "PRAGMA integrity_check" 2>&1)
 if [ "$INTEGRITY" != "ok" ]; then
     echo "$LOG_TAG BACKUP CORRUPT: $INTEGRITY"
-    rm -f "$BACKUP_FILE"
     exit 1
 fi
 
-TABLE_COUNT=$(/usr/bin/sqlite3 "$BACKUP_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='table'" 2>&1)
+FOREIGN_KEY_ERRORS=$(/usr/bin/sqlite3 "$TEMP_FILE" "PRAGMA foreign_key_check" 2>&1)
+if [ -n "$FOREIGN_KEY_ERRORS" ]; then
+    echo "$LOG_TAG BACKUP FOREIGN-KEY CHECK FAILED: $FOREIGN_KEY_ERRORS"
+    exit 1
+fi
+
+TABLE_COUNT=$(/usr/bin/sqlite3 "$TEMP_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='table'" 2>&1)
 if [ "$TABLE_COUNT" -lt 10 ]; then
     echo "$LOG_TAG BACKUP SUSPICIOUS: $TABLE_COUNT tables"
-    rm -f "$BACKUP_FILE"
     exit 1
 fi
 
+mv "$TEMP_FILE" "$BACKUP_FILE"
+chmod 0600 "$BACKUP_FILE"
 SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
 echo "$LOG_TAG BACKUP OK: $BACKUP_FILE ($SIZE, $TABLE_COUNT tables)"
 
 if [ "$WEEKDAY" = "7" ]; then
-    cp "$BACKUP_FILE" "$BACKUP_DIR/weekly_${TIMESTAMP}.db"
+    install -m 0600 "$BACKUP_FILE" "$BACKUP_DIR/weekly_${TIMESTAMP}.db"
     echo "$LOG_TAG Weekly archive saved"
 fi
 
 if [ -d "$ATTACH_DIR" ] && [ "$(ls -A $ATTACH_DIR 2>/dev/null)" ]; then
     ATTACH_BACKUP="$BACKUP_DIR/attachments_${TIMESTAMP}.tar.gz"
     tar -czf "$ATTACH_BACKUP" -C "$(dirname $ATTACH_DIR)" "$(basename $ATTACH_DIR)" 2>/dev/null
+    chmod 0600 "$ATTACH_BACKUP"
     echo "$LOG_TAG Attachments backup: $ATTACH_BACKUP"
 fi
 

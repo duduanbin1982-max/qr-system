@@ -4,8 +4,7 @@ set -Eeuo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-npm run build
-test -s public/static/index.html
+bash scripts/publish-frontend.sh
 
 if [[ "${1:-}" == "--restart" ]]; then
     python3 -c "from dotenv import load_dotenv; load_dotenv('.env'); from modules.db import init_db; init_db()"

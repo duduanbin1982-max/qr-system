@@ -15,7 +15,7 @@ def _seed_route(client):
             cursor = db.execute(
                 "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
                 "VALUES (?, ?, ?, ?, 'active', datetime('now','localtime'))",
-                (f"Fixture {label} {suffix}", "cross module fixture", "fixture", seq_order),
+                (f"Fixture {label} {suffix}", "cross module fixture", "结构件", seq_order),
             )
             process_ids.append(cursor.lastrowid)
 
@@ -29,7 +29,7 @@ def _seed_route(client):
         db.execute(
             "INSERT INTO process_routes (id, name, description, status, category, updated_at) "
             "VALUES (?, ?, ?, 'active', ?, datetime('now','localtime'))",
-            (route_id, route_name, "cross module fixture", "fixture"),
+            (route_id, route_name, "cross module fixture", "结构件"),
         )
 
         for seq_order, process_id in enumerate(process_ids[:2], start=1):
@@ -82,6 +82,18 @@ def _order_route_id(client, order_id):
         return row["route_id"]
 
 
+def _route_processes(client, route_id):
+    with client.application.app_context():
+        return [
+            (row["process_id"], row["required_audit"])
+            for row in get_db().execute(
+                "SELECT process_id, required_audit FROM process_route_items "
+                "WHERE route_id = ? ORDER BY seq_order",
+                (route_id,),
+            ).fetchall()
+        ]
+
+
 def _seed_alternate_route(client, process_id):
     with client.application.app_context():
         db = get_db()
@@ -94,7 +106,7 @@ def _seed_alternate_route(client, process_id):
         ).fetchone()[0]
         db.execute(
             "INSERT INTO process_routes (id, name, description, status, category, updated_at) "
-            "VALUES (?, ?, 'alternate route fixture', 'active', 'fixture', datetime('now','localtime'))",
+            "VALUES (?, ?, 'alternate route fixture', 'active', '结构件', datetime('now','localtime'))",
             (route_id, f"Alternate Route {uuid.uuid4().hex[:6].upper()}"),
         )
         db.execute(
@@ -106,11 +118,8 @@ def _seed_alternate_route(client, process_id):
         return route_id
 
 
-def test_route_update_syncs_unreported_order_processes(client, auth_headers):
+def test_unreferenced_route_can_be_updated(client, auth_headers):
     route_id, route_name, process_ids = _seed_route(client)
-    order_id = _create_order_with_route(client, auth_headers, route_id)
-
-    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)], "new order should copy the route's initial process list"
 
     response = client.put(
         f"/api/process-routes/{route_id}",
@@ -118,44 +127,7 @@ def test_route_update_syncs_unreported_order_processes(client, auth_headers):
         json={
             "name": route_name,
             "description": "cross module fixture",
-            "category": "fixture",
-            "processes": [
-                {"process_id": process_ids[2], "required_audit": 1},
-                {"process_id": process_ids[0], "required_audit": 0},
-            ],
-        },
-    )
-
-    assert response.status_code == 200, response.get_json()
-    assert response.get_json()["synced_orders"] == 1, response.get_json()
-    assert response.get_json()["skipped_orders"] == 0, response.get_json()
-    assert _order_processes(client, order_id) == [(process_ids[2], 1), (process_ids[0], 0)], "unreported order should sync to the updated route"
-
-
-def test_route_update_skips_orders_with_work_records(client, auth_headers):
-    route_id, route_name, process_ids = _seed_route(client)
-    order_id = _create_order_with_route(client, auth_headers, route_id)
-
-    with client.application.app_context():
-        db = get_db()
-        user_id = db.execute(
-            "SELECT id FROM users WHERE username = ?",
-            (TEST_USER,),
-        ).fetchone()["id"]
-        db.execute(
-            "INSERT INTO work_records (order_id, process_id, user_id, status, quantity) "
-            "VALUES (?, ?, ?, 'approved', 1)",
-            (order_id, process_ids[0], user_id),
-        )
-        db.commit()
-
-    response = client.put(
-        f"/api/process-routes/{route_id}",
-        headers=auth_headers,
-        json={
-            "name": route_name,
-            "description": "cross module fixture",
-            "category": "fixture",
+            "category": "结构件",
             "processes": [
                 {"process_id": process_ids[2], "required_audit": 1},
                 {"process_id": process_ids[0], "required_audit": 0},
@@ -165,16 +137,104 @@ def test_route_update_skips_orders_with_work_records(client, auth_headers):
 
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["synced_orders"] == 0, response.get_json()
-    assert response.get_json()["skipped_orders"] == 1, response.get_json()
-    assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)], "reported order should keep its original process list"
+    assert response.get_json()["skipped_orders"] == 0, response.get_json()
+    assert _route_processes(client, route_id) == [(process_ids[2], 1), (process_ids[0], 0)]
 
-    ordinary_edit = client.put(
-        f"/api/orders/{order_id}",
+
+def test_route_update_rejects_order_reference(client, auth_headers):
+    route_id, route_name, process_ids = _seed_route(client)
+    order_id = _create_order_with_route(client, auth_headers, route_id)
+
+    response = client.put(
+        f"/api/process-routes/{route_id}",
         headers=auth_headers,
-        json={"route_id": route_id, "remark": "same route ordinary edit"},
+        json={
+            "name": route_name,
+            "description": "cross module fixture",
+            "category": "结构件",
+            "processes": [
+                {"process_id": process_ids[2], "required_audit": 1},
+                {"process_id": process_ids[0], "required_audit": 0},
+            ],
+        },
     )
-    assert ordinary_edit.status_code == 200, ordinary_edit.get_json()
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["code"] == "conflict"
+    assert "1 个订单" in response.get_json()["error"]
+    assert _route_processes(client, route_id) == [(process_ids[0], 0), (process_ids[1], 0)]
     assert _order_processes(client, order_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+
+
+def test_route_update_rejects_product_reference(client, auth_headers):
+    route_id, route_name, process_ids = _seed_route(client)
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO products (product_name, product_code, model, spec, category, route_id) "
+            "VALUES (?, ?, 'TEST', 'Standard', 'fixture', ?)",
+            ("Route Locked Product", f"LOCK-{uuid.uuid4().hex[:8].upper()}", route_id),
+        )
+        db.commit()
+
+    response = client.put(
+        f"/api/process-routes/{route_id}",
+        headers=auth_headers,
+        json={
+            "name": route_name,
+            "description": "changed description",
+            "category": "结构件",
+            "processes": [{"process_id": process_ids[2], "required_audit": 1}],
+        },
+    )
+
+    assert response.status_code == 409, response.get_json()
+    assert "1 个产品" in response.get_json()["error"]
+    assert _route_processes(client, route_id) == [(process_ids[0], 0), (process_ids[1], 0)]
+
+
+def test_route_usage_is_exposed_and_recycled_references_stay_locked(client, auth_headers):
+    route_id, _, _ = _seed_route(client)
+    _create_order_with_route(client, auth_headers, route_id)
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO products "
+            "(product_name, product_code, model, spec, category, route_id, deleted_at) "
+            "VALUES (?, ?, 'TEST', 'Standard', 'fixture', ?, datetime('now','localtime'))",
+            ("Recycled Route Product", f"RECYCLE-{uuid.uuid4().hex[:8].upper()}", route_id),
+        )
+        db.commit()
+
+    list_response = client.get("/api/process-routes?limit=200", headers=auth_headers)
+    assert list_response.status_code == 200, list_response.get_json()
+    listed_route = next(route for route in list_response.get_json()["routes"] if route["id"] == route_id)
+    assert listed_route["used_orders"] == 1
+    assert listed_route["used_products"] == 1
+    assert listed_route["is_locked"] is True
+
+    impact_response = client.get(f"/api/process-routes/{route_id}/impact", headers=auth_headers)
+    assert impact_response.status_code == 200, impact_response.get_json()
+    assert impact_response.get_json()["used_orders"] == 1
+    assert impact_response.get_json()["used_products"] == 1
+    assert impact_response.get_json()["is_locked"] is True
+
+    delete_response = client.delete(f"/api/process-routes/{route_id}", headers=auth_headers)
+    assert delete_response.status_code == 409, delete_response.get_json()
+    assert "无法删除" in delete_response.get_json()["error"]
+
+
+def test_unreferenced_route_can_be_deleted(client, auth_headers):
+    route_id, _, _ = _seed_route(client)
+
+    response = client.delete(f"/api/process-routes/{route_id}", headers=auth_headers)
+
+    assert response.status_code == 200, response.get_json()
+    with client.application.app_context():
+        route = get_db().execute(
+            "SELECT id FROM process_routes WHERE id = ?", (route_id,)
+        ).fetchone()
+    assert route is None
 
 
 def test_unreported_order_clears_route_and_copied_processes(client, auth_headers):

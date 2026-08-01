@@ -33,10 +33,10 @@ class PositionService:
             raise ValueError('岗位名称不能为空')
         process_ids = data.get('process_ids', [])
         if process_ids:
-            valid = PositionRepository.find_valid_process_ids(process_ids)
+            valid = PositionRepository.find_valid_process_ids(process_ids, active_only=True)
             invalid = [str(pid) for pid in process_ids if pid not in valid]
             if invalid:
-                raise ValueError('无效工序ID: ' + ', '.join(invalid))
+                raise ValueError('工序不存在或已停用: ' + ', '.join(invalid))
         with BaseService.transaction() as txn:
             if PositionRepository.find_position_by_name(name, db=txn):
                 raise ConflictError('岗位名称【' + name + '】已存在')
@@ -58,11 +58,15 @@ class PositionService:
                 raise ValueError('岗位名称不能为空')
         if 'process_ids' in data:
             pids = data['process_ids']
-            if pids:
-                valid = PositionRepository.find_valid_process_ids(pids)
-                invalid = [str(pid) for pid in pids if pid not in valid]
+            existing_process_ids = PositionRepository.find_process_ids_by_position(pos_id)
+            added_process_ids = set(pids) - existing_process_ids
+            if added_process_ids:
+                valid = PositionRepository.find_valid_process_ids(
+                    list(added_process_ids), active_only=True
+                )
+                invalid = [str(pid) for pid in added_process_ids if pid not in valid]
                 if invalid:
-                    raise ValueError('无效工序ID: ' + ', '.join(invalid))
+                    raise ValueError('工序不存在或已停用: ' + ', '.join(invalid))
 
         sets = []
         params = []

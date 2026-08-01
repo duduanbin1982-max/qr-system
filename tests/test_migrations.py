@@ -40,6 +40,26 @@ def test_run_migrations_uses_supplied_connection():
         assert "quality_capa_records" in table_names
         assert "quality_supplier_inspections" in table_names
         assert "quality_gauges" in table_names
+        order_columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(orders)").fetchall()
+        }
+        assert {
+            "qr_printed_at",
+            "qr_print_count",
+            "qr_printed_by",
+            "qr_printed_by_name",
+        }.issubset(order_columns)
+        session_columns = {
+            row["name"]
+            for row in db.execute("PRAGMA table_info(user_sessions)").fetchall()
+        }
+        assert "active_position_id" in session_columns
+        assert "idx_us_active_position" in {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
     finally:
         db.close()
 
@@ -62,11 +82,69 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
         "modules.migration_performance",
         "modules.migration_work_time",
         "modules.migration_order_completion",
-        "modules.migration_process_quality",
-        "modules.migration_quality_management",
+        "modules.migration_order_qr_print",
+            "modules.migration_process_quality",
+            "modules.migration_process_management",
+            "modules.migration_quality_management",
         "modules.migration_materials",
-    }
+            "modules.migration_approval_workflow",
+            "modules.migration_serial_backfill",
+        }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
+
+
+def test_position_aware_backfill_migration_is_idempotent_and_preserves_history():
+    from modules.migration_serial_backfill import (
+        MIGRATIONS,
+        m048_position_aware_serial_backfill,
+    )
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE work_records (
+                id INTEGER PRIMARY KEY,
+                report_source TEXT NOT NULL DEFAULT 'standard',
+                actual_completed_at TEXT,
+                backfill_reason TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO work_records (
+                id, report_source, actual_completed_at, backfill_reason
+            ) VALUES (
+                1, 'serial_backfill', '2026-07-01 09:30:00', '历史漏扫补报'
+            );
+            """
+        )
+
+        m048_position_aware_serial_backfill(db)
+        m048_position_aware_serial_backfill(db)
+
+        columns = {
+            row["name"]: row
+            for row in db.execute("PRAGMA table_info(work_records)").fetchall()
+        }
+        assert MIGRATIONS[-1][0] == 48
+        assert columns["submit_position_id"]["type"] == "INTEGER"
+        assert columns["submit_position_name"]["type"] == "TEXT"
+        assert columns["submit_position_name"]["notnull"] == 1
+        assert columns["submit_position_name"]["dflt_value"] == "''"
+
+        history = db.execute(
+            "SELECT report_source, actual_completed_at, backfill_reason, "
+            "submit_position_id, submit_position_name FROM work_records WHERE id = 1"
+        ).fetchone()
+        assert tuple(history) == (
+            "serial_backfill",
+            "2026-07-01 09:30:00",
+            "历史漏扫补报",
+            None,
+            "",
+        )
+        assert db.execute("SELECT COUNT(*) FROM work_records").fetchone()[0] == 1
+    finally:
+        db.close()
 
 
 def test_session_migration_deactivates_tokens_that_cannot_authenticate():

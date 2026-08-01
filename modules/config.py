@@ -51,7 +51,9 @@ PREDEFINED_ROLES = {
         'name': '普通员工', 'code': 'worker',
         'description': '普通工人，可进行报工操作',
         'group_id': 2, 'level': 1,
-        'permissions': ['page:scan', 'scan:view', 'scan:report']
+        'permissions': [
+            'page:scan', 'scan:view', 'scan:report', 'scan:serial_backfill'
+        ]
     },
     # 以下为新增预置
     'production_manager': {
@@ -68,7 +70,8 @@ PREDEFINED_ROLES = {
             'products:view', 'customers:view',
             'processes:view', 'routes:view','routes:create','routes:edit','routes:delete',
             'prices:view','prices:create','prices:edit','prices:delete',
-            'scan:view', 'scan:report', 'stats:view', 'trace:view', 'reports:view', 'board:view',
+            'scan:view', 'scan:report', 'scan:serial_backfill', 'scan:serial_backfill_approve',
+            'stats:view', 'trace:view', 'reports:view', 'board:view',
             'approvals:view', 'approvals:edit','inventory:view','materials:view','quality:view','rework:view','rework:create','rework:edit',
             'work_time:view','work_time:create','work_time:edit','work_time:audit','work_time:export',
         ]
@@ -79,7 +82,8 @@ PREDEFINED_ROLES = {
         'group_id': 2, 'level': 3,
         'permissions': [
             'page:scan', 'page:production', 'page:production.trace', 'page:stats',
-            'scan:view', 'scan:report', 'trace:view', 'stats:view', 'products:view'
+            'scan:view', 'scan:report', 'scan:serial_backfill',
+            'trace:view', 'stats:view', 'products:view'
         ]
     },
     'warehouse_keeper': {

@@ -12,10 +12,22 @@
               <label style="display:block;font-weight:600;font-size:var(--text-base);margin-bottom:var(--space-2)">工序报工顺序</label>
               <div style="display:flex;gap:var(--space-4)">
                 <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-base)">
-                  <input type="radio" v-model="processConfig.process_order_mode" value="sequential"> 按顺序报工
+                  <input type="radio" v-model="processConfig.process_order_mode" value="sequential"> 按工艺顺序流转
                 </label>
                 <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-base)">
-                  <input type="radio" v-model="processConfig.process_order_mode" value="out_of_order"> 允许乱序报工
+                  <input type="radio" v-model="processConfig.process_order_mode" value="out_of_order"> 允许跨工序补报
+                </label>
+              </div>
+            </div>
+            <!-- 序列号报工规则 -->
+            <div>
+              <label style="display:block;font-weight:600;font-size:var(--text-base);margin-bottom:var(--space-2)">序列号报工规则</label>
+              <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+                <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-base)">
+                  <input type="radio" v-model="processConfig.serial_process_report_mode" value="strict"> 严格按工件当前工序
+                </label>
+                <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-base)">
+                  <input type="radio" v-model="processConfig.serial_process_report_mode" value="controlled_backfill"> 受控跨工序补报（必须审批）
                 </label>
               </div>
             </div>
@@ -31,7 +43,15 @@
             <div>
               <label style="display:block;font-weight:600;font-size:var(--text-base);margin-bottom:var(--space-3)">报工数量上限</label>
               <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-                <ToggleSwitch v-model="processConfig.limit_by_prev_process" label="上道工序累计上限" />
+                <ToggleSwitch
+                  v-if="processConfig.process_order_mode === 'sequential'"
+                  v-model="processConfig.limit_by_prev_process"
+                  label="上道工序累计上限"
+                />
+                <div v-else class="process-limit-disabled">
+                  <span>上道工序累计上限</span>
+                  <span class="badge">乱序模式不适用</span>
+                </div>
                 <ToggleSwitch v-model="processConfig.limit_by_order_qty" label="订单总数上限" />
               </div>
             </div>
@@ -76,3 +96,23 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.process-limit-disabled {
+  align-items: center;
+  background: var(--bg-table-header);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  display: flex;
+  font-size: var(--text-base);
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) 12px;
+}
+
+.process-limit-disabled .badge {
+  background: var(--bg-hover);
+  color: var(--text-placeholder);
+  font-size: var(--text-xs);
+}
+</style>

@@ -15,6 +15,7 @@ export function useProcessConfig() {
       const s = d.settings || {}
       Object.assign(processConfig, {
         process_order_mode: s.process_order_mode || 'sequential',
+        serial_process_report_mode: s.serial_process_report_mode || 'strict',
         delivery_warning_days: parseInt(s.delivery_warning_days) || 7,
         limit_by_prev_process: s.limit_by_prev_process === '0' ? 0 : 1,
         limit_by_order_qty: s.limit_by_order_qty === '0' ? 0 : 1,
@@ -31,6 +32,7 @@ export function useProcessConfig() {
     try {
       const payload = {
         process_order_mode: processConfig.process_order_mode,
+        serial_process_report_mode: processConfig.serial_process_report_mode,
         delivery_warning_days: String(processConfig.delivery_warning_days),
         limit_by_prev_process: processConfig.limit_by_prev_process,
         limit_by_order_qty: processConfig.limit_by_order_qty,

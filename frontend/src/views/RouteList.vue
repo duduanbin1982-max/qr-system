@@ -2,10 +2,10 @@
 <template>
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">🔀</span><div><div class="s-val">{{ total || routes.length }}</div><div class="s-label">路线总数</div></div></div>
-      <div class="summary-item"><span class="s-icon">🔩</span><div><div class="s-val text-primary">{{ routes.filter(r=>r.category==='结构件').length }}</div><div class="s-label">结构件路线</div></div></div>
-      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-success">{{ routes.filter(r=>r.category==='机加工').length }}</div><div class="s-label">机加工路线</div></div></div>
-      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-warning">{{ routes.reduce((s,r)=>s+(r.processes||[]).length,0) }}</div><div class="s-label">工序节点</div></div></div>
+      <div class="summary-item"><span class="s-icon">🔀</span><div><div class="s-val">{{ summary.total_routes }}</div><div class="s-label">路线总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">🔩</span><div><div class="s-val text-primary">{{ summary.category_counts['结构件'] || 0 }}</div><div class="s-label">结构件路线</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-success">{{ summary.category_counts['机加工'] || 0 }}</div><div class="s-label">机加工路线</div></div></div>
+      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-warning">{{ summary.process_nodes_total }}</div><div class="s-label">工序节点</div></div></div>
     </div>
 
     <!-- 分类Tab按钮 -->
@@ -28,7 +28,7 @@
     <div class="card">
       <div class="card-header">
         <h3>🔀 工序路线</h3>
-        <span style="color:var(--text-placeholder);font-size:var(--text-sm)">共 {{ total || routes.length }} 项</span>
+        <span style="color:var(--text-placeholder);font-size:var(--text-sm)">共 {{ total }} 项</span>
       </div>
       <div class="card-body">
         <div v-if="routes.length">
@@ -41,12 +41,16 @@
                   <div style="font-weight:600;font-size:15px">{{ r.name }}</div>
                   <div v-if="r.description" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">{{ r.description }}</div>
                 </div>
-                <span v-for="cat in routeCategories(r)" :key="cat" class="badge" :class="cat==='结构件'?'badge-info':'badge-warning'" style="font-size:var(--text-2xs)">{{ cat }}</span>
+                <span class="badge" :class="r.category==='结构件'?'badge-info':'badge-warning'" style="font-size:var(--text-2xs)">{{ r.category }}</span>
                 <span class="badge" :class="r.status==='active'?'badge-success':'badge-danger'" style="font-size:var(--text-xs-alt)">{{ r.status==='active'?'启用':'停用' }}</span>
+                <span v-if="r.is_locked" class="badge badge-warning" :title="routeLockReason(r)" data-testid="route-lock-badge">🔒 已锁定</span>
+                <span v-if="r.used_orders || r.used_products" class="route-reference" :title="routeLockReason(r)">
+                  订单引用 {{ r.used_orders || 0 }} · 产品引用 {{ r.used_products || 0 }}
+                </span>
               </div>
               <div style="display:flex;gap:var(--space-1)" @click.stop>
-                <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(r)" title="编辑">✏️</span>
-                <span v-if="canDelete" class="o-abtn o-del" @click="del(r)" title="删除">🗑️</span>
+                <button v-if="canEdit" type="button" class="o-abtn o-edit route-action" :disabled="r.is_locked" :title="r.is_locked ? routeLockReason(r) : '编辑'" :data-testid="'route-edit-' + r.id" @click="openEdit(r)">✏️</button>
+                <button v-if="canDelete" type="button" class="o-abtn o-del route-action" :disabled="r.is_locked" :title="r.is_locked ? routeLockReason(r) : '删除'" :data-testid="'route-delete-' + r.id" @click="del(r)">🗑️</button>
               </div>
             </div>
             <!-- 工序流 -->
@@ -117,7 +121,10 @@
                 <span style="color:var(--text-placeholder);font-size:var(--text-xs);min-width:20px">{{ idx + 1 }}</span>
                 <select class="form-input" v-model="rp.process_id" style="flex:1;font-size:var(--text-sm)">
                   <option value="">-- 选择工序 --</option>
-                  <option v-for="p in allProcesses" :key="p.id" :value="p.id">{{ p.seq_order }}. {{ p.process_name }}</option>
+                  <option v-for="p in allProcesses" :key="p.id" :value="p.id" :disabled="p.status !== 'active' || p.category !== form.category">
+                    {{ p.seq_order }}. {{ p.process_name }}
+                    {{ p.status !== 'active' ? '（已停用）' : p.category !== form.category ? `（${p.category}）` : '' }}
+                  </option>
                 </select>
                 <label style="display:flex;align-items:center;gap:var(--space-1);font-size:var(--text-xs);white-space:nowrap;color:var(--text-placeholder)">
                   <input type="checkbox" v-model="rp.required_audit" :true-value="1" :false-value="0" style="accent-color:var(--primary)"> 需审批
@@ -141,7 +148,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
-import { can, auth } from '@/lib/auth.js'
+import { can } from '@/lib/auth.js'
 
 export default {
   setup() {
@@ -154,6 +161,7 @@ export default {
     const page = ref(1)
     const pageSize = ref(20)
     const total = ref(0)
+    const summary = ref({ total_routes: 0, category_counts: {}, process_nodes_total: 0 })
 
     const canCreate = computed(() => can('routes:create'))
     const canEdit   = computed(() => can('routes:edit'))
@@ -181,16 +189,6 @@ export default {
       if (page.value * pageSize.value < total.value) { page.value++; load() }
     }
 
-    // 收集路线涉及的所有工序 category (用于前端汇总显示)
-    function routeCategories(r) {
-      if (!r.processes || !r.processes.length) return []
-      const cats = new Set()
-      for (const p of r.processes) {
-        if (p.category) cats.add(p.category)
-      }
-      return [...cats]
-    }
-
     // 模态框
     const showModal = ref(false)
     const modalEdit = ref(false)
@@ -208,7 +206,12 @@ export default {
         params.offset = (page.value - 1) * pageSize.value
         const d = await api.domains.processRoutes.listProcessRoutes(params)
         routes.value = d.routes || []
-        total.value = d.total || 0
+        total.value = d.total != null ? d.total : routes.value.length
+        summary.value = d.summary || {
+          total_routes: total.value,
+          category_counts: {},
+          process_nodes_total: routes.value.reduce((count, route) => count + (route.processes || []).length, 0),
+        }
       } catch(e) {
         showToast(e.message || '加载失败', 'error')
       } finally {
@@ -228,6 +231,15 @@ export default {
 
     function toggleExpand(id) { expandedId.value = expandedId.value === id ? null : id }
 
+    function routeLockReason(route) {
+      const references = []
+      if (route.used_orders) references.push(`${route.used_orders} 个订单`)
+      if (route.used_products) references.push(`${route.used_products} 个产品`)
+      return references.length
+        ? `已被${references.join('、')}引用，不能修改或删除；请新建路线供后续业务使用`
+        : ''
+    }
+
     function openAdd() {
       form.value = { name:'', description:'', category:'结构件' }
       routeProcesses.value = []
@@ -236,6 +248,10 @@ export default {
     }
 
     function openEdit(r) {
+      if (r.is_locked) {
+        showToast(routeLockReason(r), 'warn')
+        return
+      }
       form.value = { name: r.name || '', description: r.description || '', category: r.category || '结构件' }
       routeProcesses.value = (r.processes || []).map(p => ({
         process_id: p.process_id,
@@ -281,11 +297,17 @@ export default {
     }
 
     async function del(r) {
+      if (r.is_locked) {
+        showToast(routeLockReason(r), 'warn')
+        return
+      }
       let impactMsg = ''
       try {
         const res = await api.domains.processRoutes.getRouteImpact(r.id)
-        if (res.used_orders > 0) {
-          impactMsg = '\n\n' + res.used_orders + ' 个订单正在使用此路线'
+        if (res.is_locked) {
+          showToast(routeLockReason(res), 'warn')
+          await load()
+          return
         }
       } catch(e) {
         showToast(e.message || '检查路线使用情况失败，将继续删除确认', 'warn')
@@ -301,10 +323,30 @@ export default {
       routes, loading, expandedId, toggleExpand, allProcesses,
       showModal, modalEdit, form, routeProcesses, canCreate, canEdit, canDelete,
       openAdd, openEdit, addRow, removeRow, getProcessName, save, del,
-      routeCategories, searchKeyword, searchAndLoad,
+      routeLockReason, searchKeyword, searchAndLoad, summary,
       categoryFilter, activeCat, switchCat,
       page, pageSize, total, prevPage, nextPage,
     }
   }
 }
 </script>
+
+<style scoped>
+.route-reference {
+  color: var(--text-placeholder);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.route-action {
+  border: 0;
+  font: inherit;
+}
+
+.route-action:disabled {
+  cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.4;
+  transform: none;
+}
+</style>

@@ -26,16 +26,20 @@ class ApprovalRepository:
         """Return approval records with linked work, order, process, and user data."""
         db = resolve_db(db)
         op = '=' if status_condition == 'pending' else '!='
+        order_column = 'ar.created_at' if status_condition == 'pending' else 'COALESCE(ar.processed_at, ar.created_at)'
         return db.execute(f'''
             SELECT ar.*, o.order_no, wr.process_id, p.name as process_name,
-                   u.name as worker_name, wr.quantity
+                   u.name as worker_name, wr.quantity, wr.serial_no,
+                   wr.report_source, wr.actual_completed_at, wr.backfill_reason,
+                   wr.submit_position_id, wr.submit_position_name,
+                   wr.remark
             FROM approval_records ar
             LEFT JOIN work_records wr ON ar.work_record_id = wr.id
             LEFT JOIN orders o ON wr.order_id = o.id
             LEFT JOIN processes p ON wr.process_id = p.id
             LEFT JOIN users u ON wr.user_id = u.id
             WHERE ar.status {op} 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL)
-            ORDER BY ar.created_at DESC
+            ORDER BY {order_column} DESC, ar.id DESC
             LIMIT ? OFFSET ?
         ''', (limit, offset)).fetchall()
 
@@ -47,13 +51,16 @@ class ApprovalRepository:
             'SELECT * FROM approval_records WHERE id = ?', (record_id,)
         ).fetchone()
 
+
     @staticmethod
     def find_work_record(wr_id, db=None):
-        """查询报工记录[含process_id用于多级审批]"""
+        """查询报工记录，包含多级审批所需的 process_id。"""
         db = resolve_db(db)
         return db.execute(
             "SELECT wr.id, wr.quantity, wr.order_id, wr.status, wr.process_id, "
-            "wr.user_id, wr.serial_no, COALESCE(u.name, u.username, '') AS user_name "
+                "wr.user_id, wr.serial_no, wr.report_source, wr.actual_completed_at, "
+                "wr.backfill_reason, wr.submit_position_id, wr.submit_position_name, wr.remark, "
+            "COALESCE(u.name, u.username, '') AS user_name "
             "FROM work_records wr LEFT JOIN users u ON u.id = wr.user_id WHERE wr.id = ?",
             (wr_id,),
         ).fetchone()
@@ -82,42 +89,63 @@ class ApprovalRepository:
     def approve(record_id, approver_id, approver_name, comment, db=None):
         """Mark an approval record approved and store approver details."""
         db = resolve_db(db)
-        db.execute('''
+        cur = db.execute('''
             UPDATE approval_records
             SET status = 'approved', approver_id = ?, approver_name = ?,
                 comment = ?, processed_at = datetime('now','localtime')
-            WHERE id = ?
+            WHERE id = ? AND status = 'pending'
         ''', (approver_id, approver_name, comment, record_id))
+        return cur.rowcount
 
     @staticmethod
     def reject(record_id, approver_id, approver_name, comment, db=None):
         """Mark an approval record rejected and store approver details."""
         db = resolve_db(db)
-        db.execute('''
+        cur = db.execute('''
             UPDATE approval_records
             SET status = 'rejected', approver_id = ?, approver_name = ?,
                 comment = ?, processed_at = datetime('now','localtime')
-            WHERE id = ?
+            WHERE id = ? AND status = 'pending'
         ''', (approver_id, approver_name, comment, record_id))
+        return cur.rowcount
 
     @staticmethod
     def update_work_record_status(wr_id, status, db=None):
         """Update the linked work-report status."""
         db = resolve_db(db)
-        db.execute(
-            'UPDATE work_records SET status = ? WHERE id = ?', (status, wr_id)
+        cur = db.execute(
+            'UPDATE work_records SET status = ? WHERE id = ? AND status = ?',
+            (status, wr_id, 'pending'),
         )
+        return cur.rowcount
 
     @staticmethod
-    def advance_level(record_id, approver_id, approver_name, comment, next_level, db=None):
+    def advance_level(record_id, approver_id, approver_name, comment, next_level, current_level, db=None):
         """Advance approval to next level without finalizing."""
         db = resolve_db(db)
-        db.execute("""
+        cur = db.execute("""
             UPDATE approval_records
             SET current_level = ?, approver_id = ?, approver_name = ?,
                 comment = ?, processed_at = datetime('now','localtime')
-            WHERE id = ?
-        """, (next_level, approver_id, approver_name, comment, record_id))
+            WHERE id = ? AND status = 'pending' AND current_level = ?
+        """, (next_level, approver_id, approver_name, comment, record_id, current_level))
+        return cur.rowcount
+
+    @staticmethod
+    def insert_approval_step(approval_record_id, step_level, approver_id, approver_name,
+                             approver_role, action, comment, db=None):
+        """Append a step-level audit row for approval history."""
+        db = resolve_db(db)
+        cur = db.execute("""
+            INSERT INTO approval_steps (
+                approval_record_id, step_level, approver_id, approver_name,
+                approver_role, action, comment
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            approval_record_id, step_level, approver_id, approver_name,
+            approver_role, action, comment,
+        ))
+        return cur.lastrowid
 
     # ============================================================
     # 审批配置
@@ -125,10 +153,10 @@ class ApprovalRepository:
 
     @staticmethod
     def find_all_configs(db=None):
-        """返回所有工序的审批配置[含工序名称]"""
+        """返回全部工序及其审批配置。"""
         db = resolve_db(db)
         return db.execute("""
-            SELECT ac.id, ac.process_id, COALESCE(ac.require_approval, 0) as require_approval,
+            SELECT ac.id, p.id as process_id, COALESCE(ac.require_approval, 0) as require_approval,
                    COALESCE(ac.approver_role, 'admin') as approver_role,
                    COALESCE(ac.approval_level, 1) as approval_level,
                    COALESCE(ac.approver_role_2, '') as approver_role_2,
@@ -141,7 +169,7 @@ class ApprovalRepository:
 
     @staticmethod
     def upsert_config(process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level, db=None):
-        """插入或更新审批配置;require_approval=0 时删除"""
+        """插入或更新审批配置；关闭审批时删除配置。"""
         db = resolve_db(db)
         existing = db.execute(
             "SELECT id FROM approval_config WHERE process_id = ?", (process_id,)
@@ -158,13 +186,13 @@ class ApprovalRepository:
                     (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level)
                 )
         else:
-            # 关闭审批时直接删除,不做冗余 UPDATE
+            # 关闭审批时直接删除，避免保留无效角色配置。
             if existing:
                 db.execute("DELETE FROM approval_config WHERE process_id = ?", (process_id,))
 
     @staticmethod
     def get_approval_stats(db=None):
-        """审批统计数据"""
+        """返回审批统计数据。"""
         db = resolve_db(db)
         pending = db.execute("SELECT COUNT(*) FROM approval_records WHERE status='pending'").fetchone()[0]
         avg_row = db.execute("""
@@ -188,7 +216,7 @@ class ApprovalRepository:
 
     @staticmethod
     def find_approval_config(process_id, db=None):
-        """查单个工序的审批配置"""
+        """查询单个工序的审批配置。"""
         db = resolve_db(db)
         return db.execute(
             "SELECT * FROM approval_config WHERE process_id = ?", (process_id,)

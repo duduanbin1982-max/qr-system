@@ -46,7 +46,9 @@ class ScanValidationService:
         return next((error for error in checks if error), None)
 
     @staticmethod
-    def _report_route_error(order, order_id, process_id, quantity, report_type):
+    def _report_route_error(
+        order, order_id, process_id, quantity, report_type, serial_backfill=False
+    ):
         current_op, route_error = ScanValidationService._validate_route_process(
             order,
             order_id,
@@ -56,22 +58,39 @@ class ScanValidationService:
             return current_op, route_error
 
         current_seq = current_op["seq_order"] if current_op else 0
-        sequencing_error = ScanValidationService._validate_sequence(order_id, current_seq, report_type)
+        sequencing_error = None
+        if not serial_backfill:
+            sequencing_error = ScanValidationService._validate_sequence(
+                order_id, current_seq, report_type
+            )
         if sequencing_error:
             return current_op, sequencing_error
 
-        quantity_error = ScanValidationService._validate_quantity(
-            order_id,
-            current_seq,
-            current_op,
-            quantity,
-            order,
-            report_type,
-        )
+        if serial_backfill:
+            quantity_error = None
+            if (current_op["completed"] or 0) + quantity > (order["quantity"] or 0):
+                quantity_error = ({"error": "报工数量超出订单总量限制"}, 400)
+        else:
+            quantity_error = ScanValidationService._validate_quantity(
+                order_id,
+                current_seq,
+                current_op,
+                quantity,
+                order,
+                report_type,
+            )
         return current_op, quantity_error
 
     @staticmethod
-    def validate_report(order_id, process_id, user, quantity, serial_no, report_type):
+    def validate_report(
+        order_id,
+        process_id,
+        user,
+        quantity,
+        serial_no,
+        report_type,
+        serial_backfill=False,
+    ):
         """Return ((error, status), quantity, serial_no) for scan report validation."""
         order, quantity, initial_error = ScanValidationService._initial_report_context(
             order_id, process_id, user, quantity, serial_no, report_type
@@ -93,16 +112,23 @@ class ScanValidationService:
             return focus_error, None, None
 
         _, route_error = ScanValidationService._report_route_error(
-            order, order_id, process_id, quantity, report_type
+            order,
+            order_id,
+            process_id,
+            quantity,
+            report_type,
+            serial_backfill=serial_backfill,
         )
         if route_error:
             return route_error, None, None
 
-        serial_error = ScanValidationService._validate_serial_process(
-            process_id,
-            serial_no,
-            report_type,
-        )
+        serial_error = None
+        if not serial_backfill:
+            serial_error = ScanValidationService._validate_serial_process(
+                process_id,
+                serial_no,
+                report_type,
+            )
         if serial_error:
             return serial_error, None, None
 
@@ -152,14 +178,6 @@ class ScanValidationService:
     @staticmethod
     def _validate_duplicates(order_id, process_id, user_id, serial_no, report_type):
         from modules.services.scan_helper_service import ScanHelperService
-
-        if report_type == "normal" and serial_no:
-            error = ScanReportPolicy.duplicate_serial_order_error(
-                ScanHelperService.check_serial_duplicate_in_order(order_id, serial_no, user_id),
-                serial_no,
-            )
-            if error:
-                return error
 
         if report_type == "normal":
             return ScanReportPolicy.duplicate_normal_report_error(

@@ -7,6 +7,9 @@ from modules.services.mobile_scan_resolver import MobileScanResolver
 from modules.services.scan_helper_service import ScanHelperService
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 from modules.services.order_focus_service import OrderFocusService
+from modules.services.process_order_service import ProcessOrderService
+from modules.services.active_position_service import ActivePositionService
+from modules.services.serial_backfill_service import SerialBackfillService
 
 
 class MobileScanService:
@@ -24,39 +27,6 @@ class MobileScanService:
     def _resolve_target(code):
         target = MobileScanResolver.resolve(code)
         return target.order, target.item_info, target.serial_no
-
-    @staticmethod
-    def _current_process(order_data, item_info):
-        for proc in order_data["processes"]:
-            if not MobileScanService._is_process_completed(proc, order_data):
-                return MobileScanService._process_summary(proc, order_data)
-        if item_info and item_info.get("current_process_id"):
-            return MobileScanService._current_process_for_item(order_data, item_info)
-        return None
-
-    @staticmethod
-    def _is_process_completed(proc, order_data):
-        if proc.get("status") == "completed":
-            return True
-        total = proc.get("total_quantity", order_data.get("quantity", 0)) or 0
-        return total > 0 and (proc.get("completed") or 0) >= total
-
-    @staticmethod
-    def _current_process_for_item(order_data, item_info):
-        item_process_id = item_info["current_process_id"]
-        for proc in order_data["processes"]:
-            if proc["process_id"] == item_process_id:
-                return MobileScanService._process_summary(proc, order_data)
-        return None
-
-    @staticmethod
-    def _process_summary(proc, order_data):
-        return {
-            "process_id": proc["process_id"],
-            "process_name": proc.get("process_name", ""),
-            "completed": proc.get("completed") or 0,
-            "total": proc.get("total_quantity", order_data.get("quantity", 0)),
-        }
 
     @staticmethod
     def _attach_item_qr_data(item_info):
@@ -89,8 +59,14 @@ class MobileScanService:
         if order_data.get("status") == "completed":
             return {"error": "订单已完成并归档，如需继续报工请先重新打开订单"}, 400
 
-        if not ScanHelperService.check_order_scope(order_data["id"], get_user_process_ids(user)):
+        user_process_ids = get_user_process_ids(user)
+        if not ScanHelperService.check_order_scope(order_data["id"], user_process_ids):
             return {"error": "您无权查看此订单"}, 403
+        position_context = ActivePositionService.get_context(user)
+        active_position = position_context.get("active_position")
+        preferred_process_ids = (
+            active_position.get("process_ids") if active_position else None
+        )
 
         order_data["processes"] = [
             dict(process) for process in ScanHelperService.get_order_processes(order_data["id"])
@@ -99,10 +75,19 @@ class MobileScanService:
             dict(record) for record in ScanHelperService.get_work_records(order_data["id"], limit=20)
         ]
 
-        if serial_no and item_info and item_info.get("current_process_id"):
-            order_data["current_process"] = MobileScanService._current_process_for_item(order_data, item_info)
-        else:
-            order_data["current_process"] = MobileScanService._current_process(order_data, item_info)
+        ProcessOrderService.attach_context(
+            order_data,
+            item_info=item_info,
+            serial_no=serial_no,
+            user_process_ids=user_process_ids,
+            preferred_process_ids=preferred_process_ids,
+            serial_backfill_available=SerialBackfillService.is_available(user),
+            serial_report_states=(
+                ScanHelperService.list_serial_report_states(order_data["id"], serial_no)
+                if serial_no else None
+            ),
+        )
+        order_data["active_position"] = active_position
 
         quality_evaluation_pending_count = ProcessQualityEvaluationService.pending_count(user["id"])
         completion_focus_warning = OrderFocusService.scan_priority_warning(
@@ -117,9 +102,11 @@ class MobileScanService:
                 "item": MobileScanService._attach_item_qr_data(item_info),
                 "quality_evaluation_pending_count": quality_evaluation_pending_count,
                 "completion_focus_warning": completion_focus_warning,
+                "position_context": position_context,
             }, 200
         return {
             "order": order_data,
             "quality_evaluation_pending_count": quality_evaluation_pending_count,
             "completion_focus_warning": completion_focus_warning,
+            "position_context": position_context,
         }, 200

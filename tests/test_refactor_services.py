@@ -9,11 +9,17 @@ def _process_db():
     db.row_factory = sqlite3.Row
     db.execute(
         "CREATE TABLE process_route_items ("
-        "route_id INTEGER, process_id INTEGER, seq_order INTEGER, required_audit INTEGER)"
+        "id INTEGER PRIMARY KEY, route_id INTEGER, process_id INTEGER, "
+        "seq_order INTEGER, required_audit INTEGER)"
+    )
+    db.execute(
+        "CREATE TABLE process_routes ("
+        "id INTEGER PRIMARY KEY, name TEXT, status TEXT, category TEXT)"
     )
     db.execute(
         "CREATE TABLE processes ("
-        "id INTEGER PRIMARY KEY, seq_order INTEGER, status TEXT)"
+        "id INTEGER PRIMARY KEY, name TEXT DEFAULT '', category TEXT DEFAULT '结构件', "
+        "seq_order INTEGER, status TEXT)"
     )
     db.execute(
         "CREATE TABLE order_processes ("
@@ -32,6 +38,14 @@ def _assigned_processes(db):
 
 def test_order_process_assignment_uses_route_items_when_route_selected():
     db = _process_db()
+    db.execute(
+        "INSERT INTO process_routes (id, name, status, category) "
+        "VALUES (2, 'Fixture Route', 'active', '结构件')"
+    )
+    db.execute(
+        "INSERT INTO processes (id, name, category, seq_order, status) "
+        "VALUES (10, 'Fixture Process', '结构件', 1, 'active')"
+    )
     db.execute(
         "INSERT INTO process_route_items (route_id, process_id, seq_order, required_audit) "
         "VALUES (2, 10, 1, 1)"

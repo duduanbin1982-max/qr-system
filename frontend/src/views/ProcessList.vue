@@ -2,7 +2,7 @@
 <template>
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val">{{ processes.length }}</div><div class="s-label">工序总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val">{{ processTotal }}</div><div class="s-label">工序总数</div></div></div>
       <div class="summary-item"><span class="s-icon">🏗️</span><div><div class="s-val text-primary">{{ structCount }}</div><div class="s-label">结构件</div></div></div>
       <div class="summary-item"><span class="s-icon">🔧</span><div><div class="s-val text-success">{{ machCount }}</div><div class="s-label">机加工</div></div></div>
     </div>
@@ -173,13 +173,15 @@ export default {
 
     const structCount = ref(0)
     const machCount = ref(0)
+    const processTotal = computed(() => structCount.value + machCount.value)
 
     // RBAC 权限
     const canEdit   = computed(() => can('processes:edit'))
     const canCreate = computed(() => can('processes:create'))
     const canDelete = computed(() => can('processes:delete'))
 
-    async function load() {
+    async function load(options = {}) {
+      const silent = options.silent === true
       loading.value = true
       try {
         const params = { sort_by: 'seq_order', sort_dir: 'asc' }
@@ -196,6 +198,7 @@ export default {
           machCount.value = d.category_counts['机加工'] || 0
         }
       } catch(e) {
+        if (silent) throw e
         showToast(e.message || '加载失败', 'error')
       } finally {
         loading.value = false
@@ -265,7 +268,10 @@ export default {
       if (keys.length > 0) {
         const labels = { work_records:'报工记录', scrap_records:'报废记录', rework_records:'返工记录',
           quality_inspections:'质检记录', process_route_items:'路线工序关联',
-          order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗' }
+          order_processes:'订单工序关联', position_processes:'岗位工序关联', material_consumptions:'物料消耗',
+          work_time_standards:'标准工时', work_time_records:'工时记录',
+          process_handoff_reviews:'工序交接评价', process_quality_evaluations:'工序质量评价',
+          user_processes:'用户工序授权', product_items:'在制工件', route_prices:'路线工价' }
         let detail = ''
         for (let i = 0; i < keys.length; i++) {
           detail += '\n  ' + (labels[keys[i]] || keys[i]) + '：' + impact[keys[i]] + ' 条'
@@ -295,7 +301,7 @@ export default {
       // Retry up to 3 times if initial load fails
       for (let retry = 0; retry < 3; retry++) {
         try {
-          await load()
+          await load({ silent: true })
           break
         } catch(e) {
           if (retry === 2) showToast('加载工序数据失败，请刷新重试', 'error')
@@ -320,7 +326,7 @@ export default {
     return {
       processes, loading, filterCategory, searchKeyword, pageTitle, load,
       showModal, modalEdit, form, categories,
-      structCount, machCount, can, canCreate, canEdit, canDelete,
+      structCount, machCount, processTotal, can, canCreate, canEdit, canDelete,
       openAdd, openEdit, save, del, activeCat, switchCat, searchAndLoad,
       page, pageSize, total, prevPage, nextPage
     }

@@ -99,7 +99,7 @@ def test_position_crud_keeps_process_assignments(client):
 def test_position_rejects_invalid_process_duplicate_name_and_assigned_user(client):
     with client.application.app_context():
         db = get_db()
-        with pytest.raises(ValueError, match="无效工序ID"):
+        with pytest.raises(ValueError, match="不存在或已停用"):
             PositionService.create_position({"name": "无效岗位", "process_ids": [999999]})
 
         position_id = PositionService.create_position({"name": "焊接岗位"})

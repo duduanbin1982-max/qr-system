@@ -22,11 +22,9 @@ def test_required_serial_message_is_chinese():
 
 
 def test_duplicate_messages_are_chinese_and_actionable():
-    serial_error = ScanReportPolicy.duplicate_serial_order_error(True, "SN-001")
     process_error = ScanReportPolicy.duplicate_normal_report_error({"id": 1}, "SN-001")
     batch_error = ScanReportPolicy.duplicate_normal_report_error({"id": 1}, "")
 
-    assert serial_error[0]["error"] == "序列号 SN-001 在此订单中已报工"
     assert process_error[0]["error"] == "序列号 SN-001 在此工序已报工"
     assert batch_error[0]["error"] == "此工序已报工"
 

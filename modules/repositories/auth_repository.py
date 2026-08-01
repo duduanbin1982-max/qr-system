@@ -41,7 +41,8 @@ class AuthRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT u.*, s.created_at AS _session_created_at, "
-            "s.last_active AS _session_last_active "
+            "s.last_active AS _session_last_active, "
+            "s.active_position_id AS _active_position_id "
             "FROM users u "
             "LEFT JOIN user_sessions s ON s.user_id = u.id AND s.token = u.token AND s.is_active = 1 "
             "WHERE u.token = ? AND u.status = 'active' "
@@ -113,12 +114,25 @@ class AuthRepository:
         )
 
     @staticmethod
-    def create_session_insert(user_id, token, ip, ua, db=None):
+    def create_session_insert(user_id, token, ip, ua, active_position_id=None, db=None):
         db = resolve_db(db)
         db.execute(
-            "INSERT INTO user_sessions (user_id, token, ip_address, user_agent) VALUES (?,?,?,?)",
-            (user_id, token, ip, ua)
+            "INSERT INTO user_sessions "
+            "(user_id, token, ip_address, user_agent, active_position_id) "
+            "VALUES (?,?,?,?,?)",
+            (user_id, token, ip, ua, active_position_id)
         )
+
+    @staticmethod
+    def update_session_active_position(user_id, token, position_id, db=None):
+        db = resolve_db(db)
+        cursor = db.execute(
+            "UPDATE user_sessions SET active_position_id = ?, "
+            "last_active = datetime('now','localtime') "
+            "WHERE user_id = ? AND token = ? AND is_active = 1",
+            (position_id, user_id, token),
+        )
+        return cursor.rowcount
 
     @staticmethod
     def get_user_role_code(user_id, db=None):
