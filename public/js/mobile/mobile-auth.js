@@ -8,13 +8,12 @@ var _loginBusy = false;
 function persistMobileUser(serverUser) {
   var previous = user() || {};
   var merged = Object.assign({}, previous, serverUser || {});
-  if (!merged.token && previous.token) merged.token = previous.token;
+  delete merged.token;
   window.__qr_user = merged;
   var safe = {
     id: merged.id,
     name: merged.name,
     username: merged.username,
-    token: merged.token,
     role: merged.role,
     permissions: merged.permissions || [],
     position_id: merged.position_id || null,
@@ -23,9 +22,26 @@ function persistMobileUser(serverUser) {
     active_position_name: merged.active_position_name || '',
     available_positions: merged.available_positions || []
   };
-  try { sessionStorage.setItem('qr_user', JSON.stringify(safe)); } catch(e) {}
+  try {
+    sessionStorage.setItem('qr_user', JSON.stringify(safe));
+    sessionStorage.removeItem('iq_token');
+  } catch(e) {}
   return merged;
 }
+
+function clearMobileSessionState() {
+  window.__qr_user = null;
+  try {
+    sessionStorage.removeItem('qr_user');
+    sessionStorage.removeItem('iq_token');
+    sessionStorage.removeItem('iq_code');
+  } catch(e) {}
+}
+
+window.handleAuthExpired = function() {
+  clearMobileSessionState();
+  show('login');
+};
 
 function applyPositionContext(context) {
   if (!context) return;
@@ -115,8 +131,7 @@ function doLogin() {
 
 function doLogout() {
   api.logout().catch(function() {});
-  window.__qr_user = null;
-  try { sessionStorage.clear(); } catch(e) {}
+  clearMobileSessionState();
   show('login');
 }
 function goMain() {

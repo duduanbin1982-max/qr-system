@@ -41,6 +41,49 @@ def test_mobile_api_facade_is_loaded_before_business_scripts():
     assert _script_index(inspection_html, "mobile-api.js") < _script_index(inspection_html, "inspection.js")
 
 
+def test_mobile_auth_uses_same_origin_cookie_without_js_token_handoff():
+    api_script = (MOBILE_DIR / "mobile-api.js").read_text(encoding="utf-8")
+    auth_script = (MOBILE_DIR / "mobile-auth.js").read_text(encoding="utf-8")
+    utils_script = (MOBILE_DIR / "mobile-utils.js").read_text(encoding="utf-8")
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+    inspection_script = (MOBILE_DIR / "inspection.js").read_text(encoding="utf-8")
+
+    assert 'credentials: "same-origin"' in api_script
+    assert "Authorization" not in api_script
+    assert "Bearer " not in api_script
+    assert "function token(" not in api_script
+    assert "document.cookie" not in api_script
+
+    assert "token: merged.token" not in auth_script
+    assert "setItem('iq_token'" not in auth_script
+    assert "delete merged.token" in auth_script
+    assert "delete u.token" in utils_script
+
+    assert 'setItem("iq_token"' not in order_script
+    assert "token()" not in order_script
+    assert "document.cookie" not in order_script
+
+    assert "function getToken" not in inspection_script
+    assert "getItem('iq_token')" not in inspection_script
+    assert "document.cookie" not in inspection_script
+
+
+def test_mobile_api_error_protocol_exposes_consistent_domain_context():
+    api_script = (MOBILE_DIR / "mobile-api.js").read_text(encoding="utf-8")
+
+    for field in (
+        "error.code",
+        "error.status",
+        "error.domainCode",
+        "error.action",
+        "error.details",
+        "error.payload",
+    ):
+        assert field in api_script
+    assert 'response.status === 409 ? "数据冲突"' in api_script
+    assert "window.handleAuthExpired" in api_script
+
+
 def _asset_version(content, script_name):
     match = re.search(rf"{re.escape(script_name)}\?v=(\d+)", content)
     assert match, f"{script_name} must be cache-busted with ?v="

@@ -13,20 +13,6 @@
     { key: 'documentation_other', label: '标识/资料/其他', max: 10 }
   ];
 
-  function getToken() {
-    // Try sessionStorage first (set by mobile-order.js redirect), then cookie
-    try {
-      var t = sessionStorage.getItem('iq_token') || '';
-      if (t) { sessionStorage.removeItem('iq_token'); return t; }
-    } catch(e) {}
-    try {
-      var u = JSON.parse(sessionStorage.getItem('qr_user'));
-      if (u && u.token) return u.token;
-    } catch(e) {}
-    var m = document.cookie.match(/(?:^|;\s*)qr_token=([^;]*)/);
-    return m ? m[1] : '';
-  }
-
   function esc(s) {
     if (!s) return '';
     var d = document.createElement('div');
@@ -167,18 +153,17 @@
 
   function init() {
     var params = new URLSearchParams(window.location.search);
-    var code = params.get('code') || sessionStorage.getItem('iq_code') || '';
+    var storedCode = '';
+    try {
+      storedCode = sessionStorage.getItem('iq_code') || '';
+      sessionStorage.removeItem('iq_code');
+      sessionStorage.removeItem('iq_token');
+    } catch(e) {}
+    var code = params.get('code') || storedCode;
 
     if (!code) {
       document.getElementById('info').innerHTML = '';
       showMsg('缺少扫码信息，请返回重新扫码', 'error');
-      return;
-    }
-
-    var token = getToken();
-    if (!token) {
-      document.getElementById('info').innerHTML = '';
-      showMsg('登录已过期，请返回重新登录', 'error');
       return;
     }
 
@@ -224,7 +209,12 @@
     })
     .catch(function(e) {
       document.getElementById('info').innerHTML = '';
-      showMsg(e.message || '网络错误，请重试', 'error');
+      if (e && e.code === 401) {
+        showMsg('登录已过期，正在返回登录页', 'error');
+        setTimeout(function() { window.location.href = '/mobile.html'; }, 1200);
+      } else {
+        showMsg(e.message || '网络错误，请重试', 'error');
+      }
     });
   }
 

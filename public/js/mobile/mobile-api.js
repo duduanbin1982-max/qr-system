@@ -5,19 +5,6 @@
 
 const API = "/api";
 
-function token() {
-  if (typeof user === "function") {
-    var u = user();
-    if (u && u.token) return u.token;
-  }
-  try {
-    var stored = JSON.parse(sessionStorage.getItem("qr_user"));
-    if (stored && stored.token) return stored.token;
-  } catch(e) {}
-  var m = document.cookie.match(/(?:^|;\s*)qr_token=([^;]*)/);
-  return m ? m[1] : "";
-}
-
 function buildMobileQuery(params) {
   if (!params) return "";
   if (typeof params === "string") return params ? "?" + params.replace(/^\?/, "") : "";
@@ -40,13 +27,14 @@ async function parseApiResponse(response) {
     payload = {};
   }
   function responseError(fallbackMessage) {
-    var error = new Error((payload && payload.error) || fallbackMessage);
+    var body = payload && typeof payload === "object" ? payload : {};
+    var error = new Error(body.error || fallbackMessage);
     error.code = response.status;
     error.status = response.status;
-    error.domainCode = (payload && payload.code) || "";
-    error.action = (payload && payload.action) || "";
-    error.details = (payload && payload.details) || {};
-    error.payload = payload;
+    error.domainCode = body.code || "";
+    error.action = body.action || "";
+    error.details = body.details || {};
+    error.payload = body;
     return error;
   }
   if (response.status === 401) {
@@ -54,7 +42,9 @@ async function parseApiResponse(response) {
     throw responseError("登录已过期");
   }
   if (!response.ok || (payload && payload.error)) {
-    throw responseError("服务器错误(" + response.status + ")");
+    throw responseError(
+      response.status === 409 ? "数据冲突" : "服务器错误(" + response.status + ")"
+    );
   }
   return payload;
 }
@@ -65,8 +55,6 @@ async function apiRequest(method, url, data) {
     credentials: "same-origin",
     headers: {}
   };
-  var t = token();
-  if (t) opts.headers["Authorization"] = "Bearer " + t;
   if (data && method !== "GET") {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(data);

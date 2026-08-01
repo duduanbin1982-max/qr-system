@@ -33,3 +33,42 @@ def test_process_quality_page_only_loads_stats_with_permission():
     ).read_text(encoding="utf-8")
 
     assert "if (can('process_quality_evaluation:stats')) await loadStats()" in page
+
+
+def test_frontend_client_uses_cookie_auth_and_domain_error_shape():
+    client = (
+        PROJECT_ROOT / "frontend" / "src" / "lib" / "api" / "client.js"
+    ).read_text(encoding="utf-8")
+
+    assert "credentials: 'same-origin'" in client
+    assert "Authorization" not in client
+    assert "Bearer " not in client
+    for field in (
+        "error.code",
+        "error.status",
+        "error.domainCode",
+        "error.action",
+        "error.details",
+        "error.payload",
+    ):
+        assert field in client
+    assert "response.status === 409" in client
+    assert "auth:expired" in client
+
+
+def test_frontend_does_not_persist_or_append_session_tokens():
+    auth_source = (
+        PROJECT_ROOT / "frontend" / "src" / "lib" / "auth.js"
+    ).read_text(encoding="utf-8")
+    product_source = (
+        PROJECT_ROOT / "frontend" / "src" / "composables" / "useProduct.js"
+    ).read_text(encoding="utf-8")
+    product_view = (
+        PROJECT_ROOT / "frontend" / "src" / "views" / "ProductList.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "delete user.token" in auth_source
+    assert "?token=" not in product_source
+    assert "?token=" not in product_view
+    assert "auth.token" not in product_source
+    assert "auth.token" not in product_view

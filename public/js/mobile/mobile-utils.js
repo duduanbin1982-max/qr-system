@@ -41,11 +41,19 @@ function toast(msg, ms) {
   _toastTimer = setTimeout(function() { t.classList.add('fade'); setTimeout(function() { t.remove(); _toastTimer = null; }, 300); }, ms || 2000);
 }
 
-// Auth: dual channel — httpOnly cookie (primary) + Bearer token (fallback).
-// phone browsers may drop non-Secure cookies on HTTPS; Bearer is backup.
+// Auth state contains display/permission context only. The session credential stays in
+// the same-origin httpOnly cookie and is never read by JavaScript.
 function user()   {
   if (window.__qr_user) return window.__qr_user;
-  try { var u = JSON.parse(sessionStorage.getItem('qr_user')); if (u) { window.__qr_user = u; return u; } } catch(e) {}
+  try {
+    var u = JSON.parse(sessionStorage.getItem('qr_user'));
+    if (u) {
+      delete u.token;
+      sessionStorage.setItem('qr_user', JSON.stringify(u));
+      window.__qr_user = u;
+      return u;
+    }
+  } catch(e) {}
   return null;
 }
 

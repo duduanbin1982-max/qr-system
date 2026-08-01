@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
-import { auth, can } from '@/lib/auth.js'
+import { can } from '@/lib/auth.js'
 import { router } from '@/lib/router.js'
 
 export function useProduct() {
@@ -99,15 +99,15 @@ const products = ref([])
     }
 
     function getThumbnailUrl(attId) {
-      return '/api/product-attachments/' + attId + '/thumbnail?token=' + (auth.token || '')
+      return '/api/product-attachments/' + attId + '/thumbnail'
     }
 
     function openThumbnail(attId) {
-      window.open('/api/product-attachments/' + attId + '/download?token=' + (auth.token || ''), '_blank')
+      window.open('/api/product-attachments/' + attId + '/download', '_blank')
     }
 
     function openAttachment(att) {
-      window.open('/api/product-attachments/' + att.id + '/download?token=' + (auth.token || ''), '_blank')
+      window.open('/api/product-attachments/' + att.id + '/download', '_blank')
     }
 
     async function loadProductAttachments(productId) {
@@ -383,7 +383,7 @@ const products = ref([])
       currentEditProductId, productAttachments,
       getAttachmentIcon, formatFileSize, openAttachment, getThumbnailUrl, openThumbnail,
       triggerAttachmentInput, handleAttachmentUpload, deleteProductAttachment,
-      importFile, triggerImport, handleImport, importLoading, activeCat, switchCat, auth,
+      importFile, triggerImport, handleImport, importLoading, activeCat, switchCat,
       showTrash, trashedProducts, loadTrash, toggleTrash, restore, purge,
       productBom, bomForm, materialOptions, processOptions, loadProductBom, addBomItem, removeBomItem,
     }

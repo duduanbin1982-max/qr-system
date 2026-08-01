@@ -3,18 +3,18 @@
 //  初始化
 // ═══════════════════════════════════════════
 (function() {
-  // Restore session if user was previously logged in (sessionStorage + valid cookie)
-  if (user()) {
-    // Verify cookie is still valid with a lightweight API call
-    api.authInfo()
-      .then(function(d) {
-        if (d && d.user) { persistMobileUser(d.user); goMain(); }
-        else { doLogout(); }
-      })
-      .catch(function() { doLogout(); });
-  } else {
-    show('login');
-  }
+  // The httpOnly cookie is authoritative; sessionStorage only caches display context.
+  api.authInfo()
+    .then(function(d) {
+      if (!d || !d.user) {
+        window.handleAuthExpired();
+        return;
+      }
+      persistMobileUser(d.user);
+      if (d.must_change_password) showChangePassword();
+      else goMain();
+    })
+    .catch(function() { window.handleAuthExpired(); });
 
   // === Event listeners (migrated from inline handlers for CSP strict mode) ===
   var _el = document.getElementById('btn-login');

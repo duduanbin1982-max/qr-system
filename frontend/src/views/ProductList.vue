@@ -262,7 +262,7 @@
                 style="display:flex;flex-direction:column;align-items:center;width:100px;padding:6px;background:var(--bg-table-header);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;cursor:pointer"
                 @click="openAttachment(att)">
                 <div v-if="att.file_type && att.file_type.includes('image')" style="width:72px;height:72px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:var(--space-1)">
-                  <img :src="'/api/product-attachments/' + att.id + '/thumbnail?token=' + (auth.token || '')" style="width:100%;height:100%;object-fit:cover">
+                  <img :src="'/api/product-attachments/' + att.id + '/thumbnail'" style="width:100%;height:100%;object-fit:cover">
                 </div>
                 <div v-else style="font-size:32px;margin-bottom:var(--space-1);line-height:1">{{ getAttachmentIcon(att.file_type) }}</div>
                 <div style="font-size:var(--text-2xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px" :title="att.file_name">{{ att.file_name }}</div>

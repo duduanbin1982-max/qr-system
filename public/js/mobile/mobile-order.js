@@ -29,7 +29,7 @@ function doScan(code) {
     var _u = user();
     if (_u && _u.permissions && (_u.permissions.indexOf("*") !== -1 || _u.permissions.indexOf("inspection:create") !== -1 || _u.permissions.indexOf("quality:inspect") !== -1 || _u.permissions.indexOf("quality:edit") !== -1)) {
       closeCam();
-      try { sessionStorage.setItem("iq_token", token()); sessionStorage.setItem("iq_code", code); } catch(e) {}
+      try { sessionStorage.setItem("iq_code", code); } catch(e) {}
       window.location.href = "/mobile_inspection.html?code=" + encodeURIComponent(code);
       return;
     }
@@ -94,7 +94,7 @@ function doScan(code) {
       updateReportBtn();
     }
   })
-  .catch(function(e) { console.log('scan failed — token:' + (token() ? 'yes' : 'no') + ' cookie:' + (document.cookie.indexOf('qr_token')>=0 ? 'yes' : 'no')); toast((e && e.message) || '网络异常'); show('main'); });
+  .catch(function(e) { console.warn('scan failed', e && e.code); toast((e && e.message) || '网络异常'); show('main'); });
 }
 
 // ═══════════════════════════════════════════

@@ -24,10 +24,16 @@ async function loadPermissionCatalog() {
   return loadPageAccessCatalog(true)
 }
 
+function browserUser(serverUser) {
+  const user = { ...(serverUser || {}) }
+  delete user.token
+  return user
+}
+
 /** Login: credentials → httpOnly cookie (server-side) + user info */
 export async function login(username, password) {
   const d = await api.domains.auth.login({ username, password })
-  const u = d.user || d
+  const u = browserUser(d.user || d)
   const mustChange = d.must_change_password === true
   if (!mustChange) {
     await loadPermissionCatalog()
@@ -59,8 +65,8 @@ export async function restoreSession() {
     const d = await api.domains.auth.authInfo()
     if (d && d.user) {
       await loadPermissionCatalog()
-      auth.user = d.user
-      auth.isAdmin = !!(d.user.permissions && d.user.permissions.includes('*'))
+      auth.user = browserUser(d.user)
+      auth.isAdmin = !!(auth.user.permissions && auth.user.permissions.includes('*'))
       auth.mustChangePassword = d.must_change_password === true
       auth.isLoggedIn = !auth.mustChangePassword
       auth.loading = false
