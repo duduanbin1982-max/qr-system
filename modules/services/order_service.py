@@ -9,6 +9,12 @@ import logging
 from datetime import datetime, timedelta
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.order_lifecycle import (
+    COMPLETED_READONLY_MESSAGE,
+    REOPEN_STATUSES,
+    VALID_TRANSITIONS,
+    OrderLifecycle,
+)
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
@@ -257,15 +263,73 @@ class OrderService:
     # 更新（含状态机）
     # ============================================================
 
-    VALID_TRANSITIONS = {
-        'pending':   ['producing', 'cancelled', 'paused'],
-        'producing': ['cancelled', 'paused'],
-        'completed': [],
-        'cancelled': ['pending'],
-        'paused':    ['producing', 'pending', 'cancelled'],
-    }
-    COMPLETED_READONLY_MESSAGE = '已完成订单已归档，只读，请先重新打开订单'
-    REOPEN_STATUSES = {'pending', 'producing'}
+    VALID_TRANSITIONS = VALID_TRANSITIONS
+    COMPLETED_READONLY_MESSAGE = COMPLETED_READONLY_MESSAGE
+    REOPEN_STATUSES = REOPEN_STATUSES
+
+    @staticmethod
+    def _resolve_update_customer(data):
+        if 'customer_id' not in data or not data['customer_id']:
+            return
+        if (data.get('customer') or '').strip():
+            return
+        customer_name = OrderRepository.find_customer_name(data['customer_id'])
+        if customer_name:
+            data['customer'] = customer_name
+
+    @staticmethod
+    def _record_update_remark(oid, data, user_id, user_name, txn):
+        if 'remark' not in data or not user_id:
+            return
+        current_remark = OrderRepository.find_order_remark(oid, db=txn)
+        if current_remark and data['remark'] != (current_remark['remark'] or ''):
+            OrderService.log_remark_history(
+                oid,
+                current_remark['remark'] or '',
+                data['remark'],
+                user_id,
+                user_name or '',
+                db=txn,
+            )
+
+    @staticmethod
+    def _sync_updated_processes(txn, oid, data, route_changed, process_ids_changed):
+        if process_ids_changed:
+            OrderProcessSyncService.sync_processes(txn, oid, data['process_ids'])
+        elif route_changed:
+            if data['route_id']:
+                OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
+            else:
+                OrderProcessSyncService.clear_processes(txn, oid)
+
+    @staticmethod
+    def _update_order_transaction(oid, data, user_id, user_name, txn):
+        current_order = OrderRepository.find_by_id(oid, db=txn)
+        if not current_order:
+            raise ValueError('订单不存在')
+        OrderLifecycle.validate_update(current_order, data)
+
+        route_changed, process_ids_changed = OrderProcessSyncService.prepare_update(
+            txn, oid, current_order['route_id'], data
+        )
+        structure_changed = route_changed or process_ids_changed
+        quantity_changed = (
+            'quantity' in data and data['quantity'] != current_order['quantity']
+        )
+        OrderService._record_update_remark(oid, data, user_id, user_name, txn)
+        OrderRepository.update_form_fields(oid, data, db=txn)
+        actual_order_no = OrderRepository.find_by_id(oid, db=txn)['order_no']
+        OrderService._sync_updated_processes(
+            txn, oid, data, route_changed, process_ids_changed
+        )
+        if structure_changed or quantity_changed or 'process_ids' in data:
+            OrderCompletionService.reconcile(
+                oid,
+                trigger='order_structure_updated',
+                actor_id=user_id,
+                db=txn,
+            )
+        return actual_order_no
 
     @staticmethod
     def update_order(oid, data, user_id=None, user_name=None):
@@ -285,87 +349,13 @@ class OrderService:
         existing = OrderRepository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
-        if existing['deleted_at']:
-            raise ValueError('订单已在回收站中')
-        if existing['status'] == 'completed':
-            raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
-
-        if data.get('status') == 'completed':
-            raise ValueError('订单完成状态只能由系统根据实际完工事实自动生成')
-
-        # customer_id → name lookup
-        if 'customer_id' in data and data['customer_id']:
-            if not (data.get('customer') or '').strip():
-                customer_name = OrderRepository.find_customer_name(data['customer_id'])
-                if customer_name:
-                    data['customer'] = customer_name
-
-        # Detect remark change before entering transaction; the old value is fetched again
-        # inside the transaction to avoid relying on the lightweight status query.
-        remark_changed = 'remark' in data
+        OrderLifecycle.validate_update(existing, data)
+        OrderService._resolve_update_customer(data)
 
         with BaseService.transaction() as txn:
-            # Re-check the lifecycle state after acquiring the write transaction.
-            # The initial read above is only for fast feedback and is not a lock.
-            current_order = OrderRepository.find_by_id(oid, db=txn)
-            if not current_order:
-                raise ValueError('订单不存在')
-            if current_order['deleted_at']:
-                raise ValueError('订单已在回收站中')
-            if current_order['status'] == 'completed':
-                raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
-
-            if 'status' in data and data['status'] != current_order['status']:
-                allowed = OrderService.VALID_TRANSITIONS.get(current_order['status'], [])
-                if data['status'] not in allowed:
-                    raise ValueError(f"不允许从「{current_order['status']}」切换到「{data['status']}」")
-
-            route_changed, process_ids_changed = OrderProcessSyncService.prepare_update(
-                txn,
-                oid,
-                current_order['route_id'],
-                data,
+            return OrderService._update_order_transaction(
+                oid, data, user_id, user_name, txn
             )
-            structure_changed = route_changed or process_ids_changed
-            quantity_changed = (
-                'quantity' in data
-                and data['quantity'] != current_order['quantity']
-            )
-
-            # TOCTOU-safe remark history: re-read inside transaction
-            if remark_changed and user_id:
-                current_remark = OrderRepository.find_order_remark(oid, db=txn)
-                if current_remark and data['remark'] != (current_remark['remark'] or ''):
-                    OrderService.log_remark_history(
-                        oid,
-                        current_remark['remark'] or '',
-                        data['remark'],
-                        user_id,
-                        user_name or '',
-                        db=txn
-                    )
-
-            OrderRepository.update_form_fields(oid, data, db=txn)
-            updated_order = OrderRepository.find_by_id(oid, db=txn)
-            actual_order_no = updated_order['order_no']
-
-            if process_ids_changed:
-                OrderProcessSyncService.sync_processes(txn, oid, data["process_ids"])
-            elif route_changed:
-                if data['route_id']:
-                    OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
-                else:
-                    OrderProcessSyncService.clear_processes(txn, oid)
-
-            if structure_changed or quantity_changed or 'process_ids' in data:
-                OrderCompletionService.reconcile(
-                    oid,
-                    trigger='order_structure_updated',
-                    actor_id=user_id,
-                    db=txn,
-                )
-
-        return actual_order_no
 
     # ============================================================
     # 删除（级联清理子表）
@@ -386,8 +376,7 @@ class OrderService:
         deleted = existing['deleted_at'] if existing else None
         if deleted:
             raise ValueError('订单已在回收站中')
-        if existing['status'] == 'completed':
-            raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
+        OrderLifecycle.validate_editable(existing)
 
         with BaseService.transaction() as txn:
             OrderRepository.mark_deleted(oid, deleted_by=deleted_by, db=txn)
@@ -473,20 +462,10 @@ class OrderService:
     @staticmethod
     def reopen_order(oid, reason, status='producing'):
         """重新打开已完成归档订单。"""
-        reason = (reason or '').strip()
-        if not reason:
-            raise ValueError('请填写重新打开原因')
-        status = (status or 'producing').strip().lower()
-        if status not in OrderService.REOPEN_STATUSES:
-            raise ValueError('重新打开后的状态只能是 pending 或 producing')
-
         existing = OrderRepository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
-        if existing['deleted_at']:
-            raise ValueError('订单已在回收站中')
-        if existing['status'] != 'completed':
-            raise ValueError('只有已完成订单可以重新打开')
+        reason, status = OrderLifecycle.normalize_reopen(existing, reason, status)
 
         with BaseService.transaction() as txn:
             OrderRepository.reopen_completed(oid, status, db=txn)
