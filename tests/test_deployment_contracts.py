@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from modules.runtime_version import get_application_version
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,3 +101,36 @@ def test_root_node_manifest_is_the_only_frontend_dependency_authority():
     vite_config = (PROJECT_ROOT / "vite.config.js").read_text(encoding="utf-8")
     assert "root: frontendRoot" in vite_config
     assert "outDir: staticOutputDir" in vite_config
+
+
+def test_package_manifest_is_the_application_version_authority():
+    manifest = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
+    lockfile = json.loads((PROJECT_ROOT / "package-lock.json").read_text(encoding="utf-8"))
+    app_module = (PROJECT_ROOT / "modules" / "app.py").read_text(encoding="utf-8")
+    system_routes = (
+        PROJECT_ROOT / "modules" / "routes" / "system.py"
+    ).read_text(encoding="utf-8")
+    vite_config = (PROJECT_ROOT / "vite.config.js").read_text(encoding="utf-8")
+    frontend_index = (
+        PROJECT_ROOT / "frontend" / "index.html"
+    ).read_text(encoding="utf-8")
+    login_page = (
+        PROJECT_ROOT / "frontend" / "src" / "views" / "LoginPage.vue"
+    ).read_text(encoding="utf-8")
+    legacy_index = (PROJECT_ROOT / "public" / "index.html").read_text(encoding="utf-8")
+    service_worker = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
+
+    assert get_application_version() == manifest["version"]
+    assert lockfile["version"] == manifest["version"]
+    assert lockfile["packages"][""]["version"] == manifest["version"]
+    assert "get_application_version" in app_module
+    assert "get_application_version" in system_routes
+    assert "'version': '2.0'" not in app_module
+    assert "'version': '2.0'" not in system_routes
+    assert "package.json" in vite_config
+    assert "__APP_VERSION__" in vite_config
+    assert "%APP_VERSION%" in frontend_index
+    assert "__APP_VERSION__" in login_page
+    assert "生产管理系统 v3" not in legacy_index
+    assert manifest["version"] not in service_worker
+    assert "CACHE_REVISION" in service_worker

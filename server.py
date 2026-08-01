@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-扫码报工生产管理系统 V2 — 入口文件
+扫码报工生产管理系统 — 入口文件
 Flask + SQLite，内网部署。路由通过模块化装饰器注册。
 """
 import sys, os
@@ -11,6 +11,7 @@ from flask import render_template, make_response, g
 from modules.app import app
 from modules.config import PUBLIC_DIR
 from modules.db import close_db
+from modules.runtime_version import get_application_version
 
 # 注册 teardown 回调
 app.teardown_appcontext(close_db)
@@ -61,7 +62,7 @@ def static_files(filename):
 if __name__ == '__main__':
     from modules.db import init_db
     init_db()
-    print('=== 扫码报工生产管理系统 V2 ===')
+    print(f'=== 扫码报工生产管理系统 v{get_application_version()} ===')
     import ssl
     ssl_cert = os.environ.get("SSL_CERT_FILE", "server.crt")
     ssl_key = os.environ.get("SSL_KEY_FILE", "server.key")

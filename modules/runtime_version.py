@@ -1,9 +1,22 @@
 """Runtime deployment version exposed by health endpoints."""
 
+import json
 from pathlib import Path
 
 
-DEPLOYED_COMMIT_FILE = Path(__file__).resolve().parents[1] / ".deployed_commit"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_MANIFEST_FILE = PROJECT_ROOT / "package.json"
+DEPLOYED_COMMIT_FILE = PROJECT_ROOT / ".deployed_commit"
+
+
+def get_application_version():
+    """Return the application version from the authoritative package manifest."""
+    try:
+        manifest = json.loads(PACKAGE_MANIFEST_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "unknown"
+    version = str(manifest.get("version") or "").strip()
+    return version or "unknown"
 
 
 def get_deployed_commit():

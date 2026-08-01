@@ -7,7 +7,7 @@ from flasgger import Swagger
 import os
 from dotenv import load_dotenv
 from modules.config import DB_PATH
-from modules.runtime_version import get_deployed_commit
+from modules.runtime_version import get_application_version, get_deployed_commit
 
 # Load .env file (production secrets)
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
@@ -20,6 +20,7 @@ PUBLIC_DIR = os.environ.get('PUBLIC_DIR') or os.path.join(_base, 'public')
 app = Flask(__name__, static_folder=PUBLIC_DIR, template_folder=PUBLIC_DIR)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config["START_TIME"] = 1780931489.9495177  # for uptime tracking
+app.config["APP_VERSION"] = get_application_version()
 app.jinja_env.variable_start_string = '{$'
 app.jinja_env.variable_end_string = '$}'
 _secret = os.environ.get('SECRET_KEY')
@@ -50,7 +51,7 @@ swagger_template = {
     'info': {
         'title': 'QR System API',
         'description': '扫码报工生产管理系统 - 全部接口文档',
-        'version': '2.0.0',
+        'version': app.config["APP_VERSION"],
     },
     'host': None,  # 动态取 Host header，兼容换 IP
     'schemes': ['https'],
@@ -109,7 +110,7 @@ def health_check():
     from modules.db import get_db
     status = {
         'status': 'ok',
-        'version': '2.0',
+        'version': app.config["APP_VERSION"],
         'commit': get_deployed_commit(),
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }

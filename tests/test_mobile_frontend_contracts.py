@@ -92,15 +92,23 @@ def _asset_version(content, script_name):
 
 def test_mobile_quality_evaluation_assets_are_cache_busted_and_network_first():
     mobile_html = (PROJECT_ROOT / "public" / "mobile.html").read_text(encoding="utf-8")
+    inspection_html = (
+        PROJECT_ROOT / "public" / "mobile_inspection.html"
+    ).read_text(encoding="utf-8")
     sw_content = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
     assert _asset_version(mobile_html, "mobile.css") >= 18
-    assert _asset_version(mobile_html, "mobile-utils.js") >= 27
-    assert _asset_version(mobile_html, "mobile-order.js") >= 42
-    assert _asset_version(mobile_html, "mobile-init.js") >= 31
+    assert _asset_version(mobile_html, "mobile-api.js") >= 8
+    assert _asset_version(mobile_html, "mobile-utils.js") >= 31
+    assert _asset_version(mobile_html, "mobile-auth.js") >= 30
+    assert _asset_version(mobile_html, "mobile-order.js") >= 43
+    assert _asset_version(mobile_html, "mobile-init.js") >= 35
     assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 7
-    cache_match = re.search(r'CACHE_NAME = "qr-system-v3\.(\d+)"', sw_content)
-    assert cache_match and int(cache_match.group(1)) >= 16
+    assert _asset_version(inspection_html, "mobile-api.js") >= 4
+    assert _asset_version(inspection_html, "inspection.js") >= 8
+    cache_match = re.search(r'CACHE_REVISION = "(\d{8}\.\d+)"', sw_content)
+    assert cache_match
+    assert 'CACHE_NAME = "qr-system-cache-" + CACHE_REVISION' in sw_content
     assert 'url.pathname.startsWith("/js/mobile/")' in sw_content
     assert "Mobile business JS: network-first" in sw_content
 

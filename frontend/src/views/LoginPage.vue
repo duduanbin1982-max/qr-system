@@ -54,7 +54,7 @@
       </div>
       </template>
       <div class="login-footer">
-        <span>v2.0 · Hanyun</span>
+        <span>v{{ appVersion }} · Hanyun</span>
       </div>
     </div>
   </div>
@@ -69,6 +69,7 @@ import { getLandingPage } from '@/lib/permissions.js'
 
 export default {
   setup(props, { emit }) {
+    const appVersion = __APP_VERSION__
     const username = ref('')
     const password = ref('')
     const newPassword = ref('')
@@ -120,7 +121,7 @@ export default {
       }
     }
     
-    return { username, password, newPassword, confirmPassword, error, loading, showChangePassword, handleSubmit, handleChangePassword }
+    return { appVersion, username, password, newPassword, confirmPassword, error, loading, showChangePassword, handleSubmit, handleChangePassword }
   }
 }
 </script>

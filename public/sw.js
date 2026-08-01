@@ -1,5 +1,6 @@
-// Service Worker - QR System PWA v3
-const CACHE_NAME = "qr-system-v3.16";
+// Service Worker cache revision is independent from the application version.
+const CACHE_REVISION = "20260801.1";
+const CACHE_NAME = "qr-system-cache-" + CACHE_REVISION;
 // Pre-cache only immutable/large assets (NOT HTML)
 const ASSETS = [
   "/offline.html",

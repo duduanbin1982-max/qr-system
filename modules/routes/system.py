@@ -5,7 +5,7 @@ from flask import request, jsonify, send_file
 from modules.route_decorators import app, check_auth, check_permission, safe_audit_log
 from modules.config import DATA_DIR, DB_PATH
 from modules.services.system_service import SystemService
-from modules.runtime_version import get_deployed_commit
+from modules.runtime_version import get_application_version, get_deployed_commit
 
 
 @app.route('/api/system/health', methods=['GET'])
@@ -35,7 +35,7 @@ def system_health():
         'status': 'ok' if db_ok else 'degraded',
         'db': 'connected' if db_ok else 'disconnected',
         'db_size_mb': db_size,
-        'version': '2.0',
+        'version': get_application_version(),
         'commit': get_deployed_commit(),
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'uptime_seconds': round(time.time() - app.config.get('START_TIME', time.time()), 0),
@@ -67,7 +67,11 @@ def create_backup():
                     fpath = os.path.join(root, fname)
                     arcname = os.path.join('attachments', os.path.relpath(fpath, attach_dir))
                     zf.write(fpath, arcname)
-        zf.writestr('backup_info.txt', f'Backup created: {timestamp}\nSystem: QR Production System v2.0\n')
+        zf.writestr(
+            'backup_info.txt',
+            f'Backup created: {timestamp}\n'
+            f'System: QR Production System v{get_application_version()}\n',
+        )
 
     buf.seek(0)
     safe_audit_log('system_backup', detail=f'backup_{timestamp}.zip')
