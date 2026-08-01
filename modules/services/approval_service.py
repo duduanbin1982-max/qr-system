@@ -1,6 +1,11 @@
 """Approval workflow orchestration service."""
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.approval_workflow import (
+    DEFAULT_APPROVER_ROLE,
+    ROLE_ALIASES,
+    ApprovalWorkflow,
+)
 from modules.repositories.auth_repository import AuthRepository
 from modules.repositories.approval_repository import ApprovalRepository
 from modules.repositories.process_repository import ProcessRepository
@@ -14,18 +19,12 @@ from modules.services.serial_backfill_service import SerialBackfillService
 class ApprovalService:
     """Coordinate approval records and their work-report effects."""
 
-    ROLE_ALIASES = {
-        'supervisor': 'production_manager',
-        'quality': 'qc_inspector',
-    }
-    DEFAULT_APPROVER_ROLE = 'admin'
+    ROLE_ALIASES = ROLE_ALIASES
+    DEFAULT_APPROVER_ROLE = DEFAULT_APPROVER_ROLE
 
     @staticmethod
     def _normalize_role_code(role_code):
-        code = (role_code or '').strip().lower()
-        if not code:
-            return ''
-        return ApprovalService.ROLE_ALIASES.get(code, code)
+        return ApprovalWorkflow.normalize_role_code(role_code)
 
     @staticmethod
     def _role_name_map(db=None):
@@ -58,26 +57,122 @@ class ApprovalService:
 
     @staticmethod
     def _approval_roles_from_config(cfg_row):
-        if not cfg_row or not cfg_row.get('require_approval', 1):
-            return [ApprovalService.DEFAULT_APPROVER_ROLE]
-        try:
-            approval_level = int(cfg_row.get('approval_level') or 1)
-        except (TypeError, ValueError):
-            raise ValidationError('审批级别必须为 1 到 3 级')
-        if approval_level < 1 or approval_level > 3:
-            raise ValidationError('审批级别必须为 1 到 3 级')
-        base_roles = [
-            ApprovalService._normalize_role_code(cfg_row.get('approver_role') or ApprovalService.DEFAULT_APPROVER_ROLE),
-            ApprovalService._normalize_role_code(cfg_row.get('approver_role_2')),
-            ApprovalService._normalize_role_code(cfg_row.get('approver_role_3')),
-        ]
-        effective_roles = []
-        last_role = ApprovalService.DEFAULT_APPROVER_ROLE
-        for idx in range(approval_level):
-            role = base_roles[idx] or last_role or ApprovalService.DEFAULT_APPROVER_ROLE
-            effective_roles.append(role)
-            last_role = role
-        return effective_roles
+        return ApprovalWorkflow.approval_roles_from_config(cfg_row)
+
+    @staticmethod
+    def _load_pending_context(record_id, txn):
+        record = ApprovalRepository.find_by_id(record_id, db=txn)
+        if not record:
+            raise NotFoundError('审批记录不存在')
+        record = dict(record)
+        work_record = ApprovalRepository.find_work_record(record['work_record_id'], db=txn)
+        if not work_record:
+            raise NotFoundError('关联的报工记录不存在')
+        work_record = dict(work_record)
+        ApprovalWorkflow.validate_pending(record['status'], work_record['status'])
+        return record, work_record
+
+    @staticmethod
+    def _assert_backfill_permission(work_record, approver):
+        if (
+            work_record.get('report_source') == 'serial_backfill'
+            and not has_permission(approver, SerialBackfillService.APPROVE_PERMISSION)
+        ):
+            raise ConflictError('您没有序列号补报审批权限')
+
+    @staticmethod
+    def _validate_final_quantity(work_record, txn):
+        order = ApprovalRepository.find_order(work_record['order_id'], db=txn)
+        if not order or order['deleted_at'] is not None:
+            raise NotFoundError('关联订单不存在或已删除')
+        order_process = ApprovalRepository.find_order_process(
+            work_record['order_id'], work_record['process_id'], db=txn
+        )
+        if not order_process:
+            raise NotFoundError('关联订单工序不存在')
+        ApprovalWorkflow.validate_quantity(
+            order_process['completed'],
+            work_record['quantity'],
+            order['quantity'],
+        )
+
+    @staticmethod
+    def _require_updated(updated, message):
+        if updated != 1:
+            raise ConflictError(message)
+
+    @staticmethod
+    def _insert_step(record_id, decision, approver_id, approver_name, comment, txn):
+        ApprovalRepository.insert_approval_step(
+            record_id,
+            decision.current_level,
+            approver_id,
+            approver_name,
+            decision.current_role,
+            decision.step_action,
+            comment,
+            db=txn,
+        )
+
+    @staticmethod
+    def _apply_final_approval(record_id, record, work_record, decision, approver, comment, txn):
+        ApprovalService._validate_final_quantity(work_record, txn)
+        ApprovalService._require_updated(
+            ApprovalRepository.approve(
+                record_id, approver['id'], approver['name'], comment, db=txn
+            ),
+            '审批记录状态已变化，请刷新后重试',
+        )
+        ApprovalService._require_updated(
+            ApprovalRepository.update_work_record_status(
+                record['work_record_id'], 'approved', db=txn
+            ),
+            '报工记录状态已变化，请刷新后重试',
+        )
+        ApprovalService._insert_step(
+            record_id, decision, approver['id'], approver['name'], comment, txn
+        )
+        WorkReportWriter.apply_approved_normal_report(
+            WorkReportCommand.from_approved_record(work_record),
+            txn,
+            record['work_record_id'],
+        )
+
+    @staticmethod
+    def _advance_approval(record_id, decision, approver, comment, txn):
+        ApprovalService._require_updated(
+            ApprovalRepository.advance_level(
+                record_id,
+                approver['id'],
+                approver['name'],
+                comment,
+                decision.next_level,
+                decision.current_level,
+                db=txn,
+            ),
+            '审批记录状态已变化，请刷新后重试',
+        )
+        ApprovalService._insert_step(
+            record_id, decision, approver['id'], approver['name'], comment, txn
+        )
+
+    @staticmethod
+    def _reject_approval(record_id, record, decision, approver, comment, txn):
+        ApprovalService._require_updated(
+            ApprovalRepository.reject(
+                record_id, approver['id'], approver['name'], comment, db=txn
+            ),
+            '审批记录状态已变化，请刷新后重试',
+        )
+        ApprovalService._require_updated(
+            ApprovalRepository.update_work_record_status(
+                record['work_record_id'], 'rejected', db=txn
+            ),
+            '报工记录状态已变化，请刷新后重试',
+        )
+        ApprovalService._insert_step(
+            record_id, decision, approver['id'], approver['name'], comment, txn
+        )
 
     @staticmethod
     def _current_user_role(approver, db=None):
@@ -125,110 +220,31 @@ class ApprovalService:
         Raises:
             DomainError: when the action or approval state is invalid
         """
-        if action not in ('approve', 'reject'):
-            raise ValidationError('审批操作必须是通过或驳回')
-
-        approver_id = approver['id']
-        approver_name = approver['name']
-
         with BaseService.transaction() as txn:
-            record = ApprovalRepository.find_by_id(record_id, db=txn)
-            if not record:
-                raise NotFoundError('审批记录不存在')
-            record = dict(record)
-            if record['status'] != 'pending':
-                raise ConflictError('审批记录已处理，请勿重复操作')
-
-            wr = ApprovalRepository.find_work_record(record['work_record_id'], db=txn)
-            if not wr:
-                raise NotFoundError('关联的报工记录不存在')
-            wr = dict(wr)
-            if wr['status'] == 'approved':
-                raise ConflictError('报工记录已审批，请勿重复操作')
-            if (
-                wr.get('report_source') == 'serial_backfill'
-                and not has_permission(approver, SerialBackfillService.APPROVE_PERMISSION)
-            ):
-                raise ConflictError('您没有序列号补报审批权限')
-
-            cfg_row = ApprovalRepository.find_approval_config(wr.get('process_id'), db=txn)
-            cfg = dict(cfg_row) if cfg_row else None
-            approval_roles = ApprovalService._approval_roles_from_config(cfg)
-            current_level = int(record.get('current_level', 1) or 1)
-            if current_level < 1 or current_level > len(approval_roles):
-                raise ValidationError('审批级别配置无效')
+            record, work_record = ApprovalService._load_pending_context(record_id, txn)
+            ApprovalService._assert_backfill_permission(work_record, approver)
+            cfg_row = ApprovalRepository.find_approval_config(
+                work_record.get('process_id'), db=txn
+            )
             current_role = ApprovalService._current_user_role(approver, db=txn)
-            required_role = approval_roles[current_level - 1]
-            if current_role != required_role:
-                role_map = ApprovalService._role_name_map(db=txn)
-                raise ConflictError(
-                    f'当前审批步骤需要“{role_map.get(required_role, required_role)}”角色处理'
+            decision = ApprovalWorkflow.decide(
+                action,
+                dict(cfg_row) if cfg_row else None,
+                record.get('current_level', 1),
+                current_role,
+                ApprovalService._role_name_map(db=txn),
+            )
+            if decision.is_final:
+                ApprovalService._apply_final_approval(
+                    record_id, record, work_record, decision, approver, comment, txn
                 )
-
-            if action == 'approve':
-                order = ApprovalRepository.find_order(wr['order_id'], db=txn)
-                if not order or order['deleted_at'] is not None:
-                    raise NotFoundError('关联订单不存在或已删除')
-                order = dict(order)
-                order_process = ApprovalRepository.find_order_process(
-                    wr['order_id'], wr['process_id'], db=txn
+            elif action == 'approve':
+                ApprovalService._advance_approval(
+                    record_id, decision, approver, comment, txn
                 )
-                if not order_process:
-                    raise NotFoundError('关联订单工序不存在')
-                process_completed = order_process['completed'] or 0
-                if process_completed + wr['quantity'] > order['quantity']:
-                    raise ConflictError(
-                        f'审批后工序完成数量({process_completed}+{wr["quantity"]})'
-                        f'将超过订单数量({order["quantity"]})'
-                    )
-
-                if current_level >= len(approval_roles):
-                    updated = ApprovalRepository.approve(
-                        record_id, approver_id, approver_name, comment, db=txn
-                    )
-                    if updated != 1:
-                        raise ConflictError('审批记录状态已变化，请刷新后重试')
-                    updated_work = ApprovalRepository.update_work_record_status(
-                        record['work_record_id'], 'approved', db=txn
-                    )
-                    if updated_work != 1:
-                        raise ConflictError('报工记录状态已变化，请刷新后重试')
-                    ApprovalRepository.insert_approval_step(
-                        record_id, current_level, approver_id, approver_name,
-                        current_role, 'approve', comment, db=txn,
-                    )
-                    command = WorkReportCommand.from_approved_record(wr)
-                    WorkReportWriter.apply_approved_normal_report(
-                        command,
-                        txn,
-                        record['work_record_id'],
-                    )
-                else:
-                    next_level = current_level + 1
-                    updated = ApprovalRepository.advance_level(
-                        record_id, approver_id, approver_name, comment,
-                        next_level, current_level, db=txn,
-                    )
-                    if updated != 1:
-                        raise ConflictError('审批记录状态已变化，请刷新后重试')
-                    ApprovalRepository.insert_approval_step(
-                        record_id, current_level, approver_id, approver_name,
-                        current_role, 'advance', comment, db=txn,
-                    )
             else:
-                updated = ApprovalRepository.reject(
-                    record_id, approver_id, approver_name, comment, db=txn
-                )
-                if updated != 1:
-                    raise ConflictError('审批记录状态已变化，请刷新后重试')
-                updated_work = ApprovalRepository.update_work_record_status(
-                    record['work_record_id'], 'rejected', db=txn
-                )
-                if updated_work != 1:
-                    raise ConflictError('报工记录状态已变化，请刷新后重试')
-                ApprovalRepository.insert_approval_step(
-                    record_id, current_level, approver_id, approver_name,
-                    current_role, 'reject', comment, db=txn,
+                ApprovalService._reject_approval(
+                    record_id, record, decision, approver, comment, txn
                 )
 
         return action
