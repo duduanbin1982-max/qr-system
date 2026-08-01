@@ -18,6 +18,8 @@ os.environ["DB_PATH"] = TEST_DB
 
 UNIT_TEST_FILES = {
     "test_approval_workflow_policy.py",
+    "test_process_order_service.py",
+    "test_process_reporting_policy.py",
     "test_quality_evaluation_policy.py",
     "test_refactor_services.py",
     "test_scan_helper.py",
