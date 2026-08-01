@@ -282,6 +282,7 @@ class ApprovalService:
         Raises:
             DomainError: when the action or approval state is invalid
         """
+        ApprovalWorkflow.validate_action(action)
         with ApprovalService._unit_of_work().transaction() as txn:
             record, work_record = ApprovalService._load_pending_context(record_id, txn)
             ApprovalService._assert_backfill_permission(work_record, approver)

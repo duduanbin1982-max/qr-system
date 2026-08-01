@@ -64,10 +64,14 @@ class ApprovalWorkflow:
         if work_record_status == "approved":
             raise ConflictError("报工记录已审批，请勿重复操作")
 
-    @classmethod
-    def decide(cls, action, config, current_level, current_role, role_names=None):
+    @staticmethod
+    def validate_action(action):
         if action not in {"approve", "reject"}:
             raise ValidationError("审批操作必须是通过或驳回")
+
+    @classmethod
+    def decide(cls, action, config, current_level, current_role, role_names=None):
+        cls.validate_action(action)
         roles = cls.approval_roles_from_config(config)
         try:
             level = int(current_level or 1)
