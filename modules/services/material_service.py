@@ -1,6 +1,7 @@
 """Material and supplier application services."""
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.material_requirements import MaterialRequirementPolicy
 from modules.repositories.material_repository import MaterialRepository, SupplierRepository
 from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
 
@@ -326,6 +327,68 @@ class MaterialService:
         }
 
     @staticmethod
+    def _assert_consumption_not_recorded(material_rows, work_record_id, db):
+        if not material_rows or work_record_id is None:
+            return
+        existing = MaterialRepository.find_consumptions_by_work_record(
+            work_record_id, db=db
+        )
+        if existing:
+            raise ConflictError(
+                '该报工记录的物料已经扣减，请勿重复处理',
+                details={
+                    'work_record_id': work_record_id,
+                    'consumption_ids': [row['id'] for row in existing],
+                },
+            )
+
+    @staticmethod
+    def _apply_process_requirement(
+        requirement,
+        order_id,
+        process_id,
+        user_id,
+        user_name,
+        work_record_id,
+        db,
+    ):
+        transition = MaterialRepository.apply_quantity_delta(
+            requirement['material_id'],
+            -requirement['required_quantity'],
+            db=db,
+        )
+        if transition is None:
+            raise MaterialNotFoundError('物料不存在')
+        if transition['insufficient']:
+            raise ConflictError(
+                f"物料「{requirement['material_name']}」库存已发生变化，请重新提交"
+            )
+        consumption_id = MaterialRepository.insert_consumption(
+            requirement['material_id'],
+            order_id,
+            process_id,
+            requirement['required_quantity'],
+            user_id,
+            user_name,
+            'auto-deduct from order BOM',
+            source_work_record_id=work_record_id,
+            db=db,
+        )
+        MaterialRepository.insert_log(
+            requirement['material_id'],
+            'out',
+            requirement['required_quantity'],
+            'auto-deduct',
+            user_name,
+            operator_id=user_id,
+            balance_before=transition['balance_before'],
+            balance_after=transition['balance_after'],
+            source_type='auto_consumption',
+            source_id=consumption_id,
+            db=db,
+        )
+
+    @staticmethod
     def deduct_for_process(
         order_id,
         process_id,
@@ -339,83 +402,23 @@ class MaterialService:
         material_rows = MaterialConsumptionRepository.deduction_candidates(
             order_id, process_id, db=db
         )
-        if material_rows and work_record_id is not None:
-            existing = MaterialRepository.find_consumptions_by_work_record(
-                work_record_id,
-                db=db,
-            )
-            if existing:
-                raise ConflictError(
-                    '该报工记录的物料已经扣减，请勿重复处理',
-                    details={
-                        'work_record_id': work_record_id,
-                        'consumption_ids': [row['id'] for row in existing],
-                    },
-                )
-        requirements = []
-        shortages = []
-        for material in material_rows:
-            deduct_quantity = float(quantity) * float(material['quantity_per_unit'] or 0)
-            material_name = material['material_name'] or f"物料#{material['material_id']}"
-            unit = material['unit'] or ''
-            if deduct_quantity <= 0:
-                raise ValidationError(f'物料「{material_name}」的工序用量必须大于 0')
-            stock_quantity = float(material['stock_qty'] or 0)
-            requirement = {
-                'material_id': material['material_id'],
-                'material_name': material_name,
-                'unit': unit,
-                'required_quantity': deduct_quantity,
-                'available_quantity': stock_quantity,
-            }
-            requirements.append(requirement)
-            if stock_quantity < deduct_quantity:
-                shortages.append(requirement)
-
-        if shortages:
-            shortage_text = '；'.join(
-                f"{item['material_name']}需{item['required_quantity']:g}{item['unit']}，"
-                f"现有{item['available_quantity']:g}{item['unit']}"
-                for item in shortages
-            )
-            raise ConflictError(
-                f'物料库存不足，报工未提交：{shortage_text}',
-                details={'shortages': shortages},
-            )
+        MaterialService._assert_consumption_not_recorded(
+            material_rows, work_record_id, db
+        )
+        requirements, shortages = MaterialRequirementPolicy.calculate(
+            material_rows, quantity
+        )
+        MaterialRequirementPolicy.assert_sufficient(shortages)
 
         for requirement in requirements:
-            transition = MaterialRepository.apply_quantity_delta(
-                requirement['material_id'],
-                -requirement['required_quantity'],
-                db=db,
-            )
-            if transition is None:
-                raise MaterialNotFoundError('物料不存在')
-            if transition['insufficient']:
-                raise ConflictError(f"物料「{requirement['material_name']}」库存已发生变化，请重新提交")
-            consumption_id = MaterialRepository.insert_consumption(
-                requirement['material_id'],
+            MaterialService._apply_process_requirement(
+                requirement,
                 order_id,
                 process_id,
-                requirement['required_quantity'],
                 user_id,
                 user_name,
-                'auto-deduct from order BOM',
-                source_work_record_id=work_record_id,
-                db=db,
-            )
-            MaterialRepository.insert_log(
-                requirement['material_id'],
-                'out',
-                requirement['required_quantity'],
-                'auto-deduct',
-                user_name,
-                operator_id=user_id,
-                balance_before=transition['balance_before'],
-                balance_after=transition['balance_after'],
-                source_type='auto_consumption',
-                source_id=consumption_id,
-                db=db,
+                work_record_id,
+                db,
             )
         return []
 
