@@ -339,5 +339,16 @@
       "suggestion": 1
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed worktree over HEAD 41c1af7; rework routes, service, repository, Vue page/API/composable, scan writer and validation, quality trigger, production data snapshot, and focused tests"
+  },
+  {
+    "date": "2026-08-01T23:59:30+08:00",
+    "mode": "Architecture Audit",
+    "score": 78,
+    "findings": {
+      "critical": 0,
+      "warning": 4,
+      "suggestion": 2
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 008f326; full architecture scan of 587 tracked files, 312 Python files, 169 frontend modules, mobile H5, deployment/operations, change history, and architecture/test seams"
   }
 ]
