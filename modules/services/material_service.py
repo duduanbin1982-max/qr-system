@@ -14,6 +14,22 @@ class MaterialNotFoundError(NotFoundError):
 class MaterialService:
     """Material management business operations."""
 
+    repository = None
+    consumption_repository = None
+    unit_of_work = None
+
+    @classmethod
+    def _repository(cls):
+        return cls.repository or MaterialRepository
+
+    @classmethod
+    def _consumption_repository(cls):
+        return cls.consumption_repository or MaterialConsumptionRepository
+
+    @classmethod
+    def _unit_of_work(cls):
+        return cls.unit_of_work or BaseService
+
     @staticmethod
     def _actor(user):
         user = user or {}
@@ -25,15 +41,16 @@ class MaterialService:
     @staticmethod
     def list_materials(page=1, limit=100, keyword='', material_type=''):
         """Return a filtered material page with global inventory metrics."""
-        total = MaterialRepository.count_filtered(keyword, material_type)
+        repository = MaterialService._repository()
+        total = repository.count_filtered(keyword, material_type)
         offset = (page - 1) * limit
-        rows = MaterialRepository.find_all_with_supplier_paginated(
+        rows = repository.find_all_with_supplier_paginated(
             limit,
             offset,
             keyword=keyword,
             material_type=material_type,
         )
-        value_rows = MaterialRepository.find_inventory_values()
+        value_rows = repository.find_inventory_values()
         total_value = sum(float(row['inventory_value'] or 0) for row in value_rows)
         cumulative = 0
         abc_ranks = {}
@@ -52,8 +69,8 @@ class MaterialService:
             'total': total,
             'page': page,
             'limit': limit,
-            'summary': MaterialRepository.inventory_summary(),
-            'material_types': MaterialRepository.list_material_types(),
+            'summary': repository.inventory_summary(),
+            'material_types': repository.list_material_types(),
         }
 
     @staticmethod
@@ -64,7 +81,8 @@ class MaterialService:
             raise ValidationError('物料名称不能为空')
         spec = (data.get('spec') or '').strip()
         mt = (data.get('material_type') or '').strip()
-        existing = MaterialRepository.check_duplicate(name, spec, mt)
+        repository = MaterialService._repository()
+        existing = repository.check_duplicate(name, spec, mt)
         if existing:
             info = name
             if spec:
@@ -86,11 +104,11 @@ class MaterialService:
             data.get('remark', '').strip(),
             mt
         )
-        with BaseService.transaction() as txn:
-            material_id = MaterialRepository.insert(data_tuple, db=txn)
+        with MaterialService._unit_of_work().transaction() as txn:
+            material_id = repository.insert(data_tuple, db=txn)
             if opening_quantity > 0:
                 operator_id, operator_name = MaterialService._actor(user)
-                MaterialRepository.insert_log(
+                repository.insert_log(
                     material_id,
                     'in',
                     opening_quantity,
@@ -108,7 +126,8 @@ class MaterialService:
     @staticmethod
     def update_material(mid, data):
         """Update a material after validating identity and uniqueness."""
-        row = MaterialRepository.find_by_id(mid)
+        repository = MaterialService._repository()
+        row = repository.find_by_id(mid)
         if not row:
             raise MaterialNotFoundError('物料不存在')
         if 'quantity' in data:
@@ -119,7 +138,7 @@ class MaterialService:
             name = str(data['name']).strip()
             spec = str(data.get('spec', '')).strip()
             mt = str(data.get('material_type', '')).strip()
-            dup = MaterialRepository.check_duplicate(name, spec, mt, exclude_id=mid)
+            dup = repository.check_duplicate(name, spec, mt, exclude_id=mid)
             if dup:
                 info = name
                 if spec:
@@ -146,15 +165,16 @@ class MaterialService:
             raise ValidationError('没有可更新的字段')
 
         set_clauses.append("updated_at = datetime('now','localtime')")
-        with BaseService.transaction() as txn:
-            MaterialRepository.update(mid, set_clauses, params, db=txn)
+        with MaterialService._unit_of_work().transaction() as txn:
+            repository.update(mid, set_clauses, params, db=txn)
 
     @staticmethod
     def check_impact(mid):
-        mat = MaterialRepository.find_by_id(mid)
+        repository = MaterialService._repository()
+        mat = repository.find_by_id(mid)
         if not mat:
             raise MaterialNotFoundError('物料不存在')
-        references = MaterialRepository.reference_counts(mid)
+        references = repository.reference_counts(mid)
         return {
             "material_id": mid,
             "name": mat["name"],
@@ -165,26 +185,28 @@ class MaterialService:
     @staticmethod
     def delete_material(mid):
         """Delete a material only when no business records reference it."""
-        with BaseService.transaction() as txn:
-            mat = MaterialRepository.find_by_id(mid, db=txn)
+        repository = MaterialService._repository()
+        with MaterialService._unit_of_work().transaction() as txn:
+            mat = repository.find_by_id(mid, db=txn)
             if not mat:
                 raise MaterialNotFoundError('物料不存在')
-            references = MaterialRepository.reference_counts(mid, db=txn)
+            references = repository.reference_counts(mid, db=txn)
             refs = sum(references.values())
             if refs > 0:
                 raise ConflictError(
                     f'物料「{mat["name"]}」已有 {refs} 条关联记录，无法删除',
                     details={'references': references},
                 )
-            MaterialRepository.delete_logs_by_material(mid, db=txn)
-            MaterialRepository.delete(mid, db=txn)
+            repository.delete_logs_by_material(mid, db=txn)
+            repository.delete(mid, db=txn)
 
     @staticmethod
     def get_logs(mid, page=1, limit=100):
         """Return paginated material inventory movements."""
-        total = MaterialRepository.count_logs_by_material(mid)
+        repository = MaterialService._repository()
+        total = repository.count_logs_by_material(mid)
         offset = (page - 1) * limit
-        rows = MaterialRepository.find_logs_by_material_paginated(mid, limit, offset)
+        rows = repository.find_logs_by_material_paginated(mid, limit, offset)
         logs = []
         for row in rows:
             item = dict(row)
@@ -210,14 +232,15 @@ class MaterialService:
         if quantity <= 0:
             raise ValidationError('数量必须大于 0')
 
-        with BaseService.transaction() as txn:
+        repository = MaterialService._repository()
+        with MaterialService._unit_of_work().transaction() as txn:
             delta = quantity if change_type == 'in' else -quantity
-            transition = MaterialRepository.apply_quantity_delta(mid, delta, db=txn)
+            transition = repository.apply_quantity_delta(mid, delta, db=txn)
             if transition is None:
                 raise MaterialNotFoundError('物料不存在')
             if transition['insufficient']:
                 raise ConflictError(f'库存不足，当前库存为 {transition["balance_before"]}')
-            MaterialRepository.insert_log(
+            repository.insert_log(
                 mid,
                 change_type,
                 quantity,
@@ -234,9 +257,10 @@ class MaterialService:
     @staticmethod
     def list_consumptions(mid, page=1, limit=100):
         """Return paginated material consumption records."""
-        total = MaterialRepository.count_consumptions_by_material(mid)
+        repository = MaterialService._repository()
+        total = repository.count_consumptions_by_material(mid)
         offset = (page - 1) * limit
-        rows = MaterialRepository.find_consumptions_by_material_paginated(mid, limit, offset)
+        rows = repository.find_consumptions_by_material_paginated(mid, limit, offset)
         consumptions = []
         for row in rows:
             item = dict(row)
@@ -254,17 +278,18 @@ class MaterialService:
         if quantity <= 0:
             raise ValidationError('数量必须大于 0')
 
-        with BaseService.transaction() as txn:
-            transition = MaterialRepository.apply_quantity_delta(mid, -quantity, db=txn)
+        repository = MaterialService._repository()
+        with MaterialService._unit_of_work().transaction() as txn:
+            transition = repository.apply_quantity_delta(mid, -quantity, db=txn)
             if transition is None:
                 raise MaterialNotFoundError('物料不存在')
             if transition['insufficient']:
                 raise ConflictError(f'库存不足，当前库存为 {transition["balance_before"]}')
-            consumption_id = MaterialRepository.insert_consumption(
+            consumption_id = repository.insert_consumption(
                 mid, order_id, process_id, quantity,
                 user_id, operator_name, notes, db=txn
             )
-            MaterialRepository.insert_log(
+            repository.insert_log(
                 mid,
                 'out',
                 quantity,
@@ -286,19 +311,20 @@ class MaterialService:
         if not reason:
             raise ValidationError('请填写撤销原因')
         operator_id, operator_name = MaterialService._actor(user)
-        with BaseService.transaction() as txn:
-            mc = MaterialRepository.find_consumption_by_id(cid, db=txn)
+        repository = MaterialService._repository()
+        with MaterialService._unit_of_work().transaction() as txn:
+            mc = repository.find_consumption_by_id(cid, db=txn)
             if not mc:
                 raise NotFoundError('物料消耗记录不存在')
             if (mc['status'] or 'active') != 'active':
                 raise ConflictError('该消耗记录已经撤销')
-            transition = MaterialRepository.apply_quantity_delta(
+            transition = repository.apply_quantity_delta(
                 mc['material_id'], mc['quantity'], db=txn
             )
-            original_log = MaterialRepository.find_log_for_source(
+            original_log = repository.find_log_for_source(
                 'consumption', cid, db=txn
             )
-            reversal_log_id = MaterialRepository.insert_log(
+            reversal_log_id = repository.insert_log(
                 mc['material_id'],
                 'reversal',
                 mc['quantity'],
@@ -312,7 +338,7 @@ class MaterialService:
                 reversal_of_log_id=original_log['id'] if original_log else None,
                 db=txn,
             )
-            if not MaterialRepository.mark_consumption_reversed(
+            if not repository.mark_consumption_reversed(
                 cid,
                 operator_id,
                 reason,
@@ -330,7 +356,7 @@ class MaterialService:
     def _assert_consumption_not_recorded(material_rows, work_record_id, db):
         if not material_rows or work_record_id is None:
             return
-        existing = MaterialRepository.find_consumptions_by_work_record(
+        existing = MaterialService._repository().find_consumptions_by_work_record(
             work_record_id, db=db
         )
         if existing:
@@ -352,7 +378,8 @@ class MaterialService:
         work_record_id,
         db,
     ):
-        transition = MaterialRepository.apply_quantity_delta(
+        repository = MaterialService._repository()
+        transition = repository.apply_quantity_delta(
             requirement['material_id'],
             -requirement['required_quantity'],
             db=db,
@@ -363,7 +390,7 @@ class MaterialService:
             raise ConflictError(
                 f"物料「{requirement['material_name']}」库存已发生变化，请重新提交"
             )
-        consumption_id = MaterialRepository.insert_consumption(
+        consumption_id = repository.insert_consumption(
             requirement['material_id'],
             order_id,
             process_id,
@@ -374,7 +401,7 @@ class MaterialService:
             source_work_record_id=work_record_id,
             db=db,
         )
-        MaterialRepository.insert_log(
+        repository.insert_log(
             requirement['material_id'],
             'out',
             requirement['required_quantity'],
@@ -399,7 +426,7 @@ class MaterialService:
         work_record_id=None,
     ):
         """Apply approved-report material deductions through the stock ledger."""
-        material_rows = MaterialConsumptionRepository.deduction_candidates(
+        material_rows = MaterialService._consumption_repository().deduction_candidates(
             order_id, process_id, db=db
         )
         MaterialService._assert_consumption_not_recorded(

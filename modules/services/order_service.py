@@ -32,8 +32,9 @@ _logger = logging.getLogger(__name__)
 # 订单号生成（模块级工具函数，含事务锁防竞态）
 # ============================================================
 
-def _order_no_prefix(today):
-    prefix_template = get_setting("auto_order_no", "").strip()
+def _order_no_prefix(today, setting_reader=None):
+    reader = setting_reader or get_setting
+    prefix_template = reader("auto_order_no", "").strip()
     if not prefix_template:
         return today.strftime('%y%m%d')
     return (prefix_template.replace("YYYY", today.strftime("%Y"))
@@ -42,8 +43,9 @@ def _order_no_prefix(today):
                            .replace("DD", today.strftime("%d")))
 
 
-def _next_order_sequence(prefix, db):
-    row = OrderRepository.find_latest_order_no_with_prefix(prefix, db=db)
+def _next_order_sequence(prefix, db, repository=None):
+    repository = repository or OrderRepository
+    row = repository.find_latest_order_no_with_prefix(prefix, db=db)
     if not row:
         return 1
     try:
@@ -52,19 +54,64 @@ def _next_order_sequence(prefix, db):
         return 1
 
 
-def _generate_order_no(db):
+def _generate_order_no(db, repository=None, setting_reader=None):
     """自动生成订单号：前缀 + 2位顺序号。调用方必须在外层管理事务。"""
-    prefix = _order_no_prefix(datetime.now())
-    seq = _next_order_sequence(prefix, db)
+    repository = repository or OrderRepository
+    prefix = _order_no_prefix(datetime.now(), setting_reader)
+    seq = _next_order_sequence(prefix, db, repository)
     for _ in range(100):
         order_no = prefix + str(seq).zfill(2)
-        if not OrderRepository.exists_by_order_no(order_no, db=db):
+        if not repository.exists_by_order_no(order_no, db=db):
             return order_no
         seq += 1
     raise RuntimeError(f'订单号生成失败：前缀{prefix}下所有序号已用尽')
 
 class OrderService:
     """订单管理业务逻辑。"""
+
+    repository = None
+    material_repository = None
+    material_snapshot_service = None
+    process_sync_service = None
+    completion_service = None
+    unit_of_work = None
+    setting_reader = None
+
+    @classmethod
+    def _repository(cls):
+        return cls.repository or OrderRepository
+
+    @classmethod
+    def _material_repository(cls):
+        return cls.material_repository or OrderMaterialRepository
+
+    @classmethod
+    def _material_snapshot_service(cls):
+        return cls.material_snapshot_service or OrderMaterialSnapshotService
+
+    @classmethod
+    def _process_sync_service(cls):
+        return cls.process_sync_service or OrderProcessSyncService
+
+    @classmethod
+    def _completion_service(cls):
+        return cls.completion_service or OrderCompletionService
+
+    @classmethod
+    def _unit_of_work(cls):
+        return cls.unit_of_work or BaseService
+
+    @classmethod
+    def _setting_reader(cls):
+        return vars(cls).get("setting_reader") or get_setting
+
+    @classmethod
+    def _generate_order_no(cls, db):
+        return _generate_order_no(
+            db,
+            repository=cls._repository(),
+            setting_reader=cls._setting_reader(),
+        )
 
     # ============================================================
     # 辅助 — 根据 route_id 或 process_ids 分配工序
@@ -73,14 +120,16 @@ class OrderService:
     @staticmethod
     def _assign_processes(db, order_id, route_id=None, process_ids=None):
         """Backward-compatible wrapper for order process assignment."""
-        OrderProcessSyncService.assign_processes(db, order_id, route_id, process_ids)
+        OrderService._process_sync_service().assign_processes(
+            db, order_id, route_id, process_ids
+        )
 
     @staticmethod
     def _resolve_customer_name(customer_id, customer):
         customer = (customer or '').strip()
         if customer or not customer_id:
             return customer
-        return OrderRepository.find_customer_name(customer_id) or customer
+        return OrderService._repository().find_customer_name(customer_id) or customer
 
     @staticmethod
     def _create_order_extra(data):
@@ -117,8 +166,9 @@ class OrderService:
     def list_orders(page=1, limit=DEFAULT_PAGE_SIZE, status='', keyword='', customer='',
                     data_scope_pids=None, archive='active'):
         """分页查询订单列表（含数据权限过滤）。"""
+        repository = OrderService._repository()
         size = min(max(limit, 1), MAX_PAGE_LIMIT)
-        rows, total, counts, archive = OrderRepository.list_filtered(
+        rows, total, counts, archive = repository.list_filtered(
             keyword=keyword,
             customer=customer,
             status=status,
@@ -128,7 +178,7 @@ class OrderService:
             limit=size,
         )
         all_procs = {}
-        for process in OrderRepository.list_processes_for_orders([row['id'] for row in rows]):
+        for process in repository.list_processes_for_orders([row['id'] for row in rows]):
             all_procs.setdefault(process['order_id'], []).append(dict(process))
 
         result = []
@@ -162,8 +212,8 @@ class OrderService:
     @staticmethod
     def next_order_no():
         """生成下一个可用订单号。"""
-        with BaseService.transaction() as txn:
-            return _generate_order_no(txn)
+        with OrderService._unit_of_work().transaction() as txn:
+            return OrderService._generate_order_no(txn)
 
     @staticmethod
     def record_qr_print(oid, data, user):
@@ -181,15 +231,16 @@ class OrderService:
         if label_count < 1 or label_count > 999999:
             raise ValidationError('打印标签数量无效')
 
-        with BaseService.transaction() as txn:
-            order = OrderRepository.find_by_id(oid, db=txn)
+        repository = OrderService._repository()
+        with OrderService._unit_of_work().transaction() as txn:
+            order = repository.find_by_id(oid, db=txn)
             if not order:
                 raise NotFoundError('订单不存在或已删除')
             existing_mode = (order['qr_mode'] or '').strip()
             if existing_mode and existing_mode != mode:
                 raise ConflictError('打印模式与订单已锁定的二维码模式不一致')
             user_name = user.get('name') or user.get('username') or ''
-            updated = OrderRepository.record_qr_print(
+            updated = repository.record_qr_print(
                 oid,
                 user.get('id'),
                 user_name,
@@ -197,7 +248,7 @@ class OrderService:
             )
             if updated != 1:
                 raise ConflictError('订单打印状态已变化，请刷新后重试')
-            status = OrderRepository.get_qr_print_status(oid, db=txn)
+            status = repository.get_qr_print_status(oid, db=txn)
 
         result = dict(status)
         result.update({
@@ -229,8 +280,8 @@ class OrderService:
         """
         order_no = data.get('order_no', '').strip()
         if not order_no:
-            db = BaseService.db()
-            order_no = _generate_order_no(db)
+            db = OrderService._unit_of_work().db()
+            order_no = OrderService._generate_order_no(db)
 
         route_id = data.get('route_id')
         customer_id = data.get('customer_id')
@@ -238,24 +289,26 @@ class OrderService:
         extra = OrderService._create_order_extra(data)
         process_ids = data.get('process_ids', [])
 
-        with BaseService.transaction() as txn:
+        repository = OrderService._repository()
+        with OrderService._unit_of_work().transaction() as txn:
             # 冲突检查 + 自动重试（最多5次）
             for _ in range(5):
-                existing = OrderRepository.exists_by_order_no(order_no, db=txn)
+                existing = repository.exists_by_order_no(order_no, db=txn)
                 if not existing:
                     break
-                order_no = _generate_order_no(txn)
+                order_no = OrderService._generate_order_no(txn)
             else:
                 raise ValueError('订单号冲突，请重试（已重试5次）')
 
             payload = OrderService._build_create_payload(
                 data, order_no, customer, customer_id, route_id, extra
             )
-            order_id = OrderRepository.insert_from_order_form(payload, db=txn)
+            order_id = repository.insert_from_order_form(payload, db=txn)
             OrderService._assign_processes(txn, order_id, route_id, process_ids)
 
-            product_id = OrderMaterialSnapshotService.resolve_product_id(data, txn)
-            OrderMaterialSnapshotService.copy_product_bom(order_id, product_id, txn)
+            snapshot_service = OrderService._material_snapshot_service()
+            product_id = snapshot_service.resolve_product_id(data, txn)
+            snapshot_service.copy_product_bom(order_id, product_id, txn)
 
         return order_id, order_no
 
@@ -273,7 +326,7 @@ class OrderService:
             return
         if (data.get('customer') or '').strip():
             return
-        customer_name = OrderRepository.find_customer_name(data['customer_id'])
+        customer_name = OrderService._repository().find_customer_name(data['customer_id'])
         if customer_name:
             data['customer'] = customer_name
 
@@ -281,7 +334,7 @@ class OrderService:
     def _record_update_remark(oid, data, user_id, user_name, txn):
         if 'remark' not in data or not user_id:
             return
-        current_remark = OrderRepository.find_order_remark(oid, db=txn)
+        current_remark = OrderService._repository().find_order_remark(oid, db=txn)
         if current_remark and data['remark'] != (current_remark['remark'] or ''):
             OrderService.log_remark_history(
                 oid,
@@ -294,22 +347,24 @@ class OrderService:
 
     @staticmethod
     def _sync_updated_processes(txn, oid, data, route_changed, process_ids_changed):
+        process_sync_service = OrderService._process_sync_service()
         if process_ids_changed:
-            OrderProcessSyncService.sync_processes(txn, oid, data['process_ids'])
+            process_sync_service.sync_processes(txn, oid, data['process_ids'])
         elif route_changed:
             if data['route_id']:
-                OrderProcessSyncService.sync_route(txn, oid, data['route_id'])
+                process_sync_service.sync_route(txn, oid, data['route_id'])
             else:
-                OrderProcessSyncService.clear_processes(txn, oid)
+                process_sync_service.clear_processes(txn, oid)
 
     @staticmethod
     def _update_order_transaction(oid, data, user_id, user_name, txn):
-        current_order = OrderRepository.find_by_id(oid, db=txn)
+        repository = OrderService._repository()
+        current_order = repository.find_by_id(oid, db=txn)
         if not current_order:
             raise ValueError('订单不存在')
         OrderLifecycle.validate_update(current_order, data)
 
-        route_changed, process_ids_changed = OrderProcessSyncService.prepare_update(
+        route_changed, process_ids_changed = OrderService._process_sync_service().prepare_update(
             txn, oid, current_order['route_id'], data
         )
         structure_changed = route_changed or process_ids_changed
@@ -317,13 +372,13 @@ class OrderService:
             'quantity' in data and data['quantity'] != current_order['quantity']
         )
         OrderService._record_update_remark(oid, data, user_id, user_name, txn)
-        OrderRepository.update_form_fields(oid, data, db=txn)
-        actual_order_no = OrderRepository.find_by_id(oid, db=txn)['order_no']
+        repository.update_form_fields(oid, data, db=txn)
+        actual_order_no = repository.find_by_id(oid, db=txn)['order_no']
         OrderService._sync_updated_processes(
             txn, oid, data, route_changed, process_ids_changed
         )
         if structure_changed or quantity_changed or 'process_ids' in data:
-            OrderCompletionService.reconcile(
+            OrderService._completion_service().reconcile(
                 oid,
                 trigger='order_structure_updated',
                 actor_id=user_id,
@@ -346,13 +401,13 @@ class OrderService:
             ValueError: 订单不存在 / 状态转换非法
             RuntimeError: 数据库错误
         """
-        existing = OrderRepository.find_status_by_id(oid)
+        existing = OrderService._repository().find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
         OrderLifecycle.validate_update(existing, data)
         OrderService._resolve_update_customer(data)
 
-        with BaseService.transaction() as txn:
+        with OrderService._unit_of_work().transaction() as txn:
             return OrderService._update_order_transaction(
                 oid, data, user_id, user_name, txn
             )
@@ -370,7 +425,8 @@ class OrderService:
             ValueError: 订单不存在
             RuntimeError: 数据库错误
         """
-        existing = OrderRepository.find_including_deleted(oid)
+        repository = OrderService._repository()
+        existing = repository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
         deleted = existing['deleted_at'] if existing else None
@@ -378,8 +434,8 @@ class OrderService:
             raise ValueError('订单已在回收站中')
         OrderLifecycle.validate_editable(existing)
 
-        with BaseService.transaction() as txn:
-            OrderRepository.mark_deleted(oid, deleted_by=deleted_by, db=txn)
+        with OrderService._unit_of_work().transaction() as txn:
+            repository.mark_deleted(oid, deleted_by=deleted_by, db=txn)
 
         return existing['order_no']
 
@@ -390,11 +446,12 @@ class OrderService:
     @staticmethod
     def get_work_records(oid):
         """获取订单关联的报工/返工/报废记录。"""
-        order = OrderRepository.find_by_id(oid)
+        repository = OrderService._repository()
+        order = repository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
 
-        grouped_records = OrderRepository.get_work_records(oid)
+        grouped_records = repository.get_work_records(oid)
         normal = grouped_records['work']
         scrap = grouped_records['scrap']
         rework = grouped_records['rework']
@@ -423,10 +480,11 @@ class OrderService:
     @staticmethod
     def get_shipments(oid):
         """获取明确关联到订单的发货记录。"""
-        order = OrderRepository.find_by_id(oid)
+        repository = OrderService._repository()
+        order = repository.find_by_id(oid)
         if not order:
             raise ValueError('订单不存在')
-        shipments = OrderRepository.get_shipments(oid)
+        shipments = repository.get_shipments(oid)
         return {
             'order_id': oid,
             'order_no': order['order_no'],
@@ -443,16 +501,21 @@ class OrderService:
     @staticmethod
     def get_order(oid):
         """获取单个订单"""
-        return OrderRepository.find_by_id(oid)
+        return OrderService._repository().find_by_id(oid)
 
     @staticmethod
     def log_remark_history(oid, old_remark, new_remark, user_id, user_name, db=None):
         """记录备注变更历史。当 db 参数传入时复用已有事务连接。"""
+        repository = OrderService._repository()
         if db is not None:
-            OrderRepository.insert_remark_history(oid, old_remark, new_remark, user_id, user_name, db=db)
+            repository.insert_remark_history(
+                oid, old_remark, new_remark, user_id, user_name, db=db
+            )
         else:
-            with BaseService.transaction() as txn:
-                OrderRepository.insert_remark_history(oid, old_remark, new_remark, user_id, user_name, db=txn)
+            with OrderService._unit_of_work().transaction() as txn:
+                repository.insert_remark_history(
+                    oid, old_remark, new_remark, user_id, user_name, db=txn
+                )
 
     @staticmethod
     def soft_delete_order(oid, user_id):
@@ -462,13 +525,14 @@ class OrderService:
     @staticmethod
     def reopen_order(oid, reason, status='producing'):
         """重新打开已完成归档订单。"""
-        existing = OrderRepository.find_status_by_id(oid)
+        repository = OrderService._repository()
+        existing = repository.find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
         reason, status = OrderLifecycle.normalize_reopen(existing, reason, status)
 
-        with BaseService.transaction() as txn:
-            OrderRepository.reopen_completed(oid, status, db=txn)
+        with OrderService._unit_of_work().transaction() as txn:
+            repository.reopen_completed(oid, status, db=txn)
 
         return {
             'id': oid,
@@ -494,7 +558,7 @@ class OrderService:
         """分页查询回收站订单。"""
         page = max(page, 1)
         limit = min(max(limit, 1), 200)
-        rows, total = OrderRepository.list_trash(
+        rows, total = OrderService._repository().list_trash(
             page,
             limit,
             data_scope_pids=data_scope_pids,
@@ -509,15 +573,16 @@ class OrderService:
     @staticmethod
     def restore_order(oid):
         """从回收站恢复订单。"""
-        existing = OrderRepository.find_including_deleted(oid)
+        repository = OrderService._repository()
+        existing = repository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
         if not existing['deleted_at']:
             raise ValueError('订单不在回收站中')
 
         old_status = existing['pre_delete_status'] or 'pending'
-        with BaseService.transaction() as txn:
-            OrderRepository.restore(oid, old_status, db=txn)
+        with OrderService._unit_of_work().transaction() as txn:
+            repository.restore(oid, old_status, db=txn)
         return existing['order_no']
 
     @staticmethod
@@ -535,7 +600,8 @@ class OrderService:
 
     @staticmethod
     def purge_order(oid):
-        existing = OrderRepository.find_including_deleted(oid)
+        repository = OrderService._repository()
+        existing = repository.find_including_deleted(oid)
         if not existing:
             raise ValueError('订单不存在')
         if not existing['deleted_at']:
@@ -547,13 +613,13 @@ class OrderService:
             "work_records", "scrap_records", "rework_records",
             "quality_inspections"
         ]
-        with BaseService.transaction() as txn:
-            OrderRepository.detach_preserved_order_references(
+        with OrderService._unit_of_work().transaction() as txn:
+            repository.detach_preserved_order_references(
                 oid,
                 existing['order_no'] or '',
                 db=txn,
             )
-            OrderRepository.purge_with_children(oid, _PURGE_CHILD_TABLES, db=txn)
+            repository.purge_with_children(oid, _PURGE_CHILD_TABLES, db=txn)
         return existing['order_no'] or ""
 
     # ============================================================
@@ -563,7 +629,10 @@ class OrderService:
     def list_order_materials(order_id):
         if not OrderService.get_order(order_id):
             raise NotFoundError('订单不存在')
-        return [dict(row) for row in OrderMaterialRepository.list_by_order(order_id)]
+        return [
+            dict(row)
+            for row in OrderService._material_repository().list_by_order(order_id)
+        ]
 
     @staticmethod
     def add_order_material(order_id, data):
@@ -577,21 +646,25 @@ class OrderService:
         process_id = data.get('process_id') or None
         if not material_id:
             raise ValidationError('物料 ID 不能为空')
-        with BaseService.transaction() as txn:
-            if OrderMaterialRepository.find_duplicate(order_id, material_id, process_id, db=txn):
+        repository = OrderService._material_repository()
+        with OrderService._unit_of_work().transaction() as txn:
+            if repository.find_duplicate(order_id, material_id, process_id, db=txn):
                 raise ConflictError('该物料已存在于订单物料配方中')
-            new_id = OrderMaterialRepository.insert(
+            new_id = repository.insert(
                 order_id, material_id, quantity, process_id, 'manual', db=txn
             )
-            row = OrderMaterialRepository.find_by_id(new_id, db=txn)
+            row = repository.find_by_id(new_id, db=txn)
             return dict(row)
 
     @staticmethod
     def delete_order_material(order_id, item_id):
-        with BaseService.transaction() as txn:
-            order = OrderRepository.find_by_id(order_id, db=txn)
+        material_repository = OrderService._material_repository()
+        with OrderService._unit_of_work().transaction() as txn:
+            order = OrderService._repository().find_by_id(order_id, db=txn)
             if order and order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
-            if not OrderMaterialRepository.find_by_id_and_order(item_id, order_id, db=txn):
+            if not material_repository.find_by_id_and_order(
+                item_id, order_id, db=txn
+            ):
                 raise NotFoundError('订单物料记录不存在')
-            OrderMaterialRepository.delete(item_id, db=txn)
+            material_repository.delete(item_id, db=txn)

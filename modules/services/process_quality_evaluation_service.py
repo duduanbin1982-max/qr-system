@@ -21,9 +21,37 @@ from modules.services.legacy_handoff_adapter import LegacyHandoffAdapter
 
 class ProcessQualityEvaluationService:
     DIMENSIONS = LEGACY_DIMENSIONS
+    repository = None
+    task_repository = None
+    settings_repository = None
+    legacy_handoff_adapter = None
+    unit_of_work = None
+
+    @classmethod
+    def _repository(cls):
+        return cls.repository or ProcessQualityEvaluationRepository
+
+    @classmethod
+    def _task_repository(cls):
+        return cls.task_repository or ProcessQualityEvaluationTaskRepository
+
+    @classmethod
+    def _settings_repository(cls):
+        return cls.settings_repository or SettingRepository
+
+    @classmethod
+    def _legacy_handoff_adapter(cls):
+        return cls.legacy_handoff_adapter or LegacyHandoffAdapter
+
+    @classmethod
+    def _unit_of_work(cls):
+        return cls.unit_of_work or BaseService
+
     @classmethod
     def rules(cls, db=None):
-        raw = SettingRepository.get_value("process_quality_evaluation_rules", "", db=db)
+        raw = cls._settings_repository().get_value(
+            "process_quality_evaluation_rules", "", db=db
+        )
         try:
             value = json.loads(raw) if raw else {}
         except (TypeError, json.JSONDecodeError):
@@ -69,8 +97,8 @@ class ProcessQualityEvaluationService:
             ]
         if rules["critical_score_threshold"] > rules["low_score_threshold"]:
             raise ValueError("严重缺陷阈值不能高于低分核验阈值")
-        with BaseService.transaction() as db:
-            SettingRepository.upsert_txn(
+        with cls._unit_of_work().transaction() as db:
+            cls._settings_repository().upsert_txn(
                 "process_quality_evaluation_rules",
                 json.dumps(rules, ensure_ascii=False),
                 db,
@@ -188,23 +216,24 @@ class ProcessQualityEvaluationService:
 
     @staticmethod
     def references():
-        return ProcessQualityEvaluationRepository.references()
+        return ProcessQualityEvaluationService._repository().references()
 
     @staticmethod
     def list_templates(status=""):
-        return ProcessQualityEvaluationRepository.list_templates(status)
+        return ProcessQualityEvaluationService._repository().list_templates(status)
 
     @classmethod
     def save_template(cls, data, current_user, template_id=None):
         normalized = cls._normalize_template(data)
-        with BaseService.transaction() as db:
-            if template_id and not ProcessQualityEvaluationRepository.template_by_id(template_id, db):
+        repository = cls._repository()
+        with cls._unit_of_work().transaction() as db:
+            if template_id and not repository.template_by_id(template_id, db):
                 raise ValueError("评价模板不存在")
-            if normalized["route_id"] and not ProcessQualityEvaluationRepository.route_contains_process(
+            if normalized["route_id"] and not repository.route_contains_process(
                 normalized["route_id"], normalized["process_id"], db
             ):
                 raise ValueError("所选工序不属于该工序路线")
-            saved_id = ProcessQualityEvaluationRepository.save_template(
+            saved_id = repository.save_template(
                 normalized, current_user.get("id"), template_id, db
             )
         return {"ok": True, "id": saved_id}
@@ -216,7 +245,8 @@ class ProcessQualityEvaluationService:
         rules = cls.rules(db)
         if not rules.get("enabled", True):
             return 0
-        upstream = ProcessQualityEvaluationTaskRepository.upstream_processes(
+        task_repository = cls._task_repository()
+        upstream = task_repository.upstream_processes(
             command.order_id, command.process_id, db
         )
         if not upstream:
@@ -226,7 +256,7 @@ class ProcessQualityEvaluationService:
         is_serial = bool(command.serial_no)
         nearest_seq = upstream[0]["seq_order"]
         for process in upstream:
-            template_row = ProcessQualityEvaluationTaskRepository.matching_template(
+            template_row = task_repository.matching_template(
                 process["route_id"], process["process_id"], db
             )
             template_snapshot = cls._template_snapshot(template_row, rules)
@@ -235,7 +265,7 @@ class ProcessQualityEvaluationService:
             quantity = command.effective_quantity
             attribution_type = "process"
             if is_serial:
-                work = ProcessQualityEvaluationTaskRepository.serial_target_work(
+                work = task_repository.serial_target_work(
                     command.order_id, process["process_id"], command.serial_no, db
                 )
                 if not work:
@@ -245,7 +275,7 @@ class ProcessQualityEvaluationService:
                 quantity = work["quantity"] or 1
                 attribution_type = "worker"
             else:
-                contributors = ProcessQualityEvaluationTaskRepository.order_target_contributors(
+                contributors = task_repository.order_target_contributors(
                     command.order_id, process["process_id"], db
                 )
                 if not contributors:
@@ -258,7 +288,7 @@ class ProcessQualityEvaluationService:
 
             if target_user_id and int(target_user_id) == int(command.user_id):
                 continue
-            created += ProcessQualityEvaluationTaskRepository.insert_task({
+            created += task_repository.insert_task({
                 "trigger_work_record_id": trigger_work_record_id,
                 "order_id": command.order_id,
                 "serial_no": command.serial_no or "",
@@ -283,7 +313,7 @@ class ProcessQualityEvaluationService:
         cls, evaluator_user_id=None, status="pending", keyword="", page=1, per_page=100,
         include_target_identity=False,
     ):
-        result = ProcessQualityEvaluationTaskRepository.list_tasks(
+        result = ProcessQualityEvaluationService._task_repository().list_tasks(
             evaluator_user_id, status, keyword, page, per_page
         )
         if cls.rules().get("hide_target_identity", True) and not include_target_identity:
@@ -295,17 +325,19 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def pending_count(cls, evaluator_user_id):
-        return ProcessQualityEvaluationTaskRepository.pending_count(evaluator_user_id)
+        return ProcessQualityEvaluationService._task_repository().pending_count(
+            evaluator_user_id
+        )
 
     @classmethod
     def pending_required_count(cls, evaluator_user_id, db=None):
-        return ProcessQualityEvaluationTaskRepository.pending_required_count(
+        return ProcessQualityEvaluationService._task_repository().pending_required_count(
             evaluator_user_id, db
         )
 
     @classmethod
     def assert_required_tasks_completed(cls, evaluator_user_id, db=None):
-        task = ProcessQualityEvaluationTaskRepository.pending_required_task(
+        task = ProcessQualityEvaluationService._task_repository().pending_required_task(
             evaluator_user_id, db
         )
         if task:
@@ -324,7 +356,7 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def skip_task(cls, task_id, data, current_user):
-        task = ProcessQualityEvaluationTaskRepository.task_by_id(task_id)
+        task = ProcessQualityEvaluationService._task_repository().task_by_id(task_id)
         if not task:
             raise ValueError("评价任务不存在")
         if int(task["evaluator_user_id"]) != int(current_user.get("id") or 0):
@@ -337,8 +369,10 @@ class ProcessQualityEvaluationService:
         if task["is_required"]:
             raise ValueError("直接上一道工序为必评，不能跳过")
         reason = str(data.get("reason") or "历史工序选评跳过").strip()
-        with BaseService.transaction() as db:
-            if not ProcessQualityEvaluationTaskRepository.skip_task(task_id, reason, db):
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            if not ProcessQualityEvaluationService._task_repository().skip_task(
+                task_id, reason, db
+            ):
                 raise StaleQualityEvaluationTaskError(
                     "该评价任务已由其他人员处理，请刷新任务列表",
                     details={"task_id": task_id},
@@ -362,11 +396,13 @@ class ProcessQualityEvaluationService:
             raise ValueError("至少提交一条评价")
 
         results = []
-        with BaseService.transaction() as db:
+        repository = cls._repository()
+        task_repository = cls._task_repository()
+        with cls._unit_of_work().transaction() as db:
             rules = cls.rules(db)
             for entry in entries:
                 task_id = entry.get("task_id")
-                task = ProcessQualityEvaluationTaskRepository.task_by_id(task_id, db) if task_id else None
+                task = task_repository.task_by_id(task_id, db) if task_id else None
                 if not task:
                     raise ValueError("评价任务不存在")
                 if int(task["evaluator_user_id"]) != int(user_id):
@@ -387,7 +423,7 @@ class ProcessQualityEvaluationService:
                     rules,
                     configured_dimensions,
                 )
-                evaluation_id = ProcessQualityEvaluationRepository.insert_evaluation({
+                evaluation_id = repository.insert_evaluation({
                     "task_id": task["id"],
                     "order_id": task["order_id"],
                     "serial_no": task["serial_no"],
@@ -410,7 +446,7 @@ class ProcessQualityEvaluationService:
                     "template_snapshot": template_snapshot,
                     "severity": decision.severity,
                 }, db)
-                ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
+                task_repository.complete_task(task["id"], db)
                 if decision.status == "pending_verification":
                     from modules.services.quality_management_service import QualityManagementService
                     QualityManagementService.generate_for_low_evaluation({
@@ -433,11 +469,11 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def list_evaluations(cls, **filters):
-        return ProcessQualityEvaluationRepository.list_evaluations(**filters)
+        return ProcessQualityEvaluationService._repository().list_evaluations(**filters)
 
     @classmethod
     def my_evaluations(cls, current_user, year_month="", page=1, per_page=100):
-        return ProcessQualityEvaluationRepository.list_evaluations(
+        return ProcessQualityEvaluationService._repository().list_evaluations(
             year_month=year_month,
             user_id=current_user.get("id"),
             page=page,
@@ -450,7 +486,8 @@ class ProcessQualityEvaluationService:
         status = str(data.get("status") or "").strip()
         if status not in {"confirmed", "rejected"}:
             raise ValueError("核验状态只能是 confirmed 或 rejected")
-        evaluation = ProcessQualityEvaluationRepository.evaluation_by_id(evaluation_id)
+        repository = ProcessQualityEvaluationService._repository()
+        evaluation = repository.evaluation_by_id(evaluation_id)
         if not evaluation:
             raise ValueError("评价记录不存在")
         if evaluation["status"] != "pending_verification":
@@ -458,17 +495,18 @@ class ProcessQualityEvaluationService:
         note = str(data.get("note") or "").strip()
         if status == "rejected" and not note:
             raise ValueError("驳回评价必须填写核验说明")
-        with BaseService.transaction() as db:
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
             cls._apply_review(evaluation, status, reviewer_id, note, db)
         return {"ok": True, "status": status}
 
     @classmethod
     def _apply_review(cls, evaluation, status, reviewer_id, note, db):
-        ProcessQualityEvaluationRepository.review_evaluation(
+        repository = cls._repository()
+        repository.review_evaluation(
             evaluation["id"], status, reviewer_id, note, db
         )
         if evaluation["source_handoff_review_id"]:
-            LegacyHandoffAdapter.sync_compatibility_status(
+            ProcessQualityEvaluationService._legacy_handoff_adapter().sync_compatibility_status(
                 evaluation["source_handoff_review_id"], status, reviewer_id, note, db
             )
         if status == "rejected":
@@ -493,7 +531,8 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def create_appeal(cls, evaluation_id, data, current_user):
-        evaluation = ProcessQualityEvaluationRepository.evaluation_by_id(evaluation_id)
+        repository = ProcessQualityEvaluationService._repository()
+        evaluation = repository.evaluation_by_id(evaluation_id)
         if not evaluation:
             raise ValueError("评价记录不存在")
         user_id = current_user.get("id") if current_user else None
@@ -505,8 +544,8 @@ class ProcessQualityEvaluationService:
         if len(reason) < 5:
             raise ValueError("申诉原因至少填写5个字符")
         try:
-            with BaseService.transaction() as db:
-                appeal_id = ProcessQualityEvaluationRepository.create_appeal(
+            with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+                appeal_id = repository.create_appeal(
                     evaluation_id, user_id, reason, db
                 )
         except Exception as exc:
@@ -519,7 +558,7 @@ class ProcessQualityEvaluationService:
     def list_appeals(status="", current_user=None, mine=False, year_month=""):
         requester_id = current_user.get("id") if mine and current_user else None
         return {
-            "items": ProcessQualityEvaluationRepository.list_appeals(
+            "items": ProcessQualityEvaluationService._repository().list_appeals(
                 status, requester_id, year_month
             )
         }
@@ -532,18 +571,19 @@ class ProcessQualityEvaluationService:
         note = str(data.get("note") or "").strip()
         if not note:
             raise ValueError("申诉复核必须填写处理说明")
-        appeal = ProcessQualityEvaluationRepository.appeal_by_id(appeal_id)
+        repository = ProcessQualityEvaluationService._repository()
+        appeal = repository.appeal_by_id(appeal_id)
         if not appeal:
             raise ValueError("申诉记录不存在")
         if appeal["status"] != "pending":
             raise ValueError("该申诉已经处理")
         reviewer_id = current_user.get("id") if current_user else None
-        with BaseService.transaction() as db:
-            ProcessQualityEvaluationRepository.review_appeal(
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            repository.review_appeal(
                 appeal_id, status, reviewer_id, note, db
             )
             if status == "accepted":
-                ProcessQualityEvaluationRepository.review_evaluation(
+                repository.review_evaluation(
                     appeal["evaluation_id"], "rejected", reviewer_id, f"申诉成立：{note}", db
                 )
                 cls._cancel_rejected_evaluation_tasks(
@@ -553,36 +593,41 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def stats(cls, year_month=""):
-        return ProcessQualityEvaluationRepository.stats(year_month)
+        return ProcessQualityEvaluationService._repository().stats(year_month)
 
     @classmethod
     def monthly_metrics(cls, year_month, db=None):
         rules = cls.rules(db)
         minimum_samples = rules.get("minimum_samples_for_performance", 3)
-        rows = ProcessQualityEvaluationRepository.monthly_metrics(
+        rows = ProcessQualityEvaluationService._repository().monthly_metrics(
             year_month, minimum_samples, db
         )
         return {row["user_id"]: dict(row) for row in rows if row["user_id"] is not None}
 
     @classmethod
     def import_legacy_handoff(cls, data):
-        with BaseService.transaction() as db:
-            review_id = LegacyHandoffAdapter.create_compatibility_record(data, db)
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            review_id = ProcessQualityEvaluationService._legacy_handoff_adapter().create_compatibility_record(
+                data, db
+            )
             evaluation_id = cls._record_legacy_handoff(review_id, data, db)
         return {"legacy_review_id": review_id, "evaluation_id": evaluation_id}
 
     @classmethod
     def review_legacy_handoff(cls, review_id, status, note, current_user):
         reviewer_id = current_user.get("id") if current_user else None
-        evaluation = ProcessQualityEvaluationRepository.evaluation_by_legacy_handoff(review_id)
+        repository = ProcessQualityEvaluationService._repository()
+        evaluation = repository.evaluation_by_legacy_handoff(review_id)
         if not evaluation:
             raise ValueError("旧交接评价未关联全流程质量评价")
-        with BaseService.transaction() as db:
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
             cls._apply_review(evaluation, status, reviewer_id, str(note or "").strip(), db)
         return {"ok": True, "status": status, "evaluation_id": evaluation["id"]}
 
     @classmethod
     def _record_legacy_handoff(cls, review_id, data, db):
+        repository = cls._repository()
+        task_repository = cls._task_repository()
         rules = cls.rules(db)
         decision = QualityEvaluationPolicy.from_legacy(
             data.get("rating"),
@@ -590,7 +635,7 @@ class ProcessQualityEvaluationService:
             data.get("status"),
             rules,
         )
-        task = ProcessQualityEvaluationTaskRepository.find_matching_pending_task({
+        task = task_repository.find_matching_pending_task({
             "order_id": data["order_id"],
             "serial_no": data.get("serial_no", ""),
             "target_process_id": data["from_process_id"],
@@ -598,7 +643,7 @@ class ProcessQualityEvaluationService:
             "evaluator_user_id": data["evaluator_user_id"],
         }, db)
         template_snapshot = cls._default_template(rules)
-        evaluation_id = ProcessQualityEvaluationRepository.insert_evaluation({
+        evaluation_id = repository.insert_evaluation({
             "task_id": task["id"] if task else None,
             "order_id": data["order_id"],
             "serial_no": data.get("serial_no", ""),
@@ -623,5 +668,5 @@ class ProcessQualityEvaluationService:
             "severity": decision.severity,
         }, db)
         if task:
-            ProcessQualityEvaluationTaskRepository.complete_task(task["id"], db)
+            task_repository.complete_task(task["id"], db)
         return evaluation_id

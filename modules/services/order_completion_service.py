@@ -9,6 +9,21 @@ class OrderCompletionService:
     """Keep ``orders.status`` synchronized at completion-sensitive boundaries."""
 
     ACTIVE_STATUSES = {"pending", "producing"}
+    repository = None
+    audit_repository = None
+    unit_of_work = None
+
+    @classmethod
+    def _repository(cls):
+        return cls.repository or OrderCompletionRepository
+
+    @classmethod
+    def _audit_repository(cls):
+        return cls.audit_repository or AuditLogRepository
+
+    @classmethod
+    def _unit_of_work(cls):
+        return cls.unit_of_work or BaseService
 
     @staticmethod
     def _evaluate(snapshot):
@@ -53,7 +68,8 @@ class OrderCompletionService:
 
     @staticmethod
     def _reconcile_in_transaction(order_id, trigger, actor_id, db, apply_changes=True):
-        snapshot = OrderCompletionRepository.find_snapshot(order_id, db=db)
+        repository = OrderCompletionService._repository()
+        snapshot = repository.find_snapshot(order_id, db=db)
         if not snapshot:
             return {"order_id": order_id, "found": False, "changed": False}
 
@@ -64,7 +80,7 @@ class OrderCompletionService:
         if not result["needs_update"] or not apply_changes:
             return result
 
-        changed = OrderCompletionRepository.update_derived_state(
+        changed = repository.update_derived_state(
             order_id,
             result["derived_completed"],
             result["target_status"],
@@ -79,7 +95,7 @@ class OrderCompletionService:
                 f"processes={result['completed_processes']}/{result['process_total']}; "
                 f"quality_gates={result.get('pending_quality_gates', 0)}"
             )
-            AuditLogRepository.insert_log(
+            OrderCompletionService._audit_repository().insert_log(
                 actor_id,
                 "order_status_reconciled",
                 "order",
@@ -95,7 +111,7 @@ class OrderCompletionService:
             return OrderCompletionService._reconcile_in_transaction(
                 order_id, trigger, actor_id, db
             )
-        with BaseService.transaction() as txn:
+        with OrderCompletionService._unit_of_work().transaction() as txn:
             return OrderCompletionService._reconcile_in_transaction(
                 order_id, trigger, actor_id, txn
             )
@@ -103,8 +119,8 @@ class OrderCompletionService:
     @staticmethod
     def reconcile_all(dry_run=True, trigger="completion_repair", actor_id=None):
         results = []
-        with BaseService.transaction() as txn:
-            for order_id in OrderCompletionRepository.list_active_order_ids(db=txn):
+        with OrderCompletionService._unit_of_work().transaction() as txn:
+            for order_id in OrderCompletionService._repository().list_active_order_ids(db=txn):
                 result = OrderCompletionService._reconcile_in_transaction(
                     order_id,
                     trigger,

@@ -15,14 +15,66 @@ _logger = logging.getLogger(__name__)
 class WorkReportWriter:
     """Persists normal, scrap, and rework reports inside one transaction."""
 
+    material_service = None
+    scan_repository = None
+    inventory_auto_inbound_service = None
+    order_completion_service = None
+    scan_helper_service = None
+    quality_management_service = None
+    quality_evaluation_service = None
+    unit_of_work = None
+
+    @classmethod
+    def _material_service(cls):
+        return cls.material_service or MaterialService
+
+    @classmethod
+    def _scan_repository(cls):
+        return cls.scan_repository or ScanRepository
+
+    @classmethod
+    def _inventory_auto_inbound_service(cls):
+        return cls.inventory_auto_inbound_service or InventoryAutoInboundService
+
+    @classmethod
+    def _order_completion_service(cls):
+        return cls.order_completion_service or OrderCompletionService
+
+    @classmethod
+    def _scan_helper_service(cls):
+        if cls.scan_helper_service:
+            return cls.scan_helper_service
+        from modules.services.scan_helper_service import ScanHelperService
+        return ScanHelperService
+
+    @classmethod
+    def _quality_management_service(cls):
+        if cls.quality_management_service:
+            return cls.quality_management_service
+        from modules.services.quality_management_service import QualityManagementService
+        return QualityManagementService
+
+    @classmethod
+    def _quality_evaluation_service(cls):
+        if cls.quality_evaluation_service:
+            return cls.quality_evaluation_service
+        from modules.services.process_quality_evaluation_service import (
+            ProcessQualityEvaluationService,
+        )
+        return ProcessQualityEvaluationService
+
+    @classmethod
+    def _unit_of_work(cls):
+        return cls.unit_of_work or BaseService
+
     @staticmethod
     def execute_report_write(command):
         """共享报工写入逻辑。整个方法在事务中执行，全部成功或全部回滚。"""
-        from modules.services.scan_helper_service import ScanHelperService
+        scan_helper_service = WorkReportWriter._scan_helper_service()
 
-        with BaseService.transaction() as db:
+        with WorkReportWriter._unit_of_work().transaction() as db:
             WorkReportWriter._check_duplicates(
-                ScanHelperService,
+                scan_helper_service,
                 command.report_type,
                 command.order_id,
                 command.process_id,
@@ -31,7 +83,7 @@ class WorkReportWriter:
                 db,
             )
             current_op = WorkReportWriter._load_current_operation(
-                ScanHelperService,
+                scan_helper_service,
                 command.order_id,
                 command.process_id,
                 db,
@@ -39,7 +91,7 @@ class WorkReportWriter:
 
             if command.report_type == "normal":
                 WorkReportWriter._check_normal_limits(
-                    ScanHelperService,
+                    scan_helper_service,
                     command.order_id,
                     current_op,
                     command.quantity,
@@ -48,13 +100,13 @@ class WorkReportWriter:
                     skip_sequence=command.report_source == "serial_backfill",
                 )
                 WorkReportWriter._write_normal_report(
-                    ScanHelperService,
+                    scan_helper_service,
                     command,
                     db,
                 )
             elif command.report_type == "scrap":
                 WorkReportWriter._write_scrap_report(
-                    ScanHelperService,
+                    scan_helper_service,
                     command.order_id,
                     command.process_id,
                     command.user_id,
@@ -113,9 +165,9 @@ class WorkReportWriter:
         db,
         skip_sequence=False,
     ):
-        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
-
-        ProcessQualityEvaluationService.assert_required_tasks_completed(user_id, db)
+        WorkReportWriter._quality_evaluation_service().assert_required_tasks_completed(
+            user_id, db
+        )
         if not skip_sequence:
             err, code = helper.check_process_order(
                 order_id,
@@ -129,8 +181,9 @@ class WorkReportWriter:
         if not order:
             return
 
-        from modules.services.quality_management_service import QualityManagementService
-        QualityManagementService.assert_report_allowed(order_id, current_op.get("process_id"), db=db)
+        WorkReportWriter._quality_management_service().assert_report_allowed(
+            order_id, current_op.get("process_id"), db=db
+        )
 
         if skip_sequence:
             if (current_op.get("completed", 0) or 0) + quantity > (order.get("quantity", 0) or 0):
@@ -180,19 +233,19 @@ class WorkReportWriter:
 
     @staticmethod
     def apply_approved_normal_report(command, db, work_record_id=None, validate_policy=True):
-        from modules.services.scan_helper_service import ScanHelperService
-        from modules.services.quality_management_service import QualityManagementService
-        from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+        scan_helper_service = WorkReportWriter._scan_helper_service()
+        quality_management_service = WorkReportWriter._quality_management_service()
+        quality_evaluation_service = WorkReportWriter._quality_evaluation_service()
 
         if validate_policy:
             current_op = WorkReportWriter._load_current_operation(
-                ScanHelperService,
+                scan_helper_service,
                 command.order_id,
                 command.process_id,
                 db,
             )
             WorkReportWriter._check_normal_limits(
-                ScanHelperService,
+                scan_helper_service,
                 command.order_id,
                 current_op,
                 command.effective_quantity,
@@ -201,13 +254,13 @@ class WorkReportWriter:
                 skip_sequence=command.report_source == "serial_backfill",
             )
         else:
-            ProcessQualityEvaluationService.assert_required_tasks_completed(command.user_id, db)
-            QualityManagementService.assert_report_allowed(
+            quality_evaluation_service.assert_required_tasks_completed(command.user_id, db)
+            quality_management_service.assert_report_allowed(
                 command.order_id, command.process_id, db=db
             )
 
         WorkReportWriter._apply_approved_normal_effects(
-            ScanHelperService,
+            scan_helper_service,
             command.order_id,
             command.process_id,
             command.user_id,
@@ -219,27 +272,27 @@ class WorkReportWriter:
         )
         if command.serial_no:
             WorkReportWriter._reconcile_serial_item(
-                ScanHelperService,
+                scan_helper_service,
                 command.order_id,
                 command.user_id,
                 command.user_name,
                 command.serial_no,
                 db,
             )
-            ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
-            if ScanHelperService.has_approved_serial_backfill(
+            quality_evaluation_service.generate_tasks(command, work_record_id, db)
+            if scan_helper_service.has_approved_serial_backfill(
                 command.order_id, command.serial_no, db=db
             ):
                 WorkReportWriter._rebuild_serial_quality_tasks(
-                    ScanHelperService,
+                    scan_helper_service,
                     command.order_id,
                     command.serial_no,
-                    ProcessQualityEvaluationService,
+                    quality_evaluation_service,
                     db,
                 )
         else:
-            ProcessQualityEvaluationService.generate_tasks(command, work_record_id, db)
-        QualityManagementService.generate_for_report(
+            quality_evaluation_service.generate_tasks(command, work_record_id, db)
+        quality_management_service.generate_for_report(
             command.order_id,
             command.process_id,
             work_record_id,
@@ -247,7 +300,7 @@ class WorkReportWriter:
             command.user_id,
             db,
         )
-        OrderCompletionService.reconcile(
+        WorkReportWriter._order_completion_service().reconcile(
             command.order_id,
             trigger="approved_work_report",
             actor_id=command.user_id,
@@ -262,7 +315,7 @@ class WorkReportWriter:
             new_completed = (op["completed"] or 0) + quantity_local
             helper.update_order_process_completed(order_id, process_id, new_completed, db=db)
 
-        MaterialService.deduct_for_process(
+        WorkReportWriter._material_service().deduct_for_process(
             order_id,
             process_id,
             quantity_local,
@@ -284,10 +337,12 @@ class WorkReportWriter:
 
     @staticmethod
     def _auto_inbound_last_non_serial(helper, order_id, process_id, user_id, user_name, db):
-        order_status = ScanRepository.find_order_status(order_id, db=db)
+        order_status = WorkReportWriter._scan_repository().find_order_status(
+            order_id, db=db
+        )
         if order_status and order_status["status"] != "completed":
             if helper.is_last_process(order_id, process_id, db=db):
-                InventoryAutoInboundService.auto_inbound_for_item(
+                WorkReportWriter._inventory_auto_inbound_service().auto_inbound_for_item(
                     order_id,
                     user_id,
                     user_name,
@@ -323,7 +378,7 @@ class WorkReportWriter:
         cur = helper.complete_product_item(item["id"], item_version, db=db)
         if cur.rowcount == 0:
             raise ValueError(f"序列号 {serial_no} 已被其他操作修改，请刷新后重试")
-        InventoryAutoInboundService.auto_inbound_for_item(
+        WorkReportWriter._inventory_auto_inbound_service().auto_inbound_for_item(
             order_id,
             user_id,
             user_name,

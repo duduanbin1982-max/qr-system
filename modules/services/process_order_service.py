@@ -11,18 +11,25 @@ from modules.setting_reader import get_setting
 class ProcessOrderService:
     SEQUENTIAL = SEQUENTIAL
     OUT_OF_ORDER = OUT_OF_ORDER
+    setting_reader = None
 
-    @staticmethod
-    def policy():
-        mode = get_setting("process_order_mode", ProcessOrderService.SEQUENTIAL)
-        if mode not in {ProcessOrderService.SEQUENTIAL, ProcessOrderService.OUT_OF_ORDER}:
-            mode = ProcessOrderService.SEQUENTIAL
-        configured_previous_limit = get_setting("limit_by_prev_process", "1") == "1"
+    @classmethod
+    def _get_setting(cls, key, default=None):
+        """Read configuration through an overridable boundary."""
+        reader = vars(cls).get("setting_reader") or get_setting
+        return reader(key, default)
+
+    @classmethod
+    def policy(cls):
+        mode = cls._get_setting("process_order_mode", cls.SEQUENTIAL)
+        if mode not in {cls.SEQUENTIAL, cls.OUT_OF_ORDER}:
+            mode = cls.SEQUENTIAL
+        configured_previous_limit = cls._get_setting("limit_by_prev_process", "1") == "1"
         return {
             "mode": mode,
             "configured_previous_limit": configured_previous_limit,
             "effective_previous_limit": (
-                configured_previous_limit and mode == ProcessOrderService.SEQUENTIAL
+                configured_previous_limit and mode == cls.SEQUENTIAL
             ),
         }
 

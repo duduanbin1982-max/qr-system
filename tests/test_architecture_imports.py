@@ -156,6 +156,55 @@ def test_repositories_do_not_depend_on_service_db_helper():
     assert violations == [], f"repositories must depend on repository/context seams, not services: {violations}"
 
 
+def _imported_modules(path):
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            yield node.lineno, node.module
+
+
+def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
+    forbidden_prefixes = (
+        "flask",
+        "modules.app",
+        "modules.db",
+        "modules.repositories",
+        "modules.routes",
+        "modules.services",
+    )
+    violations = []
+    for path in sorted((PROJECT_ROOT / "modules" / "domain").rglob("*.py")):
+        for lineno, module_name in _imported_modules(path):
+            if module_name.startswith(forbidden_prefixes):
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
+                )
+
+    assert violations == [], (
+        "domain policy must remain independent of Flask, persistence, routes, and services: "
+        f"{violations}"
+    )
+
+
+def test_routes_do_not_depend_on_database_or_repositories():
+    forbidden_prefixes = ("modules.db", "modules.repositories")
+    violations = []
+    for path in sorted((PROJECT_ROOT / "modules" / "routes").rglob("*.py")):
+        for lineno, module_name in _imported_modules(path):
+            if module_name.startswith(forbidden_prefixes):
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
+                )
+
+    assert violations == [], (
+        "routes must call application services instead of persistence details: "
+        f"{violations}"
+    )
+
+
 def test_repositories_do_not_depend_on_other_repositories():
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"

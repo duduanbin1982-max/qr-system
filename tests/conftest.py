@@ -25,6 +25,7 @@ UNIT_TEST_FILES = {
     "test_quality_evaluation_policy.py",
     "test_refactor_services.py",
     "test_scan_helper.py",
+    "test_service_dependency_seams.py",
     "test_work_report_command.py",
 }
 
