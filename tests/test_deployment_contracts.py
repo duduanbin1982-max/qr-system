@@ -13,6 +13,8 @@ def test_deploy_script_has_required_release_gates():
     assert "git status --porcelain" in content
     assert "scripts/check_secrets.py" in content
     assert '"$PYTEST_BIN" -q' in content
+    assert "npm ci --ignore-scripts --no-audit --no-fund" in content
+    assert "bash scripts/install-playwright-runtime.sh" in content
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
@@ -48,6 +50,22 @@ def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
     assert '--outDir "$E2E_PUBLIC_DIR/static"' in e2e_script
     assert 'export PUBLIC_DIR="$E2E_PUBLIC_DIR"' in e2e_script
     assert "os.environ.get('PUBLIC_DIR')" in app_module
+
+
+def test_playwright_runtime_installer_prepares_browser_and_user_libraries():
+    installer = (
+        PROJECT_ROOT / "scripts" / "install-playwright-runtime.sh"
+    ).read_text(encoding="utf-8")
+    runner = (PROJECT_ROOT / "scripts" / "run-playwright.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "npx playwright install chromium" in installer
+    assert "apt-get download" in installer
+    assert "dpkg-deb -x" in installer
+    assert "playwright-debs/root" in installer
+    assert "playwright-debs/root" in runner
+    assert "LD_LIBRARY_PATH" in runner
 
 
 def test_pytest_suite_declares_test_layers():
