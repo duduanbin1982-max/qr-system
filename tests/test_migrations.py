@@ -48,7 +48,15 @@ def test_run_migrations_uses_supplied_connection():
             "qr_print_count",
             "qr_printed_by",
             "qr_printed_by_name",
+            "product_id",
         }.issubset(order_columns)
+        assert "product_code_aliases" in table_names
+        assert "order_product_links" in {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='view'"
+            ).fetchall()
+        }
         session_columns = {
             row["name"]
             for row in db.execute("PRAGMA table_info(user_sessions)").fetchall()
@@ -89,6 +97,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
         "modules.migration_materials",
             "modules.migration_approval_workflow",
             "modules.migration_serial_backfill",
+            "modules.migration_product_identity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -143,6 +152,113 @@ def test_position_aware_backfill_migration_is_idempotent_and_preserves_history()
             "",
         )
         assert db.execute("SELECT COUNT(*) FROM work_records").fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_stable_product_identity_migration_backfills_current_code_and_snapshot():
+    from modules.migration_product_identity import m050_stable_order_product_identity
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE products (
+                id INTEGER PRIMARY KEY,
+                product_name TEXT NOT NULL,
+                product_code TEXT NOT NULL,
+                model TEXT,
+                spec TEXT,
+                category TEXT
+            );
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                product_name TEXT NOT NULL DEFAULT '',
+                product_code TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO products (id, product_name, product_code, model, spec, category)
+            VALUES (7, '测试产品', 'TEST-CURRENT', 'M7', 'S7', '结构件');
+            INSERT INTO orders (id, product_name, product_code)
+            VALUES (9, '', 'TEST-CURRENT');
+            """
+        )
+
+        m050_stable_order_product_identity(db)
+        m050_stable_order_product_identity(db)
+
+        order = db.execute(
+            "SELECT product_id, product_name FROM orders WHERE id = 9"
+        ).fetchone()
+        assert tuple(order) == (7, "测试产品")
+        alias = db.execute(
+            "SELECT product_id, source FROM product_code_aliases WHERE product_code='TEST-CURRENT'"
+        ).fetchone()
+        assert tuple(alias) == (7, "current")
+        assert db.execute(
+            "SELECT product_id FROM order_product_links WHERE order_id=9"
+        ).fetchone()[0] == 7
+    finally:
+        db.close()
+
+
+def test_stable_product_identity_triggers_preserve_aliases_on_direct_code_update():
+    from modules.migration_product_identity import m050_stable_order_product_identity
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE products (
+                id INTEGER PRIMARY KEY,
+                product_name TEXT NOT NULL,
+                product_code TEXT NOT NULL,
+                model TEXT,
+                spec TEXT,
+                category TEXT
+            );
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                product_name TEXT NOT NULL DEFAULT '',
+                product_code TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO products (id, product_name, product_code)
+            VALUES (7, '测试产品', 'TEST-OLD');
+            INSERT INTO orders (id, product_name, product_code)
+            VALUES (9, '订单快照', 'TEST-OLD');
+            """
+        )
+
+        m050_stable_order_product_identity(db)
+        db.execute("UPDATE products SET product_code = 'TEST-NEW' WHERE id = 7")
+        db.execute(
+            "INSERT INTO orders (id, product_name, product_code) "
+            "VALUES (10, '历史导入', 'TEST-OLD')"
+        )
+        db.execute("UPDATE products SET product_code = 'TEST-FINAL' WHERE id = 7")
+
+        aliases = {
+            row["product_code"]: row["product_id"]
+            for row in db.execute(
+                "SELECT product_code, product_id FROM product_code_aliases"
+            ).fetchall()
+        }
+        orders = db.execute(
+            "SELECT id, product_id, product_code, product_name FROM orders ORDER BY id"
+        ).fetchall()
+
+        assert aliases == {"TEST-OLD": 7, "TEST-NEW": 7, "TEST-FINAL": 7}
+        assert tuple(orders[0]) == (9, 7, "TEST-OLD", "订单快照")
+        assert tuple(orders[1]) == (10, 7, "TEST-OLD", "历史导入")
+
+        with pytest.raises(sqlite3.IntegrityError, match="historical alias"):
+            db.execute(
+                "INSERT INTO products (id, product_name, product_code) "
+                "VALUES (8, '错误复用', 'TEST-OLD')"
+            )
     finally:
         db.close()
 

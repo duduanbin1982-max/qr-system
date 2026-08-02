@@ -28,7 +28,8 @@ class InventoryRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
-            "LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE "
+            "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
+            "LEFT JOIN products p ON p.id = pca.product_id AND p.deleted_at IS NULL WHERE "
             + where_clause, params
         ).fetchone()[0]
 
@@ -40,7 +41,8 @@ class InventoryRepository:
             "CASE WHEN i.quantity <= i.safe_stock AND i.safe_stock > 0 "
             "THEN 1 ELSE 0 END as is_low FROM inventory i "
             "LEFT JOIN orders o ON i.order_id = o.id "
-            "LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE "
+            "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
+            "LEFT JOIN products p ON p.id = pca.product_id AND p.deleted_at IS NULL WHERE "
             + where_clause + " "
             + build_sort_clause("updated_at", {"updated_at": "i.updated_at"}, default="i.updated_at")
         )

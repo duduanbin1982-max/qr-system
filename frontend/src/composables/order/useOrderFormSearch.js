@@ -66,6 +66,9 @@ export function useOrderFormSearch({ form, products, processRoutes }) {
   let productSearchTimer = null
   function onProductSearchInput() {
     const keyword = (productSearch.value || '').trim().toLowerCase()
+    if (form.value.product_id && keyword !== (form.value.product_code || '').toLowerCase()) {
+      clearSelectedProduct()
+    }
     if (!keyword) {
       productSearchResults.value = []
       productCursor.value = -1
@@ -102,6 +105,16 @@ export function useOrderFormSearch({ form, products, processRoutes }) {
     productSearch.value = ''
     productSearchResults.value = []
     productCursor.value = -1
+    clearSelectedProduct()
+  }
+
+  function clearSelectedProduct() {
+    const fields = [
+      'product_code', 'model', 'spec', 'style', 'upper_opening',
+      'lower_opening', 'plate_thickness', 'category', 'price', 'weight',
+    ]
+    form.value.product_id = null
+    fields.forEach(field => { form.value[field] = '' })
   }
 
   function selectProduct(product) {
@@ -109,6 +122,7 @@ export function useOrderFormSearch({ form, products, processRoutes }) {
       'product_code', 'product_name', 'model', 'spec', 'style',
       'upper_opening', 'plate_thickness', 'category', 'route_id',
     ]
+    form.value.product_id = product.id
     fields.forEach(field => { form.value[field] = product[field] || '' })
     if (product.price) form.value.price = product.price
     if (product.weight) form.value.weight = product.weight
@@ -138,6 +152,6 @@ export function useOrderFormSearch({ form, products, processRoutes }) {
     onRouteSearchFocus, onRouteSearchInput, moveRouteCursor, selectRouteByEnter,
     clearRouteSearch, selectRoute, syncRoute,
     onProductSearchFocus, onProductSearchInput, moveProductCursor, selectProductByEnter,
-    clearProductSearch, selectProduct, resetSearch,
+    clearProductSearch, clearSelectedProduct, selectProduct, resetSearch,
   }
 }

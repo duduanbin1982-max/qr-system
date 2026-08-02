@@ -471,14 +471,19 @@ class WorkTimeRepository:
         params = [period_start, period_end]
         product_code = (product_code or '').strip()
         if product_code:
-            where.append("(wr.product_code = ? OR o.product_code = ?)")
-            params.extend([product_code, product_code])
+            where.append(
+                "(wr.product_code = ? OR o.product_code = ? OR "
+                "opl.product_id = "
+                "(SELECT a.product_id FROM product_code_aliases a WHERE a.product_code = ?))"
+            )
+            params.extend([product_code, product_code, product_code])
         where_clause = " AND ".join(where)
         row = db.execute(
             "SELECT COUNT(*) AS record_count, "
             "COUNT(DISTINCT wr.user_id) AS worker_count, "
             "COUNT(DISTINCT wr.order_id) AS order_count, "
-            "COUNT(DISTINCT COALESCE(NULLIF(wr.product_code, ''), wr.product_name, o.product_code, o.product_name)) AS product_count, "
+            "COUNT(DISTINCT COALESCE(CAST(opl.product_id AS TEXT), "
+            "NULLIF(wr.product_code, ''), wr.product_name, o.product_code, o.product_name)) AS product_count, "
             "COALESCE(SUM(wr.quantity), 0) AS quantity, "
             "COALESCE(SUM(wr.standard_minutes), 0) AS standard_minutes, "
             "COALESCE(SUM(wr.actual_minutes), 0) AS actual_minutes, "
@@ -489,6 +494,7 @@ class WorkTimeRepository:
             "THEN wr.standard_minutes * 100.0 / wr.effective_minutes END), 1) AS efficiency "
             "FROM work_time_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
+            "LEFT JOIN order_product_links opl ON opl.order_id = o.id "
             "WHERE " + where_clause,
             params,
         ).fetchone()

@@ -65,7 +65,12 @@ class StatsService:
                 group["normal_quantity"] += quantity
             if record.get("order_id"):
                 order_sets[user_id].add(record.get("order_id"))
-            product_key = record.get("product_code") or record.get("product_name") or ""
+            product_key = (
+                record.get("product_id")
+                or record.get("product_code")
+                or record.get("product_name")
+                or ""
+            )
             if product_key:
                 product_sets[user_id].add(product_key)
             group["records"].append(record)

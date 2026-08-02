@@ -12,8 +12,18 @@ def _database():
     db.executescript(
         """
         CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE orders (id INTEGER PRIMARY KEY, product_code TEXT);
+        CREATE TABLE orders (
+            id INTEGER PRIMARY KEY,
+            product_code TEXT,
+            product_id INTEGER
+        );
         CREATE TABLE products (id INTEGER PRIMARY KEY, product_code TEXT);
+        CREATE VIEW order_product_links AS
+        SELECT o.id AS order_id, COALESCE(o.product_id, p.id) AS product_id
+        FROM orders o
+        LEFT JOIN products p
+          ON o.product_id IS NULL
+         AND p.product_code = o.product_code;
         CREATE TABLE materials (
             id INTEGER PRIMARY KEY,
             quantity REAL,
@@ -65,7 +75,9 @@ def _database():
 def test_deduct_for_process_prefers_order_material_snapshot():
     db = _database()
     db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
-    db.execute("INSERT INTO orders VALUES (10, 'PRODUCT-1')")
+    db.execute(
+        "INSERT INTO orders (id, product_code, product_id) VALUES (10, 'PRODUCT-1', NULL)"
+    )
     db.execute("INSERT INTO products VALUES (20, 'PRODUCT-1')")
     db.execute("INSERT INTO materials VALUES (30, 20, NULL, 'Steel', 'kg')")
     db.execute("INSERT INTO materials VALUES (31, 20, NULL, 'Wire', 'm')")
@@ -93,7 +105,9 @@ def test_deduct_for_process_prefers_order_material_snapshot():
 def test_deduct_for_process_falls_back_to_matching_product_bom():
     db = _database()
     db.execute("INSERT INTO system_settings VALUES ('auto_deduct_material', '1')")
-    db.execute("INSERT INTO orders VALUES (10, 'PRODUCT-1')")
+    db.execute(
+        "INSERT INTO orders (id, product_code, product_id) VALUES (10, 'PRODUCT-OLD', 20)"
+    )
     db.execute("INSERT INTO products VALUES (20, 'PRODUCT-1')")
     db.execute("INSERT INTO materials VALUES (30, 10, NULL, 'Steel', 'kg')")
     db.execute("INSERT INTO materials VALUES (31, 10, NULL, 'Wire', 'm')")

@@ -21,6 +21,7 @@ from modules.repositories.order_material_repository import OrderMaterialReposito
 from modules.services.order_material_snapshot_service import OrderMaterialSnapshotService
 from modules.services.order_process_sync_service import OrderProcessSyncService
 from modules.services.order_completion_service import OrderCompletionService
+from modules.services.order_product_identity_service import OrderProductIdentityService
 from modules.setting_reader import get_setting
 
 # Extracted constants — Brooks R4 fix
@@ -74,6 +75,7 @@ class OrderService:
     material_snapshot_service = None
     process_sync_service = None
     completion_service = None
+    product_identity_service = None
     unit_of_work = None
     setting_reader = None
 
@@ -96,6 +98,10 @@ class OrderService:
     @classmethod
     def _completion_service(cls):
         return cls.completion_service or OrderCompletionService
+
+    @classmethod
+    def _product_identity_service(cls):
+        return cls.product_identity_service or OrderProductIdentityService
 
     @classmethod
     def _unit_of_work(cls):
@@ -136,7 +142,7 @@ class OrderService:
         core_fields = {
             'order_no', 'customer', 'customer_id', 'product_name', 'quantity',
             'plan_start', 'plan_end', 'deadline', 'remark', 'process_ids',
-            'route_id', 'production_line_id', 'status'
+            'route_id', 'production_line_id', 'status', 'product_id'
         }
         return {key: value for key, value in data.items() if key not in core_fields}
 
@@ -147,6 +153,7 @@ class OrderService:
             "customer": customer,
             "customer_id": customer_id if customer_id else None,
             "product_name": data.get('product_name', ''),
+            "product_id": data.get('product_id'),
             "quantity": data.get('quantity', 0),
             "plan_start": data.get('plan_start', '') or datetime.now().strftime('%Y-%m-%d'),
             "plan_end": data.get('plan_end', '') or (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
@@ -286,11 +293,16 @@ class OrderService:
         route_id = data.get('route_id')
         customer_id = data.get('customer_id')
         customer = OrderService._resolve_customer_name(customer_id, data.get('customer'))
-        extra = OrderService._create_order_extra(data)
         process_ids = data.get('process_ids', [])
 
         repository = OrderService._repository()
         with OrderService._unit_of_work().transaction() as txn:
+            normalized_data = OrderService._product_identity_service().normalize_create(
+                data,
+                txn,
+            )
+            route_id = normalized_data.get('route_id')
+            extra = OrderService._create_order_extra(normalized_data)
             # 冲突检查 + 自动重试（最多5次）
             for _ in range(5):
                 existing = repository.exists_by_order_no(order_no, db=txn)
@@ -301,13 +313,13 @@ class OrderService:
                 raise ValueError('订单号冲突，请重试（已重试5次）')
 
             payload = OrderService._build_create_payload(
-                data, order_no, customer, customer_id, route_id, extra
+                normalized_data, order_no, customer, customer_id, route_id, extra
             )
             order_id = repository.insert_from_order_form(payload, db=txn)
             OrderService._assign_processes(txn, order_id, route_id, process_ids)
 
             snapshot_service = OrderService._material_snapshot_service()
-            product_id = snapshot_service.resolve_product_id(data, txn)
+            product_id = normalized_data.get('product_id')
             snapshot_service.copy_product_bom(order_id, product_id, txn)
 
         return order_id, order_no
@@ -363,6 +375,11 @@ class OrderService:
         if not current_order:
             raise ValueError('订单不存在')
         OrderLifecycle.validate_update(current_order, data)
+        data = OrderService._product_identity_service().normalize_update(
+            current_order,
+            data,
+            txn,
+        )
 
         route_changed, process_ids_changed = OrderService._process_sync_service().prepare_update(
             txn, oid, current_order['route_id'], data

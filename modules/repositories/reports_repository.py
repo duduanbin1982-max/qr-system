@@ -18,6 +18,17 @@ class ReportsRepository:
         return where, params
 
     @staticmethod
+    def _order_product_filter(product_code, order_alias="o"):
+        return (
+            f"({order_alias}.product_code = ? OR COALESCE({order_alias}.product_id, "
+            f"(SELECT a.product_id FROM product_code_aliases a "
+            f"WHERE a.product_code = {order_alias}.product_code)) = "
+            "(SELECT selected.product_id FROM product_code_aliases selected "
+            "WHERE selected.product_code = ?))",
+            [product_code, product_code],
+        )
+
+    @staticmethod
     def worker_efficiency(start="", end="", product_code="", db=None):
         where = [
             "wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL)",
@@ -26,8 +37,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where.extend(date_where)
         if product_code:
-            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
+            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            where.append("wr.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
+            params.extend(clause_params)
         return ReportsRepository.fetch_worker_efficiency(" AND ".join(where), params, db=db)
 
     @staticmethod
@@ -39,8 +51,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where.extend(date_where)
         if product_code:
-            where.append("wr.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
+            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            where.append("wr.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
+            params.extend(clause_params)
         return ReportsRepository.fetch_quality_by_process(" AND ".join(where), params, db=db)
 
     @staticmethod
@@ -49,8 +62,12 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "qi", "inspected_at")
         where.extend(date_where)
         if product_code:
-            where.append("qi.product_code = ?")
-            params.append(product_code)
+            where.append(
+                "(qi.product_code = ? OR COALESCE((SELECT a.product_id FROM "
+                "product_code_aliases a WHERE a.product_code = qi.product_code), -1) = "
+                "COALESCE((SELECT a.product_id FROM product_code_aliases a WHERE a.product_code = ?), -2))"
+            )
+            params.extend([product_code, product_code])
         return ReportsRepository.fetch_quality_inspection_by_process(
             " AND ".join(where), params, db=db
         )
@@ -61,8 +78,9 @@ class ReportsRepository:
         order_dates, params = ReportsRepository._date_filter(start, end, "o")
         where.extend(order_dates)
         if product_code:
-            where.append("o.product_code = ?")
-            params.append(product_code)
+            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o")
+            where.append(clause)
+            params.extend(clause_params)
         item_dates, item_params = ReportsRepository._date_filter(start, end, "pi", "completed_at")
         scrap_dates, _ = ReportsRepository._date_filter(start, end, "sr")
         work_dates, _ = ReportsRepository._date_filter(start, end, "wr")
@@ -84,8 +102,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "mc")
         where = ["1=1", *date_where]
         if product_code:
-            where.append("mc.order_id IN (SELECT id FROM orders WHERE product_code = ?)")
-            params.append(product_code)
+            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            where.append("mc.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
+            params.extend(clause_params)
         date_sql = " AND ".join(date_where)
         date_params = params[:len(date_where)]
         return (
@@ -100,9 +119,10 @@ class ReportsRepository:
         if product_code:
             where.append(
                 "s.id IN (SELECT si.shipment_id FROM shipment_items si "
-                "JOIN orders o ON si.order_id=o.id WHERE o.product_code = ?)"
+                "JOIN orders o ON si.order_id=o.id WHERE "
+                + ReportsRepository._order_product_filter(product_code, "o")[0] + ")"
             )
-            params.append(product_code)
+            params.extend(ReportsRepository._order_product_filter(product_code, "o")[1])
         where_sql = " AND ".join(where)
         return (
             ReportsRepository.fetch_shipment_by_status(where_sql, params, db=db),
@@ -117,8 +137,11 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where = ["wr.status = 'approved'", "o.deleted_at IS NULL", *date_where]
         if product_code:
-            where.append("p.product_code = ?")
-            params.append(product_code)
+            where.append(
+                "(p.product_code = ? OR p.id = (SELECT a.product_id FROM "
+                "product_code_aliases a WHERE a.product_code = ?))"
+            )
+            params.extend([product_code, product_code])
         return ReportsRepository.fetch_product_process_matrix(" AND ".join(where), params, db=db)
 
     @staticmethod
@@ -210,14 +233,18 @@ class ReportsRepository:
             "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
             "COALESCE(SUM(o.quantity),0) as order_qty, "
             "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
             "COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
             "COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
             "COUNT(DISTINCT o.id) as order_count "
             "FROM products p "
-            "LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
+            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "WHERE " + where_clause + " GROUP BY p.id ORDER BY output DESC LIMIT 200",
             params + item_params + item_params + item_params
         ).fetchall()
@@ -231,7 +258,8 @@ class ReportsRepository:
             "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
             "WHERE o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as total_output "
             "FROM products p "
-            "LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
+            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "WHERE " + where_clause,
             params + item_params
         ).fetchone()
@@ -262,14 +290,18 @@ class ReportsRepository:
             "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
             "COALESCE(SUM(o.quantity),0) as order_qty, "
             "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
             "COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
             "COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id "
-            "WHERE o2.product_code=p.product_code AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
+            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
+            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
             "COUNT(DISTINCT o.id) as order_count "
             "FROM products p "
-            "LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
+            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "WHERE " + where_clause + " GROUP BY p.id ORDER BY output DESC LIMIT 200",
             params + item_params + item_params + item_params
         ).fetchall()
@@ -283,7 +315,8 @@ class ReportsRepository:
             "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
             "WHERE o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as total_output "
             "FROM products p "
-            "LEFT JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
+            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "WHERE " + where_clause,
             params + item_params
         ).fetchone()
@@ -376,7 +409,8 @@ class ReportsRepository:
             "pr.id as process_id, pr.name as process_name, pr.seq_order, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output "
             "FROM products p "
-            "JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "JOIN order_product_links opl ON opl.product_id=p.id "
+            "JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "JOIN work_records wr ON wr.order_id=o.id AND " + where_clause + " "
             "JOIN processes pr ON wr.process_id=pr.id "
             "GROUP BY p.product_code, p.product_name, p.model, p.spec, pr.id, pr.name, pr.seq_order "
@@ -393,7 +427,8 @@ class ReportsRepository:
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
             "FROM products p "
-            "JOIN orders o ON o.product_code=p.product_code AND o.deleted_at IS NULL "
+            "JOIN order_product_links opl ON opl.product_id=p.id "
+            "JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "JOIN work_records wr ON wr.order_id=o.id AND " + where_clause + " "
             "JOIN processes pr ON wr.process_id=pr.id "
             "GROUP BY p.model, pr.name ORDER BY output DESC",
@@ -420,7 +455,8 @@ class ReportsRepository:
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
             "FROM products p "
-            "JOIN orders o ON o.product_code=p.product_code "
+            "JOIN order_product_links opl ON opl.product_id=p.id "
+            "JOIN orders o ON o.id=opl.order_id "
             "JOIN work_records wr ON wr.order_id=o.id "
             "JOIN processes pr ON wr.process_id=pr.id "
             "WHERE " + where_clause + " GROUP BY p.product_code, pr.name ORDER BY p.product_code",

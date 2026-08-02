@@ -13,6 +13,22 @@ class StatsRepository:
     # Shared WHERE builders
     # ============================================================
     @staticmethod
+    def _append_product_filter(where_parts, params, product_code):
+        if not product_code:
+            return
+        where_parts.append(
+            "(o.product_code = ? OR "
+            "COALESCE(o.product_id, ("
+            "SELECT a.product_id FROM product_code_aliases a "
+            "WHERE a.product_code = o.product_code"
+            ")) = ("
+            "SELECT selected.product_id FROM product_code_aliases selected "
+            "WHERE selected.product_code = ?"
+            "))"
+        )
+        params.extend([product_code, product_code])
+
+    @staticmethod
     def _daily_where(date, product_code):
         period_start, period_end = reporting_day_bounds(date)
         where_parts = [
@@ -23,9 +39,7 @@ class StatsRepository:
             "o.status != 'cancelled'"
         ]
         params = [period_start, period_end]
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code)
         return " AND ".join(where_parts), params
 
     @staticmethod
@@ -38,9 +52,7 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(sr.created_at) <= ?")
             params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code)
         return " AND ".join(where_parts), params
 
     @staticmethod
@@ -53,9 +65,7 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(o.created_at) <= ?")
             params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code)
         return " AND ".join(where_parts), params
 
     @staticmethod
@@ -68,9 +78,7 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(wr.created_at) <= ?")
             params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code)
         return " AND ".join(where_parts), params
 
     # ============================================================
@@ -83,7 +91,7 @@ class StatsRepository:
         rows = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, wr.remark, "
             "wr.order_id, wr.process_id, "
-            "o.order_no, o.qr_mode, o.customer, o.product_code, "
+            "o.order_no, o.qr_mode, o.customer, o.product_code, opl.product_id, "
             "CASE WHEN o.qr_mode = 'serial' AND COALESCE(wr.serial_no, '') != '' "
             "THEN wr.serial_no ELSE o.order_no END as display_order_no, "
             "COALESCE(NULLIF(o.product_name, ''), prod.product_name, '') as product_name, "
@@ -104,7 +112,8 @@ class StatsRepository:
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
             "JOIN users u ON wr.user_id=u.id "
-            "LEFT JOIN products prod ON prod.product_code=o.product_code AND COALESCE(o.product_code, '') != '' "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
+            "LEFT JOIN products prod ON prod.id=opl.product_id "
             "LEFT JOIN process_routes route ON route.id=o.route_id "
             "LEFT JOIN departments dept ON dept.id=u.department_id "
             "LEFT JOIN positions pos ON pos.id=u.position_id "
@@ -126,9 +135,10 @@ class StatsRepository:
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework_quantity, "
             "COUNT(DISTINCT wr.user_id) as worker_count, "
             "COUNT(DISTINCT wr.order_id) as order_count, "
-            "COUNT(DISTINCT COALESCE(NULLIF(o.product_code, ''), o.product_name)) as product_count "
+            "COUNT(DISTINCT COALESCE(CAST(opl.product_id AS TEXT), NULLIF(o.product_code, ''), o.product_name)) as product_count "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
             "WHERE " + where_clause,
             params
         ).fetchone()
@@ -280,7 +290,8 @@ class StatsRepository:
             "SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END) AS scrap "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
-            "LEFT JOIN products pr ON o.product_code=pr.product_code AND pr.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
+            "LEFT JOIN products pr ON pr.id=opl.product_id AND pr.deleted_at IS NULL "
             "JOIN processes p ON wr.process_id=p.id "
             "WHERE " + w + " GROUP BY o.product_name, pr.model, pr.spec, p.id "
             "ORDER BY o.product_name, pr.model, p.name",

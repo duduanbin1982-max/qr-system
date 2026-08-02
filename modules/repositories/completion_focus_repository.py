@@ -50,8 +50,13 @@ class CompletionFocusRepository:
             scope_sql = "AND o.route_id = ?"
             params.append(route_id)
         elif product_code:
-            scope_sql = "AND COALESCE(o.product_code, '') = ?"
-            params.append(product_code)
+            scope_sql = (
+                "AND (COALESCE(o.product_code, '') = ? OR COALESCE(o.product_id, "
+                "(SELECT a.product_id FROM product_code_aliases a "
+                "WHERE a.product_code = o.product_code)) = "
+                "(SELECT a.product_id FROM product_code_aliases a WHERE a.product_code = ?))"
+            )
+            params.extend([product_code, product_code])
         return db.execute(
             f"""
             SELECT o.id, o.order_no, o.product_name, o.product_code, o.quantity,

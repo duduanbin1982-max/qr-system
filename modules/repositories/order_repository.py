@@ -201,7 +201,7 @@ class OrderRepository:
     def update_form_fields(order_id, changes, db=None):
         db = resolve_db(db)
         allowed = (
-            "order_no", "customer", "customer_id", "product_name", "product_code",
+            "order_no", "customer", "customer_id", "product_name", "product_code", "product_id",
             "quantity", "plan_start", "plan_end", "deadline", "remark", "status",
             "route_id", "production_line_id",
         )
@@ -273,12 +273,12 @@ class OrderRepository:
     def insert_from_order_form(data, db=None):
         db = resolve_db(db)
         cur = db.execute("""
-            INSERT INTO orders (order_no, customer, customer_id, product_name, quantity,
+            INSERT INTO orders (order_no, customer, customer_id, product_name, product_id, quantity,
                 plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
         """, (
             data["order_no"], data.get("customer", ""), data.get("customer_id"),
-            data.get("product_name", ""), data.get("quantity", 0),
+            data.get("product_name", ""), data.get("product_id"), data.get("quantity", 0),
             data.get("plan_start", ""), data.get("plan_end", ""), data.get("deadline", ""),
             data.get("extra_fields", "{}"), data.get("remark", ""), data.get("route_id"),
             data.get("product_code", ""), data.get("production_line_id")

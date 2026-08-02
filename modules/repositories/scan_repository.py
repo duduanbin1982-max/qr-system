@@ -28,7 +28,8 @@ class ScanRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec "
-            "FROM orders o LEFT JOIN products p ON o.product_code = p.product_code "
+            "FROM orders o LEFT JOIN order_product_links opl ON opl.order_id = o.id "
+            "LEFT JOIN products p ON p.id = opl.product_id "
             "WHERE o.id = ?",
             (order_id,)
         ).fetchone()

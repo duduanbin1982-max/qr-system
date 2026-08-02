@@ -33,6 +33,25 @@ PRODUCT_IMPORT_FIELD_ALIASES = {
 class ProductService:
     """产品管理业务逻辑。所有方法为静态方法，接受纯数据参数。"""
 
+    @staticmethod
+    def _ensure_code_alias(product_id, product_code, source, db):
+        product_code = (product_code or '').strip()
+        if not product_code:
+            return
+        existing = ProductRepository.find_code_alias(product_code, db=db)
+        if existing:
+            if existing['product_id'] != product_id:
+                raise ConflictError(
+                    f'产品编码 {product_code} 已是产品 {existing["product_id"]} 的历史编码'
+                )
+            return
+        ProductRepository.insert_code_alias(
+            product_id,
+            product_code,
+            source,
+            db=db,
+        )
+
     # ============================================================
     # 查询 — 列表
     # ============================================================
@@ -103,8 +122,13 @@ class ProductService:
             model = product_code
 
         with BaseService.transaction() as db:
-            if ProductRepository.exists_by_code(product_code, db=db):
+            if ProductRepository.find_by_code(product_code, db=db):
                 raise ConflictError(f'产品编码 {product_code} 已存在')
+            alias = ProductRepository.find_code_alias(product_code, db=db)
+            if alias:
+                raise ConflictError(
+                    f'产品编码 {product_code} 已是产品 {alias["product_id"]} 的历史编码'
+                )
 
             insert_data = {
                 'product_name': name,
@@ -121,6 +145,7 @@ class ProductService:
                 'route_id': data.get('route_id') or None
             }
             pid = ProductRepository.insert(insert_data, db=db)
+            ProductService._ensure_code_alias(pid, product_code, 'current', db)
             return pid, product_code
 
     # ============================================================
@@ -142,12 +167,8 @@ class ProductService:
         Raises:
             ValueError: 产品不存在、无更新内容、编码重复
         """
-        prod = ProductRepository.find_with_fields(pid)
-        if not prod:
-            raise NotFoundError('产品不存在')
-
         allowed = ['product_name', 'model', 'spec', 'style', 'upper_opening',
-                   'plate_thickness', 'category', 'price', 'weight',
+                   'lower_opening', 'plate_thickness', 'category', 'price', 'weight',
                    'description', 'route_id']
         sets = []
         params = []
@@ -161,35 +182,50 @@ class ProductService:
 
         sets.append('updated_at = datetime("now","localtime")')
 
-        # 检查编码是否会重复
-        key_fields = {'product_name', 'model', 'spec', 'upper_opening',
-                      'lower_opening', 'plate_thickness', 'style'}
-        new_code = None
-        if key_fields & set(data.keys()):
-            nm = data.get('product_name', prod['product_name'])
-            md = data.get('model', prod['model'])
-            sp = data.get('spec', prod['spec'])
-            up = data.get('upper_opening', prod['upper_opening'])
-            th = data.get('plate_thickness', prod['plate_thickness'])
-            st = data.get('style', prod['style'] or '')
-            lo = data.get('lower_opening', dict(prod).get('lower_opening', ''))
-            cat = data.get('category', dict(prod).get('category', '结构件'))
-            new_code = generate_product_code(nm, md, sp, up, th, st, lower_opening=lo, category=cat)
-
         with BaseService.transaction() as txn:
+            prod = ProductRepository.find_with_fields(pid, db=txn)
+            if not prod:
+                raise NotFoundError('产品不存在')
+
+            key_fields = {'product_name', 'model', 'spec', 'upper_opening',
+                          'lower_opening', 'plate_thickness', 'style', 'category'}
+            new_code = None
+            if key_fields & set(data.keys()):
+                new_code = generate_product_code(
+                    data.get('product_name', prod['product_name']),
+                    data.get('model', prod['model']),
+                    data.get('spec', prod['spec']),
+                    data.get('upper_opening', prod['upper_opening']),
+                    data.get('plate_thickness', prod['plate_thickness']),
+                    data.get('style', prod['style'] or ''),
+                    lower_opening=data.get('lower_opening', prod['lower_opening']),
+                    category=data.get('category', prod['category']),
+                )
+
             # 在事务内检查唯一性，消除 TOCTOU 竞态
             if new_code:
                 dup = ProductRepository.find_by_code_exclude(new_code, pid, db=txn)
                 if dup:
                     raise ConflictError(f'产品编码 {new_code} 已被其他产品使用，修改后会导致重复')
+                alias = ProductRepository.find_code_alias(new_code, db=txn)
+                if alias and alias['product_id'] != pid:
+                    raise ConflictError(
+                        f'产品编码 {new_code} 已是产品 {alias["product_id"]} 的历史编码'
+                    )
+
+            old_code = prod['product_code'] or ''
+            ProductService._ensure_code_alias(pid, old_code, 'product_update', txn)
 
             ProductRepository.update(pid, sets, params, db=txn)
 
             # 如果关键字段变了，重新生成编码
-            if new_code:
+            if new_code and new_code != old_code:
                 ProductRepository.update_product_code(pid, new_code, db=txn)
+            current_code = new_code or old_code
+            ProductService._ensure_code_alias(pid, current_code, 'current', txn)
+            ProductRepository.link_unresolved_orders(pid, db=txn)
 
-        return ProductRepository.get_product_code(pid)
+        return current_code
 
     # ============================================================
     # 删除
@@ -198,7 +234,7 @@ class ProductService:
         prod = ProductRepository.find_active_identity(pid)
         if not prod:
             raise NotFoundError("Product not found")
-        used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
+        used = ProductRepository.count_orders_referencing_product(pid)
         return {"product": dict(prod), "used_in_orders": used}
 
     # ============================================================    # ============================================================
@@ -215,7 +251,7 @@ class ProductService:
         if not prod:
             raise NotFoundError('产品不存在')
 
-        used = ProductRepository.count_by_product_code_in_orders(prod['product_code'])
+        used = ProductRepository.count_orders_referencing_product(pid)
         if used > 0:
             raise ConflictError(f'该产品已被 {used} 个订单使用，无法删除')
 
@@ -240,7 +276,7 @@ class ProductService:
             raise NotFoundError("product not found")
         if not prod.get("deleted_at"):
             raise ConflictError("only soft-deleted products can be purged")
-        used = ProductRepository.count_by_product_code_in_orders(prod["product_code"])
+        used = ProductRepository.count_orders_referencing_product(pid)
         if used > 0:
             raise ConflictError("product referenced by " + str(used) + " orders, cannot purge")
         with BaseService.transaction() as txn:
@@ -333,9 +369,21 @@ class ProductService:
             if existing.get("deleted_at"):
                 return False, f'第{row_index}行：{product_code}({name})的编码与已删除产品重复，请先联系管理员恢复'
             return False, f'第{row_index}行：{product_code}({name})已存在，跳过'
+        alias = ProductRepository.find_code_alias(product_code, db=txn)
+        if alias:
+            return False, (
+                f'第{row_index}行：{product_code}({name})是产品'
+                f'{alias["product_id"]}的历史编码，跳过'
+            )
 
         try:
-            ProductRepository.insert(payload, db=txn)
+            product_id = ProductRepository.insert(payload, db=txn)
+            ProductService._ensure_code_alias(
+                product_id,
+                product_code,
+                'current',
+                txn,
+            )
             return True, None
         except Exception as e:
             return False, f'第{row_index}行：入库失败 - {e}'

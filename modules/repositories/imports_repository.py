@@ -12,9 +12,9 @@ class ImportsRepository:
     @staticmethod
     def insert_order_txn(data, db):
         cur = db.execute(
-            "INSERT INTO orders (order_no, product_name, product_code, customer, quantity, "
-            "status, plan_start, plan_end, deadline, remark) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (data["order_no"], data.get("product_name",""), data.get("product_code",""),
+            "INSERT INTO orders (order_no, product_name, product_id, product_code, customer, quantity, "
+            "status, plan_start, plan_end, deadline, remark) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (data["order_no"], data.get("product_name",""), data.get("product_id"), data.get("product_code",""),
              data.get("customer",""), data.get("quantity",0), data.get("status","pending"),
              data.get("plan_start",""), data.get("plan_end",""), data.get("deadline",""),
              data.get("remark",""))
