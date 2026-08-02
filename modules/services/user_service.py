@@ -603,8 +603,11 @@ class UserService:
         if ext:
             safe_name += "." + ext
         filepath = os.path.join(upload_dir, safe_name)
-        file_storage.save(filepath)
-        file_size = os.path.getsize(filepath)
+        file_size = 0
+        with open(filepath, "wb") as target:
+            while chunk := file_storage.stream.read(64 * 1024):
+                target.write(chunk)
+                file_size += len(chunk)
         with BaseService.transaction() as txn:
             UserRepository.insert_user_document_txn(
                 uid, file_storage.filename, doc_type, safe_name, file_size, uploaded_by, db=txn

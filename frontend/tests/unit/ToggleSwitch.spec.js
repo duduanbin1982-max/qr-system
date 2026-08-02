@@ -10,7 +10,7 @@ describe('ToggleSwitch', () => {
       props: { modelValue: 0, label: '启用强拦截' },
     })
 
-    await wrapper.find('label > span:last-child').trigger('click')
+    await wrapper.findAll('label > span')[1].trigger('click')
 
     expect(wrapper.emitted('update:modelValue')).toEqual([[1]])
   })

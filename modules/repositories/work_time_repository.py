@@ -1,5 +1,6 @@
 """Work time management data access."""
 
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 from modules.domain.reporting_day import reporting_day_bounds
 
@@ -471,12 +472,11 @@ class WorkTimeRepository:
         params = [period_start, period_end]
         product_code = (product_code or '').strip()
         if product_code:
-            where.append(
-                "(wr.product_code = ? OR o.product_code = ? OR "
-                "opl.product_id = "
-                "(SELECT a.product_id FROM product_code_aliases a WHERE a.product_code = ?))"
-            )
-            params.extend([product_code, product_code, product_code])
+            clause, clause_params = ProductQueryFilter.resolve(
+                db, product_code
+            ).order_or_snapshot_clause("o", "wr.product_code")
+            where.append(clause)
+            params.extend(clause_params)
         where_clause = " AND ".join(where)
         row = db.execute(
             "SELECT COUNT(*) AS record_count, "

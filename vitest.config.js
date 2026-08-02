@@ -7,18 +7,18 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'frontend/src'),
+      '@': resolve(import.meta.dirname, 'frontend/src'),
     },
   },
   test: {
     environment: 'jsdom',
     include: ['frontend/tests/unit/**/*.spec.js'],
-    setupFiles: [resolve(__dirname, 'frontend/tests/setup.js')],
+    setupFiles: [resolve(import.meta.dirname, 'frontend/tests/setup.js')],
     clearMocks: true,
     restoreMocks: true,
     coverage: {
       provider: 'v8',
-      reportsDirectory: resolve(__dirname, 'coverage/frontend'),
+      reportsDirectory: resolve(import.meta.dirname, 'coverage/frontend'),
       reporter: ['text', 'json-summary', 'html'],
       include: ['frontend/src/**/*.{js,vue}'],
       exclude: ['frontend/src/lib/permissionFallback.generated.js'],

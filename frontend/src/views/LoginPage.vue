@@ -64,8 +64,8 @@
 <script>
 import { ref } from 'vue'
 import { auth, login, changePassword } from '@/lib/auth.js'
-import { navigate } from '@/lib/router.js'
-import { getLandingPage } from '@/lib/permissions.js'
+import { navigate, requestedNavigation } from '@/lib/router.js'
+import { canOpenPage, getLandingPage } from '@/lib/permissions.js'
 
 export default {
   setup(props, { emit }) {
@@ -77,6 +77,16 @@ export default {
     const error = ref('')
     const loading = ref(false)
     const showChangePassword = ref(false)
+
+    function postLoginPage() {
+      const requested = requestedNavigation()
+      if (requested.settingsTab) {
+        localStorage.setItem('settingsTab', requested.settingsTab)
+      }
+      return requested.page && canOpenPage(auth.user, requested.page)
+        ? requested.page
+        : getLandingPage(auth.user)
+    }
     
     async function handleSubmit() {
       if (!username.value || !password.value) {
@@ -91,7 +101,7 @@ export default {
           showChangePassword.value = true
           error.value = ''
         } else {
-          navigate(getLandingPage(auth.user))
+          navigate(postLoginPage())
         }
       } catch(e) {
         error.value = e.message || '登录失败'
@@ -113,7 +123,7 @@ export default {
       error.value = ''
       try {
         await changePassword(newPassword.value)
-        navigate(getLandingPage(auth.user))
+        navigate(postLoginPage())
       } catch(e) {
         error.value = e.message || '修改密码失败'
       } finally {

@@ -1,4 +1,5 @@
 """qr-system — ReportsRepository（报表数据访问层）"""
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 
 
@@ -18,15 +19,8 @@ class ReportsRepository:
         return where, params
 
     @staticmethod
-    def _order_product_filter(product_code, order_alias="o"):
-        return (
-            f"({order_alias}.product_code = ? OR COALESCE({order_alias}.product_id, "
-            f"(SELECT a.product_id FROM product_code_aliases a "
-            f"WHERE a.product_code = {order_alias}.product_code)) = "
-            "(SELECT selected.product_id FROM product_code_aliases selected "
-            "WHERE selected.product_code = ?))",
-            [product_code, product_code],
-        )
+    def _product_filter(product_code, db=None):
+        return ProductQueryFilter.resolve(resolve_db(db), product_code)
 
     @staticmethod
     def worker_efficiency(start="", end="", product_code="", db=None):
@@ -37,7 +31,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where.extend(date_where)
         if product_code:
-            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).order_clause("o2")
             where.append("wr.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
             params.extend(clause_params)
         return ReportsRepository.fetch_worker_efficiency(" AND ".join(where), params, db=db)
@@ -51,7 +47,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where.extend(date_where)
         if product_code:
-            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).order_clause("o2")
             where.append("wr.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
             params.extend(clause_params)
         return ReportsRepository.fetch_quality_by_process(" AND ".join(where), params, db=db)
@@ -62,12 +60,11 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "qi", "inspected_at")
         where.extend(date_where)
         if product_code:
-            where.append(
-                "(qi.product_code = ? OR COALESCE((SELECT a.product_id FROM "
-                "product_code_aliases a WHERE a.product_code = qi.product_code), -1) = "
-                "COALESCE((SELECT a.product_id FROM product_code_aliases a WHERE a.product_code = ?), -2))"
-            )
-            params.extend([product_code, product_code])
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).snapshot_clause("qi.product_code")
+            where.append(clause)
+            params.extend(clause_params)
         return ReportsRepository.fetch_quality_inspection_by_process(
             " AND ".join(where), params, db=db
         )
@@ -78,7 +75,9 @@ class ReportsRepository:
         order_dates, params = ReportsRepository._date_filter(start, end, "o")
         where.extend(order_dates)
         if product_code:
-            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o")
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).order_clause("o")
             where.append(clause)
             params.extend(clause_params)
         item_dates, item_params = ReportsRepository._date_filter(start, end, "pi", "completed_at")
@@ -102,7 +101,9 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "mc")
         where = ["1=1", *date_where]
         if product_code:
-            clause, clause_params = ReportsRepository._order_product_filter(product_code, "o2")
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).order_clause("o2")
             where.append("mc.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
             params.extend(clause_params)
         date_sql = " AND ".join(date_where)
@@ -117,12 +118,15 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "s")
         where = ["1=1", *date_where]
         if product_code:
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).order_clause("o")
             where.append(
                 "s.id IN (SELECT si.shipment_id FROM shipment_items si "
                 "JOIN orders o ON si.order_id=o.id WHERE "
-                + ReportsRepository._order_product_filter(product_code, "o")[0] + ")"
+                + clause + ")"
             )
-            params.extend(ReportsRepository._order_product_filter(product_code, "o")[1])
+            params.extend(clause_params)
         where_sql = " AND ".join(where)
         return (
             ReportsRepository.fetch_shipment_by_status(where_sql, params, db=db),
@@ -137,11 +141,11 @@ class ReportsRepository:
         date_where, params = ReportsRepository._date_filter(start, end, "wr")
         where = ["wr.status = 'approved'", "o.deleted_at IS NULL", *date_where]
         if product_code:
-            where.append(
-                "(p.product_code = ? OR p.id = (SELECT a.product_id FROM "
-                "product_code_aliases a WHERE a.product_code = ?))"
-            )
-            params.extend([product_code, product_code])
+            clause, clause_params = ReportsRepository._product_filter(
+                product_code, db
+            ).product_clause("p")
+            where.append(clause)
+            params.extend(clause_params)
         return ReportsRepository.fetch_product_process_matrix(" AND ".join(where), params, db=db)
 
     @staticmethod

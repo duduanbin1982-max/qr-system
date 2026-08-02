@@ -350,5 +350,27 @@
       "suggestion": 2
     },
     "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 008f326; full architecture scan of 587 tracked files, 312 Python files, 169 frontend modules, mobile H5, deployment/operations, change history, and architecture/test seams"
+  },
+  {
+    "date": "2026-08-02T15:00:01+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 79,
+    "findings": {
+      "critical": 0,
+      "warning": 4,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 2e5f7db; full modules, frontend/src, reachable public pages, tests, dependencies, Git churn, and production runtime verification"
+  },
+  {
+    "date": "2026-08-02T16:42:00+08:00",
+    "mode": "Tech Debt Assessment",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "local remediation worktree over deployed HEAD 2e5f7db; full modules, frontend/src, reachable public pages, tests, dependencies, and deployment scripts; 490 backend tests, 40 frontend unit tests, 14 browser workflows, build/API/import/dependency checks"
   }
 ]

@@ -77,15 +77,13 @@ qr-system/
 │       ├── inventory.py     # 库存管理
 │       └── ...              # 其他路由
 ├── public/                  # 前端静态资源
-│   ├── index-v2.html        # 主页面
+│   ├── static/              # Vite 构建后的桌面端主应用
 │   ├── mobile.html          # 移动端扫码
+│   ├── mobile_inspection.html # 移动端检验
 │   ├── bigscreen.html       # 车间大屏
 │   ├── board.html           # 生产看板
-│   ├── audit-logs.html      # 操作日志
-│   ├── batch-qr.html        # 批量QR码
-│   ├── reports.html         # 报表页面
 │   ├── sw.js / offline.html # PWA 离线支持
-│   └── components/          # Vue 组件
+│   └── swagger-ui.html      # 可选 API 文档入口
 ├── scripts/
 │   ├── db-maintenance.py    # 数据库维护（VACUUM/清理）
 │   ├── backup-db.sh         # 数据库备份

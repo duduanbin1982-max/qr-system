@@ -4,7 +4,8 @@
 
 - `frontend/src` 是桌面端主应用入口，使用 Vue + Vite 构建，负责后台管理、角色权限、生产/库存/发货/质量等业务页面。
 - `public/mobile*.html` 是移动扫码入口，面向扫码报工、抽检提交等现场流程，当前仍保留为轻量页面。
-- `public/index.html`、`modules/routes/index-v2.html` 等旧入口仅作为兼容遗留入口，不应再承载新的后台管理功能。
+- `/reports.html`、`/audit-logs.html`、`/batch-qr.html` 仅保留为服务端 302 兼容跳转，分别进入 SPA 数据分析、操作日志和订单二维码功能；对应旧静态实现已删除。
+- 服务端只渲染明确列入白名单的独立 HTML，未知 `.html` 路径返回 404，避免静态 catch-all 重新引入第二套后台页面。
 
 ## 权限目录来源
 

@@ -2,6 +2,7 @@
 
 All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 from modules.domain.reporting_day import reporting_day_bounds
 
@@ -13,23 +14,17 @@ class StatsRepository:
     # Shared WHERE builders
     # ============================================================
     @staticmethod
-    def _append_product_filter(where_parts, params, product_code):
+    def _append_product_filter(where_parts, params, product_code, db):
         if not product_code:
             return
-        where_parts.append(
-            "(o.product_code = ? OR "
-            "COALESCE(o.product_id, ("
-            "SELECT a.product_id FROM product_code_aliases a "
-            "WHERE a.product_code = o.product_code"
-            ")) = ("
-            "SELECT selected.product_id FROM product_code_aliases selected "
-            "WHERE selected.product_code = ?"
-            "))"
-        )
-        params.extend([product_code, product_code])
+        clause, clause_params = ProductQueryFilter.resolve(
+            db, product_code
+        ).order_clause("o")
+        where_parts.append(clause)
+        params.extend(clause_params)
 
     @staticmethod
-    def _daily_where(date, product_code):
+    def _daily_where(date, product_code, db):
         period_start, period_end = reporting_day_bounds(date)
         where_parts = [
             "wr.status='approved'",
@@ -39,11 +34,11 @@ class StatsRepository:
             "o.status != 'cancelled'"
         ]
         params = [period_start, period_end]
-        StatsRepository._append_product_filter(where_parts, params, product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _scrap_where(start, end, product_code):
+    def _scrap_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
         if start:
@@ -52,11 +47,11 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(sr.created_at) <= ?")
             params.append(end)
-        StatsRepository._append_product_filter(where_parts, params, product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _order_progress_where(start, end, product_code):
+    def _order_progress_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status IN ('producing','pending','paused')"]
         params = []
         if start:
@@ -65,11 +60,11 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(o.created_at) <= ?")
             params.append(end)
-        StatsRepository._append_product_filter(where_parts, params, product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _worker_where(start, end, product_code):
+    def _worker_where(start, end, product_code, db):
         where_parts = ["wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
         if start:
@@ -78,7 +73,7 @@ class StatsRepository:
         if end:
             where_parts.append("DATE(wr.created_at) <= ?")
             params.append(end)
-        StatsRepository._append_product_filter(where_parts, params, product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     # ============================================================
@@ -87,7 +82,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_records(date, product_code, limit, offset, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         rows = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, wr.remark, "
             "wr.order_id, wr.process_id, "
@@ -126,7 +121,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_totals(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         row = db.execute(
             "SELECT COUNT(*) as record_count, "
             "COALESCE(SUM(wr.quantity),0) as total_quantity, "
@@ -147,7 +142,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_summary(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         rows = db.execute(
             "SELECT p.id, p.name, COUNT(*) as record_count, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output, "
@@ -166,7 +161,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_count(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         return db.execute(
             "SELECT COUNT(*) FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
@@ -180,7 +175,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_records(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT sr.id, sr.created_at, sr.quantity, sr.reason, "
             "o.order_no, o.product_name, p.name as process_name, "
@@ -197,7 +192,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_summary(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         return dict(db.execute(
             "SELECT COUNT(*) as total_records, "
             "COALESCE(SUM(sr.quantity),0) as total_qty, "
@@ -211,7 +206,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_by_process(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT p.name, COUNT(*) as cnt, COALESCE(SUM(sr.quantity),0) as qty "
             "FROM scrap_records sr "
@@ -229,7 +224,7 @@ class StatsRepository:
     @staticmethod
     def get_order_progress(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._order_progress_where(start, end, product_code)
+        w, params = StatsRepository._order_progress_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT o.id, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer, "
@@ -252,7 +247,7 @@ class StatsRepository:
         allowed = {"quantity": "total_output", "name": "name", "scrap": "total_scrap", "rework": "total_rework"}
         col = allowed.get(sort_by, "total_output")
         direction = "DESC" if sort_dir == "desc" else "ASC"
-        where_clause, params = StatsRepository._worker_where(start, end, product_code)
+        where_clause, params = StatsRepository._worker_where(start, end, product_code, db)
         # Worker filter removed - admins cannot scan work per mobile module
         rows = db.execute(
             "SELECT u.id as id, u.name as name, u.employee_no, "

@@ -3,6 +3,10 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.19 <21"
+  },
+  "packageManager": "npm@10.8.2",
   "scripts": {
     "dev": "vite",
     "check:api": "node frontend/scripts/check-api-facade.mjs",
@@ -16,17 +20,20 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@playwright/test": "^1.53.2",
-    "@vitejs/plugin-vue": "^6.0.7",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@playwright/test": "1.62.1",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vitest/coverage-v8": "4.1.10",
     "@vue/test-utils": "^2.4.6",
-    "jsdom": "^25.0.1",
-    "vite": "^5.0.0",
-    "vitest": "^2.1.9",
+    "jsdom": "29.1.1",
+    "vite": "8.2.0",
+    "vitest": "4.1.10",
     "vue": "^3.5.38"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
     "html2canvas": "^1.4.1"
+  },
+  "overrides": {
+    "brace-expansion": "2.1.3"
   }
 }

@@ -1,7 +1,7 @@
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { navigate, restoreNavState, router } from '@/lib/router.js'
+import { navigate, requestedNavigation, restoreNavState, router } from '@/lib/router.js'
 
 
 describe('navigation state', () => {
@@ -27,5 +27,13 @@ describe('navigation state', () => {
 
     expect(router.subPage).toBe('roles')
     expect(router.tab).toBe('daily')
+  })
+
+  it('parses legacy entrypoint navigation without mutating router state', () => {
+    expect(requestedNavigation('?page=settings&settings_tab=audit-logs')).toEqual({
+      page: 'settings',
+      settingsTab: 'audit-logs',
+    })
+    expect(router.page).toBe('login')
   })
 })

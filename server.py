@@ -7,7 +7,7 @@ Flask + SQLite，内网部署。路由通过模块化装饰器注册。
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import render_template, make_response, g
+from flask import abort, g, make_response, redirect, render_template
 from modules.app import app
 from modules.config import PUBLIC_DIR
 from modules.db import close_db
@@ -25,6 +25,22 @@ register_routes()
 # ============================================================
 # Static files
 # ============================================================
+LEGACY_PAGE_REDIRECTS = {
+    "reports.html": "/?page=reports",
+    "audit-logs.html": "/?page=settings&settings_tab=audit-logs",
+    "batch-qr.html": "/?page=orders",
+}
+
+STANDALONE_HTML_PAGES = frozenset({
+    "mobile.html",
+    "mobile_inspection.html",
+    "board.html",
+    "bigscreen.html",
+    "offline.html",
+    "swagger-ui.html",
+})
+
+
 @app.route('/')
 def index():
     resp = make_response(render_template('static/index.html', nonce=getattr(g, 'csp_nonce', '')))
@@ -35,13 +51,16 @@ def index():
 
 @app.route('/<path:filename>')
 def static_files(filename):
-    """Serve static assets (js/, css/, vendor/, etc.) from PUBLIC_DIR.
-    
-    Safety: reject paths starting with 'api/' to prevent shadowing API routes.
-    HTML files are rendered as Jinja2 templates for CSP nonce injection.
-    """
+    """Serve explicit HTML entrypoints and static assets from PUBLIC_DIR."""
     if filename.startswith('api/') or filename.startswith('api'):
-        from flask import abort
+        abort(404)
+    if filename in LEGACY_PAGE_REDIRECTS:
+        return redirect(LEGACY_PAGE_REDIRECTS[filename], code=302)
+    if (
+        filename.endswith('.html')
+        and filename not in STANDALONE_HTML_PAGES
+        and filename not in ('index.html', 'index-v3.html')
+    ):
         abort(404)
     try:
         if filename in ('index.html', 'index-v3.html'):
@@ -55,7 +74,6 @@ def static_files(filename):
         resp.headers['Expires'] = '0'
         return resp
     except Exception:
-        from flask import abort
         abort(404)
 
 # ============================================================
