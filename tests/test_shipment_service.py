@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from openpyxl import load_workbook
@@ -352,3 +354,115 @@ def test_export_is_not_limited_by_page_size(client):
         db.commit()
         workbook = load_workbook(ShipmentService.export_shipments())
         assert workbook.active.max_row == 502
+
+
+def test_unlinked_inventory_requires_explicit_permission(client):
+    with client.application.app_context():
+        db = get_db()
+        inventory_id = create_inventory_item(
+            db, quantity=3, order_id=None, product_model="UNLINKED-001",
+            product_name="无订单库存",
+        )
+        payload = _shipment_payload(None, "", inventory_id, quantity=1)
+        with pytest.raises(ConflictError, match="无订单发货"):
+            ShipmentService.create_shipment(payload, created_by=CURRENT_USER)
+
+        shipment_id, _ = ShipmentService.create_shipment(
+            payload, created_by=CURRENT_USER, allow_unlinked=True
+        )
+        item = ShipmentService.get_shipment(shipment_id)["items"][0]
+        assert item["order_id"] is None
+        assert item["product_code"] == "UNLINKED-001"
+
+
+def test_shipment_events_are_immutable(client):
+    with client.application.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(order_id, order_no, inventory_id), created_by=CURRENT_USER
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE shipment_events SET operator_name='changed' WHERE shipment_id=?",
+                (shipment_id,),
+            )
+        db.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute("DELETE FROM shipment_events WHERE shipment_id=?", (shipment_id,))
+        db.rollback()
+
+
+def test_concurrent_complete_and_cancel_cannot_corrupt_inventory(client):
+    app = client.application
+    with app.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db, quantity=5)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(order_id, order_no, inventory_id, quantity=5),
+            created_by=CURRENT_USER,
+        )
+        _pass_outgoing_inspection(shipment_id)
+
+    barrier = threading.Barrier(2)
+
+    def run(action):
+        with app.app_context():
+            barrier.wait()
+            try:
+                if action == "complete":
+                    ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
+                else:
+                    ShipmentService.cancel_shipment(
+                        shipment_id, CURRENT_USER, "并发取消测试"
+                    )
+                return "success"
+            except ValueError:
+                return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(run, ("complete", "cancel")))
+
+    with app.app_context():
+        db = get_db()
+        shipment = ShipmentService.get_shipment(shipment_id)
+        assert shipment["status"] in ("cancelled", "reversed")
+        assert db.execute(
+            "SELECT quantity FROM inventory WHERE id=?", (inventory_id,)
+        ).fetchone()["quantity"] == 5
+        assert "success" in results
+
+
+def test_concurrent_receipts_serialize_against_receivable(client):
+    app = client.application
+    with app.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(order_id, order_no, inventory_id), created_by=CURRENT_USER
+        )
+        _pass_outgoing_inspection(shipment_id)
+        ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
+
+    barrier = threading.Barrier(2)
+
+    def receive(key):
+        with app.app_context():
+            barrier.wait()
+            try:
+                ShipmentService.record_payment(
+                    shipment_id, CURRENT_USER, 60, idempotency_key=key
+                )
+                return "success"
+            except ConflictError:
+                return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(receive, ("concurrent-receipt-1", "concurrent-receipt-2")))
+
+    with app.app_context():
+        shipment = ShipmentService.get_shipment(shipment_id)
+        assert sorted(results) == ["conflict", "success"]
+        assert shipment["paid_amount"] == 60
+        assert shipment["payment_status"] == "partial"
+        assert len(shipment["payments"]) == 1
