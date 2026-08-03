@@ -372,5 +372,27 @@
       "suggestion": 0
     },
     "scope": "local remediation worktree over deployed HEAD 2e5f7db; full modules, frontend/src, reachable public pages, tests, dependencies, and deployment scripts; 490 backend tests, 40 frontend unit tests, 14 browser workflows, build/API/import/dependency checks"
+  },
+  {
+    "date": "2026-08-02T20:12:22+08:00",
+    "mode": "Test Quality Review",
+    "score": 93,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 2
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD 1102eb2; 58 backend test files/491 tests, 19 frontend unit files/40 tests, 4 E2E files/14 tests, full-suite runtime 74.53s, fixture/mock/assertion scans and changed shipment/frontend paths"
+  },
+  {
+    "date": "2026-08-02T21:16:34+08:00",
+    "mode": "Health Dashboard",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system HEAD 1102eb22; architecture, debt, PR diff, and test-quality scans with 492 backend tests, 49 frontend unit tests, 15 E2E tests, build/API/import checks, and live /api/health verification"
   }
 ]

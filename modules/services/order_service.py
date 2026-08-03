@@ -165,6 +165,52 @@ class OrderService:
             "production_line_id": data.get('production_line_id'),
         }
 
+    @classmethod
+    def _prepare_create_context(cls, data):
+        """Resolve request-level values before opening the create transaction."""
+        order_no = data.get('order_no', '').strip()
+        if not order_no:
+            order_no = cls._generate_order_no(cls._unit_of_work().db())
+        customer_id = data.get('customer_id')
+        customer = cls._resolve_customer_name(customer_id, data.get('customer'))
+        process_ids = data.get('process_ids', [])
+        return order_no, customer_id, customer, process_ids
+
+    @classmethod
+    def _allocate_create_order_no(cls, order_no, txn, repository):
+        """Keep a requested order number when free, otherwise allocate a fresh one."""
+        for _ in range(5):
+            if not repository.exists_by_order_no(order_no, db=txn):
+                return order_no
+            order_no = cls._generate_order_no(txn)
+        raise ValueError('订单号冲突，请重试（已重试5次）')
+
+    @classmethod
+    def _persist_created_order(
+        cls,
+        txn,
+        normalized_data,
+        order_no,
+        customer_id,
+        customer,
+        process_ids,
+        repository,
+    ):
+        """Persist the order aggregate and snapshots atomically."""
+        route_id = normalized_data.get('route_id')
+        extra = cls._create_order_extra(normalized_data)
+        payload = cls._build_create_payload(
+            normalized_data, order_no, customer, customer_id, route_id, extra
+        )
+        order_id = repository.insert_from_order_form(payload, db=txn)
+        cls._assign_processes(txn, order_id, route_id, process_ids)
+        cls._material_snapshot_service().copy_product_bom(
+            order_id,
+            normalized_data.get('product_id'),
+            txn,
+        )
+        return order_id
+
     # ============================================================
     # 查询
     # ============================================================
@@ -285,42 +331,27 @@ class OrderService:
             ValueError: 订单号冲突
             RuntimeError: 数据库错误
         """
-        order_no = data.get('order_no', '').strip()
-        if not order_no:
-            db = OrderService._unit_of_work().db()
-            order_no = OrderService._generate_order_no(db)
-
-        route_id = data.get('route_id')
-        customer_id = data.get('customer_id')
-        customer = OrderService._resolve_customer_name(customer_id, data.get('customer'))
-        process_ids = data.get('process_ids', [])
-
+        order_no, customer_id, customer, process_ids = OrderService._prepare_create_context(data)
         repository = OrderService._repository()
         with OrderService._unit_of_work().transaction() as txn:
             normalized_data = OrderService._product_identity_service().normalize_create(
                 data,
                 txn,
             )
-            route_id = normalized_data.get('route_id')
-            extra = OrderService._create_order_extra(normalized_data)
-            # 冲突检查 + 自动重试（最多5次）
-            for _ in range(5):
-                existing = repository.exists_by_order_no(order_no, db=txn)
-                if not existing:
-                    break
-                order_no = OrderService._generate_order_no(txn)
-            else:
-                raise ValueError('订单号冲突，请重试（已重试5次）')
-
-            payload = OrderService._build_create_payload(
-                normalized_data, order_no, customer, customer_id, route_id, extra
+            order_no = OrderService._allocate_create_order_no(
+                order_no,
+                txn,
+                repository,
             )
-            order_id = repository.insert_from_order_form(payload, db=txn)
-            OrderService._assign_processes(txn, order_id, route_id, process_ids)
-
-            snapshot_service = OrderService._material_snapshot_service()
-            product_id = normalized_data.get('product_id')
-            snapshot_service.copy_product_bom(order_id, product_id, txn)
+            order_id = OrderService._persist_created_order(
+                txn,
+                normalized_data,
+                order_no,
+                customer_id,
+                customer,
+                process_ids,
+                repository,
+            )
 
         return order_id, order_no
 

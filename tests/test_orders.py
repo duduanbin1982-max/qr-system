@@ -1,6 +1,14 @@
 """Order management specific tests — covers all 12 endpoints"""
 import json, time, pytest, uuid
-from factories import TEST_HASH, TEST_PASS, ensure_user
+from factories import (
+    TEST_HASH,
+    TEST_PASS,
+    add_product_bom,
+    create_material,
+    ensure_process,
+    ensure_product,
+    ensure_user,
+)
 
 
 def _set_order_status(client, order_id, status):
@@ -211,6 +219,107 @@ class TestOrderCRUD:
             "quantity": 10
         })
         assert resp.status_code == 200
+
+    def test_duplicate_order_number_is_reallocated(self, client, auth_headers):
+        order_no = f"TEST-DUPLICATE-{uuid.uuid4().hex[:8].upper()}"
+        payload = {
+            "order_no": order_no,
+            "customer": "Duplicate Customer",
+            "product_name": "Duplicate Product",
+            "quantity": 1,
+        }
+
+        first = client.post("/api/orders", headers=auth_headers, json=payload)
+        second = client.post("/api/orders", headers=auth_headers, json=payload)
+
+        assert first.status_code == 200, first.get_json()
+        assert second.status_code == 200, second.get_json()
+        first_id = first.get_json()["id"]
+        second_id = second.get_json()["id"]
+        with client.application.app_context():
+            from modules.db import get_db
+
+            rows = get_db().execute(
+                "SELECT order_no FROM orders WHERE id IN (?, ?)",
+                (first_id, second_id),
+            ).fetchall()
+        order_numbers = {row["order_no"] for row in rows}
+        assert len(order_numbers) == 2
+        assert order_no in order_numbers
+
+    def test_create_order_copies_product_bom_snapshot(self, client):
+        from modules.db import get_db
+        from modules.services.order_service import OrderService
+
+        suffix = uuid.uuid4().hex[:8].upper()
+        product_code = f"ORDER-BOM-{suffix}"
+        with client.application.app_context():
+            db = get_db()
+            process_id = ensure_process(db, name=f"Order BOM Process {suffix}")
+            product_id = ensure_product(
+                db,
+                product_code=product_code,
+                product_name=f"Order BOM Product {suffix}",
+            )
+            material_id = create_material(db, name=f"Order BOM Material {suffix}")
+            add_product_bom(
+                db,
+                product_id,
+                material_id,
+                process_id,
+                quantity_per_unit=2.5,
+            )
+            db.commit()
+
+            order_id, _order_no = OrderService.create_order(
+                {
+                    "order_no": f"ORDER-BOM-{suffix}",
+                    "product_id": product_id,
+                    "product_code": product_code,
+                    "quantity": 4,
+                    "process_ids": [process_id],
+                }
+            )
+            snapshot = db.execute(
+                "SELECT material_id, process_id, quantity_per_unit, source "
+                "FROM order_materials WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+
+        assert tuple(snapshot) == (material_id, process_id, 2.5, "auto")
+
+    def test_create_order_rolls_back_when_process_assignment_fails(
+        self, client, monkeypatch
+    ):
+        from modules.db import get_db
+        from modules.services.order_service import OrderService
+
+        order_no = f"TEST-ROLLBACK-{uuid.uuid4().hex[:8].upper()}"
+
+        def fail_assignment(*_args, **_kwargs):
+            raise RuntimeError("process assignment failed")
+
+        monkeypatch.setattr(
+            OrderService,
+            "_assign_processes",
+            staticmethod(fail_assignment),
+        )
+
+        with client.application.app_context():
+            with pytest.raises(RuntimeError, match="process assignment failed"):
+                OrderService.create_order(
+                    {
+                        "order_no": order_no,
+                        "product_name": "Rollback Product",
+                        "quantity": 1,
+                    }
+                )
+            row = get_db().execute(
+                "SELECT id FROM orders WHERE order_no = ?",
+                (order_no,),
+            ).fetchone()
+
+        assert row is None
 
     def test_update_order(self, client, auth_headers, test_order_id):
         resp = client.put(f"/api/orders/{test_order_id}", headers=auth_headers, json={
