@@ -11,18 +11,6 @@ export const TABS = [
 ]
 
 export const TABS_WITH_DATE = ["daily", "worker", "scrap", "matrix", "product", "shipment", "material", "customer"]
-export const TABS_WITH_PRODUCT = ["worker", "product", "material"]
+export const TABS_WITH_PRODUCT = ["worker", "product", "shipment", "material"]
 
-export function exportCSV(data, filename) {
-  const BOM = "﻿"
-  const csv = BOM + data.map(row => row.map(c => {
-    const s = String(c == null ? "" : c)
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
-  }).join(",")).join("\n")
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url; a.download = filename + ".csv"
-  a.click(); URL.revokeObjectURL(url)
-}
-export { statusLabel, buildParams, createLoader, createExporter } from "@/lib/report-utils.js"
+export { statusLabel, buildParams, exportCSV, createLoader, createExporter } from "@/lib/report-utils.js"

@@ -125,6 +125,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { exportCSV } from './shared.js'
 
 export default {
   props: { start: String, end: String, productCode: String },
@@ -167,12 +168,7 @@ export default {
         const q=qiByProcess.value.find(x=>x.name===p.name)||{}
         rows.push([p.name,p.output||0,p.scrap||0,p.rework||0,p.defect_rate+'%',q.total_inspections||0,q.pass_count||0,q.fail_count||0])
       })
-      const csv=rows.map(r=>r.join(',')).join('\n')
-      const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'})
-      const url=URL.createObjectURL(blob)
-      const a=document.createElement('a')
-      a.href=url; a.download='品质分析_'+new Date().toISOString().slice(0,10)+'.csv'
-      a.click(); URL.revokeObjectURL(url)
+      exportCSV(rows, '品质分析_'+new Date().toISOString().slice(0,10))
     }
 
     function renderPie() {

@@ -4,7 +4,7 @@ All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
-from modules.domain.reporting_day import reporting_day_bounds
+from modules.domain.reporting_day import reporting_day_bounds, reporting_range_bounds
 
 
 class StatsRepository:
@@ -24,6 +24,16 @@ class StatsRepository:
         params.extend(clause_params)
 
     @staticmethod
+    def _append_reporting_range(where_parts, params, start, end, field):
+        period_start, period_end = reporting_range_bounds(start, end)
+        if period_start:
+            where_parts.append(f"{field} >= ?")
+            params.append(period_start)
+        if period_end:
+            where_parts.append(f"{field} < ?")
+            params.append(period_end)
+
+    @staticmethod
     def _daily_where(date, product_code, db):
         period_start, period_end = reporting_day_bounds(date)
         where_parts = [
@@ -41,12 +51,9 @@ class StatsRepository:
     def _scrap_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
-        if start:
-            where_parts.append("DATE(sr.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(sr.created_at) <= ?")
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "sr.created_at"
+        )
         StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
@@ -54,12 +61,9 @@ class StatsRepository:
     def _order_progress_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status IN ('producing','pending','paused')"]
         params = []
-        if start:
-            where_parts.append("DATE(o.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(o.created_at) <= ?")
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "o.created_at"
+        )
         StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
@@ -67,12 +71,9 @@ class StatsRepository:
     def _worker_where(start, end, product_code, db):
         where_parts = ["wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
-        if start:
-            where_parts.append("DATE(wr.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(wr.created_at) <= ?")
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "wr.created_at"
+        )
         StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
@@ -251,7 +252,7 @@ class StatsRepository:
         # Worker filter removed - admins cannot scan work per mobile module
         rows = db.execute(
             "SELECT u.id as id, u.name as name, u.employee_no, "
-            "COUNT(DISTINCT DATE(wr.created_at)) as work_days, "
+            "COUNT(DISTINCT DATE(wr.created_at, '-7 hours')) as work_days, "
             "COUNT(wr.id) as record_count, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as total_scrap, "
@@ -270,12 +271,9 @@ class StatsRepository:
         db = resolve_db(db)
         where = ["wr.user_id=?", "wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = [user_id]
-        if start:
-            where.append('DATE(wr.created_at) >= ?')
-            params.append(start)
-        if end:
-            where.append('DATE(wr.created_at) <= ?')
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where, params, start, end, "wr.created_at"
+        )
         w = ' AND '.join(where)
         rows = db.execute(
             "SELECT o.product_name, "
@@ -297,14 +295,11 @@ class StatsRepository:
     @staticmethod
     def get_material_detail(material_id, start='', end='', db=None):
         db = resolve_db(db)
-        where = ["mc.material_id = ?"]
+        where = ["mc.material_id = ?", "mc.status = 'active'"]
         params = [material_id]
-        if start:
-            where.append("DATE(mc.created_at) >= ?")
-            params.append(start)
-        if end:
-            where.append("DATE(mc.created_at) <= ?")
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where, params, start, end, "mc.created_at"
+        )
         w = " AND ".join(where)
         rows = db.execute(
             "SELECT mc.id, mc.quantity, mc.created_at, o.order_no, o.product_name, "

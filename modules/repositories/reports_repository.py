@@ -1,6 +1,13 @@
 """qr-system — ReportsRepository（报表数据访问层）"""
+from datetime import datetime, timedelta
+
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
+from modules.domain.reporting_day import (
+    current_reporting_day,
+    reporting_day_bounds,
+    reporting_range_bounds,
+)
 
 
 class ReportsRepository:
@@ -10,12 +17,13 @@ class ReportsRepository:
     def _date_filter(start, end, prefix, field="created_at"):
         where = []
         params = []
-        if start:
-            where.append(f"DATE({prefix}.{field}) >= ?")
-            params.append(start)
-        if end:
-            where.append(f"DATE({prefix}.{field}) <= ?")
-            params.append(end)
+        period_start, period_end = reporting_range_bounds(start, end)
+        if period_start:
+            where.append(f"{prefix}.{field} >= ?")
+            params.append(period_start)
+        if period_end:
+            where.append(f"{prefix}.{field} < ?")
+            params.append(period_end)
         return where, params
 
     @staticmethod
@@ -62,7 +70,7 @@ class ReportsRepository:
         if product_code:
             clause, clause_params = ReportsRepository._product_filter(
                 product_code, db
-            ).snapshot_clause("qi.product_code")
+            ).order_clause("o")
             where.append(clause)
             params.extend(clause_params)
         return ReportsRepository.fetch_quality_inspection_by_process(
@@ -71,46 +79,57 @@ class ReportsRepository:
 
     @staticmethod
     def product_report(start="", end="", product_code="", db=None):
-        where = ["o.deleted_at IS NULL"]
-        order_dates, params = ReportsRepository._date_filter(start, end, "o")
-        where.extend(order_dates)
-        if product_code:
-            clause, clause_params = ReportsRepository._product_filter(
-                product_code, db
-            ).order_clause("o")
-            where.append(clause)
-            params.extend(clause_params)
-        item_dates, item_params = ReportsRepository._date_filter(start, end, "pi", "completed_at")
-        scrap_dates, _ = ReportsRepository._date_filter(start, end, "sr")
-        work_dates, _ = ReportsRepository._date_filter(start, end, "wr")
-        item_where = "".join(f" AND {condition}" for condition in item_dates)
-        scrap_where = "".join(f" AND {condition}" for condition in scrap_dates)
-        work_where = "".join(f" AND {condition}" for condition in work_dates)
-        where_sql = " AND ".join(where)
-        return (
-            ReportsRepository.fetch_product_report(
-                where_sql, params, item_where, scrap_where, work_where, item_params, db=db
-            ),
-            ReportsRepository.fetch_product_report_summary(
-                where_sql, params, item_where, item_params, db=db
-            ),
+        order_dates, order_params = ReportsRepository._date_filter(start, end, "o")
+        item_dates, item_params = ReportsRepository._date_filter(
+            start, end, "pi", "completed_at"
         )
+        scrap_dates, scrap_params = ReportsRepository._date_filter(start, end, "sr")
+        work_dates, work_params = ReportsRepository._date_filter(start, end, "wr")
+        product_where = "1=1"
+        product_params = []
+        if product_code:
+            product_where, product_params = ReportsRepository._product_filter(
+                product_code, db
+            ).product_clause("p")
+        rows = ReportsRepository.fetch_product_report(
+            " AND ".join(["o.deleted_at IS NULL", *order_dates]),
+            order_params,
+            " AND ".join([
+                "o.deleted_at IS NULL", "pi.status='completed'", *item_dates,
+            ]),
+            item_params,
+            " AND ".join(["o.deleted_at IS NULL", *scrap_dates]),
+            scrap_params,
+            " AND ".join([
+                "o.deleted_at IS NULL", "wr.type='rework'",
+                "wr.status='approved'", *work_dates,
+            ]),
+            work_params,
+            product_where,
+            product_params,
+            db=db,
+        )
+        summary = {
+            "product_count": len(rows),
+            "order_count": sum(row["order_count"] or 0 for row in rows),
+            "total_output": sum(row["output"] or 0 for row in rows),
+        }
+        return rows, summary
 
     @staticmethod
     def material_usage(start="", end="", product_code="", db=None):
         date_where, params = ReportsRepository._date_filter(start, end, "mc")
-        where = ["1=1", *date_where]
+        where = ["mc.status = 'active'", *date_where]
         if product_code:
             clause, clause_params = ReportsRepository._product_filter(
                 product_code, db
             ).order_clause("o2")
             where.append("mc.order_id IN (SELECT o2.id FROM orders o2 WHERE " + clause + ")")
             params.extend(clause_params)
-        date_sql = " AND ".join(date_where)
-        date_params = params[:len(date_where)]
+        where_sql = " AND ".join(where)
         return (
-            ReportsRepository.fetch_material_usage(" AND ".join(where), params, db=db),
-            ReportsRepository.fetch_material_usage_summary(date_sql, date_params, db=db),
+            ReportsRepository.fetch_material_usage(where_sql, params, db=db),
+            ReportsRepository.fetch_material_usage_summary(where_sql, params, db=db),
         )
 
     @staticmethod
@@ -124,14 +143,9 @@ class ReportsRepository:
         if product_code:
             clause, clause_params = ReportsRepository._product_filter(
                 product_code, db
-            ).order_clause("o")
-            product_where = (
-                "s.id IN (SELECT si.shipment_id FROM shipment_items si "
-                "JOIN orders o ON si.order_id=o.id WHERE "
-                + clause + ")"
-            )
-            where.append(product_where)
-            actual_where.append(product_where)
+            ).order_or_snapshot_clause("o", "si.product_model")
+            where.append(clause)
+            actual_where.append(clause)
             params.extend(clause_params)
             actual_params.extend(clause_params)
         where_sql = " AND ".join(where)
@@ -197,18 +211,33 @@ class ReportsRepository:
     @staticmethod
     def fetch_production_trend(start_date, end_date, db=None):
         db = resolve_db(db)
+        period_start, period_end = reporting_range_bounds(start_date, end_date)
         return db.execute(
-            "SELECT dates.d as date, "
-            "COALESCE(COUNT(DISTINCT CASE WHEN pi.status='completed' THEN pi.id END),0) as output, "
-            "COALESCE(COUNT(DISTINCT CASE WHEN pi.status='scrapped' THEN pi.id END),0) as scrap, "
-            "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
-            "COUNT(wr.id) as report_count "
-            "FROM (WITH RECURSIVE dates(d) AS (SELECT ? UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d<?) SELECT d FROM dates) dates "
-            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status IN ('completed','scrapped') AND pi.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL) "
-            "LEFT JOIN work_records wr ON DATE(wr.created_at)=dates.d "
-            "AND wr.order_id IN (SELECT id FROM orders WHERE deleted_at IS NULL) "
-            "GROUP BY dates.d ORDER BY dates.d ASC",
-            (start_date, end_date)
+            "WITH RECURSIVE dates(d) AS ("
+            "SELECT ? UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d<?"
+            "), item_agg AS ("
+            "SELECT DATE(pi.completed_at,'-7 hours') AS d, "
+            "SUM(CASE WHEN pi.status='completed' THEN 1 ELSE 0 END) AS output, "
+            "SUM(CASE WHEN pi.status='scrapped' THEN 1 ELSE 0 END) AS scrap "
+            "FROM product_items pi JOIN orders o ON pi.order_id=o.id "
+            "WHERE o.deleted_at IS NULL AND pi.status IN ('completed','scrapped') "
+            "AND pi.completed_at>=? AND pi.completed_at<? GROUP BY d"
+            "), work_agg AS ("
+            "SELECT DATE(wr.created_at,'-7 hours') AS d, "
+            "SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END) AS rework, "
+            "COUNT(*) AS report_count FROM work_records wr "
+            "JOIN orders o ON wr.order_id=o.id "
+            "WHERE o.deleted_at IS NULL AND wr.status='approved' "
+            "AND wr.created_at>=? AND wr.created_at<? GROUP BY d"
+            ") SELECT dates.d AS date, COALESCE(i.output,0) AS output, "
+            "COALESCE(i.scrap,0) AS scrap, COALESCE(w.rework,0) AS rework, "
+            "COALESCE(w.report_count,0) AS report_count FROM dates "
+            "LEFT JOIN item_agg i ON i.d=dates.d "
+            "LEFT JOIN work_agg w ON w.d=dates.d ORDER BY dates.d ASC",
+            (
+                start_date, end_date, period_start, period_end,
+                period_start, period_end,
+            ),
         ).fetchall()
 
     # ========== worker_efficiency ==========
@@ -220,7 +249,8 @@ class ReportsRepository:
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework, "
-            "COUNT(DISTINCT DATE(wr.created_at)) as work_days, COUNT(wr.id) as report_count "
+            "COUNT(DISTINCT DATE(wr.created_at,'-7 hours')) as work_days, "
+            "COUNT(wr.id) as report_count "
             "FROM users u LEFT JOIN work_records wr ON wr.user_id=u.id AND " + where_clause + " "
             "WHERE u.status='active' "
             "GROUP BY u.id ORDER BY output DESC",
@@ -242,45 +272,6 @@ class ReportsRepository:
         ).fetchall()
 
     @staticmethod
-    def fetch_quality_by_product(where_clause, params, pi_w, sr_w, wr_w, item_params, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
-            "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
-            "COALESCE(SUM(o.quantity),0) as order_qty, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
-            "COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
-            "COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
-            "COUNT(DISTINCT o.id) as order_count "
-            "FROM products p "
-            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
-            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
-            "WHERE " + where_clause + " GROUP BY p.id ORDER BY output DESC LIMIT 200",
-            params + item_params + item_params + item_params
-        ).fetchall()
-
-    @staticmethod
-    def fetch_quality_summary(where_clause, params, pi_w, item_params, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT COUNT(DISTINCT p.id) as product_count, "
-            "COUNT(DISTINCT o.id) as order_count, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "WHERE o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as total_output "
-            "FROM products p "
-            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
-            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
-            "WHERE " + where_clause,
-            params + item_params
-        ).fetchone()
-
-    @staticmethod
     def fetch_quality_inspection_by_process(where_clause, params, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -299,43 +290,49 @@ class ReportsRepository:
 
     # ========== product_report ==========
     @staticmethod
-    def fetch_product_report(where_clause, params, pi_w, sr_w, wr_w, item_params, db=None):
+    def fetch_product_report(
+        order_where, order_params, output_where, output_params,
+        scrap_where, scrap_params, rework_where, rework_params,
+        product_where, product_params, db=None,
+    ):
         db = resolve_db(db)
         return db.execute(
-            "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
+            "WITH order_agg AS ("
+            "SELECT opl.product_id, SUM(o.quantity) AS order_qty, "
+            "COUNT(DISTINCT o.id) AS order_count FROM orders o "
+            "JOIN order_product_links opl ON opl.order_id=o.id "
+            "WHERE " + order_where + " AND opl.product_id IS NOT NULL GROUP BY opl.product_id"
+            "), output_agg AS ("
+            "SELECT opl.product_id, COUNT(pi.id) AS output FROM product_items pi "
+            "JOIN orders o ON pi.order_id=o.id "
+            "JOIN order_product_links opl ON opl.order_id=o.id "
+            "WHERE " + output_where + " AND opl.product_id IS NOT NULL GROUP BY opl.product_id"
+            "), scrap_agg AS ("
+            "SELECT opl.product_id, COALESCE(SUM(sr.quantity),0) AS scrap "
+            "FROM scrap_records sr JOIN orders o ON sr.order_id=o.id "
+            "JOIN order_product_links opl ON opl.order_id=o.id "
+            "WHERE " + scrap_where + " AND opl.product_id IS NOT NULL GROUP BY opl.product_id"
+            "), rework_agg AS ("
+            "SELECT opl.product_id, COALESCE(SUM(wr.quantity),0) AS rework "
+            "FROM work_records wr JOIN orders o ON wr.order_id=o.id "
+            "JOIN order_product_links opl ON opl.order_id=o.id "
+            "WHERE " + rework_where + " AND opl.product_id IS NOT NULL GROUP BY opl.product_id"
+            "), activity AS ("
+            "SELECT product_id FROM order_agg UNION SELECT product_id FROM output_agg "
+            "UNION SELECT product_id FROM scrap_agg UNION SELECT product_id FROM rework_agg"
+            ") SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.category, "
             "p.price, p.upper_opening, p.lower_opening, p.plate_thickness, p.weight, "
-            "COALESCE(SUM(o.quantity),0) as order_qty, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as output, "
-            "COALESCE((SELECT COUNT(DISTINCT sr.id) FROM scrap_records sr JOIN orders o2 ON sr.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL" + sr_w + "),0) as scrap, "
-            "COALESCE((SELECT COUNT(DISTINCT wr.id) FROM work_records wr JOIN orders o2 ON wr.order_id=o2.id "
-            "JOIN order_product_links opl2 ON opl2.order_id=o2.id "
-            "WHERE opl2.product_id=p.id AND o2.deleted_at IS NULL AND wr.type='rework' AND wr.status='approved'" + wr_w + "),0) as rework, "
-            "COUNT(DISTINCT o.id) as order_count "
-            "FROM products p "
-            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
-            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
-            "WHERE " + where_clause + " GROUP BY p.id ORDER BY output DESC LIMIT 200",
-            params + item_params + item_params + item_params
+            "COALESCE(oa.order_qty,0) AS order_qty, COALESCE(out.output,0) AS output, "
+            "COALESCE(sa.scrap,0) AS scrap, COALESCE(ra.rework,0) AS rework, "
+            "COALESCE(oa.order_count,0) AS order_count FROM activity a "
+            "JOIN products p ON p.id=a.product_id "
+            "LEFT JOIN order_agg oa ON oa.product_id=p.id "
+            "LEFT JOIN output_agg out ON out.product_id=p.id "
+            "LEFT JOIN scrap_agg sa ON sa.product_id=p.id "
+            "LEFT JOIN rework_agg ra ON ra.product_id=p.id "
+            "WHERE " + product_where + " ORDER BY output DESC, p.id",
+            order_params + output_params + scrap_params + rework_params + product_params,
         ).fetchall()
-
-    @staticmethod
-    def fetch_product_report_summary(where_clause, params, pi_w, item_params, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT COUNT(DISTINCT p.id) as product_count, "
-            "COUNT(DISTINCT o.id) as order_count, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
-            "WHERE o2.deleted_at IS NULL AND pi.status='completed'" + pi_w + "),0) as total_output "
-            "FROM products p "
-            "LEFT JOIN order_product_links opl ON opl.product_id=p.id "
-            "LEFT JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
-            "WHERE " + where_clause,
-            params + item_params
-        ).fetchone()
 
     # ========== material_usage ==========
     @staticmethod
@@ -348,20 +345,19 @@ class ReportsRepository:
             "COUNT(DISTINCT mc.order_id) as order_count "
             "FROM materials m "
             "LEFT JOIN material_consumptions mc ON mc.material_id=m.id AND " + where_clause + " "
-            "GROUP BY m.id ORDER BY total_used DESC LIMIT 200",
+            "GROUP BY m.id ORDER BY total_used DESC",
             params
         ).fetchall()
 
     @staticmethod
-    def fetch_material_usage_summary(date_w, date_p, db=None):
+    def fetch_material_usage_summary(where_clause, params, db=None):
         db = resolve_db(db)
-        extra = (" AND " + date_w) if date_w else ""
         return db.execute(
-            "SELECT COUNT(DISTINCT m.id) as material_count, "
+            "SELECT COUNT(DISTINCT CASE WHEN mc.id IS NOT NULL THEN m.id END) as material_count, "
             "COALESCE(SUM(mc.quantity),0) as total_consumed "
             "FROM materials m "
-            "LEFT JOIN material_consumptions mc ON mc.material_id=m.id" + extra,
-            date_p
+            "LEFT JOIN material_consumptions mc ON mc.material_id=m.id AND " + where_clause,
+            params,
         ).fetchone()
 
     # ========== shipment_stats ==========
@@ -369,8 +365,11 @@ class ReportsRepository:
     def fetch_shipment_by_status(where_clause, params, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT s.status, COUNT(*) as count, COALESCE(SUM(s.total_quantity),0) as total_qty "
-            "FROM shipments s WHERE " + where_clause + " GROUP BY s.status ORDER BY count DESC",
+            "SELECT s.status, COUNT(DISTINCT s.id) as count, "
+            "COALESCE(SUM(si.quantity),0) as total_qty FROM shipments s "
+            "JOIN shipment_items si ON si.shipment_id=s.id "
+            "LEFT JOIN orders o ON si.order_id=o.id "
+            "WHERE " + where_clause + " GROUP BY s.status ORDER BY count DESC",
             params
         ).fetchall()
 
@@ -378,9 +377,10 @@ class ReportsRepository:
     def fetch_shipment_by_customer(where_clause, params, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT s.customer, COUNT(*) as shipment_count, "
-            "COALESCE(SUM(s.total_quantity),0) as total_qty "
-            "FROM shipments s WHERE " + where_clause + " "
+            "SELECT s.customer, COUNT(DISTINCT s.id) as shipment_count, "
+            "COALESCE(SUM(si.quantity),0) as total_qty FROM shipments s "
+            "JOIN shipment_items si ON si.shipment_id=s.id "
+            "LEFT JOIN orders o ON si.order_id=o.id WHERE " + where_clause + " "
             "GROUP BY s.customer ORDER BY total_qty DESC LIMIT 50",
             params
         ).fetchall()
@@ -389,9 +389,10 @@ class ReportsRepository:
     def fetch_shipment_monthly_trend(where_clause, params, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT substr(s.completed_at,1,7) as month, COUNT(*) as count, "
-            "COALESCE(SUM(s.total_quantity),0) as total_qty "
-            "FROM shipments s WHERE " + where_clause + " "
+            "SELECT strftime('%Y-%m',s.completed_at,'-7 hours') as month, "
+            "COUNT(DISTINCT s.id) as count, COALESCE(SUM(si.quantity),0) as total_qty "
+            "FROM shipments s JOIN shipment_items si ON si.shipment_id=s.id "
+            "LEFT JOIN orders o ON si.order_id=o.id WHERE " + where_clause + " "
             "GROUP BY month ORDER BY month ASC",
             params
         ).fetchall()
@@ -515,9 +516,17 @@ class ReportsRepository:
         return db.execute(
             "SELECT COUNT(DISTINCT o.id) as orders, "
             "COALESCE(SUM(o.quantity),0) as total_qty, "
-            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.deleted_at IS NULL AND pi.status='completed' AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')),0) as output "
-            "FROM orders o WHERE o.deleted_at IS NULL AND substr(o.created_at,1,7)=strftime('%Y-%m','now')"
+            "COALESCE((SELECT SUM(o3.quantity) FROM orders o3 "
+            "WHERE o3.deleted_at IS NULL AND o3.status='completed' "
+            "AND strftime('%Y-%m',o3.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
+            "WHERE o2.deleted_at IS NULL AND pi.status='completed' "
+            "AND strftime('%Y-%m',pi.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')),0) as output "
+            "FROM orders o WHERE o.deleted_at IS NULL "
+            "AND strftime('%Y-%m',o.created_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')"
         ).fetchone()
 
     @staticmethod
@@ -526,9 +535,17 @@ class ReportsRepository:
         return db.execute(
             "SELECT COUNT(DISTINCT o.id) as orders, "
             "COALESCE(SUM(o.quantity),0) as total_qty, "
-            "COALESCE(SUM(CASE WHEN o.status='completed' THEN o.quantity ELSE 0 END),0) as completed_qty, "
-            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id WHERE o2.deleted_at IS NULL AND pi.status='completed' AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now','-1 month')),0) as output "
-            "FROM orders o WHERE o.deleted_at IS NULL AND substr(o.created_at,1,7)=strftime('%Y-%m','now','-1 month')"
+            "COALESCE((SELECT SUM(o3.quantity) FROM orders o3 "
+            "WHERE o3.deleted_at IS NULL AND o3.status='completed' "
+            "AND strftime('%Y-%m',o3.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-1 month','-7 hours')),0) as completed_qty, "
+            "COALESCE((SELECT COUNT(*) FROM product_items pi JOIN orders o2 ON pi.order_id=o2.id "
+            "WHERE o2.deleted_at IS NULL AND pi.status='completed' "
+            "AND strftime('%Y-%m',pi.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-1 month','-7 hours')),0) as output "
+            "FROM orders o WHERE o.deleted_at IS NULL "
+            "AND strftime('%Y-%m',o.created_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-1 month','-7 hours')"
         ).fetchone()
 
     # ========== KPI methods ==========
@@ -543,35 +560,50 @@ class ReportsRepository:
     def kpi_completed_month(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL AND status='completed' AND substr(updated_at,1,7)=strftime('%Y-%m','now')"
+            "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL AND status='completed' "
+            "AND strftime('%Y-%m',completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')"
         ).fetchone()[0]
 
     @staticmethod
     def kpi_output_month(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status='completed' AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
+            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id "
+            "WHERE pi.status='completed' AND o.deleted_at IS NULL "
+            "AND strftime('%Y-%m',pi.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_scrap_total(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status IN ('completed','scrapped') AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
+            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id "
+            "WHERE pi.status IN ('completed','scrapped') AND o.deleted_at IS NULL "
+            "AND strftime('%Y-%m',pi.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_scrap_count(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id WHERE pi.status='scrapped' AND o.deleted_at IS NULL AND substr(pi.completed_at,1,7)=strftime('%Y-%m','now')"
+            "SELECT COUNT(*) FROM product_items pi JOIN orders o ON pi.order_id=o.id "
+            "WHERE pi.status='scrapped' AND o.deleted_at IS NULL "
+            "AND strftime('%Y-%m',pi.completed_at,'-7 hours')="
+            "strftime('%Y-%m','now','localtime','-7 hours')"
         ).fetchone()[0] or 0
 
     @staticmethod
     def kpi_active_workers(db=None):
         db = resolve_db(db)
+        period_start, period_end = reporting_day_bounds(current_reporting_day())
         return db.execute(
-            "SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr JOIN orders o ON wr.order_id=o.id WHERE o.deleted_at IS NULL AND wr.status='approved' AND DATE(wr.created_at)=date('now')"
+            "SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr "
+            "JOIN orders o ON wr.order_id=o.id WHERE o.deleted_at IS NULL "
+            "AND wr.status='approved' AND wr.created_at>=? AND wr.created_at<?",
+            (period_start, period_end),
         ).fetchone()[0] or 0
 
     @staticmethod
@@ -590,12 +622,10 @@ class ReportsRepository:
 
     @staticmethod
     def kpi_weekly_trend(db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT dates.d as date, "
-            "COALESCE(COUNT(DISTINCT pi.id),0) as output "
-            "FROM (WITH RECURSIVE dates(d) AS (SELECT date('now','-6 days') UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d<date('now')) SELECT d FROM dates) dates "
-            "LEFT JOIN product_items pi ON DATE(pi.completed_at)=dates.d AND pi.status='completed' "
-            "LEFT JOIN orders o ON pi.order_id=o.id AND o.deleted_at IS NULL "
-            "GROUP BY dates.d ORDER BY dates.d ASC"
-        ).fetchall()
+        reporting_end = current_reporting_day()
+        reporting_start = (
+            datetime.strptime(reporting_end, "%Y-%m-%d") - timedelta(days=6)
+        ).strftime("%Y-%m-%d")
+        return ReportsRepository.fetch_production_trend(
+            reporting_start, reporting_end, db=db
+        )

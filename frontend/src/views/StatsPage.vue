@@ -25,7 +25,7 @@
           <option value="">全部产品</option>
           <option v-for="p in productOptions" :key="p.code" :value="p.code">{{ p.label }}</option>
         </select>
-        <button class="btn btn-primary btn-sm" @click="doQuery">查询</button><button class="btn" style="padding:4px 10px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:var(--radius-md);margin-left:4px" @click="exportPdf">📄 PDF</button>
+        <button class="btn btn-primary btn-sm" @click="doQuery">查询</button><button class="btn" style="padding:4px 10px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:var(--radius-md);margin-left:4px" @click="exportPdf">打印/另存 PDF</button>
       </div>
     </div>
   </div>

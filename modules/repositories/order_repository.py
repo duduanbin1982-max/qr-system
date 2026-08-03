@@ -209,9 +209,18 @@ class OrderRepository:
         if not fields:
             return 0
         params = [changes[field] if changes[field] is not None else None for field in fields]
+        completion_sql = ""
+        if "status" in changes:
+            completion_sql = (
+                ", completed_at = CASE WHEN ? = 'completed' "
+                "THEN COALESCE(NULLIF(completed_at, ''), datetime('now','localtime')) "
+                "ELSE NULL END"
+            )
+            params.append(changes["status"])
         cursor = db.execute(
             "UPDATE orders SET "
             + ", ".join(f"{field} = ?" for field in fields)
+            + completion_sql
             + ", updated_at = datetime('now','localtime') WHERE id = ?",
             params + [order_id],
         )
@@ -297,7 +306,8 @@ class OrderRepository:
     def reopen_completed(order_id, status, db=None):
         db = resolve_db(db)
         db.execute(
-            "UPDATE orders SET status = ?, updated_at = datetime('now','localtime') "
+            "UPDATE orders SET status = ?, completed_at = NULL, "
+            "updated_at = datetime('now','localtime') "
             "WHERE id = ? AND status = 'completed' AND deleted_at IS NULL",
             (status, order_id)
         )

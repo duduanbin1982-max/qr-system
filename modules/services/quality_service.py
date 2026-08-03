@@ -244,15 +244,20 @@ class QualityService:
         return QualityRepository.defect_pareto(date_from=date_from, date_to=date_to)
 
     @staticmethod
-    def spc_p_chart(order_id=None, process_id=None, date_from="", date_to=""):
+    def spc_p_chart(
+        order_id=None, process_id=None, date_from="", date_to="", product_code=""
+    ):
         return QualityRepository.spc_p_chart(
             order_id=order_id, process_id=process_id,
-            date_from=date_from, date_to=date_to
+            date_from=date_from, date_to=date_to, product_code=product_code,
         )
 
     @staticmethod
     def inspector_performance(**kwargs):
-        rows = QualityRepository.inspector_performance()
+        rows = QualityRepository.inspector_performance(
+            start=kwargs.get("start", ""), end=kwargs.get("end", ""),
+            product_code=kwargs.get("product_code", ""),
+        )
         result = []
         for r in rows:
             r = dict(r)
@@ -271,7 +276,10 @@ class QualityService:
 
     @staticmethod
     def supplier_quality(**kwargs):
-        rows = QualityRepository.supplier_quality()
+        rows = QualityRepository.supplier_quality(
+            start=kwargs.get("start", ""), end=kwargs.get("end", ""),
+            product_code=kwargs.get("product_code", ""),
+        )
         result = []
         for r in rows:
             r = dict(r)
@@ -290,8 +298,10 @@ class QualityService:
         return {"ok": True, "data": result}
 
     @staticmethod
-    def pass_rate_trend(weeks=6, start="", end=""):
-        return QualityRepository.pass_rate_trend(weeks=weeks, start=start, end=end)
+    def pass_rate_trend(weeks=6, start="", end="", product_code=""):
+        return QualityRepository.pass_rate_trend(
+            weeks=weeks, start=start, end=end, product_code=product_code
+        )
 
     @staticmethod
     def export_inspections(order_id=None, process_id=None, inspection_type="",

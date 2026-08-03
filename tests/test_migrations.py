@@ -49,6 +49,7 @@ def test_run_migrations_uses_supplied_connection():
             "qr_printed_by",
             "qr_printed_by_name",
             "product_id",
+            "completed_at",
         }.issubset(order_columns)
         assert "product_code_aliases" in table_names
         assert "order_product_links" in {
@@ -100,6 +101,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_product_identity",
             "modules.migration_inventory_ledger",
             "modules.migration_shipment_lifecycle",
+            "modules.migration_reporting",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 

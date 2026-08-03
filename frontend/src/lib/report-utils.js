@@ -17,12 +17,15 @@ export function buildParams(start, end, filterCode) {
   return p
 }
 
+export function formatCSVCell(value) {
+  let text = String(value == null ? "" : value)
+  if (/^[\t\r\n ]*[=+\-@]/.test(text)) text = "'" + text
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text
+}
+
 export function exportCSV(data, filename) {
   const BOM = "﻿"
-  const csv = BOM + data.map(row => row.map(c => {
-    const s = String(c == null ? "" : c)
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
-  }).join(",")).join("\n")
+  const csv = BOM + data.map(row => row.map(formatCSVCell).join(",")).join("\n")
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")

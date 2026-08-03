@@ -72,9 +72,12 @@ class OrderCompletionRepository:
         db = resolve_db(db)
         cursor = db.execute(
             "UPDATE orders SET completed = ?, status = ?, "
+            "completed_at = CASE WHEN ? = 'completed' "
+            "THEN COALESCE(NULLIF(completed_at, ''), datetime('now','localtime')) "
+            "ELSE completed_at END, "
             "updated_at = datetime('now','localtime') "
             "WHERE id = ? AND deleted_at IS NULL "
             "AND status IN ('pending', 'producing')",
-            (completed, status, order_id),
+            (completed, status, status, order_id),
         )
         return cursor.rowcount

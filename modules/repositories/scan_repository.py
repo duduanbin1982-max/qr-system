@@ -365,7 +365,8 @@ class ScanRepository:
         db = resolve_db(db)
         db.execute(
             "UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = 'completed'), "
-            "updated_at = datetime('now','localtime'), status = 'producing' WHERE id = ?",
+            "completed_at = NULL, updated_at = datetime('now','localtime'), "
+            "status = 'producing' WHERE id = ?",
             (order_id, order_id),
         )
 
@@ -389,7 +390,9 @@ class ScanRepository:
     def complete_order(order_id, db=None):
         db = resolve_db(db)
         db.execute(
-            "UPDATE orders SET status = 'completed', updated_at = datetime('now','localtime') WHERE id = ?",
+            "UPDATE orders SET status = 'completed', "
+            "completed_at = COALESCE(NULLIF(completed_at, ''), datetime('now','localtime')), "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
             (order_id,),
         )
 
