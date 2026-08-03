@@ -29,9 +29,17 @@ test('work-time route modal stays stable inside the viewport', async ({ page }) 
   const modal = page.locator('.route-standard-modal')
   await expect(modal).toBeVisible()
   const firstBox = await modal.boundingBox()
-  await page.waitForTimeout(350)
-  const secondBox = await modal.boundingBox()
   expect(firstBox).not.toBeNull()
+  let stableBox = firstBox
+  await expect.poll(async () => {
+    const currentBox = await modal.boundingBox()
+    if (!currentBox || !stableBox) return false
+    const stable = Math.abs(currentBox.y - stableBox.y) < 2
+      && Math.abs(currentBox.x - stableBox.x) < 2
+    stableBox = currentBox
+    return stable
+  }, { timeout: 2_000, intervals: [50, 100, 200] }).toBe(true)
+  const secondBox = stableBox
   expect(secondBox).not.toBeNull()
   expect(firstBox.y).toBeGreaterThanOrEqual(0)
   expect(firstBox.y + firstBox.height).toBeLessThanOrEqual((page.viewportSize()?.height || 720) + 2)

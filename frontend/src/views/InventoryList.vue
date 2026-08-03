@@ -75,7 +75,8 @@
                   <span v-else style="color:var(--text-placeholder);font-size:var(--text-2xs)">-</span>
                 </td>
                 <td style="text-align:center">
-                  <span style="display:inline-block;font-weight:700;font-size:15px;min-width:28px;padding:var(--space-1) 8px;border-radius:var(--radius-sm)" :style="{background: item.is_low ? 'var(--danger-light)' : 'var(--success-light)', color: item.is_low ? 'var(--danger)' : 'var(--success)'}">{{ item.quantity }}</span>
+                  <span style="display:inline-block;font-weight:700;font-size:15px;min-width:28px;padding:var(--space-1) 8px;border-radius:var(--radius-sm)" :style="{background: item.is_low ? 'var(--danger-light)' : 'var(--success-light)', color: item.is_low ? 'var(--danger)' : 'var(--success)'}">{{ item.available_quantity }}</span>
+                  <div v-if="item.reserved" style="font-size:var(--text-2xs);color:var(--text-muted);margin-top:2px">现存 {{ item.quantity }} / 预留 {{ item.reserved }}</div>
                 </td>
                 <td style="text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">
                   <span v-if="item.safe_stock" style="display:inline-block;background:var(--bg-hover);padding:1px 8px;border-radius:var(--radius-md);font-size:var(--text-xs-alt)">{{ item.safe_stock }}</span>
@@ -97,7 +98,7 @@
                     <button class="inv-btn inv-btn-edit" @click="openEdit(item)" v-if="canEdit" title="编辑">
                       <span>✏️</span>
                     </button>
-                    <button class="inv-btn inv-btn-del" @click="del(item)" v-if="canDelete" title="删除">
+                    <button class="inv-btn inv-btn-del" @click="del(item)" v-if="canDelete" title="停用">
                       <span>🗑️</span>
                     </button>
                   </div>
@@ -123,7 +124,7 @@
         <div class="modal-body">
           <div class="form-row">
             <div class="form-col" style="flex:2"><div class="form-group"><label>产品型号 *</label><input class="form-input" v-model="form.product_model" :disabled="modalEdit" placeholder="唯一标识"></div></div>
-            <div class="form-col" style="flex:1"><div class="form-group"><label>关联订单</label><select class="form-input" v-model="form.order_id"><option value="">-- 无 --</option><option v-for="o in orderOptions" :key="o.id" :value="o.id">{{ o.order_no }} {{ o.product_name }}</option></select></div></div>
+            <div v-if="!modalEdit" class="form-col" style="flex:1"><div class="form-group"><label>关联订单</label><select class="form-input" v-model="form.order_id"><option value="">-- 无 --</option><option v-for="o in orderOptions" :key="o.id" :value="o.id">{{ o.order_no }} {{ o.product_name }}</option></select></div></div>
             <div class="form-col" style="flex:1"><div class="form-group"><label>单位</label><input class="form-input" v-model="form.unit" placeholder="件"></div></div>
           </div>
           <div class="form-row">
@@ -163,6 +164,10 @@
             <label>{{ moveType === 'in' ? '入库' : '出库' }}数量</label>
             <input class="form-input" v-model.number="moveQty" type="number" min="1" style="text-align:center;font-size:24px;font-weight:700;width:150px;margin:0 auto" autofocus @keyup.enter="doMove">
           </div>
+          <div class="form-row" style="margin-top:var(--space-3)">
+            <div class="form-col"><div class="form-group"><label>批次号</label><input class="form-input" v-model="moveLotNo" placeholder="可选"></div></div>
+            <div class="form-col"><div class="form-group"><label>序列号</label><input class="form-input" v-model="moveSerialNo" placeholder="可选"></div></div>
+          </div>
         </div>
         <div class="modal-footer" style="justify-content:center">
           <button class="btn btn-default" @click="showMoveModal=false">取消</button>
@@ -190,14 +195,50 @@
               <tr v-for="l in logs" :key="l.id">
                 <td style="font-size:var(--text-xs);white-space:nowrap">{{ l.created_at }}</td>
                 <td style="white-space:nowrap"><code style="font-size:var(--text-xs-alt)">{{ l.product_model }}</code></td>
-                <td><span class="badge" :class="l.type==='in'?'badge-success':'badge-warning'" style="font-size:var(--text-xs-alt)">{{ l.type==='in'?'入库':'出库' }}</span></td>
-                <td style="font-weight:600" :style="{color: l.type==='in'?'var(--success)':'var(--danger)'}">{{ l.type==='in'?'+':'-' }}{{ l.quantity }}</td>
+                <td><span class="badge" :class="Number(l.qty_delta)>=0?'badge-success':'badge-warning'" style="font-size:var(--text-xs-alt)">{{ ({in:'入库',out:'出库',opening_balance:'期初',count_gain:'盘盈',count_loss:'盘亏',return:'归还',reserve:'预留',release:'释放'})[l.type] || l.type }}</span></td>
+                <td style="font-weight:600" :style="{color: Number(l.qty_delta)>=0?'var(--success)':'var(--danger)'}">{{ Number(l.qty_delta)>0?'+':'' }}{{ l.qty_delta }}</td>
                 <td style="font-size:var(--text-sm);white-space:nowrap">{{ l.operator_name || '-' }}</td>
                 <td style="font-size:var(--text-xs);color:var(--text-placeholder);white-space:nowrap">{{ l.remark || '-' }}</td>
               </tr>
             </tbody>
           </table>
           <p v-else style="text-align:center;color:var(--text-muted);padding:40px">暂无流水记录</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 盘点任务 -->
+    <div v-if="showCount" class="modal-overlay">
+      <div class="modal" style="max-width:1100px">
+        <div class="modal-header">
+          <span>盘点任务 {{ countTask?.task_no }}</span>
+          <span class="modal-close" @click="showCount=false">&times;</span>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);gap:var(--space-3)">
+            <span class="badge">{{ ({counting:'盘点中',submitted:'待审批',posted:'已过账'})[countTask?.status] || countTask?.status }}</span>
+            <span style="font-size:var(--text-sm);color:var(--text-muted)">{{ countItems.filter(item => item.status !== 'pending').length }} / {{ countItems.length }}</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" style="min-width:760px">
+              <thead><tr><th>产品型号</th><th>产品名称</th><th>账面数量</th><th>实盘数量</th><th>差异</th><th>备注</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="item in countItems" :key="item.id">
+                  <td><code>{{ item.product_model }}</code></td>
+                  <td>{{ item.product_name || '-' }}</td>
+                  <td style="text-align:center">{{ item.book_quantity }}</td>
+                  <td style="width:130px"><input class="form-input" type="number" min="0" v-model.number="item.actual_qty" :disabled="countTask?.status !== 'counting'"></td>
+                  <td style="text-align:center" :style="{color:Number(item.actual_qty)-Number(item.book_quantity)===0?'var(--text-muted)':'var(--danger)'}">{{ Number(item.actual_qty)-Number(item.book_quantity) }}</td>
+                  <td><input class="form-input" v-model="item.remark" :disabled="countTask?.status !== 'counting'" placeholder="可选"></td>
+                  <td style="text-align:center"><button v-if="countTask?.status === 'counting'" class="btn btn-default btn-sm" @click="saveCountItem(item)">保存</button><span v-else>{{ item.status === 'posted' ? '已过账' : '已录入' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-default" @click="showCount=false">关闭</button>
+          <button v-if="countTask?.status === 'submitted'" class="btn btn-primary" :disabled="countLoading" @click="approveCount">审批过账</button>
         </div>
       </div>
     </div>

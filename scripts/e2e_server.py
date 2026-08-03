@@ -131,6 +131,12 @@ def prepare_database():
                 (race_worker_id, process_id),
             )
 
+        db.execute(
+            "INSERT INTO inventory "
+            "(product_model, product_name, specification, quantity, safe_stock, location, unit, remark) "
+            "VALUES ('E2E-SHIP-MODEL', 'E2E Shipment Product', 'browser test item', 10, 1, 'E2E-A1', '件', '')"
+        )
+
         insert_order(db, "E2E-ORDER-001", process_ids, route_id=route_id)
 
         handoff_order_id = insert_order(

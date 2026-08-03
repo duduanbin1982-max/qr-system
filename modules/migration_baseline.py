@@ -246,7 +246,7 @@ def m001_baseline(db):
         -- 库存管理表
         CREATE TABLE IF NOT EXISTS inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_model TEXT UNIQUE NOT NULL,
+            product_model TEXT NOT NULL,
             product_name TEXT DEFAULT '',
             specification TEXT DEFAULT '',
             quantity INTEGER DEFAULT 0,

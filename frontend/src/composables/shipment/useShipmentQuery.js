@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
@@ -14,16 +14,9 @@ export function useShipmentQuery() {
   const searchKeyword = ref('')
   const pendingCount = ref(0)
   const completedCount = ref(0)
-
-  const receivableTotal = computed(() => shipments.value.reduce(
-    (sum, row) => sum + (row.receivable_amount || 0),
-    0,
-  ))
-  const paidTotal = computed(() => shipments.value.reduce(
-    (sum, row) => sum + (row.paid_amount || 0),
-    0,
-  ))
-  const unpaidTotal = computed(() => receivableTotal.value - paidTotal.value)
+  const receivableTotal = ref(0)
+  const paidTotal = ref(0)
+  const unpaidTotal = ref(0)
 
   async function load() {
     loading.value = true
@@ -36,6 +29,9 @@ export function useShipmentQuery() {
       total.value = data.total || 0
       pendingCount.value = data.pending_count ?? 0
       completedCount.value = data.completed_count ?? 0
+      receivableTotal.value = Number(data.receivable_total || 0)
+      paidTotal.value = Number(data.paid_total || 0)
+      unpaidTotal.value = Number(data.unpaid_total || 0)
     } catch (error) {
       showToast(error.message || '加载失败', 'error')
     } finally {

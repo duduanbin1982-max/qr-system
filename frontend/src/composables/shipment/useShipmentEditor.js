@@ -12,7 +12,6 @@ function createEmptyForm() {
     contact_phone: '',
     address: '',
     remark: '',
-    status: 'pending',
     material_bill_no: '',
     receivable_amount: 0,
   }
@@ -72,7 +71,6 @@ export function useShipmentEditor({ reload }) {
       contact_phone: shipment.contact_phone || '',
       address: shipment.address || '',
       remark: shipment.remark || '',
-      status: shipment.status || 'pending',
       receivable_amount: shipment.receivable_amount || 0,
     }
     items.value = []
@@ -147,7 +145,14 @@ export function useShipmentEditor({ reload }) {
     try {
       const data = { ...form.value }
       if (modalEdit.value) {
-        await api.domains.shipments.updateShipment(modalId.value, data)
+        await api.domains.shipments.updateShipment(modalId.value, {
+          customer: data.customer,
+          contact_person: data.contact_person,
+          contact_phone: data.contact_phone,
+          address: data.address,
+          remark: data.remark,
+          receivable_amount: data.receivable_amount,
+        })
         showToast('更新成功')
       } else {
         data.items = items.value.filter(item => item.inventory_id)

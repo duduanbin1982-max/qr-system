@@ -31,6 +31,12 @@ ACTION_LABELS = {
     "capa": "CAPA闭环",
     "supplier": "供应商质量",
     "calibration": "量具校准",
+    "complete": "完成出库",
+    "cancel": "取消/冲销",
+    "receive": "签收",
+    "finance": "收退款",
+    "logistics": "物流维护",
+    "unlinked": "无订单发货",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -46,7 +52,13 @@ ACTION_PERMISSION_DEFS = {
     "role_groups": ("角色组", ["view", "create", "edit", "delete"]),
     "positions": ("岗位", ["view", "create", "edit", "delete"]),
     "inventory": ("库存", ["view", "create", "edit", "delete"]),
-    "shipments": ("发货", ["view", "create", "edit", "delete"]),
+    "shipments": (
+        "发货",
+        [
+            "view", "create", "edit", "delete", "complete", "cancel",
+            "receive", "finance", "logistics", "unlinked",
+        ],
+    ),
     "scan": (
         "扫码报工",
         ["view", "report", "serial_backfill", "serial_backfill_approve"],
@@ -244,6 +256,14 @@ ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
     "quality:edit": ["quality:review"],
+    "shipments:edit": [
+        "shipments:complete",
+        "shipments:cancel",
+        "shipments:receive",
+        "shipments:finance",
+        "shipments:logistics",
+    ],
+    "shipments:delete": ["shipments:cancel"],
     "materials:manage": [
         "materials:view",
         "materials:create",

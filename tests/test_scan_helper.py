@@ -1,4 +1,4 @@
-"""ScanHelperService ?????? ? ???? SQLite ?????"""
+"""ScanHelperService behavior tests against an in-memory SQLite database."""
 
 import sqlite3
 
@@ -83,14 +83,14 @@ class TestCheckDuplicateNormalReport:
 class TestIsLastProcess:
     def test_is_last_process_true(self):
         db = _scan_db()
-        _add_process(db, 10, "??", 5)
+        _add_process(db, 10, "inspection", 5)
 
         assert ScanHelperService.is_last_process(1, 10, db) is True
 
     def test_is_last_process_false(self):
         db = _scan_db()
-        _add_process(db, 10, "??", 3)
-        _add_process(db, 20, "??", 5)
+        _add_process(db, 10, "cutting", 3)
+        _add_process(db, 20, "inspection", 5)
 
         assert ScanHelperService.is_last_process(1, 10, db) is False
 
@@ -103,17 +103,17 @@ class TestIsLastProcess:
 class TestGetPrevIncompleteProcesses:
     def test_has_prev_incomplete(self):
         db = _scan_db()
-        _add_process(db, 10, "??", 1)
-        _add_process(db, 20, "??", 2)
-        _add_process(db, 30, "??", 3)
+        _add_process(db, 10, "cutting", 1)
+        _add_process(db, 20, "welding", 2)
+        _add_process(db, 30, "inspection", 3)
 
         result = ScanHelperService.get_prev_incomplete_processes(1, 3, db)
 
-        assert [row["process_name"] for row in result] == ["??", "??"]
+        assert [row["process_name"] for row in result] == ["cutting", "welding"]
 
     def test_no_prev_incomplete(self):
         db = _scan_db()
-        _add_process(db, 10, "??", 1)
+        _add_process(db, 10, "cutting", 1)
 
         result = ScanHelperService.get_prev_incomplete_processes(1, 1, db)
 
@@ -123,20 +123,20 @@ class TestGetPrevIncompleteProcesses:
 class TestCheckProcessOrder:
     def test_sequential_blocks_skip(self, monkeypatch):
         db = _scan_db()
-        _add_process(db, 10, "??", 1)
-        _add_process(db, 30, "??", 3)
+        _add_process(db, 10, "cutting", 1)
+        _add_process(db, 30, "inspection", 3)
         monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "sequential")
 
         error, status = ScanHelperService.check_process_order(1, 3, db)
 
         assert error is not None
-        assert "??" in error["error"]
+        assert "cutting" in error["error"]
         assert status == 400
 
     def test_out_of_order_allows_skip(self, monkeypatch):
         db = _scan_db()
-        _add_process(db, 10, "??", 1)
-        _add_process(db, 30, "??", 3)
+        _add_process(db, 10, "cutting", 1)
+        _add_process(db, 30, "inspection", 3)
         monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "out_of_order")
 
         error, status = ScanHelperService.check_process_order(1, 3, db)
@@ -146,7 +146,7 @@ class TestCheckProcessOrder:
 
     def test_sequential_no_prev_ok(self, monkeypatch):
         db = _scan_db()
-        _add_process(db, 10, "??", 1)
+        _add_process(db, 10, "cutting", 1)
         monkeypatch.setattr(process_order_module, "get_setting", lambda key, default=None: "sequential")
 
         error, status = ScanHelperService.check_process_order(1, 1, db)
@@ -184,10 +184,10 @@ class TestCheckProcessOrder:
 class TestGetOrderProcesses:
     def test_returns_processes_with_ids_and_names(self):
         db = _scan_db()
-        _add_process(db, 10, "??", 1, completed=5)
-        _add_process(db, 20, "??", 2, completed=3)
+        _add_process(db, 10, "cutting", 1, completed=5)
+        _add_process(db, 20, "welding", 2, completed=3)
 
         result = ScanHelperService.get_order_processes(1, db)
 
         assert [row["process_id"] for row in result] == [10, 20]
-        assert [row["process_name"] for row in result] == ["??", "??"]
+        assert [row["process_name"] for row in result] == ["cutting", "welding"]

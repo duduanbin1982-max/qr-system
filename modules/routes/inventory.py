@@ -78,10 +78,7 @@ def create_inventory():
     security: [{Bearer: []}]
     """
     data = get_json_body()
-    try:
-        item_id = InventoryService.create_item(data)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    item_id = InventoryService.create_item(data)
     safe_audit_log('create_inventory', 'inventory', item_id, data.get('product_model'))
     return jsonify({'message': '创建成功', 'id': item_id})
 
@@ -141,12 +138,9 @@ def delete_inventory(id):
     responses: {200: {description: 删除成功}}
     security: [{Bearer: []}]
     """
-    try:
-        InventoryService.delete_item(id)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+    InventoryService.delete_item(id)
     safe_audit_log('delete_inventory', 'inventory', id)
-    return jsonify({'message': '删除成功'})
+    return jsonify({'message': '停用成功'})
 
 
 @app.route('/api/inventory/stock-in', methods=['POST'])
@@ -183,10 +177,13 @@ def stock_in():
         return jsonify({'error': '数量必须为数字'}), 400
     if not inv_id or qty <= 0:
         return jsonify({'error': '参数错误'}), 400
-    try:
-        InventoryService.stock_in(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+    InventoryService.stock_in(
+        inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''),
+        remark=data.get('remark', ''), operator_id=g.current_user['id'],
+        operator_name=g.current_user['name'], lot_no=data.get('lot_no', ''),
+        serial_no=data.get('serial_no', ''),
+        idempotency_key=data.get('idempotency_key', ''),
+    )
     safe_audit_log('stock_in', 'inventory', inv_id, f'+{qty}')
     return jsonify({'message': '入库成功'})
 
@@ -227,7 +224,13 @@ def stock_out():
         return jsonify({'error': '数量必须为数字'}), 400
     if not inv_id or qty <= 0:
         return jsonify({'error': '参数错误'}), 400
-    InventoryService.stock_out(inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''), remark=data.get('remark', ''), operator_id=g.current_user['id'], operator_name=g.current_user['name'])
+    InventoryService.stock_out(
+        inv_id, qty, order_id=data.get('order_id'), order_no=data.get('order_no', ''),
+        remark=data.get('remark', ''), operator_id=g.current_user['id'],
+        operator_name=g.current_user['name'], lot_no=data.get('lot_no', ''),
+        serial_no=data.get('serial_no', ''),
+        idempotency_key=data.get('idempotency_key', ''),
+    )
     safe_audit_log('stock_out', 'inventory', inv_id, f'-{qty}')
     return jsonify({'message': '出库成功'})
 
@@ -285,22 +288,18 @@ def inventory_alerts():
 @app.route('/api/inventory/<int:id>/adjust', methods=['POST'])
 @check_auth
 @check_permission('inventory:edit')
+@validate_json('inventory_adjust')
 def inventory_adjust(id):
-    try:
-        data = request.get_json() or {}
-        actual_qty = data.get('actual_qty', 0)
-        remark = data.get('remark', '')
-        user = g.current_user if hasattr(g, 'current_user') else {}
-        result = InventoryService.stock_adjust(
-            id, actual_qty,
-            operator_id=user.get('id'),
-            operator_name=user.get('name', user.get('username', '')),
-            remark=remark
-        )
-        safe_audit_log('inventory_adjust', 'inventory', id, f'qty adjusted')
-        return jsonify({'ok': True, **result})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    data = get_json_body()
+    user = g.current_user if hasattr(g, 'current_user') else {}
+    result = InventoryService.stock_adjust(
+        id, data.get('actual_qty'),
+        operator_id=user.get('id'),
+        operator_name=user.get('name', user.get('username', '')),
+        remark=data.get('remark', '')
+    )
+    safe_audit_log('inventory_adjust', 'inventory', id, 'qty adjusted')
+    return jsonify({'ok': True, **result})
 
 
 @app.route('/api/inventory/export', methods=['GET'])
@@ -408,30 +407,45 @@ def inventory_impact(id):
 @check_auth
 @check_permission("inventory:edit")
 def create_count_task():
-    return jsonify(InventoryService.create_count_task())
+    return jsonify(InventoryService.create_count_task(
+        user_id=g.current_user.get('id'),
+        user_name=g.current_user.get('name', g.current_user.get('username', '')),
+    ))
 
 
 @app.route("/api/inventory/count-status", methods=["GET"])
 @check_auth
 @check_permission("inventory:view")
 def count_status():
-    return jsonify(InventoryService.get_count_status())
+    return jsonify(InventoryService.get_count_status(request.args.get('task_id', type=int)))
 
 
 @app.route("/api/inventory/<int:id>/count", methods=["POST"])
 @check_auth
 @check_permission("inventory:edit")
+@validate_json('inventory_count_item')
 def submit_count(id):
     data = get_json_body()
-    try:
-        result = InventoryService.submit_count(
-            item_id=id,
-            actual_qty=data.get("actual_qty", 0),
-            remark=data.get("remark", "")
-        )
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    task_id = data.get('task_id')
+    if not task_id:
+        raise ValueError('缺少盘点任务 ID')
+    return jsonify(InventoryService.submit_count(
+        task_id=task_id, item_id=id, actual_qty=data.get("actual_qty"),
+        remark=data.get("remark", ""), user_id=g.current_user.get('id'),
+        user_name=g.current_user.get('name', g.current_user.get('username', '')),
+    ))
+
+
+@app.route('/api/inventory/count-task/<int:task_id>/approve', methods=['POST'])
+@check_auth
+@check_permission('inventory:edit')
+def approve_count_task(task_id):
+    result = InventoryService.approve_count_task(
+        task_id, user_id=g.current_user.get('id'),
+        user_name=g.current_user.get('name', g.current_user.get('username', '')),
+    )
+    safe_audit_log('approve_inventory_count', 'inventory_count_task', task_id)
+    return jsonify(result)
 
 @app.route('/api/inventory/stats', methods=['GET'])
 @check_auth

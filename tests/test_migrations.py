@@ -98,6 +98,8 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_approval_workflow",
             "modules.migration_serial_backfill",
             "modules.migration_product_identity",
+            "modules.migration_inventory_ledger",
+            "modules.migration_shipment_lifecycle",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -259,6 +261,56 @@ def test_stable_product_identity_triggers_preserve_aliases_on_direct_code_update
                 "INSERT INTO products (id, product_name, product_code) "
                 "VALUES (8, '错误复用', 'TEST-OLD')"
             )
+    finally:
+        db.close()
+
+
+def test_inventory_ledger_migration_reconciles_and_protects_history():
+    from modules.migration_inventory_ledger import m051_inventory_ledger
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE users (id INTEGER PRIMARY KEY);
+            CREATE TABLE inventory (
+                id INTEGER PRIMARY KEY, quantity REAL DEFAULT 0,
+                product_model TEXT, product_name TEXT, reserved REAL DEFAULT 0,
+                updated_at TEXT, last_count_date TEXT
+            );
+            CREATE TABLE inventory_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inventory_id INTEGER NOT NULL, type TEXT NOT NULL,
+                quantity REAL NOT NULL, order_id INTEGER, order_no TEXT DEFAULT '',
+                remark TEXT DEFAULT '', operator_id INTEGER,
+                operator_name TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO inventory (id, quantity, product_model, product_name)
+            VALUES (1, 5, 'M-1', 'Product 1');
+            INSERT INTO inventory_logs (inventory_id, type, quantity)
+            VALUES (1, 'in', 3);
+            """
+        )
+
+        m051_inventory_ledger(db)
+        db.commit()
+        m051_inventory_ledger(db)
+        db.commit()
+
+        logs = db.execute(
+            "SELECT qty_delta, balance_before, balance_after, source_type "
+            "FROM inventory_logs ORDER BY id"
+        ).fetchall()
+        assert [tuple(row) for row in logs] == [
+            (3, 0, 3, "legacy"),
+            (2, 3, 5, "migration"),
+        ]
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute("UPDATE inventory_logs SET remark='changed' WHERE id=1")
+        db.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="archive"):
+            db.execute("DELETE FROM inventory WHERE id=1")
     finally:
         db.close()
 

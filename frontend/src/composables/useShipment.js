@@ -11,6 +11,8 @@ const statusMap = {
   pending: { label: '待出库', cls: 'badge-info' },
   completed: { label: '已出库', cls: 'badge-success' },
   received: { label: '已签收', cls: 'badge-primary' },
+  cancelled: { label: '已取消', cls: 'badge-info' },
+  reversed: { label: '已冲销', cls: 'badge-danger' },
 }
 
 const paymentStatusMap = {
@@ -28,6 +30,11 @@ export function useShipment() {
   const canCreate = computed(() => can('shipments:create'))
   const canEdit = computed(() => can('shipments:edit'))
   const canDelete = computed(() => can('shipments:delete'))
+  const canComplete = computed(() => can('shipments:complete'))
+  const canCancel = computed(() => can('shipments:cancel'))
+  const canReceive = computed(() => can('shipments:receive'))
+  const canFinance = computed(() => can('shipments:finance'))
+  const canLogistics = computed(() => can('shipments:logistics'))
 
   onMounted(async () => {
     await editor.loadInventory()
@@ -44,5 +51,10 @@ export function useShipment() {
     canCreate,
     canEdit,
     canDelete,
+    canComplete,
+    canCancel,
+    canReceive,
+    canFinance,
+    canLogistics,
   }
 }

@@ -389,6 +389,16 @@ export const IMPLIED_PERMISSIONS = {
   "quality:edit": [
     "quality:review"
   ],
+  "shipments:edit": [
+    "shipments:complete",
+    "shipments:cancel",
+    "shipments:receive",
+    "shipments:finance",
+    "shipments:logistics"
+  ],
+  "shipments:delete": [
+    "shipments:cancel"
+  ],
   "materials:manage": [
     "materials:view",
     "materials:create",

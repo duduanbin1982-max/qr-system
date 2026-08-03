@@ -117,22 +117,34 @@ class ReportsRepository:
     def shipment_stats(start="", end="", product_code="", db=None):
         date_where, params = ReportsRepository._date_filter(start, end, "s")
         where = ["1=1", *date_where]
+        actual_dates, actual_params = ReportsRepository._date_filter(
+            start, end, "s", "completed_at"
+        )
+        actual_where = ["s.status IN ('completed','received')", *actual_dates]
         if product_code:
             clause, clause_params = ReportsRepository._product_filter(
                 product_code, db
             ).order_clause("o")
-            where.append(
+            product_where = (
                 "s.id IN (SELECT si.shipment_id FROM shipment_items si "
                 "JOIN orders o ON si.order_id=o.id WHERE "
                 + clause + ")"
             )
+            where.append(product_where)
+            actual_where.append(product_where)
             params.extend(clause_params)
+            actual_params.extend(clause_params)
         where_sql = " AND ".join(where)
+        actual_where_sql = " AND ".join(actual_where)
         return (
             ReportsRepository.fetch_shipment_by_status(where_sql, params, db=db),
-            ReportsRepository.fetch_shipment_by_customer(where_sql, params, db=db),
+            ReportsRepository.fetch_shipment_by_customer(
+                actual_where_sql, actual_params, db=db
+            ),
             ReportsRepository.fetch_shipment_monthly_trend(
-                where_sql + " AND s.created_at>=date('now','-12 months')", params, db=db
+                actual_where_sql + " AND s.completed_at>=date('now','-12 months')",
+                actual_params,
+                db=db,
             ),
         )
 
@@ -377,7 +389,7 @@ class ReportsRepository:
     def fetch_shipment_monthly_trend(where_clause, params, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT substr(s.created_at,1,7) as month, COUNT(*) as count, "
+            "SELECT substr(s.completed_at,1,7) as month, COUNT(*) as count, "
             "COALESCE(SUM(s.total_quantity),0) as total_qty "
             "FROM shipments s WHERE " + where_clause + " "
             "GROUP BY month ORDER BY month ASC",

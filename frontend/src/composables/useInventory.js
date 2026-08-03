@@ -20,6 +20,11 @@ export function useInventory() {
   const turnoverData = ref([])
   const turnoverLoading = ref(false)
 
+  const showCount = ref(false)
+  const countLoading = ref(false)
+  const countTask = ref(null)
+  const countItems = ref([])
+
   const showModal = ref(false)
   const modalEdit = ref(false)
   const modalId = ref(null)
@@ -39,6 +44,8 @@ export function useInventory() {
   const moveTarget = ref(null)
   const moveQty = ref(1)
   const moveOrderId = ref('')
+  const moveLotNo = ref('')
+  const moveSerialNo = ref('')
 
   const stats = ref({ total_items: 0, total_quantity: 0, low_stock: 0, today_in: 0, today_out: 0 })
   const lowCount = computed(() => stats.value.low_stock || items.value.filter((item) => item.is_low).length)
@@ -93,7 +100,7 @@ export function useInventory() {
     turnoverLoading.value = true
     try {
       const data = await api.domains.inventory.inventoryTurnover()
-      turnoverData.value = data.data || []
+      turnoverData.value = data.items || []
     } catch (error) {
       showToast('加载周转数据失败', 'error')
     } finally {
@@ -102,19 +109,66 @@ export function useInventory() {
   }
 
   async function doCount() {
-    if (!confirm('确定创建盘点任务吗？')) return
+    countLoading.value = true
     try {
-      await api.domains.inventory.createCountTask()
-      showToast('盘点任务已创建')
+      let data = await api.domains.inventory.countStatus()
+      if (!data.task || data.task.status === 'posted') {
+        if (!confirm('确定创建新的盘点任务吗？')) return
+        data = await api.domains.inventory.createCountTask()
+        showToast('盘点任务已创建')
+      }
+      applyCountTask(data)
+      showCount.value = true
     } catch (error) {
-      showToast(error.message || '创建失败', 'error')
+      showToast(error.message || '加载盘点任务失败', 'error')
+    } finally {
+      countLoading.value = false
+    }
+  }
+
+  function applyCountTask(data) {
+    countTask.value = data.task || null
+    countItems.value = (data.items || []).map((item) => ({
+      ...item,
+      actual_qty: item.actual_quantity == null ? item.book_quantity : item.actual_quantity,
+    }))
+  }
+
+  async function saveCountItem(item) {
+    try {
+      await api.domains.inventory.submitCount(item.inventory_id, {
+        task_id: countTask.value.id,
+        actual_qty: Number(item.actual_qty),
+        remark: item.remark || '',
+      })
+      const data = await api.domains.inventory.countStatus(countTask.value.id)
+      applyCountTask(data)
+      showToast('盘点数量已记录')
+    } catch (error) {
+      showToast(error.message || '盘点录入失败', 'error')
+    }
+  }
+
+  async function approveCount() {
+    if (!countTask.value || !confirm('确定审批并过账全部盘点差异吗？')) return
+    countLoading.value = true
+    try {
+      const data = await api.domains.inventory.approveCountTask(countTask.value.id)
+      applyCountTask(data)
+      showToast('盘点差异已过账')
+      await load()
+      await loadStats()
+    } catch (error) {
+      showToast(error.message || '盘点审批失败', 'error')
+    } finally {
+      countLoading.value = false
     }
   }
 
   async function loadLocations() {
     try {
       const data = await api.domains.inventory.listLocations()
-      locations.value = data.locations || []
+      locations.value = (data.locations || []).map((row) => row.location)
     } catch (error) {
       // noop
     }
@@ -173,11 +227,15 @@ export function useInventory() {
       return
     }
     try {
+      const payload = { ...form.value }
       if (modalEdit.value) {
-        await api.domains.inventory.updateInventory(modalId.value, form.value)
+        delete payload.quantity
+        delete payload.order_id
+        await api.domains.inventory.updateInventory(modalId.value, payload)
         showToast('更新成功')
       } else {
-        await api.domains.inventory.createInventory(form.value)
+        payload.order_id = payload.order_id ? Number(payload.order_id) : null
+        await api.domains.inventory.createInventory(payload)
         showToast('创建成功')
       }
       showModal.value = false
@@ -192,16 +250,16 @@ export function useInventory() {
     let impactInfo = ''
     try {
       const result = await api.domains.inventory.inventoryImpact(item.id)
-      if (result.log_count > 0) {
-        impactInfo = '（将同步删除 ' + result.log_count + ' 条流水记录）'
+      if (result.warnings?.length) {
+        impactInfo = '（' + result.warnings.join('；') + '）'
       }
     } catch (error) {
       // non-blocking
     }
-    if (!confirm('确定删除库存 "' + item.product_model + '" 吗？' + impactInfo)) return
+    if (!confirm('确定停用库存 "' + item.product_model + '" 吗？' + impactInfo)) return
     try {
       await api.domains.inventory.deleteInventory(item.id)
-      showToast('删除成功')
+      showToast('已停用')
       await load()
       await loadStats()
     } catch (error) {
@@ -213,6 +271,8 @@ export function useInventory() {
     moveTarget.value = item
     moveType.value = type
     moveQty.value = 1
+    moveLotNo.value = ''
+    moveSerialNo.value = ''
     showMoveModal.value = true
   }
 
@@ -224,7 +284,10 @@ export function useInventory() {
     }
     try {
       if (moveType.value === 'in') {
-        const payload = { inventory_id: moveTarget.value.id, quantity, remark: '手动入库' }
+        const payload = {
+          inventory_id: moveTarget.value.id, quantity, remark: '手动入库',
+          lot_no: moveLotNo.value, serial_no: moveSerialNo.value,
+        }
         if (moveOrderId.value) {
           payload.order_id = moveOrderId.value
           const order = orderOptions.value.find((item) => item.id == moveOrderId.value)
@@ -233,7 +296,10 @@ export function useInventory() {
         await api.domains.inventory.stockIn(payload)
         showToast('入库成功 +' + quantity)
       } else {
-        await api.domains.inventory.stockOut({ inventory_id: moveTarget.value.id, quantity, remark: '手动出库' })
+        await api.domains.inventory.stockOut({
+          inventory_id: moveTarget.value.id, quantity, remark: '手动出库',
+          lot_no: moveLotNo.value, serial_no: moveSerialNo.value,
+        })
         showToast('出库成功 -' + quantity)
       }
       showMoveModal.value = false
@@ -275,6 +341,10 @@ export function useInventory() {
     showTurnover,
     turnoverData,
     turnoverLoading,
+    showCount,
+    countLoading,
+    countTask,
+    countItems,
     showModal,
     modalEdit,
     form,
@@ -283,6 +353,8 @@ export function useInventory() {
     moveTarget,
     moveQty,
     moveOrderId,
+    moveLotNo,
+    moveSerialNo,
     stats,
     lowCount,
     totalQty,
@@ -294,7 +366,10 @@ export function useInventory() {
     exportExcel,
     doABC,
     loadTurnover,
+    loadLocations,
     doCount,
+    saveCountItem,
+    approveCount,
     loadLogs,
     openAdd,
     openEdit,

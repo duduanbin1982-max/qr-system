@@ -17,6 +17,8 @@ from modules.migration_order_qr_print import MIGRATIONS as ORDER_QR_PRINT_MIGRAT
 from modules.migration_serial_backfill import MIGRATIONS as SERIAL_BACKFILL_MIGRATIONS
 from modules.migration_process_management import MIGRATIONS as PROCESS_MANAGEMENT_MIGRATIONS
 from modules.migration_product_identity import MIGRATIONS as PRODUCT_IDENTITY_MIGRATIONS
+from modules.migration_inventory_ledger import MIGRATIONS as INVENTORY_LEDGER_MIGRATIONS
+from modules.migration_shipment_lifecycle import MIGRATIONS as SHIPMENT_LIFECYCLE_MIGRATIONS
 
 
 MIGRATIONS = sorted([
@@ -34,6 +36,8 @@ MIGRATIONS = sorted([
     *SERIAL_BACKFILL_MIGRATIONS,
     *PROCESS_MANAGEMENT_MIGRATIONS,
     *PRODUCT_IDENTITY_MIGRATIONS,
+    *INVENTORY_LEDGER_MIGRATIONS,
+    *SHIPMENT_LIFECYCLE_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]
