@@ -48,6 +48,8 @@ class InventoryAutoInboundService:
                 user_id,
                 user_name,
                 db=d,
+                serial_no=serial_no,
             )
         except Exception as exc:
-            _logger.warning("auto_inbound failed: %s", exc)
+            _logger.exception("auto_inbound failed: %s", exc)
+            raise

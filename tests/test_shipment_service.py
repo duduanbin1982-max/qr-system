@@ -172,3 +172,64 @@ def test_cancel_or_delete_completed_shipment_restores_stock(client, action):
             "SELECT quantity FROM inventory WHERE id = ?", (inventory_id,)
         ).fetchone()["quantity"]
         assert stock == 5
+
+
+@pytest.mark.parametrize("action", ["cancel", "delete"])
+def test_cancel_or_delete_pending_reserved_shipment_releases_reservation(client, action):
+    with client.application.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db, quantity=5)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(
+                order_id, order_no, inventory_id, quantity=4,
+                deduction_mode="on_create",
+            ),
+            created_by="测试管理员",
+        )
+        reserved = db.execute(
+            "SELECT quantity, reserved FROM inventory WHERE id=?", (inventory_id,)
+        ).fetchone()
+        assert tuple(reserved) == (5, 4)
+
+        if action == "cancel":
+            ShipmentService.cancel_shipment(shipment_id, CURRENT_USER)
+        else:
+            ShipmentService.delete_shipment(shipment_id, CURRENT_USER)
+
+        released = db.execute(
+            "SELECT quantity, reserved FROM inventory WHERE id=?", (inventory_id,)
+        ).fetchone()
+        assert tuple(released) == (5, 0)
+        assert [
+            row["type"] for row in db.execute(
+                "SELECT type FROM inventory_logs WHERE inventory_id=? "
+                "AND type IN ('reserve', 'release') ORDER BY id",
+                (inventory_id,),
+            ).fetchall()
+        ] == ["reserve", "release"]
+
+
+def test_complete_reserved_shipment_consumes_quantity_and_reservation_together(client):
+    with client.application.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db, quantity=5)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(
+                order_id, order_no, inventory_id, quantity=4,
+                deduction_mode="on_create",
+            ),
+            created_by="测试管理员",
+        )
+        _pass_outgoing_inspection(shipment_id)
+        ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
+
+        item = db.execute(
+            "SELECT quantity, reserved FROM inventory WHERE id=?", (inventory_id,)
+        ).fetchone()
+        assert tuple(item) == (1, 0)
+        movement = db.execute(
+            "SELECT qty_delta, balance_before, balance_after FROM inventory_logs "
+            "WHERE idempotency_key LIKE ?",
+            ("shipment:%:out",),
+        ).fetchone()
+        assert tuple(movement) == (-4, 5, 1)

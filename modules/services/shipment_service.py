@@ -8,6 +8,7 @@ from modules.services import BaseService
 from modules.repositories.inventory_repository import InventoryRepository
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.shipment_repository import ShipmentRepository
+from modules.services.inventory_posting_service import InventoryPostingService
 from modules.setting_reader import get_setting
 from modules.shipment_config import (
     DEFAULT_SHIPMENT_NO_PREFIX,
@@ -57,22 +58,37 @@ class ShipmentService:
         if not items:
             raise ValueError("请添加出库产品")
 
-        total_qty = sum(item.get("quantity", 0) for item in items)
-
-        # 库存校验
-        for item in items:
-            inv = InventoryRepository.find_item_by_id(item.get("inventory_id", 0))
-            if not inv:
-                raise NotFoundError("库存记录不存在 (ID:" + str(item.get("inventory_id")) + ")")
-            quality_status = inv["quality_status"] if "quality_status" in inv.keys() else "released"
-            if (quality_status or "released") != "released":
-                raise ConflictError(
-                    inv["product_model"] + " " + inv["product_name"] + ": 库存处于质量隔离状态，不能创建出库单"
-                )
-            if inv["quantity"] < item.get("quantity", 0):
-                raise ConflictError(inv["product_model"] + " " + inv["product_name"] + ": 库存不足 (当前" + str(inv["quantity"]) + "，需要" + str(item["quantity"]) + ")")
+        try:
+            total_qty = sum(float(item.get("quantity", 0)) for item in items)
+        except (TypeError, ValueError):
+            raise ValueError("出库数量必须为数字")
+        if total_qty <= 0 or any(float(item.get("quantity", 0)) <= 0 for item in items):
+            raise ValueError("出库数量必须大于零")
 
         with BaseService.transaction() as txn:
+            required_by_inventory = {}
+            for item in items:
+                inventory_id = item.get("inventory_id", 0)
+                required_by_inventory[inventory_id] = (
+                    required_by_inventory.get(inventory_id, 0) + float(item.get("quantity", 0))
+                )
+            for inventory_id, required in required_by_inventory.items():
+                inv = InventoryRepository.find_item_by_id(inventory_id, db=txn)
+                if not inv:
+                    raise NotFoundError("库存记录不存在 (ID:" + str(inventory_id) + ")")
+                quality_status = inv["quality_status"] if "quality_status" in inv.keys() else "released"
+                if (quality_status or "released") != "released":
+                    raise ConflictError(
+                        inv["product_model"] + " " + inv["product_name"]
+                        + ": 库存处于质量隔离状态，不能创建出库单"
+                    )
+                available = float(inv["quantity"] or 0) - float(inv["reserved"] or 0)
+                if available < required:
+                    raise ConflictError(
+                        inv["product_model"] + " " + inv["product_name"]
+                        + ": 可用库存不足 (当前" + str(available)
+                        + "，需要" + str(required) + ")"
+                    )
             try:
                 shipment_id = ShipmentRepository.insert_shipment_txn(
                     shipment_no, data.get("customer", ""), data.get("contact_person", ""),
@@ -93,6 +109,7 @@ class ShipmentService:
                 order = OrderRepository.find_by_id(order_id, db=txn)
                 order_no_val = order["order_no"] if order else ""
 
+            inserted_items = []
             for item in items:
                 item_order_id = item.get("order_id") or order_id
                 item_order_no = item.get("order_no") or order_no_val
@@ -106,18 +123,27 @@ class ShipmentService:
                         product_code = inv_row["product_model"]
                     else:
                         product_code = item.get("product_model", "")
-                ShipmentRepository.insert_shipment_item_txn(
+                shipment_item_id = ShipmentRepository.insert_shipment_item_txn(
                     shipment_id, item.get("inventory_id", 0),
                     item.get("product_model", ""), item.get("product_name", ""),
                     item.get("quantity", 0), item.get("unit", "件"), item.get("remark", ""),
                     item_order_id, product_code, item_order_no,
                     db=txn
                 )
+                inserted_items.append((shipment_item_id, item))
 
             if data.get("deduction_mode") == "on_create":
-                for item in items:
-                    InventoryRepository.reserve_stock_txn(
-                        item.get("inventory_id", 0), item.get("quantity", 0), db=txn
+                for shipment_item_id, item in inserted_items:
+                    InventoryPostingService.reserve(
+                        item.get("inventory_id", 0), item.get("quantity", 0),
+                        operator_name=created_by,
+                        source_type="shipment",
+                        source_id=shipment_item_id,
+                        idempotency_key="shipment:%s:item:%s:reserve" % (
+                            shipment_id, shipment_item_id
+                        ),
+                        remark="出库单 %s 预留库存" % shipment_no,
+                        db=txn,
                     )
                 ShipmentRepository.mark_reserved_txn(shipment_id, db=txn)
 
@@ -162,15 +188,35 @@ class ShipmentService:
         if not row:
             raise NotFoundError("出库单不存在")
         with BaseService.transaction() as txn:
-            if row["status"] == "completed":
-                items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
+            items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
+            if row["status"] in ("completed", "received"):
                 for item in items:
-                    InventoryRepository.increase_stock_txn(item["inventory_id"], item["quantity"], db=txn)
                     remark = "删除出库单 " + row["shipment_no"] + " - 归还库存"
-                    InventoryRepository.insert_movement_log_txn(
-                        item["inventory_id"], "in", item["quantity"],
+                    outbound = InventoryRepository.find_log_by_idempotency_key(
+                        "shipment:%s:item:%s:out" % (shipment_id, item["id"]), db=txn
+                    )
+                    InventoryPostingService.post(
+                        item["inventory_id"], item["quantity"], "return",
                         order_id=item["order_id"], order_no=row["shipment_no"], remark=remark,
-                        operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
+                        operator_id=current_user["id"], operator_name=current_user["name"],
+                        source_type="shipment_delete", source_id=item["id"],
+                        idempotency_key="shipment:%s:item:%s:delete-return" % (
+                            shipment_id, item["id"]
+                        ),
+                        reversal_of_id=outbound["id"] if outbound else None,
+                        db=txn,
+                    )
+            elif row["reserved_at"]:
+                for item in items:
+                    InventoryPostingService.release(
+                        item["inventory_id"], item["quantity"],
+                        operator_id=current_user["id"], operator_name=current_user["name"],
+                        source_type="shipment_delete", source_id=item["id"],
+                        idempotency_key="shipment:%s:item:%s:delete-release" % (
+                            shipment_id, item["id"]
+                        ),
+                        remark="删除出库单 %s 释放预留" % row["shipment_no"],
+                        db=txn,
                     )
             ShipmentRepository.delete_shipment_items_txn(shipment_id, db=txn)
             ShipmentRepository.delete_shipment_txn(shipment_id, db=txn)
@@ -191,26 +237,16 @@ class ShipmentService:
         with BaseService.transaction() as txn:
             from modules.services.quality_management_service import QualityManagementService
             QualityManagementService.assert_shipment_allowed(shipment_id, db=txn)
-            if row["reserved_at"]:
-                for item in items:
-                    InventoryRepository.release_reserved_stock_txn(
-                        item["inventory_id"], item["quantity"], db=txn
-                    )
             for item in items:
-                cur = InventoryRepository.decrease_stock_if_available_txn(
-                    item["inventory_id"], item["quantity"], db=txn
-                )
-                if cur.rowcount == 0:
-                    inv = InventoryRepository.find_item_by_id(item["inventory_id"], db=txn)
-                    current = inv["quantity"] if inv else 0
-                    model = inv["product_model"] if inv else (item["product_model"] or "?")
-                    raise ConflictError(model + " " + (item["product_name"] or "") + ": 库存不足 (库存" + str(current) + "，需" + str(item["quantity"]) + ")")
                 item_order_no = item["order_no"] if item["order_no"] else sn
                 remark = "出库单 " + sn + " 出库 " + str(item["quantity"]) + " " + (item["unit"] or "件")
-                InventoryRepository.insert_movement_log_txn(
-                    item["inventory_id"], "out", item["quantity"],
+                InventoryPostingService.post(
+                    item["inventory_id"], -float(item["quantity"]), "out",
                     order_id=item["order_id"], order_no=item_order_no, remark=remark,
-                    operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
+                    operator_id=current_user["id"], operator_name=current_user["name"],
+                    source_type="shipment", source_id=item["id"],
+                    idempotency_key="shipment:%s:item:%s:out" % (shipment_id, item["id"]),
+                    consume_reserved=bool(row["reserved_at"]), db=txn,
                 )
             ShipmentRepository.complete_shipment_txn(shipment_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), db=txn)
             ShipmentService._update_order_delivery_status(txn, shipment_id)
@@ -293,21 +329,35 @@ class ShipmentService:
         if row["status"] == "cancelled":
             raise ConflictError("出库单已取消")
         with BaseService.transaction() as txn:
-            if row["reserved_at"]:
-                items_rel = ShipmentRepository.release_reserved_for_shipment_txn(shipment_id, db=txn)
-                for item in items_rel:
-                    InventoryRepository.release_reserved_stock_txn(
-                        item["inventory_id"], item["quantity"], db=txn
-                    )
-            if row["status"] == "completed":
-                items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
+            items = ShipmentRepository.find_shipment_items_for_delete_txn(shipment_id, db=txn)
+            if row["status"] in ("completed", "received"):
                 for item in items:
-                    InventoryRepository.increase_stock_txn(item["inventory_id"], item["quantity"], db=txn)
-                    InventoryRepository.insert_movement_log_txn(
-                        item["inventory_id"], "in", item["quantity"],
+                    outbound = InventoryRepository.find_log_by_idempotency_key(
+                        "shipment:%s:item:%s:out" % (shipment_id, item["id"]), db=txn
+                    )
+                    InventoryPostingService.post(
+                        item["inventory_id"], item["quantity"], "return",
                         order_id=item["order_id"], order_no=row["shipment_no"],
                         remark="取消出库单 " + row["shipment_no"] + " - 归还库存",
-                        operator_id=current_user["id"], operator_name=current_user["name"], db=txn,
+                        operator_id=current_user["id"], operator_name=current_user["name"],
+                        source_type="shipment_cancel", source_id=item["id"],
+                        idempotency_key="shipment:%s:item:%s:cancel-return" % (
+                            shipment_id, item["id"]
+                        ),
+                        reversal_of_id=outbound["id"] if outbound else None,
+                        db=txn,
+                    )
+            elif row["reserved_at"]:
+                for item in items:
+                    InventoryPostingService.release(
+                        item["inventory_id"], item["quantity"],
+                        operator_id=current_user["id"], operator_name=current_user["name"],
+                        source_type="shipment_cancel", source_id=item["id"],
+                        idempotency_key="shipment:%s:item:%s:cancel-release" % (
+                            shipment_id, item["id"]
+                        ),
+                        remark="取消出库单 %s 释放预留" % row["shipment_no"],
+                        db=txn,
                     )
             ShipmentRepository.cancel_shipment_txn(shipment_id, db=txn)
         return row["shipment_no"]

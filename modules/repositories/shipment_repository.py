@@ -71,13 +71,14 @@ class ShipmentRepository:
     @staticmethod
     def insert_shipment_item_txn(shipment_id, inventory_id, product_model, product_name,
                                   quantity, unit, remark, order_id, product_code, order_no, db):
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO shipment_items (shipment_id, inventory_id, product_model, "
             "product_name, quantity, unit, remark, order_id, product_code, order_no) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (shipment_id, inventory_id, product_model, product_name, quantity, unit, remark,
              order_id, product_code, order_no)
         )
+        return cursor.lastrowid
 
     @staticmethod
     def mark_reserved_txn(shipment_id, db):
