@@ -170,7 +170,7 @@ def test_historical_cutover_rolls_back_when_confirmed_counts_change(client):
         preparer_id = ensure_user(db, "rollback-preparer", "hash", "回滚制单员", "admin", "ROLLBACK-PREP")
         db.commit()
         try:
-            PayrollHistoryMigrationService.apply(db, "2026-07", preparer_id, 2592, 61)
+            PayrollHistoryMigrationService.apply(db, "2026-07", preparer_id, 2638, 15)
         except RuntimeError as error:
             assert "历史工资基线不一致" in str(error)
         else:
