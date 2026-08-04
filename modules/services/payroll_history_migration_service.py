@@ -205,6 +205,12 @@ class PayrollHistoryMigrationService:
                     expected_unresolved,
                 )
             batch_id = batch["id"] if batch else None
+            if batch:
+                for row in plan["unresolved_rows"]:
+                    if row["classification"] == "zero_current_price":
+                        PayrollHistoryMigrationRepository.reclassify_exception(
+                            batch_id, row["work_record_id"], "zero_price", db
+                        )
             if manifest:
                 if create_revision and manifest.get("batch_id") != batch_id:
                     raise RuntimeError("历史工资迁移清单关联的 V2 批次不一致")

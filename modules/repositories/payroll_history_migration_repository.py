@@ -121,3 +121,19 @@ class PayrollHistoryMigrationRepository:
             "SELECT 1 FROM payroll_events WHERE idempotency_key=? LIMIT 1",
             (idempotency_key,),
         ).fetchone() is not None
+
+    @staticmethod
+    def reclassify_exception(batch_id, work_record_id, exception_type, db=None):
+        db = resolve_db(db)
+        cursor = db.execute(
+            """
+            UPDATE payroll_exceptions
+            SET exception_type=?,updated_at=datetime('now','localtime')
+            WHERE batch_id=? AND work_record_id=? AND status='pending'
+            """,
+            (exception_type, batch_id, work_record_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                f"工资异常重分类失败: batch={batch_id}, work_record={work_record_id}"
+            )

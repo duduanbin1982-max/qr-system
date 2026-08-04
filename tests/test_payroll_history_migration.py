@@ -119,6 +119,9 @@ def test_historical_cutover_creates_exact_v2_and_keeps_unmatched_as_exception(cl
 def test_historical_analysis_classifies_zero_current_price_as_unresolved(client):
     with client.application.app_context():
         db = get_db()
+        preparer_id = ensure_user(
+            db, "zero-history-preparer", "hash", "零工价制单员", "admin", "ZERO-PREP"
+        )
         worker_id = ensure_user(
             db, "zero-history-worker", WORKER_HASH, "零工价员工", "worker", "ZERO-HIST"
         )
@@ -149,6 +152,17 @@ def test_historical_analysis_classifies_zero_current_price_as_unresolved(client)
             "VALUES (?,?,?,'normal',2,'approved','2026-07-20 08:00:00')",
             (order_id, process_id, worker_id),
         ).lastrowid
+        start, end = reporting_month_bounds("2026-07")
+        db.execute(
+            """
+            INSERT INTO payroll_batches (
+                payroll_month,version,period_start,period_end,status,source_cutoff_at,
+                idempotency_key,legacy_imported,prepared_by_name
+            ) VALUES ('2026-07',1,?,?,'locked','2026-08-01 07:00:00',
+                      'legacy:test-zero-history',1,'legacy import')
+            """,
+            (start, end),
+        )
         db.commit()
 
         first = PayrollHistoryMigrationService.analyze(db, "2026-07")
@@ -162,6 +176,14 @@ def test_historical_analysis_classifies_zero_current_price_as_unresolved(client)
             }
         ]
         assert first["manifest_sha256"] == second["manifest_sha256"]
+        result = PayrollHistoryMigrationService.apply(
+            db, "2026-07", preparer_id, 0, 1
+        )
+        exception = db.execute(
+            "SELECT exception_type FROM payroll_exceptions WHERE batch_id=?",
+            (result["batch"]["id"],),
+        ).fetchone()
+        assert exception["exception_type"] == "zero_price"
 
 
 def test_historical_cutover_rolls_back_when_confirmed_counts_change(client):
