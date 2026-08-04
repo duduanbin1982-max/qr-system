@@ -17,7 +17,9 @@ class PerformanceService:
 
     @staticmethod
     def _score_worker(metrics, max_output, review=None, handoff=None):
-        return PerformanceService.scoring_policy.score_worker(metrics, max_output, review, handoff)
+        return PerformanceService.scoring_policy.score_legacy_worker(
+            metrics, max_output, review, handoff
+        )
 
     @staticmethod
     def rules():
