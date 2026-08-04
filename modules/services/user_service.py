@@ -14,6 +14,12 @@ from io import BytesIO
 from openpyxl import Workbook
 from modules.services import BaseService
 from modules.repositories.user_repository import UserRepository
+from modules.repositories.performance_assignment_repository import (
+    PerformanceAssignmentRepository,
+)
+from modules.services.performance_assignment_service import (
+    PerformanceAssignmentService,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -173,7 +179,7 @@ class UserService:
         field_labels = {
             "name": "Name", "nickname": "Nickname", "email": "Email", "phone": "Phone",
             "role": "Role", "employee_no": "Employee No", "marker": "Marker", "group_name": "Role Group",
-            "position_id": "Position ID", "status": "Status"
+            "position_id": "Position ID", "department_id": "Department ID", "status": "Status"
         }
         for field, label in field_labels.items():
             old_val = existing[field] if field in existing.keys() else None
@@ -226,6 +232,9 @@ class UserService:
         if position_id:
             if not UserRepository.find_position_by_id(position_id, db=db):
                 raise NotFoundError("Specified position does not exist")
+        department_id = data.get("department_id")
+        if department_id and not UserRepository.find_department_by_id(department_id, db=db):
+            raise NotFoundError("Specified department does not exist")
 
         # Process validation
         UserService._validate_process_ids(data)
@@ -244,6 +253,7 @@ class UserService:
                 marker=(data.get("marker") or "").strip(),
                 phone=data.get("phone", ""),
                 position_id=position_id or None,
+                department_id=department_id or None,
                 status=data.get("status", "active"),
                 db=txn
             )
@@ -254,6 +264,12 @@ class UserService:
                 valid_pids = [int(x.strip()) for x in data["process_ids"].split(",") if x.strip()]
             for pid in valid_pids:
                 UserRepository.insert_user_process_txn(uid, pid, db=txn)
+            PerformanceAssignmentService.record_initial_assignment(
+                uid,
+                created_by=data.get("_caller_user_id"),
+                source_type="user_created",
+                db=txn,
+            )
 
         return uid, raw_pw
 
@@ -275,6 +291,12 @@ class UserService:
             if position_id:
                 if not UserRepository.find_position_by_id(position_id, db=db):
                     raise NotFoundError("Specified position does not exist")
+        if "department_id" in data:
+            department_id = data["department_id"]
+            if department_id and not UserRepository.find_department_by_id(
+                department_id, db=db
+            ):
+                raise NotFoundError("Specified department does not exist")
 
         # Process validation
         UserService._validate_process_ids(data)
@@ -286,9 +308,16 @@ class UserService:
         sets, params = UserService._build_update_fields(data)
 
         with BaseService.transaction() as txn:
+            existing = UserRepository.find_user_by_id_for_update(uid, db=txn)
+            if not existing:
+                raise NotFoundError("User not found")
             UserService._sync_user_processes(uid, data, txn)
             UserRepository.update_user_txn(uid, ", ".join(sets), params, db=txn)
             UserService._apply_role_update(uid, old_role, new_role_id, new_role_code, txn)
+            updated = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
+            PerformanceAssignmentService.record_user_change(
+                existing, updated, created_by=current_user_id, db=txn
+            )
 
         # Audit field changes
         try:
@@ -304,21 +333,25 @@ class UserService:
 
     @staticmethod
     def restore_user(uid):
-        db = BaseService.db()
-        user = UserRepository.find_deleted_user(uid, db=db)
-        if not user:
-            raise NotFoundError("User not found or not deleted")
-        UserRepository.restore_user_txn(uid, db=db)
-        db.commit()
+        with BaseService.transaction() as txn:
+            user = UserRepository.find_user_by_id_for_update(uid, db=txn)
+            if not user or user["status"] != "deleted":
+                raise NotFoundError("User not found or not deleted")
+            UserRepository.restore_user_txn(uid, db=txn)
+            updated = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
+            PerformanceAssignmentService.record_user_change(user, updated, db=txn)
         return True
 
     @staticmethod
     def permanent_delete_user(uid):
-        db = BaseService.db()
-        user = UserRepository.find_deleted_user(uid, db=db)
-        if not user:
-            raise ConflictError("Can only permanently delete trashed users")
         with BaseService.transaction() as txn:
+            user = UserRepository.find_deleted_user(uid, db=txn)
+            if not user:
+                raise ConflictError("Can only permanently delete trashed users")
+            if PerformanceAssignmentRepository.has_assignment_history(uid, db=txn):
+                raise ConflictError(
+                    "Cannot permanently delete a user with performance assignment history"
+                )
             UserRepository.permanent_delete_cascade_txn(uid, db=txn)
         return True
 
@@ -338,8 +371,13 @@ class UserService:
             if UserRepository.count_admin_roles(db=db) <= 1:
                 raise ConflictError("Cannot delete the last administrator")
 
-        UserRepository.soft_delete_user_txn(uid, db=db)
-        db.commit()
+        with BaseService.transaction() as txn:
+            before = UserRepository.find_user_by_id_for_update(uid, db=txn)
+            UserRepository.soft_delete_user_txn(uid, db=txn)
+            after = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
+            PerformanceAssignmentService.record_user_change(
+                before, after, created_by=current_user_id, db=txn
+            )
         return True
 
     @staticmethod
@@ -351,9 +389,30 @@ class UserService:
             raise ConflictError("Cannot change own status")
         if status not in ("active", "inactive"):
             raise ValueError("Invalid status")
-        db = BaseService.db()
-        count = UserRepository.batch_update_status_txn(ids, status, db=db)
-        db.commit()
+        with BaseService.transaction() as txn:
+            before_rows = {
+                row["id"]: row
+                for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
+            }
+            count = UserRepository.batch_update_status_txn(ids, status, db=txn)
+            after_rows = {
+                row["id"]: row
+                for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
+            }
+            effective_at = PerformanceAssignmentService._current_timestamp()
+            for user_id, before in before_rows.items():
+                after = after_rows.get(user_id)
+                if after and before["status"] != after["status"]:
+                    snapshot = PerformanceAssignmentRepository.user_snapshot(
+                        user_id, db=txn
+                    )
+                    PerformanceAssignmentService.record_user_change(
+                        before,
+                        snapshot,
+                        created_by=current_user_id,
+                        effective_at=effective_at,
+                        db=txn,
+                    )
         return count
 
     @staticmethod
@@ -369,8 +428,23 @@ class UserService:
         if admin_count > 0:
             if UserRepository.count_admin_roles(db=db) <= admin_count:
                 raise ConflictError("Cannot remove all administrators")
-        count = UserRepository.batch_soft_delete_users_txn(ids, db=db)
-        db.commit()
+        with BaseService.transaction() as txn:
+            before_rows = {
+                row["id"]: row
+                for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
+            }
+            count = UserRepository.batch_soft_delete_users_txn(ids, db=txn)
+            effective_at = PerformanceAssignmentService._current_timestamp()
+            for user_id, before in before_rows.items():
+                snapshot = PerformanceAssignmentRepository.user_snapshot(user_id, db=txn)
+                if snapshot and before["status"] != snapshot["status"]:
+                    PerformanceAssignmentService.record_user_change(
+                        before,
+                        snapshot,
+                        created_by=current_user_id,
+                        effective_at=effective_at,
+                        db=txn,
+                    )
         return count
 
     # ============================================================
@@ -488,6 +562,9 @@ class UserService:
                 position_id=position_id, db=txn
             )
             UserRepository.insert_user_role_txn(uid, role_id, db=txn)
+            PerformanceAssignmentService.record_initial_assignment(
+                uid, source_type="user_imported", db=txn
+            )
 
     @staticmethod
     def _import_user_row(row_idx, row, col_map, pos_map, db):

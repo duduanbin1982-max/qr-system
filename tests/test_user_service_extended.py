@@ -7,6 +7,7 @@ from werkzeug.datastructures import FileStorage
 
 from factories import ensure_process
 from modules.db import get_db
+from modules.domain.errors import ConflictError
 from modules.services.user_service import UserService
 
 
@@ -33,6 +34,13 @@ def test_create_worker_assigns_processes_and_worker_list_excludes_admin(client):
         detail = UserService.get_user_detail(user_id)
         assert detail["marker"] == "A班"
         assert [item["id"] for item in detail["assigned_processes"]] == [process_id]
+        assignment = db.execute(
+            "SELECT * FROM performance_assignment_history WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        assert assignment["employee_name_snapshot"] == "服务层员工"
+        assert assignment["source_type"] == "user_created"
+        assert assignment["valid_to"] == ""
 
         workers = UserService.list_users(role_filter="worker", limit=100)["users"]
         assert any(user["id"] == user_id for user in workers)
@@ -106,8 +114,11 @@ def test_batch_status_soft_delete_restore_and_permanent_delete(client):
         assert UserService.batch_delete_users([first_id, second_id], _admin_id(db)) == 2
         assert UserService.restore_user(first_id) is True
         assert UserService.delete_user(first_id, _admin_id(db)) is True
-        assert UserService.permanent_delete_user(first_id) is True
-        assert db.execute("SELECT id FROM users WHERE id = ?", (first_id,)).fetchone() is None
+        with pytest.raises(ConflictError, match="assignment history"):
+            UserService.permanent_delete_user(first_id)
+        assert db.execute(
+            "SELECT status FROM users WHERE id = ?", (first_id,)
+        ).fetchone()["status"] == "deleted"
 
 
 def test_reset_password_validates_strength_and_unlocks_account(client):
@@ -157,6 +168,11 @@ def test_import_export_and_document_lifecycle(client, tmp_path):
         user_id = db.execute(
             "SELECT id FROM users WHERE username = 'importeduser'"
         ).fetchone()["id"]
+        assignment = db.execute(
+            "SELECT source_type, valid_to FROM performance_assignment_history WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        assert tuple(assignment) == ("user_imported", "")
         assert UserService.export_users(role_filter="worker").getbuffer().nbytes > 0
 
         upload_dir = tmp_path / "documents"
