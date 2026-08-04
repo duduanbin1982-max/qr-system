@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from modules.permission_catalog import (
+    ACTION_LABELS,
     ACTION_PERMISSION_DEFS,
     PAGE_OPERATION_BINDINGS,
     PAGE_PERMISSION_CODES,
     SIDEBAR_ITEMS,
     build_permission_payload,
+    default_role_permission_additions,
     infer_page_permissions,
 )
 from modules.access_policy import has_permission_code
@@ -40,8 +42,45 @@ def test_page_operation_bindings_reference_known_pages_and_resources():
 
 
 def test_business_permissions_infer_page_permissions():
-    assert infer_page_permissions(["performance:view"]) == ["page:performance"]
+    assert infer_page_permissions(["performance:view_self"]) == ["page:performance"]
     assert "page:settings.admin-users" in infer_page_permissions(["users:admin"])
+
+
+def test_performance_permissions_are_granular_and_labels_are_resource_neutral():
+    assert ACTION_PERMISSION_DEFS["performance"][1] == [
+        "view_self",
+        "view_department",
+        "view_all",
+        "review_department",
+        "prepare",
+        "approve",
+        "plan_manage",
+        "plan_reassess",
+    ]
+    assert ACTION_LABELS["view_self"] == "查看本人"
+    assert ACTION_LABELS["view_all"] == "查看全部"
+    assert ACTION_LABELS["prepare"] == "制单"
+    assert ACTION_LABELS["approve"] == "批准"
+
+
+def test_legacy_performance_permissions_never_imply_global_access():
+    assert not has_permission_code(["performance:view"], "performance:view_all")
+    assert not has_permission_code(["performance:create"], "performance:prepare")
+    for role_code in ("qc_inspector", "warehouse_keeper"):
+        additions = default_role_permission_additions(role_code)
+        assert "performance:view_self" in additions
+        assert "performance:view_all" not in additions
+        assert "performance:view" not in additions
+
+
+def test_performance_write_permissions_only_imply_required_read_scope():
+    assert has_permission_code(
+        ["performance:review_department"], "performance:view_department"
+    )
+    assert has_permission_code(["performance:prepare"], "performance:view_all")
+    assert has_permission_code(["performance:approve"], "performance:view_all")
+    assert not has_permission_code(["performance:view_all"], "performance:prepare")
+    assert not has_permission_code(["performance:view_all"], "performance:approve")
 
 
 def test_frontend_fallback_catalog_is_generated_from_backend_catalog():

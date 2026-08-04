@@ -37,10 +37,14 @@ ACTION_LABELS = {
     "finance": "收退款",
     "logistics": "物流维护",
     "unlinked": "无订单发货",
-    "view_self": "查看本人工资",
-    "view_all": "查看全部工资",
-    "prepare": "工资制单",
-    "approve": "工资审批",
+    "view_self": "查看本人",
+    "view_department": "查看部门",
+    "view_all": "查看全部",
+    "review_department": "部门复核",
+    "prepare": "制单",
+    "approve": "批准",
+    "plan_manage": "改进计划管理",
+    "plan_reassess": "改进计划复评",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -83,7 +87,13 @@ ACTION_PERMISSION_DEFS = {
         "工资核算",
         ["view", "edit", "view_self", "view_all", "prepare", "approve", "export"],
     ),
-    "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
+    "performance": (
+        "绩效量化",
+        [
+            "view_self", "view_department", "view_all", "review_department",
+            "prepare", "approve", "plan_manage", "plan_reassess",
+        ],
+    ),
     "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
     "process_quality_evaluation": (
         "工序质量评价",
@@ -267,6 +277,9 @@ PERMISSION_IMPLICATIONS = {
     "wages:prepare": ["wages:view", "wages:view_all"],
     "wages:approve": ["wages:view", "wages:view_all"],
     "wages:export": ["wages:view", "wages:view_all"],
+    "performance:review_department": ["performance:view_department"],
+    "performance:prepare": ["performance:view_all"],
+    "performance:approve": ["performance:view_all"],
     "quality:edit": ["quality:review"],
     "shipments:edit": [
         "shipments:complete",
@@ -437,10 +450,8 @@ def infer_page_permissions(permission_codes):
 DEFAULT_ROLE_PERMISSION_ADDITIONS = {
     "production_manager": [
         "page:performance",
-        "performance:view",
-        "performance:create",
-        "performance:edit",
-        "performance:export",
+        "performance:view_department",
+        "performance:review_department",
         "page:process-quality-evaluation",
         "process_quality_evaluation:view",
         "process_quality_evaluation:review",
@@ -455,14 +466,14 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
     ],
     "qc_inspector": [
         "page:performance",
-        "performance:view",
+        "performance:view_self",
         "page:process-quality-evaluation",
         "process_quality_evaluation:view",
         "process_quality_evaluation:review",
         "process_quality_evaluation:waive",
         "process_quality_evaluation:stats",
     ],
-    "warehouse_keeper": ["page:performance", "performance:view"],
+    "warehouse_keeper": ["page:performance", "performance:view_self"],
 }
 
 

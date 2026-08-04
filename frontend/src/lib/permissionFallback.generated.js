@@ -404,6 +404,15 @@ export const IMPLIED_PERMISSIONS = {
     "wages:view",
     "wages:view_all"
   ],
+  "performance:review_department": [
+    "performance:view_department"
+  ],
+  "performance:prepare": [
+    "performance:view_all"
+  ],
+  "performance:approve": [
+    "performance:view_all"
+  ],
   "quality:edit": [
     "quality:review"
   ],

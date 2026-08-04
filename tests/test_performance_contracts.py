@@ -533,12 +533,13 @@ def test_performance_role_permission_seed_matches_catalog():
 
     manager_permissions = default_role_permission_additions("production_manager")
     assert "page:performance" in manager_permissions
-    assert "performance:view" in manager_permissions
-    assert "performance:create" in manager_permissions
-    assert "performance:edit" in manager_permissions
+    assert "performance:view_department" in manager_permissions
+    assert "performance:review_department" in manager_permissions
+    assert "performance:view_all" not in manager_permissions
 
     inspector_permissions = default_role_permission_additions("qc_inspector")
     assert "page:performance" in inspector_permissions
-    assert "performance:view" in inspector_permissions
+    assert "performance:view_self" in inspector_permissions
+    assert "performance:view_all" not in inspector_permissions
     assert "page:process-quality-evaluation" in inspector_permissions
     assert "process_quality_evaluation:review" in inspector_permissions
