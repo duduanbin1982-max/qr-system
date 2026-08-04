@@ -118,24 +118,17 @@ def test_position_rejects_invalid_process_duplicate_name_and_assigned_user(clien
             PositionService.delete_position(position_id)
 
 
-def test_route_price_create_update_and_history(client):
+def test_legacy_route_price_write_is_disabled(client):
     with client.application.app_context():
         db = get_db()
         process_id = ensure_process(db, "计件工序")
         route_id = create_process_route(db, [process_id], "计件路线")
 
-        assert RoutePriceService.save_prices(
-            route_id, {str(process_id): "12.50"}, "2026-07-01", "首版"
-        ) == (0, 1)
-        assert RoutePriceService.save_prices(
-            route_id, {str(process_id): 15}, "2026-07-15", "调整"
-        ) == (1, 0)
-
-        route = RoutePriceService.get_by_route(route_id)
-        assert route["steps"][0]["unit_price"] == 15
-        history = RoutePriceService.get_route_price_history(route_id)["history"]
-        assert history[0]["old_price"] == 12.5
-        assert history[0]["new_price"] == 15
+        with pytest.raises(ValueError, match="版本化工价"):
+            RoutePriceService.save_prices(
+                route_id, {str(process_id): "12.50"}, "2026-07-01", "首版"
+            )
+        assert RoutePriceService.get_by_route(route_id)["steps"][0]["unit_price"] is None
 
 
 @pytest.mark.parametrize(

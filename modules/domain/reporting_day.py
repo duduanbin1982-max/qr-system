@@ -35,6 +35,22 @@ def reporting_range_bounds(start="", end=""):
     )
 
 
+def reporting_month_bounds(year_month):
+    """Return the half-open 07:00 production range for a YYYY-MM month."""
+    start = datetime.strptime(year_month, "%Y-%m").replace(
+        day=1,
+        hour=REPORTING_DAY_START_HOUR,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def current_reporting_day(now=None):
     current = now or datetime.now()
     if current.hour < REPORTING_DAY_START_HOUR:

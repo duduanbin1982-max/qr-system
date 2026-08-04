@@ -10,7 +10,7 @@ test('administrator can open all previously blank critical pages', async ({ page
   for (const [label, expected] of [
     ['系统设置', '系统设置'],
     ['基础设置', '基础设置'],
-    ['工资核算', '计件工资'],
+    ['工资核算', '工资批次台账'],
     ['数据分析', '数据分析'],
     ['绩效管理', '绩效量化管理'],
     ['工时管理', '工时管理'],

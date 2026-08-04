@@ -70,25 +70,7 @@ class RoutePriceService:
             if process_id not in valid_pids:
                 raise ValueError('工序 ' + str(process_id) + ' 不属于路线 ' + str(route_id))
             validated.append((process_id, price_val))
-        with BaseService.transaction() as txn:
-            updated = 0
-            created = 0
-            for process_id, price_val in validated:
-                existing = PriceRepository.find_route_price(route_id, process_id, db=txn)
-                if existing:
-                    old_price = existing['unit_price'] if 'unit_price' in existing.keys() else None
-                    e_date = effective_date if effective_date is not None else (existing.get('effective_date') or '')
-                    e_remark = remark if remark is not None else (existing.get('remark') or '')
-                    if old_price is not None and abs(old_price - price_val) > 0.001:
-                        PriceRepository.insert_route_price_history(
-                            route_id, process_id, old_price, price_val, e_date, e_remark, db=txn)
-                    PriceRepository.update_route_price(existing['id'], price_val, e_date, e_remark, db=txn)
-                    updated += 1
-                else:
-                    PriceRepository.insert_route_price(
-                        route_id, process_id, price_val, effective_date or '', remark or '', db=txn)
-                    created += 1
-        return updated, created
+        raise ValueError('旧工价表已转为只读，请使用版本化工价流程')
 
     @staticmethod
     def get_route_price_history(route_id):

@@ -20,6 +20,7 @@ from modules.migration_product_identity import MIGRATIONS as PRODUCT_IDENTITY_MI
 from modules.migration_inventory_ledger import MIGRATIONS as INVENTORY_LEDGER_MIGRATIONS
 from modules.migration_shipment_lifecycle import MIGRATIONS as SHIPMENT_LIFECYCLE_MIGRATIONS
 from modules.migration_reporting import MIGRATIONS as REPORTING_MIGRATIONS
+from modules.migration_payroll_ledger import MIGRATIONS as PAYROLL_LEDGER_MIGRATIONS
 
 
 MIGRATIONS = sorted([
@@ -40,6 +41,7 @@ MIGRATIONS = sorted([
     *INVENTORY_LEDGER_MIGRATIONS,
     *SHIPMENT_LIFECYCLE_MIGRATIONS,
     *REPORTING_MIGRATIONS,
+    *PAYROLL_LEDGER_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]

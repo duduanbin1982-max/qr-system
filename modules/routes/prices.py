@@ -13,12 +13,25 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    has_permission,
     safe_audit_log,
     validate_json,
 )
 from modules.services.price_service import RoutePriceService
 from modules.services.wage_service import WageService
 from modules.domain.reporting_day import current_reporting_day
+
+
+def _legacy_wage_write_disabled(
+    replacement='/api/payroll',
+    code='LEGACY_WAGE_WRITE_DISABLED',
+    message='旧工资写接口已停用，请使用版本化工资台账',
+):
+    return jsonify({
+        'error': message,
+        'code': code,
+        'replacement': replacement,
+    }), 410
 
 # ============================================================
 # Product Route Pricing (产品路线工价)
@@ -48,20 +61,11 @@ def get_route_prices(route_id):
 @check_auth
 @check_permission('prices:edit')
 def save_route_prices(route_id):
-    data = get_json_body()
-    prices = data.get('prices', {})
-    if not isinstance(prices, dict):
-        return jsonify({'error': 'prices必须为对象格式'}), 400
-    effective_date = data.get('effective_date')
-    remark = data.get('remark')
-    try:
-        updated, created = RoutePriceService.save_prices(
-            route_id, prices, effective_date, remark)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    msg = f'保存成功（新增 {created} 条，更新 {updated} 条）'
-    safe_audit_log('save_route_prices', 'process_route', route_id, msg)
-    return jsonify({'message': msg, 'created': created, 'updated': updated})
+    return _legacy_wage_write_disabled(
+        '/api/route-price-versions',
+        'LEGACY_PRICE_WRITE_DISABLED',
+        '旧工价表已转为只读，请使用版本化工价流程',
+    )
 
 # ============================================================
 
@@ -82,14 +86,12 @@ def get_route_price_history(route_id):
 def calculate_wages():
     employee_id = request.args.get('employee_id', type=int)
     # Row-level access control: non-admin users can only see their own wages
-    if not g.current_user.get('_permissions') or '*' not in g.current_user.get('_permissions', []):
-        if 'prices:view_all' not in g.current_user.get('_permissions', []):
-            # Force to current user's own employee_id
-            current_uid = g.current_user.get('id')
-            current_eno = g.current_user.get('employee_no')
-            if employee_id and employee_id != current_uid:
-                return jsonify({'error': '无权限查看他人工资'}), 403
-            employee_id = current_uid
+    if not has_permission(g.current_user, 'wages:view_all'):
+        # Force to current user's own employee_id.
+        current_uid = g.current_user.get('id')
+        if employee_id and employee_id != current_uid:
+            return jsonify({'error': '无权限查看他人工资'}), 403
+        employee_id = current_uid
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')
@@ -188,18 +190,13 @@ def list_wage_adjustments():
 @check_auth
 @check_permission('wages:edit')
 def save_wage_adjustment():
-    data = request.get_json()
-    return jsonify(WageService.save_adjustment(
-        user_id=data["user_id"], year_month=data["year_month"],
-        adj_type=data["type"], amount=data["amount"],
-        reason=data.get("reason", ""), created_by="system"
-    ))
+    return _legacy_wage_write_disabled()
 
 @app.route("/api/wages/adjustments/<int:adj_id>", methods=["DELETE"])
 @check_auth
 @check_permission('wages:edit')
 def delete_wage_adjustment(adj_id):
-    return jsonify(WageService.delete_adjustment(adj_id))
+    return _legacy_wage_write_disabled()
 
 @app.route("/api/wages/adjustments-total", methods=["GET"])
 @check_auth
@@ -222,10 +219,7 @@ def wage_trends():
 @check_auth
 @check_permission("wages:edit")
 def confirm_wage_snapshot():
-    year_month = request.args.get("year_month", "")
-    if not year_month:
-        return jsonify({"error": "missing year_month"}), 400
-    return jsonify(WageService.confirm_snapshot(year_month, g.current_user.get("name", g.current_user.get("username", "system"))))
+    return _legacy_wage_write_disabled()
 
 @app.route("/api/wages/snapshot-status", methods=["GET"])
 @check_auth
@@ -240,20 +234,13 @@ def wage_snapshot_status():
 @check_auth
 @check_permission('wages:view')
 def save_wage_snapshot():
-    year_month = request.args.get("year_month", "")
-    if not year_month:
-        return jsonify({"error": "missing year_month"}), 400
-    return jsonify(WageService.save_snapshot(year_month))
+    return _legacy_wage_write_disabled()
 
 @app.route("/api/wages/lock", methods=["POST"])
 @check_auth
 @check_permission('wages:view')
 def lock_wage_snapshot():
-    data = request.get_json() or {}
-    year_month = request.args.get("year_month", "")
-    if not year_month:
-        return jsonify({"error": "missing year_month"}), 400
-    return jsonify(WageService.lock_snapshot(year_month, g.current_user.get("name", g.current_user.get("username", "system")), data.get("notes", "")))
+    return _legacy_wage_write_disabled()
 
 @app.route("/api/wages/position-summary", methods=["GET"])
 @check_auth

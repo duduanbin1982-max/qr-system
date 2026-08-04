@@ -386,6 +386,24 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "wages:view_self": [
+    "wages:view"
+  ],
+  "wages:view_all": [
+    "wages:view"
+  ],
+  "wages:prepare": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:approve": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:export": [
+    "wages:view",
+    "wages:view_all"
+  ],
   "quality:edit": [
     "quality:review"
   ],

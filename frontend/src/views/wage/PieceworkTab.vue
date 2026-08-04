@@ -7,23 +7,15 @@
     <div class="summary-item"><span class="s-icon">💰</span><div><div class="s-val" style="color:var(--warning)">¥{{ fmtMoney(grandTotal()) }}</div><div class="s-label">总工资</div></div></div>
   </div>
 
-  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:12px;font-size:var(--text-xs);flex-wrap:wrap">
-    <span style="font-weight:600;color:var(--text-primary)">📋 {{ currentMonth }} 工资状态:</span>
-    <span style="padding:2px 8px;border-radius:10px;background:var(--bg-primary);color:var(--text-placeholder)">草稿 {{ snapStatus.draft }}</span>
-    <span style="padding:2px 8px;border-radius:10px;background:var(--warning-light);color:var(--warning-dark)">已锁定 {{ snapStatus.locked }}</span>
-    <span style="padding:2px 8px;border-radius:10px;background:var(--success-light);color:var(--success)">已确认 {{ snapStatus.confirmed }}</span>
-    <span style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn-default btn-sm" @click="saveSnapshot" style="font-size:var(--text-xs);padding:2px 10px">💾 保存快照</button>
-      <button class="btn-default btn-sm" @click="showLockDialog=true" style="font-size:var(--text-xs);padding:2px 10px">🔒 锁定</button>
-      <button class="btn-default btn-sm" @click="confirmSnapshot" style="font-size:var(--text-xs);padding:2px 10px">✅ 确认归档</button>
-    </span>
+  <div style="padding:8px 12px;background:var(--warning-lighter);border-left:3px solid var(--warning);margin-bottom:12px;font-size:var(--text-xs);color:var(--text-secondary)">
+    实时预估仅用于核对报工和当前工价，不作为正式工资凭证。正式结算以已确认的版本化工资台账为准。
   </div>
 
   <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">
     <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) 20px">
       <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2);margin:0">
         <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,var(--warning),var(--warning-dark));border-radius:var(--radius-md);font-size:var(--text-lg);color:white">💰</span>
-        计件工资
+        实时工资预估
       </h3>
       <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="includeRework" @change="load"> 含返工</label>
@@ -94,20 +86,6 @@
       <button class="btn-default btn-sm" @click="prevPage" :disabled="page<=1">◀ 上一页</button>
       <span style="font-size:var(--text-xs);color:var(--text-placeholder)">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 人</span>
       <button class="btn-default btn-sm" @click="nextPage" :disabled="page>=totalPages">下一页 ▶</button>
-    </div>
-  </div>
-
-  <!-- Lock dialog -->
-  <div v-if="showLockDialog" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center" @click.self="showLockDialog=false">
-    <div class="card" style="width:400px;max-width:90vw;padding:24px;border-radius:var(--radius-lg)">
-      <h3 style="margin:0 0 4px">🔒 锁定 {{ currentMonth }}</h3>
-      <p style="font-size:var(--text-xs);color:var(--text-placeholder);margin:0 0 16px">锁定后工资数据不可修改，可进一步确认归档</p>
-      <label style="display:block;font-size:var(--text-xs);color:var(--text-placeholder);margin-bottom:4px">备注</label>
-      <textarea v-model="lockNotes" class="form-input" style="width:100%;height:60px;font-size:var(--text-sm);padding:8px" placeholder="如：经部门负责人审核确认"></textarea>
-      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px">
-        <button class="btn-default" @click="showLockDialog=false">取消</button>
-        <button class="btn-primary" @click="lockSnapshot">确认锁定</button>
-      </div>
     </div>
   </div>
 </div>

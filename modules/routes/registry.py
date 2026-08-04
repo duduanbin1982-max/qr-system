@@ -11,6 +11,7 @@ ROUTE_MODULES = (
     "modules.routes.orders",  # orders CRUD + batch + work-records
     "modules.routes.customers",  # customers CRUD + order history
     "modules.routes.prices",  # process-prices + route-prices + wages
+    "modules.routes.payroll",  # versioned payroll ledger
     "modules.routes.products",  # products CRUD + import + attachments
     "modules.routes.scan_work",
     "modules.routes.scan_qr",

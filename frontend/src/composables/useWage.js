@@ -1,6 +1,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { can } from '@/lib/auth.js'
 
 const PROCESS_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1']
 
@@ -8,17 +9,22 @@ let _instance = null
 
 export function useWage() {
   if (_instance) return _instance
-const activeTab = ref("piece")
-    const tabs = [
-      { id:"piece", label:"计件工资", icon:"💰" },
+const preferredTab = localStorage.getItem('wageActiveTab')
+const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepare') || can('wages:approve') ? "ledger" : "my"))
+    const tabs = computed(() => [
+      { id:"ledger", label:"批次台账", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
+      { id:"exceptions", label:"异常处理", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
+      { id:"adjustment", label:"调整项", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
+      { id:"priceversions", label:"工价版本", show:can('wages:prepare') || can('wages:approve') },
+      { id:"my", label:"我的工资", show:can('wages:view_self') || can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
+      { id:"piece", label:"实时预估", show:can('wages:view') },
       { id:"monthly", label:"月度汇总", icon:"📊" },
       { id:"process", label:"工序分析", icon:"🔧" },
       { id:"compare", label:"工资对比", icon:"📈" },
-      { id:"adjustment", label:"工资调整", icon:"💵" },
       { id:"trend", label:"历史趋势", icon:"📈" },
       { id:"position", label:"岗位汇总", icon:"👥" },
       { id:"predict", label:"工资预测", icon:"🔮" }
-    ]
+    ].filter(tab => tab.show !== false))
 
     // --- piece wage state ---
     const wages = ref([])
@@ -84,38 +90,6 @@ const activeTab = ref("piece")
       if (dateFrom.value) return dateFrom.value.slice(0,7)
       const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
     })
-
-
-    const showLockDialog = ref(false)
-    const lockNotes = ref("")
-    const snapStatus = ref({ draft: 0, locked: 0, confirmed: 0, total_employees: 0, total_wage: 0 })
-
-    async function loadSnapStatus() {
-      try { snapStatus.value = await api.domains.wages.getSnapshotStatus(currentMonth.value) || {} }
-      catch(e) { /* silent */ }
-    }
-
-    async function saveSnapshot() {
-      try { const r = await api.domains.wages.saveSnapshot(currentMonth.value); showToast("快照已保存: "+r.saved+" 人"); loadSnapStatus() }
-      catch(e) { showToast("快照保存失败: "+(e.message||"服务器错误"), "error") }
-    }
-    async function lockSnapshot() {
-      showLockDialog.value = false
-      try {
-        const r = await api.domains.wages.lockSnapshot(currentMonth.value, lockNotes.value)
-        showToast("已锁定: "+r.locked+" 人")
-        lockNotes.value = ""
-        loadSnapStatus()
-      } catch(e) { showToast("锁定失败: "+(e.message||"服务器错误"), "error") }
-    }
-    async function confirmSnapshot() {
-      if (!confirm("确定确认 "+currentMonth.value+" 的工资？确认后将归档不可修改！")) return
-      try {
-        const r = await api.domains.wages.confirmSnapshot(currentMonth.value)
-        showToast("已确认: "+r.confirmed+" 人")
-        loadSnapStatus()
-      } catch(e) { showToast("确认失败: "+(e.message||"服务器错误"), "error") }
-    }
 
     function exportCSV() {
       const rows = [["姓名","岗位","工号","日期","订单号","产品","工序","数量","单价","工资"]]
@@ -237,50 +211,6 @@ const activeTab = ref("piece")
       finally { compareLoading.value = false }
     }
 
-
-    // --- adjustment state ---
-    const adjustments = ref([])
-    const adjLoading = ref(true)
-    const adjMonth = ref(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"))
-    const showAdjForm = ref(false)
-    const adjForm = ref({ user_id: null, type: "bonus", amount: 0, reason: "" })
-    const employeeList = ref([])
-    const adjNet = computed(() => adjustments.value.reduce((s,a) => s + (a.type=="deduction"?-a.amount:a.amount), 0))
-
-    function isWorkerUser(user) {
-      const roleCode = (user?.role_code || user?.role || '').toLowerCase()
-      if (roleCode === 'worker') return true
-      const roles = Array.isArray(user?.roles) ? user.roles : (Array.isArray(user?.role_items) ? user.role_items : [])
-      return roles.some(role => (role?.code || '').toLowerCase() === 'worker')
-    }
-
-    async function loadEmployees() {
-      try { const r = await api.domains.users.listUsers({ role: 'worker', limit: 500 }); employeeList.value = (r.users || []).filter(isWorkerUser) }
-      catch(e) { showToast("加载员工列表失败","error") }
-    }
-    async function loadAdjustments() {
-      adjLoading.value = true
-      try { adjustments.value = await api.domains.wages.listAdjustments(adjMonth.value) || [] }
-      catch(e) { showToast("加载调整记录失败","error") }
-      finally { adjLoading.value = false }
-    }
-    async function saveAdjustment() {
-      if (!adjForm.value.user_id || !adjForm.value.amount || adjForm.value.amount <= 0) { showToast("请填写员工和金额","error"); return }
-      try {
-        await api.domains.wages.createAdjustment({ ...adjForm.value, year_month: adjMonth.value })
-        showToast("保存成功")
-        showAdjForm.value = false
-        adjForm.value = { user_id: null, type: "bonus", amount: 0, reason: "" }
-        loadAdjustments()
-      } catch(e) { showToast("保存失败: "+(e.message||"服务器错误"),"error") }
-    }
-    async function deleteAdjustment(id) {
-      if (!confirm("确定删除此调整？")) return
-      try { await api.domains.wages.deleteAdjustment(id); loadAdjustments() }
-      catch(e) { showToast("删除失败","error") }
-    }
-
-
     // --- trend state ---
     const trendData = ref([])
     const trendLoading = ref(true)
@@ -367,26 +297,32 @@ const activeTab = ref("piece")
 
     function switchTab(tabId) {
       activeTab.value = tabId
+      localStorage.setItem('wageActiveTab', tabId)
+      if (tabId==="piece") load()
       if (tabId==="monthly" && !monthlyData.value.summary.length) loadMonthly()
       if (tabId==="process" && !processData.value.summary.length) loadProcess()
-      if (tabId==="adjustment") { loadEmployees(); loadAdjustments() }
       if (tabId==="trend" && !trendData.value.length) loadTrends()
       if (tabId==="position" && (!posData.value.summary || !posData.value.summary.length)) loadPosition()
       if (tabId==="predict" && !predData.value.predicted_wage) loadPrediction()
     }
 
-    if (!_instance) { onMounted(() => { load(); loadSnapStatus(); _refreshTimer = setInterval(load, 60000) }) }
+    if (!_instance) { onMounted(() => {
+      if (!tabs.value.some(tab => tab.id === activeTab.value)) {
+        activeTab.value = tabs.value[0]?.id || 'piece'
+      }
+      if (activeTab.value === "piece") load()
+      _refreshTimer = setInterval(() => { if (activeTab.value === "piece") load() }, 60000)
+    }) }
     if (!_instance) { onBeforeUnmount(() => { if (_refreshTimer) clearInterval(_refreshTimer); _instance = null }) }
 
     _instance = {
       activeTab, tabs, switchTab,
       wages, loading, dateFrom, dateTo, expandedId, includeRework, hideZero, page, limit, total, totalPages,
       fmtMoney, fmtDate, load, toggle, filteredWages, grandTotal, grandQty, exportCSV, prevPage, nextPage,
-      saveSnapshot, lockSnapshot, confirmSnapshot, printPayslip, showLockDialog, lockNotes, snapStatus,
+      printPayslip,
       monthlyData, monthlyLoading, monthlyMonth, monthlyPage, monthlyLimit, monthlyTotal, monthlyTotalPages, monthlyPercent, loadMonthly, exportMonthlyCSV, monthlyPrevPage, monthlyNextPage,
       processData, processLoading, processMonth, processColor, processPercent, barHeight, loadProcess,
       compareData, compareLoading, compareMonthA, compareMonthB, loadCompare,
-      adjustments, adjLoading, adjMonth, showAdjForm, adjForm, employeeList, adjNet, loadAdjustments, saveAdjustment, deleteAdjustment,
       trendData, trendLoading, trendMonths, trendChartRef, trendTotal, trendTotalQty, trendAvg, loadTrends,
       posData, posLoading, posError, posMonth, posPercent, loadPosition,
       predData, predLoading, predError, predMonths, loadPrediction

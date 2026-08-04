@@ -16,7 +16,7 @@
     <div v-if="trendLoading" style="text-align:center;padding:60px">⏳ 加载中...</div>
     <div v-else-if="!trendData.length" style="text-align:center;padding:60px;color:var(--text-placeholder)">
       <p style="font-size:48px;margin:0">📈</p>
-      <p style="margin-top:12px">暂无趋势数据。请先执行报工并在计件工资中保存快照或等待系统自动统计。</p>
+      <p style="margin-top:12px">暂无趋势数据。</p>
     </div>
     <div v-else style="padding:20px">
       <div style="height:320px;position:relative">

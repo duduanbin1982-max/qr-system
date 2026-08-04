@@ -102,8 +102,84 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_inventory_ledger",
             "modules.migration_shipment_lifecycle",
             "modules.migration_reporting",
+            "modules.migration_payroll_ledger",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
+
+
+def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():
+    from modules import migrations
+    from modules.migration_payroll_ledger import m055_versioned_payroll_ledger
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        for version, _, migrate in migrations.MIGRATIONS:
+            if version >= 55:
+                break
+            migrate(db)
+
+        db.execute(
+            "INSERT INTO users (id,username,password,name,role,employee_no,status) "
+            "VALUES (9001,'payroll-migration-worker','hash','迁移员工','worker','PAY-9001','active')"
+        )
+        db.execute(
+            "INSERT INTO route_prices (id,route_id,process_id,unit_price,effective_date,status) "
+            "VALUES (9001,9001,9001,12.3456,'2026-07-01','active')"
+        )
+        db.execute(
+            "INSERT INTO wage_snapshots "
+            "(id,employee_id,employee_name,employee_no,year_month,total_quantity,total_wage,rework_wage,status) "
+            "VALUES (9001,9001,'迁移员工','PAY-9001','2026-07',3,12.345,1.005,'confirmed')"
+        )
+        db.execute(
+            "INSERT INTO wage_adjustments "
+            "(id,user_id,year_month,type,amount,reason,created_by) "
+            "VALUES (9001,9001,'2026-07','bonus',1.005,'历史四舍五入','migration-test')"
+        )
+
+        m055_versioned_payroll_ledger(db)
+
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='payroll_migration_manifests'"
+        ).fetchone()
+
+        adjustment = db.execute(
+            "SELECT amount_cents FROM payroll_adjustments WHERE legacy_wage_adjustment_id=9001"
+        ).fetchone()
+        assert adjustment["amount_cents"] == 101
+
+        locked_operations = [
+            (
+                "INSERT INTO route_prices (route_id,process_id,unit_price) VALUES (9002,9002,1)",
+                (),
+            ),
+            ("UPDATE route_prices SET unit_price=99 WHERE id=9001", ()),
+            ("DELETE FROM route_prices WHERE id=9001", ()),
+            (
+                "INSERT INTO wage_snapshots (employee_id,year_month) VALUES (9001,'2026-08')",
+                (),
+            ),
+            ("UPDATE wage_snapshots SET total_wage=99 WHERE id=9001", ()),
+            ("DELETE FROM wage_snapshots WHERE id=9001", ()),
+            (
+                "INSERT INTO wage_adjustments (user_id,year_month,type,amount,reason) "
+                "VALUES (9001,'2026-08','bonus',1,'blocked')",
+                (),
+            ),
+            ("UPDATE wage_adjustments SET amount=99 WHERE id=9001", ()),
+            ("DELETE FROM wage_adjustments WHERE id=9001", ()),
+        ]
+        for statement, parameters in locked_operations:
+            with pytest.raises(sqlite3.IntegrityError, match="read-only"):
+                db.execute(statement, parameters)
+
+        assert db.execute("SELECT unit_price FROM route_prices WHERE id=9001").fetchone()[0] == 12.3456
+        assert db.execute("SELECT total_wage FROM wage_snapshots WHERE id=9001").fetchone()[0] == 12.345
+        assert db.execute("SELECT amount FROM wage_adjustments WHERE id=9001").fetchone()[0] == 1.005
+    finally:
+        db.close()
 
 
 def test_position_aware_backfill_migration_is_idempotent_and_preserves_history():

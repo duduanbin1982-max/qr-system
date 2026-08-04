@@ -36,9 +36,19 @@ def _seed_route_bundle(client):
                 (route_id, process_id, seq_order),
             )
             db.execute(
-                "INSERT INTO route_prices (route_id, process_id, unit_price, effective_date, status, remark) "
-                "VALUES (?, ?, ?, ?, 'active', ?)",
-                (route_id, process_id, unit_price, datetime.now().strftime("%Y-%m-%d"), "fixture"),
+                """
+                INSERT INTO route_price_versions (
+                    route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
+                    rework_rate_configured,valid_from,status,created_by_name,approved_by_name,
+                    approved_at,remark
+                ) VALUES (?,?,?,0,0,?,'approved','fixture','fixture',datetime('now','localtime'),'fixture')
+                """,
+                (
+                    route_id,
+                    process_id,
+                    int(unit_price * 10000),
+                    datetime.now().strftime("%Y-%m-%d 00:00:00"),
+                ),
             )
 
         db.commit()
@@ -229,7 +239,8 @@ class TestCrossModuleIntegration:
             headers=auth_headers,
             json={},
         )
-        assert snapshot_response.status_code == 200
+        assert snapshot_response.status_code == 410
+        assert snapshot_response.get_json()["code"] == "LEGACY_WAGE_WRITE_DISABLED"
 
         snapshot_status = client.get(
             f"/api/wages/snapshot-status?year_month={year_month}",
@@ -242,7 +253,7 @@ class TestCrossModuleIntegration:
             headers=auth_headers,
             json={"notes": "fixture"},
         )
-        assert lock_response.status_code == 200
+        assert lock_response.status_code == 410
 
     def test_wage_adjustment_and_trends_flow(self, client, auth_headers, worker_auth_headers):
         year_month = _seed_worker_report(client, auth_headers, worker_auth_headers)
@@ -254,7 +265,7 @@ class TestCrossModuleIntegration:
                 ("testworker",),
             ).fetchone()["id"]
 
-        adjustment_response = client.post(
+        legacy_response = client.post(
             "/api/wages/adjustments",
             headers=auth_headers,
             json={
@@ -262,6 +273,19 @@ class TestCrossModuleIntegration:
                 "year_month": year_month,
                 "type": "bonus",
                 "amount": 50.0,
+                "reason": "fixture adjustment",
+            },
+        )
+        assert legacy_response.status_code == 410
+
+        adjustment_response = client.post(
+            "/api/payroll/adjustments",
+            headers=auth_headers,
+            json={
+                "employee_id": worker_id,
+                "payroll_month": year_month,
+                "adjustment_type": "bonus",
+                "amount": "50.00",
                 "reason": "fixture adjustment",
             },
         )

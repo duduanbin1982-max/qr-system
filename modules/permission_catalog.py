@@ -37,6 +37,10 @@ ACTION_LABELS = {
     "finance": "收退款",
     "logistics": "物流维护",
     "unlinked": "无订单发货",
+    "view_self": "查看本人工资",
+    "view_all": "查看全部工资",
+    "prepare": "工资制单",
+    "approve": "工资审批",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -75,7 +79,10 @@ ACTION_PERMISSION_DEFS = {
     "quality": ("质量管理", ["view", "inspect", "standards", "plans", "disposition", "review", "capa", "supplier", "calibration", "edit", "delete"]),
     "rework": ("返工", ["view", "create", "edit"]),
     "schedule": ("生产排程", ["view", "edit"]),
-    "wages": ("工资核算", ["view", "edit"]),
+    "wages": (
+        "工资核算",
+        ["view", "edit", "view_self", "view_all", "prepare", "approve", "export"],
+    ),
     "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
     "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
     "process_quality_evaluation": (
@@ -255,6 +262,11 @@ ACTION_PERMISSION_CODES = [
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
+    "wages:view_self": ["wages:view"],
+    "wages:view_all": ["wages:view"],
+    "wages:prepare": ["wages:view", "wages:view_all"],
+    "wages:approve": ["wages:view", "wages:view_all"],
+    "wages:export": ["wages:view", "wages:view_all"],
     "quality:edit": ["quality:review"],
     "shipments:edit": [
         "shipments:complete",
