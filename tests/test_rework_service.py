@@ -32,6 +32,15 @@ def test_create_rework_updates_process_and_order_totals(client):
         assert record["reason"] == "尺寸偏差"
         assert process["rework"] == 3
         assert order["rework"] == 3
+        event = db.execute(
+            "SELECT event.event_type,event.quantity,event.user_id "
+            "FROM performance_quality_events event "
+            "JOIN performance_quality_event_sources source "
+            "ON source.quality_event_id=event.id "
+            "WHERE source.source_type='rework_record' AND source.source_id=?",
+            (rework_id,),
+        ).fetchone()
+        assert tuple(event) == ("rework", 3, user_id)
 
 
 @pytest.mark.parametrize("quantity", [0, -1])

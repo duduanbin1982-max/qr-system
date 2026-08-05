@@ -152,6 +152,18 @@ def test_low_score_requires_reason_and_enters_verification(client, auth_headers,
     result = created.get_json()["items"][0]
     assert result["total_score"] == 40
     assert result["status"] == "pending_verification"
+    with client.application.app_context():
+        event = get_db().execute(
+            "SELECT event.event_type,event.user_id,evaluation.target_user_id "
+            "FROM performance_quality_events event "
+            "JOIN performance_quality_event_sources source "
+            "ON source.quality_event_id=event.id "
+            "JOIN process_quality_evaluations evaluation ON evaluation.id=source.source_id "
+            "WHERE source.source_type='process_quality_evaluation' AND source.source_id=?",
+            (result["id"],),
+        ).fetchone()
+        assert event["event_type"] == "process_handoff"
+        assert event["user_id"] == event["target_user_id"]
 
     reviewed = client.put(
         f"/api/process-quality-evaluations/{result['id']}/review",

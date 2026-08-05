@@ -11,10 +11,20 @@ from modules.repositories.rework_repository import ReworkRepository
 class ReworkService:
     """Rework business logic."""
 
+    quality_event_service = None
     ALLOWED_STATUSES = {"", "pending", "completed"}
     ALLOWED_RESULTS = {"ok", "scrap", "rework_again"}
     MAX_PAGE_SIZE = 200
     MAX_TEXT_LENGTH = 512
+
+    @classmethod
+    def _quality_event_service(cls):
+        if cls.quality_event_service:
+            return cls.quality_event_service
+        from modules.services.performance_quality_event_service import (
+            PerformanceQualityEventService,
+        )
+        return PerformanceQualityEventService
 
     @staticmethod
     def _integer(value, field, minimum=1, maximum=None):
@@ -147,6 +157,16 @@ class ReworkService:
             raise ValidationError("该工序不在订单工艺路线中")
         if source_ncr_id and ReworkRepository.find_by_source_ncr_id(source_ncr_id, db=db):
             raise ConflictError("该质量不合格单已经生成返工记录")
+        ncr_context = None
+        if source_ncr_id:
+            ncr_context = ReworkRepository.find_ncr_context(source_ncr_id, db=db)
+            if not ncr_context:
+                raise NotFoundError("质量不合格单不存在")
+            if (
+                int(ncr_context.get("order_id") or 0) != order_id
+                or int(ncr_context.get("process_id") or 0) != process_id
+            ):
+                raise ValidationError("返工记录与质量不合格单归属不一致")
         if reject_recent_duplicate and ReworkRepository.find_recent_duplicate(
             order_id, process_id, user_id, db=db
         ):
@@ -162,6 +182,34 @@ class ReworkService:
             raise ConflictError("订单工序状态已变化，请刷新后重试")
         if ReworkRepository.sync_order_rework_txn(order_id, db=db) != 1:
             raise ConflictError("订单状态已变化，请刷新后重试")
+        related_sources = []
+        if ncr_context:
+            related_sources.append(("quality_ncr", ncr_context["id"]))
+            if ncr_context.get("inspection_id"):
+                related_sources.append(
+                    ("quality_inspection", ncr_context["inspection_id"])
+                )
+        target_work_record_id = (
+            ncr_context.get("target_work_record_id") if ncr_context else None
+        )
+        event_user_id = (
+            None
+            if target_work_record_id
+            else (ncr_context.get("responsible_user_id") if ncr_context else user_id)
+        )
+        ReworkService._quality_event_service().record_event(
+            event_type="rework",
+            source_type="rework_record",
+            source_id=rework_id,
+            quantity=quantity,
+            order_id=order_id,
+            process_id=process_id,
+            user_id=event_user_id,
+            target_work_record_id=target_work_record_id,
+            related_sources=related_sources,
+            snapshot={"reason": reason, "source_ncr_id": source_ncr_id},
+            db=db,
+        )
         return rework_id
 
     @staticmethod

@@ -469,8 +469,20 @@ def test_legacy_handoff_review_is_backed_by_authoritative_evaluation(client, aut
         evaluation = db.execute(
             "SELECT status FROM process_quality_evaluations WHERE id = ?", (payload["evaluation_id"],)
         ).fetchone()
+        event_sources = db.execute(
+            "SELECT source.source_type,source.quality_event_id "
+            "FROM performance_quality_event_sources source WHERE "
+            "(source.source_type='process_quality_evaluation' AND source.source_id=?) OR "
+            "(source.source_type='process_handoff_review' AND source.source_id=?)",
+            (payload["evaluation_id"], payload["id"]),
+        ).fetchall()
         assert legacy["status"] == "confirmed"
         assert evaluation["status"] == "confirmed"
+        assert {row["source_type"] for row in event_sources} == {
+            "process_quality_evaluation",
+            "process_handoff_review",
+        }
+        assert len({row["quality_event_id"] for row in event_sources}) == 1
 
 
 def test_order_mode_handoff_review_requires_clear_previous_worker(client, auth_headers):

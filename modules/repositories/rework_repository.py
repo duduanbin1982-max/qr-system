@@ -106,6 +106,19 @@ class ReworkRepository:
         ).fetchone()
 
     @staticmethod
+    def find_ncr_context(source_ncr_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT ncr.id,ncr.inspection_id,ncr.order_id,ncr.process_id,"
+            "ncr.responsible_user_id,task.work_record_id AS target_work_record_id "
+            "FROM quality_nonconformances ncr "
+            "LEFT JOIN quality_inspection_tasks task ON task.id=ncr.task_id "
+            "WHERE ncr.id=?",
+            (source_ncr_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def insert_rework_txn(
         order_id, process_id, user_id, quantity, reason, db, source_ncr_id=None
     ):

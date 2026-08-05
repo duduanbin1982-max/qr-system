@@ -399,10 +399,11 @@ class ScanRepository:
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
         db = resolve_db(db)
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
             (order_id, process_id, user_id, quantity, reason),
         )
+        return cursor.lastrowid
 
     @staticmethod
     def update_order_process_scrapped(order_id, process_id, scrapped, db=None):

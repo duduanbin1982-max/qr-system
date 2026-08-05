@@ -258,7 +258,7 @@ class ScanHelperService:
 
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
-        ScanRepository.insert_scrap_record(
+        return ScanRepository.insert_scrap_record(
             order_id,
             process_id,
             user_id,

@@ -370,6 +370,15 @@ def test_performance_uses_authoritative_quality_evaluation_source():
     )
 
 
+def test_performance_fact_repository_uses_only_canonical_quality_sources():
+    path = PROJECT_ROOT / "modules" / "repositories" / "performance_fact_repository.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "performance_quality_events" in source
+    assert "performance_quality_event_sources" in source
+    assert "process_handoff_reviews" not in source
+
+
 def test_services_do_not_embed_sql_statements():
     sql_pattern = re.compile(
         r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",

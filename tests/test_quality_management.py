@@ -93,6 +93,20 @@ def test_failed_inspection_creates_ncr_rework_and_reinspection(client, auth_head
         assert rework["source_ncr_id"] == failed["ncr_id"]
         assert process_totals["rework"] == 1
         assert order_totals["rework"] == 1
+        source_events = db.execute(
+            "SELECT source_type,quality_event_id "
+            "FROM performance_quality_event_sources WHERE "
+            "(source_type='quality_inspection' AND source_id=?) OR "
+            "(source_type='quality_ncr' AND source_id=?) OR "
+            "(source_type='rework_record' AND source_id=?)",
+            (failed["inspection_id"], failed["ncr_id"], rework_id),
+        ).fetchall()
+        assert {row["source_type"] for row in source_events} == {
+            "quality_inspection",
+            "quality_ncr",
+            "rework_record",
+        }
+        assert len({row["quality_event_id"] for row in source_events}) == 1
         db.execute(
             "UPDATE rework_records SET status='completed',completed_at=datetime('now','localtime') WHERE id=?",
             (rework_id,),

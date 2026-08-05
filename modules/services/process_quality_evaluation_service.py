@@ -25,6 +25,7 @@ class ProcessQualityEvaluationService:
     task_repository = None
     settings_repository = None
     legacy_handoff_adapter = None
+    quality_event_service = None
     unit_of_work = None
 
     @classmethod
@@ -42,6 +43,15 @@ class ProcessQualityEvaluationService:
     @classmethod
     def _legacy_handoff_adapter(cls):
         return cls.legacy_handoff_adapter or LegacyHandoffAdapter
+
+    @classmethod
+    def _quality_event_service(cls):
+        if cls.quality_event_service:
+            return cls.quality_event_service
+        from modules.services.performance_quality_event_service import (
+            PerformanceQualityEventService,
+        )
+        return PerformanceQualityEventService
 
     @classmethod
     def _unit_of_work(cls):
@@ -446,6 +456,31 @@ class ProcessQualityEvaluationService:
                     "template_snapshot": template_snapshot,
                     "severity": decision.severity,
                 }, db)
+                cls._quality_event_service().record_event(
+                    event_type="process_handoff",
+                    source_type="process_quality_evaluation",
+                    source_id=evaluation_id,
+                    quantity=task["quantity"],
+                    order_id=task["order_id"],
+                    process_id=task["target_process_id"],
+                    user_id=(
+                        None
+                        if task.get("target_work_record_id")
+                        else task.get("target_user_id")
+                    ),
+                    target_work_record_id=task.get("target_work_record_id"),
+                    snapshot={
+                        "task_id": task["id"],
+                        "evaluator_process_id": task["evaluator_process_id"],
+                        "evaluator_user_id": user_id,
+                        "total_score": decision.total_score,
+                        "grade": decision.grade,
+                        "issue_tags": decision.issue_tags,
+                        "status": decision.status,
+                        "severity": decision.severity,
+                    },
+                    db=db,
+                )
                 task_repository.complete_task(task["id"], db)
                 if decision.status == "pending_verification":
                     from modules.services.quality_management_service import QualityManagementService
@@ -667,6 +702,27 @@ class ProcessQualityEvaluationService:
             "template_snapshot": template_snapshot,
             "severity": decision.severity,
         }, db)
+        target_work_record_id = data.get("source_work_record_id")
+        cls._quality_event_service().record_event(
+            event_type="process_handoff",
+            source_type="process_quality_evaluation",
+            source_id=evaluation_id,
+            quantity=data.get("quantity", 1),
+            order_id=data["order_id"],
+            process_id=data["from_process_id"],
+            user_id=None if target_work_record_id else data["from_user_id"],
+            target_work_record_id=target_work_record_id,
+            related_sources=[("process_handoff_review", review_id)],
+            snapshot={
+                "evaluator_process_id": data["to_process_id"],
+                "evaluator_user_id": data["evaluator_user_id"],
+                "rating": data.get("rating"),
+                "issue_type": data.get("issue_type", ""),
+                "status": decision.status,
+                "severity": decision.severity,
+            },
+            db=db,
+        )
         if task:
             task_repository.complete_task(task["id"], db)
         return evaluation_id

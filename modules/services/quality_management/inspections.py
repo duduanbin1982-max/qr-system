@@ -13,6 +13,17 @@ from modules.services.quality_management.tasks import QualityTaskService
 
 
 class QualityInspectionService(QualityTaskService):
+    quality_event_service = None
+
+    @classmethod
+    def _quality_event_service(cls):
+        if cls.quality_event_service:
+            return cls.quality_event_service
+        from modules.services.performance_quality_event_service import (
+            PerformanceQualityEventService,
+        )
+        return PerformanceQualityEventService
+
     @classmethod
     def _evaluate_measurements(cls, standard_items, measurements):
         supplied = {}
@@ -143,6 +154,33 @@ class QualityInspectionService(QualityTaskService):
                     "owner_id": data.get("owner_id"), "due_at": cls._text(data.get("due_at")),
                 }, user_id, db)
                 QualityManagementRepository.add_ncr_action(ncr_id, "create", "", "open", "检验不合格自动创建", user_id, db)
+                target_work_record_id = task.get("work_record_id")
+                cls._quality_event_service().record_event(
+                    event_type="inspection_failed",
+                    source_type="quality_inspection",
+                    source_id=inspection_id,
+                    quantity=inspection_data["defect_quantity"],
+                    order_id=task.get("order_id"),
+                    process_id=task.get("process_id"),
+                    user_id=(
+                        None
+                        if target_work_record_id
+                        else data.get("responsible_user_id")
+                    ),
+                    business_at=inspected_at,
+                    target_work_record_id=target_work_record_id,
+                    related_sources=[("quality_ncr", ncr_id)],
+                    snapshot={
+                        "task_id": task_id,
+                        "inspection_type": task["inspection_type"],
+                        "result": requested,
+                        "defect_category": inspection_data["defect_category"],
+                        "defect_level": defect_level,
+                        "serial_no": inspection_data["serial_no"],
+                        "notes": inspection_data["notes"],
+                    },
+                    db=db,
+                )
             elif task.get("source_ncr_id"):
                 cls._close_ncr_after_reinspection(task["source_ncr_id"], user_id, inspection_id, db)
             if requested == "pass" and task.get("inspection_type") == "final" and task.get("order_id"):
@@ -301,6 +339,36 @@ class QualityInspectionService(QualityTaskService):
                     QualityManagementRepository.add_ncr_action(
                         ncr_id, "review_reject", current.get("review_status", ""), "open", note, user_id, db
                     )
+                task = (
+                    QualityManagementRepository.task_by_id(current.get("task_id"), db)
+                    if current.get("task_id")
+                    else None
+                )
+                target_work_record_id = (
+                    task.get("work_record_id") if task else None
+                )
+                cls._quality_event_service().record_event(
+                    event_type="inspection_failed",
+                    source_type="quality_inspection",
+                    source_id=inspection_id,
+                    quantity=current.get("defect_quantity")
+                    or current.get("quantity_failed")
+                    or 1,
+                    order_id=current.get("order_id"),
+                    process_id=current.get("process_id"),
+                    user_id=None,
+                    business_at=current.get("inspected_at", ""),
+                    target_work_record_id=target_work_record_id,
+                    related_sources=[("quality_ncr", ncr_id)],
+                    snapshot={
+                        "task_id": current.get("task_id"),
+                        "inspection_type": current.get("inspection_type"),
+                        "result": current.get("result"),
+                        "review_status": status,
+                        "review_note": note,
+                    },
+                    db=db,
+                )
                 QualityManagementRepository.reject_task_for_review(current.get("task_id"), db)
                 if current.get("order_id"):
                     QualityManagementRepository.set_inventory_quality(
