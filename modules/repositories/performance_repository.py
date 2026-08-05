@@ -125,6 +125,7 @@ class PerformanceRepository:
 
     @staticmethod
     def worker_month_metrics(user_id, year_month, db=None):
+        """Legacy V1 only; V2 metrics must be built from frozen source facts."""
         db = resolve_db(db)
         work = PerformanceRepository.work_record_metrics(user_id, year_month, db)
         scrap = PerformanceRepository.scrap_record_metrics(user_id, year_month, db)

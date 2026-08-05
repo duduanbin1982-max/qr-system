@@ -1,9 +1,24 @@
+import inspect
 import json
 
 from modules.db import get_db
 from factories import ensure_user, WORKER_HASH
 from modules.services.performance_service import PerformanceService
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+
+
+def test_v2_fact_collection_has_no_legacy_calendar_month_dependency():
+    from modules.repositories.performance_fact_repository import PerformanceFactRepository
+    from modules.repositories.performance_repository import PerformanceRepository
+    from modules.services.performance_fact_collector import PerformanceFactCollector
+
+    repository_source = inspect.getsource(PerformanceFactRepository)
+    collector_source = inspect.getsource(PerformanceFactCollector)
+    assert " LIKE " not in repository_source
+    assert "DATE(" not in repository_source.upper()
+    assert "reporting_month_bounds" in collector_source
+    assert "PerformanceRepository" not in collector_source
+    assert "Legacy V1" in (PerformanceRepository.worker_month_metrics.__doc__ or "")
 
 
 def _worker_id(db):

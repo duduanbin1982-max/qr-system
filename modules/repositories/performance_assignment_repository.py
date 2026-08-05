@@ -57,6 +57,48 @@ class PerformanceAssignmentRepository:
         ]
 
     @staticmethod
+    def assignment_at(user_id, business_at, db=None):
+        """Return the single assignment effective at one business timestamp."""
+        if not business_at:
+            raise ValueError("Assignment business_at is required")
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT * FROM performance_assignment_history "
+            "WHERE user_id=? AND valid_from<=? "
+            "AND (valid_to='' OR valid_to>?) ORDER BY valid_from DESC,id DESC",
+            (user_id, business_at, business_at),
+        ).fetchall()
+        if len(rows) > 1:
+            raise ConflictError(
+                "Performance assignment history has overlapping effective intervals"
+            )
+        return dict(rows[0]) if rows else None
+
+    @staticmethod
+    def list_for_collection(period_start, period_end, source_cutoff_at, db=None):
+        """List assignment intervals observable by the collection cutoff."""
+        if not period_start or not period_end or period_start >= period_end:
+            raise ValueError("Invalid assignment collection period")
+        if not source_cutoff_at:
+            raise ValueError("Assignment collection cutoff is required")
+        db = resolve_db(db)
+        return [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM performance_assignment_history "
+                "WHERE valid_from<? AND (valid_to='' OR valid_to>?) "
+                "AND valid_from<=? AND created_at<=? "
+                "ORDER BY user_id,valid_from,id",
+                (
+                    period_end,
+                    period_start,
+                    source_cutoff_at,
+                    source_cutoff_at,
+                ),
+            ).fetchall()
+        ]
+
+    @staticmethod
     def open_assignment(user_id, db=None):
         db = resolve_db(db)
         rows = db.execute(
