@@ -27,6 +27,100 @@ class PerformanceLedgerRepository:
         return dict(row) if row else None
 
     @staticmethod
+    def review_by_idempotency_key(idempotency_key, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM performance_reviews_v2 WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def latest_score_revisions(batch_id, user_id=None, position_id=None, db=None):
+        """Return one immutable, current score revision per employee."""
+        db = resolve_db(db)
+        clauses = [
+            "score.batch_id=?",
+            "NOT EXISTS (SELECT 1 FROM performance_score_revisions newer "
+            "WHERE newer.batch_id=score.batch_id AND newer.user_id=score.user_id "
+            "AND newer.revision>score.revision)",
+        ]
+        params = [batch_id]
+        if user_id is not None:
+            clauses.append("score.user_id=?")
+            params.append(user_id)
+        if position_id is not None:
+            clauses.append("score.position_id_snapshot=?")
+            params.append(position_id)
+        rows = db.execute(
+            "SELECT score.* FROM performance_score_revisions score WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY score.user_id",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def latest_review(batch_id, user_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM performance_reviews_v2 "
+            "WHERE batch_id=? AND user_id=? ORDER BY revision DESC,id DESC LIMIT 1",
+            (batch_id, user_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def next_review_revision(batch_id, user_id, db=None):
+        db = resolve_db(db)
+        return int(
+            db.execute(
+                "SELECT COALESCE(MAX(revision),0)+1 "
+                "FROM performance_reviews_v2 WHERE batch_id=? AND user_id=?",
+                (batch_id, user_id),
+            ).fetchone()[0]
+        )
+
+    @staticmethod
+    def insert_review(payload, db):
+        cursor = db.execute(
+            "INSERT INTO performance_reviews_v2 ("
+            "batch_id,user_id,revision,discipline_deduction,discipline_reason,"
+            "improvement_adjustment,improvement_reason,manual_score,manual_comment,"
+            "reviewed_by,reviewed_by_name,input_digest,idempotency_key"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload["batch_id"],
+                payload["user_id"],
+                payload["revision"],
+                payload.get("discipline_deduction", 0),
+                payload.get("discipline_reason", ""),
+                payload.get("improvement_adjustment", 0),
+                payload.get("improvement_reason", ""),
+                payload.get("manual_score", 10),
+                payload.get("manual_comment", ""),
+                payload.get("reviewed_by"),
+                payload.get("reviewed_by_name", ""),
+                payload.get("input_digest", ""),
+                payload.get("idempotency_key"),
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
+    def update_batch_row_version(batch_id, expected_row_version, db):
+        cursor = db.execute(
+            "UPDATE performance_batches SET row_version=row_version+1,"
+            "updated_at=datetime('now','localtime') "
+            "WHERE id=? AND row_version=? AND status='supervisor_review'",
+            (batch_id, expected_row_version),
+        )
+        if cursor.rowcount != 1:
+            return None
+        row = PerformanceLedgerRepository.batch(batch_id, db=db)
+        return row["row_version"] if row else None
+
+    @staticmethod
     def next_version(production_month, db=None):
         db = resolve_db(db)
         return int(
