@@ -482,3 +482,54 @@ V57 代码已通过 `629` 项后端完整回归。正式生产创建三个专用
 工资隔离再次通过：批次 `4`、员工行 `119`、调整项 `0`、明细 `2975`、工价解析 `2638`、事件 `4`、迁移 manifest `1`，验收前后完全一致。
 
 副本验收门禁已通过。正式生产发布时可安全执行 V57 迁移、部门修订和未激活专用账号建立；在专用账号完成密码重置和激活前，生产 V2 批次不生成，查询开关不开启。
+
+## 18. V57 正式发布与生产授权数据落地
+
+V57 于 2026-08-07 19:04（Asia/Shanghai）通过标准部署脚本正式发布，部署提交为 `306fa387d78c67fbf977f6a82eac16c22ef88479`。Git HEAD、`.deployed_commit` 和健康接口提交一致，用户级 `qr-system.service` 持续为 `active`，健康接口返回 `status=ok`、`db=connected`。
+
+标准部署验证：
+
+| 验证项 | 结果 |
+| --- | --- |
+| 后端完整回归 | `629 passed in 94.22s` |
+| 前端单元测试 | `19 files / 62 tests passed` |
+| 浏览器关键路径 | `15 passed` |
+| API 架构检查 | 30 个 namespace、339 个唯一方法 |
+| 前端依赖环检查 | 180 个文件、434 条内部边，无环 |
+| 生产构建 | 230 个模块转换成功 |
+| 数据库迁移 | V56 -> V57，执行 1 个迁移 |
+
+正式发布备份：
+
+| 阶段 | 路径 | SHA-256 | 校验 |
+| --- | --- | --- | --- |
+| 发布前外置 V56 | `/home/dubin/qr-system-release-backups/20260807-performance-v57/production-pre-v57-20260807-185922.db` | `3dc14d8c730f7809c54f77ff602be69c7ea31e2cfc5c0e6b9ae5a606675fd3ac` | V56、`ok`、外键 0 |
+| 部署脚本内部 V56 | `/home/dubin/qr-system/data/backups/production_20260807_190417.db` | `3dc14d8c730f7809c54f77ff602be69c7ea31e2cfc5c0e6b9ae5a606675fd3ac` | 112 张表 |
+| 迁移后、配置前 V57 | `/home/dubin/qr-system/data/backups/production_20260807_190745.db` | `189f1733099080d0ec01f8d7cd16acc25b3d79ccd6215dfd90d0f1a03b911869` | 113 张表 |
+| 生产配置后外置 V57 | `/home/dubin/qr-system-release-backups/20260807-performance-v57/production-post-v57-provisioning-20260807-190914.db` | `b3016b20603efd25443ca209e4d2ba075983e4d20bea9b14e988ee31a9899e1e` | V57、`ok`、外键 0 |
+
+部门与授权数据于 2026-08-07 19:08:18 在一个 `BEGIN IMMEDIATE` 受控事务中正式提交：
+
+- 新建“机加工班组” ID `11`，与生产范围 ID `1` 至 `8` 组成全部 9 个生产范围。
+- 创建 `1000_perf`（用户 `10336`）、`1004_plan`（用户 `10337`）、`1005_reassess`（用户 `10338`）。
+- 三个专用账号均为 `inactive`，密码为独立随机 bcrypt 哈希，没有复制原管理员密码，当前不可登录。
+- 三个角色分别为 `performance_reviewer_v57`、`performance_plan_manager_v57`、`performance_reassessor_v57`；不含通配权限，每个账号恰好绑定 9 个生产部门范围。
+- 授权和部门配置留存审计日志 `audit_logs.id=11603`，操作人为杨冰 `10304`。
+
+37 条历史任职的部门补充修订已正式发布：
+
+- 37 条全部为 `approved`，每条任职恰好一个当前已批准版本。
+- 制单人全部为杨冰 `10304`，批准人全部为时文芳 `10305`。
+- 原 37 条任职记录的部门字段变更数为 `0`，前后摘要同为 `1ba004f105f649721aedbc7227bc5debf04a346dd150d09db044643722764c8f`。
+- 岗位映射数量为：切割 1、铆工 5、焊工 15、抛丸 1、打磨 4、镗工 2、喷漆 5、车工 1、铣工 2、普工 1，合计 37。
+
+生产配置证据：
+
+- 证据文件：`/home/dubin/qr-system-release-backups/20260807-performance-v57/v57-production-provisioning-20260807-190815.json`
+- 证据 SHA-256：`f78c912b34afe8ff83fbeb6b27bcad22d29788f1e8046ab2c9d6d03ff6a856d4`
+- 配置前后预检均为 `64 / 30 / 5 / 11`，质量歧义 `0`，缺已批准目标 `0`。
+- 工资台账指纹前后一致：`4 / 119 / 0 / 2975 / 2638 / 4 / 1`。
+- 绩效批次前后一致：Legacy V1 `2`、V2 `0`、Legacy 评分 `64`。
+- `PERFORMANCE_LEDGER_V2_QUERY_ENABLED` 未配置，按默认值保持 `false`。
+
+当前唯一未完成门禁是三个专用账号的密码重置和激活。在用户确认安全的初始密码交付/自助重置方式前，三个账号保持 `inactive`，生产 V2 不生成、不批准，查询开关不开启。
