@@ -54,37 +54,3 @@ def performance_review_save():
         return jsonify(result)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-
-
-@app.route('/api/performance/plans', methods=['GET'])
-@check_auth
-@check_permission('performance:view')
-def performance_plans():
-    plans = PerformanceService.list_plans(
-        year_month=request.args.get('year_month', ''),
-        status=request.args.get('status', ''),
-        user_id=request.args.get('user_id', type=int),
-    )
-    return jsonify({'plans': plans})
-
-
-@app.route('/api/performance/plans', methods=['POST'])
-@check_auth
-@check_permission('performance:create')
-def performance_plan_create():
-    try:
-        user = g.current_user if hasattr(g, 'current_user') else {}
-        plan_id = PerformanceService.create_plan(request.get_json() or {}, user.get('id'))
-        safe_audit_log('performance_plan_create', 'performance_plan', plan_id, '')
-        return jsonify({'ok': True, 'id': plan_id})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-
-
-@app.route('/api/performance/plans/<int:plan_id>', methods=['PUT'])
-@check_auth
-@check_permission('performance:edit')
-def performance_plan_update(plan_id):
-    result = PerformanceService.update_plan(plan_id, request.get_json() or {})
-    safe_audit_log('performance_plan_update', 'performance_plan', plan_id, '')
-    return jsonify(result)

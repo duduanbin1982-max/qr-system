@@ -31,6 +31,10 @@ class ConflictError(DomainError):
     status_code = 409
 
 
+class LegacyLedgerReadOnlyError(ConflictError):
+    code = "LEGACY_LEDGER_READ_ONLY"
+
+
 class RequiredQualityEvaluationError(ConflictError):
     code = "quality_evaluation_required"
 

@@ -633,6 +633,7 @@ class PerformanceFactCollector:
             "source_employee_no_snapshot": row.get("employee_no_snapshot") or "",
         }
         payload = {
+            "plan_id": int(row["id"]),
             "plan_production_month": row.get("production_month") or "",
             "status": row.get("status_snapshot") or row.get("status") or "",
             "reassessment_round": int(row.get("event_round") or 0),

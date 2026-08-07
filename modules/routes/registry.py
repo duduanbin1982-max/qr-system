@@ -47,6 +47,7 @@ ROUTE_MODULES = (
     "modules.routes.email_reports",  # email reports
     "modules.routes.progress",  # process progress + delivery alerts
     "modules.routes.performance",  # performance evaluation + improvement workflow
+    "modules.routes.performance_plans",  # evidence-backed improvement plans
     "modules.routes.performance_authorization",  # performance department scopes
     "modules.routes.performance_configuration",  # versioned performance configuration
     "modules.routes.handoff_reviews",  # process handoff quality review
