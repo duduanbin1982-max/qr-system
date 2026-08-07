@@ -5,7 +5,7 @@ export function usePerformanceModals(data) {
   const reviewModal = ref(false)
   const detailModal = ref(false)
   const selectedScore = ref({})
-  const planForm = ref({ reason: '', goal: '', actions: '', due_date: '' })
+  const planForm = ref({ reason: '', goal: '', actions: '', owner_id: '', due_date: '' })
   const reviewForm = ref({
     discipline_deduction: 0,
     discipline_reason: '',
@@ -44,6 +44,7 @@ export function usePerformanceModals(data) {
       reason: row.warning_reason || '',
       goal: '明确改进目标并在下期复评',
       actions: '主管面谈、技能辅导、过程跟踪',
+      owner_id: '',
       due_date: '',
     }
     planModal.value = true

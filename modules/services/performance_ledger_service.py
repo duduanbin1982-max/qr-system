@@ -1259,6 +1259,45 @@ class PerformanceLedgerService:
         return batch, scope
 
     @classmethod
+    def _allowed_batch_actions(cls, batch, actor):
+        """Project workflow actions without duplicating command authorization in UI."""
+        actions = []
+        actor_id = (actor or {}).get("id")
+        try:
+            actor_id = int(actor_id) if actor_id is not None else None
+        except (TypeError, ValueError):
+            actor_id = None
+        status = batch.get("status")
+        owns_batch = actor_id is not None and actor_id == batch.get("prepared_by")
+        can_prepare = PerformanceAuthorizationService.can_perform(actor, "prepare")
+        can_approve = PerformanceAuthorizationService.can_perform(actor, "approve")
+        can_view_all = PerformanceAuthorizationService.can_perform(actor, "view_all")
+
+        if can_prepare and owns_batch:
+            if status == BATCH_STATUS_DRAFT:
+                actions.extend(("submit_supervisor_review", "cancel"))
+            elif status == BATCH_STATUS_SUPERVISOR_REVIEW:
+                actions.extend(("submit_approval", "return", "cancel"))
+        if can_prepare and status == BATCH_STATUS_APPROVED:
+            actions.append("create_revision")
+        if (
+            can_approve
+            and can_view_all
+            and actor_id is not None
+            and actor_id != batch.get("prepared_by")
+            and status == BATCH_STATUS_APPROVAL_PENDING
+        ):
+            actions.extend(("approve", "return"))
+        if (
+            status == BATCH_STATUS_SUPERVISOR_REVIEW
+            and PerformanceAuthorizationService.can_perform(
+                actor, "review_department"
+            )
+        ):
+            actions.append("review_member")
+        return actions
+
+    @classmethod
     def list_batches(
         cls,
         actor,
@@ -1285,7 +1324,7 @@ class PerformanceLedgerService:
         scope = PerformanceAuthorizationService.require_workflow_view_access(
             actor, db=db
         )
-        return PerformanceLedgerRepository.list_batches(
+        result = PerformanceLedgerRepository.list_batches(
             scope,
             production_month=production_month,
             status=status,
@@ -1293,6 +1332,9 @@ class PerformanceLedgerService:
             limit=per_page,
             db=db,
         )
+        for item in result["items"]:
+            item["allowed_actions"] = cls._allowed_batch_actions(item, actor)
+        return result
 
     @classmethod
     def batch_detail(cls, batch_id, actor, page=1, per_page=50, db=None):
@@ -1316,6 +1358,19 @@ class PerformanceLedgerService:
         )
         for event in events:
             event["payload"] = cls._json_object(event.get("payload_json"))
+        allowed_actions = cls._allowed_batch_actions(result["batch"], actor)
+        if "review_member" in allowed_actions:
+            for score in scores["items"]:
+                score["allowed_actions"] = (
+                    ["review"]
+                    if PerformanceAuthorizationService.can_review_member(
+                        actor, batch_id, score["user_id"], db=db
+                    )
+                    else []
+                )
+        else:
+            for score in scores["items"]:
+                score["allowed_actions"] = []
         result.update(
             {
                 "scores": scores["items"],
@@ -1324,6 +1379,7 @@ class PerformanceLedgerService:
                 "per_page": per_page,
                 "events": events,
                 "visible_scope": scope,
+                "allowed_actions": allowed_actions,
             }
         )
         return result

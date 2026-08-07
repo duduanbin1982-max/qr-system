@@ -386,6 +386,23 @@ def test_legacy_writes_are_closed_and_batch_create_returns_event_id(
     assert created.status_code == 200, created.get_json()
     assert created.get_json()["event_id"] > 0
     assert created.get_json()["row_version"] >= 1
+    batch_id = created.get_json()["batch_id"]
+    batch_list = client.get(
+        "/api/performance/batches?production_month=" + MONTH,
+        headers=auth_headers,
+    ).get_json()
+    batch_detail = client.get(
+        "/api/performance/batches/" + str(batch_id),
+        headers=auth_headers,
+    ).get_json()
+    assert set(batch_list["items"][0]["allowed_actions"]) >= {
+        "submit_supervisor_review",
+        "cancel",
+    }
+    assert set(batch_detail["allowed_actions"]) >= {
+        "submit_supervisor_review",
+        "cancel",
+    }
 
     replay = client.post(
         "/api/performance/batches",
@@ -488,6 +505,11 @@ def test_self_scope_is_applied_before_pagination_and_rejects_direct_cross_scope(
     assert reviewer_batches.get_json()["total"] == 1
     assert reviewer_detail.status_code == 200, reviewer_detail.get_json()
     assert reviewer_detail.get_json()["scores_total"] == 4
+    assert reviewer_detail.get_json()["allowed_actions"] == []
+    assert all(
+        item["allowed_actions"] == []
+        for item in reviewer_detail.get_json()["scores"]
+    )
 
     missing = client.get(
         "/api/performance/batches/999999", headers=reviewer_headers

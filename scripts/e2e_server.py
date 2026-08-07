@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -66,6 +67,7 @@ def prepare_database():
     remove_database()
     from modules.domain.work_report import WorkReportCommand
     from modules.migrations import run_migrations
+    from modules.services.performance_scoring_policy import PerformanceScoringPolicy
     from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
     from factory_auth import TEST_HASH, ensure_user
 
@@ -93,6 +95,63 @@ def prepare_database():
             "UPDATE users SET position_id = ? WHERE id IN (?, ?)",
             (position_id, worker_id, previous_worker_id),
         )
+        production_month = datetime.now().strftime("%Y-%m")
+        rules = PerformanceScoringPolicy.rules()
+        db.execute(
+            "INSERT INTO performance_rule_versions ("
+            "version_code,name,weights_json,warning_levels_json,scoring_parameters_json,"
+            "status,effective_from_month,created_by,created_by_name,published_by,published_by_name,published_at"
+            ") VALUES (?,?,?,?,?,'published','2000-01',?,?,?, ?,datetime('now','localtime'))",
+            (
+                "e2e-performance-rule",
+                "E2E 绩效规则",
+                json.dumps(rules["weights"], ensure_ascii=False),
+                json.dumps(rules["warning_levels"], ensure_ascii=False),
+                json.dumps({
+                    "work_days_target": rules["work_days_target"],
+                    "handoff": rules["handoff"],
+                    "improvement": rules["improvement"],
+                }, ensure_ascii=False),
+                admin_id,
+                "E2E Administrator",
+                admin_id,
+                "E2E Administrator",
+            ),
+        )
+        db.execute(
+            "INSERT INTO performance_position_target_versions ("
+            "position_id,position_name_snapshot,target_output_qty,minimum_effective_work_days,"
+            "effective_from_month,status,created_by,created_by_name,approved_by,approved_by_name,approved_at"
+            ") VALUES (?,?,1,1,?,'approved',?,?,?, ?,datetime('now','localtime'))",
+            (
+                position_id,
+                "E2E Production Position",
+                production_month,
+                admin_id,
+                "E2E Administrator",
+                admin_id,
+                "E2E Administrator",
+            ),
+        )
+        for employee_id, employee_name, employee_no in (
+            (worker_id, "E2E Current Worker", "E2E-WORKER-001"),
+            (previous_worker_id, "E2E Previous Worker", "E2E-WORKER-002"),
+        ):
+            db.execute(
+                "INSERT INTO performance_assignment_history ("
+                "user_id,employee_name_snapshot,employee_no_snapshot,position_id,"
+                "position_name_snapshot,valid_from,source_type,source_key,created_by"
+                ") VALUES (?,?,?,?,?,'2000-01-01 00:00:00','e2e','e2e-assignment-' || ?,?)",
+                (
+                    employee_id,
+                    employee_name,
+                    employee_no,
+                    position_id,
+                    "E2E Production Position",
+                    employee_id,
+                    admin_id,
+                ),
+            )
 
         process_ids = []
         for sequence, name in enumerate(("E2E Cutting", "E2E Welding", "E2E Drilling"), start=1):
