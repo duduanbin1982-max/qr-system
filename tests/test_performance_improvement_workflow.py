@@ -19,6 +19,12 @@ PERIOD_END = "2026-09-01 07:00:00"
 
 
 def _user(db, suffix, permissions=None):
+    permissions = list(permissions or [])
+    if any(
+        permission in permissions
+        for permission in ("performance:plan_manage", "performance:plan_reassess")
+    ) and "performance:view_department" not in permissions:
+        permissions.append("performance:view_department")
     department_id = db.execute(
         "INSERT INTO departments (name,status) VALUES (?,'active')",
         ("绩效改进部门-" + suffix,),
@@ -57,12 +63,23 @@ def _user(db, suffix, permissions=None):
             "test:performance-plan:" + suffix,
         ),
     )
+    if any(
+        permission in permissions
+        for permission in ("performance:plan_manage", "performance:plan_reassess")
+    ):
+        for row in db.execute("SELECT id FROM departments ORDER BY id").fetchall():
+            db.execute(
+                "INSERT OR IGNORE INTO performance_department_scopes "
+                "(user_id,department_id,granted_by,granted_by_name) "
+                "VALUES (?,?,1,'测试管理员')",
+                (user_id, row["id"]),
+            )
     db.commit()
     return {
         "id": user_id,
         "name": "绩效改进人员-" + suffix,
         "department_id": department_id,
-        "_permissions": permissions or [],
+        "_permissions": permissions,
     }
 
 
@@ -143,6 +160,80 @@ def _pending(db, suffix):
         manager,
     )
     return employee, owner, manager, pending, evidence
+
+
+def _replace_scopes(db, actor_id, department_ids):
+    db.execute(
+        "DELETE FROM performance_department_scopes WHERE user_id=?", (actor_id,)
+    )
+    for department_id in department_ids:
+        db.execute(
+            "INSERT INTO performance_department_scopes "
+            "(user_id,department_id,granted_by,granted_by_name) "
+            "VALUES (?,?,1,'测试管理员')",
+            (actor_id, department_id),
+        )
+    db.commit()
+
+
+def test_plan_manager_and_reassessor_writes_fail_closed_outside_department_scope(
+    client,
+):
+    with client.application.app_context():
+        db = get_db()
+        employee = _user(db, "scope-employee")
+        owner = _user(db, "scope-owner")
+        manager = _user(db, "scope-manager", ["performance:plan_manage"])
+        outside_department = db.execute(
+            "INSERT INTO departments (name,status) VALUES "
+            "('绩效改进范围外部门','active')"
+        ).lastrowid
+        db.commit()
+        _replace_scopes(db, manager["id"], [outside_department])
+
+        with pytest.raises(PermissionError, match="数据范围"):
+            PerformanceImprovementService.create_plan(
+                _plan_data(employee, owner, "scope-denied"), manager
+            )
+
+        _replace_scopes(db, manager["id"], [employee["department_id"]])
+        plan = PerformanceImprovementService.create_plan(
+            _plan_data(employee, owner, "scope-allowed"), manager
+        )
+        active = _activate(plan, manager, "scope-allowed")
+        evidence = PerformanceImprovementService.add_evidence(
+            plan["plan_id"],
+            _command(
+                active["row_version"],
+                "performance-plan:evidence:scope-allowed",
+                evidence_type="metric",
+                description="范围测试证据",
+            ),
+            manager,
+        )
+        pending = PerformanceImprovementService.transition(
+            plan["plan_id"],
+            _command(
+                evidence["row_version"],
+                "performance-plan:request:scope-allowed",
+                target_status="reassessment_pending",
+            ),
+            manager,
+        )
+        assessor = _user(db, "scope-assessor", ["performance:plan_reassess"])
+        _replace_scopes(db, assessor["id"], [outside_department])
+        with pytest.raises(PermissionError, match="数据范围"):
+            PerformanceImprovementService.reassess(
+                plan["plan_id"],
+                _command(
+                    pending["row_version"],
+                    "performance-plan:reassess:scope-denied",
+                    result="passed",
+                    notes="范围外复评不应成功",
+                    evidence_ids=[evidence["evidence_id"]],
+                ),
+                assessor,
+            )
 
 
 def test_activation_validates_fields_and_illegal_transitions(client):

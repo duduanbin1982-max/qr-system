@@ -163,6 +163,19 @@ class PerformanceAuthorizationService:
         )
 
     @staticmethod
+    def require_department_action_scope(actor, department_id, action_label, db=None):
+        """Fail closed for department-scoped performance write actions."""
+        scope = PerformanceAuthorizationService.resolve_view_scope(actor, db=db)
+        if scope["all"]:
+            return True
+        if department_id is None:
+            raise PermissionError(action_label + "缺少可授权的历史部门快照")
+        allowed = {int(value) for value in scope.get("department_ids", [])}
+        if int(department_id) not in allowed:
+            raise PermissionError(action_label + "超出绩效部门数据范围")
+        return True
+
+    @staticmethod
     def require_distinct_actors(first_actor_id, second_actor_id):
         if first_actor_id is not None and first_actor_id == second_actor_id:
             raise ValueError("Performance duty actors must differ")

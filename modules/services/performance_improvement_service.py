@@ -94,6 +94,15 @@ class PerformanceImprovementService:
         return cls._actor_identity(actor, "绩效改进计划复评人")
 
     @staticmethod
+    def _require_plan_scope(actor, plan, db):
+        PerformanceAuthorizationService.require_department_action_scope(
+            actor,
+            plan.get("department_id_snapshot"),
+            "绩效改进计划操作",
+            db=db,
+        )
+
+    @staticmethod
     def _idempotency_key(data, label):
         key = str((data or {}).get("idempotency_key") or "").strip()
         if not key:
@@ -159,7 +168,7 @@ class PerformanceImprovementService:
 
     @classmethod
     def _creation_replay(
-        cls, event, actor_id, user_id, production_month, db
+        cls, event, actor_id, user_id, production_month, actor, db
     ):
         if int(event.get("operator_id") or 0) != int(actor_id):
             raise PermissionError("绩效改进计划幂等请求只能由原操作人重试")
@@ -169,6 +178,7 @@ class PerformanceImprovementService:
         if not result:
             raise NotFoundError("绩效改进计划不存在")
         plan = result["plan"]
+        cls._require_plan_scope(actor, plan, db)
         if (
             int(plan["user_id"]) != int(user_id)
             or plan["production_month"] != production_month
@@ -252,6 +262,23 @@ class PerformanceImprovementService:
                 if score["batch_production_month"] != production_month:
                     raise ConflictError("绩效评分修订版不属于计划生产月份")
 
+            department_id_snapshot = (
+                score.get("department_id_snapshot")
+                if score is not None
+                else employee.get("department_id_snapshot")
+            )
+            department_name_snapshot = (
+                score.get("department_name_snapshot")
+                if score is not None
+                else employee.get("department_name_snapshot")
+            ) or ""
+            PerformanceAuthorizationService.require_department_action_scope(
+                actor,
+                department_id_snapshot,
+                "绩效改进计划创建",
+                db=txn,
+            )
+
             created_at = PerformanceImprovementRepository.database_now(db=txn)
             plan_id = PerformanceImprovementRepository.insert_plan(
                 {
@@ -259,10 +286,8 @@ class PerformanceImprovementService:
                     "user_id": user_id,
                     "employee_name_snapshot": employee["employee_name_snapshot"],
                     "employee_no_snapshot": employee["employee_no_snapshot"],
-                    "department_id_snapshot": employee["department_id_snapshot"],
-                    "department_name_snapshot": employee[
-                        "department_name_snapshot"
-                    ],
+                    "department_id_snapshot": department_id_snapshot,
+                    "department_name_snapshot": department_name_snapshot,
                     "production_month": production_month,
                     "warning_level_snapshot": str(
                         data.get("warning_level")
@@ -316,7 +341,7 @@ class PerformanceImprovementService:
             )
             if event:
                 return cls._creation_replay(
-                    event, actor_id, user_id, production_month, db
+                    event, actor_id, user_id, production_month, actor, db
                 )
             return execute(db)
         with cls._transaction() as txn:
@@ -325,7 +350,7 @@ class PerformanceImprovementService:
             )
             if event:
                 return cls._creation_replay(
-                    event, actor_id, user_id, production_month, txn
+                    event, actor_id, user_id, production_month, actor, txn
                 )
             return execute(txn)
 
@@ -339,6 +364,8 @@ class PerformanceImprovementService:
         event_key = cls._event_key("transition", command["idempotency_key"])
 
         def execute(txn):
+            plan = cls._require_plan(plan_id, txn)
+            cls._require_plan_scope(actor, plan, txn)
             replay = cls._event_replay(
                 plan_id,
                 actor_id,
@@ -348,7 +375,6 @@ class PerformanceImprovementService:
             )
             if replay:
                 return replay
-            plan = cls._require_plan(plan_id, txn)
             current_status = plan["status"]
             if target_status not in cls.TRANSITIONS[current_status]:
                 raise ConflictError(
@@ -485,10 +511,11 @@ class PerformanceImprovementService:
         event_key = cls._event_key("evidence", command["idempotency_key"])
 
         def execute(txn):
+            plan = cls._require_plan(plan_id, txn)
+            cls._require_plan_scope(actor, plan, txn)
             replay = cls._event_replay(plan_id, actor_id, event_key, txn)
             if replay:
                 return replay
-            plan = cls._require_plan(plan_id, txn)
             if plan["status"] != "active":
                 raise ConflictError("只有执行中的绩效改进计划可以追加证据")
             cls._require_version(plan, command["row_version"])
@@ -605,12 +632,13 @@ class PerformanceImprovementService:
             return summary
 
         def execute(txn):
+            plan = cls._require_plan(plan_id, txn)
+            cls._require_plan_scope(actor, plan, txn)
             existing = PerformanceImprovementRepository.reassessment_by_idempotency_key(
                 reassessment_key, db=txn
             )
             if existing:
                 return replay(existing, txn)
-            plan = cls._require_plan(plan_id, txn)
             if plan.get("owner_id") is not None and int(plan["owner_id"]) == actor_id:
                 raise PermissionError("绩效改进计划负责人不能复评自己的计划")
             if plan["status"] != "reassessment_pending":

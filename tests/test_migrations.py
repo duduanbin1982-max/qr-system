@@ -104,6 +104,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_shipment_lifecycle",
             "modules.migration_reporting",
             "modules.migration_payroll_ledger",
+            "modules.migration_performance_department",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 

@@ -471,6 +471,16 @@ class PerformanceFactCollector:
             "effective_to": effective_to,
             "source_type": row.get("source_type") or "",
             "source_key": row.get("source_key") or "",
+            "department_revision_id": row.get("department_revision_id"),
+            "department_revision": row.get("department_revision"),
+            "department_revision_source_key": row.get(
+                "department_revision_source_key"
+            )
+            or "",
+            "department_revision_approved_at": row.get(
+                "department_revision_approved_at"
+            )
+            or "",
         }
         return cls._fact(
             batch_id=batch_id,

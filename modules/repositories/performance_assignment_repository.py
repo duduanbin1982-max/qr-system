@@ -8,6 +8,54 @@ class PerformanceAssignmentRepository:
     """Persist and query immutable employee assignment snapshots."""
 
     @staticmethod
+    def _supports_department_revisions(db):
+        return db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='performance_assignment_department_revisions'"
+        ).fetchone() is not None
+
+    @staticmethod
+    def _effective_select(db):
+        base = (
+            "SELECT assignment.id,assignment.user_id,"
+            "assignment.employee_name_snapshot,assignment.employee_no_snapshot,"
+            "assignment.position_id,assignment.position_name_snapshot,"
+        )
+        tail = (
+            "assignment.valid_from,assignment.valid_to,assignment.source_type,"
+            "assignment.source_key,assignment.created_by,assignment.created_at,"
+            "assignment.department_id AS original_department_id,"
+            "assignment.department_name_snapshot AS original_department_name_snapshot,"
+        )
+        if not PerformanceAssignmentRepository._supports_department_revisions(db):
+            return (
+                base
+                + "assignment.department_id,assignment.department_name_snapshot,"
+                + tail
+                + "NULL AS department_revision_id,NULL AS department_revision,"
+                "'' AS department_revision_source_key,'' AS department_revision_approved_at "
+                "FROM performance_assignment_history assignment "
+            )
+        return (
+            base
+            + "CASE WHEN department_revision.id IS NULL THEN assignment.department_id "
+            "ELSE department_revision.department_id END AS department_id,"
+            "CASE WHEN department_revision.id IS NULL "
+            "THEN assignment.department_name_snapshot "
+            "ELSE department_revision.department_name_snapshot "
+            "END AS department_name_snapshot,"
+            + tail
+            + "department_revision.id AS department_revision_id,"
+            "department_revision.revision AS department_revision,"
+            "COALESCE(department_revision.source_key,'') AS department_revision_source_key,"
+            "COALESCE(department_revision.approved_at,'') AS department_revision_approved_at "
+            "FROM performance_assignment_history assignment "
+            "LEFT JOIN performance_assignment_department_revisions department_revision "
+            "ON department_revision.assignment_id=assignment.id "
+            "AND department_revision.status='approved' "
+        )
+
+    @staticmethod
     def user_snapshot(user_id, db=None):
         db = resolve_db(db)
         row = db.execute(
@@ -32,8 +80,9 @@ class PerformanceAssignmentRepository:
         return [
             dict(row)
             for row in db.execute(
-                "SELECT * FROM performance_assignment_history "
-                "WHERE user_id=? ORDER BY valid_from,id",
+                PerformanceAssignmentRepository._effective_select(db)
+                + "WHERE assignment.user_id=? "
+                "ORDER BY assignment.valid_from,assignment.id",
                 (user_id,),
             ).fetchall()
         ]
@@ -46,12 +95,10 @@ class PerformanceAssignmentRepository:
         return [
             dict(row)
             for row in db.execute(
-                """
-                SELECT * FROM performance_assignment_history
-                WHERE user_id=? AND valid_from<?
-                  AND (valid_to='' OR valid_to>?)
-                ORDER BY valid_from,id
-                """,
+                PerformanceAssignmentRepository._effective_select(db)
+                + "WHERE assignment.user_id=? AND assignment.valid_from<? "
+                "AND (assignment.valid_to='' OR assignment.valid_to>?) "
+                "ORDER BY assignment.valid_from,assignment.id",
                 (user_id, period_end, period_start),
             ).fetchall()
         ]
@@ -63,9 +110,10 @@ class PerformanceAssignmentRepository:
             raise ValueError("Assignment business_at is required")
         db = resolve_db(db)
         rows = db.execute(
-            "SELECT * FROM performance_assignment_history "
-            "WHERE user_id=? AND valid_from<=? "
-            "AND (valid_to='' OR valid_to>?) ORDER BY valid_from DESC,id DESC",
+            PerformanceAssignmentRepository._effective_select(db)
+            + "WHERE assignment.user_id=? AND assignment.valid_from<=? "
+            "AND (assignment.valid_to='' OR assignment.valid_to>?) "
+            "ORDER BY assignment.valid_from DESC,assignment.id DESC",
             (user_id, business_at, business_at),
         ).fetchall()
         if len(rows) > 1:
@@ -85,10 +133,11 @@ class PerformanceAssignmentRepository:
         return [
             dict(row)
             for row in db.execute(
-                "SELECT * FROM performance_assignment_history "
-                "WHERE valid_from<? AND (valid_to='' OR valid_to>?) "
-                "AND valid_from<=? "
-                "ORDER BY user_id,valid_from,id",
+                PerformanceAssignmentRepository._effective_select(db)
+                + "WHERE assignment.valid_from<? "
+                "AND (assignment.valid_to='' OR assignment.valid_to>?) "
+                "AND assignment.valid_from<=? "
+                "ORDER BY assignment.user_id,assignment.valid_from,assignment.id",
                 (
                     period_end,
                     period_start,
@@ -101,8 +150,9 @@ class PerformanceAssignmentRepository:
     def open_assignment(user_id, db=None):
         db = resolve_db(db)
         rows = db.execute(
-            "SELECT * FROM performance_assignment_history "
-            "WHERE user_id=? AND valid_to='' ORDER BY valid_from,id",
+            PerformanceAssignmentRepository._effective_select(db)
+            + "WHERE assignment.user_id=? AND assignment.valid_to='' "
+            "ORDER BY assignment.valid_from,assignment.id",
             (user_id,),
         ).fetchall()
         if len(rows) > 1:
