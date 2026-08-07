@@ -106,6 +106,9 @@ class PerformanceAuthorizationRepository:
         batch_id=None,
         user_id=None,
         department_id=None,
+        warning_level="",
+        search="",
+        position_id="",
         page=1,
         limit=20,
         db=None,
@@ -127,6 +130,22 @@ class PerformanceAuthorizationRepository:
         if department_id is not None:
             clauses.append("score.department_id_snapshot=?")
             params.append(department_id)
+        if warning_level:
+            clauses.append("score.eligibility_status='eligible'")
+            clauses.append("score.warning_level=?")
+            params.append(warning_level)
+        if position_id == "__unassigned__":
+            clauses.append("score.position_id_snapshot IS NULL")
+        elif position_id not in (None, ""):
+            clauses.append("score.position_id_snapshot=?")
+            params.append(int(position_id))
+        if search:
+            clauses.append(
+                "(score.employee_name_snapshot LIKE ? "
+                "OR score.employee_no_snapshot LIKE ?)"
+            )
+            like = "%" + search + "%"
+            params.extend([like, like])
         where_sql = " AND ".join(clauses)
         total = db.execute(
             "SELECT COUNT(*) FROM performance_score_revisions score WHERE "
@@ -136,7 +155,9 @@ class PerformanceAuthorizationRepository:
         rows = db.execute(
             "SELECT score.* FROM performance_score_revisions score WHERE "
             + where_sql
-            + " ORDER BY score.user_id,score.id LIMIT ? OFFSET ?",
+            + " ORDER BY COALESCE(NULLIF(score.position_name_snapshot,''),'未设置岗位'),"
+            "CASE WHEN score.rank_no IS NULL THEN 1 ELSE 0 END,score.rank_no,"
+            "score.total_score DESC,score.user_id,score.id LIMIT ? OFFSET ?",
             params + [limit, (page - 1) * limit],
         ).fetchall()
         return {
@@ -145,3 +166,87 @@ class PerformanceAuthorizationRepository:
             "page": page,
             "limit": limit,
         }
+
+    @staticmethod
+    def score_summary(scope, batch_id, position_id="", db=None):
+        db = resolve_db(db)
+        scope_sql, params = PerformanceAuthorizationRepository._scope_sql(scope)
+        clauses = [
+            scope_sql,
+            "score.batch_id=?",
+            "NOT EXISTS (SELECT 1 FROM performance_score_revisions newer "
+            "WHERE newer.batch_id=score.batch_id AND newer.user_id=score.user_id "
+            "AND newer.revision>score.revision)",
+        ]
+        params.append(batch_id)
+        if position_id == "__unassigned__":
+            clauses.append("score.position_id_snapshot IS NULL")
+        elif position_id not in (None, ""):
+            clauses.append("score.position_id_snapshot=?")
+            params.append(int(position_id))
+        row = db.execute(
+            "SELECT COUNT(*) AS total,"
+            "SUM(CASE WHEN score.eligibility_status='eligible' THEN 1 ELSE 0 END) "
+            "AS eligible_count,"
+            "SUM(CASE WHEN score.eligibility_status='insufficient_data' THEN 1 ELSE 0 END) "
+            "AS insufficient_data_count,"
+            "ROUND(AVG(CASE WHEN score.eligibility_status='eligible' "
+            "THEN score.total_score END),1) AS avg_score,"
+            "SUM(CASE WHEN score.eligibility_status='eligible' "
+            "AND score.warning_level='green' THEN 1 ELSE 0 END) AS green,"
+            "SUM(CASE WHEN score.eligibility_status='eligible' "
+            "AND score.warning_level='yellow' THEN 1 ELSE 0 END) AS yellow,"
+            "SUM(CASE WHEN score.eligibility_status='eligible' "
+            "AND score.warning_level='orange' THEN 1 ELSE 0 END) AS orange,"
+            "SUM(CASE WHEN score.eligibility_status='eligible' "
+            "AND score.warning_level='red' THEN 1 ELSE 0 END) AS red "
+            "FROM performance_score_revisions score WHERE "
+            + " AND ".join(clauses),
+            params,
+        ).fetchone()
+        result = dict(row) if row else {}
+        for key in (
+            "total",
+            "eligible_count",
+            "insufficient_data_count",
+            "green",
+            "yellow",
+            "orange",
+            "red",
+        ):
+            result[key] = int(result.get(key) or 0)
+        return result
+
+    @staticmethod
+    def score_positions(scope, batch_id, db=None):
+        db = resolve_db(db)
+        scope_sql, params = PerformanceAuthorizationRepository._scope_sql(scope)
+        rows = db.execute(
+            "SELECT score.position_id_snapshot AS id,"
+            "COALESCE(NULLIF(score.position_name_snapshot,''),'未设置岗位') AS name,"
+            "COUNT(*) AS employee_count FROM performance_score_revisions score "
+            "WHERE "
+            + scope_sql
+            + " AND score.batch_id=? AND NOT EXISTS ("
+            "SELECT 1 FROM performance_score_revisions newer "
+            "WHERE newer.batch_id=score.batch_id AND newer.user_id=score.user_id "
+            "AND newer.revision>score.revision) "
+            "GROUP BY score.position_id_snapshot,"
+            "COALESCE(NULLIF(score.position_name_snapshot,''),'未设置岗位') "
+            "ORDER BY CASE WHEN score.position_id_snapshot IS NULL THEN 1 ELSE 0 END,name",
+            params + [batch_id],
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["id"] = "__unassigned__" if item["id"] is None else item["id"]
+            item["employee_count"] = int(item["employee_count"] or 0)
+            result.append(item)
+        return result
+
+    @staticmethod
+    def department_exists(department_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM departments WHERE id=? LIMIT 1", (department_id,)
+        ).fetchone() is not None

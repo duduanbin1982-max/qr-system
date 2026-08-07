@@ -75,6 +75,9 @@ class PerformanceAuthorizationService:
         batch_id=None,
         user_id=None,
         department_id=None,
+        warning_level="",
+        search="",
+        position_id="",
         page=1,
         limit=20,
         db=None,
@@ -87,10 +90,54 @@ class PerformanceAuthorizationService:
             batch_id=batch_id,
             user_id=user_id,
             department_id=department_id,
+            warning_level=warning_level,
+            search=search,
+            position_id=position_id,
             page=page,
             limit=limit,
             db=db,
         )
+
+    @staticmethod
+    def require_view_access(actor, db=None):
+        scope = PerformanceAuthorizationService.resolve_view_scope(actor, db=db)
+        if not scope["all"] and scope["self_user_id"] is None and not scope["department_ids"]:
+            raise PermissionError("无绩效结果查看权限")
+        return scope
+
+    @staticmethod
+    def require_workflow_view_access(actor, db=None):
+        if not any(
+            PerformanceAuthorizationService.can_perform(actor, action)
+            for action in ("view_all", "review_department", "prepare", "approve")
+        ):
+            raise PermissionError("无绩效批次工作流查看权限")
+        return PerformanceAuthorizationService.require_view_access(actor, db=db)
+
+    @staticmethod
+    def require_visible_filters(
+        actor, batch_id, user_id=None, department_id=None, db=None
+    ):
+        scope = PerformanceAuthorizationService.require_view_access(actor, db=db)
+        if department_id is not None:
+            if not PerformanceAuthorizationRepository.department_exists(
+                department_id, db=db
+            ):
+                raise NotFoundError("绩效部门不存在")
+            if not scope["all"] and department_id not in scope["department_ids"]:
+                raise PermissionError("无权查看该部门绩效")
+        if user_id is not None:
+            if not PerformanceAuthorizationRepository.user_exists(user_id, db=db):
+                raise NotFoundError("绩效员工不存在")
+            allowed = scope["all"] or user_id == scope["self_user_id"]
+            member = PerformanceAuthorizationRepository.latest_score_member(
+                batch_id, user_id, db=db
+            )
+            if member and member.get("department_id_snapshot") in scope["department_ids"]:
+                allowed = True
+            if not allowed:
+                raise PermissionError("无权查看该员工绩效")
+        return scope
 
     @staticmethod
     def can_review_member(actor, batch_id, user_id, db=None):

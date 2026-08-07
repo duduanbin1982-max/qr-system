@@ -5,6 +5,26 @@ from modules.repositories.context import resolve_db
 
 class PerformanceLedgerRepository:
     @staticmethod
+    def _score_scope_sql(scope, alias):
+        if scope.get("all"):
+            return "1=1", []
+        clauses = []
+        params = []
+        if scope.get("self_user_id") is not None:
+            clauses.append(alias + ".user_id=?")
+            params.append(scope["self_user_id"])
+        department_ids = list(scope.get("department_ids") or [])
+        if department_ids:
+            placeholders = ",".join("?" for _ in department_ids)
+            clauses.append(
+                alias + ".department_id_snapshot IN (" + placeholders + ")"
+            )
+            params.extend(department_ids)
+        if not clauses:
+            return "0=1", []
+        return "(" + " OR ".join(clauses) + ")", params
+
+    @staticmethod
     def database_now(db=None):
         db = resolve_db(db)
         return db.execute("SELECT datetime('now','localtime')").fetchone()[0]
@@ -25,6 +45,133 @@ class PerformanceLedgerRepository:
             (idempotency_key,),
         ).fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def _batch_visibility_sql(scope):
+        if scope.get("all"):
+            return "1=1", []
+        score_scope_sql, params = PerformanceLedgerRepository._score_scope_sql(
+            scope, alias="visible_score"
+        )
+        return (
+            "EXISTS (SELECT 1 FROM performance_score_revisions visible_score "
+            "WHERE visible_score.batch_id=batch.id AND "
+            + score_scope_sql
+            + ")",
+            params,
+        )
+
+    @staticmethod
+    def list_batches(
+        scope,
+        production_month="",
+        status="",
+        page=1,
+        limit=20,
+        db=None,
+    ):
+        db = resolve_db(db)
+        visibility_sql, params = PerformanceLedgerRepository._batch_visibility_sql(
+            scope
+        )
+        clauses = [visibility_sql]
+        if production_month:
+            clauses.append("batch.production_month=?")
+            params.append(production_month)
+        if status:
+            clauses.append("batch.status=?")
+            params.append(status)
+        where_sql = " AND ".join(clauses)
+        total = db.execute(
+            "SELECT COUNT(*) FROM performance_batches batch WHERE " + where_sql,
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            "SELECT batch.*,(SELECT COUNT(*) FROM performance_score_revisions score "
+            "WHERE score.batch_id=batch.id AND NOT EXISTS ("
+            "SELECT 1 FROM performance_score_revisions newer "
+            "WHERE newer.batch_id=score.batch_id AND newer.user_id=score.user_id "
+            "AND newer.revision>score.revision)) AS score_count,"
+            "(SELECT COUNT(*) FROM performance_data_exceptions exception "
+            "WHERE exception.batch_id=batch.id AND exception.status='pending') "
+            "AS pending_exception_count FROM performance_batches batch WHERE "
+            + where_sql
+            + " ORDER BY batch.production_month DESC,batch.version DESC,batch.id DESC "
+            "LIMIT ? OFFSET ?",
+            params + [limit, (page - 1) * limit],
+        ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": int(total),
+            "page": page,
+            "per_page": limit,
+        }
+
+    @staticmethod
+    def batch_is_visible(batch_id, scope, db=None):
+        db = resolve_db(db)
+        visibility_sql, params = PerformanceLedgerRepository._batch_visibility_sql(
+            scope
+        )
+        return db.execute(
+            "SELECT 1 FROM performance_batches batch WHERE batch.id=? AND "
+            + visibility_sql,
+            [batch_id] + params,
+        ).fetchone() is not None
+
+    @staticmethod
+    def list_batch_events(batch_id, db=None):
+        db = resolve_db(db)
+        return [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM performance_batch_events WHERE batch_id=? "
+                "ORDER BY created_at,id",
+                (batch_id,),
+            ).fetchall()
+        ]
+
+    @staticmethod
+    def list_exceptions(scope, batch_id, status="", page=1, limit=50, db=None):
+        db = resolve_db(db)
+        clauses = ["exception.batch_id=?"]
+        params = [batch_id]
+        if not scope.get("all"):
+            score_scope_sql, scope_params = (
+                PerformanceLedgerRepository._score_scope_sql(
+                    scope, alias="visible_score"
+                )
+            )
+            clauses.append(
+                "exception.user_id IS NOT NULL AND EXISTS ("
+                "SELECT 1 FROM performance_score_revisions visible_score "
+                "WHERE visible_score.batch_id=exception.batch_id "
+                "AND visible_score.user_id=exception.user_id AND "
+                + score_scope_sql
+                + ")"
+            )
+            params.extend(scope_params)
+        if status:
+            clauses.append("exception.status=?")
+            params.append(status)
+        where_sql = " AND ".join(clauses)
+        total = db.execute(
+            "SELECT COUNT(*) FROM performance_data_exceptions exception WHERE "
+            + where_sql,
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            "SELECT exception.* FROM performance_data_exceptions exception WHERE "
+            + where_sql
+            + " ORDER BY exception.id LIMIT ? OFFSET ?",
+            params + [limit, (page - 1) * limit],
+        ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": int(total),
+            "page": page,
+            "per_page": limit,
+        }
 
     @staticmethod
     def review_by_idempotency_key(idempotency_key, db=None):

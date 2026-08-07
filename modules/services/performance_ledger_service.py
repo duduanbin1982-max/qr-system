@@ -100,7 +100,16 @@ class PerformanceLedgerService:
             if existing["production_month"] != command["production_month"]:
                 raise ConflictError("同一绩效幂等键不能用于不同生产月份")
             result = PerformanceLedgerRepository.batch_summary(existing["id"], db=db)
-            result["idempotent_replay"] = True
+            event = PerformanceLedgerRepository.event_by_idempotency_key(
+                "performance-batch-generated:" + command["idempotency_key"],
+                db=db,
+            )
+            result.update(
+                {
+                    "event_id": event["id"] if event else None,
+                    "idempotent_replay": True,
+                }
+            )
             return result
 
         rule = PerformanceConfigurationRepository.published_rule_for_month(
@@ -185,7 +194,7 @@ class PerformanceLedgerService:
                 for item in results
             ),
         }
-        PerformanceLedgerRepository.insert_batch_event(
+        event_id = PerformanceLedgerRepository.insert_batch_event(
             {
                 "batch_id": batch_id,
                 "event_type": "batch_generated",
@@ -202,7 +211,7 @@ class PerformanceLedgerService:
             db,
         )
         result = PerformanceLedgerRepository.batch_summary(batch_id, db=db)
-        result["idempotent_replay"] = False
+        result.update({"event_id": event_id, "idempotent_replay": False})
         return result
 
     @staticmethod
@@ -817,6 +826,11 @@ class PerformanceLedgerService:
                 result = PerformanceLedgerRepository.batch_summary(
                     existing["id"], db=txn
                 )
+                event = PerformanceLedgerRepository.event_by_idempotency_key(
+                    "performance-batch-generated:" + command["idempotency_key"],
+                    db=txn,
+                )
+                result["event_id"] = event["id"] if event else None
                 result["idempotent_replay"] = True
                 return result
             cls._require_batch_state(source, BATCH_STATUS_APPROVED)
@@ -1010,6 +1024,14 @@ class PerformanceLedgerService:
                     "review_id": existing_review["id"],
                     "review_revision": existing_review["revision"],
                     "changed_user_ids": [],
+                    "event_id": (
+                        PerformanceLedgerRepository.event_by_idempotency_key(
+                            "performance-supervisor-review:"
+                            + command["idempotency_key"],
+                            db=db,
+                        )
+                        or {}
+                    ).get("id"),
                     "idempotent_replay": True,
                 }
             )
@@ -1177,7 +1199,7 @@ class PerformanceLedgerService:
         if new_row_version is None:
             raise ConflictError("绩效批次版本号已被其他操作修改，请刷新后重试")
         changed_user_ids = [int(item["user_id"]) for item in changed_results]
-        PerformanceLedgerRepository.insert_batch_event(
+        event_id = PerformanceLedgerRepository.insert_batch_event(
             {
                 "batch_id": command["batch_id"],
                 "event_type": "supervisor_review_saved",
@@ -1209,9 +1231,127 @@ class PerformanceLedgerService:
                 "review_id": review_id,
                 "review_revision": review_payload["revision"],
                 "changed_user_ids": changed_user_ids,
+                "event_id": event_id,
                 "idempotent_replay": False,
             }
         )
+        return result
+
+    @staticmethod
+    def _pagination(page, per_page, default=20):
+        try:
+            page = max(int(page or 1), 1)
+            per_page = min(max(int(per_page or default), 1), 200)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("绩效分页参数无效") from exc
+        return page, per_page
+
+    @classmethod
+    def require_visible_batch(cls, batch_id, actor, db=None):
+        batch = cls._require_batch(batch_id, db)
+        scope = PerformanceAuthorizationService.require_workflow_view_access(
+            actor, db=db
+        )
+        if not PerformanceLedgerRepository.batch_is_visible(
+            batch_id, scope, db=db
+        ):
+            raise PermissionError("无权查看该绩效批次")
+        return batch, scope
+
+    @classmethod
+    def list_batches(
+        cls,
+        actor,
+        production_month="",
+        status="",
+        page=1,
+        per_page=20,
+        db=None,
+    ):
+        if production_month:
+            production_month = validate_production_month(production_month)
+        allowed_statuses = {
+            "",
+            BATCH_STATUS_DRAFT,
+            BATCH_STATUS_SUPERVISOR_REVIEW,
+            BATCH_STATUS_APPROVAL_PENDING,
+            BATCH_STATUS_APPROVED,
+            BATCH_STATUS_SUPERSEDED,
+            BATCH_STATUS_CANCELLED,
+        }
+        if status not in allowed_statuses:
+            raise ValueError("绩效批次状态无效")
+        page, per_page = cls._pagination(page, per_page)
+        scope = PerformanceAuthorizationService.require_workflow_view_access(
+            actor, db=db
+        )
+        return PerformanceLedgerRepository.list_batches(
+            scope,
+            production_month=production_month,
+            status=status,
+            page=page,
+            limit=per_page,
+            db=db,
+        )
+
+    @classmethod
+    def batch_detail(cls, batch_id, actor, page=1, per_page=50, db=None):
+        page, per_page = cls._pagination(page, per_page, default=50)
+        _, scope = cls.require_visible_batch(batch_id, actor, db=db)
+        result = PerformanceLedgerRepository.batch_summary(batch_id, db=db)
+        scores = PerformanceAuthorizationService.list_visible_scores(
+            actor,
+            batch_id=batch_id,
+            page=page,
+            limit=per_page,
+            db=db,
+        )
+        events = (
+            PerformanceLedgerRepository.list_batch_events(batch_id, db=db)
+            if any(
+                PerformanceAuthorizationService.can_perform(actor, action)
+                for action in ("prepare", "approve", "review_department")
+            )
+            else []
+        )
+        for event in events:
+            event["payload"] = cls._json_object(event.get("payload_json"))
+        result.update(
+            {
+                "scores": scores["items"],
+                "scores_total": scores["total"],
+                "page": page,
+                "per_page": per_page,
+                "events": events,
+                "visible_scope": scope,
+            }
+        )
+        return result
+
+    @classmethod
+    def list_exceptions(
+        cls,
+        batch_id,
+        actor,
+        status="",
+        page=1,
+        per_page=50,
+        db=None,
+    ):
+        if status not in ("", "pending", "resolved", "confirmed_insufficient", "excluded"):
+            raise ValueError("绩效异常状态无效")
+        page, per_page = cls._pagination(page, per_page, default=50)
+        _, scope = cls.require_visible_batch(batch_id, actor, db=db)
+        result = PerformanceLedgerRepository.list_exceptions(
+            scope,
+            batch_id,
+            status=status,
+            page=page,
+            limit=per_page,
+            db=db,
+        )
+        for item in result["items"]:
+            item["snapshot"] = cls._json_object(item.get("snapshot_json"))
         return result
 
     @staticmethod

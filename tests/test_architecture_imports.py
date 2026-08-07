@@ -336,9 +336,9 @@ def test_services_do_not_depend_on_migrations():
 
 def test_performance_uses_authoritative_quality_evaluation_source():
     performance_paths = (
-        PROJECT_ROOT / "modules" / "services" / "performance_service.py",
+        PROJECT_ROOT / "modules" / "services" / "performance_fact_collector.py",
         PROJECT_ROOT / "modules" / "services" / "performance_scoring_policy.py",
-        PROJECT_ROOT / "modules" / "repositories" / "performance_repository.py",
+        PROJECT_ROOT / "modules" / "repositories" / "performance_fact_repository.py",
     )
     forbidden_modules = {
         "modules.services.handoff_review_service",
@@ -363,7 +363,7 @@ def test_performance_uses_authoritative_quality_evaluation_source():
                     )
 
     performance_source = performance_paths[0].read_text(encoding="utf-8", errors="replace")
-    assert "ProcessQualityEvaluationService.monthly_metrics" in performance_source
+    assert "PerformanceFactRepository.list_quality_events" in performance_source
     assert violations == [], (
         "performance scoring must use process_quality_evaluations as its authoritative source: "
         f"{violations}"
