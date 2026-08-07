@@ -76,7 +76,7 @@ class PerformanceAssignmentRepository:
 
     @staticmethod
     def list_for_collection(period_start, period_end, source_cutoff_at, db=None):
-        """List assignment intervals observable by the collection cutoff."""
+        """List historical assignment intervals effective in the period."""
         if not period_start or not period_end or period_start >= period_end:
             raise ValueError("Invalid assignment collection period")
         if not source_cutoff_at:
@@ -87,12 +87,11 @@ class PerformanceAssignmentRepository:
             for row in db.execute(
                 "SELECT * FROM performance_assignment_history "
                 "WHERE valid_from<? AND (valid_to='' OR valid_to>?) "
-                "AND valid_from<=? AND created_at<=? "
+                "AND valid_from<=? "
                 "ORDER BY user_id,valid_from,id",
                 (
                     period_end,
                     period_start,
-                    source_cutoff_at,
                     source_cutoff_at,
                 ),
             ).fetchall()

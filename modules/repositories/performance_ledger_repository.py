@@ -36,6 +36,15 @@ class PerformanceLedgerRepository:
         return dict(row) if row else None
 
     @staticmethod
+    def event_by_idempotency_key(idempotency_key, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM performance_batch_events WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def latest_score_revisions(batch_id, user_id=None, position_id=None, db=None):
         """Return one immutable, current score revision per employee."""
         db = resolve_db(db)
@@ -121,6 +130,72 @@ class PerformanceLedgerRepository:
         return row["row_version"] if row else None
 
     @staticmethod
+    def transition_batch(
+        batch_id,
+        expected_row_version,
+        current_status,
+        target_status,
+        fields,
+        db,
+    ):
+        allowed_fields = {
+            "submitted_at",
+            "approved_by",
+            "approved_by_name",
+            "approved_at",
+        }
+        invalid_fields = set(fields) - allowed_fields
+        if invalid_fields:
+            raise ValueError("不允许更新绩效批次工作流字段")
+        assignments = ["status=?", "row_version=row_version+1"]
+        params = [target_status]
+        for field in sorted(fields):
+            assignments.append(field + "=?")
+            params.append(fields[field])
+        assignments.append("updated_at=datetime('now','localtime')")
+        params.extend([batch_id, expected_row_version, current_status])
+        cursor = db.execute(
+            "UPDATE performance_batches SET "
+            + ",".join(assignments)
+            + " WHERE id=? AND row_version=? AND status=?",
+            params,
+        )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def approve_batch(
+        batch_id,
+        expected_row_version,
+        actor_id,
+        actor_name,
+        approved_at,
+        db,
+    ):
+        return PerformanceLedgerRepository.transition_batch(
+            batch_id,
+            expected_row_version,
+            "approval_pending",
+            "approved",
+            {
+                "approved_by": actor_id,
+                "approved_by_name": actor_name,
+                "approved_at": approved_at,
+            },
+            db,
+        )
+
+    @staticmethod
+    def mark_superseded(batch_id, successor_batch_id, expected_row_version, db):
+        cursor = db.execute(
+            "UPDATE performance_batches SET status='superseded',"
+            "superseded_by_batch_id=?,row_version=row_version+1,"
+            "updated_at=datetime('now','localtime') "
+            "WHERE id=? AND row_version=? AND status='approved'",
+            (successor_batch_id, batch_id, expected_row_version),
+        )
+        return cursor.rowcount == 1
+
+    @staticmethod
     def next_version(production_month, db=None):
         db = resolve_db(db)
         return int(
@@ -193,6 +268,16 @@ class PerformanceLedgerRepository:
             (batch_id,),
         ).fetchall()
         return {int(row["user_id"]): int(row["exception_count"]) for row in rows}
+
+    @staticmethod
+    def unresolved_exceptions(batch_id, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT * FROM performance_data_exceptions "
+            "WHERE batch_id=? AND status='pending' ORDER BY id",
+            (batch_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def insert_score_revision(payload, db):

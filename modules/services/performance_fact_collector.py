@@ -14,6 +14,12 @@ from modules.services import BaseService
 
 
 class PerformanceFactCollector:
+    DERIVED_SCORING_EXCEPTION_TYPES = {
+        "ambiguous_department_snapshot",
+        "ambiguous_position_snapshot",
+        "missing_position_snapshot",
+        "missing_position_target",
+    }
     FACT_INPUT_FIELDS = (
         "fact_type",
         "source_type",
@@ -119,6 +125,38 @@ class PerformanceFactCollector:
         if PerformanceFactRepository.list_batch_facts(batch_id, db=db):
             raise ConflictError("绩效批次已有事实但缺少输入摘要，禁止覆盖采集")
 
+        facts, exceptions = cls._gather(batch, cutoff, db)
+
+        facts.sort(key=cls._fact_sort_key)
+        exceptions.sort(key=cls._exception_sort_key)
+        for fact in facts:
+            PerformanceFactRepository.insert_source_fact(fact, db)
+        for exception in exceptions:
+            PerformanceFactRepository.insert_batch_exception(exception, db)
+
+        persisted_facts = PerformanceFactRepository.list_batch_facts(batch_id, db=db)
+        persisted_exceptions = PerformanceFactRepository.list_batch_exceptions(
+            batch_id, db=db
+        )
+        input_json, input_digest = cls._input_summary(
+            batch, cutoff, persisted_facts, persisted_exceptions
+        )
+        if not PerformanceFactRepository.save_collection_digest(
+            batch_id, cutoff, input_digest, db
+        ):
+            raise ConflictError("绩效批次来源摘要已被其他操作写入")
+        saved_batch = PerformanceFactRepository.batch(batch_id, db=db)
+        return cls._result(
+            saved_batch,
+            persisted_facts,
+            persisted_exceptions,
+            input_json,
+            input_digest,
+        )
+
+    @classmethod
+    def _gather(cls, batch, cutoff, db):
+        batch_id = int(batch["id"])
         exceptions = []
         facts = []
         for assignment in PerformanceAssignmentRepository.list_for_collection(
@@ -172,33 +210,50 @@ class PerformanceFactCollector:
                     "snapshot_json": cls._canonical(snapshot),
                 }
             )
-
         facts.sort(key=cls._fact_sort_key)
         exceptions.sort(key=cls._exception_sort_key)
-        for fact in facts:
-            PerformanceFactRepository.insert_source_fact(fact, db)
-        for exception in exceptions:
-            PerformanceFactRepository.insert_batch_exception(exception, db)
+        return facts, exceptions
 
-        persisted_facts = PerformanceFactRepository.list_batch_facts(batch_id, db=db)
-        persisted_exceptions = PerformanceFactRepository.list_batch_exceptions(
-            batch_id, db=db
+    @classmethod
+    def verify_frozen_input(cls, batch_id, db=None):
+        batch = PerformanceFactRepository.batch(batch_id, db=db)
+        if not batch:
+            raise NotFoundError("绩效批次不存在")
+        facts = PerformanceFactRepository.list_batch_facts(batch_id, db=db)
+        exceptions = PerformanceFactRepository.list_batch_exceptions(batch_id, db=db)
+        _, calculated_digest = cls._input_summary(
+            batch, batch["source_cutoff_at"], facts, exceptions
         )
-        input_json, input_digest = cls._input_summary(
-            batch, cutoff, persisted_facts, persisted_exceptions
+        return {
+            "valid": calculated_digest == batch["input_digest"],
+            "saved_input_digest": batch["input_digest"],
+            "calculated_input_digest": calculated_digest,
+        }
+
+    @classmethod
+    def current_input_status(cls, batch_id, db=None):
+        batch = PerformanceFactRepository.batch(batch_id, db=db)
+        if not batch:
+            raise NotFoundError("绩效批次不存在")
+        frozen = cls.verify_frozen_input(batch_id, db=db)
+        current_cutoff = PerformanceFactRepository.database_now(db=db)
+        if current_cutoff < batch["source_cutoff_at"]:
+            current_cutoff = batch["source_cutoff_at"]
+        facts, exceptions = cls._gather(batch, current_cutoff, db)
+        _, current_digest = cls._input_summary(
+            batch, batch["source_cutoff_at"], facts, exceptions
         )
-        if not PerformanceFactRepository.save_collection_digest(
-            batch_id, cutoff, input_digest, db
-        ):
-            raise ConflictError("绩效批次来源摘要已被其他操作写入")
-        saved_batch = PerformanceFactRepository.batch(batch_id, db=db)
-        return cls._result(
-            saved_batch,
-            persisted_facts,
-            persisted_exceptions,
-            input_json,
-            input_digest,
-        )
+        return {
+            **frozen,
+            "current_source_cutoff_at": current_cutoff,
+            "current_input_digest": current_digest,
+            "input_drift_detected": (
+                not frozen["valid"]
+                or current_digest != batch["input_digest"]
+            ),
+            "current_fact_count": len(facts),
+            "current_exception_count": len(exceptions),
+        }
 
     @classmethod
     def _saved_result(cls, batch, db):
@@ -244,12 +299,15 @@ class PerformanceFactCollector:
         fact_inputs = []
         for row in facts:
             item = {field: row.get(field) for field in cls.FACT_INPUT_FIELDS}
+            item["quantity"] = float(item.get("quantity") or 0)
             item["payload"] = cls._json_object(item.pop("payload_json"))
             fact_inputs.append(item)
         fact_inputs.sort(key=cls._fact_sort_key)
 
         exception_inputs = []
         for row in exceptions:
+            if row.get("exception_type") in cls.DERIVED_SCORING_EXCEPTION_TYPES:
+                continue
             item = {field: row.get(field) for field in cls.EXCEPTION_INPUT_FIELDS}
             item["snapshot"] = cls._json_object(item.pop("snapshot_json"))
             exception_inputs.append(item)
