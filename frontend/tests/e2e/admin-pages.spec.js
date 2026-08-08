@@ -10,9 +10,9 @@ test('administrator can open all previously blank critical pages', async ({ page
   for (const [label, expected] of [
     ['系统设置', '系统设置'],
     ['基础设置', '基础设置'],
-    ['工资核算', '计件工资'],
+    ['工资核算', '工资批次台账'],
     ['数据分析', '数据分析'],
-    ['绩效管理', '绩效量化管理'],
+    ['绩效管理', '绩效管理'],
     ['工时管理', '工时管理'],
   ]) {
     await openSidebarPage(page, label, expected)
@@ -72,29 +72,41 @@ test('employee list renders assigned processes without administrator accounts', 
   expect(failures).toEqual([])
 })
 
-test('performance page filters by position and opens score evidence', async ({ page }) => {
+test('performance page creates a V2 draft and opens immutable score evidence', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginAdmin(page)
-  await openSidebarPage(page, '\u7ee9\u6548\u7ba1\u7406', '\u7ee9\u6548\u91cf\u5316\u7ba1\u7406')
-
-  const generateButton = page.getByRole('button', { name: '\u751f\u6210/\u91cd\u7b97\u672c\u6708\u8bc4\u5206', exact: true })
-  await expect(generateButton).toBeVisible()
-  await generateButton.click()
+  await openSidebarPage(page, '\u7ee9\u6548\u7ba1\u7406', '\u7ee9\u6548\u7ba1\u7406')
 
   const main = page.locator('.main-content')
-  const scoreRow = main.locator('.data-table tbody tr').filter({ hasText: 'E2E Current Worker' })
-  await expect(scoreRow).toBeVisible()
-  const positionSelect = main.locator('select.form-input').nth(1)
-  const positionValue = await positionSelect.locator('option').filter({ hasText: 'E2E Production Position' }).getAttribute('value')
-  await positionSelect.selectOption(positionValue)
-  await expect(scoreRow).toContainText('E2E Production Position')
-  await expect(scoreRow).toContainText(/1\/2|2\/2/)
+  await expect(main).not.toContainText('\u751f\u6210/\u91cd\u7b97\u672c\u6708\u8bc4\u5206')
+  await expect(main).not.toContainText('\u5c97\u4f4d\u6700\u9ad8\u4ea7\u91cf')
+  await main.getByRole('button', { name: '\u6279\u6b21\u5ba1\u6279', exact: true }).click()
+  await main.getByRole('button', { name: '\u65b0\u5efa\u6708\u5ea6\u8349\u7a3f', exact: true }).click()
 
-  await scoreRow.getByRole('button', { name: '\u4f9d\u636e' }).click()
+  await expect(main).toContainText('\u8349\u7a3f')
+  await expect(main).toContainText('V1')
+  const scoreRow = main.locator('.batch-members-table tbody tr').filter({ hasText: 'E2E Current Worker' })
+  await expect(scoreRow).toBeVisible()
+  await expect(scoreRow).toContainText('E2E Production Position')
+
+  await scoreRow.getByRole('button', { name: '\u4f9d\u636e', exact: true }).click()
   const modal = page.locator('.modal').filter({ hasText: '\u8bc4\u5206\u4f9d\u636e - E2E Current Worker' })
   await expect(modal).toBeVisible()
-  await expect(modal).toContainText('\u5c97\u4f4d\u5185\u6392\u540d')
-  await expect(modal).toContainText('\u5c97\u4f4d\u6700\u9ad8\u4ea7\u91cf')
+  await expect(modal).toContainText('\u5c97\u4f4d\u76ee\u6807\u4ea7\u91cf')
+  await expect(modal).not.toContainText('\u5c97\u4f4d\u6700\u9ad8\u4ea7\u91cf')
+  await modal.getByRole('button', { name: '\u5173\u95ed', exact: true }).click()
+  await page.waitForTimeout(3000)
+  for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport)
+    await page.waitForTimeout(350)
+    await page.locator('.table-wrap').evaluateAll(elements => elements.forEach(element => { element.scrollLeft = 0 }))
+    const shell = main.locator('.performance-page')
+    await expect(shell).toBeVisible()
+    const box = await shell.boundingBox()
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+    await page.screenshot({ path: `test-results/performance-${viewport.width}x${viewport.height}.png`, fullPage: true })
+  }
   expect(failures).toEqual([])
 })
 

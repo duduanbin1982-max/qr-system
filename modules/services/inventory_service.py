@@ -7,6 +7,7 @@ from modules.domain.errors import ConflictError, NotFoundError
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.inventory_repository import InventoryRepository
+from modules.services.inventory_posting_service import InventoryPostingService
 
 
 class InventoryService:
@@ -22,109 +23,129 @@ class InventoryService:
 
     @staticmethod
     def create_item(data):
-        """新增库存产品。Raises ValueError on duplicate model."""
+        """Create a zero-balance item, then post any opening balance."""
         model = (data.get('product_model') or '').strip()
         if not model:
             raise ValueError('产品型号不能为空')
+        try:
+            opening_quantity = float(data.get('quantity', 0) or 0)
+        except (TypeError, ValueError):
+            raise ValueError('初始数量必须为数字')
+        if opening_quantity < 0:
+            raise ValueError('初始数量不能为负数')
+        order_id = data.get('order_id') or None
         with BaseService.transaction() as txn:
-            if InventoryRepository.find_duplicate_model_txn(model, data.get('order_id'), 0, txn):
+            if InventoryRepository.find_duplicate_model_txn(model, order_id, 0, txn):
                 raise ConflictError('产品型号已存在')
-            return InventoryRepository.insert_txn(
+            item_id = InventoryRepository.insert_txn(
                 model,
                 data.get('product_name', ''),
                 data.get('specification', ''),
-                data.get('quantity', 0),
                 data.get('safe_stock', 0),
                 data.get('location', ''),
                 data.get('unit', '件'),
                 data.get('remark', ''),
                 data.get('category', ''),
                 data.get('unit_cost', 0),
-                data.get('last_count_date', ''),
-                data.get('order_id') or None,
+                order_id,
                 txn,
             )
+            if opening_quantity:
+                InventoryPostingService.post(
+                    item_id,
+                    opening_quantity,
+                    'opening_balance',
+                    remark='创建库存时录入期初余额',
+                    source_type='inventory_create',
+                    source_id=item_id,
+                    idempotency_key='inventory:%s:opening' % item_id,
+                    db=txn,
+                )
+            return item_id
 
     @staticmethod
     def update_item(item_id, data):
-        """更新库存产品。"""
+        """Update item metadata without mutating its audited balance."""
+        current = InventoryRepository.find_item_by_id(item_id)
+        if not current:
+            raise NotFoundError('库存不存在')
         model = (data.get('product_model') or '').strip()
         if not model:
             raise ValueError('产品型号不能为空')
         with BaseService.transaction() as txn:
-            if InventoryRepository.find_duplicate_model_txn(model, data.get('order_id'), item_id, txn):
+            current = InventoryRepository.find_item_by_id(item_id, db=txn)
+            if not current:
+                raise NotFoundError('库存不存在')
+            if InventoryRepository.find_duplicate_model_txn(
+                model, current['order_id'], item_id, txn
+            ):
                 raise ConflictError('该订单下产品型号已存在')
-            InventoryRepository.update_item_txn(
+            cursor = InventoryRepository.update_item_txn(
                 item_id,
-                data.get('product_model', ''),
+                model,
                 data.get('product_name', ''),
                 data.get('specification', ''),
-                data.get('quantity', 0),
                 data.get('safe_stock', 0),
                 data.get('location', ''),
                 data.get('unit', '件'),
                 data.get('remark', ''),
                 data.get('category', ''),
                 data.get('unit_cost', 0),
-                data.get('last_count_date', ''),
                 txn,
             )
+            if cursor.rowcount != 1:
+                raise ConflictError('库存状态已变化，请刷新后重试')
 
     @staticmethod
     def delete_item(item_id):
-        """删除库存产品（级联删除日志）。"""
-        if not InventoryRepository.find_item_by_id(item_id):
+        """Archive a zero-balance item while retaining its ledger."""
+        item = InventoryRepository.find_item_for_delete(item_id)
+        if not item or item['deleted_at']:
             raise NotFoundError('库存不存在')
+        if float(item['quantity'] or 0) != 0:
+            raise ConflictError('库存不为零，不能停用')
+        if float(item['reserved'] or 0) != 0:
+            raise ConflictError('仍有预留库存，不能停用')
         with BaseService.transaction() as txn:
-            InventoryRepository.delete_logs_for_item_txn(item_id, txn)
-            InventoryRepository.delete_item_txn(item_id, txn)
+            cursor = InventoryRepository.archive_item_txn(item_id, txn)
+            if cursor.rowcount != 1:
+                raise ConflictError('库存状态已变化，请刷新后重试')
 
     @staticmethod
     def stock_in(inv_id, qty, order_id=None, order_no='', remark='',
-                 operator_id=None, operator_name=''):
+                 operator_id=None, operator_name='', lot_no='', serial_no='',
+                 idempotency_key=''):
         """入库操作。"""
+        try:
+            qty = float(qty)
+        except (TypeError, ValueError):
+            raise ValueError('数量必须为数字')
         if qty <= 0:
             raise ValueError('参数错误')
-        with BaseService.transaction() as txn:
-            cur = InventoryRepository.increase_stock_txn(inv_id, qty, txn)
-            if cur.rowcount == 0:
-                raise NotFoundError('库存不存在')
-            InventoryRepository.insert_movement_log_txn(
-                inv_id,
-                'in',
-                qty,
-                order_id,
-                order_no,
-                remark,
-                operator_id,
-                operator_name,
-                txn,
-            )
+        return InventoryPostingService.post(
+            inv_id, qty, 'in', order_id=order_id, order_no=order_no,
+            remark=remark, operator_id=operator_id, operator_name=operator_name,
+            lot_no=lot_no, serial_no=serial_no, source_type='manual',
+            idempotency_key=idempotency_key,
+        )
 
     @staticmethod
     def stock_out(inv_id, qty, order_id=None, order_no='', remark='',
-                  operator_id=None, operator_name=''):
+                  operator_id=None, operator_name='', lot_no='', serial_no='',
+                  idempotency_key=''):
         """出库操作（原子扣减 + 防超卖）。"""
+        try:
+            qty = float(qty)
+        except (TypeError, ValueError):
+            raise ValueError('数量必须为数字')
         if qty <= 0:
             raise ValueError('参数错误')
-        with BaseService.transaction() as txn:
-            cur = InventoryRepository.decrease_stock_if_available_txn(inv_id, qty, txn)
-            if cur.rowcount == 0:
-                inv = InventoryRepository.get_item_quantity(inv_id, txn)
-                if not inv:
-                    raise NotFoundError('库存不存在')
-                raise ConflictError('库存不足')
-            InventoryRepository.insert_movement_log_txn(
-                inv_id,
-                'out',
-                qty,
-                order_id,
-                order_no,
-                remark,
-                operator_id,
-                operator_name,
-                txn,
-            )
+        return InventoryPostingService.post(
+            inv_id, -qty, 'out', order_id=order_id, order_no=order_no,
+            remark=remark, operator_id=operator_id, operator_name=operator_name,
+            lot_no=lot_no, serial_no=serial_no, source_type='manual',
+            idempotency_key=idempotency_key,
+        )
 
     @staticmethod
     def get_logs(inv_id='', type_filter='', page=1, limit=20, date_from='', date_to=''):
@@ -141,26 +162,29 @@ class InventoryService:
 
     @staticmethod
     def stock_adjust(inv_id, actual_qty, operator_id=None, operator_name='', remark=''):
-        inv = InventoryRepository.find_adjustment_item(inv_id)
-        if not inv:
-            raise NotFoundError('库存记录不存在')
-        current = inv['quantity'] or 0
-        diff = actual_qty - current
-        if diff == 0:
-            return {'adjusted': False, 'message': '库存数量一致，无需调整'}
-
+        try:
+            actual_qty = float(actual_qty)
+        except (TypeError, ValueError):
+            raise ValueError('盘点数量必须为数字')
+        if actual_qty < 0:
+            raise ValueError('盘点数量不能为负数')
         with BaseService.transaction() as txn:
-            InventoryRepository.update_quantity_txn(inv_id, actual_qty, txn)
-            InventoryRepository.insert_movement_log_txn(
-                inv_id,
-                'adjust',
-                abs(diff),
-                None,
-                '',
-                f'盘点调整: {remark or "系统调整"} (原{current}→现{actual_qty}, 差额{diff:+d})',
-                operator_id,
-                operator_name,
-                txn,
+            inv = InventoryRepository.find_adjustment_item(inv_id, db=txn)
+            if not inv:
+                raise NotFoundError('库存记录不存在')
+            current = float(inv['quantity'] or 0)
+            diff = actual_qty - current
+            if diff == 0:
+                return {'adjusted': False, 'message': '库存数量一致，无需调整'}
+            InventoryPostingService.post(
+                inv_id, diff, 'count_gain' if diff > 0 else 'count_loss',
+                remark='盘点调整: %s (原%s→现%s, 差额%+g)' % (
+                    remark or '系统调整', current, actual_qty, diff
+                ),
+                operator_id=operator_id,
+                operator_name=operator_name,
+                source_type='manual_count',
+                db=txn,
             )
         return {'adjusted': True, 'product_model': inv['product_model'],
                 'old_qty': current, 'new_qty': actual_qty, 'diff': diff}
@@ -202,7 +226,7 @@ class InventoryService:
         for r in rows:
             turnover = round(r["total_out"] / max(r["current_stock"], 1), 2)
             result.append({"id": r["id"], "product_model": r["product_model"], "product_name": r["product_name"], "current_stock": r["current_stock"], "total_out": r["total_out"], "total_in": r["total_in"], "unit_cost": r["unit_cost"], "turnover_rate": turnover, "status": "高周转" if turnover > 3 else ("正常" if turnover > 1 else "低周转")})
-        return result
+        return {"items": result}
 
     @staticmethod
     def suggest_safe_stock():
@@ -216,23 +240,56 @@ class InventoryService:
 
     @staticmethod
     def get_batch_tracking(item_id=None, lot_no=None):
-        batches = InventoryRepository.list_inbound_batches(item_id=item_id, lot_no=lot_no)
-        result = []
-        for b in batches:
-            bd = dict(b)
-            outs = InventoryRepository.list_batch_outbound_after(
-                bd["inventory_id"],
-                bd.get("created_at", ""),
-            )
-            bd["related_outs"] = [dict(o) for o in outs]
-            bd["remaining"] = bd.get("quantity", 0) - sum(o["quantity"] for o in outs)
-            result.append(bd)
-        return result
+        movements = InventoryRepository.list_batch_movements(item_id=item_id)
+        batches_by_inventory = {}
+        batches = []
+        for row in movements:
+            movement = dict(row)
+            inventory_id = movement["inventory_id"]
+            delta = float(movement.get("qty_delta") or 0)
+            movement_lot = movement.get("lot_no") or ""
+            inventory_batches = batches_by_inventory.setdefault(inventory_id, [])
+            if delta > 0:
+                batch = {
+                    **movement,
+                    "received_quantity": delta,
+                    "remaining": delta,
+                    "related_outs": [],
+                }
+                inventory_batches.append(batch)
+                batches.append(batch)
+                continue
+            if delta >= 0:
+                continue
+
+            remaining_out = abs(delta)
+            candidates = [
+                batch for batch in inventory_batches
+                if batch["remaining"] > 0
+                and (not movement_lot or (batch.get("lot_no") or "") == movement_lot)
+            ]
+            for batch in candidates:
+                allocated = min(batch["remaining"], remaining_out)
+                if allocated <= 0:
+                    continue
+                batch["remaining"] -= allocated
+                batch["related_outs"].append({
+                    **movement,
+                    "allocated_quantity": allocated,
+                })
+                remaining_out -= allocated
+                if remaining_out <= 0:
+                    break
+
+        if lot_no:
+            batches = [batch for batch in batches if (batch.get("lot_no") or "") == lot_no]
+        batches.reverse()
+        return {"batches": batches[:100]}
 
     @staticmethod
     def get_locations():
         rows = InventoryRepository.list_locations()
-        return [dict(r) for r in rows]
+        return {"locations": [dict(r) for r in rows]}
 
     @staticmethod
     def update_location(item_ids, new_location):
@@ -244,15 +301,39 @@ class InventoryService:
         return {"updated": len(item_ids), "location": new_location}
 
     @staticmethod
-    def create_count_task():
-        count = InventoryRepository.count_inventory_items()
-        return {"message": "盘点任务已创建，共 %d 项待盘点" % count, "total_items": count}
+    def create_count_task(user_id=None, user_name=''):
+        with BaseService.transaction() as txn:
+            open_task = InventoryRepository.find_open_count_task(db=txn)
+            if open_task:
+                raise ConflictError('已有未完成盘点任务 %s' % open_task['task_no'])
+            if InventoryRepository.count_inventory_items(db=txn) == 0:
+                raise ValueError('没有可盘点的库存')
+            task_no = 'CT-' + datetime.now().strftime('%Y%m%d%H%M%S%f')
+            task_id = InventoryRepository.create_count_task_txn(
+                task_no, user_id, user_name, txn
+            )
+        return InventoryService.get_count_status(task_id)
 
     @staticmethod
-    def get_count_status():
-        total = InventoryRepository.count_inventory_items()
-        done = InventoryRepository.count_inventory_items_counted_today()
-        return {"total": total, "done": done, "pending": total - done, "progress_pct": round(done / max(total, 1) * 100, 1)}
+    def get_count_status(task_id=None):
+        task = (
+            InventoryRepository.find_count_task(task_id)
+            if task_id else InventoryRepository.find_latest_count_task()
+        )
+        if not task:
+            return {"task": None, "items": [], "total": 0, "done": 0,
+                    "pending": 0, "progress_pct": 0}
+        items = [dict(row) for row in InventoryRepository.list_count_task_items(task['id'])]
+        done = sum(1 for item in items if item['status'] != 'pending')
+        total = len(items)
+        return {
+            "task": dict(task),
+            "items": items,
+            "total": total,
+            "done": done,
+            "pending": total - done,
+            "progress_pct": round(done / max(total, 1) * 100, 1),
+        }
 
     @staticmethod
     def export_inventory(keyword='', low_stock=False):
@@ -318,7 +399,7 @@ class InventoryService:
                 (item.get('created_at') or '')[:19],
                 type_map.get(item.get('type', ''), item.get('type', '')),
                 item.get('product_model', ''), item.get('product_name', ''),
-                item.get('quantity', 0), item.get('order_no', ''),
+                item.get('qty_delta', 0), item.get('order_no', ''),
                 item.get('operator_name', ''), item.get('remark', '')
             ]
             for col_idx, val in enumerate(vals, 1):
@@ -333,26 +414,87 @@ class InventoryService:
         return output
 
     @staticmethod
-    def submit_count(item_id, actual_qty, remark=""):
+    def submit_count(task_id, item_id, actual_qty, remark="", user_id=None, user_name=""):
+        try:
+            actual_qty = float(actual_qty)
+        except (TypeError, ValueError):
+            raise ValueError("盘点数量必须为数字")
         if actual_qty < 0:
-            raise ValueError("count quantity cannot be negative")
+            raise ValueError("盘点数量不能为负数")
         with BaseService.transaction() as txn:
-            inv = InventoryRepository.get_count_item(item_id, txn)
-            if not inv:
-                raise NotFoundError("item not found")
-            old_qty = inv["quantity"]
-            diff = actual_qty - old_qty
-            log_type = "adjust" if diff != 0 else "count"
-            log_remark = remark or ("count: " + str(old_qty) + " -> " + str(actual_qty))
-            InventoryRepository.submit_count_txn(
-                item_id,
-                actual_qty,
-                diff if diff != 0 else 0,
-                log_type,
-                log_remark,
-                txn,
+            task = InventoryRepository.find_count_task(task_id, db=txn)
+            if not task:
+                raise NotFoundError("盘点任务不存在")
+            if task["status"] != "counting":
+                raise ConflictError("盘点任务已提交，不能继续录入")
+            count_items = InventoryRepository.list_count_task_items(task_id, db=txn)
+            count_item = next(
+                (row for row in count_items if row["inventory_id"] == item_id), None
             )
-        return {"ok": True, "old_qty": old_qty, "new_qty": actual_qty, "diff": diff}
+            if not count_item:
+                raise NotFoundError("盘点明细不存在")
+            cursor = InventoryRepository.update_count_item_txn(
+                task_id, item_id, actual_qty, remark, user_id, user_name, txn
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("盘点明细状态已变化，请刷新后重试")
+            diff = actual_qty - float(count_item["book_quantity"] or 0)
+        return {"ok": True, "old_qty": count_item["book_quantity"],
+                "new_qty": actual_qty, "diff": diff}
+
+    @staticmethod
+    def approve_count_task(task_id, user_id=None, user_name=""):
+        with BaseService.transaction() as txn:
+            task = InventoryRepository.find_count_task(task_id, db=txn)
+            if not task:
+                raise NotFoundError("盘点任务不存在")
+            if task["status"] != "submitted":
+                raise ConflictError("盘点尚未全部录入或已经审批")
+            items = InventoryRepository.list_count_task_items(task_id, db=txn)
+            for item in items:
+                if item["actual_quantity"] is None:
+                    raise ConflictError("盘点任务仍有未录入明细")
+                current = InventoryRepository.find_item_by_id(item["inventory_id"], db=txn)
+                if not current:
+                    raise ConflictError("盘点库存已停用，请重新创建任务")
+                if abs(
+                    float(current["quantity"] or 0) - float(item["book_quantity"] or 0)
+                ) > 0.0000001:
+                    raise ConflictError(
+                        "%s 在盘点期间发生库存变动，请重新盘点"
+                        % item["product_model"]
+                    )
+                diff = float(item["difference"] or 0)
+                movement_id = None
+                if diff:
+                    movement = InventoryPostingService.post(
+                        item["inventory_id"],
+                        diff,
+                        "count_gain" if diff > 0 else "count_loss",
+                        remark="盘点任务 %s 审批过账%s" % (
+                            task["task_no"],
+                            ("：" + item["remark"]) if item["remark"] else "",
+                        ),
+                        operator_id=user_id,
+                        operator_name=user_name,
+                        source_type="count_task",
+                        source_id=item["id"],
+                        idempotency_key="count:%s:item:%s:post" % (task_id, item["id"]),
+                        db=txn,
+                    )
+                    movement_id = movement["id"]
+                InventoryRepository.mark_count_item_posted_txn(
+                    item["id"], movement_id, txn
+                )
+                InventoryRepository.mark_inventory_counted_txn(
+                    item["inventory_id"], txn
+                )
+            cursor = InventoryRepository.approve_count_task_txn(
+                task_id, user_id, user_name, txn
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("盘点任务状态已变化，请刷新后重试")
+        return InventoryService.get_count_status(task_id)
 
     @staticmethod
     def get_impact(item_id):
@@ -363,14 +505,20 @@ class InventoryService:
         order_count = InventoryRepository.count_linked_orders(item_id)
         warnings = []
         if log_count > 0:
-            warnings.append("will delete " + str(log_count) + " log records")
+            warnings.append("将保留 %s 条历史流水" % log_count)
         if order_count > 0:
-            warnings.append("linked to " + str(order_count) + " orders")
+            warnings.append("关联 %s 个订单" % order_count)
+        shipment_count = InventoryRepository.count_linked_shipment_items(item_id)
+        if shipment_count > 0:
+            warnings.append("关联 %s 条出库明细" % shipment_count)
+        can_archive = float(item["quantity"] or 0) == 0 and float(item["reserved"] or 0) == 0
         return {
             "item": dict(item),
             "log_count": log_count,
             "order_count": order_count,
-            "can_delete": True,
+            "shipment_count": shipment_count,
+            "can_delete": can_archive,
+            "can_archive": can_archive,
             "warnings": [w for w in warnings if w]
         }
 

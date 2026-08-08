@@ -5,6 +5,8 @@ from modules.domain.process_reporting import (
     SEQUENTIAL,
     ProcessReportingPolicy,
 )
+from modules.domain.process_reporting_models import ProcessReportingRequest
+from modules.services.process_reporting_presenter import ProcessReportingPresenter
 from modules.setting_reader import get_setting
 
 
@@ -52,9 +54,9 @@ class ProcessOrderService:
         serial_backfill_available=False,
         serial_report_states=None,
     ):
-        return ProcessReportingPolicy.attach_context(
-            order_data,
-            cls.policy(),
+        request = ProcessReportingRequest(
+            order_data=order_data,
+            policy=cls.policy(),
             item_info=item_info,
             serial_no=serial_no,
             user_process_ids=user_process_ids,
@@ -62,3 +64,6 @@ class ProcessOrderService:
             serial_backfill_available=serial_backfill_available,
             serial_report_states=serial_report_states,
         )
+        result = ProcessReportingPolicy.evaluate(request)
+        result.attach_to(order_data)
+        return ProcessReportingPresenter.attach_messages(order_data, result)

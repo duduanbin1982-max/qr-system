@@ -2,8 +2,9 @@
 
 All SQL for stats: daily records, scrap records, order progress, worker stats.
 """
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
-from modules.domain.reporting_day import reporting_day_bounds
+from modules.domain.reporting_day import reporting_day_bounds, reporting_range_bounds
 
 
 class StatsRepository:
@@ -13,7 +14,27 @@ class StatsRepository:
     # Shared WHERE builders
     # ============================================================
     @staticmethod
-    def _daily_where(date, product_code):
+    def _append_product_filter(where_parts, params, product_code, db):
+        if not product_code:
+            return
+        clause, clause_params = ProductQueryFilter.resolve(
+            db, product_code
+        ).order_clause("o")
+        where_parts.append(clause)
+        params.extend(clause_params)
+
+    @staticmethod
+    def _append_reporting_range(where_parts, params, start, end, field):
+        period_start, period_end = reporting_range_bounds(start, end)
+        if period_start:
+            where_parts.append(f"{field} >= ?")
+            params.append(period_start)
+        if period_end:
+            where_parts.append(f"{field} < ?")
+            params.append(period_end)
+
+    @staticmethod
+    def _daily_where(date, product_code, db):
         period_start, period_end = reporting_day_bounds(date)
         where_parts = [
             "wr.status='approved'",
@@ -23,54 +44,37 @@ class StatsRepository:
             "o.status != 'cancelled'"
         ]
         params = [period_start, period_end]
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _scrap_where(start, end, product_code):
+    def _scrap_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
-        if start:
-            where_parts.append("DATE(sr.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(sr.created_at) <= ?")
-            params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "sr.created_at"
+        )
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _order_progress_where(start, end, product_code):
+    def _order_progress_where(start, end, product_code, db):
         where_parts = ["o.deleted_at IS NULL", "o.status IN ('producing','pending','paused')"]
         params = []
-        if start:
-            where_parts.append("DATE(o.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(o.created_at) <= ?")
-            params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "o.created_at"
+        )
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     @staticmethod
-    def _worker_where(start, end, product_code):
+    def _worker_where(start, end, product_code, db):
         where_parts = ["wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = []
-        if start:
-            where_parts.append("DATE(wr.created_at) >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("DATE(wr.created_at) <= ?")
-            params.append(end)
-        if product_code:
-            where_parts.append("o.product_code = ?")
-            params.append(product_code)
+        StatsRepository._append_reporting_range(
+            where_parts, params, start, end, "wr.created_at"
+        )
+        StatsRepository._append_product_filter(where_parts, params, product_code, db)
         return " AND ".join(where_parts), params
 
     # ============================================================
@@ -79,11 +83,11 @@ class StatsRepository:
     @staticmethod
     def get_daily_records(date, product_code, limit, offset, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         rows = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, wr.remark, "
             "wr.order_id, wr.process_id, "
-            "o.order_no, o.qr_mode, o.customer, o.product_code, "
+            "o.order_no, o.qr_mode, o.customer, o.product_code, opl.product_id, "
             "CASE WHEN o.qr_mode = 'serial' AND COALESCE(wr.serial_no, '') != '' "
             "THEN wr.serial_no ELSE o.order_no END as display_order_no, "
             "COALESCE(NULLIF(o.product_name, ''), prod.product_name, '') as product_name, "
@@ -104,7 +108,8 @@ class StatsRepository:
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
             "JOIN users u ON wr.user_id=u.id "
-            "LEFT JOIN products prod ON prod.product_code=o.product_code AND COALESCE(o.product_code, '') != '' "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
+            "LEFT JOIN products prod ON prod.id=opl.product_id "
             "LEFT JOIN process_routes route ON route.id=o.route_id "
             "LEFT JOIN departments dept ON dept.id=u.department_id "
             "LEFT JOIN positions pos ON pos.id=u.position_id "
@@ -117,7 +122,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_totals(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         row = db.execute(
             "SELECT COUNT(*) as record_count, "
             "COALESCE(SUM(wr.quantity),0) as total_quantity, "
@@ -126,9 +131,10 @@ class StatsRepository:
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework_quantity, "
             "COUNT(DISTINCT wr.user_id) as worker_count, "
             "COUNT(DISTINCT wr.order_id) as order_count, "
-            "COUNT(DISTINCT COALESCE(NULLIF(o.product_code, ''), o.product_name)) as product_count "
+            "COUNT(DISTINCT COALESCE(CAST(opl.product_id AS TEXT), NULLIF(o.product_code, ''), o.product_name)) as product_count "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
             "WHERE " + where_clause,
             params
         ).fetchone()
@@ -137,7 +143,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_summary(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         rows = db.execute(
             "SELECT p.id, p.name, COUNT(*) as record_count, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output, "
@@ -156,7 +162,7 @@ class StatsRepository:
     @staticmethod
     def get_daily_count(date, product_code, db=None):
         db = resolve_db(db)
-        where_clause, params = StatsRepository._daily_where(date, product_code)
+        where_clause, params = StatsRepository._daily_where(date, product_code, db)
         return db.execute(
             "SELECT COUNT(*) FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
@@ -170,7 +176,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_records(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT sr.id, sr.created_at, sr.quantity, sr.reason, "
             "o.order_no, o.product_name, p.name as process_name, "
@@ -187,7 +193,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_summary(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         return dict(db.execute(
             "SELECT COUNT(*) as total_records, "
             "COALESCE(SUM(sr.quantity),0) as total_qty, "
@@ -201,7 +207,7 @@ class StatsRepository:
     @staticmethod
     def get_scrap_by_process(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._scrap_where(start, end, product_code)
+        w, params = StatsRepository._scrap_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT p.name, COUNT(*) as cnt, COALESCE(SUM(sr.quantity),0) as qty "
             "FROM scrap_records sr "
@@ -219,7 +225,7 @@ class StatsRepository:
     @staticmethod
     def get_order_progress(start, end, product_code, db=None):
         db = resolve_db(db)
-        w, params = StatsRepository._order_progress_where(start, end, product_code)
+        w, params = StatsRepository._order_progress_where(start, end, product_code, db)
         rows = db.execute(
             "SELECT o.id, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer, "
@@ -242,11 +248,11 @@ class StatsRepository:
         allowed = {"quantity": "total_output", "name": "name", "scrap": "total_scrap", "rework": "total_rework"}
         col = allowed.get(sort_by, "total_output")
         direction = "DESC" if sort_dir == "desc" else "ASC"
-        where_clause, params = StatsRepository._worker_where(start, end, product_code)
+        where_clause, params = StatsRepository._worker_where(start, end, product_code, db)
         # Worker filter removed - admins cannot scan work per mobile module
         rows = db.execute(
             "SELECT u.id as id, u.name as name, u.employee_no, "
-            "COUNT(DISTINCT DATE(wr.created_at)) as work_days, "
+            "COUNT(DISTINCT DATE(wr.created_at, '-7 hours')) as work_days, "
             "COUNT(wr.id) as record_count, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as total_scrap, "
@@ -265,12 +271,9 @@ class StatsRepository:
         db = resolve_db(db)
         where = ["wr.user_id=?", "wr.status = 'approved'", "o.deleted_at IS NULL", "o.status != 'cancelled'"]
         params = [user_id]
-        if start:
-            where.append('DATE(wr.created_at) >= ?')
-            params.append(start)
-        if end:
-            where.append('DATE(wr.created_at) <= ?')
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where, params, start, end, "wr.created_at"
+        )
         w = ' AND '.join(where)
         rows = db.execute(
             "SELECT o.product_name, "
@@ -280,7 +283,8 @@ class StatsRepository:
             "SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END) AS scrap "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
-            "LEFT JOIN products pr ON o.product_code=pr.product_code AND pr.deleted_at IS NULL "
+            "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
+            "LEFT JOIN products pr ON pr.id=opl.product_id AND pr.deleted_at IS NULL "
             "JOIN processes p ON wr.process_id=p.id "
             "WHERE " + w + " GROUP BY o.product_name, pr.model, pr.spec, p.id "
             "ORDER BY o.product_name, pr.model, p.name",
@@ -291,14 +295,11 @@ class StatsRepository:
     @staticmethod
     def get_material_detail(material_id, start='', end='', db=None):
         db = resolve_db(db)
-        where = ["mc.material_id = ?"]
+        where = ["mc.material_id = ?", "mc.status = 'active'"]
         params = [material_id]
-        if start:
-            where.append("DATE(mc.created_at) >= ?")
-            params.append(start)
-        if end:
-            where.append("DATE(mc.created_at) <= ?")
-            params.append(end)
+        StatsRepository._append_reporting_range(
+            where, params, start, end, "mc.created_at"
+        )
         w = " AND ".join(where)
         rows = db.execute(
             "SELECT mc.id, mc.quantity, mc.created_at, o.order_no, o.product_name, "

@@ -1,6 +1,8 @@
 """
 qr-system — ScanRepository（扫码报工数据访问层）
 """
+import sqlite3
+
 from modules.repositories.context import resolve_db
 
 
@@ -28,7 +30,8 @@ class ScanRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec "
-            "FROM orders o LEFT JOIN products p ON o.product_code = p.product_code "
+            "FROM orders o LEFT JOIN order_product_links opl ON opl.order_id = o.id "
+            "LEFT JOIN products p ON p.id = opl.product_id "
             "WHERE o.id = ?",
             (order_id,)
         ).fetchone()
@@ -362,7 +365,8 @@ class ScanRepository:
         db = resolve_db(db)
         db.execute(
             "UPDATE orders SET completed = (SELECT COUNT(*) FROM product_items WHERE order_id = ? AND status = 'completed'), "
-            "updated_at = datetime('now','localtime'), status = 'producing' WHERE id = ?",
+            "completed_at = NULL, updated_at = datetime('now','localtime'), "
+            "status = 'producing' WHERE id = ?",
             (order_id, order_id),
         )
 
@@ -386,17 +390,20 @@ class ScanRepository:
     def complete_order(order_id, db=None):
         db = resolve_db(db)
         db.execute(
-            "UPDATE orders SET status = 'completed', updated_at = datetime('now','localtime') WHERE id = ?",
+            "UPDATE orders SET status = 'completed', "
+            "completed_at = COALESCE(NULLIF(completed_at, ''), datetime('now','localtime')), "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
             (order_id,),
         )
 
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
         db = resolve_db(db)
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
             (order_id, process_id, user_id, quantity, reason),
         )
+        return cursor.lastrowid
 
     @staticmethod
     def update_order_process_scrapped(order_id, process_id, scrapped, db=None):
@@ -445,15 +452,31 @@ class ScanRepository:
         db = resolve_db(db)
         if order_id:
             inv = db.execute(
-                "SELECT id FROM inventory WHERE product_model = ? AND order_id = ?",
+                "SELECT id FROM inventory WHERE product_model = ? AND order_id = ? "
+                "AND deleted_at IS NULL",
                 (product_code, order_id),
             ).fetchone()
             if inv:
                 return inv["id"]
-        cur = db.execute(
-            "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) VALUES (?, ?, 0, ?, ?)",
-            (product_code, product_name or product_code, order_id, specification or ""),
-        )
+        try:
+            cur = db.execute(
+                "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) "
+                "VALUES (?, ?, 0, ?, ?)",
+                (product_code, product_name or product_code, order_id, specification or ""),
+            )
+        except sqlite3.IntegrityError as exc:
+            # Compatibility for databases created by the former global UNIQUE
+            # product_model definition. New databases allow one row per order.
+            if "inventory.product_model" not in str(exc):
+                raise
+            existing = db.execute(
+                "SELECT id FROM inventory WHERE product_model = ? "
+                "AND deleted_at IS NULL ORDER BY id LIMIT 1",
+                (product_code,),
+            ).fetchone()
+            if not existing:
+                raise
+            return existing["id"]
         return cur.lastrowid
 
     @staticmethod
@@ -468,19 +491,6 @@ class ScanRepository:
             "SELECT id FROM inventory_logs WHERE order_id = ? AND type = 'in'",
             (order_id,)
         ).fetchone()
-
-    @staticmethod
-    def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
-        db = resolve_db(db)
-        db.execute(
-            "UPDATE inventory SET quantity = quantity + ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (quantity, inv_id),
-        )
-        db.execute(
-            "INSERT INTO inventory_logs (inventory_id, type, quantity, order_id, order_no, remark, operator_id, operator_name) "
-            "VALUES (?, 'in', ?, ?, ?, ?, ?, ?)",
-            (inv_id, quantity, order_id, order_no, "Order complete auto-inbound", user_id, user_name),
-        )
 
     @staticmethod
     def order_has_process_in_scope(order_id, process_ids, db=None):

@@ -78,6 +78,12 @@ fi
 log "running complete test suite"
 "$PYTEST_BIN" -q
 
+log "installing locked frontend dependencies"
+npm ci --ignore-scripts --no-audit --no-fund
+
+log "ensuring Playwright Chromium runtime"
+bash scripts/install-playwright-runtime.sh
+
 log "running frontend unit suite"
 npm run test:unit
 

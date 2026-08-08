@@ -269,6 +269,36 @@ def test_repositories_do_not_execute_schema_ddl():
 
     assert violations == [], f"schema DDL belongs in migrations, not repositories: {violations}"
 
+
+def test_report_repositories_use_canonical_product_identity_filter():
+    repository_names = (
+        "completion_focus_repository.py",
+        "reports_repository.py",
+        "stats_repository.py",
+        "work_time_repository.py",
+    )
+    for name in repository_names:
+        path = PROJECT_ROOT / "modules" / "repositories" / name
+        source = path.read_text(encoding="utf-8", errors="replace")
+        assert "from modules.product_query import ProductQueryFilter" in source
+        assert "ProductQueryFilter.resolve" in source
+        assert "product_code_aliases" not in source
+
+
+def test_process_reporting_policy_delegates_decisions_and_presentation():
+    policy_path = PROJECT_ROOT / "modules" / "domain" / "process_reporting.py"
+    policy_source = policy_path.read_text(encoding="utf-8", errors="replace")
+    presenter_source = (
+        PROJECT_ROOT / "modules" / "services" / "process_reporting_presenter.py"
+    ).read_text(encoding="utf-8", errors="replace")
+
+    assert len(policy_source.splitlines()) < 100
+    assert "ProcessEligibilityPolicy.evaluate" in policy_source
+    assert "ProcessSelectionPolicy.select_current" in policy_source
+    assert "请先选择当前岗位" not in policy_source
+    assert "请先选择当前岗位" in presenter_source
+
+
 def test_services_do_not_import_sqlite_driver_directly():
     violations = []
     service_root = PROJECT_ROOT / "modules" / "services"
@@ -306,9 +336,9 @@ def test_services_do_not_depend_on_migrations():
 
 def test_performance_uses_authoritative_quality_evaluation_source():
     performance_paths = (
-        PROJECT_ROOT / "modules" / "services" / "performance_service.py",
+        PROJECT_ROOT / "modules" / "services" / "performance_fact_collector.py",
         PROJECT_ROOT / "modules" / "services" / "performance_scoring_policy.py",
-        PROJECT_ROOT / "modules" / "repositories" / "performance_repository.py",
+        PROJECT_ROOT / "modules" / "repositories" / "performance_fact_repository.py",
     )
     forbidden_modules = {
         "modules.services.handoff_review_service",
@@ -333,11 +363,20 @@ def test_performance_uses_authoritative_quality_evaluation_source():
                     )
 
     performance_source = performance_paths[0].read_text(encoding="utf-8", errors="replace")
-    assert "ProcessQualityEvaluationService.monthly_metrics" in performance_source
+    assert "PerformanceFactRepository.list_quality_events" in performance_source
     assert violations == [], (
         "performance scoring must use process_quality_evaluations as its authoritative source: "
         f"{violations}"
     )
+
+
+def test_performance_fact_repository_uses_only_canonical_quality_sources():
+    path = PROJECT_ROOT / "modules" / "repositories" / "performance_fact_repository.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "performance_quality_events" in source
+    assert "performance_quality_event_sources" in source
+    assert "process_handoff_reviews" not in source
 
 
 def test_services_do_not_embed_sql_statements():

@@ -22,6 +22,7 @@ class WorkReportWriter:
     scan_helper_service = None
     quality_management_service = None
     quality_evaluation_service = None
+    quality_event_service = None
     unit_of_work = None
 
     @classmethod
@@ -62,6 +63,15 @@ class WorkReportWriter:
             ProcessQualityEvaluationService,
         )
         return ProcessQualityEvaluationService
+
+    @classmethod
+    def _quality_event_service(cls):
+        if cls.quality_event_service:
+            return cls.quality_event_service
+        from modules.services.performance_quality_event_service import (
+            PerformanceQualityEventService,
+        )
+        return PerformanceQualityEventService
 
     @classmethod
     def _unit_of_work(cls):
@@ -401,7 +411,20 @@ class WorkReportWriter:
     @staticmethod
     def _write_scrap_report(helper, order_id, process_id, user_id, quantity, remark, db):
         reason = remark or ""
-        helper.insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=db)
+        scrap_id = helper.insert_scrap_record(
+            order_id, process_id, user_id, quantity, reason, db=db
+        )
+        WorkReportWriter._quality_event_service().record_event(
+            event_type="scrap",
+            source_type="scrap_record",
+            source_id=scrap_id,
+            quantity=quantity,
+            order_id=order_id,
+            process_id=process_id,
+            user_id=user_id,
+            snapshot={"reason": reason},
+            db=db,
+        )
         op = helper.get_order_process(order_id, process_id, db=db)
         if op:
             new_scrapped = (op["scrapped"] or 0) + quantity

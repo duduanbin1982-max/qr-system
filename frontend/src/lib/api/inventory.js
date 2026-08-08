@@ -14,6 +14,9 @@ export const inventoryApi = {
   inventoryStats:   ()       => request('GET', '/api/inventory/stats'),
   inventoryTurnover:()       => request('GET', '/api/inventory/turnover'),
   createCountTask:  ()       => request('POST', '/api/inventory/count-task', {}),
+  countStatus:      (taskId) => request('GET', '/api/inventory/count-status' + buildQuery({ task_id: taskId })),
+  submitCount:      (id,data)=> request('POST', '/api/inventory/' + id + '/count', data),
+  approveCountTask: (taskId) => request('POST', '/api/inventory/count-task/' + taskId + '/approve', {}),
   listLocations:    ()       => request('GET', '/api/inventory/locations'),
   inventoryImpact:  (id)     => request('GET', '/api/inventory/' + id + '/impact'),
 }

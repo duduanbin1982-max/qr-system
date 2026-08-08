@@ -14,6 +14,14 @@ export function navigate(page, params = {}) {
   localStorage.setItem('currentPage', page)
 }
 
+export function requestedNavigation(search = window.location.search) {
+  const params = new URLSearchParams(search || '')
+  return {
+    page: (params.get('page') || '').trim(),
+    settingsTab: (params.get('settings_tab') || '').trim(),
+  }
+}
+
 // 子页面持久化
 watch(() => router.subPage, v => { if (v) localStorage.setItem('settingsSub', v) })
 watch(() => router.tab, v => { if (v) localStorage.setItem('invTab', v) })

@@ -65,7 +65,12 @@ class StatsService:
                 group["normal_quantity"] += quantity
             if record.get("order_id"):
                 order_sets[user_id].add(record.get("order_id"))
-            product_key = record.get("product_code") or record.get("product_name") or ""
+            product_key = (
+                record.get("product_id")
+                or record.get("product_code")
+                or record.get("product_name")
+                or ""
+            )
             if product_key:
                 product_sets[user_id].add(product_key)
             group["records"].append(record)
@@ -97,8 +102,8 @@ class StatsService:
     @staticmethod
     def get_daily_records(date, product_code="", page_param=1, per_page_param=500):
         period_start, period_end = reporting_day_bounds(date)
-        page = int(page_param or 1)
-        per_page = min(int(per_page_param or 500), 5000)
+        page = max(int(page_param or 1), 1)
+        per_page = min(max(int(per_page_param or 500), 1), 5000)
         offset = (page - 1) * per_page
         records = StatsRepository.get_daily_records(date, product_code, per_page, offset)
         summary = StatsRepository.get_daily_summary(date, product_code)

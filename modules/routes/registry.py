@@ -11,6 +11,7 @@ ROUTE_MODULES = (
     "modules.routes.orders",  # orders CRUD + batch + work-records
     "modules.routes.customers",  # customers CRUD + order history
     "modules.routes.prices",  # process-prices + route-prices + wages
+    "modules.routes.payroll",  # versioned payroll ledger
     "modules.routes.products",  # products CRUD + import + attachments
     "modules.routes.scan_work",
     "modules.routes.scan_qr",
@@ -46,6 +47,10 @@ ROUTE_MODULES = (
     "modules.routes.email_reports",  # email reports
     "modules.routes.progress",  # process progress + delivery alerts
     "modules.routes.performance",  # performance evaluation + improvement workflow
+    "modules.routes.performance_ledger",  # versioned performance ledger workflow
+    "modules.routes.performance_plans",  # evidence-backed improvement plans
+    "modules.routes.performance_authorization",  # performance department scopes
+    "modules.routes.performance_configuration",  # versioned performance configuration
     "modules.routes.handoff_reviews",  # process handoff quality review
     "modules.routes.process_quality_evaluations",  # full-process quality evaluation
     "modules.routes.system",  # health, backup, integrity checks

@@ -69,7 +69,20 @@ class TestScanWorkReport:
             "order_id": 1,
             "process_id": 1
         })
-        assert resp.status_code in (401, 404)  # route may not exist
+        assert resp.status_code == 401
+        assert resp.get_json() == {"error": "未登录"}
+
+    def test_scan_forbidden_without_report_permission(self, client, auth_headers, monkeypatch):
+        import modules.middleware.auth as auth_module
+
+        monkeypatch.setattr(auth_module, "has_permission", lambda user, permission: False)
+        resp = client.post("/api/scan/report", headers=auth_headers, json={
+            "order_id": 1,
+            "process_id": 1,
+        })
+
+        assert resp.status_code == 403
+        assert resp.get_json() == {"error": "无权限"}
 
 
 class TestSystem:

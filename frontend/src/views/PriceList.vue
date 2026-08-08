@@ -52,7 +52,7 @@
           <!-- 展开：工序编辑面板 -->
           <div v-if="expandedRoute === r.id && routeSteps.length" style="border-top:1px solid var(--bg-hover);padding:var(--space-5)">
             <div style="font-size:var(--text-sm);color:var(--text-placeholder);margin-bottom:var(--space-3)">
-              💡 所有使用此路线的产品共享以下工价
+              旧工价仅供查阅。新增或调整工价请通过版本化工价流程，并由另一名用户审批。
             </div>
 
             <table class="data-table" style="font-size:var(--text-sm);width:100%">
@@ -63,7 +63,6 @@
                   <th class="col-cat">分类</th>
                   <th class="col-min-110 text-center">当前工价</th>
                   <th class="col-min-110 text-center">生效日期</th>
-                  <th class="col-min-130 text-center">新工价 (元)</th>
                 </tr>
               </thead>
               <tbody>
@@ -82,27 +81,13 @@
                     </span>
                     <span v-else style="color:var(--border)">—</span>
                   </td>
-                  <td class="text-center">
-                    <input type="number" class="form-input" style="text-align:center;width:120px"
-                      v-model.number="editPrices[s.process_id]" placeholder="输入单价" step="0.01" min="0">
-                  </td>
                 </tr>
               </tbody>
             </table>
 
             <!-- 操作栏 -->
-            <div style="display:flex;gap:var(--space-3);align-items:center;margin-top:16px;flex-wrap:wrap">
-              <div style="display:flex;gap:var(--space-2);align-items:center">
-                <label style="font-size:var(--text-sm);color:var(--text-placeholder);white-space:nowrap">生效日期</label>
-                <input type="date" class="form-input" style="width:150px" v-model="editMeta[expandedRoute].effectiveDate">
-              </div>
-              <div style="display:flex;gap:var(--space-2);align-items:center;flex:1">
-                <label style="font-size:var(--text-sm);color:var(--text-placeholder);white-space:nowrap">备注</label>
-                <input class="form-input" style="flex:1;max-width:300px" v-model="editMeta[expandedRoute].remark" placeholder="调价备注">
-              </div>
-              <button class="btn btn-primary" @click="saveRoute" :disabled="saving" style="margin-left:auto;white-space:nowrap">
-                {{ saving ? '⏳ 保存中...' : '💾 保存工价' }}
-              </button>
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button class="btn btn-primary" @click="openVersionedPricing">前往工价版本</button>
             </div>
             <!-- 调价历史 -->
             <div v-if="priceHistory.length" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-light)">
@@ -157,7 +142,7 @@ import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
-import { router } from '@/lib/router.js'
+import { navigate, router } from '@/lib/router.js'
 
 export default {
   setup() {
@@ -275,6 +260,11 @@ export default {
       finally { saving.value = false }
     }
 
+    function openVersionedPricing() {
+      localStorage.setItem('wageActiveTab', 'priceversions')
+      navigate('wages')
+    }
+
     const pageTitle = computed(() => {
       const cat = pricingCategory.value
       const cnt = filteredRoutes.value.length
@@ -345,7 +335,7 @@ export default {
       totalRouteCount, structRouteCount, machRouteCount, pricedRouteCount,
       can, canEdit, canCreate, canDelete,
       // 卡片模式
-      expandedRoute, toggleRoute, editMeta, saveRoute, isRecentDate, loadPriceHistory,
+      expandedRoute, toggleRoute, editMeta, saveRoute, openVersionedPricing, isRecentDate, loadPriceHistory,
       // 方法
       switchCat, loadAllRoutes,
 

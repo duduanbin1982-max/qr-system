@@ -16,7 +16,7 @@ class OrderMaterialSnapshotService:
         product_code = data.get("product_code", "")
         if not product_code:
             return None
-        product = ProductRepository.find_active_id_by_code(product_code, db=db)
+        product = ProductRepository.find_active_snapshot_by_code(product_code, db=db)
         return product["id"] if product else None
 
     @staticmethod

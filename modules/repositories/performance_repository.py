@@ -6,6 +6,59 @@ from modules.repositories.context import resolve_db
 
 class PerformanceRepository:
     @staticmethod
+    def formal_result_batch(year_month, v2_query_enabled=False, db=None):
+        """Select the only employee-visible snapshot for a production month."""
+        db = resolve_db(db)
+        if v2_query_enabled:
+            row = db.execute(
+                "SELECT * FROM performance_batches WHERE production_month=? "
+                "AND legacy_imported=0 AND status='approved' "
+                "ORDER BY version DESC,id DESC LIMIT 1",
+                (year_month,),
+            ).fetchone()
+            if row:
+                return dict(row)
+        row = db.execute(
+            "SELECT * FROM performance_batches WHERE production_month=? "
+            "AND legacy_imported=1 AND status IN ('approved','superseded') "
+            "ORDER BY version DESC,id DESC LIMIT 1",
+            (year_month,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def formal_result_months(v2_query_enabled=False, limit=12, db=None):
+        db = resolve_db(db)
+        source_clause = (
+            "((legacy_imported=1 AND status IN ('approved','superseded')) "
+            "OR (legacy_imported=0 AND status='approved'))"
+            if v2_query_enabled
+            else "legacy_imported=1 AND status IN ('approved','superseded')"
+        )
+        rows = db.execute(
+            "SELECT DISTINCT production_month AS year_month "
+            "FROM performance_batches WHERE "
+            + source_clause
+            + " ORDER BY production_month DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            batch = PerformanceRepository.formal_result_batch(
+                row["year_month"], v2_query_enabled, db=db
+            )
+            count = db.execute(
+                "SELECT COUNT(*) FROM performance_score_revisions score "
+                "WHERE score.batch_id=? AND NOT EXISTS ("
+                "SELECT 1 FROM performance_score_revisions newer "
+                "WHERE newer.batch_id=score.batch_id AND newer.user_id=score.user_id "
+                "AND newer.revision>score.revision)",
+                (batch["id"],),
+            ).fetchone()[0] if batch else 0
+            result.append({"year_month": row["year_month"], "score_count": int(count)})
+        return result
+
+    @staticmethod
     def eligible_workers(db=None):
         db = resolve_db(db)
         return db.execute(
@@ -125,6 +178,7 @@ class PerformanceRepository:
 
     @staticmethod
     def worker_month_metrics(user_id, year_month, db=None):
+        """Legacy V1 only; V2 metrics must be built from frozen source facts."""
         db = resolve_db(db)
         work = PerformanceRepository.work_record_metrics(user_id, year_month, db)
         scrap = PerformanceRepository.scrap_record_metrics(user_id, year_month, db)

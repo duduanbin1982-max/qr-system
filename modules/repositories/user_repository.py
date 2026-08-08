@@ -189,9 +189,24 @@ class UserRepository:
         """Find user by ID with selected fields for update comparison."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, position_id, status "
+            "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, "
+            "position_id, department_id, status "
             "FROM users WHERE id = ?", (uid,)
         ).fetchone()
+
+    @staticmethod
+    def find_users_by_ids_for_update(ids, db=None):
+        db = resolve_db(db)
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        return db.execute(
+            "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, "
+            "position_id, department_id, status FROM users WHERE id IN ("
+            + placeholders
+            + ") ORDER BY id",
+            ids,
+        ).fetchall()
 
     @staticmethod
     def find_user_status(uid, db=None):
@@ -315,6 +330,13 @@ class UserRepository:
         return db.execute("SELECT id FROM positions WHERE id = ?", (position_id,)).fetchone()
 
     @staticmethod
+    def find_department_by_id(department_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id FROM departments WHERE id = ?", (department_id,)
+        ).fetchone()
+
+    @staticmethod
     def get_active_positions(db=None):
         """Get all active positions (id, name)."""
         db = resolve_db(db)
@@ -344,13 +366,13 @@ class UserRepository:
     # ============================================================
 
     @staticmethod
-    def insert_user_txn(username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, position_id, status, db):
+    def insert_user_txn(username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, position_id, department_id, status, db):
         """Insert a new user. Returns lastrowid."""
         cur = db.execute(
             "INSERT INTO users (username, password, name, nickname, email, group_name, "
-            "role, employee_no, marker, phone, process_ids, position_id, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, "", position_id or None, status)
+            "role, employee_no, marker, phone, process_ids, position_id, department_id, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (username, pw_hash, name, nickname, email, group_name, role, employee_no, marker, phone, "", position_id or None, department_id or None, status)
         )
         return cur.lastrowid
 

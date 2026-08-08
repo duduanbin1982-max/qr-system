@@ -94,7 +94,7 @@
 
 <script>
 import { auth, restoreSession, logout } from '@/lib/auth.js'
-import { router, navigate, restoreNavState } from '@/lib/router.js'
+import { navigate, requestedNavigation, restoreNavState, router } from '@/lib/router.js'
 import { store, showToast } from '@/lib/store.js'
 import { api } from '@/lib/api.js'
 import { usePageAccess, loadPageAccessCatalog } from '@/composables/usePageAccess.js'
@@ -310,8 +310,15 @@ export default {
       if (await restoreSession()) {
         await loadPageAccessCatalog()
         restoreNavState()
+        const requested = requestedNavigation()
+        if (requested.settingsTab) {
+          localStorage.setItem('settingsTab', requested.settingsTab)
+        }
         const saved = localStorage.getItem('currentPage')
-        if (saved === 'quality') {
+        if (requested.page && pageAccess.canOpen(auth.user, requested.page)) {
+          router.page = requested.page
+        }
+        else if (saved === 'quality') {
           localStorage.setItem('currentPage', 'quality-management')
           router.page = 'quality-management'
         }

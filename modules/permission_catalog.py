@@ -31,6 +31,20 @@ ACTION_LABELS = {
     "capa": "CAPA闭环",
     "supplier": "供应商质量",
     "calibration": "量具校准",
+    "complete": "完成出库",
+    "cancel": "取消/冲销",
+    "receive": "签收",
+    "finance": "收退款",
+    "logistics": "物流维护",
+    "unlinked": "无订单发货",
+    "view_self": "查看本人",
+    "view_department": "查看部门",
+    "view_all": "查看全部",
+    "review_department": "部门复核",
+    "prepare": "制单",
+    "approve": "批准",
+    "plan_manage": "改进计划管理",
+    "plan_reassess": "改进计划复评",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -46,7 +60,13 @@ ACTION_PERMISSION_DEFS = {
     "role_groups": ("角色组", ["view", "create", "edit", "delete"]),
     "positions": ("岗位", ["view", "create", "edit", "delete"]),
     "inventory": ("库存", ["view", "create", "edit", "delete"]),
-    "shipments": ("发货", ["view", "create", "edit", "delete"]),
+    "shipments": (
+        "发货",
+        [
+            "view", "create", "edit", "delete", "complete", "cancel",
+            "receive", "finance", "logistics", "unlinked",
+        ],
+    ),
     "scan": (
         "扫码报工",
         ["view", "report", "serial_backfill", "serial_backfill_approve"],
@@ -63,8 +83,17 @@ ACTION_PERMISSION_DEFS = {
     "quality": ("质量管理", ["view", "inspect", "standards", "plans", "disposition", "review", "capa", "supplier", "calibration", "edit", "delete"]),
     "rework": ("返工", ["view", "create", "edit"]),
     "schedule": ("生产排程", ["view", "edit"]),
-    "wages": ("工资核算", ["view", "edit"]),
-    "performance": ("绩效量化", ["view", "create", "edit", "delete", "export"]),
+    "wages": (
+        "工资核算",
+        ["view", "edit", "view_self", "view_all", "prepare", "approve", "export"],
+    ),
+    "performance": (
+        "绩效量化",
+        [
+            "view_self", "view_department", "view_all", "review_department",
+            "prepare", "approve", "plan_manage", "plan_reassess",
+        ],
+    ),
     "work_time": ("工时管理", ["view", "create", "edit", "audit", "export"]),
     "process_quality_evaluation": (
         "工序质量评价",
@@ -243,7 +272,23 @@ ACTION_PERMISSION_CODES = [
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
+    "wages:view_self": ["wages:view"],
+    "wages:view_all": ["wages:view"],
+    "wages:prepare": ["wages:view", "wages:view_all"],
+    "wages:approve": ["wages:view", "wages:view_all"],
+    "wages:export": ["wages:view", "wages:view_all"],
+    "performance:review_department": ["performance:view_department"],
+    "performance:prepare": ["performance:view_all"],
+    "performance:approve": ["performance:view_all"],
     "quality:edit": ["quality:review"],
+    "shipments:edit": [
+        "shipments:complete",
+        "shipments:cancel",
+        "shipments:receive",
+        "shipments:finance",
+        "shipments:logistics",
+    ],
+    "shipments:delete": ["shipments:cancel"],
     "materials:manage": [
         "materials:view",
         "materials:create",
@@ -405,10 +450,8 @@ def infer_page_permissions(permission_codes):
 DEFAULT_ROLE_PERMISSION_ADDITIONS = {
     "production_manager": [
         "page:performance",
-        "performance:view",
-        "performance:create",
-        "performance:edit",
-        "performance:export",
+        "performance:view_department",
+        "performance:review_department",
         "page:process-quality-evaluation",
         "process_quality_evaluation:view",
         "process_quality_evaluation:review",
@@ -423,14 +466,14 @@ DEFAULT_ROLE_PERMISSION_ADDITIONS = {
     ],
     "qc_inspector": [
         "page:performance",
-        "performance:view",
+        "performance:view_self",
         "page:process-quality-evaluation",
         "process_quality_evaluation:view",
         "process_quality_evaluation:review",
         "process_quality_evaluation:waive",
         "process_quality_evaluation:stats",
     ],
-    "warehouse_keeper": ["page:performance", "performance:view"],
+    "warehouse_keeper": ["page:performance", "performance:view_self"],
 }
 
 

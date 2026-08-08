@@ -89,6 +89,17 @@ def test_rejected_inspection_creates_ncr_fails_task_and_quarantines_inventory(cl
             (inspection_id,),
         ).fetchone()
         assert tuple(inspection) == ("rejected", "审核发现检验依据不足", "nonconforming"), "review rejection must update inspection audit fields"
+        event_sources = db.execute(
+            "SELECT source_type,quality_event_id FROM performance_quality_event_sources "
+            "WHERE (source_type='quality_inspection' AND source_id=?) "
+            "OR (source_type='quality_ncr' AND source_id=?)",
+            (inspection_id, ncr_id),
+        ).fetchall()
+        assert {row["source_type"] for row in event_sources} == {
+            "quality_inspection",
+            "quality_ncr",
+        }
+        assert len({row["quality_event_id"] for row in event_sources}) == 1
 
     detail = client.get(f"/api/quality-management/ncr/{ncr_id}", headers=auth_headers)
     assert detail.status_code == 200, detail.get_json()

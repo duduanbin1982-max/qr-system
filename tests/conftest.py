@@ -36,6 +36,7 @@ CONTRACT_TEST_FILES = {
     "test_export_contracts.py",
     "test_fixture_isolation.py",
     "test_frontend_api_facade_contracts.py",
+    "test_legacy_entrypoints.py",
     "test_mobile_frontend_contracts.py",
     "test_permission_catalog_contracts.py",
     "test_quality_cutover_contracts.py",

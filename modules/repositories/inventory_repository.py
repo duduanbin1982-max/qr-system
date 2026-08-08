@@ -7,7 +7,7 @@ class InventoryRepository:
 
     @staticmethod
     def build_item_filters(keyword="", low_stock=False, location=""):
-        clauses = ["1=1"]
+        clauses = ["i.deleted_at IS NULL"]
         params = []
         if keyword:
             clauses.append(
@@ -17,7 +17,7 @@ class InventoryRepository:
             )
             params.extend([f"%{keyword}%"] * 8)
         if low_stock:
-            clauses.append("i.quantity <= i.safe_stock AND i.safe_stock > 0")
+            clauses.append("i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0")
         if location:
             clauses.append("i.location = ?")
             params.append(location)
@@ -28,7 +28,8 @@ class InventoryRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
-            "LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE "
+            "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
+            "LEFT JOIN products p ON p.id = pca.product_id AND p.deleted_at IS NULL WHERE "
             + where_clause, params
         ).fetchone()[0]
 
@@ -36,11 +37,13 @@ class InventoryRepository:
     def list_items_paginated(where_clause, params, page, limit, db=None):
         db = resolve_db(db)
         base_sql = (
-            "SELECT i.*, o.order_no, o.customer, p.price, "
-            "CASE WHEN i.quantity <= i.safe_stock AND i.safe_stock > 0 "
+            "SELECT i.*, i.quantity - i.reserved AS available_quantity, "
+            "o.order_no, o.customer, p.price, "
+            "CASE WHEN i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0 "
             "THEN 1 ELSE 0 END as is_low FROM inventory i "
             "LEFT JOIN orders o ON i.order_id = o.id "
-            "LEFT JOIN products p ON i.product_model = p.product_code AND p.deleted_at IS NULL WHERE "
+            "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
+            "LEFT JOIN products p ON p.id = pca.product_id AND p.deleted_at IS NULL WHERE "
             + where_clause + " "
             + build_sort_clause("updated_at", {"updated_at": "i.updated_at"}, default="i.updated_at")
         )
@@ -49,44 +52,48 @@ class InventoryRepository:
         return rows, size
 
     @staticmethod
-    def insert_txn(model, product_name, specification, quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, order_id, db):
+    def insert_txn(model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id, db):
         db.execute(
             "INSERT INTO inventory (product_model, product_name, specification, "
-            "quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, order_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (model, product_name, specification, quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, order_id)
+            "quantity, safe_stock, location, unit, remark, category, unit_cost, order_id) "
+            "VALUES (?,?,?,0,?,?,?,?,?,?,?)",
+            (model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id)
         )
         return db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     @staticmethod
     def find_duplicate_model_txn(model, order_id, exclude_id, db):
         return db.execute(
-            "SELECT id FROM inventory WHERE product_model = ? AND order_id = ? AND id != ?",
-            (model, order_id, exclude_id)
+            "SELECT id FROM inventory WHERE product_model = ? "
+            "AND ((order_id IS NULL AND ? IS NULL) OR order_id = ?) "
+            "AND id != ? AND deleted_at IS NULL",
+            (model, order_id, order_id, exclude_id)
         ).fetchone()
 
     @staticmethod
-    def update_item_txn(item_id, model, product_name, specification, quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, db):
-        db.execute(
+    def update_item_txn(item_id, model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, db):
+        return db.execute(
             "UPDATE inventory SET product_model = ?, product_name = ?, specification = ?, "
-            "quantity = ?, safe_stock = ?, location = ?, unit = ?, remark = ?, "
-            "category = ?, unit_cost = ?, last_count_date = ?, "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            (model, product_name, specification, quantity, safe_stock, location, unit, remark, category, unit_cost, last_count_date, item_id)
+            "safe_stock = ?, location = ?, unit = ?, remark = ?, category = ?, unit_cost = ?, "
+            "updated_at = datetime('now','localtime') WHERE id = ? AND deleted_at IS NULL",
+            (model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, item_id)
         )
 
     @staticmethod
     def find_item_by_id(item_id, db=None):
         db = resolve_db(db)
-        return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
+        return db.execute(
+            "SELECT * FROM inventory WHERE id = ? AND deleted_at IS NULL",
+            (item_id,),
+        ).fetchone()
 
     @staticmethod
     def list_available_by_order(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
             "SELECT id AS inventory_id, product_model, product_name, specification, "
-            "quantity, unit, order_id FROM inventory "
-            "WHERE order_id = ? AND quantity > 0",
+            "quantity, reserved, quantity - reserved AS available_quantity, unit, order_id FROM inventory "
+            "WHERE order_id = ? AND quantity - reserved > 0 AND deleted_at IS NULL",
             (order_id,),
         ).fetchall()
 
@@ -94,23 +101,26 @@ class InventoryRepository:
     def find_item_for_delete(item_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT product_model, product_name, quantity FROM inventory WHERE id = ?",
+            "SELECT product_model, product_name, quantity, reserved, deleted_at "
+            "FROM inventory WHERE id = ?",
             (item_id,)
         ).fetchone()
 
     @staticmethod
-    def delete_item_txn(item_id, db):
-        db.execute("DELETE FROM inventory WHERE id = ?", (item_id,))
-
-    @staticmethod
-    def delete_logs_for_item_txn(item_id, db):
-        db.execute("DELETE FROM inventory_logs WHERE inventory_id = ?", (item_id,))
+    def archive_item_txn(item_id, db):
+        return db.execute(
+            "UPDATE inventory SET deleted_at = datetime('now','localtime'), "
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND deleted_at IS NULL AND quantity = 0 AND reserved = 0",
+            (item_id,),
+        )
 
     @staticmethod
     def increase_stock_txn(item_id, quantity, db):
         return db.execute(
             'UPDATE inventory SET quantity = quantity + ?, '
-            'updated_at = datetime("now","localtime") WHERE id = ?',
+            'updated_at = datetime("now","localtime") '
+            'WHERE id = ? AND deleted_at IS NULL',
             (quantity, item_id),
         )
 
@@ -119,7 +129,23 @@ class InventoryRepository:
         return db.execute(
             'UPDATE inventory SET quantity = quantity - ?, '
             'updated_at = datetime("now","localtime") '
-            'WHERE id = ? AND quantity >= ?',
+            'WHERE id = ? AND quantity - reserved >= ? AND deleted_at IS NULL',
+            (quantity, item_id, quantity),
+        )
+
+    @staticmethod
+    def consume_stock_txn(item_id, quantity, reserved_quantity, db):
+        if reserved_quantity:
+            return db.execute(
+                "UPDATE inventory SET quantity = quantity - ?, reserved = reserved - ?, "
+                "updated_at = datetime('now','localtime') "
+                "WHERE id = ? AND quantity >= ? AND reserved >= ? AND deleted_at IS NULL",
+                (quantity, reserved_quantity, item_id, quantity, reserved_quantity),
+            )
+        return db.execute(
+            "UPDATE inventory SET quantity = quantity - ?, "
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND quantity - reserved >= ? AND deleted_at IS NULL",
             (quantity, item_id, quantity),
         )
 
@@ -127,16 +153,18 @@ class InventoryRepository:
     def reserve_stock_txn(item_id, quantity, db):
         return db.execute(
             "UPDATE inventory SET reserved = reserved + ?, "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            (quantity, item_id),
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND quantity - reserved >= ? AND deleted_at IS NULL",
+            (quantity, item_id, quantity),
         )
 
     @staticmethod
     def release_reserved_stock_txn(item_id, quantity, db):
         return db.execute(
-            "UPDATE inventory SET reserved = MAX(0, reserved - ?), "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            (quantity, item_id),
+            "UPDATE inventory SET reserved = reserved - ?, "
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND reserved >= ? AND deleted_at IS NULL",
+            (quantity, item_id, quantity),
         )
 
     @staticmethod
@@ -149,40 +177,87 @@ class InventoryRepository:
         remark="",
         operator_id=None,
         operator_name="",
+        qty_delta=0,
+        balance_before=None,
+        balance_after=None,
+        lot_no="",
+        serial_no="",
+        source_type="",
+        source_id=None,
+        idempotency_key="",
+        movement_no="",
+        reversal_of_id=None,
         db=None,
     ):
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO inventory_logs (inventory_id, type, quantity, "
-            "order_id, order_no, remark, operator_id, operator_name) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (inventory_id, log_type, quantity, order_id, order_no, remark, operator_id, operator_name),
+            "order_id, order_no, remark, operator_id, operator_name, movement_no, qty_delta, "
+            "balance_before, balance_after, lot_no, serial_no, source_type, source_id, "
+            "idempotency_key, reversal_of_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                inventory_id, log_type, quantity, order_id, order_no, remark,
+                operator_id, operator_name, movement_no, qty_delta,
+                balance_before, balance_after, lot_no, serial_no, source_type,
+                source_id, idempotency_key, reversal_of_id,
+            ),
         )
+        return cursor.lastrowid
 
     @staticmethod
-    def insert_log_txn(inventory_id, log_type, quantity, remark, operator_id, operator_name, db):
-        db.execute(
-            "INSERT INTO inventory_logs (inventory_id, type, quantity, remark, operator_id, operator_name) "
-            "VALUES (?,?,?,?,?,?)",
-            (inventory_id, log_type, quantity, remark, operator_id, operator_name)
-        )
+    def find_log_by_idempotency_key(idempotency_key, db=None):
+        if not idempotency_key:
+            return None
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_logs WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
 
     @staticmethod
-    def update_quantity_txn(item_id, new_quantity, db):
-        db.execute(
-            "UPDATE inventory SET quantity = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (new_quantity, item_id)
-        )
+    def get_lot_balance(inventory_id, lot_no, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT COALESCE(SUM(qty_delta), 0) AS balance FROM inventory_logs "
+            "WHERE inventory_id = ? AND lot_no = ?",
+            (inventory_id, lot_no),
+        ).fetchone()
+        return float(row["balance"] or 0)
+
+    @staticmethod
+    def get_serial_balance(inventory_id, serial_no, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT COALESCE(SUM(qty_delta), 0) AS balance FROM inventory_logs "
+            "WHERE inventory_id = ? AND serial_no = ?",
+            (inventory_id, serial_no),
+        ).fetchone()
+        return float(row["balance"] or 0)
+
+    @staticmethod
+    def find_serial_inbound(serial_no, db=None):
+        if not serial_no:
+            return None
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_logs WHERE serial_no = ? AND qty_delta > 0 LIMIT 1",
+            (serial_no,),
+        ).fetchone()
 
     @staticmethod
     def get_item_quantity(item_id, db=None):
         db = resolve_db(db)
-        return db.execute("SELECT quantity FROM inventory WHERE id = ?", (item_id,)).fetchone()
+        return db.execute(
+            "SELECT quantity, reserved FROM inventory WHERE id = ? AND deleted_at IS NULL",
+            (item_id,),
+        ).fetchone()
 
     @staticmethod
     def find_adjustment_item(item_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, quantity, product_model FROM inventory WHERE id=?",
+            "SELECT id, quantity, reserved, product_model FROM inventory "
+            "WHERE id=? AND deleted_at IS NULL",
             (item_id,),
         ).fetchone()
 
@@ -236,9 +311,10 @@ class InventoryRepository:
     def list_alerts(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT *, (safe_stock - quantity) as shortage "
+            "SELECT *, quantity - reserved AS available_quantity, "
+            "(safe_stock - (quantity - reserved)) as shortage "
             "FROM inventory "
-            "WHERE quantity <= safe_stock AND safe_stock > 0 "
+            "WHERE quantity - reserved <= safe_stock AND safe_stock > 0 AND deleted_at IS NULL "
             "ORDER BY shortage DESC"
         ).fetchall()
 
@@ -258,62 +334,58 @@ class InventoryRepository:
         ).fetchone()[0]
 
     @staticmethod
+    def count_linked_shipment_items(item_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT COUNT(*) FROM shipment_items WHERE inventory_id = ?",
+            (item_id,),
+        ).fetchone()[0]
+
+    @staticmethod
     def get_inventory_stats(db=None):
         db = resolve_db(db)
         return db.execute(
             "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
-            "COALESCE(SUM(CASE WHEN quantity <= safe_stock AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
-            "FROM inventory"
+            "COALESCE(SUM(CASE WHEN quantity - reserved <= safe_stock "
+            "AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
+            "FROM inventory WHERE deleted_at IS NULL"
         ).fetchone()
 
     @staticmethod
     def get_today_stats(today, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COALESCE(SUM(CASE WHEN type='in' THEN quantity ELSE 0 END),0) as today_in, "
-            "COALESCE(SUM(CASE WHEN type='out' THEN quantity ELSE 0 END),0) as today_out "
+            "SELECT COALESCE(SUM(CASE WHEN qty_delta > 0 THEN qty_delta ELSE 0 END),0) as today_in, "
+            "COALESCE(SUM(CASE WHEN qty_delta < 0 THEN -qty_delta ELSE 0 END),0) as today_out "
             "FROM inventory_logs WHERE date(created_at) = ?", (today,)
         ).fetchone()
-
-    @staticmethod
-    def submit_count_txn(item_id, actual_qty, diff, log_type, log_remark, db):
-        db.execute(
-            "UPDATE inventory SET quantity = ?, last_count_date = date('now'), "
-            "updated_at = datetime('now','localtime') WHERE id = ?",
-            (actual_qty, item_id)
-        )
-        db.execute(
-            "INSERT INTO inventory_logs (inventory_id, type, quantity, remark, operator_id, operator_name) "
-            "VALUES (?,?,?,?,?,?)",
-            (item_id, log_type, diff, log_remark, None, "system")
-        )
 
     @staticmethod
     def list_abc_rows(db=None):
         db = resolve_db(db)
         return db.execute(
             "SELECT inv.id, inv.product_model, "
-            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
+            "COALESCE(SUM(CASE WHEN il.qty_delta < 0 THEN -il.qty_delta ELSE 0 END),0) as total_out, "
             "inv.unit_cost, "
-            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) * inv.unit_cost as out_value "
+            "COALESCE(SUM(CASE WHEN il.qty_delta < 0 THEN -il.qty_delta ELSE 0 END),0) * inv.unit_cost as out_value "
             "FROM inventory inv LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
-            "GROUP BY inv.id ORDER BY out_value DESC"
+            "WHERE inv.deleted_at IS NULL GROUP BY inv.id ORDER BY out_value DESC"
         ).fetchall()
 
     @staticmethod
     def update_category_txn(item_id, category, db):
-        db.execute("UPDATE inventory SET category=? WHERE id=?", (category, item_id))
+        return db.execute("UPDATE inventory SET category=? WHERE id=? AND deleted_at IS NULL", (category, item_id))
 
     @staticmethod
     def list_turnover_rows(db=None):
         db = resolve_db(db)
         return db.execute(
             "SELECT inv.id, inv.product_model, inv.product_name, inv.quantity as current_stock, "
-            "COALESCE(SUM(CASE WHEN il.type='out' THEN il.quantity ELSE 0 END),0) as total_out, "
-            "COALESCE(SUM(CASE WHEN il.type='in' THEN il.quantity ELSE 0 END),0) as total_in, "
+            "COALESCE(SUM(CASE WHEN il.qty_delta < 0 THEN -il.qty_delta ELSE 0 END),0) as total_out, "
+            "COALESCE(SUM(CASE WHEN il.qty_delta > 0 THEN il.qty_delta ELSE 0 END),0) as total_in, "
             "inv.unit_cost FROM inventory inv "
             "LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
-            "GROUP BY inv.id ORDER BY total_out DESC"
+            "WHERE inv.deleted_at IS NULL GROUP BY inv.id ORDER BY total_out DESC"
         ).fetchall()
 
     @staticmethod
@@ -322,10 +394,11 @@ class InventoryRepository:
         return db.execute(
             "SELECT inv.id, inv.product_model, inv.product_name, inv.safe_stock as current_safe, "
             "inv.quantity, "
-            "COALESCE(SUM(CASE WHEN il.type='out' AND il.created_at >= date('now','-30 days') "
-            "THEN il.quantity ELSE 0 END),0) as month_out "
+            "COALESCE(SUM(CASE WHEN il.qty_delta < 0 "
+            "AND il.created_at >= date('now','-30 days') "
+            "THEN -il.qty_delta ELSE 0 END),0) as month_out "
             "FROM inventory inv LEFT JOIN inventory_logs il ON il.inventory_id = inv.id "
-            "GROUP BY inv.id"
+            "WHERE inv.deleted_at IS NULL GROUP BY inv.id"
         ).fetchall()
 
     @staticmethod
@@ -347,12 +420,18 @@ class InventoryRepository:
         ).fetchall()
 
     @staticmethod
-    def list_batch_outbound_after(inventory_id, created_at, db=None):
+    def list_batch_movements(item_id=None, db=None):
         db = resolve_db(db)
+        params = []
+        where = "WHERE i.deleted_at IS NULL"
+        if item_id:
+            where += " AND il.inventory_id = ?"
+            params.append(item_id)
         return db.execute(
-            "SELECT * FROM inventory_logs WHERE inventory_id=? AND type='out' "
-            "AND created_at >= ? ORDER BY created_at",
-            (inventory_id, created_at),
+            "SELECT il.*, i.product_model, i.product_name FROM inventory_logs il "
+            "JOIN inventory i ON i.id = il.inventory_id "
+            + where + " ORDER BY il.inventory_id, il.created_at, il.id",
+            params,
         ).fetchall()
 
     @staticmethod
@@ -361,29 +440,136 @@ class InventoryRepository:
         return db.execute(
             "SELECT location, COUNT(*) as item_count, SUM(quantity) as total_qty, "
             "GROUP_CONCAT(product_model || '(' || quantity || ')', ', ') as items "
-            "FROM inventory WHERE location != '' GROUP BY location ORDER BY location"
+            "FROM inventory WHERE location != '' AND deleted_at IS NULL "
+            "GROUP BY location ORDER BY location"
         ).fetchall()
 
     @staticmethod
     def update_location_txn(item_id, new_location, db):
-        db.execute(
-            "UPDATE inventory SET location=?, updated_at=datetime('now','localtime') WHERE id=?",
+        return db.execute(
+            "UPDATE inventory SET location=?, updated_at=datetime('now','localtime') "
+            "WHERE id=? AND deleted_at IS NULL",
             (new_location, item_id),
         )
 
     @staticmethod
     def count_inventory_items(db=None):
         db = resolve_db(db)
-        return db.execute("SELECT COUNT(*) as cnt FROM inventory").fetchone()["cnt"]
+        return db.execute(
+            "SELECT COUNT(*) as cnt FROM inventory WHERE deleted_at IS NULL"
+        ).fetchone()["cnt"]
 
     @staticmethod
     def count_inventory_items_counted_today(db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) as cnt FROM inventory WHERE last_count_date >= date('now')"
+            "SELECT COUNT(*) as cnt FROM inventory "
+            "WHERE last_count_date >= date('now') AND deleted_at IS NULL"
         ).fetchone()["cnt"]
 
     @staticmethod
     def get_count_item(item_id, db=None):
         db = resolve_db(db)
-        return db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
+        return db.execute(
+            "SELECT * FROM inventory WHERE id = ? AND deleted_at IS NULL",
+            (item_id,),
+        ).fetchone()
+
+    @staticmethod
+    def create_count_task_txn(task_no, user_id, user_name, db):
+        cursor = db.execute(
+            "INSERT INTO inventory_count_tasks "
+            "(task_no, status, created_by, created_by_name) VALUES (?, 'counting', ?, ?)",
+            (task_no, user_id, user_name),
+        )
+        task_id = cursor.lastrowid
+        db.execute(
+            "INSERT INTO inventory_count_items "
+            "(task_id, inventory_id, product_model, product_name, book_quantity) "
+            "SELECT ?, id, product_model, product_name, quantity FROM inventory "
+            "WHERE deleted_at IS NULL",
+            (task_id,),
+        )
+        return task_id
+
+    @staticmethod
+    def find_latest_count_task(db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_count_tasks ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    @staticmethod
+    def find_open_count_task(db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_count_tasks "
+            "WHERE status IN ('counting', 'submitted') ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    @staticmethod
+    def find_count_task(task_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_count_tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+
+    @staticmethod
+    def list_count_task_items(task_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_count_items WHERE task_id = ? ORDER BY id",
+            (task_id,),
+        ).fetchall()
+
+    @staticmethod
+    def update_count_item_txn(task_id, item_id, actual_qty, remark, user_id, user_name, db):
+        cursor = db.execute(
+            "UPDATE inventory_count_items SET actual_quantity = ?, "
+            "difference = ? - book_quantity, status = 'counted', remark = ?, "
+            "counted_by = ?, counted_by_name = ?, "
+            "counted_at = datetime('now','localtime') "
+            "WHERE task_id = ? AND inventory_id = ? AND status != 'posted' "
+            "AND EXISTS (SELECT 1 FROM inventory_count_tasks t "
+            "WHERE t.id = ? AND t.status = 'counting')",
+            (actual_qty, actual_qty, remark, user_id, user_name, task_id, item_id, task_id),
+        )
+        db.execute(
+            "UPDATE inventory_count_tasks SET status = CASE WHEN EXISTS ("
+            "SELECT 1 FROM inventory_count_items WHERE task_id = ? AND status = 'pending'"
+            ") THEN 'counting' ELSE 'submitted' END, "
+            "submitted_at = CASE WHEN EXISTS ("
+            "SELECT 1 FROM inventory_count_items WHERE task_id = ? AND status = 'pending'"
+            ") THEN submitted_at ELSE datetime('now','localtime') END, "
+            "updated_at = datetime('now','localtime') WHERE id = ?",
+            (task_id, task_id, task_id),
+        )
+        return cursor
+
+    @staticmethod
+    def mark_count_item_posted_txn(count_item_id, movement_id, db):
+        db.execute(
+            "UPDATE inventory_count_items SET status = 'posted', posted_movement_id = ? "
+            "WHERE id = ?",
+            (movement_id, count_item_id),
+        )
+
+    @staticmethod
+    def mark_inventory_counted_txn(inventory_id, db):
+        db.execute(
+            "UPDATE inventory SET last_count_date = date('now','localtime'), "
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND deleted_at IS NULL",
+            (inventory_id,),
+        )
+
+    @staticmethod
+    def approve_count_task_txn(task_id, user_id, user_name, db):
+        return db.execute(
+            "UPDATE inventory_count_tasks SET status = 'posted', approved_by = ?, "
+            "approved_by_name = ?, approved_at = datetime('now','localtime'), "
+            "updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND status = 'submitted'",
+            (user_id, user_name, task_id),
+        )

@@ -47,7 +47,10 @@ export function useOrderMaterials({ modalId, products }) {
       loadProcessOptions(),
       loadOrderMaterials(order.id),
     ])
-    const product = products.value.find(item => item.product_code === order.product_code)
+    const product = products.value.find(item => (
+      (order.product_id && item.id === order.product_id)
+      || item.product_code === order.product_code
+    ))
     orderMatForm.value.quantity_per_unit = (
       parseFloat(product?.weight)
       || parseFloat(order.weight)

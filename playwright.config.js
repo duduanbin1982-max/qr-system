@@ -1,5 +1,13 @@
 import { defineConfig } from '@playwright/test'
+import { existsSync } from 'node:fs'
 
+
+const windowsVirtualenvPython = '.venv\\Scripts\\python.exe'
+const pythonCommand = process.env.E2E_PYTHON || (
+  process.platform === 'win32' && existsSync(windowsVirtualenvPython)
+    ? windowsVirtualenvPython
+    : process.platform === 'win32' ? 'python' : 'python3'
+)
 
 export default defineConfig({
   testDir: './frontend/tests/e2e',
@@ -23,7 +31,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: 'python3 scripts/e2e_server.py',
+    command: `${pythonCommand} scripts/e2e_server.py`,
     url: 'http://127.0.0.1:4173/api/health',
     reuseExistingServer: false,
     timeout: 120_000,

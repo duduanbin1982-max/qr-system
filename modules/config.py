@@ -16,6 +16,10 @@ os.makedirs(PUBLIC_DIR, exist_ok=True)
 DB_PATH = os.environ.get('DB_PATH') or os.path.join(DATA_DIR, 'production.db')
 SESSION_TIMEOUT_HOURS = 8  # 登录超时时间（小时），0表示永不过期
 SESSION_IDLE_MINUTES = 480  # idle timeout (8 hours)
+PERFORMANCE_LEDGER_V2_QUERY_ENABLED = (
+    os.environ.get("PERFORMANCE_LEDGER_V2_QUERY_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {

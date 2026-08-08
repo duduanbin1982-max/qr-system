@@ -386,8 +386,45 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "wages:view_self": [
+    "wages:view"
+  ],
+  "wages:view_all": [
+    "wages:view"
+  ],
+  "wages:prepare": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:approve": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:export": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "performance:review_department": [
+    "performance:view_department"
+  ],
+  "performance:prepare": [
+    "performance:view_all"
+  ],
+  "performance:approve": [
+    "performance:view_all"
+  ],
   "quality:edit": [
     "quality:review"
+  ],
+  "shipments:edit": [
+    "shipments:complete",
+    "shipments:cancel",
+    "shipments:receive",
+    "shipments:finance",
+    "shipments:logistics"
+  ],
+  "shipments:delete": [
+    "shipments:cancel"
   ],
   "materials:manage": [
     "materials:view",

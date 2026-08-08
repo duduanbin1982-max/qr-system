@@ -1,6 +1,8 @@
 """qr-system - ImportsService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.imports_repository import ImportsRepository
+from modules.services.order_product_identity_service import OrderProductIdentityService
+from modules.services.product_service import ProductService
 
 
 class ImportsService:
@@ -11,12 +13,12 @@ class ImportsService:
     @staticmethod
     def insert_order(data):
         with BaseService.transaction() as txn:
-            return ImportsRepository.insert_order_txn(data, db=txn)
+            normalized = OrderProductIdentityService.normalize_create(data, txn)
+            return ImportsRepository.insert_order_txn(normalized, db=txn)
 
     @staticmethod
     def insert_product(data):
-        with BaseService.transaction() as txn:
-            return ImportsRepository.insert_product_txn(data, db=txn)
+        return ProductService.create_product(data)[0]
 
     @staticmethod
     def check_customer_exists(name):

@@ -3,12 +3,36 @@ qr-system - QualityRepository
 
 All SQL for quality_inspections and quality_attachments tables.
 """
-from datetime import datetime
+from modules.domain.reporting_day import (
+    current_reporting_day,
+    reporting_day_bounds,
+    reporting_range_bounds,
+)
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 
 
 class QualityRepository:
     """Quality inspection data access."""
+
+    @staticmethod
+    def _analytics_filter(start, end, product_code, db):
+        where_parts = ["o.deleted_at IS NULL"]
+        params = []
+        period_start, period_end = reporting_range_bounds(start, end)
+        if period_start:
+            where_parts.append("qi.inspected_at >= ?")
+            params.append(period_start)
+        if period_end:
+            where_parts.append("qi.inspected_at < ?")
+            params.append(period_end)
+        if product_code:
+            clause, clause_params = ProductQueryFilter.resolve(
+                db, product_code
+            ).order_clause("o")
+            where_parts.append(clause)
+            params.extend(clause_params)
+        return where_parts, params
 
     # ============================================================
     # Inspection CRUD
@@ -177,7 +201,7 @@ class QualityRepository:
     @staticmethod
     def get_stats(db=None):
         db = resolve_db(db)
-        today = datetime.now().strftime("%Y-%m-%d")
+        period_start, period_end = reporting_day_bounds(current_reporting_day())
         agg = db.execute(
             "SELECT COUNT(*) as total, "
             "COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
@@ -186,7 +210,8 @@ class QualityRepository:
             "FROM quality_inspections"
         ).fetchone()
         today_count = db.execute(
-            "SELECT COUNT(*) FROM quality_inspections WHERE DATE(inspected_at)=?", (today,)
+            "SELECT COUNT(*) FROM quality_inspections "
+            "WHERE inspected_at>=? AND inspected_at<?", (period_start, period_end)
         ).fetchone()[0]
         return {
             "ok": True, "total": agg["total"], "today_count": today_count,
@@ -226,30 +251,36 @@ class QualityRepository:
         return {"ok": True, "data": result}
 
     @staticmethod
-    def spc_p_chart(order_id=None, process_id=None, date_from="", date_to="", db=None):
+    def spc_p_chart(
+        order_id=None, process_id=None, date_from="", date_to="",
+        product_code="", db=None,
+    ):
         db = resolve_db(db)
-        where_parts = []
-        params = []
+        where_parts, params = QualityRepository._analytics_filter(
+            date_from, date_to, product_code, db
+        )
         if order_id:
             where_parts.append("qi.order_id = ?"); params.append(order_id)
         if process_id:
             where_parts.append("qi.process_id = ?"); params.append(process_id)
-        if date_from:
-            where_parts.append("qi.inspected_at >= ?"); params.append(date_from)
-        if date_to:
-            where_parts.append("qi.inspected_at <= ?"); params.append(date_to + " 23:59:59")
-        where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        where_clause = "WHERE " + " AND ".join(where_parts)
 
         rows = db.execute(
-            "SELECT DATE(inspected_at) as sample_date, "
-            "SUM(quantity_checked) as checked, SUM(quantity_failed) as failed "
-            "FROM quality_inspections " + where_clause + " "
-            "GROUP BY DATE(inspected_at) ORDER BY sample_date", params
+            "SELECT DATE(qi.inspected_at,'-7 hours') as sample_date, "
+            "SUM(qi.quantity_checked) as checked, SUM(qi.quantity_failed) as failed "
+            "FROM quality_inspections qi JOIN orders o ON qi.order_id=o.id "
+            + where_clause + " GROUP BY sample_date ORDER BY sample_date", params
         ).fetchall()
 
         import math
-        samples = [{"date": r["sample_date"], "checked": r["checked"] or 0,
-                     "failed": r["failed"] or 0} for r in rows]
+        samples = []
+        for row in rows:
+            checked = row["checked"] or 0
+            failed = row["failed"] or 0
+            samples.append({
+                "date": row["sample_date"], "checked": checked, "failed": failed,
+                "rate": round(failed / checked * 100, 1) if checked else 0,
+            })
         total_checked = sum(s["checked"] for s in samples) if samples else 0
         total_failed = sum(s["failed"] for s in samples) if samples else 0
         p_bar = total_failed / total_checked if total_checked > 0 else 0
@@ -265,8 +296,11 @@ class QualityRepository:
         }
 
     @staticmethod
-    def inspector_performance(db=None):
+    def inspector_performance(start="", end="", product_code="", db=None):
         db = resolve_db(db)
+        where_parts, params = QualityRepository._analytics_filter(
+            start, end, product_code, db
+        )
         return db.execute(
             "SELECT u.id, u.name, COUNT(*) as inspection_count, "
             "COALESCE(SUM(qi.quantity_checked),0) as total_checked, "
@@ -275,12 +309,19 @@ class QualityRepository:
             "ROUND(AVG(CASE WHEN qi.quantity_checked>0 THEN qi.quantity_failed*100.0/qi.quantity_checked ELSE 0 END),1) as avg_defect_rate "
             "FROM quality_inspections qi "
             "JOIN users u ON qi.inspector_id = u.id "
-            "GROUP BY qi.inspector_id ORDER BY inspection_count DESC"
+            "JOIN orders o ON qi.order_id=o.id "
+            "WHERE " + " AND ".join(where_parts) + " "
+            "GROUP BY qi.inspector_id ORDER BY inspection_count DESC",
+            params,
         ).fetchall()
 
     @staticmethod
-    def supplier_quality(db=None):
+    def supplier_quality(start="", end="", product_code="", db=None):
         db = resolve_db(db)
+        where_parts, params = QualityRepository._analytics_filter(
+            start, end, product_code, db
+        )
+        where_parts.append("c.id IS NOT NULL")
         return db.execute(
             "SELECT c.id as customer_id, c.name as customer_name, "
             "COUNT(*) as inspection_count, "
@@ -291,37 +332,38 @@ class QualityRepository:
             "FROM quality_inspections qi "
             "JOIN orders o ON qi.order_id = o.id "
             "JOIN customers c ON o.customer_id = c.id "
-            "WHERE c.id IS NOT NULL "
-            "GROUP BY c.id ORDER BY inspection_count DESC"
+            "WHERE " + " AND ".join(where_parts) + " "
+            "GROUP BY c.id ORDER BY inspection_count DESC",
+            params,
         ).fetchall()
 
     @staticmethod
-    def pass_rate_trend(weeks=6, start="", end="", db=None):
+    def pass_rate_trend(weeks=6, start="", end="", product_code="", db=None):
         db = resolve_db(db)
+        where_parts, params = QualityRepository._analytics_filter(
+            start, end, product_code, db
+        )
         if start or end:
-            where_parts = []
-            params = []
-            if start:
-                where_parts.append("DATE(inspected_at) >= ?"); params.append(start)
-            if end:
-                where_parts.append("DATE(inspected_at) <= ?"); params.append(end)
             where_clause = "WHERE " + " AND ".join(where_parts)
             rows = db.execute(
-                "SELECT strftime('%Y-W%W', inspected_at) as week, "
+                "SELECT strftime('%Y-W%W', qi.inspected_at,'-7 hours') as week, "
                 "COUNT(*) as total, "
-                "COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count "
-                "FROM quality_inspections " + where_clause + " "
+                "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count "
+                "FROM quality_inspections qi JOIN orders o ON qi.order_id=o.id "
+                + where_clause + " "
                 "GROUP BY week ORDER BY week", params
             ).fetchall()
         else:
             days_val = str(-abs(weeks * 7))
+            where_parts.append("qi.inspected_at >= datetime('now','localtime', ? || ' days')")
+            params.append(days_val)
             rows = db.execute(
-                "SELECT strftime('%Y-W%W', inspected_at) as week, "
+                "SELECT strftime('%Y-W%W', qi.inspected_at,'-7 hours') as week, "
                 "COUNT(*) as total, "
-                "COALESCE(SUM(CASE WHEN result='pass' THEN 1 ELSE 0 END),0) as pass_count "
-                "FROM quality_inspections "
-                "WHERE inspected_at >= date('now', ? || ' days') "
-                "GROUP BY week ORDER BY week", (days_val,)
+                "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count "
+                "FROM quality_inspections qi JOIN orders o ON qi.order_id=o.id "
+                "WHERE " + " AND ".join(where_parts) + " "
+                "GROUP BY week ORDER BY week", params
             ).fetchall()
         result = []
         for r in rows:

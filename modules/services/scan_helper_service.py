@@ -5,6 +5,7 @@ from modules.services import BaseService
 from modules.repositories.scan_repository import ScanRepository
 from modules.setting_reader import get_setting
 from modules.services.process_order_service import ProcessOrderService
+from modules.services.inventory_posting_service import InventoryPostingService
 
 
 class ScanHelperService:
@@ -257,7 +258,7 @@ class ScanHelperService:
 
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
-        ScanRepository.insert_scrap_record(
+        return ScanRepository.insert_scrap_record(
             order_id,
             process_id,
             user_id,
@@ -325,14 +326,24 @@ class ScanHelperService:
         return ScanRepository.find_inbound_inventory_log(order_id, serial_no, db=ScanHelperService._db(db))
 
     @staticmethod
-    def stock_in(inv_id, quantity, order_id, order_no, user_id, user_name, db=None):
-        ScanRepository.stock_in(
+    def stock_in(
+        inv_id, quantity, order_id, order_no, user_id, user_name,
+        db=None, serial_no=None,
+    ):
+        return InventoryPostingService.post(
             inv_id,
             quantity,
-            order_id,
-            order_no,
-            user_id,
-            user_name,
+            "in",
+            order_id=order_id,
+            order_no=order_no,
+            remark="订单完工自动入库" + ((" " + serial_no) if serial_no else ""),
+            operator_id=user_id,
+            operator_name=user_name,
+            lot_no=order_no,
+            serial_no=serial_no or "",
+            source_type="production_completion",
+            source_id=order_id,
+            idempotency_key="auto-inbound:%s:%s" % (order_id, serial_no or "order"),
             db=ScanHelperService._db(db),
         )
 

@@ -20,6 +20,17 @@ QUALITY_SCORE_ITEMS = [
 
 
 class QualityService:
+    quality_event_service = None
+
+    @classmethod
+    def _quality_event_service(cls):
+        if cls.quality_event_service:
+            return cls.quality_event_service
+        from modules.services.performance_quality_event_service import (
+            PerformanceQualityEventService,
+        )
+        return PerformanceQualityEventService
+
     @staticmethod
     def _normalize_result(result):
         result = (result or "").strip()
@@ -163,7 +174,37 @@ class QualityService:
         data = QualityService.normalize_scoring(data)
 
         with BaseService.transaction() as txn:
-            return QualityRepository.insert_inspection_txn(data, user_id, db=txn)
+            inspection_id = QualityRepository.insert_inspection_txn(
+                data, user_id, db=txn
+            )
+            if data.get("result") != "pass":
+                target_work_record_id = data.get("target_work_record_id")
+                QualityService._quality_event_service().record_event(
+                    event_type="inspection_failed",
+                    source_type="quality_inspection",
+                    source_id=inspection_id,
+                    quantity=data.get("quantity_failed")
+                    or data.get("defect_quantity")
+                    or 0,
+                    order_id=order_id,
+                    process_id=process_id,
+                    user_id=(
+                        None
+                        if target_work_record_id
+                        else data.get("responsible_user_id")
+                    ),
+                    business_at=data.get("inspected_at", ""),
+                    target_work_record_id=target_work_record_id,
+                    snapshot={
+                        "inspection_type": inspection_type,
+                        "result": data.get("result"),
+                        "defect_category": defect_category,
+                        "defect_level": data.get("defect_level", ""),
+                        "notes": notes,
+                    },
+                    db=txn,
+                )
+            return inspection_id
 
     @staticmethod
     def get_inspection(inspection_id):
@@ -244,15 +285,20 @@ class QualityService:
         return QualityRepository.defect_pareto(date_from=date_from, date_to=date_to)
 
     @staticmethod
-    def spc_p_chart(order_id=None, process_id=None, date_from="", date_to=""):
+    def spc_p_chart(
+        order_id=None, process_id=None, date_from="", date_to="", product_code=""
+    ):
         return QualityRepository.spc_p_chart(
             order_id=order_id, process_id=process_id,
-            date_from=date_from, date_to=date_to
+            date_from=date_from, date_to=date_to, product_code=product_code,
         )
 
     @staticmethod
     def inspector_performance(**kwargs):
-        rows = QualityRepository.inspector_performance()
+        rows = QualityRepository.inspector_performance(
+            start=kwargs.get("start", ""), end=kwargs.get("end", ""),
+            product_code=kwargs.get("product_code", ""),
+        )
         result = []
         for r in rows:
             r = dict(r)
@@ -271,7 +317,10 @@ class QualityService:
 
     @staticmethod
     def supplier_quality(**kwargs):
-        rows = QualityRepository.supplier_quality()
+        rows = QualityRepository.supplier_quality(
+            start=kwargs.get("start", ""), end=kwargs.get("end", ""),
+            product_code=kwargs.get("product_code", ""),
+        )
         result = []
         for r in rows:
             r = dict(r)
@@ -290,8 +339,10 @@ class QualityService:
         return {"ok": True, "data": result}
 
     @staticmethod
-    def pass_rate_trend(weeks=6, start="", end=""):
-        return QualityRepository.pass_rate_trend(weeks=weeks, start=start, end=end)
+    def pass_rate_trend(weeks=6, start="", end="", product_code=""):
+        return QualityRepository.pass_rate_trend(
+            weeks=weeks, start=start, end=end, product_code=product_code
+        )
 
     @staticmethod
     def export_inspections(order_id=None, process_id=None, inspection_type="",

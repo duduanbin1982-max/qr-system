@@ -1,9 +1,12 @@
 """qr-system - Reports Routes (Refactored)"""
 from datetime import datetime, timedelta
 from flask import request, jsonify
-from modules.route_decorators import app, check_auth, check_permission
+from modules.route_decorators import (
+    app, check_auth, check_permission, validate_reporting_range,
+)
 from modules.services.reports_service import ReportsService
 from modules.cache_utils import ttl_cache
+from modules.domain.reporting_day import current_reporting_day
 
 
 @app.route('/api/reports/production-trend', methods=['GET'])
@@ -11,12 +14,15 @@ from modules.cache_utils import ttl_cache
 @check_permission('reports:view')
 @ttl_cache(ttl_seconds=30)
 def reports_production_trend():
-    days = request.args.get('days', 30, type=int)
-    if days <= 0:
-        return jsonify({'trend': [], 'summary': {'total_output': 0, 'total_scrap': 0, 'total_rework': 0, 'scrap_rate': 0, 'rework_rate': 0, 'days': days}})
-    now = datetime.now()
-    end_date = now.strftime('%Y-%m-%d')
-    start_date = (now - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+    try:
+        days = int(request.args.get('days', '30'))
+    except (TypeError, ValueError):
+        days = 0
+    if not 1 <= days <= 366:
+        return jsonify({'error': 'days 必须是 1 到 366 之间的整数'}), 400
+    reporting_end = datetime.strptime(current_reporting_day(), '%Y-%m-%d')
+    end_date = reporting_end.strftime('%Y-%m-%d')
+    start_date = (reporting_end - timedelta(days=days - 1)).strftime('%Y-%m-%d')
     trend_data = ReportsService.production_trend(start_date, end_date)
     total_output = sum(r['output'] for r in trend_data)
     total_scrap = sum(r['scrap'] for r in trend_data)
@@ -38,6 +44,7 @@ def reports_production_trend():
 @app.route('/api/reports/worker-efficiency', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_worker_efficiency():
     workers = ReportsService.worker_efficiency(
         start=request.args.get('start', ''),
@@ -50,6 +57,7 @@ def reports_worker_efficiency():
 @app.route('/api/reports/quality-analysis', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_quality_analysis():
     return jsonify(ReportsService.quality_analysis(
         start=request.args.get('start', ''),
@@ -69,6 +77,7 @@ def reports_order_analysis():
 @app.route('/api/reports/product-stats', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 @ttl_cache(ttl_seconds=30)
 def reports_product_stats():
     return jsonify(ReportsService.product_stats(
@@ -80,6 +89,7 @@ def reports_product_stats():
 @app.route('/api/reports/material-usage', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_material_usage():
     return jsonify(ReportsService.material_usage(
         start=request.args.get('start', ''),
@@ -91,6 +101,7 @@ def reports_material_usage():
 @app.route('/api/reports/shipment-stats', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_shipment_stats():
     return jsonify(ReportsService.shipment_stats(
         start=request.args.get('start', ''),
@@ -104,6 +115,7 @@ def reports_shipment_stats():
 @app.route('/api/reports/product-process-matrix', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_product_process_matrix():
     return jsonify(ReportsService.product_process_matrix(
         start=request.args.get('start', ''),
@@ -116,6 +128,7 @@ def reports_product_process_matrix():
 @app.route('/api/reports/model-process-stats', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_model_process_stats():
     return jsonify(ReportsService.model_process_stats(
         start=request.args.get('start', ''),
@@ -124,6 +137,7 @@ def reports_model_process_stats():
 @app.route('/api/reports/product-process-stats', methods=['GET'])
 @check_auth
 @check_permission('reports:view')
+@validate_reporting_range
 def reports_product_process_stats():
     return jsonify(ReportsService.product_process_stats(
         start=request.args.get('start', ''),

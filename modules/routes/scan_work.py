@@ -243,6 +243,7 @@ def mobile_report():
 # ============================================================
 
 @app.route("/api/report", methods=["POST"])
+@app.route("/api/scan/report", methods=["POST"])
 @check_auth
 @check_permission("scan:report")
 def work_report():

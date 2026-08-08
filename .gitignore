@@ -17,6 +17,7 @@ logs/
 *.pem-debug.log
 .DS_Store
 venv/
+.venv/
 NODEMODULES/
 lastmodified.txt
 *.mac

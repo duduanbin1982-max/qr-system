@@ -6,7 +6,7 @@ import { useOrderFormSearch } from './useOrderFormSearch.js'
 
 
 const emptyForm = () => ({
-  order_no: '', customer: '', customer_id: null, product_name: '', product_code: '',
+  order_no: '', customer: '', customer_id: null, product_name: '', product_id: null, product_code: '',
   model: '', spec: '', style: '', upper_opening: '', plate_thickness: '', category: '',
   quantity: 1, plan_start: '', plan_end: '', deadline: '', route_id: '',
   production_line_id: null, remark: '', status: 'pending',
@@ -64,6 +64,7 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
       customer: order.customer || '',
       customer_id: order.customer_id || null,
       product_name: order.product_name || '',
+      product_id: order.product_id || null,
       product_code: order.product_code || '',
       quantity: order.quantity || 1,
       plan_start: order.plan_start || '',

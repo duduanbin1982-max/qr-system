@@ -3,10 +3,10 @@ import vue from '@vitejs/plugin-vue'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
-const frontendRoot = resolve(__dirname, 'frontend')
-const staticOutputDir = resolve(__dirname, 'public/static')
+const frontendRoot = resolve(import.meta.dirname, 'frontend')
+const staticOutputDir = resolve(import.meta.dirname, 'public/static')
 const packageManifest = JSON.parse(
-  readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
+  readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf-8')
 )
 const applicationVersion = packageManifest.version
 

@@ -48,7 +48,7 @@
     </div>
 
     <div v-if="loading" style="text-align:center;padding:40px;color:var(--text-placeholder)">加载中...</div>
-    <p v-else-if="!loading" class="empty"><span class="empty-text">暂无数据</span></p>
+    <p v-else-if="!loading && !workers.length" class="empty"><span class="empty-text">暂无数据</span></p>
   </div>
 </template>
 <script>

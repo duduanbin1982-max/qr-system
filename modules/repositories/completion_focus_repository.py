@@ -1,5 +1,6 @@
 """Persistence for completion-focus board, exceptions, and scan events."""
 
+from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 
 
@@ -50,8 +51,11 @@ class CompletionFocusRepository:
             scope_sql = "AND o.route_id = ?"
             params.append(route_id)
         elif product_code:
-            scope_sql = "AND COALESCE(o.product_code, '') = ?"
-            params.append(product_code)
+            clause, clause_params = ProductQueryFilter.resolve(
+                db, product_code
+            ).order_clause("o")
+            scope_sql = "AND " + clause
+            params.extend(clause_params)
         return db.execute(
             f"""
             SELECT o.id, o.order_no, o.product_name, o.product_code, o.quantity,

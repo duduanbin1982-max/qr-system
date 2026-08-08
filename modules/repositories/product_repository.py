@@ -47,6 +47,41 @@ class ProductRepository:
         ).fetchone()
 
     @staticmethod
+    def find_active_snapshot(pid, db=None):
+        """Return the authoritative fields copied into a newly linked order."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, product_name, product_code, model, spec, style, "
+            "upper_opening, lower_opening, plate_thickness, category, "
+            "weight, price, route_id "
+            "FROM products WHERE id = ? AND deleted_at IS NULL",
+            (pid,),
+        ).fetchone()
+
+    @staticmethod
+    def find_active_snapshot_by_code(product_code, db=None):
+        """Resolve a current or historical code to one active product."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.style, "
+            "p.upper_opening, p.lower_opening, p.plate_thickness, p.category, "
+            "p.weight, p.price, p.route_id "
+            "FROM product_code_aliases a "
+            "JOIN products p ON p.id = a.product_id "
+            "WHERE a.product_code = ? AND p.deleted_at IS NULL",
+            (product_code,),
+        ).fetchone()
+
+    @staticmethod
+    def find_code_alias(product_code, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, product_id, product_code, source, created_at "
+            "FROM product_code_aliases WHERE product_code = ?",
+            (product_code,),
+        ).fetchone()
+
+    @staticmethod
     def find_by_code_exclude(product_code, exclude_id, db=None):
         """按 product_code 查询，排除指定 ID（用于更新时的唯一性检查）。"""
         db = resolve_db(db)
@@ -124,11 +159,15 @@ class ProductRepository:
             ).fetchall()
 
     @staticmethod
-    def count_by_product_code_in_orders(product_code, db=None):
-        """统计该 product_code 在 orders 表中的使用次数。"""
+    def count_orders_referencing_product(product_id, db=None):
+        """Count stable and not-yet-backfilled order references to a product."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM orders WHERE product_code = ?", (product_code,)
+            "SELECT COUNT(*) FROM orders o "
+            "LEFT JOIN product_code_aliases a "
+            "ON o.product_id IS NULL AND a.product_code = o.product_code "
+            "WHERE o.product_id = ? OR a.product_id = ?",
+            (product_id, product_id),
         ).fetchone()[0]
 
     @staticmethod
@@ -136,10 +175,12 @@ class ProductRepository:
         """按 ID 查询产品（仅关键字段，用于更新前获取旧值）。"""
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, product_name, IFNULL(model,'') as model, "
+            "SELECT id, product_name, product_code, IFNULL(model,'') as model, "
             "IFNULL(spec,'') as spec, IFNULL(style,'') as style, "
             "IFNULL(upper_opening,'') as upper_opening, "
-            "IFNULL(plate_thickness,'') as plate_thickness "
+            "IFNULL(lower_opening,'') as lower_opening, "
+            "IFNULL(plate_thickness,'') as plate_thickness, "
+            "IFNULL(category,'结构件') as category "
             "FROM products WHERE id = ?", (pid,)
         ).fetchone()
 
@@ -190,6 +231,29 @@ class ProductRepository:
         db.execute(
             "UPDATE products SET product_code = ? WHERE id = ?", (product_code, pid)
         )
+
+    @staticmethod
+    def insert_code_alias(product_id, product_code, source, db=None):
+        """Insert one immutable code alias. Caller must validate ownership first."""
+        db = resolve_db(db)
+        db.execute(
+            "INSERT INTO product_code_aliases (product_id, product_code, source) "
+            "VALUES (?, ?, ?)",
+            (product_id, product_code, source),
+        )
+
+    @staticmethod
+    def link_unresolved_orders(product_id, db=None):
+        """Bind legacy orders whose snapshot code is an alias of this product."""
+        db = resolve_db(db)
+        cursor = db.execute(
+            "UPDATE orders SET product_id = ? "
+            "WHERE product_id IS NULL AND product_code IN ("
+            "SELECT product_code FROM product_code_aliases WHERE product_id = ?"
+            ")",
+            (product_id, product_id),
+        )
+        return cursor.rowcount
 
     @staticmethod
     def soft_delete(pid, db=None):
@@ -255,4 +319,3 @@ class ProductRepository:
         db.execute(
             "DELETE FROM product_attachments WHERE id = ?", (attachment_id,)
         )
-

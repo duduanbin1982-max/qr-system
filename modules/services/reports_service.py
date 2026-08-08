@@ -1,9 +1,5 @@
 """qr-system \u2014 ReportsService (refactored)"""
-import logging
-
 from modules.repositories.reports_repository import ReportsRepository
-
-_logger = logging.getLogger(__name__)
 
 PROCESS_ORDER = ["下料", "铆接", "焊接", "抛丸", "打磨", "镗孔", "喷漆"]
 
@@ -42,48 +38,39 @@ class ReportsService:
 
     @staticmethod
     def quality_analysis(start="", end="", product_code=""):
+        from modules.services.quality_service import QualityService
+
         by_process = ReportsRepository.quality_by_process(start, end, product_code)
         result = {"by_process": _calc_defect_rate(by_process)}
-        try:
-            from modules.services.quality_service import QualityService
-        except ImportError:
-            return result
-        try:
-            trend_list = QualityService.pass_rate_trend(weeks=6, start=start, end=end)
-            if isinstance(trend_list, list):
-                result["trend_labels"] = [t["label"] for t in trend_list]
-                result["trend_pass_rates"] = [t["rate"] for t in trend_list]
-        except Exception as exc:
-            _logger.warning("quality pass_rate_trend report failed: %s", exc)
-        try:
-            spc = QualityService.spc_p_chart(limit=50, start=start, end=end)
-            if isinstance(spc, dict):
-                result["spc_samples"] = [s["rate"] for s in spc.get("samples", [])]
-                result["spc_ucl"] = spc.get("ucl", 0)
-                result["spc_cl"] = spc.get("cl", 0)
-                result["spc_lcl"] = spc.get("lcl", 0)
-        except Exception as exc:
-            _logger.warning("quality spc_p_chart report failed: %s", exc)
-        try:
-            insp = QualityService.inspector_performance(start=start, end=end)
-            if isinstance(insp, dict):
-                result["inspector_data"] = insp.get("data", [])
-        except Exception as exc:
-            _logger.warning("quality inspector_performance report failed: %s", exc)
-        try:
-            supp = QualityService.supplier_quality(start=start, end=end)
-            if isinstance(supp, dict):
-                result["supplier_data"] = supp.get("data", [])
-        except Exception as exc:
-            _logger.warning("quality supplier_quality report failed: %s", exc)
-        try:
-            qi_by_process = ReportsRepository.quality_inspection_by_process(
+        trend_list = QualityService.pass_rate_trend(
+            weeks=6, start=start, end=end, product_code=product_code
+        )
+        result["trend_labels"] = [item["label"] for item in trend_list]
+        result["trend_pass_rates"] = [item["rate"] for item in trend_list]
+
+        spc = QualityService.spc_p_chart(
+            date_from=start, date_to=end, product_code=product_code
+        )
+        result["spc_samples"] = [sample["rate"] for sample in spc.get("samples", [])]
+        result["spc_ucl"] = spc.get("ucl", 0)
+        result["spc_cl"] = spc.get("cl", 0)
+        result["spc_lcl"] = spc.get("lcl", 0)
+
+        inspector = QualityService.inspector_performance(
+            start=start, end=end, product_code=product_code
+        )
+        result["inspector_data"] = inspector.get("data", [])
+        supplier = QualityService.supplier_quality(
+            start=start, end=end, product_code=product_code
+        )
+        result["supplier_data"] = supplier.get("data", [])
+        result["qi_by_process"] = [
+            dict(row) for row in ReportsRepository.quality_inspection_by_process(
                 start, end, product_code
             )
-            result["qi_by_process"] = [dict(r) for r in qi_by_process]
-        except Exception as exc:
-            _logger.warning("quality inspection by-process report failed: %s", exc)
+        ]
         return result
+
     @staticmethod
     def order_analysis():
         status_dist = ReportsRepository.fetch_order_status_distribution()
@@ -234,4 +221,5 @@ class ReportsService:
             "pending_shipments": ReportsRepository.kpi_pending_shipments(),
             "low_stock_count": ReportsRepository.kpi_low_stock(),
             "weekly_trend": [dict(r) for r in ReportsRepository.kpi_weekly_trend()],
+            "monthly_summary": ReportsService.monthly_summary(),
         }

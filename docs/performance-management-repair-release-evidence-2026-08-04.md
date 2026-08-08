@@ -1,0 +1,810 @@
+# 绩效管理版本化台账发布证据
+
+## 1. 发布状态
+
+- 实施日期：2026-08-07（Asia/Shanghai）
+- 生产主机：`192.168.1.8`
+- 生产目录：`/home/dubin/qr-system`
+- 发布分支：`codex/performance-ledger-repair`
+- 发布前提交：`c0817bb15cb6a346de411f94bb8142f04145ad0c`
+- 已部署提交：`399d23831f6c5224639a2b478ebacce5fd492d42`
+- 数据库迁移：V55 -> V56 已完成
+- 正式查询模式：`PERFORMANCE_LEDGER_V2_QUERY_ENABLED` 未配置，按代码默认值保持 `false`
+- 当前结论：V56 架构、Legacy 只读导入和 Legacy 查询兼容已发布；历史 V2 生成、主管复核、双人批准和正式查询切换尚未执行。
+
+未继续切换 V2 的原因不是技术迁移失败，而是生产库尚无已发布的 V2 评分规则、尚无已批准的岗位目标，并且人工岗位映射及职责分离人员尚未由业务负责人确认。发布过程没有绕过这些门禁。
+
+## 2. 代码和完整回归
+
+本地工作区在实施前、完整构建后均为干净状态。生产工作区在切换前为 `codex/versioned-payroll-ledger@c0817bb`，没有未提交变更；随后快进切换到待发布分支。
+
+本地完整验证结果：
+
+| 验证项 | 结果 |
+| --- | --- |
+| 后端完整测试 | `625 passed in 117.62s` |
+| 前端架构检查 | 通过，30 个 API namespace、339 个唯一方法、180 个文件、434 条内部依赖边 |
+| 前端单元测试 | `19 files / 62 tests passed` |
+| 浏览器关键路径 | `15 passed` |
+| 生产前端构建 | 通过，230 个模块完成转换 |
+
+生产候选工作树 `/home/dubin/qr-system-task15-stage-399d238` 固定为 `399d238`，`scripts/deploy.sh --check-only` 通过。正式部署后再次执行 check-only，结果仍通过。
+
+## 3. 备份与恢复验证
+
+### 3.1 项目目录外备份
+
+| 项目 | 值 |
+| --- | --- |
+| 路径 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/production-pre-v56.db` |
+| 字节数 | `19,988,480` |
+| SHA-256 | `f2cc67332fecea3e646a61f7a3d015a997ecdd2d4b978b56012f153fe0782fe0` |
+| `PRAGMA integrity_check` | `ok` |
+| `PRAGMA foreign_key_check` | 无结果 |
+
+### 3.2 部署脚本内部备份
+
+| 项目 | 值 |
+| --- | --- |
+| 路径 | `/home/dubin/qr-system/data/backups/production_20260807_153833.db` |
+| 字节数 | `19,988,480` |
+| SHA-256 | `245ed00c20925c77472220fe6ffd576d76c800b87711a4deaa7b2b7a25f23574` |
+| `PRAGMA integrity_check` | `ok` |
+
+数据库迁移只允许向前。应用回滚点为 `c0817bb`；若需要回滚，关闭 V2 查询并回退应用/静态资源，保留 V56 表和证据。只有数据库完整性受损时才允许停止服务并从外置备份恢复。
+
+## 4. 生产数据库副本演练
+
+演练副本：
+
+`/home/dubin/qr-system-release-backups/20260807-performance-v56/production-v55-copy.db`
+
+迁移前基线：
+
+- `PRAGMA user_version = 55`
+- `PRAGMA integrity_check = ok`
+- 表数量：94
+- Legacy 绩效评分：64
+- Legacy 复核：0
+- Legacy 改进计划：0
+- 绩效月份：2026-06 至 2026-07，共 2 个月
+
+V55 -> V56 演练结果：
+
+- 执行迁移数：1
+- 迁移耗时：0.21 秒
+- `PRAGMA user_version = 56`
+- `PRAGMA integrity_check = ok`
+- `PRAGMA foreign_key_check` 无结果
+- 表数量：112
+- 索引数量：251
+- Legacy 写保护触发器：18
+- Legacy V1 批次：2
+- Legacy 评分修订：64
+- 迁移 manifest：2
+- 权限迁移报告：4
+
+副本历史生成尝试被正确拒绝：
+
+```text
+apply_exit_code=1
+未找到当月已发布的绩效规则
+```
+
+该尝试在事务内回滚，没有生成 V2 批次，也没有写入工资台账。
+
+## 5. 正式迁移与生产健康
+
+官方 `deploy.sh` 已完成完整测试、内部备份、V56 迁移、前端构建、用户级 systemd 服务重载和健康检查。
+
+发布后状态：
+
+- Git HEAD、`.deployed_commit` 和健康接口 commit 均为 `399d23831f6c5224639a2b478ebacce5fd492d42`
+- `qr-system.service` 为 `active`
+- 服务于 2026-08-07 15:38:41 +08:00 完成重启
+- 健康接口：`status=ok`、`db=connected`
+- `PRAGMA user_version = 56`
+- `PRAGMA integrity_check = ok`
+- 表数量：112
+- 索引数量：251
+- Legacy 写保护触发器：18
+- V2 正式查询开关：关闭
+
+正式库当前批次仅有：
+
+| 生产月 | 版本 | 状态 | 来源 |
+| --- | ---: | --- | --- |
+| 2026-06 | V1 | approved | Legacy 只读导入 |
+| 2026-07 | V1 | approved | Legacy 只读导入 |
+
+没有创建或批准 V2 批次。
+
+## 6. 历史预检证据
+
+正式库只读预检通过四项审计基线校验：
+
+| 指标 | 总数 |
+| --- | ---: |
+| Legacy 评分 | 64 |
+| 已覆盖但旧修订不可恢复 | 64 |
+| 缺少历史岗位快照 | 30 |
+| 07:00 口径跨自然月报工 | 5 |
+| 07:00 口径跨自然月质量记录 | 11 |
+| 质量来源歧义 | 0 |
+| 缺少已批准岗位目标的员工 | 34 |
+
+月度摘要：
+
+| 生产月 | 评分 | 覆盖 | 缺岗位 | 跨月报工 | 跨月质量 | 缺目标 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-06 | 27 | 27 | 27 | 1 | 0 | 0 |
+| 2026-07 | 37 | 37 | 3 | 4 | 11 | 34 |
+
+- 全局 manifest SHA-256：`c98835a9cb56c684b9b0f114319c75903ca52841ef8e264fd3a5009336ff1044`
+- 正式预检 JSON SHA-256：`58c706327c2f28fae615bc587a2110b4a94d1f88424215508a665944d13c784b`
+- 正式预检摘要 SHA-256：`d1c427bbd1e8d34e72ce2b2954df3c6510c014afffc0a8f07e344aa5b31894f3`
+
+## 7. 权限影响与职责分离
+
+V56 权限迁移结果：
+
+| 角色 | 受影响用户 | 迁移结果 |
+| --- | ---: | --- |
+| worker | 38 | 增加 `page:performance` 和 `performance:view_self` |
+| production_manager | 0 | 移除 Legacy 宽权限，保留本人查看 |
+| qc_inspector | 0 | 移除 Legacy 宽权限，保留本人查看 |
+| warehouse_keeper | 0 | 移除 Legacy 宽权限，保留本人查看 |
+
+当前共有 4 个管理员账号，管理员角色使用通配权限。本人查询已用真实生产数据验证：员工 `10271` 只能看到本人的 1 条 2026-07 评分，尝试查询员工 `10272` 被拒绝并返回“无权查看该员工绩效”。
+
+以下显式授权仍待业务负责人指定，不能用管理员通配权限替代正式职责拆分：
+
+- 部门主管复核人
+- 历史 V2 制单人
+- 与制单人不同的批准人
+- 改进计划管理人
+- 与计划管理人分离的复评人
+
+当前角色和用户导出位于：
+
+- `/home/dubin/qr-system-release-backups/20260807-performance-v56/current-performance-user-roles.csv`
+- `/home/dubin/qr-system-release-backups/20260807-performance-v56/performance-permission-impact.csv`
+
+## 8. 工资隔离验证
+
+绩效迁移前后工资台账完全一致：
+
+| 项目 | 迁移前 | 迁移后 |
+| --- | ---: | ---: |
+| 工资批次 | 4 | 4 |
+| 员工工资行 | 119 | 119 |
+| 员工应付合计（分） | 27,695,420 | 27,695,420 |
+| 工资明细 | 2,975 | 2,975 |
+| 工资明细金额合计（分） | 27,695,420 | 27,695,420 |
+| 工价解析 | 2,638 | 2,638 |
+| 调整项 | 0 | 0 |
+| 工资事件 | 4 | 4 |
+| 工资迁移 manifest | 1 | 1 |
+
+绩效 V56 迁移和历史预检均没有写工资台账。
+
+## 9. 真实业务验收结果
+
+| 验收项 | 状态 | 证据或原因 |
+| --- | --- | --- |
+| Legacy 正式结果可查 | 通过 | 管理员查询 2026-06 返回 27 条、2026-07 返回 37 条，来源为 `legacy_v1`、版本 V1、状态 approved |
+| 本人访问与跨员工越权 | 通过 | 本人仅 1 条；指定其他员工 ID 被拒绝 |
+| 07:00 生产月边界 | 预检通过 | 识别 5 条跨月报工和 11 条跨月质量记录 |
+| 质量来源唯一性 | 预检通过 | 质量来源歧义为 0；尚未生成 V2 正式事实 |
+| 工资隔离 | 通过 | 行数及 27,695,420 分金额摘要完全一致 |
+| Legacy 只读保护 | 通过 | 18 个 Legacy 写保护触发器存在，旧写接口改为失败关闭 |
+| 零产量、岗位目标评分和单人岗位排名 | 阻塞 | 尚无已发布规则和已批准岗位目标，不能生成合格 V2 |
+| 主管复核与岗位排名原子重算 | 阻塞 | 尚无 V2 批次及显式部门主管账号 |
+| 制单/批准双人分离和旧 row_version 409 | 阻塞 | 尚未指定制单人、批准人并走真实审批 |
+| 改进计划状态机和失败复评 | 阻塞 | 尚未指定计划管理人和复评人 |
+| V2 批准、V1 回查和 V3 取代 | 阻塞 | V2 尚未生成和批准 |
+
+## 10. 待业务确认清单
+
+### 10.1 人工岗位映射
+
+30 条记录必须逐条人工确认，禁止按名称相似度自动修复：
+
+`/home/dubin/qr-system-release-backups/20260807-performance-v56/manual-position-mapping-required.csv`
+
+文件 SHA-256：`87f49058491561b1dcf9b851a33e17857be85eac7743adf5d30a3341dce1df8d`
+
+### 10.2 岗位目标
+
+2026-07 有 34 名员工涉及 8 个岗位目标分组，需要业务负责人给出目标产量和最低有效报工日并批准版本：
+
+`/home/dubin/qr-system-release-backups/20260807-performance-v56/position-target-required.csv`
+
+文件 SHA-256：`35792f4f83702f6163bf60598bac90e91c5f442683335a7e193d7b36ec24582e`
+
+### 10.3 首个 V2 规则
+
+生产库当前状态：
+
+- 规则版本：0
+- 已发布规则：0
+- 岗位目标版本：0
+- 已批准岗位目标：0
+
+必须由业务负责人确认并发布首个 V2 规则，至少包括权重、预警阈值、产量评分参数、质量扣分参数、最低有效报工日和生效月份。
+
+### 10.4 显式授权矩阵
+
+必须指定不同人员承担制单和批准，并明确部门复核、计划管理和计划复评人员。当前仅管理员通配权限和员工本人查看权限，不满足完整生产验收所需的显式职责拆分证据。
+
+## 11. 下一次安全续跑点
+
+业务负责人完成规则、岗位目标、30 条岗位映射和授权矩阵后，按以下顺序继续：
+
+1. 再次执行生产只读 preflight，核对 `64 / 30 / 5 / 11` 和 manifest SHA-256。
+2. 使用已授权制单人执行 2026-06 至 2026-07 的 `--apply`，生成影子 V2。
+3. 处理所有岗位、目标和质量异常；提交审批前未确认异常必须为 0。
+4. 导出 V1/V2 逐人差异并由部门主管复核。
+5. 制单人提交，由不同批准人批准。
+6. 验证工资台账摘要仍完全一致。
+7. 将 `PERFORMANCE_LEDGER_V2_QUERY_ENABLED=true` 写入生产环境并重启服务。
+8. 执行 V2 正式结果、Legacy 回退、越权、并发和改进计划真实业务冒烟。
+
+在以上条件满足前，V2 查询保持关闭，Legacy V1 继续作为正式结果来源。
+
+## 12. 证据文件哈希
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `copy-baseline.txt` | `06024183dea743329187460762a0571cda9dc0985da644d937896613a9a76217` |
+| `copy-v56-validation.txt` | `a3d10dd3950ec9ea5304e849c819d6e214baef8c0eb9abeb538fd1ad68d53e8a` |
+| `business-readiness-summary.txt` | `0fb27417a390c54f30ff23e9f2bb3cf025acb05f3e4ba98beeea070d14fbf7b0` |
+| `historical-apply-blocker.txt` | `05856c27b75fe1ab626bc6fc372c4e4363de3ed56ab17e208e6089222a9b2763` |
+| `current-performance-user-roles.csv` | `5e6f72ead40f3f9b748f7e4a65424cfbcb6b350dca1d367271c4b6d1b9381bd4` |
+| `performance-permission-impact.csv` | `2ac1707a827cf04b438b41225634cc6cdb93225b3d9730d4ab2d667269235fc9` |
+| `production-check-only.txt` | `7ae65203c4f21a3a695b6ab2856358d16a8fe38ada6d919a505c2c14e683fd98` |
+
+## 13. 首个 V2 评分规则生产发布
+
+业务负责人于 2026-08-07 确认沿用当前 Legacy 评分基线，并指定杨冰制单、时文芳发布批准。生产操作于 2026-08-07 16:36:21（Asia/Shanghai）通过绩效配置业务服务完成，没有直接修改表余额、没有绕过规则校验，也没有开启 V2 查询。
+
+发布结果：
+
+| 项目 | 结果 |
+| --- | --- |
+| 规则 ID | `1` |
+| 版本编码 | `PERF-V2-2026-06-R1` |
+| 规则名称 | 历史绩效V2首版规则 |
+| 生效区间 | `[2026-06, 2026-08)`，覆盖 2026-06、2026-07 |
+| 状态 | `published` |
+| 行版本 | `2` |
+| 制单人 | 杨冰，用户 ID `10304` |
+| 发布批准人 | 时文芳，用户 ID `10305` |
+| 权重 | 产量 35、质量 30、交付 15、纪律 10、改进 10 |
+| 交付目标工作日 | 22 |
+| 预警阈值 | 绿色 80、黄色 70、橙色 60、红色 0 |
+
+发布前一致性备份：
+
+| 项目 | 值 |
+| --- | --- |
+| 路径 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/pre-first-v2-rule-20260807-163621.db` |
+| 字节数 | `20,533,248` |
+| SHA-256 | `1b3212e6ec186d7764f18227d2fb4b90993b3b9d9e188e3b9d3fe171798ad484` |
+| `PRAGMA user_version` | `56` |
+| `PRAGMA integrity_check` | `ok` |
+| `PRAGMA foreign_key_check` | 无结果 |
+
+独立发布证据：
+
+- 文件：`/home/dubin/qr-system-release-backups/20260807-performance-v56/first-v2-rule-publication-20260807-163621.json`
+- SHA-256：`1dd05ebba9ff97a9c5e5956469a6e2b211a9d888fc682cd0b7a98ce64ee1c705`
+- 生产服务：`active`
+- 健康接口：`status=ok`、`db=connected`
+- 健康接口提交：`399d23831f6c5224639a2b478ebacce5fd492d42`
+
+隔离校验：
+
+- 规则版本从 0 增加到 1，已发布规则为 1。
+- 岗位目标仍为 0；没有自动填充任何业务目标。
+- 绩效批次仍为 2 个 Legacy V1 批次，V2 批次仍为 0。
+- 工资台账七项行数指纹前后一致：批次 4、员工行 119、明细 2975、工价解析 2638、调整项 0、事件 4、迁移 manifest 1。
+- 数据库完整性为 `ok`，外键违规为 0。
+- `PERFORMANCE_LEDGER_V2_QUERY_ENABLED` 仍未配置，按默认值保持 `false`。
+
+当前门禁已从“缺少已发布评分规则”推进到“缺少已批准岗位目标”。下一步必须由业务负责人确认 8 个岗位的月目标产量和最低有效报工日，并继续采用制单、批准人员分离流程。30 条历史岗位映射仍不得按名称相似度自动处理。
+
+## 14. 首批岗位目标生产发布
+
+业务负责人于 2026-08-07 确认首批岗位目标，其中车工月目标产量为 1000，其余岗位采用历史试运行建议基线；所有岗位最低有效报工日统一为 15 天，生效区间为 `[2026-06, 2026-08)`。生产操作于 2026-08-07 17:02:11（Asia/Shanghai）完成。
+
+全部 8 个岗位目标均由杨冰（用户 ID `10304`）制单、时文芳（用户 ID `10305`）独立批准：
+
+| 目标 ID | 岗位 ID | 岗位 | 月目标产量 | 最低有效报工日 | 状态 |
+| ---: | ---: | --- | ---: | ---: | --- |
+| 1 | 1 | 切割工 | 500 | 15 | approved |
+| 2 | 6 | 喷漆工 | 110 | 15 | approved |
+| 3 | 5 | 打磨工 | 80 | 15 | approved |
+| 4 | 4 | 抛丸工 | 350 | 15 | approved |
+| 5 | 3 | 焊工 | 35 | 15 | approved |
+| 6 | 14 | 车工 | 1000 | 15 | approved |
+| 7 | 2 | 铆工 | 90 | 15 | approved |
+| 8 | 7 | 镗工 | 120 | 15 | approved |
+
+发布前一致性备份：
+
+| 项目 | 值 |
+| --- | --- |
+| 路径 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/pre-position-targets-20260807-170211.db` |
+| 字节数 | `20,533,248` |
+| SHA-256 | `44045210500fde3cd04da4c0f13050bfbaab2872cccf6207cc9d400fb82aa858` |
+| `PRAGMA user_version` | `56` |
+| `PRAGMA integrity_check` | `ok` |
+| `PRAGMA foreign_key_check` | 无结果 |
+| WAL/SHM 边车文件 | 无 |
+
+独立发布证据：
+
+- 岗位目标发布证据：`/home/dubin/qr-system-release-backups/20260807-performance-v56/position-target-publication-20260807-170211.json`
+- 发布证据 SHA-256：`c354d0b8ba228b12ea8f6344ba9eb00fa8825f01c4eb0fcf8e0af15565e061f9`
+- 发布后完整预检：`/home/dubin/qr-system-release-backups/20260807-performance-v56/post-position-target-preflight-20260807-170211.json`
+- 预检文件 SHA-256：`1412dfdc70caf36929eb7a38081ef51ab9a353ed0e3d29a8d8339e7a683393a4`
+- 新 manifest SHA-256：`55041a59567d5fe0d49ebf23006229c893c930a255b0a58426240e9d59f7911f`
+
+发布后预检结果：
+
+| 指标 | 数量 |
+| --- | ---: |
+| Legacy 评分 | 64 |
+| 已覆盖但旧修订不可恢复 | 64 |
+| 缺少历史岗位快照 | 30 |
+| 07:00 口径跨自然月报工 | 5 |
+| 07:00 口径跨自然月质量记录 | 11 |
+| 质量来源歧义 | 0 |
+| 缺少已批准岗位目标 | 0 |
+
+隔离校验继续通过：生产数据库完整性为 `ok`，外键违规为 0；绩效批次仍为 2 个 Legacy V1 批次，V2 批次为 0；工资台账七项行数指纹没有变化；V2 查询开关继续保持 `false`。
+
+下一门禁为 30 条人工岗位映射。2026-06 的 27 条记录可以通过同一稳定用户 ID、2026-07 可靠岗位快照和实际工序交叉复核，但仍需业务负责人确认历史期间没有岗位变更。2026-07 的 3 条缺口中：张治国的 39 件报工里有 32 件来自已映射至“铣工”（岗位 ID `13`）的工序，张骞没有可用于判断的报工记录，员工号 1011 的时文芳来自独立 worker 账号 `10328` 且存在喷漆、焊接、打磨、抛丸混合报工，三者均不得自动写入岗位映射。
+
+## 15. 补充岗位目标与历史任职映射生产发布
+
+业务负责人于 2026-08-07 完成剩余人工确认：A 组 27 人在 2026 年 6 月至 7 月没有岗位调动；张治国（用户 `10324`）和张骞（用户 `10325`）历史岗位均为铣工（岗位 ID `13`）；时文芳 worker 账号（用户 `10328`、员工号 `1011`）历史岗位映射到现有普工（岗位 ID `15`）。铣工月目标产量为 500，普工月目标产量为 100，最低有效报工日均为 15 天，生效区间为 `[2026-06, 2026-08)`。生产操作于 2026-08-07 17:39:43（Asia/Shanghai）完成。
+
+新增岗位目标继续执行制单和批准分离：
+
+| 目标 ID | 岗位 ID | 岗位 | 月目标产量 | 最低有效报工日 | 制单人 | 批准人 | 状态 |
+| ---: | ---: | --- | ---: | ---: | --- | --- | --- |
+| 9 | 13 | 铣工 | 500 | 15 | 杨冰 `10304` | 时文芳 `10305` | approved |
+| 10 | 15 | 普工 | 100 | 15 | 杨冰 `10304` | 时文芳 `10305` | approved |
+
+历史任职映射共新增 37 条，全部在一个 `BEGIN IMMEDIATE` 事务中写入并校验：
+
+- A 组 27 人：有效区间 `[2026-06-01 07:00:00, 2026-08-01 07:00:00)`，来源 `manual_history_confirmation`。
+- 7 名有可靠 Legacy 评分岗位快照的员工：张伟林、程峰、武利军、李涛映射焊工；徐运锋、谷新顺、试用工映射喷漆工。有效区间 `[2026-07-01 07:00:00, 2026-08-01 07:00:00)`，来源 `legacy_score_snapshot`。
+- 3 名人工确认员工：张治国、张骞映射铣工，时文芳 worker 账号映射普工。有效区间 `[2026-07-01 07:00:00, 2026-08-01 07:00:00)`，来源 `manual_history_confirmation`。
+- 每条记录均使用包含期间、用户 ID 和岗位 ID 的稳定 `source_key`，`created_by=10304`；没有按姓名或相似度自动推断。
+
+发布前先在独立恢复副本中模拟全部 37 条写入、全量预检和回滚，模拟回滚后数据库指纹保持不变。正式事务内及提交后各执行一次来源解析校验，共检查 5291 条带 `user_id/business_at` 的来源记录，覆盖 37 个稳定用户 ID，`missing_assignment_history=0`。
+
+Legacy 预检中的 `missing_position_count=30` 是不可变历史审计分类，写入任职历史后按设计保持不变；它不再代表 V2 来源事实无法解析岗位。发布后完整预检为：
+
+| 指标 | 数量 |
+| --- | ---: |
+| Legacy 评分 | 64 |
+| 已覆盖但旧修订不可恢复 | 64 |
+| Legacy 缺岗位快照分类 | 30 |
+| 07:00 口径跨自然月报工 | 5 |
+| 07:00 口径跨自然月质量记录 | 11 |
+| 质量来源歧义 | 0 |
+| 缺少已批准岗位目标 | 0 |
+| V2 来源缺失任职历史 | 0 |
+
+备份和发布证据：
+
+| 项目 | 值 |
+| --- | --- |
+| 一致性备份 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/pre-position-mapping-20260807-173656.db` |
+| 备份字节数 | `20,561,920` |
+| 备份 SHA-256 | `49e3cb42e91ace4f35669d31c1d94184ed0396471e14ef174c468743c862f902` |
+| 独立恢复副本 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/restore-verification-position-mapping-20260807-173656.db` |
+| 备份验证证据 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/position-mapping-backup-verification-20260807-173656.json` |
+| 备份验证证据 SHA-256 | `ffa89ade199eebe0c87206ad4edd43f75cf3e111074983d53473ef879debb6be` |
+| 发布证据 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/position-target-assignment-publication-20260807-173943.json` |
+| 发布证据 SHA-256 | `461e38c68b86b916b60f61559c3c9d0d2114f303e35f50ffe1f3ca32d1850e9b` |
+| 完整预检 | `/home/dubin/qr-system-release-backups/20260807-performance-v56/post-position-mapping-preflight-20260807-173943.json` |
+| 完整预检 SHA-256 | `65cda4a4a056d4397f7aa96cc95a60fcbb14ac845604587c38ec931a93c83181` |
+| 新 manifest SHA-256 | `62a4583acec238b863a5b270c17c992e6a4dfc595a93905056a2108086b120b7` |
+
+隔离校验全部通过：岗位目标从 8 增加到 10，任职历史从 42 增加到 79；绩效批次仍为 2 个 Legacy V1 批次、V2 批次为 0；规则版本仍为 1；工资台账七项行数指纹保持为批次 4、员工行 119、明细 2975、工价解析 2638、调整项 0、事件 4、迁移 manifest 1；数据库完整性为 `ok`、外键违规为 0；`PERFORMANCE_LEDGER_V2_QUERY_ENABLED=false`。生产服务为 `active`，健康接口返回 `status=ok`、`db=connected`，部署提交仍为 `399d23831f6c5224639a2b478ebacce5fd492d42`。
+
+至此，历史 V2 生成的规则、岗位目标和岗位任职来源门禁已经满足。正式执行历史 `--apply` 前仍需确认主管复核人、计划管理人和复评人的授权矩阵；在人员和数据范围确认前继续保持 V2 查询开关关闭。
+
+## 16. 最终授权矩阵与部门补充修订确认
+
+业务负责人于 2026-08-07 确认下列最终授权矩阵。配置制单和批准继续使用现有账号；主管复核、改进计划管理和复评使用独立最小权限账号，不继承原管理员账号的通配权限。
+
+| 职责 | 人员与原身份 | 专用登录账号 | 最小权限 | 数据范围 |
+| --- | --- | --- | --- | --- |
+| 配置/部门修订制单 | 杨冰，用户 ID `10304` | 使用现有账号 | `performance:prepare` | 全局配置制单 |
+| 配置/部门修订批准 | 时文芳，用户 ID `10305` | 使用现有账号 | `performance:approve` | 全局配置批准 |
+| 主管统一复核 | 杜斌，原用户 ID `10333`、登录账号 `1000` | `1000_perf` | `performance:review_department` | 全部 9 个生产范围 |
+| 改进计划管理 | Dooley，原用户 ID `10334`、登录账号 `1004` | `1004_plan` | `performance:plan_manage` | 全部 9 个生产范围 |
+| 改进计划复评 | 王晓璐，原用户 ID `10335`、登录账号 `1005` | `1005_reassess` | `performance:plan_reassess` | 全部 9 个生产范围 |
+
+全部 9 个生产范围由生产部、下料、铆接、焊接、抛丸、打磨、镗孔、喷漆和新建的“机加工班组”组成。车工、铣工归属机加工班组；普工归属生产部 ID `1`；其他岗位分别归属已确认的班组 ID `2` 至 `8`。
+
+历史任职的部门处理方式确认为“保留原记录、生成版本化部门补充修订版”：
+
+- 不更新、不删除现有 37 条 `performance_assignment_history` 记录。
+- 部门补充修订独立记录版本、部门快照、原因、稳定来源键、制单人和批准人。
+- 已批准版本不可变；后续变更通过新修订版取代，不覆写旧版。
+- 同一任职同时最多存在一个当前已批准部门版本。
+- 部门修订制单人为杨冰 `10304`，批准人为时文芳 `10305`，两者必须分离。
+- V2 来源事实冻结当时的部门修订 ID、版本、来源键和批准时间，以便追溯。
+
+V57 代码已通过 `629` 项后端完整回归。正式生产创建三个专用账号前，密码或激活方式仍必须单独确认；未确认前不复制原管理员密码哈希，不将专用账号直接激活。V2 批次生成和 V2 查询开关仍须等待生产数据库副本验收通过。
+
+## 17. V57 生产数据库副本验收
+
+2026-08-07 18:56（Asia/Shanghai）使用候选代码 `df69b2df1ecc08bd46fcae8478c0ce20bdb55a4f` 和 SQLite 在线备份 API，将生产库以只读方式复制为独立验收副本。所有迁移、账号模拟、V2 生成和审批均只发生在副本，生产库仍保持 V56。
+
+| 项目 | 值 |
+| --- | --- |
+| 验收副本 | `/home/dubin/qr-system-release-backups/20260807-performance-v57/production-v56-replica-df69b2d-r2.db` |
+| 复制后、变更前 SHA-256 | `3dc14d8c730f7809c54f77ff602be69c7ea31e2cfc5c0e6b9ae5a606675fd3ac` |
+| 验收后 SHA-256 | `89a9890ca2c0df13e24a5437a4f9a24731371fb4821267262b3e3f2bdc2562ef` |
+| 独立证据 JSON | `/home/dubin/qr-system-release-backups/20260807-performance-v57/v57-replica-validation-df69b2d-r2.json` |
+| 证据 SHA-256 | `deef47bf568bda91ab2a1e18324d61f1a21ecb9cd94da80cb3cd89b9b65fc419` |
+| 迁移 | V56 -> V57，执行 1 个迁移 |
+| 最终完整性 | `integrity_check=ok`，外键违规 `0` |
+
+部门和授权验收：
+
+- 新建“机加工班组”，副本 ID 为 `11`；9 个生产范围为 `1,2,3,4,5,6,7,8,11`。
+- 副本专用账号为 `1000_perf`/`10336`、`1004_plan`/`10337`、`1005_reassess`/`10338`，均为 `inactive`，使用随机独立密码哈希，没有复制原管理员密码。
+- 三个专用角色均不含 `*`；分别只拥有复核、计划管理、复评所需的页面、部门查看和单一写权限。
+- 三个专用账号均绑定全部 9 个生产范围；对范围外的质检部 ID `9` 执行写操作被失败关闭门禁拒绝。
+
+部门修订和来源事实验收：
+
+- 37 条原任职记录的前后摘要一致：`1ba004f105f649721aedbc7227bc5debf04a346dd150d09db044643722764c8f`。
+- 新增并批准 37 条部门补充修订，当前版本重复为 `0`，已批准内容的更新被不可变触发器拒绝。
+- 副本 V2 共冻结 64 条任职事实；部门快照缺失 `0`，修订 ID/版本/来源键/批准时间缺失 `0`。
+
+历史 V2 和工作流验收：
+
+- 迁移前、部门修订后和全流程结束后的预检均为 `64 / 30 / 5 / 11`，质量歧义 `0`，缺已批准岗位目标 `0`。
+- 生成 2026-06 V2（27 人）和 2026-07 V2（37 人）；专用复核身份对 64 人次执行中性统一复核。
+- 两个 V2 批次均完成提交和双人批准；原两个 Legacy V1 保留并转为 `superseded`，64 条 Legacy 评分仍存在。
+- Dooley 专用身份建立、激活、追加证据并提交复评；王晓璐专用身份完成独立复评，计划终态为 `closed`。
+
+工资隔离再次通过：批次 `4`、员工行 `119`、调整项 `0`、明细 `2975`、工价解析 `2638`、事件 `4`、迁移 manifest `1`，验收前后完全一致。
+
+副本验收门禁已通过。正式生产发布时可安全执行 V57 迁移、部门修订和未激活专用账号建立；在专用账号完成密码重置和激活前，生产 V2 批次不生成，查询开关不开启。
+
+## 18. V57 正式发布与生产授权数据落地
+
+V57 于 2026-08-07 19:04（Asia/Shanghai）通过标准部署脚本正式发布，部署提交为 `306fa387d78c67fbf977f6a82eac16c22ef88479`。Git HEAD、`.deployed_commit` 和健康接口提交一致，用户级 `qr-system.service` 持续为 `active`，健康接口返回 `status=ok`、`db=connected`。
+
+标准部署验证：
+
+| 验证项 | 结果 |
+| --- | --- |
+| 后端完整回归 | `629 passed in 94.22s` |
+| 前端单元测试 | `19 files / 62 tests passed` |
+| 浏览器关键路径 | `15 passed` |
+| API 架构检查 | 30 个 namespace、339 个唯一方法 |
+| 前端依赖环检查 | 180 个文件、434 条内部边，无环 |
+| 生产构建 | 230 个模块转换成功 |
+| 数据库迁移 | V56 -> V57，执行 1 个迁移 |
+
+正式发布备份：
+
+| 阶段 | 路径 | SHA-256 | 校验 |
+| --- | --- | --- | --- |
+| 发布前外置 V56 | `/home/dubin/qr-system-release-backups/20260807-performance-v57/production-pre-v57-20260807-185922.db` | `3dc14d8c730f7809c54f77ff602be69c7ea31e2cfc5c0e6b9ae5a606675fd3ac` | V56、`ok`、外键 0 |
+| 部署脚本内部 V56 | `/home/dubin/qr-system/data/backups/production_20260807_190417.db` | `3dc14d8c730f7809c54f77ff602be69c7ea31e2cfc5c0e6b9ae5a606675fd3ac` | 112 张表 |
+| 迁移后、配置前 V57 | `/home/dubin/qr-system/data/backups/production_20260807_190745.db` | `189f1733099080d0ec01f8d7cd16acc25b3d79ccd6215dfd90d0f1a03b911869` | 113 张表 |
+| 生产配置后外置 V57 | `/home/dubin/qr-system-release-backups/20260807-performance-v57/production-post-v57-provisioning-20260807-190914.db` | `b3016b20603efd25443ca209e4d2ba075983e4d20bea9b14e988ee31a9899e1e` | V57、`ok`、外键 0 |
+
+部门与授权数据于 2026-08-07 19:08:18 在一个 `BEGIN IMMEDIATE` 受控事务中正式提交：
+
+- 新建“机加工班组” ID `11`，与生产范围 ID `1` 至 `8` 组成全部 9 个生产范围。
+- 创建 `1000_perf`（用户 `10336`）、`1004_plan`（用户 `10337`）、`1005_reassess`（用户 `10338`）。
+- 三个专用账号均为 `inactive`，密码为独立随机 bcrypt 哈希，没有复制原管理员密码，当前不可登录。
+- 三个角色分别为 `performance_reviewer_v57`、`performance_plan_manager_v57`、`performance_reassessor_v57`；不含通配权限，每个账号恰好绑定 9 个生产部门范围。
+- 授权和部门配置留存审计日志 `audit_logs.id=11603`，操作人为杨冰 `10304`。
+
+37 条历史任职的部门补充修订已正式发布：
+
+- 37 条全部为 `approved`，每条任职恰好一个当前已批准版本。
+- 制单人全部为杨冰 `10304`，批准人全部为时文芳 `10305`。
+- 原 37 条任职记录的部门字段变更数为 `0`，前后摘要同为 `1ba004f105f649721aedbc7227bc5debf04a346dd150d09db044643722764c8f`。
+- 岗位映射数量为：切割 1、铆工 5、焊工 15、抛丸 1、打磨 4、镗工 2、喷漆 5、车工 1、铣工 2、普工 1，合计 37。
+
+生产配置证据：
+
+- 证据文件：`/home/dubin/qr-system-release-backups/20260807-performance-v57/v57-production-provisioning-20260807-190815.json`
+- 证据 SHA-256：`f78c912b34afe8ff83fbeb6b27bcad22d29788f1e8046ab2c9d6d03ff6a856d4`
+- 配置前后预检均为 `64 / 30 / 5 / 11`，质量歧义 `0`，缺已批准目标 `0`。
+- 工资台账指纹前后一致：`4 / 119 / 0 / 2975 / 2638 / 4 / 1`。
+- 绩效批次前后一致：Legacy V1 `2`、V2 `0`、Legacy 评分 `64`。
+- `PERFORMANCE_LEDGER_V2_QUERY_ENABLED` 未配置，按默认值保持 `false`。
+
+当前唯一未完成门禁是三个专用账号的密码重置和激活。在用户确认安全的初始密码交付/自助重置方式前，三个账号保持 `inactive`，生产 V2 不生成、不批准，查询开关不开启。
+
+## 19. V57 专用账号基础角色校正
+
+2026-08-08 10:25（Asia/Shanghai）处理了启用 `1000_perf` 时出现的参数校验错误：
+
+```text
+参数校验失败: role — 'performance_reviewer_v57' is not one of ['admin', 'worker']
+```
+
+根因是 V57 初始配置把权限角色码写入了 `users.role`。该字段是系统基础身份字段，只允许 `admin` 或 `worker`；绩效职责角色应只通过 `roles`/`user_roles` 表表达。修复提交为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`，内容包括：
+
+- 副本和生产配置脚本统一使用 `users.role='worker'`，保留三个专用权限角色码及 `user_roles` 关联。
+- 管理员编辑现有用户时不再把 `role_code`（包括绩效专用角色码）回传到受限的基础 `role` 参数；角色勾选继续通过独立的用户角色接口保存。
+- 增加生产修复脚本、幂等事务、完整性/工资/绩效指纹校验、审计日志和回归测试。
+
+代码发布门禁全部通过：后端 `632 passed`，前端单元 `64 passed`，关键浏览器路径 `15 passed`，生产构建和健康检查通过；线上 `.deployed_commit` 与健康接口均为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`。
+
+生产数据库修复由 `scripts/repair_performance_v57_account_base_roles.py` 在 `BEGIN IMMEDIATE` 事务中完成，改动范围仅为：
+
+| 账号 | 用户 ID | `users.role` 修复前 | `users.role` 修复后 | 状态 | 权限角色 | 范围数 |
+| --- | ---: | --- | --- | --- | --- | ---: |
+| `1000_perf` | 10336 | `performance_reviewer_v57` | `worker` | inactive | `performance_reviewer_v57` | 9 |
+| `1004_plan` | 10337 | `performance_plan_manager_v57` | `worker` | inactive | `performance_plan_manager_v57` | 9 |
+| `1005_reassess` | 10338 | `performance_reassessor_v57` | `worker` | inactive | `performance_reassessor_v57` | 9 |
+
+三个 `user_roles` 映射、权限集合、9 个部门范围和账号状态均未改写；每个账号写入一条 `audit_logs.action=performance_v57_account_base_role_repair`。生产修复前备份及证据如下：
+
+| 项目 | 值 |
+| --- | --- |
+| 修复前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-account-role-fix/production-pre-role-repair-20260808-102500.db` |
+| 备份大小 | `21,397,504` bytes |
+| 备份 SHA-256 | `469df42390ccc099260cb70737766c51e7795507b30bcc10253d3f8715215f58` |
+| 修复证据 | `/home/dubin/qr-system-release-backups/20260808-performance-account-role-fix/production-role-repair-evidence-20260808-102500.json` |
+| 证据 SHA-256 | `bb5d7f3baf7117aa1caf78f927a0d911d3731ad821c6061ba57425d875ca402c` |
+
+修复后校验保持：`user_version=57`、`integrity_check=ok`、外键违规 `0`；Legacy V1 批次 `2`、V2 批次 `0`、Legacy 评分 `64`；工资台账指纹为批次 `4`、员工行 `119`、明细 `2975`、工价解析 `2638`、调整项 `0`、事件 `4`、迁移 manifest `1`；已批准部门修订 `37`。服务继续为 `active`，健康接口返回 `status=ok`、`db=connected`。
+
+账号仍按既定安全门禁保持 `inactive`，没有复制管理员密码，也没有生成或开启 V2 批次。现在从管理员用户界面重新启用 `1000_perf` 时，请求不会再携带 `performance_reviewer_v57` 到基础 `role` 字段；若需要正式激活三个账号，仍需按既定密码重置和双人授权流程单独执行。
+
+## 20. 生产 V2 历史预检与差异清单
+
+三个专用账号完成独立密码设置并激活后，于 2026-08-08 11:01:49（Asia/Shanghai）对生产库执行 2026-06 至 2026-07 的 V2 历史只读预检。执行进程通过 SQLite `mode=ro` 打开数据库，并设置 `PRAGMA query_only=ON`；没有使用 `--apply`、没有生成 V2 批次、没有修改工资台账，也没有开启 V2 查询。
+
+预检结果：
+
+| 指标 | 数量 |
+| --- | ---: |
+| Legacy 评分 | 64 |
+| 已覆盖但旧修订不可恢复 | 64 |
+| Legacy 缺岗位快照分类 | 30 |
+| 07:00 口径跨自然月报工 | 5 |
+| 07:00 口径跨自然月质量记录 | 11 |
+| 质量来源歧义 | 0 |
+| 缺少已批准岗位目标 | 0 |
+| V2 来源缺失任职历史 | 0 |
+
+全局预检 manifest SHA-256 保持为 `62a4583acec238b863a5b270c17c992e6a4dfc595a93905056a2108086b120b7`。任职覆盖检查共核验 5291 条带稳定用户 ID 和业务时间的历史来源，覆盖 37 人，未发现断链。
+
+差异清单共导出 666 条记录：
+
+- 64 条 `prior_revisions_unavailable`，其中 30 条同时属于 `missing_position_snapshot`；这是不可变 Legacy 审计分类，不阻止 V2 使用已确认任职历史解析岗位。
+- 16 条 `production_month_boundary`，包括 5 条报工和 11 条质量记录；均按 07:00 生产月口径正确归月。
+- 586 条 `explicit_source_relation`；这是已建立的显式质量来源映射证据，不是待修复异常。
+- `quality_source_confirmation_required=0`、`missing_position_target=0`，当前没有阻断历史 V2 生成的未确认差异。
+
+只读前后隔离校验一致：数据库 `user_version=57`、`integrity_check=ok`、外键违规 `0`；绩效批次为 Legacy V1 `2`、V2 `0`、Legacy 评分 `64`；工资台账七项指纹仍为 `4 / 119 / 0 / 2975 / 2638 / 4 / 1`；已确认任职记录 `37`、已批准部门修订 `37`；三个专用账号均为 `active`、基础角色 `worker`、各自最小权限角色和 9 个部门范围正确；V2 查询开关继续为 `false`。生产用户级服务为 `active`，HTTPS 健康接口返回 `status=ok`、`db=connected`，部署提交为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`。
+
+证据目录：`/home/dubin/qr-system-release-backups/20260808-performance-v2-preflight/20260808-110149`
+
+| 证据 | SHA-256 |
+| --- | --- |
+| `performance-v2-preflight-full-20260808-110149.json` | `c34b706249984e2767560143ddc01bbf013ac6de202d384155e8736180249cd3` |
+| `performance-v2-differences-20260808-110149.json` | `3bf3874813879140962aa4b8c6898533ca9d1044548e3beb8be3ddbe73f2f644` |
+| `performance-v2-differences-20260808-110149.csv` | `65a8a040e561eec308465bdf7cbaf99469a47d127acace7ef35d0b75e1ef6918` |
+| `performance-v2-preflight-evidence-20260808-110149.json` | `8d0e268a159ff5c038676ede607ece54291a81c3679a30f82d296f7e0cbc8bd4` |
+| `SHA256SUMS` | `9f7b2f41d45a5d11ee11265be79fd69b698130a8bfb297c55a854fad08be49bf` |
+
+生产 V2 历史生成前置门禁已满足。下一步可在保持查询开关关闭的情况下，由杨冰 `10304` 作为制单人受控执行 2026-06 至 2026-07 历史 V2 生成；生成后先导出 V1/V2 逐人差异，由 `1000_perf` 完成主管复核，再进入时文芳 `10305` 的双人批准流程。
+
+## 21. 生产 V2 草稿批次受控生成
+
+预检通过后，于 2026-08-08 13:53:06（Asia/Shanghai）完成生产 V2 草稿生成。操作人为杨冰 `10304`，使用现有历史迁移服务的 `apply` 事务；生产 V2 查询开关保持关闭。
+
+| 生产月 | V2 批次 | 版本 | 状态 | 评分数 | 迁移事件 |
+| --- | ---: | ---: | --- | ---: | ---: |
+| 2026-06 | 3 | 2 | `draft` | 27 | 4 |
+| 2026-07 | 4 | 2 | `draft` | 37 | 6 |
+
+生成后绩效批次为 Legacy V1 `2`、V2 `2`；Legacy 评分 `64`、V2 评分 `64`。两个批次均仍为 `draft`，没有提交主管复核、没有批准、没有取代 Legacy。
+
+2026-07 质量来源回填建立了 2198 条已确定关系；新增质量来源歧义 `0`。工资台账生成前后完全一致：`4 / 119 / 0 / 2975 / 2638 / 4 / 1`。数据库生成后 `integrity_check=ok`、外键违规 `0`。生成前后的历史预检 manifest 均为 `62a4583acec238b863a5b270c17c992e6a4dfc595a93905056a2108086b120b7`。
+
+生成前一致性备份：
+
+| 项目 | 值 |
+| --- | --- |
+| 备份路径 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-apply/20260808-135306/production-pre-v2-apply-20260808-135306.db` |
+| 备份大小 | `21,594,112` bytes |
+| 备份 SHA-256 | `ce3d67a0e1065f0a844dc365d996eb4ae9ba0fa15edadf78523f6105aa3cce17` |
+| 备份校验 | V57、`integrity_check=ok`、外键 0 |
+| 生成证据 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-apply/20260808-135306/performance-v2-apply-evidence-20260808-135306.json` |
+| 证据 SHA-256 | `6369424c8c3c536c5b6e499cfaee245e27c582f3d338454bbdd19bd2470047c7` |
+
+## 22. V1/V2 逐人主管复核清单导出
+
+2026-08-08 13:55:56 通过只读连接从两个 V2 迁移事件导出 64 人逐人差异，所有记录均处于 `draft` 批次，未写入生产数据库。
+
+| 复核维度 | 人次 |
+| --- | ---: |
+| 总差异记录 | 64 |
+| 有变化记录 | 64 |
+| `eligibility` | 41 |
+| `position_target` | 57 |
+| `quality_deduplication` | 56 |
+| `supervisor_review` | 41 |
+| `month_boundary` | 6 |
+
+清单目录：`/home/dubin/qr-system-release-backups/20260808-performance-v2-review/20260808-135556`
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `performance-v2-review-differences-20260808-135556.json` | `c26318c42e93ab22c85a69c9be0514048c108c13b1d793a718e69aa3041d69fc` |
+| `performance-v2-review-differences-20260808-135556.csv` | `9458b7134d59478b0745f9066283cfa1035bd422394200534024d00156168134` |
+| `performance-v2-review-export-evidence-20260808-135556.json` | `8a70f313f99fcbc5e276aa2d1aadab1e1443d11777dfb8f586eff3d2e45466b6` |
+
+当前门禁已切换为：由专用账号 `1000_perf` 执行 64 人统一主管复核。复核完成并确认差异后，才允许杨冰提交批次，再由时文芳 `10305` 执行双人批准；在批准前继续保持 Legacy 查询为正式来源，V2 查询开关不变。
+
+## 23. 生产 V2 统一主管复核
+
+2026-08-08 14:01:12（Asia/Shanghai）由专用账号 `1000_perf`（用户 `10336`、显示姓名杜斌）完成两个 V2 批次的统一中性复核。该账号实际权限为 `page:performance`、`performance:view_department`、`performance:review_department`，数据范围继续限定为全部 9 个生产部门/班组。
+
+复核前先创建并验证一致性备份。首次模拟执行因验收脚本把“数据不足员工”和“合格但岗位组不足 3 人”的空名次误判为异常而主动回滚；回滚后两个批次仍为 `draft`、复核记录仍为 `0`。将门禁修正为仅要求参评人数不少于 3 的合格岗位组具备公开名次后，正式事务重新执行并通过。
+
+| 生产月 | 批次 | 复核人数 | 最终状态 | 行版本 |
+| --- | ---: | ---: | --- | ---: |
+| 2026-06 | 3 | 27 | `supervisor_review` | 30 |
+| 2026-07 | 4 | 37 | `supervisor_review` | 40 |
+
+复核规则为 `uniform_no_input_adjustment`：纪律扣分、改进调整和人工分均保持默认值，不修改来源事实。每名员工均写入独立幂等复核记录，并在同一事务中按岗位原子重算当前评分和排名；最终复核记录共 64 条。
+
+| 项目 | 值 |
+| --- | --- |
+| 复核前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-supervisor-review/20260808-140112/production-pre-supervisor-review-20260808-140112.db` |
+| 备份大小 | `29,827,072` bytes |
+| 备份 SHA-256 | `90f26399a5e3217929b7b0c0e33275e8d9310df4de8351b891463f5140b7e4a1` |
+| 备份校验 | V57、`integrity_check=ok`、外键 0 |
+| 复核证据 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-supervisor-review/20260808-140112/performance-v2-supervisor-review-evidence-20260808-140112.json` |
+| 证据 SHA-256 | `b094e715b032507c8aefd5bd013123897dddd57d96c7e85e661bebca5b140782` |
+
+复核后工资台账七项指纹仍完全一致，Legacy V1 仍为正式查询来源，V2 查询开关继续关闭。生产用户级服务保持 `active`，HTTPS 健康接口返回 `status=ok`、`db=connected`，部署提交仍为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`。
+
+当前下一门禁为批次提交与双人批准：先由制单人杨冰 `10304` 将批次 3、4 从 `supervisor_review` 提交为待批准，再由不同人员时文芳 `10305` 批准并取代 Legacy。批准前不得开启 V2 查询。
+
+## 24. 生产 V2 批次提交与双人批准
+
+2026-08-08 14:46:55（Asia/Shanghai）开始执行生产 V2 批次提交与双人批准。批准前创建并验证一致性备份；批次 3、4 在同一受控事务中由制单人杨冰 `10304` 提交，再由不同人员时文芳 `10305` 批准。事务中的任一月份失败都会整体回滚。
+
+| 生产月 | Legacy 批次 | Legacy 终态 | V2 批次 | V2 终态 | 制单人 | 批准人 |
+| --- | ---: | --- | ---: | --- | --- | --- |
+| 2026-06 | 1 | `superseded` | 3 | `approved` | 杨冰 `10304` | 时文芳 `10305` |
+| 2026-07 | 2 | `superseded` | 4 | `approved` | 杨冰 `10304` | 时文芳 `10305` |
+
+版本取代关系完整：Legacy 批次 1 的 `superseded_by_batch_id=3`，V2 批次 3 的 `supersedes_batch_id=1`；Legacy 批次 2 的 `superseded_by_batch_id=4`，V2 批次 4 的 `supersedes_batch_id=2`。没有残留 `approval_pending` 批次。
+
+批准证据：
+
+| 项目 | 值 |
+| --- | --- |
+| 批准前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-approval/20260808-144655/production-pre-v2-approval-20260808-144655.db` |
+| 备份大小 | `30,511,104` bytes |
+| 备份 SHA-256 | `6f0798e4714ece01869505de38a7040a2cf5753bff860b608d52533eecd2c813` |
+| 备份校验 | V57、`integrity_check=ok`、外键 0 |
+| 批准证据 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-approval/20260808-144655/performance-v2-approval-evidence-20260808-144655.json` |
+| 证据 SHA-256 | `d48f92fe4734bd0ecebeb2b08a58124a08875af855d4749b58533b472c098a7e` |
+
+批准前后工资台账七项指纹完全一致；生产数据库完整性为 `ok`、外键违规 `0`。V2 查询开关仍保持 `false(default)`，批准动作本身没有改变正式查询来源。
+
+批准后又执行一次只读切换就绪验证：
+
+- 开关为 `false` 时，2026-06、2026-07 分别选择已取代但可兼容查询的 Legacy 批次 1、2，评分数量为 27、37。
+- 模拟开关为 `true` 时，分别选择已批准的 V2 批次 3、4，评分数量同样为 27、37。
+- Legacy 回退和 V2 候选选择均通过，未实际修改环境变量。
+
+切换就绪证据：`/home/dubin/qr-system-release-backups/20260808-performance-v2-approval/20260808-144655/performance-v2-cutover-readiness-20260808-144655.json`，SHA-256 为 `64840dff27059481cadcce3b0f905054cddb010322d7bd34a0cf6e411a5ceaf3`。
+
+生产用户级服务继续为 `active`，HTTPS 健康接口返回 `status=ok`、`db=connected`，部署提交为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`。当前唯一未执行步骤是将 `PERFORMANCE_LEDGER_V2_QUERY_ENABLED=true` 写入生产环境、重启服务并进行 V2 正式查询与 Legacy 回退验收。
+
+## 25. V2 正式查询切换与回退验收
+
+2026-08-08 15:12:56（Asia/Shanghai）完成 V2 正式查询切换。切换脚本先备份生产数据库和 `.env`，再原子写入 `PERFORMANCE_LEDGER_V2_QUERY_ENABLED=true`，重启用户级 `qr-system.service`，并验证 Gunicorn 主进程实际环境、生产健康、V2 查询、权限范围和 Legacy 回退。
+
+正式成功前有两次验收脚本失败，均由自动回滚机制完整恢复：
+
+- `20260808-151128`：使用部门范围专用账号验收 Legacy 全量回退时，Legacy 缺历史部门快照记录按权限设计不可见；脚本恢复原 `.env` 并重启，开关回到 `false`。
+- `20260808-151229`：Legacy 回退改用实际管理员账号后，通用验收身份检查错误地只允许基础角色 `worker`，拒绝合法的 `admin`；脚本再次恢复原 `.env` 并重启，开关回到 `false`。
+- 两次失败均发生在只读验收阶段，绩效批次、工资台账和数据库内容没有变化；回滚后的服务健康均为 `status=ok`、`db=connected`。
+
+修正验收身份口径后第三次切换成功：
+
+| 验收项 | 结果 |
+| --- | --- |
+| `.env` 开关 | `PERFORMANCE_LEDGER_V2_QUERY_ENABLED=true` |
+| Gunicorn 主进程环境 | `true`，PID `909503` |
+| 用户级服务 | `active` |
+| 健康接口 | `status=ok`、`db=connected` |
+| 部署提交 | `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85` |
+| 数据库 | V57、`integrity_check=ok`、外键 0 |
+| 工资台账 | 切换前后指纹完全一致 |
+
+V2 正式查询验收：
+
+| 生产月 | 正式来源 | 批次 | 版本 | 状态 | 评分数 |
+| --- | --- | ---: | ---: | --- | ---: |
+| 2026-06 | `ledger_v2` | 3 | 2 | `approved` | 27 |
+| 2026-07 | `ledger_v2` | 4 | 2 | `approved` | 37 |
+
+权限范围验收使用专用账号 `1000_perf`（用户 `10336`）：权限仅为绩效页面、部门查看和主管复核，范围 ID 为 `1,2,3,4,5,6,7,8,11`；对范围外部门 ID `9` 的查询被正确拒绝。2026-06 实际结果涉及范围 ID `2,3,4,5,6,7,8,11`，2026-07 涉及全部 9 个授权范围。
+
+Legacy 回退验收在不修改生产环境的模拟关闭开关上下文中完成，使用实际管理员账号 `1000`：
+
+| 生产月 | 回退来源 | 批次 | 版本 | 状态 | 评分数 |
+| --- | --- | ---: | ---: | --- | ---: |
+| 2026-06 | `legacy_v1` | 1 | 1 | `superseded` | 27 |
+| 2026-07 | `legacy_v1` | 2 | 1 | `superseded` | 37 |
+
+正式切换备份和证据：
+
+| 项目 | 值 |
+| --- | --- |
+| `.env` 切换前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-cutover/20260808-151256/production-env-pre-v2-cutover-20260808-151256.backup` |
+| `.env` 备份权限 | `0600` |
+| `.env` 备份 SHA-256 | `897824492db05c168d17ab5866bbeff8e3be71143b6297fd6e1d85bf2439680f` |
+| 数据库切换前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-cutover/20260808-151256/production-pre-v2-cutover-20260808-151256.db` |
+| 数据库备份大小 | `30,511,104` bytes |
+| 数据库备份 SHA-256 | `2deccbb67487400700832ea49a80ce96a7f562a361c6ddea97f8a1567446d987` |
+| 切换证据 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-cutover/20260808-151256/performance-v2-cutover-evidence-20260808-151256.json` |
+| 证据 SHA-256 | `7da262e9e2a585e44f5cd20c62ec6ad6d6291b1f1df84e7b02c6aced077a1656` |
+
+至此，2026-06 至 2026-07 绩效查询已正式切换到版本化 V2 台账。Legacy V1 数据和回退选择逻辑继续保留；如需紧急回退，可恢复切换前 `.env` 或将开关设置为 `false` 后重启用户级服务。
+
+## 26. 切换后真实业务只读冒烟
+
+正式切换后继续执行生产只读业务冒烟，最终证据生成于 2026-08-08。整个验收使用 SQLite `mode=ro` 和 `PRAGMA query_only=ON`，前后数据库、绩效批次和工资台账指纹完全一致。
+
+V2 正式结果与批次完整性：
+
+| 生产月 | 正式批次 | 来源 | 评分数 | 批次完整性 |
+| --- | ---: | --- | ---: | --- |
+| 2026-06 | 3 | `ledger_v2` | 27 | `complete=true`、问题 0 |
+| 2026-07 | 4 | `ledger_v2` | 37 | `complete=true`、问题 0 |
+
+专用账号权限和范围：
+
+| 账号 | 用户 ID | 专用职责 | 写权限 | 部门范围 |
+| --- | ---: | --- | --- | --- |
+| `1000_perf` | 10336 | 主管复核 | `performance:review_department` | `1,2,3,4,5,6,7,8,11` |
+| `1004_plan` | 10337 | 改进计划管理 | `performance:plan_manage` | `1,2,3,4,5,6,7,8,11` |
+| `1005_reassess` | 10338 | 改进计划复评 | `performance:plan_reassess` | `1,2,3,4,5,6,7,8,11` |
+
+三个账号均只有绩效页面、部门查看及各自单一职责写权限；没有制单、批准、其他绩效职责或通配权限。三个账号查询范围外部门 ID `9` 均被正确拒绝。
+
+Legacy 回退再次通过：模拟关闭 V2 查询时，2026-06 返回 Legacy 批次 1、27 人；2026-07 返回 Legacy 批次 2、37 人。模拟切换仅发生在独立应用上下文，没有修改生产 `.env`；实际生产开关继续为 `true`。
+
+最终冒烟证据：
+
+| 项目 | 值 |
+| --- | --- |
+| 证据文件 | `/home/dubin/qr-system-release-backups/20260808-performance-v2-cutover/20260808-151256/performance-v2-post-cutover-smoke-final-20260808-151256.json` |
+| 证据 SHA-256 | `f5d7887b3ec255f16d804dc4a87c569ab122fc9c7e9f332cc345fb1438f89686` |
+| 数据库 | V57、`integrity_check=ok`、外键 0 |
+| 工资台账 | 切换前后及冒烟前后完全一致 |
+| 服务错误日志 | 自 2026-08-08 15:12 起无 error 级记录 |
+| 延迟健康检查 | 2026-08-08 15:54，`status=ok`、`db=connected` |
+
+绩效 V2 生产迁移、复核、双人批准、正式切换和切换后只读验收至此全部完成。后续进入常规运行观察和业务使用阶段；任何新评分调整均必须通过 V2 修订版流程，不得覆写已批准批次。

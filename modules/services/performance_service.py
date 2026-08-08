@@ -1,23 +1,41 @@
-"""Performance evaluation and improvement workflow service."""
+"""Performance formal-result query facade and legacy support helpers."""
 from datetime import datetime
+import json
 
-from modules.services import BaseService
+from flask import current_app, has_app_context
+
+from modules import config
+from modules.domain.performance_policy import validate_production_month
+from modules.domain.reporting_day import reporting_month_bounds
+from modules.repositories.performance_authorization_repository import (
+    PerformanceAuthorizationRepository,
+)
 from modules.repositories.performance_repository import PerformanceRepository
 from modules.repositories.work_time_repository import WorkTimeRepository
-from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+from modules.services.performance_authorization_service import (
+    PerformanceAuthorizationService,
+)
 from modules.services.performance_scoring_policy import PerformanceScoringPolicy
 
 
 class PerformanceService:
+    SCORE_FIELDS = (
+        "output_score",
+        "quality_score",
+        "delivery_score",
+        "discipline_score",
+        "improvement_score",
+        "total_score",
+        "rank_no",
+        "rank_total",
+        "warning_level",
+    )
+
     @staticmethod
     def current_month():
         return datetime.now().strftime("%Y-%m")
 
     scoring_policy = PerformanceScoringPolicy
-
-    @staticmethod
-    def _score_worker(metrics, max_output, review=None, handoff=None):
-        return PerformanceService.scoring_policy.score_worker(metrics, max_output, review, handoff)
 
     @staticmethod
     def rules():
@@ -44,12 +62,35 @@ class PerformanceService:
         return latest_score_month or requested_month
 
     @staticmethod
-    def overview(year_month=None):
+    def _v2_query_enabled():
+        if not has_app_context():
+            return config.PERFORMANCE_LEDGER_V2_QUERY_ENABLED
+        return bool(
+            current_app.config.get(
+                "PERFORMANCE_LEDGER_V2_QUERY_ENABLED",
+                config.PERFORMANCE_LEDGER_V2_QUERY_ENABLED,
+            )
+        )
+
+    @staticmethod
+    def overview(year_month=None, actor=None):
         current_month = PerformanceService.current_month()
         requested_month = year_month or current_month
-        latest_score_month = PerformanceRepository.latest_score_month()
-        current_summary = PerformanceRepository.summary(current_month)
-        requested_summary = current_summary if requested_month == current_month else PerformanceRepository.summary(requested_month)
+        validate_production_month(requested_month)
+        months = PerformanceRepository.formal_result_months(
+            PerformanceService._v2_query_enabled()
+        )
+        latest_score_month = months[0]["year_month"] if months else ""
+        current_summary = PerformanceService.list_scores(
+            current_month, page=1, per_page=1, actor=actor
+        )["all_summary"]
+        requested_summary = (
+            current_summary
+            if requested_month == current_month
+            else PerformanceService.list_scores(
+                requested_month, page=1, per_page=1, actor=actor
+            )["all_summary"]
+        )
         current_score_count = current_summary.get("total") or 0
         requested_score_count = requested_summary.get("total") or 0
         display_month = PerformanceService.resolve_display_month(
@@ -66,116 +107,153 @@ class PerformanceService:
             "current_month_work_record_count": PerformanceService.work_record_count(current_month),
             "requested_month_score_count": requested_score_count,
             "requested_month_work_record_count": PerformanceService.work_record_count(requested_month),
-            "months": PerformanceRepository.list_score_months(),
+            "months": months,
         }
 
     @staticmethod
-    def _position_group_key(worker):
-        return worker.get("position_id") or 0
+    def _normalize_score(item, year_month):
+        item = dict(item)
+        try:
+            details = json.loads(item.get("score_details_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            details = {}
+        if not isinstance(details, dict):
+            details = {}
+        item.update(
+            {
+                "user_name": item.get("employee_name_snapshot") or "",
+                "employee_no": item.get("employee_no_snapshot") or "",
+                "role": item.get("role_type_snapshot") or "worker",
+                "department_id": item.get("department_id_snapshot"),
+                "department_name": item.get("department_name_snapshot") or "",
+                "position_id": item.get("position_id_snapshot"),
+                "position_name": item.get("position_name_snapshot") or "未设置岗位",
+                "score_details": details,
+                "year_month": year_month,
+                "eligible": item.get("eligibility_status") == "eligible",
+            }
+        )
+        if not item["eligible"]:
+            for field in PerformanceService.SCORE_FIELDS:
+                item[field] = None
+            item["warning_reason"] = ""
+        return item
 
     @staticmethod
-    def _position_group_name(worker):
-        return worker.get("position_name") or "未设置岗位"
+    def _empty_result(year_month, position_id, page, per_page):
+        period_start, period_end = reporting_month_bounds(year_month)
+        empty_summary = {
+            "total": 0,
+            "eligible_count": 0,
+            "insufficient_data_count": 0,
+            "avg_score": None,
+            "green": 0,
+            "yellow": 0,
+            "orange": 0,
+            "red": 0,
+        }
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "per_page": per_page,
+            "summary": dict(empty_summary),
+            "all_summary": dict(empty_summary),
+            "position_options": [],
+            "position_id": position_id,
+            "year_month": year_month,
+            "result_source": "legacy_v1",
+            "batch_id": None,
+            "version": None,
+            "batch_status": "unavailable",
+            "period_start": period_start,
+            "period_end": period_end,
+            "source_cutoff_at": "",
+        }
 
     @staticmethod
-    def generate_month(year_month=None):
-        year_month = year_month or PerformanceService.current_month()
-        workers = [dict(row) for row in PerformanceRepository.eligible_workers()]
-        metrics_by_user = {}
-        max_output_by_position = {}
-        for worker in workers:
-            metrics = PerformanceService.worker_month_metrics(worker["id"], year_month)
-            metrics_by_user[worker["id"]] = metrics
-            position_key = PerformanceService._position_group_key(worker)
-            max_output_by_position[position_key] = max(
-                max_output_by_position.get(position_key, 0),
-                metrics["output_qty"],
+    def list_scores(
+        year_month=None,
+        warning_level="",
+        search="",
+        position_id="",
+        page=1,
+        per_page=50,
+        user_id=None,
+        department_id=None,
+        actor=None,
+        db=None,
+    ):
+        year_month = validate_production_month(
+            year_month or PerformanceService.current_month()
+        )
+        try:
+            page = max(int(page or 1), 1)
+            per_page = min(max(int(per_page or 50), 1), 200)
+            user_id = int(user_id) if user_id not in (None, "") else None
+            department_id = (
+                int(department_id) if department_id not in (None, "") else None
             )
-        handoff_metrics = ProcessQualityEvaluationService.monthly_metrics(year_month)
-        with BaseService.transaction() as db:
-            for worker in workers:
-                metrics = metrics_by_user[worker["id"]]
-                review = PerformanceRepository.get_review(worker["id"], year_month, db) or {}
-                handoff = handoff_metrics.get(worker["id"], {})
-                position_key = PerformanceService._position_group_key(worker)
-                position_max_output = max_output_by_position.get(position_key, 0)
-                score = PerformanceService._score_worker(metrics, position_max_output, review, handoff)
-                score_details = score.get("score_details", {})
-                score_details.update({
-                    "scoring_scope": "position",
-                    "position_id": worker.get("position_id"),
-                    "position_name": PerformanceService._position_group_name(worker),
-                    "position_max_output": position_max_output,
-                })
-                score["score_details"] = score_details
-                PerformanceRepository.upsert_score({
-                    "user_id": worker["id"],
-                    "year_month": year_month,
-                    "role_type": worker.get("role") or "worker",
-                    **metrics,
-                    **score,
-                    "status": "generated",
-                }, db)
-            PerformanceRepository.update_ranks(year_month, db)
-        return {"ok": True, "year_month": year_month, "generated": len(workers)}
-
-    @staticmethod
-    def list_scores(year_month=None, warning_level="", search="", position_id="", page=1, per_page=50):
-        year_month = year_month or PerformanceService.current_month()
-        result = PerformanceRepository.list_scores(year_month, warning_level, search, position_id, page, per_page)
-        result["summary"] = PerformanceRepository.summary(year_month, position_id)
-        result["all_summary"] = PerformanceRepository.summary(year_month)
-        result["position_options"] = PerformanceRepository.score_positions(year_month)
-        result["position_id"] = position_id
-        result["year_month"] = year_month
-        return result
-
-    @staticmethod
-    def save_review(data, current_user_id=None):
-        required = ["user_id", "year_month"]
-        for field in required:
-            if not data.get(field):
-                raise ValueError(f"缺少必填字段: {field}")
-        payload = {
-            "user_id": int(data["user_id"]),
-            "year_month": str(data["year_month"]),
-            "discipline_deduction": PerformanceService.scoring_policy.clamp(
-                PerformanceService.scoring_policy.as_float(data.get("discipline_deduction")), 0.0, 10.0
+            if position_id not in (None, "", "__unassigned__"):
+                position_id = int(position_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("绩效查询筛选参数无效") from exc
+        if warning_level not in ("", "green", "yellow", "orange", "red"):
+            raise ValueError("绩效预警等级无效")
+        batch = PerformanceRepository.formal_result_batch(
+            year_month, PerformanceService._v2_query_enabled(), db=db
+        )
+        scope = PerformanceAuthorizationService.require_visible_filters(
+            actor,
+            batch["id"] if batch else None,
+            user_id=user_id,
+            department_id=department_id,
+            db=db,
+        )
+        if not batch:
+            return PerformanceService._empty_result(
+                year_month, position_id, page, per_page
+            )
+        rows = PerformanceAuthorizationRepository.list_score_revisions(
+            scope,
+            batch_id=batch["id"],
+            user_id=user_id,
+            department_id=department_id,
+            warning_level=warning_level,
+            search=str(search or "").strip(),
+            position_id=position_id,
+            page=page,
+            limit=per_page,
+            db=db,
+        )
+        summary = PerformanceAuthorizationRepository.score_summary(
+            scope, batch["id"], position_id=position_id, db=db
+        )
+        all_summary = PerformanceAuthorizationRepository.score_summary(
+            scope, batch["id"], db=db
+        )
+        return {
+            "items": [
+                PerformanceService._normalize_score(item, year_month)
+                for item in rows["items"]
+            ],
+            "total": rows["total"],
+            "page": rows["page"],
+            "per_page": rows["limit"],
+            "summary": summary,
+            "all_summary": all_summary,
+            "position_options": PerformanceAuthorizationRepository.score_positions(
+                scope, batch["id"], db=db
             ),
-            "discipline_reason": str(data.get("discipline_reason") or "").strip(),
-            "improvement_adjustment": PerformanceService.scoring_policy.clamp(
-                PerformanceService.scoring_policy.as_float(data.get("improvement_adjustment")), -5.0, 5.0
+            "position_id": position_id,
+            "year_month": year_month,
+            "result_source": (
+                "legacy_v1" if batch.get("legacy_imported") else "ledger_v2"
             ),
-            "improvement_reason": str(data.get("improvement_reason") or "").strip(),
-            "manual_score": PerformanceService.scoring_policy.clamp(
-                PerformanceService.scoring_policy.as_float(data.get("manual_score"), 10.0), 0.0, 10.0
-            ),
-            "manual_comment": str(data.get("manual_comment") or "").strip(),
-            "reviewed_by": current_user_id,
+            "batch_id": batch["id"],
+            "version": batch["version"],
+            "batch_status": batch["status"],
+            "period_start": batch["period_start"],
+            "period_end": batch["period_end"],
+            "source_cutoff_at": batch.get("source_cutoff_at") or "",
         }
-        with BaseService.transaction() as db:
-            PerformanceRepository.upsert_review(payload, db)
-        PerformanceService.generate_month(payload["year_month"])
-        return {"ok": True, "year_month": payload["year_month"]}
-
-    @staticmethod
-    def create_plan(data, current_user_id=None):
-        required = ["user_id", "year_month", "reason", "goal"]
-        for field in required:
-            if not data.get(field):
-                raise ValueError(f"缺少必填字段: {field}")
-        payload = dict(data)
-        payload["created_by"] = current_user_id
-        with BaseService.transaction() as db:
-            plan_id = PerformanceRepository.create_plan(payload, db)
-        return plan_id
-
-    @staticmethod
-    def list_plans(year_month="", status="", user_id=None):
-        return PerformanceRepository.list_plans(year_month, status, user_id)
-
-    @staticmethod
-    def update_plan(plan_id, data):
-        with BaseService.transaction() as db:
-            PerformanceRepository.update_plan(plan_id, data, db)
-        return {"ok": True}
