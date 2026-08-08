@@ -533,3 +533,41 @@ V57 于 2026-08-07 19:04（Asia/Shanghai）通过标准部署脚本正式发布�
 - `PERFORMANCE_LEDGER_V2_QUERY_ENABLED` 未配置，按默认值保持 `false`。
 
 当前唯一未完成门禁是三个专用账号的密码重置和激活。在用户确认安全的初始密码交付/自助重置方式前，三个账号保持 `inactive`，生产 V2 不生成、不批准，查询开关不开启。
+
+## 19. V57 专用账号基础角色校正
+
+2026-08-08 10:25（Asia/Shanghai）处理了启用 `1000_perf` 时出现的参数校验错误：
+
+```text
+参数校验失败: role — 'performance_reviewer_v57' is not one of ['admin', 'worker']
+```
+
+根因是 V57 初始配置把权限角色码写入了 `users.role`。该字段是系统基础身份字段，只允许 `admin` 或 `worker`；绩效职责角色应只通过 `roles`/`user_roles` 表表达。修复提交为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`，内容包括：
+
+- 副本和生产配置脚本统一使用 `users.role='worker'`，保留三个专用权限角色码及 `user_roles` 关联。
+- 管理员编辑现有用户时不再把 `role_code`（包括绩效专用角色码）回传到受限的基础 `role` 参数；角色勾选继续通过独立的用户角色接口保存。
+- 增加生产修复脚本、幂等事务、完整性/工资/绩效指纹校验、审计日志和回归测试。
+
+代码发布门禁全部通过：后端 `632 passed`，前端单元 `64 passed`，关键浏览器路径 `15 passed`，生产构建和健康检查通过；线上 `.deployed_commit` 与健康接口均为 `ecf5c03f0888a57b9400bbfe04ff1e33bd71fd85`。
+
+生产数据库修复由 `scripts/repair_performance_v57_account_base_roles.py` 在 `BEGIN IMMEDIATE` 事务中完成，改动范围仅为：
+
+| 账号 | 用户 ID | `users.role` 修复前 | `users.role` 修复后 | 状态 | 权限角色 | 范围数 |
+| --- | ---: | --- | --- | --- | --- | ---: |
+| `1000_perf` | 10336 | `performance_reviewer_v57` | `worker` | inactive | `performance_reviewer_v57` | 9 |
+| `1004_plan` | 10337 | `performance_plan_manager_v57` | `worker` | inactive | `performance_plan_manager_v57` | 9 |
+| `1005_reassess` | 10338 | `performance_reassessor_v57` | `worker` | inactive | `performance_reassessor_v57` | 9 |
+
+三个 `user_roles` 映射、权限集合、9 个部门范围和账号状态均未改写；每个账号写入一条 `audit_logs.action=performance_v57_account_base_role_repair`。生产修复前备份及证据如下：
+
+| 项目 | 值 |
+| --- | --- |
+| 修复前备份 | `/home/dubin/qr-system-release-backups/20260808-performance-account-role-fix/production-pre-role-repair-20260808-102500.db` |
+| 备份大小 | `21,397,504` bytes |
+| 备份 SHA-256 | `469df42390ccc099260cb70737766c51e7795507b30bcc10253d3f8715215f58` |
+| 修复证据 | `/home/dubin/qr-system-release-backups/20260808-performance-account-role-fix/production-role-repair-evidence-20260808-102500.json` |
+| 证据 SHA-256 | `bb5d7f3baf7117aa1caf78f927a0d911d3731ad821c6061ba57425d875ca402c` |
+
+修复后校验保持：`user_version=57`、`integrity_check=ok`、外键违规 `0`；Legacy V1 批次 `2`、V2 批次 `0`、Legacy 评分 `64`；工资台账指纹为批次 `4`、员工行 `119`、明细 `2975`、工价解析 `2638`、调整项 `0`、事件 `4`、迁移 manifest `1`；已批准部门修订 `37`。服务继续为 `active`，健康接口返回 `status=ok`、`db=connected`。
+
+账号仍按既定安全门禁保持 `inactive`，没有复制管理员密码，也没有生成或开启 V2 批次。现在从管理员用户界面重新启用 `1000_perf` 时，请求不会再携带 `performance_reviewer_v57` 到基础 `role` 字段；若需要正式激活三个账号，仍需按既定密码重置和双人授权流程单独执行。
