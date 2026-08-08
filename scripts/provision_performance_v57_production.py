@@ -28,6 +28,7 @@ from modules.services.performance_assignment_department_service import (  # noqa
     PerformanceAssignmentDepartmentService,
 )
 from scripts.validate_performance_v57_replica import (  # noqa: E402
+    DEDICATED_ACCOUNT_BASE_ROLE,
     DEDICATED_ACCOUNTS,
     POSITION_DEPARTMENTS,
     SOURCE_ACTORS,
@@ -107,7 +108,7 @@ def _ensure_account(db, definition, role_id):
             "username": definition["username"],
             "name": definition["name"],
             "employee_no": definition["employee_no"],
-            "role": definition["role_code"],
+            "role": DEDICATED_ACCOUNT_BASE_ROLE,
             "status": "inactive",
         }
         if any(account[field] != value for field, value in expected.items()):
@@ -126,7 +127,7 @@ def _ensure_account(db, definition, role_id):
                     definition["username"],
                     password_hash,
                     definition["name"],
-                    definition["role_code"],
+                    DEDICATED_ACCOUNT_BASE_ROLE,
                     definition["employee_no"],
                 ),
             ).lastrowid
@@ -182,6 +183,7 @@ def _provision_authorization(db):
             "role_id": role_id,
             "username": definition["username"],
             "name": definition["name"],
+            "base_role": DEDICATED_ACCOUNT_BASE_ROLE,
             "status": "inactive",
             "permissions": definition["permissions"],
             "department_ids": scope_ids,

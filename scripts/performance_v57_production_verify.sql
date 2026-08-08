@@ -13,6 +13,7 @@ SELECT u.id,
        u.username,
        u.name,
        u.status,
+       u.role AS base_role,
        r.code AS role_code,
        r.permissions,
        COUNT(scope.department_id) AS scope_count,
@@ -22,7 +23,7 @@ JOIN user_roles AS ur ON ur.user_id = u.id
 JOIN roles AS r ON r.id = ur.role_id
 LEFT JOIN performance_department_scopes AS scope ON scope.user_id = u.id
 WHERE u.username IN ('1000_perf', '1004_plan', '1005_reassess')
-GROUP BY u.id, u.username, u.name, u.status, r.code, r.permissions
+GROUP BY u.id, u.username, u.name, u.status, u.role, r.code, r.permissions
 ORDER BY u.id;
 
 SELECT COUNT(*) AS approved_department_revisions,

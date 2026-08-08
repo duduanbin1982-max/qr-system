@@ -120,8 +120,8 @@ export function useAdminUsers() {
       name: user.name || '',
       nickname: user.nickname || '',
       password: '',
-      role: user.role_code || user.role || 'admin',
-      role_id: user.role_id || null,
+      role: user.role || (user.is_admin_user ? 'admin' : 'worker'),
+      role_id: null,
       email: user.email || '',
       phone: user.phone || '',
       employee_no: user.employee_no || '',
@@ -171,7 +171,6 @@ export function useAdminUsers() {
         username: adminForm.username,
         name: adminForm.name,
         nickname: adminForm.nickname,
-        role: adminForm.role || 'admin',
         email: adminForm.email,
         phone: adminForm.phone,
         employee_no: adminForm.employee_no,
@@ -179,7 +178,10 @@ export function useAdminUsers() {
         group_name: adminForm.group_name,
       }
       if (adminForm.password) body.password = adminForm.password
-      if (adminForm.role_id) body.role_id = adminForm.role_id
+      if (!adminModalEdit.value) {
+        body.role = adminForm.role || 'admin'
+        if (adminForm.role_id) body.role_id = adminForm.role_id
+      }
 
       let userId = adminForm._id
       if (adminModalEdit.value) {

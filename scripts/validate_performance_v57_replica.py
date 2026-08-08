@@ -58,6 +58,7 @@ EXPECTED_COUNTS = {
     "cross_month_work_count": 5,
     "cross_month_quality_count": 11,
 }
+DEDICATED_ACCOUNT_BASE_ROLE = "worker"
 SOURCE_ACTORS = {
     "preparer": {"id": 10304, "username": "1001", "name": "杨冰"},
     "approver": {"id": 10305, "username": "1002", "name": "时文芳"},
@@ -285,7 +286,7 @@ def _create_dedicated_account(db, account):
                 account["username"],
                 password_hash,
                 account["name"],
-                account["role_code"],
+                DEDICATED_ACCOUNT_BASE_ROLE,
                 account["employee_no"],
             ),
         ).lastrowid
@@ -340,6 +341,7 @@ def _provision_replica_authorization(db):
             "role_id": role_id,
             "username": definition["username"],
             "name": definition["name"],
+            "base_role": DEDICATED_ACCOUNT_BASE_ROLE,
             "status": "inactive",
             "permissions": list(definition["permissions"]),
             "department_ids": scope_ids,
