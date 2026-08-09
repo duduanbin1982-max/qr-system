@@ -79,6 +79,51 @@ def test_latest_version_matches_highest_registered_migration():
     assert migrations.LATEST_VERSION == max(version for version, _, _ in migrations.MIGRATIONS)
 
 
+def test_process_quality_state_migration_records_anomalies_and_locks_terminal_states():
+    from modules.migration_process_quality import m058_harden_process_quality_state_transitions
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE process_quality_evaluations (
+                id INTEGER PRIMARY KEY,
+                status TEXT
+            );
+            CREATE TABLE process_quality_evaluation_appeals (
+                id INTEGER PRIMARY KEY,
+                evaluation_id INTEGER,
+                status TEXT
+            );
+            INSERT INTO process_quality_evaluations VALUES (1, 'confirmed');
+            INSERT INTO process_quality_evaluations VALUES (2, 'legacy_unknown');
+            INSERT INTO process_quality_evaluation_appeals VALUES (10, 1, 'pending');
+            """
+        )
+
+        m058_harden_process_quality_state_transitions(db)
+
+        issue = db.execute(
+            "SELECT issue_code, observed_status FROM process_quality_state_issues "
+            "WHERE entity_type = 'evaluation' AND entity_id = 2"
+        ).fetchone()
+        assert dict(issue) == {
+            "issue_code": "invalid_status",
+            "observed_status": "legacy_unknown",
+        }
+        db.execute("UPDATE process_quality_evaluations SET status = 'rejected' WHERE id = 1")
+        db.execute("UPDATE process_quality_evaluation_appeals SET status = 'accepted' WHERE id = 10")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("UPDATE process_quality_evaluations SET status = 'confirmed' WHERE id = 1")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("UPDATE process_quality_evaluation_appeals SET status = 'rejected' WHERE id = 10")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO process_quality_evaluations VALUES (3, 'invalid')")
+    finally:
+        db.close()
+
+
 def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     from modules import migrations
 

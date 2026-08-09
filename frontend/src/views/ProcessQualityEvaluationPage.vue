@@ -50,6 +50,7 @@
           <div class="table-wrap"><table v-if="appeals.length" class="data-table pqe-wide"><thead><tr><th>申诉时间</th><th>订单/工件</th><th>工序/申诉人</th><th>原评分</th><th>申诉原因</th><th>状态</th><th>复核人/说明</th><th>操作</th></tr></thead>
             <tbody><tr v-for="row in appeals" :key="row.id"><td>{{ row.created_at }}</td><td><code>{{ row.order_no }}</code><div class="cell-muted">{{ row.serial_no || '订单模式' }}</div></td><td>{{ row.target_process_name }}<div class="cell-muted">{{ row.requester_name }}</div></td><td><strong :class="scoreClass(row.total_score)">{{ row.total_score }}</strong><div class="cell-muted">{{ row.grade }}</div></td><td>{{ row.reason }}</td><td><span class="badge" :class="appealClass(row.status)">{{ appealText(row.status) }}</span></td><td>{{ row.reviewer_name || '-' }}<div class="cell-muted">{{ row.review_note || '-' }}</div></td><td class="action-cell"><template v-if="row.status === 'pending'"><button class="btn btn-success btn-sm" @click="openReview('appeal', row, 'accepted')">成立</button><button class="btn btn-default btn-sm" @click="openReview('appeal', row, 'rejected')">不成立</button></template></td></tr></tbody>
           </table><div v-else class="empty"><div class="empty-text">暂无申诉记录</div></div></div>
+          <div v-if="appealTotal" class="pqe-pagination"><span>共 {{ appealTotal }} 条</span><button class="btn btn-default btn-sm" :disabled="appealPage <= 1" @click="changeAppealPage(-1)">上一页</button><span>第 {{ appealPage }} / {{ appealPages }} 页</span><button class="btn btn-default btn-sm" :disabled="appealPage >= appealPages" @click="changeAppealPage(1)">下一页</button></div>
         </section>
 
         <section v-else-if="activeTab === 'templates'">
@@ -119,7 +120,7 @@ const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const keyword = ref('')
 const PAGE_SIZE = 50
 const tasks = ref([]), records = ref([]), appeals = ref([]), templates = ref([])
-const taskPage = ref(1), taskTotal = ref(0), recordPage = ref(1), recordTotal = ref(0)
+const taskPage = ref(1), taskTotal = ref(0), recordPage = ref(1), recordTotal = ref(0), appealPage = ref(1), appealTotal = ref(0)
 const statsSummary = ref({}), appealSummary = ref({}), processStats = ref([]), evaluatorStats = ref([])
 const disposalSummary = ref({}), disposalView = ref(null)
 const refs = reactive({ routes: [], processes: [] })
@@ -132,23 +133,25 @@ const reviewTargetLabel = computed(() => reviewForm.target ? `${reviewForm.targe
 
 const taskPages = computed(() => pageCount(taskTotal.value))
 const recordPages = computed(() => pageCount(recordTotal.value))
+const appealPages = computed(() => pageCount(appealTotal.value))
 
 function pageCount(total) { return Math.max(1, Math.ceil((Number(total) || 0) / PAGE_SIZE)) }
 function tabCount(key) { if (key === 'disposal') return disposalSummary.value.required_pending || 0; if (key === 'review') return statsSummary.value.pending_verification || 0; if (key === 'appeals') return appealSummary.value.pending || 0; return 0 }
 async function loadTasks() { const data = await api.domains.processQualityEvaluations.qualityEvaluationTasks({ scope: 'all', status: 'pending', keyword: keyword.value, page: taskPage.value, per_page: PAGE_SIZE }); const lastPage = pageCount(data.total); if (taskPage.value > lastPage) { taskPage.value = lastPage; return loadTasks() } tasks.value = data.items || []; taskTotal.value = data.total || 0 }
 async function loadRecords(status = '') { const data = await api.domains.processQualityEvaluations.qualityEvaluationRecords({ year_month: yearMonth.value, status, keyword: keyword.value, page: recordPage.value, per_page: PAGE_SIZE }); const lastPage = pageCount(data.total); if (recordPage.value > lastPage) { recordPage.value = lastPage; return loadRecords(status) } records.value = data.items || []; recordTotal.value = data.total || 0 }
-async function loadAppeals() { const data = await api.domains.processQualityEvaluations.qualityEvaluationAppeals({ status: '', year_month: yearMonth.value }); appeals.value = data.items || [] }
+async function loadAppeals() { const data = await api.domains.processQualityEvaluations.qualityEvaluationAppeals({ status: '', year_month: yearMonth.value, page: appealPage.value, per_page: PAGE_SIZE }); const lastPage = pageCount(data.total); if (appealPage.value > lastPage) { appealPage.value = lastPage; return loadAppeals() } appeals.value = data.items || []; appealTotal.value = data.total || 0 }
 async function loadTemplates() { const [templateData, refData] = await Promise.all([api.domains.processQualityEvaluations.qualityEvaluationTemplates({}), api.domains.processQualityEvaluations.qualityEvaluationReferences()]); templates.value = templateData.items || []; Object.assign(refs, refData) }
 async function loadStats() { const data = await api.domains.processQualityEvaluations.qualityEvaluationStats({ year_month: yearMonth.value }); statsSummary.value = data.summary || {}; appealSummary.value = data.appeals || {}; processStats.value = data.processes || []; evaluatorStats.value = data.evaluators || [] }
 async function loadRules() { const data = await api.domains.processQualityEvaluations.qualityEvaluationRules(); Object.assign(ruleForm, data); issueTagsText.value = (data.issue_tags || []).join('，'); criticalTagsText.value = (data.critical_issue_tags || []).join('，') }
 async function loadActive({ resetDisposal = false } = {}) { try { if (activeTab.value === 'tasks') await loadTasks(); if (activeTab.value === 'disposal') { await nextTick(); await disposalView.value?.reload({ resetPage: resetDisposal }) } if (activeTab.value === 'records') await loadRecords(); if (activeTab.value === 'review') await loadRecords('pending_verification'); if (activeTab.value === 'appeals') await loadAppeals(); if (activeTab.value === 'templates') await loadTemplates(); if (activeTab.value === 'rules') await loadRules(); if (can('process_quality_evaluation:stats')) await loadStats() } catch (error) { showToast(error.message || '评价数据加载失败', 'error') } }
-function resetActivePage() { if (activeTab.value === 'tasks') taskPage.value = 1; if (['records', 'review'].includes(activeTab.value)) recordPage.value = 1 }
+function resetActivePage() { if (activeTab.value === 'tasks') taskPage.value = 1; if (['records', 'review'].includes(activeTab.value)) recordPage.value = 1; if (activeTab.value === 'appeals') appealPage.value = 1 }
 async function reloadActiveFromFirstPage() { resetActivePage(); await loadActive({ resetDisposal: true }) }
 async function switchTab(key) { activeTab.value = key; resetActivePage(); localStorage.setItem('processQualityEvaluationTab', key); await loadActive({ resetDisposal: true }) }
 function onDisposalSummary(value) { disposalSummary.value = value || {} }
 async function onTasksWaived() { taskPage.value = 1; await loadTasks() }
 async function changeTaskPage(delta) { taskPage.value += delta; await loadTasks() }
 async function changeRecordPage(delta) { recordPage.value += delta; await loadRecords(activeTab.value === 'review' ? 'pending_verification' : '') }
+async function changeAppealPage(delta) { appealPage.value += delta; await loadAppeals() }
 
 function splitTags(value) { return value.split(/[，,]/).map(item => item.trim()).filter(Boolean) }
 async function saveRules() { try { await api.domains.processQualityEvaluations.saveQualityEvaluationRules({ ...ruleForm, issue_tags: splitTags(issueTagsText.value), critical_issue_tags: splitTags(criticalTagsText.value) }); showToast('评价规则已保存'); await loadRules() } catch (error) { showToast(error.message || '保存失败', 'error') } }

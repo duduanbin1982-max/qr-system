@@ -944,3 +944,188 @@ def test_accepted_appeal_cancels_existing_quality_task(
         ).fetchone()
     assert quality_task["status"] == "cancelled"
     assert "申诉成立" in quality_task["cancel_reason"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/process-quality-evaluations?page=0",
+        "/api/process-quality-evaluations?per_page=0",
+        "/api/process-quality-evaluations?per_page=501",
+        "/api/process-quality-evaluations/appeals?per_page=invalid",
+    ],
+)
+def test_quality_routes_reject_invalid_pagination(client, auth_headers, path):
+    response = client.get(path, headers=auth_headers)
+
+    assert response.status_code == 400
+    assert any(
+        label in response.get_json()["error"] for label in ("分页", "页码", "每页")
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"enabled": "false"},
+        {"low_score_threshold": "60"},
+        {"issue_tags": "尺寸问题"},
+    ],
+)
+def test_quality_rules_reject_malformed_values_without_persisting(
+    client, auth_headers, payload
+):
+    before = client.get(
+        "/api/process-quality-evaluations/rules", headers=auth_headers
+    ).get_json()
+
+    response = client.put(
+        "/api/process-quality-evaluations/rules", headers=auth_headers, json=payload
+    )
+
+    assert response.status_code == 400
+    after = client.get(
+        "/api/process-quality-evaluations/rules", headers=auth_headers
+    ).get_json()
+    assert after == before
+
+
+def test_duplicate_evaluation_review_returns_conflict_without_second_event(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"][0]
+    evaluation = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 2, ["尺寸问题"]),
+    ).get_json()["items"][0]
+
+    first = client.put(
+        f"/api/process-quality-evaluations/{evaluation['id']}/review",
+        headers=auth_headers,
+        json={"status": "confirmed", "note": "第一次现场复核确认"},
+    )
+    second = client.put(
+        f"/api/process-quality-evaluations/{evaluation['id']}/review",
+        headers=auth_headers,
+        json={"status": "rejected", "note": "第二次竞争处理请求"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.get_json()["code"] == "conflict"
+    with client.application.app_context():
+        db = get_db()
+        stored = db.execute(
+            "SELECT status FROM process_quality_evaluations WHERE id = ?",
+            (evaluation["id"],),
+        ).fetchone()
+        review_count = db.execute(
+            "SELECT COUNT(*) FROM process_quality_evaluation_reviews WHERE evaluation_id = ?",
+            (evaluation["id"],),
+        ).fetchone()[0]
+    assert stored["status"] == "confirmed"
+    assert review_count == 1
+
+
+def test_duplicate_appeal_review_returns_conflict_and_list_is_paginated(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][0]
+    )
+    evaluation = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 4),
+    ).get_json()["items"][0]
+    target_headers = _login_headers(client, flow["upstream_usernames"][0])
+    appeal = client.post(
+        f"/api/process-quality-evaluations/{evaluation['id']}/appeals",
+        headers=target_headers,
+        json={"reason": "现场流转记录与评价结论不一致"},
+    ).get_json()
+
+    listed = client.get(
+        "/api/process-quality-evaluations/appeals?page=1&per_page=1",
+        headers=auth_headers,
+    )
+    first = client.put(
+        f"/api/process-quality-evaluations/appeals/{appeal['id']}/review",
+        headers=auth_headers,
+        json={"status": "rejected", "note": "现有证据不足以支持申诉"},
+    )
+    second = client.put(
+        f"/api/process-quality-evaluations/appeals/{appeal['id']}/review",
+        headers=auth_headers,
+        json={"status": "accepted", "note": "重复提交的竞争请求"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.get_json()["total"] == 1
+    assert listed.get_json()["page"] == 1
+    assert listed.get_json()["per_page"] == 1
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.get_json()["code"] == "conflict"
+    with client.application.app_context():
+        db = get_db()
+        stored_appeal = db.execute(
+            "SELECT status FROM process_quality_evaluation_appeals WHERE id = ?",
+            (appeal["id"],),
+        ).fetchone()
+        stored_evaluation = db.execute(
+            "SELECT status FROM process_quality_evaluations WHERE id = ?",
+            (evaluation["id"],),
+        ).fetchone()
+    assert stored_appeal["status"] == "rejected"
+    assert stored_evaluation["status"] == "confirmed"
+
+
+def test_quality_evaluation_month_filters_use_0700_production_boundary(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"][0]
+    evaluation = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json=_score_payload(task["id"], 4),
+    ).get_json()["items"][0]
+
+    cases = [
+        ("2026-08-01 06:59:59", "2026-07", "2026-08"),
+        ("2026-08-01 07:00:00", "2026-08", "2026-07"),
+        ("2026-09-01 06:59:59", "2026-08", "2026-09"),
+    ]
+    for timestamp, included_month, excluded_month in cases:
+        with client.application.app_context():
+            db = get_db()
+            db.execute(
+                "UPDATE process_quality_evaluations SET created_at = ? WHERE id = ?",
+                (timestamp, evaluation["id"]),
+            )
+            db.commit()
+        included = client.get(
+            f"/api/process-quality-evaluations?year_month={included_month}",
+            headers=auth_headers,
+        ).get_json()
+        excluded = client.get(
+            f"/api/process-quality-evaluations?year_month={excluded_month}",
+            headers=auth_headers,
+        ).get_json()
+        assert included["total"] == 1
+        assert excluded["total"] == 0

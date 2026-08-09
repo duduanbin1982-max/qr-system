@@ -244,6 +244,7 @@ body {
 /* ===== 主内容区 ===== */
 .main-content {
   flex: 1;
+  min-width: 0;
   margin-left: 260px;
   min-height: 100vh;
   background: var(--bg-page);

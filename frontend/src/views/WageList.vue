@@ -1,7 +1,7 @@
 <!-- WageList.vue — 工资核算模块 -->
 <template>
-<div style="padding:var(--space-6)">
-    <div class="tab-nav" style="display:flex;gap:2px;margin-bottom:var(--space-5);background:var(--bg-secondary);border-radius:8px;padding:4px;overflow-x:auto">
+<div class="wage-page">
+    <div class="tab-nav wage-tab-nav">
       <button v-for="t in tabs" :key="t.id" @click="switchTab(t.id)"
         :style="{flex:'0 0 auto',whiteSpace:'nowrap',textAlign:'center',padding:'9px 14px',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'var(--text-sm)',fontWeight:600,transition:'all .2s',background:activeTab===t.id?'#fff':'transparent',color:activeTab===t.id?'var(--primary)':'var(--text-secondary)',boxShadow:activeTab===t.id?'0 1px 3px rgba(0,0,0,.08)':'none'}">
         {{ t.label }}
@@ -45,3 +45,7 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.wage-page{width:100%;max-width:100%;min-width:0;padding:var(--space-6);overflow:hidden}.wage-tab-nav{display:flex;max-width:100%;gap:2px;margin-bottom:var(--space-5);padding:4px;overflow-x:auto;overscroll-behavior-x:contain;border-radius:8px;background:var(--bg-secondary);scrollbar-width:thin}@media(max-width:768px){.wage-page{padding:var(--space-4) 12px}.wage-tab-nav{margin-bottom:var(--space-4)}}
+</style>

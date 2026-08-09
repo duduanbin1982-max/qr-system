@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 IGNORED_PARTS = {
     ".git",
     ".pytest_cache",
+    ".venv",
     "__pycache__",
     "backups",
     "data",

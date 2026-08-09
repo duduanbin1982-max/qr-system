@@ -77,31 +77,39 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def save_rules(cls, data):
+        if not isinstance(data, dict):
+            raise ValueError("评价规则必须是对象")
         rules = cls.rules()
         if "enabled" in data:
-            rules["enabled"] = bool(data["enabled"])
+            rules["enabled"] = cls._strict_bool(data["enabled"], "enabled")
         if "required_previous_process" in data:
-            rules["required_previous_process"] = bool(data["required_previous_process"])
+            rules["required_previous_process"] = cls._strict_bool(
+                data["required_previous_process"], "required_previous_process"
+            )
         if "low_score_threshold" in data:
-            threshold = cls._score_threshold(data["low_score_threshold"])
-            if threshold < 0 or threshold > 100:
-                raise ValueError("低分核验阈值必须是0-100分")
+            threshold = cls._strict_int(data["low_score_threshold"], "低分核验阈值", 0, 100)
             rules["low_score_threshold"] = threshold
         if "critical_score_threshold" in data:
-            critical = cls._score_threshold(data["critical_score_threshold"], 40)
-            if critical < 0 or critical > rules["low_score_threshold"]:
+            critical = cls._strict_int(
+                data["critical_score_threshold"], "严重缺陷阈值", 0, 100
+            )
+            if critical > rules["low_score_threshold"]:
                 raise ValueError("严重缺陷阈值必须在0到低分阈值之间")
             rules["critical_score_threshold"] = critical
         if "minimum_samples_for_performance" in data:
-            rules["minimum_samples_for_performance"] = max(
-                cls._positive_int(data["minimum_samples_for_performance"], 3), 1
+            rules["minimum_samples_for_performance"] = cls._strict_int(
+                data["minimum_samples_for_performance"], "进入绩效最小样本数", 1, None
             )
         for key in ("hide_target_identity", "auto_open_mobile"):
             if key in data:
-                rules[key] = bool(data[key])
-        if isinstance(data.get("issue_tags"), list):
+                rules[key] = cls._strict_bool(data[key], key)
+        if "issue_tags" in data:
+            if not isinstance(data["issue_tags"], list):
+                raise ValueError("问题标签必须是字符串数组")
             rules["issue_tags"] = [str(tag).strip() for tag in data["issue_tags"] if str(tag).strip()]
-        if isinstance(data.get("critical_issue_tags"), list):
+        if "critical_issue_tags" in data:
+            if not isinstance(data["critical_issue_tags"], list):
+                raise ValueError("严重问题标签必须是字符串数组")
             rules["critical_issue_tags"] = [
                 str(tag).strip() for tag in data["critical_issue_tags"] if str(tag).strip()
             ]
@@ -122,6 +130,22 @@ class ProcessQualityEvaluationService:
     @staticmethod
     def _positive_int(value, default=1):
         return QualityEvaluationPolicy.positive_int(value, default)
+
+    @staticmethod
+    def _strict_bool(value, label):
+        if not isinstance(value, bool):
+            raise ValueError(f"{label}必须是布尔值")
+        return value
+
+    @staticmethod
+    def _strict_int(value, label, minimum=None, maximum=None):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label}必须是整数")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"{label}不能小于{minimum}")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{label}不能大于{maximum}")
+        return value
 
     @staticmethod
     def _rating(value, label):
@@ -179,9 +203,11 @@ class ProcessQualityEvaluationService:
 
     @classmethod
     def _normalize_template(cls, data):
+        if not isinstance(data, dict):
+            raise ValueError("评价模板必须是对象")
         name = str(data.get("name") or "").strip()
         process_id = data.get("process_id")
-        if not name or not process_id:
+        if not name or not isinstance(process_id, int) or isinstance(process_id, bool) or process_id <= 0:
             raise ValueError("评价模板必须填写名称并选择工序")
         dimensions = data.get("dimensions")
         if not isinstance(dimensions, list) or not dimensions:
@@ -203,16 +229,27 @@ class ProcessQualityEvaluationService:
             normalized.append({
                 "key": key,
                 "label": label,
-                "weight": cls._positive_int(dimension.get("weight"), 1),
-                "required": dimension.get("required", True) is not False,
+                "weight": cls._strict_int(dimension.get("weight", 1), "评分维度权重", 1, None),
+                "required": cls._strict_bool(dimension.get("required", True), "评分维度 required"),
             })
-        low = cls._score_threshold(data.get("low_score_threshold"), 60)
-        critical = cls._score_threshold(data.get("critical_score_threshold"), 40)
+        low = cls._strict_int(data.get("low_score_threshold", 60), "低分核验阈值", 0, 100)
+        critical = cls._strict_int(data.get("critical_score_threshold", 40), "严重缺陷阈值", 0, 100)
         if low < 0 or low > 100 or critical < 0 or critical > low:
             raise ValueError("模板评分阈值设置无效")
+        route_id = data.get("route_id")
+        if route_id is not None and (
+            not isinstance(route_id, int) or isinstance(route_id, bool) or route_id <= 0
+        ):
+            raise ValueError("评价模板路线 ID 无效")
+        status = data.get("status", "active")
+        if status not in {"active", "inactive"}:
+            raise ValueError("评价模板状态无效")
+        for field, label in (("issue_tags", "问题标签"), ("critical_issue_tags", "严重问题标签")):
+            if field in data and not isinstance(data[field], list):
+                raise ValueError(f"{label}必须是字符串数组")
         return {
             "name": name,
-            "route_id": data.get("route_id") or None,
+            "route_id": route_id,
             "process_id": process_id,
             "dimensions": normalized,
             "issue_tags": [str(tag).strip() for tag in data.get("issue_tags", []) if str(tag).strip()],
@@ -221,7 +258,7 @@ class ProcessQualityEvaluationService:
             ],
             "low_score_threshold": low,
             "critical_score_threshold": critical,
-            "status": data.get("status") if data.get("status") in {"active", "inactive"} else "active",
+            "status": status,
         }
 
     @staticmethod
@@ -239,6 +276,8 @@ class ProcessQualityEvaluationService:
         with cls._unit_of_work().transaction() as db:
             if template_id and not repository.template_by_id(template_id, db):
                 raise ValueError("评价模板不存在")
+            if not repository.active_process_exists(normalized["process_id"], db):
+                raise ValueError("目标工序不存在或已停用")
             if normalized["route_id"] and not repository.route_contains_process(
                 normalized["route_id"], normalized["process_id"], db
             ):
@@ -522,24 +561,26 @@ class ProcessQualityEvaluationService:
         if status not in {"confirmed", "rejected"}:
             raise ValueError("核验状态只能是 confirmed 或 rejected")
         repository = ProcessQualityEvaluationService._repository()
-        evaluation = repository.evaluation_by_id(evaluation_id)
-        if not evaluation:
-            raise ValueError("评价记录不存在")
-        if evaluation["status"] != "pending_verification":
-            raise ValueError("当前评价不在待核验状态")
         note = str(data.get("note") or "").strip()
-        if status == "rejected" and not note:
-            raise ValueError("驳回评价必须填写核验说明")
+        if len(note) < 5:
+            raise ValueError("评价核验必须填写至少5个字符的处理说明")
         with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            evaluation = repository.evaluation_by_id(evaluation_id, db)
+            if not evaluation:
+                raise ValueError("评价记录不存在")
+            if evaluation["status"] != "pending_verification":
+                raise ConflictError("当前评价已由其他人员处理，请刷新后重试")
             cls._apply_review(evaluation, status, reviewer_id, note, db)
         return {"ok": True, "status": status}
 
     @classmethod
     def _apply_review(cls, evaluation, status, reviewer_id, note, db):
         repository = cls._repository()
-        repository.review_evaluation(
-            evaluation["id"], status, reviewer_id, note, db
-        )
+        if not repository.review_evaluation(
+            evaluation["id"], status, reviewer_id, note, db,
+            expected_status="pending_verification",
+        ):
+            raise ConflictError("当前评价已由其他人员处理，请刷新后重试")
         if evaluation["source_handoff_review_id"]:
             ProcessQualityEvaluationService._legacy_handoff_adapter().sync_compatibility_status(
                 evaluation["source_handoff_review_id"], status, reviewer_id, note, db
@@ -567,36 +608,27 @@ class ProcessQualityEvaluationService:
     @classmethod
     def create_appeal(cls, evaluation_id, data, current_user):
         repository = ProcessQualityEvaluationService._repository()
-        evaluation = repository.evaluation_by_id(evaluation_id)
-        if not evaluation:
-            raise ValueError("评价记录不存在")
         user_id = current_user.get("id") if current_user else None
-        if not evaluation["target_user_id"] or int(evaluation["target_user_id"]) != int(user_id or 0):
-            raise ValueError("只能对归属于本人的评价提出申诉")
-        if evaluation["status"] != "confirmed":
-            raise ValueError("只有已确认评价可以申诉")
         reason = str(data.get("reason") or "").strip()
         if len(reason) < 5:
             raise ValueError("申诉原因至少填写5个字符")
-        try:
-            with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
-                appeal_id = repository.create_appeal(
-                    evaluation_id, user_id, reason, db
-                )
-        except Exception as exc:
-            if "UNIQUE constraint" in str(exc):
-                raise ValueError("该评价已有待处理申诉") from exc
-            raise
+        with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            evaluation = repository.evaluation_by_id(evaluation_id, db)
+            if not evaluation:
+                raise ValueError("评价记录不存在")
+            if not evaluation["target_user_id"] or int(evaluation["target_user_id"]) != int(user_id or 0):
+                raise ValueError("只能对归属于本人的评价提出申诉")
+            if evaluation["status"] != "confirmed":
+                raise ValueError("只有已确认评价可以申诉")
+            appeal_id = repository.create_appeal(evaluation_id, user_id, reason, db)
         return {"ok": True, "id": appeal_id, "status": "pending"}
 
     @staticmethod
-    def list_appeals(status="", current_user=None, mine=False, year_month=""):
+    def list_appeals(status="", current_user=None, mine=False, year_month="", page=1, per_page=100):
         requester_id = current_user.get("id") if mine and current_user else None
-        return {
-            "items": ProcessQualityEvaluationService._repository().list_appeals(
-                status, requester_id, year_month
-            )
-        }
+        return ProcessQualityEvaluationService._repository().list_appeals(
+            status, requester_id, year_month, page, per_page
+        )
 
     @classmethod
     def review_appeal(cls, appeal_id, data, current_user):
@@ -607,20 +639,19 @@ class ProcessQualityEvaluationService:
         if not note:
             raise ValueError("申诉复核必须填写处理说明")
         repository = ProcessQualityEvaluationService._repository()
-        appeal = repository.appeal_by_id(appeal_id)
-        if not appeal:
-            raise ValueError("申诉记录不存在")
-        if appeal["status"] != "pending":
-            raise ValueError("该申诉已经处理")
         reviewer_id = current_user.get("id") if current_user else None
         with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
-            repository.review_appeal(
-                appeal_id, status, reviewer_id, note, db
-            )
+            appeal = repository.appeal_by_id(appeal_id, db)
+            if not appeal:
+                raise ValueError("申诉记录不存在")
+            if not repository.review_appeal(appeal_id, status, reviewer_id, note, db):
+                raise ConflictError("该申诉已由其他人员处理，请刷新后重试")
             if status == "accepted":
-                repository.review_evaluation(
-                    appeal["evaluation_id"], "rejected", reviewer_id, f"申诉成立：{note}", db
-                )
+                if not repository.review_evaluation(
+                    appeal["evaluation_id"], "rejected", reviewer_id,
+                    f"申诉成立：{note}", db, expected_status="confirmed",
+                ):
+                    raise ConflictError("原评价已由其他人员处理，请刷新后重试")
                 cls._cancel_rejected_evaluation_tasks(
                     appeal["evaluation_id"], appeal["order_id"], reviewer_id, f"申诉成立：{note}", db
                 )
@@ -652,10 +683,18 @@ class ProcessQualityEvaluationService:
     def review_legacy_handoff(cls, review_id, status, note, current_user):
         reviewer_id = current_user.get("id") if current_user else None
         repository = ProcessQualityEvaluationService._repository()
-        evaluation = repository.evaluation_by_legacy_handoff(review_id)
-        if not evaluation:
-            raise ValueError("旧交接评价未关联全流程质量评价")
+        status = str(status or "").strip()
+        if status not in {"confirmed", "rejected"}:
+            raise ValueError("核验状态只能是 confirmed 或 rejected")
+        note = str(note or "").strip()
+        if len(note) < 5:
+            raise ValueError("评价核验必须填写至少5个字符的处理说明")
         with ProcessQualityEvaluationService._unit_of_work().transaction() as db:
+            evaluation = repository.evaluation_by_legacy_handoff(review_id, db)
+            if not evaluation:
+                raise ValueError("旧交接评价未关联全流程质量评价")
+            if evaluation["status"] != "pending_verification":
+                raise ConflictError("当前评价已由其他人员处理，请刷新后重试")
             cls._apply_review(evaluation, status, reviewer_id, str(note or "").strip(), db)
         return {"ok": True, "status": status, "evaluation_id": evaluation["id"]}
 
