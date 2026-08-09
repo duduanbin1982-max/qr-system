@@ -1,7 +1,10 @@
 """Full-process quality evaluation persistence."""
 
 import json
+import sqlite3
 
+from modules.domain.errors import ConflictError
+from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.context import resolve_db
 
 
@@ -46,8 +49,9 @@ class ProcessQualityEvaluationRepository:
         where = []
         params = []
         if year_month:
-            where.append("evaluation.created_at LIKE ?")
-            params.append(year_month + "%")
+            period_start, period_end = reporting_month_bounds(year_month)
+            where.extend(["evaluation.created_at >= ?", "evaluation.created_at < ?"])
+            params.extend([period_start, period_end])
         if status:
             where.append("evaluation.status = ?")
             params.append(status)
@@ -121,17 +125,26 @@ class ProcessQualityEvaluationRepository:
         ).fetchone()
 
     @staticmethod
-    def review_evaluation(evaluation_id, status, reviewer_user_id, note, db):
-        db.execute(
+    def review_evaluation(evaluation_id, status, reviewer_user_id, note, db, expected_status=None):
+        where = "id = ?"
+        params = [status, reviewer_user_id, note, evaluation_id]
+        if expected_status:
+            where += " AND status = ?"
+            params.append(expected_status)
+        cursor = db.execute(
             "UPDATE process_quality_evaluations SET status = ?, reviewed_by = ?, review_note = ?, "
-            "reviewed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = ?",
-            (status, reviewer_user_id, note, evaluation_id),
+            "reviewed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE "
+            + where,
+            params,
         )
+        if cursor.rowcount != 1:
+            return False
         db.execute(
             "INSERT INTO process_quality_evaluation_reviews (evaluation_id, action, reviewer_user_id, note) "
             "VALUES (?,?,?,?)",
             (evaluation_id, status, reviewer_user_id, note),
         )
+        return True
 
     @staticmethod
     def references(db=None):
@@ -151,6 +164,14 @@ class ProcessQualityEvaluationRepository:
         return db.execute(
             "SELECT 1 FROM process_route_items WHERE route_id = ? AND process_id = ? LIMIT 1",
             (route_id, process_id),
+        ).fetchone() is not None
+
+    @staticmethod
+    def active_process_exists(process_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM processes WHERE id = ? AND status = 'active' LIMIT 1",
+            (process_id,),
         ).fetchone() is not None
 
     @staticmethod
@@ -250,11 +271,14 @@ class ProcessQualityEvaluationRepository:
 
     @staticmethod
     def create_appeal(evaluation_id, requester_user_id, reason, db):
-        cursor = db.execute(
-            "INSERT INTO process_quality_evaluation_appeals "
-            "(evaluation_id, requester_user_id, reason) VALUES (?,?,?)",
-            (evaluation_id, requester_user_id, reason),
-        )
+        try:
+            cursor = db.execute(
+                "INSERT INTO process_quality_evaluation_appeals "
+                "(evaluation_id, requester_user_id, reason) VALUES (?,?,?)",
+                (evaluation_id, requester_user_id, reason),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError("该评价已有待处理申诉") from exc
         return cursor.lastrowid
 
     @staticmethod
@@ -270,7 +294,7 @@ class ProcessQualityEvaluationRepository:
         ).fetchone()
 
     @staticmethod
-    def list_appeals(status="", requester_user_id=None, year_month="", db=None):
+    def list_appeals(status="", requester_user_id=None, year_month="", page=1, per_page=100, db=None):
         db = resolve_db(db)
         where = []
         params = []
@@ -281,9 +305,15 @@ class ProcessQualityEvaluationRepository:
             where.append("appeal.requester_user_id = ?")
             params.append(requester_user_id)
         if year_month:
-            where.append("appeal.created_at LIKE ?")
-            params.append(year_month + "%")
+            period_start, period_end = reporting_month_bounds(year_month)
+            where.extend(["appeal.created_at >= ?", "appeal.created_at < ?"])
+            params.extend([period_start, period_end])
         clause = " AND ".join(where) if where else "1=1"
+        total = db.execute(
+            "SELECT COUNT(*) FROM process_quality_evaluation_appeals appeal WHERE " + clause,
+            params,
+        ).fetchone()[0]
+        offset = (page - 1) * per_page
         rows = db.execute(
             "SELECT appeal.*, evaluation.total_score, evaluation.grade, evaluation.serial_no, "
             "evaluation.target_process_id, evaluation.target_user_id, o.order_no, o.product_name, "
@@ -294,26 +324,35 @@ class ProcessQualityEvaluationRepository:
             "JOIN processes process ON process.id = evaluation.target_process_id "
             "JOIN users requester ON requester.id = appeal.requester_user_id "
             "LEFT JOIN users reviewer ON reviewer.id = appeal.reviewed_by "
-            "WHERE " + clause + " ORDER BY appeal.created_at DESC, appeal.id DESC",
-            params,
+            "WHERE " + clause + " ORDER BY appeal.created_at DESC, appeal.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset],
         ).fetchall()
-        return [dict(row) for row in rows]
+        return {
+            "items": [dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
 
     @staticmethod
-    def review_appeal(appeal_id, status, reviewer_user_id, note, db):
-        db.execute(
+    def review_appeal(appeal_id, status, reviewer_user_id, note, db, expected_status="pending"):
+        cursor = db.execute(
             "UPDATE process_quality_evaluation_appeals SET status = ?, reviewed_by = ?, review_note = ?, "
-            "reviewed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = ?",
-            (status, reviewer_user_id, note, appeal_id),
+            "reviewed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') "
+            "WHERE id = ? AND status = ?",
+            (status, reviewer_user_id, note, appeal_id, expected_status),
         )
+        return cursor.rowcount == 1
 
     @staticmethod
     def stats(year_month="", db=None):
         db = resolve_db(db)
         conditions = ["evaluation.status != 'rejected'"]
-        date_params = [year_month + "%"] if year_month else []
+        date_params = []
         if year_month:
-            conditions.append("evaluation.created_at LIKE ?")
+            period_start, period_end = reporting_month_bounds(year_month)
+            conditions.extend(["evaluation.created_at >= ?", "evaluation.created_at < ?"])
+            date_params.extend([period_start, period_end])
         date_clause = "WHERE " + " AND ".join(conditions)
         summary = dict(db.execute(
             "SELECT COUNT(*) AS total, ROUND(COALESCE(AVG(total_score), 0), 1) AS avg_score, "
@@ -341,8 +380,12 @@ class ProcessQualityEvaluationRepository:
             "ORDER BY avg_score ASC, evaluation_count DESC",
             date_params,
         ).fetchall()
-        appeal_clause = "WHERE created_at LIKE ?" if year_month else ""
-        appeal_params = [year_month + "%"] if year_month else []
+        appeal_clause = ""
+        appeal_params = []
+        if year_month:
+            period_start, period_end = reporting_month_bounds(year_month)
+            appeal_clause = "WHERE created_at >= ? AND created_at < ?"
+            appeal_params = [period_start, period_end]
         appeal_summary = dict(db.execute(
             "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending "
             "FROM process_quality_evaluation_appeals " + appeal_clause,
@@ -365,10 +408,10 @@ class ProcessQualityEvaluationRepository:
             "SUM(CASE WHEN severity IN ('warning','critical') THEN 1 ELSE 0 END) AS low_count, "
             "SUM(CASE WHEN total_score >= 80 THEN 1 ELSE 0 END) AS good_count "
             "FROM process_quality_evaluations "
-            "WHERE created_at LIKE ? AND status = 'confirmed' "
+            "WHERE created_at >= ? AND created_at < ? AND status = 'confirmed' "
             "AND attribution_type = 'worker' AND target_user_id IS NOT NULL "
             "AND NOT EXISTS (SELECT 1 FROM process_quality_evaluation_appeals appeal "
             "WHERE appeal.evaluation_id = process_quality_evaluations.id AND appeal.status = 'pending') "
             "GROUP BY target_user_id HAVING COUNT(*) >= ?",
-            (year_month + "%", minimum_samples),
+            (*reporting_month_bounds(year_month), minimum_samples),
         ).fetchall()

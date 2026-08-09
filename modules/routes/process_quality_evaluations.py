@@ -10,6 +10,22 @@ from modules.services.process_quality_evaluation_waiver_service import (
 )
 
 
+def _quality_pagination(default=100, maximum=500):
+    """Parse pagination without silently accepting invalid client input."""
+    raw_page = request.args.get("page")
+    raw_per_page = request.args.get("per_page")
+    try:
+        page = int(raw_page) if raw_page is not None else 1
+        per_page = int(raw_per_page) if raw_per_page is not None else default
+    except (TypeError, ValueError) as exc:
+        raise ValueError("分页参数必须是整数") from exc
+    if page < 1:
+        raise ValueError("页码必须大于等于1")
+    if per_page < 1 or per_page > maximum:
+        raise ValueError(f"每页数量必须在1到{maximum}之间")
+    return page, per_page
+
+
 def _can_read(user):
     return has_permission(user, "process_quality_evaluation:view") or has_permission(
         user, "process_quality_evaluation:submit"
@@ -23,6 +39,10 @@ def _can_read(user):
 def process_quality_tasks():
     if not _can_read(g.current_user):
         return jsonify({"error": "无权限"}), 403
+    try:
+        page, per_page = _quality_pagination()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     can_view_all = has_permission(g.current_user, "process_quality_evaluation:view") or has_permission(
         g.current_user, "process_quality_evaluation:waive"
     ) or has_permission(
@@ -34,8 +54,8 @@ def process_quality_tasks():
         evaluator_user_id=evaluator_id,
         status=request.args.get("status", "pending"),
         keyword=request.args.get("keyword", "").strip(),
-        page=request.args.get("page", 1, type=int),
-        per_page=min(request.args.get("per_page", 100, type=int), 500),
+        page=page,
+        per_page=per_page,
         include_target_identity=requested_all,
     )
     result["pending_count"] = ProcessQualityEvaluationService.pending_count(g.current_user["id"])
@@ -58,10 +78,14 @@ def process_quality_task_disposal_summary():
 @check_auth
 @check_permission("process_quality_evaluation:waive")
 def process_quality_task_audits():
+    try:
+        page, per_page = _quality_pagination()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify(ProcessQualityEvaluationWaiverService.task_audits(
         keyword=request.args.get("keyword", "").strip(),
-        page=request.args.get("page", 1, type=int),
-        per_page=min(request.args.get("per_page", 100, type=int), 500),
+        page=page,
+        per_page=per_page,
     ))
 
 
@@ -135,15 +159,19 @@ def process_quality_submit():
 @check_auth
 @check_permission("process_quality_evaluation:view")
 def process_quality_list():
-    return jsonify(ProcessQualityEvaluationService.list_evaluations(
-        year_month=request.args.get("year_month", ""),
-        status=request.args.get("status", ""),
-        process_id=request.args.get("process_id", type=int),
-        user_id=request.args.get("user_id", type=int),
-        keyword=request.args.get("keyword", "").strip(),
-        page=request.args.get("page", 1, type=int),
-        per_page=min(request.args.get("per_page", 100, type=int), 500),
-    ))
+    try:
+        page, per_page = _quality_pagination()
+        return jsonify(ProcessQualityEvaluationService.list_evaluations(
+            year_month=request.args.get("year_month", ""),
+            status=request.args.get("status", ""),
+            process_id=request.args.get("process_id", type=int),
+            user_id=request.args.get("user_id", type=int),
+            keyword=request.args.get("keyword", "").strip(),
+            page=page,
+            per_page=per_page,
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/process-quality-evaluations/mine", methods=["GET"])
@@ -151,12 +179,16 @@ def process_quality_list():
 def process_quality_mine():
     if not _can_read(g.current_user):
         return jsonify({"error": "无权限"}), 403
-    return jsonify(ProcessQualityEvaluationService.my_evaluations(
-        g.current_user,
-        year_month=request.args.get("year_month", ""),
-        page=request.args.get("page", 1, type=int),
-        per_page=min(request.args.get("per_page", 100, type=int), 500),
-    ))
+    try:
+        page, per_page = _quality_pagination()
+        return jsonify(ProcessQualityEvaluationService.my_evaluations(
+            g.current_user,
+            year_month=request.args.get("year_month", ""),
+            page=page,
+            per_page=per_page,
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/process-quality-evaluations/<int:evaluation_id>/review", methods=["PUT"])
@@ -167,6 +199,8 @@ def process_quality_review(evaluation_id):
         result = ProcessQualityEvaluationService.review(evaluation_id, request.get_json() or {}, g.current_user)
         safe_audit_log("process_quality_evaluation_review", "process_quality_evaluation", evaluation_id, result["status"])
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -191,9 +225,12 @@ def process_quality_rules():
 @check_permission("process_quality_evaluation:rules")
 def process_quality_save_rules():
     try:
-        result = ProcessQualityEvaluationService.save_rules(request.get_json() or {})
+        payload = request.get_json(silent=True)
+        result = ProcessQualityEvaluationService.save_rules({} if payload is None else payload)
         safe_audit_log("process_quality_evaluation_rules", "system_setting", 0, "updated")
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -217,8 +254,9 @@ def process_quality_template_list():
 @check_permission("process_quality_evaluation:rules")
 def process_quality_template_create():
     try:
+        payload = request.get_json(silent=True)
         result = ProcessQualityEvaluationService.save_template(
-            request.get_json() or {}, g.current_user
+            {} if payload is None else payload, g.current_user
         )
         safe_audit_log("process_quality_template_create", "process_quality_evaluation_template", result["id"], "created")
         return jsonify(result)
@@ -231,8 +269,9 @@ def process_quality_template_create():
 @check_permission("process_quality_evaluation:rules")
 def process_quality_template_update(template_id):
     try:
+        payload = request.get_json(silent=True)
         result = ProcessQualityEvaluationService.save_template(
-            request.get_json() or {}, g.current_user, template_id
+            {} if payload is None else payload, g.current_user, template_id
         )
         safe_audit_log("process_quality_template_update", "process_quality_evaluation_template", template_id, "updated")
         return jsonify(result)
@@ -251,6 +290,8 @@ def process_quality_appeal_create(evaluation_id):
         )
         safe_audit_log("process_quality_appeal_create", "process_quality_evaluation", evaluation_id, "pending")
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -264,10 +305,16 @@ def process_quality_appeal_list():
         return jsonify({"error": "无权限"}), 403
     if mine and not _can_read(g.current_user):
         return jsonify({"error": "无权限"}), 403
-    return jsonify(ProcessQualityEvaluationService.list_appeals(
-        request.args.get("status", ""), g.current_user, mine=mine,
-        year_month=request.args.get("year_month", ""),
-    ))
+    try:
+        page, per_page = _quality_pagination()
+        return jsonify(ProcessQualityEvaluationService.list_appeals(
+            request.args.get("status", ""), g.current_user, mine=mine,
+            year_month=request.args.get("year_month", ""),
+            page=page,
+            per_page=per_page,
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/process-quality-evaluations/appeals/<int:appeal_id>/review", methods=["PUT"])
@@ -280,5 +327,7 @@ def process_quality_appeal_review(appeal_id):
         )
         safe_audit_log("process_quality_appeal_review", "process_quality_evaluation_appeal", appeal_id, result["status"])
         return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

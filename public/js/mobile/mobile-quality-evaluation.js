@@ -130,11 +130,30 @@ function loadQualityEvaluationTasks() {
 function loadMyQualityEvaluations() {
   var list = $('quality-task-list');
   list.innerHTML = '<div class="quality-empty">正在加载我的评价...</div>';
+  var pageSize = 100;
   Promise.all([
-    api.myQualityEvaluations({ per_page: 100 }),
-    api.myQualityEvaluationAppeals({ scope: 'mine' })
+    api.myQualityEvaluations({ page: 1, per_page: pageSize }),
+    api.myQualityEvaluationAppeals({ scope: 'mine', page: 1, per_page: pageSize })
   ]).then(function(results) {
-    renderMyQualityEvaluations(results[0].items || [], results[1].items || []);
+    var recordPage = results[0] || {};
+    var appealPage = results[1] || {};
+    var recordPages = Math.max(1, Math.ceil((Number(recordPage.total) || 0) / pageSize));
+    var appealPages = Math.max(1, Math.ceil((Number(appealPage.total) || 0) / pageSize));
+    var requests = [];
+    for (var page = 2; page <= recordPages; page += 1) {
+      requests.push(api.myQualityEvaluations({ page: page, per_page: pageSize }));
+    }
+    for (var appealPageNumber = 2; appealPageNumber <= appealPages; appealPageNumber += 1) {
+      requests.push(api.myQualityEvaluationAppeals({ scope: 'mine', page: appealPageNumber, per_page: pageSize }));
+    }
+    return Promise.all(requests).then(function(extra) {
+      var records = (recordPage.items || []).slice();
+      var appeals = (appealPage.items || []).slice();
+      var recordExtraCount = recordPages - 1;
+      extra.slice(0, recordExtraCount).forEach(function(pageResult) { records = records.concat(pageResult.items || []); });
+      extra.slice(recordExtraCount).forEach(function(pageResult) { appeals = appeals.concat(pageResult.items || []); });
+      renderMyQualityEvaluations(records, appeals);
+    });
   }).catch(function(error) {
     list.innerHTML = '<div class="quality-empty error">' + esc(error.message || '我的评价加载失败') + '</div>';
   });
@@ -331,7 +350,12 @@ function skipQualityTask(card, button) {
 function renderMyQualityEvaluations(records, appeals) {
   var list = $('quality-task-list');
   var appealMap = {};
-  appeals.forEach(function(appeal) { appealMap[appeal.evaluation_id] = appeal; });
+  appeals.forEach(function(appeal) {
+    var current = appealMap[appeal.evaluation_id];
+    if (!current || String(appeal.created_at || '') > String(current.created_at || '')) {
+      appealMap[appeal.evaluation_id] = appeal;
+    }
+  });
   if (!records.length) {
     list.innerHTML = '<div class="quality-empty"><strong>暂无收到的评价</strong><span>明确归属到个人的工序评价会显示在这里。</span></div>';
     return;

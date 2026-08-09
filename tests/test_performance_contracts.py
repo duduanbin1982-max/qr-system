@@ -1,7 +1,8 @@
 import inspect
+import json
 
 from modules.db import get_db
-from factories import ensure_user, WORKER_HASH
+from factories import ensure_user, WORKER_HASH, WORKER_PASS
 from modules.services.performance_service import PerformanceService
 
 
@@ -128,6 +129,13 @@ def test_legacy_handoff_review_is_backed_by_authoritative_evaluation(client, aut
         headers=auth_headers,
     )
     assert confirmed.status_code == 200, confirmed.get_json()
+    stale_legacy_write = client.put(
+        f"/api/handoff-reviews/{payload['id']}/status",
+        json={"status": "rejected", "confirm_note": "旧接口重复处理终态评价"},
+        headers=auth_headers,
+    )
+    assert stale_legacy_write.status_code == 409
+    assert stale_legacy_write.get_json()["code"] == "conflict"
 
     with client.application.app_context():
         db = get_db()
@@ -151,6 +159,44 @@ def test_legacy_handoff_review_is_backed_by_authoritative_evaluation(client, aut
             "process_handoff_review",
         }
         assert len({row["quality_event_id"] for row in event_sources}) == 1
+
+
+def test_legacy_handoff_status_rejects_old_performance_edit_permission(client):
+    username = "legacy_perf_editor"
+    with client.application.app_context():
+        db = get_db()
+        user_id = ensure_user(
+            db, username, WORKER_HASH, "旧绩效编辑用户", "worker", "TEST-LEGACY-PERF"
+        )
+        role_id = db.execute(
+            "INSERT INTO roles (name, code, description, permissions, status, level) "
+            "VALUES (?, ?, ?, ?, 'active', 1)",
+            (
+                "旧绩效编辑角色",
+                "legacy_performance_editor",
+                "仅保留旧 performance:edit 权限",
+                json.dumps(["performance:edit"]),
+            ),
+        ).lastrowid
+        db.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
+        db.execute(
+            "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+            (user_id, role_id),
+        )
+        db.commit()
+    login = client.post(
+        "/api/auth/login", json={"username": username, "password": WORKER_PASS}
+    )
+    assert login.status_code == 200, login.get_json()
+    headers = {"Authorization": f"Bearer {login.get_json()['user']['token']}"}
+
+    response = client.put(
+        "/api/handoff-reviews/999999/status",
+        headers=headers,
+        json={"status": "confirmed", "confirm_note": "不应获得新版评价复核权限"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_order_mode_handoff_review_requires_clear_previous_worker(client, auth_headers):

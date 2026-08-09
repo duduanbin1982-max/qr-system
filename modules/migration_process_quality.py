@@ -489,6 +489,98 @@ def m041_preserve_process_quality_waiver_audits(db):
     db.commit()
 
 
+def m058_harden_process_quality_state_transitions(db):
+    """Record legacy anomalies and enforce terminal quality-review states."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS process_quality_state_issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            issue_code TEXT NOT NULL,
+            observed_status TEXT DEFAULT '',
+            detail TEXT DEFAULT '',
+            detected_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(entity_type, entity_id, issue_code)
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pqe_state_issues_entity "
+        "ON process_quality_state_issues(entity_type, entity_id)"
+    )
+
+    # Keep ambiguous historical data visible for an operator to resolve; do not
+    # infer a business outcome as part of a schema migration.
+    db.execute(
+        "INSERT OR IGNORE INTO process_quality_state_issues "
+        "(entity_type, entity_id, issue_code, observed_status, detail) "
+        "SELECT 'evaluation', id, 'invalid_status', COALESCE(status, ''), "
+        "'评价状态不在允许集合内，需人工确认' "
+        "FROM process_quality_evaluations "
+        "WHERE COALESCE(status, '') NOT IN ('pending_verification', 'confirmed', 'rejected')"
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO process_quality_state_issues "
+        "(entity_type, entity_id, issue_code, observed_status, detail) "
+        "SELECT 'appeal', id, 'invalid_status', COALESCE(status, ''), "
+        "'申诉状态不在允许集合内，需人工确认' "
+        "FROM process_quality_evaluation_appeals "
+        "WHERE COALESCE(status, '') NOT IN ('pending', 'accepted', 'rejected')"
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO process_quality_state_issues "
+        "(entity_type, entity_id, issue_code, observed_status, detail) "
+        "SELECT 'appeal', appeal.id, 'pending_for_rejected_evaluation', "
+        "COALESCE(appeal.status, ''), '已驳回评价仍有待处理申诉，需人工确认' "
+        "FROM process_quality_evaluation_appeals appeal "
+        "JOIN process_quality_evaluations evaluation ON evaluation.id = appeal.evaluation_id "
+        "WHERE evaluation.status = 'rejected' AND appeal.status = 'pending'"
+    )
+    issue_count = db.execute(
+        "SELECT COUNT(*) FROM process_quality_state_issues"
+    ).fetchone()[0]
+    if issue_count:
+        print(f"[Migration v58] Recorded {issue_count} process-quality state issue(s) for manual review")
+
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pqe_evaluation_status_insert_guard
+        BEFORE INSERT ON process_quality_evaluations
+        WHEN COALESCE(NEW.status, '') NOT IN ('pending_verification', 'confirmed', 'rejected')
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid process quality evaluation status');
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pqe_evaluation_status_update_guard
+        BEFORE UPDATE OF status ON process_quality_evaluations
+        WHEN COALESCE(NEW.status, '') NOT IN ('pending_verification', 'confirmed', 'rejected')
+          OR (OLD.status = 'rejected' AND NEW.status <> 'rejected')
+          OR (OLD.status = 'pending_verification'
+              AND NEW.status NOT IN ('pending_verification', 'confirmed', 'rejected'))
+          OR (OLD.status = 'confirmed' AND NEW.status NOT IN ('confirmed', 'rejected'))
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid process quality evaluation status transition');
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pqe_appeal_status_insert_guard
+        BEFORE INSERT ON process_quality_evaluation_appeals
+        WHEN COALESCE(NEW.status, '') NOT IN ('pending', 'accepted', 'rejected')
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid process quality appeal status');
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pqe_appeal_status_update_guard
+        BEFORE UPDATE OF status ON process_quality_evaluation_appeals
+        WHEN COALESCE(NEW.status, '') NOT IN ('pending', 'accepted', 'rejected')
+          OR (OLD.status <> 'pending' AND NEW.status <> OLD.status)
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid process quality appeal status transition');
+        END
+    """)
+    db.commit()
+
+
 MIGRATIONS = [
     (33, "Add full-process quality evaluation workflow", m033_full_process_quality_evaluation),
     (36, "Upgrade process quality evaluation workflow", m036_process_quality_evaluation_b),
@@ -497,4 +589,5 @@ MIGRATIONS = [
     (39, "Add auditable process quality task waivers", m039_process_quality_task_waivers),
     (40, "Harden process quality task waiver policy", m040_harden_process_quality_task_waivers),
     (41, "Preserve process quality waiver audit snapshots", m041_preserve_process_quality_waiver_audits),
+    (58, "Harden process quality state transitions", m058_harden_process_quality_state_transitions),
 ]
