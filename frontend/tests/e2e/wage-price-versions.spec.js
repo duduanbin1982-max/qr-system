@@ -51,7 +51,7 @@ test('price version workflow stays task-focused across desktop and mobile', asyn
   await expect(main.locator('[data-testid^="route-price-card-"]')).toHaveCount(2)
   await main.locator('[data-testid="route-price-card-2"] button').click()
   await expect(main.locator('.current-table tbody tr')).toHaveCount(1)
-  await expect(main).toContainText('1 个草稿待处理')
+  await expect(main.locator('[data-testid="route-price-card-1"]')).toContainText('1 待处理')
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.waitForTimeout(400)
