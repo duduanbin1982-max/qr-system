@@ -30,7 +30,7 @@
                 </tr></thead>
                 <tbody>
                   <tr v-for="(u, idx) in filteredAdminList" :key="u.id">
-                    <td style="text-align:center"><input type="checkbox" :value="u.id" v-model="selectedAdmins"></td>
+                    <td style="text-align:center"><input type="checkbox" :value="u.id" v-model="selectedAdmins" :disabled="u.status==='deleted'"></td>
                     <td style="text-align:center"><span class="badge" style="background:var(--primary-light);color:var(--primary-dark);min-width:28px;text-align:center">{{ idx+1 }}</span></td>
                     <td style="font-weight:500">{{ u.username }}</td>
                     <td>{{ u.nickname || u.name || '-' }}</td>
@@ -38,12 +38,12 @@
                     <td style="color:var(--text-placeholder)">{{ u.email || '-' }}</td>
                     <td>{{ u.phone || '-' }}</td>
                     <td>{{ u.employee_no || '-' }}</td>
-                    <td><span class="badge" :class="u.status==='active'?'completed':u.status==='deleted'?'danger':'pending'">{{ u.status==='active'?'正常':u.status==='deleted'?'已删除':'停用' }}</span></td>
+                    <td><span class="badge" :class="u.status==='active'?'completed':u.status==='deleted'?'danger':'pending'">{{ u.status==='active'?'正常':u.status==='deleted'?(u.purged_at?'已匿名化':'已删除'):'停用' }}</span></td>
                     <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ u.last_active || '无' }}</td>
                     <td style="text-align:center;white-space:nowrap">
-                      <button class="o-abtn edit" @click="openEditAdmin(u)">✏️</button>
-                      <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--success-light);color:var(--success)" @click="restoreAdminUser(u.id)" title="恢复">🔄</button>
-                      <button v-if="u.status==='deleted'" class="o-abtn" style="background:var(--danger-light);color:var(--danger)" @click="permanentDeleteAdminUser(u.id)" title="彻底删除">💀</button>
+                      <button v-if="u.status!=='deleted'" class="o-abtn edit" @click="openEditAdmin(u)">✏️</button>
+                      <button v-if="u.status==='deleted' && !u.purged_at" class="o-abtn" style="background:var(--success-light);color:var(--success)" @click="restoreAdminUser(u.id)" title="恢复">🔄</button>
+                      <button v-if="u.status==='deleted' && !u.purged_at" class="o-abtn" style="background:var(--danger-light);color:var(--danger)" @click="permanentDeleteAdminUser(u.id)" title="匿名化身份">◉</button>
                       <button v-if="u.status!=='deleted'" class="o-abtn del" @click="deleteAdminUser(u.id)">🗑️</button>
                     </td>
                   </tr>

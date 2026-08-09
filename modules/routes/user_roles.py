@@ -5,9 +5,9 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
 )
 from modules.services.audit_log_service import AuditLogService
+from modules.services.user_service import UserService
 
 
 # ============================================================
@@ -22,11 +22,15 @@ def get_user_roles(uid):
 
 @app.route("/api/users/<int:uid>/roles", methods=["PUT"])
 @check_auth
-@check_permission("users:edit")
+@check_permission("users:admin")
 def set_user_roles(uid):
     data = get_json_body()
-    AuditLogService.set_user_roles(uid, data.get("role_ids", []))
-    safe_audit_log("set_user_roles", "user", uid, f"roles={data.get('role_ids', [])}")
+    try:
+        UserService.set_user_roles(
+            uid, data.get("role_ids", []), g.current_user.get("id")
+        )
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
     return jsonify({"message": "角色分配成功"})
 
 
@@ -76,7 +80,7 @@ def get_permission_matrix():
 # ============================================================
 @app.route("/api/users/batch-roles", methods=["POST"])
 @check_auth
-@check_permission("users:edit")
+@check_permission("users:admin")
 def batch_set_roles():
     data = get_json_body()
     user_ids = data.get("user_ids", [])
@@ -87,8 +91,12 @@ def batch_set_roles():
     if not role_ids:
         return jsonify({"error": "请选择角色"}), 400
     try:
-        AuditLogService.batch_set_roles(user_ids, role_ids, act)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    safe_audit_log("batch_set_roles", "users", 0, f"users={user_ids} roles={role_ids} action={act}")
-    return jsonify({"message": f"已为 {len(user_ids)} 个用户{('分配' if act!='remove' else '移除')}角色"})
+        changed = UserService.batch_set_user_roles(
+            user_ids, role_ids, act, g.current_user.get("id")
+        )
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    return jsonify({
+        "message": f"已为 {changed} 个用户{('分配' if act!='remove' else '移除')}角色",
+        "updated": changed,
+    })

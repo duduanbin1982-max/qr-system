@@ -69,6 +69,8 @@ class UserRepository:
             else:
                 where.append("(rs.role_code != ? AND NOT (rs.role_count = 0 AND u.role = ?))")
                 params.extend([role_not, role_not])
+        summary_where_sql = " AND ".join(where)
+        summary_params = list(params)
         if status:
             where.append("u.status = ?")
             params.append(status)
@@ -86,11 +88,21 @@ class UserRepository:
             + where_sql
         )
         total = db.execute(count_sql, params).fetchone()[0]
+        summary_row = db.execute(
+            role_summary_cte
+            + "SELECT COUNT(*) AS total, "
+            + "SUM(CASE WHEN u.status = 'active' THEN 1 ELSE 0 END) AS active, "
+            + "SUM(CASE WHEN u.status = 'inactive' THEN 1 ELSE 0 END) AS inactive, "
+            + "SUM(CASE WHEN u.status = 'deleted' THEN 1 ELSE 0 END) AS deleted "
+            + "FROM users u JOIN role_summary rs ON rs.user_id = u.id WHERE "
+            + summary_where_sql,
+            summary_params,
+        ).fetchone()
 
         base_sql = (
             role_summary_cte
             + "SELECT u.id, u.username, u.name, u.nickname, u.email, u.group_name, u.role, u.employee_no, "
-            "u.marker, u.phone, u.process_ids, u.status, u.created_at, "
+            "u.marker, u.phone, u.process_ids, u.status, u.created_at, u.purged_at, "
             "(SELECT GROUP_CONCAT(up2.process_id) FROM user_processes up2 WHERE up2.user_id = u.id) as process_ids_junction, "
             "COALESCE((SELECT json_group_array(json_object('id', p2.id, 'name', p2.name, 'source', '员工')) "
             "FROM user_processes up3 JOIN processes p2 ON up3.process_id = p2.id "
@@ -163,7 +175,13 @@ class UserRepository:
             "users": users,
             "total": total,
             "page": page,
-            "limit": size
+            "limit": size,
+            "summary": {
+                "total": summary_row["total"] or 0,
+                "active": summary_row["active"] or 0,
+                "inactive": summary_row["inactive"] or 0,
+                "deleted": summary_row["deleted"] or 0,
+            },
         }
 
     @staticmethod
@@ -190,7 +208,7 @@ class UserRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, "
-            "position_id, department_id, status "
+            "position_id, department_id, status, purged_at "
             "FROM users WHERE id = ?", (uid,)
         ).fetchone()
 
@@ -202,7 +220,7 @@ class UserRepository:
         placeholders = ",".join("?" for _ in ids)
         return db.execute(
             "SELECT id, username, name, nickname, email, phone, role, employee_no, marker, group_name, "
-            "position_id, department_id, status FROM users WHERE id IN ("
+            "position_id, department_id, status, purged_at FROM users WHERE id IN ("
             + placeholders
             + ") ORDER BY id",
             ids,
@@ -219,7 +237,8 @@ class UserRepository:
         """Find soft-deleted user. Returns row or None."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, username FROM users WHERE id = ? AND status = 'deleted'", (uid,)
+            "SELECT id, username, purged_at FROM users WHERE id = ? AND status = 'deleted'",
+            (uid,),
         ).fetchone()
 
     # ============================================================
@@ -231,6 +250,36 @@ class UserRepository:
         """Find role row by code. Returns row or None."""
         db = resolve_db(db)
         return db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
+
+    @staticmethod
+    def find_active_role_by_code(code, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, code FROM roles WHERE code = ? AND status = 'active' LIMIT 1",
+            (code,),
+        ).fetchone()
+
+    @staticmethod
+    def find_active_roles_by_ids(role_ids, db=None):
+        db = resolve_db(db)
+        if not role_ids:
+            return []
+        placeholders = ",".join("?" for _ in role_ids)
+        return db.execute(
+            "SELECT id, code FROM roles WHERE status = 'active' AND id IN ("
+            + placeholders
+            + ") ORDER BY id",
+            role_ids,
+        ).fetchall()
+
+    @staticmethod
+    def get_user_role_rows(user_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT r.id, r.code FROM user_roles ur "
+            "JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.id",
+            (user_id,),
+        ).fetchall()
 
     @staticmethod
     def find_role_code_by_id(role_id, db=None):
@@ -260,10 +309,13 @@ class UserRepository:
 
     @staticmethod
     def count_admin_roles(db=None):
-        """Count total users with admin role."""
+        """Count active users with the administrator role."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE r.code = 'admin'"
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur "
+            "JOIN roles r ON ur.role_id = r.id "
+            "JOIN users u ON u.id = ur.user_id "
+            "WHERE r.code = 'admin' AND u.status = 'active'"
         ).fetchone()[0]
 
     @staticmethod
@@ -271,8 +323,10 @@ class UserRepository:
         """Count admin roles excluding a specific user."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE r.code = 'admin' AND ur.user_id != ?",
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur "
+            "JOIN roles r ON ur.role_id = r.id "
+            "JOIN users u ON u.id = ur.user_id "
+            "WHERE r.code = 'admin' AND u.status = 'active' AND ur.user_id != ?",
             (user_id,)
         ).fetchone()[0]
 
@@ -281,7 +335,8 @@ class UserRepository:
         """Count admin users (by role column) excluding one."""
         db = resolve_db(db)
         return db.execute(
-            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?",
+            "SELECT COUNT(*) FROM users "
+            "WHERE role = 'admin' AND status = 'active' AND id != ?",
             (user_id,)
         ).fetchone()[0]
 
@@ -291,8 +346,11 @@ class UserRepository:
         db = resolve_db(db)
         placeholders = ",".join("?" for _ in ids)
         return db.execute(
-            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE r.code = 'admin' AND ur.user_id IN (" + placeholders + ")",
+            "SELECT COUNT(DISTINCT ur.user_id) FROM user_roles ur "
+            "JOIN roles r ON ur.role_id = r.id "
+            "JOIN users u ON u.id = ur.user_id "
+            "WHERE r.code = 'admin' AND u.status = 'active' "
+            "AND ur.user_id IN (" + placeholders + ")",
             ids
         ).fetchone()[0]
 
@@ -359,7 +417,24 @@ class UserRepository:
     def check_employee_no_exists(employee_no, db=None):
         """Check if an employee_no already exists."""
         db = resolve_db(db)
-        return db.execute("SELECT 1 FROM users WHERE employee_no = ?", (employee_no,)).fetchone() is not None
+        return UserRepository.find_user_by_employee_no(employee_no, db=db) is not None
+
+    @staticmethod
+    def find_user_by_employee_no(employee_no, exclude_user_id=None, db=None):
+        db = resolve_db(db)
+        normalized = str(employee_no or "").strip()
+        if not normalized:
+            return None
+        sql = (
+            "SELECT id, username, employee_no FROM users "
+            "WHERE lower(trim(employee_no)) = lower(?)"
+        )
+        params = [normalized]
+        if exclude_user_id is not None:
+            sql += " AND id != ?"
+            params.append(exclude_user_id)
+        sql += " LIMIT 1"
+        return db.execute(sql, params).fetchone()
 
     # ============================================================
     # Transaction: User CRUD
@@ -412,12 +487,47 @@ class UserRepository:
         db.execute("DELETE FROM user_roles WHERE user_id = ? AND role_id = ?", (user_id, role_id))
 
     @staticmethod
+    def replace_user_roles_txn(user_id, role_ids, db):
+        db.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
+        for role_id in role_ids:
+            db.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+                (user_id, role_id),
+            )
+
+    @staticmethod
+    def add_user_roles_txn(user_id, role_ids, db):
+        for role_id in role_ids:
+            db.execute(
+                "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
+                (user_id, role_id),
+            )
+
+    @staticmethod
+    def remove_user_roles_txn(user_id, role_ids, db):
+        if not role_ids:
+            return
+        placeholders = ",".join("?" for _ in role_ids)
+        db.execute(
+            "DELETE FROM user_roles WHERE user_id = ? AND role_id IN ("
+            + placeholders
+            + ")",
+            [user_id] + list(role_ids),
+        )
+
+    @staticmethod
+    def update_user_base_role_txn(user_id, role_code, db):
+        db.execute("UPDATE users SET role = ? WHERE id = ?", (role_code, user_id))
+
+    @staticmethod
     def soft_delete_user_txn(uid, db):
         """Soft-delete a user: set status='deleted' with timestamp."""
         db.execute(
-            "UPDATE users SET status = 'deleted', deleted_at = datetime('now','localtime') WHERE id = ?",
+            "UPDATE users SET status = 'deleted', token = NULL, "
+            "deleted_at = datetime('now','localtime') WHERE id = ?",
             (uid,)
         )
+        db.execute("DELETE FROM user_sessions WHERE user_id = ?", (uid,))
 
     @staticmethod
     def restore_user_txn(uid, db):
@@ -429,8 +539,13 @@ class UserRepository:
         """Soft-delete multiple users. Returns rowcount."""
         placeholders = ",".join("?" for _ in ids)
         cur = db.execute(
-            "UPDATE users SET status = 'deleted', deleted_at = datetime('now','localtime') WHERE id IN (" + placeholders + ")",
+            "UPDATE users SET status = 'deleted', token = NULL, "
+            "deleted_at = datetime('now','localtime') WHERE id IN (" + placeholders + ")",
             ids
+        )
+        db.execute(
+            "DELETE FROM user_sessions WHERE user_id IN (" + placeholders + ")",
+            ids,
         )
         return cur.rowcount
 
@@ -439,28 +554,43 @@ class UserRepository:
         """Batch update user status (active/inactive). Returns rowcount."""
         placeholders = ",".join("?" for _ in ids)
         cur = db.execute(
-            "UPDATE users SET status = ? WHERE id IN (" + placeholders + ") AND status IN ('active','inactive')",
-            [status] + ids
+            "UPDATE users SET status = ?, "
+            "token = CASE WHEN ? = 'inactive' THEN NULL ELSE token END "
+            "WHERE id IN (" + placeholders + ") AND status IN ('active','inactive')",
+            [status, status] + ids
         )
+        if status == "inactive":
+            db.execute(
+                "DELETE FROM user_sessions WHERE user_id IN (" + placeholders + ")",
+                ids,
+            )
         return cur.rowcount
 
     # ============================================================
-    # Transaction: Permanent Delete Cascade
+    # Transaction: Identity Purge
     # ============================================================
 
     @staticmethod
-    def permanent_delete_cascade_txn(uid, db):
-        """Delete all user data across all related tables, then the user."""
+    def anonymize_deleted_user_txn(uid, actor_id, reason, password_hash, db):
+        """Revoke access and redact identity while preserving ledger and audit history."""
         db.execute("DELETE FROM user_sessions WHERE user_id = ?", (uid,))
-        db.execute("DELETE FROM login_logs WHERE user_id = ?", (uid,))
         db.execute("DELETE FROM user_processes WHERE user_id = ?", (uid,))
         db.execute("DELETE FROM user_roles WHERE user_id = ?", (uid,))
-        db.execute("DELETE FROM audit_logs WHERE user_id = ?", (uid,))
-        db.execute("DELETE FROM audit_logs WHERE target_id = ? AND target_type = ?", (uid, "user"))
-        db.execute("DELETE FROM order_remark_history WHERE user_id = ?", (uid,))
-        db.execute("DELETE FROM wage_snapshots WHERE employee_id = ?", (uid,))
-        db.execute("DELETE FROM wage_adjustments WHERE user_id = ?", (uid,))
-        db.execute("DELETE FROM users WHERE id = ?", (uid,))
+        db.execute(
+            "UPDATE users SET username = ?, password = ?, name = ?, nickname = '', "
+            "email = '', phone = '', employee_no = NULL, marker = '', group_name = '', "
+            "process_ids = '', role = 'worker', token = NULL, failed_login_count = 0, "
+            "locked_until = NULL, purged_at = datetime('now','localtime'), "
+            "purged_by = ?, purge_reason = ? WHERE id = ?",
+            (
+                "purged_user_" + str(uid),
+                password_hash,
+                "已删除员工#" + str(uid),
+                actor_id,
+                reason,
+                uid,
+            ),
+        )
 
 
     # ============================================================

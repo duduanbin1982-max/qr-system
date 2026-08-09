@@ -24,6 +24,7 @@ from modules.migration_payroll_ledger import MIGRATIONS as PAYROLL_LEDGER_MIGRAT
 from modules.migration_performance_department import (
     MIGRATIONS as PERFORMANCE_DEPARTMENT_MIGRATIONS,
 )
+from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
 
 
 MIGRATIONS = sorted([
@@ -46,6 +47,7 @@ MIGRATIONS = sorted([
     *REPORTING_MIGRATIONS,
     *PAYROLL_LEDGER_MIGRATIONS,
     *PERFORMANCE_DEPARTMENT_MIGRATIONS,
+    *USER_MANAGEMENT_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]

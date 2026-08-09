@@ -3,6 +3,7 @@
 users_schemas = {
     'create_user': {'additionalProperties': False,
  'properties': {'email': {'format': 'email', 'maxLength': 128, 'type': 'string'},
+                'department_id': {'type': ['integer', 'null']},
                 'employee_no': {'maxLength': 32, 'type': 'string'},
                 'marker': {'maxLength': 128, 'type': 'string'},
                 'group_name': {'maxLength': 64, 'type': 'string'},
@@ -20,6 +21,7 @@ users_schemas = {
  'type': 'object'},
     'update_user': {'additionalProperties': False,
  'properties': {'email': {'format': 'email', 'maxLength': 128, 'type': 'string'},
+                'department_id': {'type': ['integer', 'null']},
                 'employee_no': {'maxLength': 32, 'type': 'string'},
                 'marker': {'maxLength': 128, 'type': 'string'},
                 'group_name': {'maxLength': 64, 'type': 'string'},

@@ -6,6 +6,7 @@
       <div class="summary-item"><span class="s-icon">👥</span><div><div class="s-val">{{ totalStaff }}</div><div class="s-label">员工总数</div></div></div>
       <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ activeCount }}</div><div class="s-label">在职</div></div></div>
       <div class="summary-item"><span class="s-icon">⏸️</span><div><div class="s-val text-danger">{{ inactiveCount }}</div><div class="s-label">停用</div></div></div>
+      <div class="summary-item"><span class="s-icon">🗃️</span><div><div class="s-val">{{ deletedCount }}</div><div class="s-label">已删除</div></div></div>
     </div>
 
     <div class="card">
@@ -55,14 +56,19 @@
                 <td>{{ u.employee_no || '-' }}</td>
                 <td><span v-if="u.marker" class="badge badge-info" style="font-size:var(--text-xs-alt)">{{ u.marker }}</span><span v-else>-</span></td>
                 <td class="text-sm">{{ u.phone || '-' }}</td>
-                <td><span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">{{ u.status === 'active' ? '在职' : '停用' }}</span></td>
+                <td>
+                  <span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" style="font-size:var(--text-xs-alt)">
+                    {{ u.status === 'active' ? '在职' : (u.status === 'deleted' ? (u.purged_at ? '已匿名化' : '已删除') : '停用') }}
+                  </span>
+                </td>
                 <td class="text-center">
                   <div class="o-actions" style="justify-content:center">
-                    <span v-if="u.locked_until && canEdit" class="o-abtn" style="color:var(--danger);cursor:pointer" @click="unlock(u)" title="解锁账户">🔓</span>
-                    <span v-if="canEdit" class="o-abtn o-edit" @click="openEdit(u)" title="编辑">✏️</span>
-                    <span v-if="canEdit" class="o-abtn" style="color:var(--warning);cursor:pointer" @click="resetPwd(u)" title="重置密码">🔑</span>
-                    <span v-if="canDelete" class="o-abtn o-del" @click="del(u)" title="删除">🗑️</span>
-                    <span v-if="canDelete" class="o-abtn" style="color:var(--danger);cursor:pointer;font-size:12px" @click="purgeUser(u.id, u.name)" title="彻底删除">☠️</span>
+                    <span v-if="u.status !== 'deleted' && u.locked_until && canEdit" class="o-abtn" style="color:var(--danger);cursor:pointer" @click="unlock(u)" title="解锁账户">🔓</span>
+                    <span v-if="u.status !== 'deleted' && canEdit" class="o-abtn o-edit" @click="openEdit(u)" title="编辑">✏️</span>
+                    <span v-if="u.status !== 'deleted' && canEdit" class="o-abtn" style="color:var(--warning);cursor:pointer" @click="resetPwd(u)" title="重置密码">🔑</span>
+                    <span v-if="u.status !== 'deleted' && canDelete" class="o-abtn o-del" @click="del(u)" title="删除">🗑️</span>
+                    <span v-if="u.status === 'deleted' && !u.purged_at && canDelete" class="o-abtn" style="color:var(--success);cursor:pointer" @click="restoreUser(u)" title="恢复">↻</span>
+                    <span v-if="u.status === 'deleted' && !u.purged_at && canAdmin" class="o-abtn" style="color:var(--danger);cursor:pointer;font-size:12px" @click="purgeUser(u.id, u.name)" title="匿名化身份">◉</span>
                   </div>
                 </td>
               </tr>
@@ -125,7 +131,7 @@
               </div>
             </div>
             <div class="form-col">
-              <div class="form-group"><label>密码{{ modalEdit ? '' : ' *' }}</label><input class="form-input" type="password" v-model="form.password" :placeholder="modalEdit ? '留空不修改' : '留空则自动生成'"></div>
+              <div class="form-group"><label>密码{{ modalEdit ? '' : ' *' }}</label><input class="form-input" type="password" v-model="form.password" :placeholder="modalEdit ? '留空不修改' : '请输入至少6位密码'"></div>
             </div>
           </div>
           <div class="form-group" style="position:relative">
@@ -157,19 +163,6 @@
             </div>
           </div>
         </div>
-        <!-- 创建成功密码展示面板 -->
-        <div v-if="pwResult" style="margin:var(--space-3) var(--space-5);padding:var(--space-4);background:#f0fdf4;border:1px solid #86efac;border-radius:var(--radius-md)">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
-            <strong style="color:#166534">✅ {{ pwResult.name }} 创建成功</strong>
-            <span @click="pwResult=null" style="cursor:pointer;font-size:18px;color:var(--text-placeholder)">&times;</span>
-          </div>
-          <div style="font-size:var(--text-sm);color:#14532d;line-height:1.8">
-            <div>用户名：<code style="background:#dcfce7;padding:2px 6px;border-radius:3px">{{ pwResult.username }}</code></div>
-            <div>随机密码：<code style="background:#dcfce7;padding:2px 6px;border-radius:3px;font-weight:bold">{{ pwResult.password }}</code></div>
-          </div>
-          <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:var(--space-2)">请将密码告知员工，首次登录需修改密码</div>
-        </div>
-
         <div class="modal-footer" style="flex-shrink:0">
           <button class="btn btn-default" @click="showModal=false">取消</button>
           <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? "保存中..." : "保存" }}</button>
