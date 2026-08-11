@@ -404,6 +404,8 @@ POST /api/process-versions/<id>/approve
 POST /api/process-versions/<id>/reject
 POST /api/processes/<id>/retirement-requests
 POST /api/process-retirement-requests/<id>/approve
+POST /api/processes/<id>/reactivation-requests
+POST /api/process-reactivation-requests/<id>/approve
 ```
 
 路线版本：
@@ -416,6 +418,8 @@ POST /api/process-route-versions/<id>/approve
 POST /api/process-route-versions/<id>/reject
 POST /api/process-routes/<id>/retirement-requests
 POST /api/process-route-retirement-requests/<id>/approve
+POST /api/process-routes/<id>/reactivation-requests
+POST /api/process-route-reactivation-requests/<id>/approve
 ```
 
 成组发布：
@@ -449,6 +453,7 @@ process_versions:approve
 process_versions:reject
 process_versions:impact
 processes:retire
+processes:reactivate
 ```
 
 路线权限：
@@ -461,6 +466,7 @@ route_versions:approve
 route_versions:reject
 route_versions:impact
 process_routes:retire
+process_routes:reactivate
 ```
 
 第一阶段按统一主数据范围管理，不使用个人工序授权限制审批。未来如需分权，只按“结构件/机加工”分类范围扩展。
