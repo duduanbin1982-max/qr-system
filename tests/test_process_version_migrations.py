@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "master_data_release_process_versions",
     "master_data_release_route_versions",
     "master_data_release_price_versions",
+    "master_data_release_exceptions",
     "process_version_migration_manifests",
     "process_version_migration_exceptions",
 }
@@ -263,6 +264,38 @@ def test_v060_indexes_immutability_and_idempotent_replay():
             db.execute("UPDATE process_version_events SET reason='覆盖' WHERE id=?", (event_id,))
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             db.execute("DELETE FROM process_version_events WHERE id=?", (event_id,))
+
+        batch_id = db.execute(
+            "INSERT INTO master_data_release_batches "
+            "(release_no,revision_reason) VALUES ('MDR-IMMUTABLE','迁移保护测试')"
+        ).lastrowid
+        exception_id = db.execute(
+            "INSERT INTO master_data_release_exceptions ("
+            "batch_id,route_version_id,retained_process_version_id,"
+            "replacement_process_version_id,reason,approved_by,approved_by_name,"
+            "valid_from,valid_to) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                batch_id,
+                published_route,
+                published_process,
+                published_process,
+                "批准保留旧工序版本",
+                10,
+                "批准人",
+                "2026-08-12 07:00:00",
+                "2026-09-01 07:00:00",
+            ),
+        ).lastrowid
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE master_data_release_exceptions SET reason='覆盖' WHERE id=?",
+                (exception_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "DELETE FROM master_data_release_exceptions WHERE id=?",
+                (exception_id,),
+            )
     finally:
         db.close()
 

@@ -282,6 +282,14 @@ PROCESS_REFERENCES = (
         impact_level=IMPACT_INTERNAL,
         action="保留主数据发布证据",
     ),
+    _process(
+        "master_data_release_exceptions",
+        version_columns=("retained_process_version_id", "replacement_process_version_id"),
+        key="release_exceptions",
+        label="主数据发布批准例外",
+        impact_level=IMPACT_INTERNAL,
+        action="保留主数据发布例外证据",
+    ),
 )
 
 
@@ -403,6 +411,14 @@ ROUTE_REFERENCES = (
         label="主数据发布批次路线",
         impact_level=IMPACT_INTERNAL,
         action="保留主数据发布证据",
+    ),
+    _route(
+        "master_data_release_exceptions",
+        version_columns=("route_version_id",),
+        key="release_exceptions",
+        label="主数据发布批准例外",
+        impact_level=IMPACT_INTERNAL,
+        action="保留主数据发布例外证据",
     ),
 )
 

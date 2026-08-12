@@ -25,6 +25,7 @@ class MasterDataReleaseRepository:
             batch["process_versions"] = []
             batch["route_versions"] = []
             batch["price_versions"] = []
+            batch["approved_exceptions"] = []
         placeholders = ",".join("?" for _ in batch_map)
         params = list(batch_map)
         member_queries = (
@@ -61,6 +62,14 @@ class MasterDataReleaseRepository:
                 item = dict(row)
                 batch_id = item.pop("batch_id")
                 batch_map[batch_id][collection].append(item)
+        for row in db.execute(
+            "SELECT * FROM master_data_release_exceptions WHERE batch_id IN ("
+            + placeholders
+            + ") ORDER BY batch_id,route_version_id,replacement_process_version_id,id",
+            params,
+        ).fetchall():
+            item = dict(row)
+            batch_map[item["batch_id"]]["approved_exceptions"].append(item)
         return batches
 
     @staticmethod
@@ -189,6 +198,40 @@ class MasterDataReleaseRepository:
             label="工价版本",
             db=db,
         )
+
+    @staticmethod
+    def add_approved_exception(batch_id, payload, db):
+        try:
+            cursor = db.execute(
+                "INSERT INTO master_data_release_exceptions ("
+                "batch_id,route_version_id,retained_process_version_id,"
+                "replacement_process_version_id,reason,approved_by,approved_by_name,"
+                "valid_from,valid_to) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    batch_id,
+                    payload["route_version_id"],
+                    payload["retained_process_version_id"],
+                    payload["replacement_process_version_id"],
+                    payload["reason"],
+                    payload["approved_by"],
+                    payload.get("approved_by_name", ""),
+                    payload["valid_from"],
+                    payload["valid_to"],
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError(
+                "主数据发布例外冲突或有效期无效",
+                details={
+                    "batch_id": batch_id,
+                    "route_version_id": payload.get("route_version_id"),
+                },
+            ) from exc
+        row = db.execute(
+            "SELECT * FROM master_data_release_exceptions WHERE id=?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        return dict(row)
 
     @staticmethod
     def transition_batch(

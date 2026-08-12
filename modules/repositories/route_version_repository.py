@@ -189,6 +189,37 @@ class RouteVersionRepository:
         return RouteVersionRepository._attach_items(versions, db)
 
     @staticmethod
+    def current_versions_for_process_ids(process_ids, db=None):
+        db = resolve_db(db)
+        normalized = list(dict.fromkeys(int(value) for value in process_ids))
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        versions = [
+            dict(row)
+            for row in db.execute(
+                "SELECT DISTINCT version.* FROM process_routes route "
+                "JOIN process_route_versions version "
+                "ON version.id=route.current_effective_version_id "
+                "JOIN process_route_version_items item "
+                "ON item.route_version_id=version.id "
+                "WHERE item.process_id IN (" + placeholders + ") "
+                "ORDER BY version.process_route_id,version.id",
+                normalized,
+            ).fetchall()
+        ]
+        return RouteVersionRepository._attach_items(versions, db)
+
+    @staticmethod
+    def find_legacy_items(route_id, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT * FROM process_route_items WHERE route_id=? ORDER BY seq_order,id",
+            (route_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
     def create_root(payload, db):
         cursor = db.execute(
             "INSERT INTO process_routes ("

@@ -497,6 +497,28 @@ def _create_workflow_tables(db):
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS master_data_release_exceptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            route_version_id INTEGER NOT NULL,
+            retained_process_version_id INTEGER NOT NULL,
+            replacement_process_version_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            approved_by INTEGER NOT NULL,
+            approved_by_name TEXT NOT NULL DEFAULT '',
+            valid_from TEXT NOT NULL,
+            valid_to TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY(batch_id) REFERENCES master_data_release_batches(id) ON DELETE RESTRICT,
+            FOREIGN KEY(route_version_id) REFERENCES process_route_versions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(retained_process_version_id) REFERENCES process_versions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(replacement_process_version_id) REFERENCES process_versions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(approved_by) REFERENCES users(id) ON DELETE RESTRICT,
+            UNIQUE(batch_id,route_version_id,replacement_process_version_id),
+            CHECK(valid_to>valid_from)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS process_version_migration_manifests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             migration_key TEXT NOT NULL,
@@ -573,6 +595,8 @@ def _create_indexes(db):
         "ON master_data_release_batches(release_no)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_master_data_release_idempotency "
         "ON master_data_release_batches(idempotency_key) WHERE idempotency_key<>''",
+        "CREATE INDEX IF NOT EXISTS idx_master_data_release_exception_batch "
+        "ON master_data_release_exceptions(batch_id,route_version_id)",
     )
     for statement in statements:
         db.execute(statement)
@@ -860,6 +884,16 @@ def _create_triggers(db):
         CREATE TRIGGER IF NOT EXISTS prevent_route_version_event_delete
         BEFORE DELETE ON process_route_version_events
         BEGIN SELECT RAISE(ABORT,'route version events are immutable'); END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS prevent_master_data_release_exception_update
+        BEFORE UPDATE ON master_data_release_exceptions
+        BEGIN SELECT RAISE(ABORT,'master data release exceptions are immutable'); END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS prevent_master_data_release_exception_delete
+        BEFORE DELETE ON master_data_release_exceptions
+        BEGIN SELECT RAISE(ABORT,'master data release exceptions are immutable'); END
         """,
         """
         CREATE TRIGGER IF NOT EXISTS prevent_process_version_manifest_update
