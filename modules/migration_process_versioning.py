@@ -1078,6 +1078,11 @@ def m060_process_master_versioning(db):
         _create_indexes(db)
         _backfill_legacy_v1(db)
         _create_triggers(db)
+        from modules.migration_process_management import (
+            rebuild_master_data_reference_guards,
+        )
+
+        rebuild_master_data_reference_guards(db)
         _validate_baseline(db)
         _write_manifest(db)
     except Exception:

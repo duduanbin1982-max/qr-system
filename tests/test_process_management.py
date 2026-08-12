@@ -105,6 +105,58 @@ def test_delete_rejects_work_time_reference_and_preserves_rows(client, auth_head
         ).fetchone()
 
 
+def test_process_impact_includes_price_payroll_and_performance_references(
+    client, auth_headers
+):
+    with client.application.app_context():
+        db = get_db()
+        process_id = _insert_process(db, "跨模块影响目录")
+        route_id = _insert_route(db, [process_id])
+        db.execute(
+            "INSERT INTO route_price_versions ("
+            "route_id, process_id, normal_unit_price_micros, valid_from, status) "
+            "VALUES (?, ?, 12000, '2026-08-01 07:00:00', 'draft')",
+            (route_id, process_id),
+        )
+        db.execute(
+            "INSERT INTO performance_quality_events "
+            "(event_type, quantity, process_id, business_at) "
+            "VALUES ('quality_inspection', 1, ?, '2026-08-12 08:00:00')",
+            (process_id,),
+        )
+        batch_id = db.execute(
+            "INSERT INTO payroll_batches ("
+            "payroll_month, version, period_start, period_end, source_cutoff_at) "
+            "VALUES ('2026-08', 99, '2026-08-01 07:00:00', "
+            "'2026-09-01 07:00:00', '2026-09-01 07:00:00')"
+        ).lastrowid
+        employee_line_id = db.execute(
+            "INSERT INTO payroll_employee_lines ("
+            "batch_id, employee_name_snapshot, employee_no_snapshot) "
+            "VALUES (?, '影响测试员工', 'IMPACT-001')",
+            (batch_id,),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO payroll_detail_lines ("
+            "batch_id, employee_line_id, source_type, source_id, route_id, process_id) "
+            "VALUES (?, ?, 'legacy_snapshot', 990001, ?, ?)",
+            (batch_id, employee_line_id, route_id, process_id),
+        )
+        db.commit()
+
+    response = client.get(f"/api/processes/{process_id}/impact", headers=auth_headers)
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["impact"]["route_price_versions"] == 1
+    assert payload["impact"]["performance_quality_events"] == 1
+    assert payload["impact"]["payroll_detail_lines"] == 1
+    references = {item["key"]: item for item in payload["references"]}
+    assert references["price_versions"]["label"] == "工价版本"
+    assert references["performance_quality_events"]["label"] == "绩效质量事件"
+    assert references["payroll_details"]["label"] == "工资明细台账"
+    assert payload["is_locked"] is True
+
+
 def test_database_trigger_blocks_non_fk_process_reference(client):
     with client.application.app_context():
         db = get_db()
