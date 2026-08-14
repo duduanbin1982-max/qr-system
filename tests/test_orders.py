@@ -5,7 +5,9 @@ from factories import (
     TEST_PASS,
     add_product_bom,
     create_material,
+    bind_order_process_versions,
     ensure_process,
+    ensure_process_version,
     ensure_product,
     ensure_user,
 )
@@ -109,6 +111,7 @@ def _seed_completion_focus_pair(client, lead_username=None):
             (f"Fixture Focus Process {suffix}",),
         )
         process_id = cursor.lastrowid
+        ensure_process_version(db, process_id)
         product_code = f"XMOD-FOCUS-{suffix}"
         earlier_order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode, created_at) "
@@ -126,6 +129,7 @@ def _seed_completion_focus_pair(client, lead_username=None):
                 "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
                 (order_id, process_id),
             )
+            bind_order_process_versions(db, order_id)
         worker = db.execute("SELECT id FROM users WHERE username = 'testworker'").fetchone()
         assert worker is not None
         db.execute(

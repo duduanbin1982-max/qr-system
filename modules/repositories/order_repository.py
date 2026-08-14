@@ -19,7 +19,9 @@ class OrderRepository:
         """按 ID 查询订单（含关联的客户名、路线名）。"""
         db = resolve_db(db)
         return db.execute(f'''
-            SELECT o.*, pr.name as route_name, c.name as customer_name
+            SELECT o.*,
+                COALESCE(NULLIF(o.route_name_snapshot, ''), pr.name) as route_name,
+                c.name as customer_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
@@ -104,7 +106,9 @@ class OrderRepository:
         ).fetchone()[0]
         offset = (page - 1) * limit
         rows = db.execute(f'''
-            SELECT o.*, pr.name as route_name, c.name as customer_name
+            SELECT o.*,
+                COALESCE(NULLIF(o.route_name_snapshot, ''), pr.name) as route_name,
+                c.name as customer_name
             FROM orders o
             LEFT JOIN process_routes pr ON o.route_id = pr.id
             LEFT JOIN customers c ON o.customer_id = c.id
@@ -170,7 +174,8 @@ class OrderRepository:
             return []
         placeholders = ','.join('?' for _ in order_ids)
         sql = """
-            SELECT op.*, p.name as process_name
+            SELECT op.*,
+                COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name
             FROM order_processes op JOIN processes p ON op.process_id = p.id
             WHERE op.order_id IN ({})
             ORDER BY op.order_id, op.seq_order
@@ -203,7 +208,7 @@ class OrderRepository:
         allowed = (
             "order_no", "customer", "customer_id", "product_name", "product_code", "product_id",
             "quantity", "plan_start", "plan_end", "deadline", "remark", "status",
-            "route_id", "production_line_id",
+            "route_id", "route_version_id", "route_name_snapshot", "production_line_id",
         )
         fields = [field for field in allowed if field in changes]
         if not fields:
@@ -283,13 +288,15 @@ class OrderRepository:
         db = resolve_db(db)
         cur = db.execute("""
             INSERT INTO orders (order_no, customer, customer_id, product_name, product_id, quantity,
-                plan_start, plan_end, deadline, extra_fields, remark, route_id, status, product_code, production_line_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
+                plan_start, plan_end, deadline, extra_fields, remark, route_id,
+                route_version_id, route_name_snapshot, status, product_code, production_line_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
         """, (
             data["order_no"], data.get("customer", ""), data.get("customer_id"),
             data.get("product_name", ""), data.get("product_id"), data.get("quantity", 0),
             data.get("plan_start", ""), data.get("plan_end", ""), data.get("deadline", ""),
             data.get("extra_fields", "{}"), data.get("remark", ""), data.get("route_id"),
+            data.get("route_version_id"), data.get("route_name_snapshot", ""),
             data.get("product_code", ""), data.get("production_line_id")
         ))
         return cur.lastrowid
@@ -345,44 +352,13 @@ class OrderRepository:
     def get_processes(order_id, db=None):
         db = resolve_db(db)
         return db.execute('''
-            SELECT op.*, p.name as process_name
+            SELECT op.*,
+                COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name
             FROM order_processes op
             JOIN processes p ON op.process_id = p.id
             WHERE op.order_id = ?
             ORDER BY op.seq_order
         ''', (order_id,)).fetchall()
-
-    @staticmethod
-    def assign_processes_from_route(order_id, route_id, db=None):
-        db = resolve_db(db)
-        route_items = db.execute(
-            'SELECT process_id, seq_order, required_audit '
-            'FROM process_route_items WHERE route_id = ? ORDER BY seq_order',
-            (route_id,)
-        ).fetchall()
-        for item in route_items:
-            db.execute(
-                'INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) '
-                'VALUES (?,?,?,?)',
-                (order_id, item['process_id'], item['seq_order'], item['required_audit'])
-            )
-        return len(route_items)
-
-    @staticmethod
-    def assign_processes_from_list(order_id, process_ids, db=None):
-        db = resolve_db(db)
-        count = 0
-        for pid in process_ids:
-            proc = db.execute(
-                'SELECT seq_order FROM processes WHERE id = ?', (pid,)
-            ).fetchone()
-            if proc:
-                db.execute(
-                    'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                    (order_id, pid, proc['seq_order'])
-                )
-                count += 1
-        return count
 
     @staticmethod
     def list_order_process_ids(order_id, db=None):
@@ -401,15 +377,6 @@ class OrderRepository:
             (order_id,),
         ).fetchone()
         return row["cnt"] if row else 0
-
-    @staticmethod
-    def list_route_items(route_id, db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT process_id, seq_order, required_audit "
-            "FROM process_route_items WHERE route_id = ? ORDER BY seq_order, id",
-            (route_id,),
-        ).fetchall()
 
     @staticmethod
     def delete_order_processes(order_id, process_ids, db=None):
@@ -431,50 +398,63 @@ class OrderRepository:
         )
 
     @staticmethod
-    def find_process_seq_order(process_id, db=None):
+    def insert_order_process(
+        order_id,
+        process_id,
+        seq_order,
+        required_audit=None,
+        process_version_id=None,
+        process_code_snapshot="",
+        process_name_snapshot="",
+        process_category_snapshot="",
+        db=None,
+    ):
         db = resolve_db(db)
-        return db.execute(
-            'SELECT seq_order FROM processes WHERE id = ?',
-            (process_id,)
-        ).fetchone()
-
-    @staticmethod
-    def insert_order_process(order_id, process_id, seq_order, required_audit=None, db=None):
-        db = resolve_db(db)
-        if required_audit is None:
-            db.execute(
-                'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                (order_id, process_id, seq_order)
-            )
-            return
         db.execute(
-            'INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) VALUES (?,?,?,?)',
-            (order_id, process_id, seq_order, required_audit)
+            "INSERT INTO order_processes "
+            "(order_id,process_id,seq_order,required_audit,process_version_id,"
+            "process_code_snapshot,process_name_snapshot,process_category_snapshot) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                order_id,
+                process_id,
+                seq_order,
+                0 if required_audit is None else required_audit,
+                process_version_id,
+                process_code_snapshot,
+                process_name_snapshot,
+                process_category_snapshot,
+            ),
         )
 
     @staticmethod
-    def update_order_process_route_fields(order_id, process_id, seq_order, required_audit, db=None):
+    def update_order_process_route_fields(
+        order_id,
+        process_id,
+        seq_order,
+        required_audit,
+        process_version_id,
+        process_code_snapshot,
+        process_name_snapshot,
+        process_category_snapshot,
+        db=None,
+    ):
         db = resolve_db(db)
         db.execute(
-            "UPDATE order_processes SET seq_order = ?, required_audit = ? "
+            "UPDATE order_processes SET seq_order=?,required_audit=?,process_version_id=?,"
+            "process_code_snapshot=?,process_name_snapshot=?,process_category_snapshot=? "
             "WHERE order_id = ? AND process_id = ?",
-            (seq_order, required_audit, order_id, process_id),
+            (
+                seq_order,
+                required_audit,
+                process_version_id,
+                process_code_snapshot,
+                process_name_snapshot,
+                process_category_snapshot,
+                order_id,
+                process_id,
+            ),
         )
-
-    @staticmethod
-    def assign_all_active_processes(order_id, db=None):
-        db = resolve_db(db)
-        procs = db.execute(
-            "SELECT id, seq_order FROM processes WHERE status = 'active' ORDER BY seq_order"
-        ).fetchall()
-        count = 0
-        for p in procs:
-            db.execute(
-                'INSERT INTO order_processes (order_id, process_id, seq_order) VALUES (?,?,?)',
-                (order_id, p['id'], p['seq_order'])
-            )
-            count += 1
-        return count
 
     @staticmethod
     def remove_processes_except(order_id, keep_ids, db=None):
@@ -495,8 +475,14 @@ class OrderRepository:
         db = resolve_db(db)
         result = {'work': [], 'scrap': [], 'rework': []}
         for table, key in [('work_records', 'work'), ('scrap_records', 'scrap'), ('rework_records', 'rework')]:
+            process_name_sql = (
+                "COALESCE(NULLIF(r.process_name_snapshot, ''), p.name)"
+                if table == "work_records"
+                else "p.name"
+            )
             result[key] = [dict(r) for r in db.execute(f'''
-                SELECT r.*, u.name as worker_name, p.name as process_name, ? as record_type
+                SELECT r.*, u.name as worker_name,
+                    {process_name_sql} as process_name, ? as record_type
                 FROM {table} r
                 LEFT JOIN users u ON r.user_id = u.id
                 LEFT JOIN processes p ON r.process_id = p.id
@@ -541,7 +527,8 @@ class OrderRepository:
             "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
         ).fetchall()
         processes = db.execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
+            "SELECT op.*, COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) "
+            "as process_name FROM order_processes op "
             "JOIN processes p ON p.id = op.process_id WHERE op.order_id = ? ORDER BY op.seq_order",
             (order_id,)
         ).fetchall()

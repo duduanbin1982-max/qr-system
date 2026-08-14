@@ -48,7 +48,8 @@ class ScanRepository:
     def get_order_processes(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            """SELECT op.*, p.name as process_name
+            """SELECT op.*,
+                      COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name
                FROM order_processes op
                JOIN processes p ON op.process_id=p.id
                WHERE op.order_id = ? ORDER BY op.seq_order""",
@@ -87,6 +88,20 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
+    def get_work_fact_binding(order_id, process_id, db=None):
+        """Return the exact order binding inherited by a new work fact."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT op.process_id,op.process_version_id,op.process_code_snapshot,"
+            "op.process_name_snapshot,op.process_category_snapshot,"
+            "order_row.route_id,order_row.route_version_id,"
+            "order_row.route_name_snapshot "
+            "FROM order_processes op JOIN orders order_row ON order_row.id=op.order_id "
+            "WHERE op.order_id=? AND op.process_id=?",
+            (order_id, process_id),
+        ).fetchone()
+
+    @staticmethod
     def find_order_process_id(order_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -98,7 +113,9 @@ class ScanRepository:
     def get_prev_incomplete_processes(order_id, current_seq, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT op.seq_order, p.name as process_name FROM order_processes op "
+            "SELECT op.seq_order, "
+            "COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name "
+            "FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
             "WHERE op.order_id = ? AND op.seq_order < ? AND (op.completed IS NULL OR op.completed = 0) "
             "ORDER BY op.seq_order",
@@ -109,7 +126,8 @@ class ScanRepository:
     def get_prev_order_process(order_id, current_seq, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
+            "SELECT op.*, COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) "
+            "as process_name FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
             "WHERE op.order_id = ? AND op.seq_order < ? "
             "ORDER BY op.seq_order DESC LIMIT 1",
@@ -228,15 +246,19 @@ class ScanRepository:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        fact_binding=None,
         db=None,
     ):
         db = resolve_db(db)
+        binding = dict(fact_binding or {})
         cur = db.execute(
             "INSERT INTO work_records "
             "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
             "report_source, actual_completed_at, backfill_reason, "
-            "submit_position_id, submit_position_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "submit_position_id, submit_position_name, process_version_id, "
+            "process_code_snapshot, process_name_snapshot, process_category_snapshot, "
+            "route_id, route_version_id, route_name_snapshot) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 order_id,
                 process_id,
@@ -251,6 +273,13 @@ class ScanRepository:
                 backfill_reason,
                 submit_position_id,
                 submit_position_name,
+                binding.get("process_version_id"),
+                binding.get("process_code_snapshot", ""),
+                binding.get("process_name_snapshot", ""),
+                binding.get("process_category_snapshot", ""),
+                binding.get("route_id"),
+                binding.get("route_version_id"),
+                binding.get("route_name_snapshot", ""),
             ),
         )
         return cur.lastrowid
@@ -295,7 +324,8 @@ class ScanRepository:
     def find_first_unreported_serial_process(order_id, serial_no, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT op.*, p.name AS process_name FROM order_processes op "
+            "SELECT op.*, COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) "
+            "AS process_name FROM order_processes op "
             "JOIN processes p ON p.id = op.process_id "
             "WHERE op.order_id = ? AND NOT EXISTS ("
             "SELECT 1 FROM work_records wr WHERE wr.order_id = op.order_id "
@@ -505,15 +535,23 @@ class ScanRepository:
     @staticmethod
     def insert_work_record(data, db=None):
         db = resolve_db(db)
-        cur = db.execute(
-            """INSERT INTO work_records
-               (order_id, process_id, user_id, serial_no, quantity, type, status, remark)
-               VALUES (?,?,?,?,?,?,'approved',?)""",
-            (data['order_id'], data['process_id'], data['user_id'],
-             data.get('serial_no', ''), data.get('quantity', 1),
-             data.get('type', 'normal'), data.get('remark', ''))
+        binding = ScanRepository.get_work_fact_binding(
+            data["order_id"], data["process_id"], db=db
         )
-        return cur.lastrowid
+        if binding is None or binding["process_version_id"] is None:
+            raise ValueError("订单工序缺少版本绑定，禁止报工")
+        return ScanRepository.insert_report_work_record(
+            data["order_id"],
+            data["process_id"],
+            data["user_id"],
+            data.get("type", "normal"),
+            data.get("quantity", 1),
+            data.get("remark", ""),
+            "approved",
+            data.get("serial_no", ""),
+            fact_binding=binding,
+            db=db,
+        )
 
 
     @staticmethod

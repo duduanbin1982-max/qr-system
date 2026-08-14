@@ -2,6 +2,7 @@ from datetime import datetime
 import uuid
 
 from modules.db import get_db
+from factories import ensure_process_version, ensure_route_version
 
 
 def _seed_route_bundle(client):
@@ -20,7 +21,9 @@ def _seed_route_bundle(client):
                 "VALUES (?, ?, ?, ?, 'active', datetime('now','localtime'))",
                 (name, "cross module fixture", "fixture", seq_order),
             )
-            process_ids.append(cursor.lastrowid)
+            process_id = cursor.lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         cursor = db.execute(
             "INSERT INTO process_routes (name, description, status, category, updated_at) "
@@ -51,6 +54,7 @@ def _seed_route_bundle(client):
                 ),
             )
 
+        ensure_route_version(db, route_id)
         db.commit()
         return route_id, process_ids
 

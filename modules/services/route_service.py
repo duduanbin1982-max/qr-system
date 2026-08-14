@@ -204,13 +204,11 @@ class ProcessRouteService:
 
     @staticmethod
     def apply_route(rid, order_id):
-        version = LegacyProcessCompatibilityService.current_route_for_legacy_apply(rid)
-        route_items = version.get("items") if version else None
         with BaseService.transaction() as txn:
             if not RouteRepository.find_route_by_id(rid, db=txn):
                 raise NotFoundError("路线不存在")
             if not RouteRepository.check_order_exists(order_id, db=txn):
                 raise NotFoundError("订单不存在")
             return OrderProcessSyncService.apply_route(
-                txn, order_id, rid, route_items=route_items
+                txn, order_id, rid
             )

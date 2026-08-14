@@ -108,6 +108,15 @@ def test_v061_binds_route_and_custom_orders_to_v1_without_changing_business_tota
             "process_name_snapshot",
             "process_category_snapshot",
         } <= _column_names(db, "order_processes")
+        assert {
+            "process_version_id",
+            "process_code_snapshot",
+            "process_name_snapshot",
+            "process_category_snapshot",
+            "route_id",
+            "route_version_id",
+            "route_name_snapshot",
+        } <= _column_names(db, "work_records")
 
         route_order = db.execute(
             "SELECT order_row.route_id,order_row.route_version_id,"
@@ -165,6 +174,12 @@ def test_v061_binds_route_and_custom_orders_to_v1_without_changing_business_tota
             "SELECT route_version_id,route_name_snapshot FROM orders WHERE id=101"
         ).fetchone()
         assert tuple(custom_order) == (None, "")
+        historical_work = db.execute(
+            "SELECT process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_id,route_version_id,route_name_snapshot "
+            "FROM work_records WHERE id=2001"
+        ).fetchone()
+        assert tuple(historical_work) == (None, "", "", "", None, None, "")
         assert _business_totals(db) == before
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:

@@ -81,7 +81,9 @@ class RouteVersionRepository:
             version["items"] = []
         placeholders = ",".join("?" for _ in version_map)
         rows = db.execute(
-            "SELECT item.*,process_version.name AS process_name_snapshot,"
+            "SELECT item.*,"
+            "process_version.process_code_snapshot AS process_code_snapshot,"
+            "process_version.name AS process_name_snapshot,"
             "process_version.category AS process_category,"
             "process_version.version AS process_version,"
             "process_version.status AS process_version_status "

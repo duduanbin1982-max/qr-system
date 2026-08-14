@@ -16,7 +16,8 @@ def _scan_db():
     )
     db.execute(
         "CREATE TABLE order_processes ("
-        "order_id INTEGER, process_id INTEGER, seq_order INTEGER, completed INTEGER)"
+        "order_id INTEGER, process_id INTEGER, seq_order INTEGER, completed INTEGER, "
+        "process_name_snapshot TEXT NOT NULL DEFAULT '')"
     )
     db.execute(
         "CREATE TABLE work_records ("

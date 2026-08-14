@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 
-from factories import TEST_HASH
+from factories import TEST_HASH, ensure_route_version
 from modules.db import get_db
 from modules.services.position_service import PositionService
 
@@ -279,6 +279,7 @@ def test_route_apply_uses_order_sync_service(client, auth_headers):
         new_process_id = _insert_process(db, "新路线工序", seq_order=2)
         route_id = _insert_route(db, [new_process_id])
         order_id = _insert_order(db, [old_process_id])
+        ensure_route_version(db, route_id)
         db.commit()
 
     response = client.post(

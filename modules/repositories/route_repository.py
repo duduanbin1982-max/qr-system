@@ -242,35 +242,3 @@ class RouteRepository:
             "WHERE pri.route_id = ? ORDER BY pri.seq_order, pri.id",
             (rid,),
         ).fetchall()
-
-    @staticmethod
-    def count_work_records_for_order_txn(order_id, db):
-        row = db.execute(
-            "SELECT COUNT(*) as cnt FROM work_records WHERE order_id = ?", (order_id,)
-        ).fetchone()
-        return row["cnt"] if row else 0
-
-    @staticmethod
-    def update_order_route_txn(rid, order_id, db):
-        db.execute("UPDATE orders SET route_id = ? WHERE id = ?", (rid, order_id))
-
-    @staticmethod
-    def delete_order_processes_txn(order_id, db):
-        db.execute("DELETE FROM order_processes WHERE order_id = ?", (order_id,))
-
-    @staticmethod
-    def insert_order_process_txn(order_id, process_id, seq_order, required_audit, db):
-        db.execute(
-            "INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) "
-            "VALUES (?, ?, ?, ?)",
-            (order_id, process_id, seq_order, required_audit)
-        )
-
-    @staticmethod
-    def replace_order_processes_txn(order_id, route_items, db):
-        RouteRepository.delete_order_processes_txn(order_id, db=db)
-        for item in route_items:
-            RouteRepository.insert_order_process_txn(
-                order_id, item["process_id"], item["seq_order"], item["required_audit"], db=db
-            )
-        return len(route_items)

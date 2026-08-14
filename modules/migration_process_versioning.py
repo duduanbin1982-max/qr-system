@@ -1322,6 +1322,48 @@ def _add_order_binding_columns(db):
         "process_category_snapshot",
         "TEXT NOT NULL DEFAULT ''",
     )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "process_version_id",
+        "INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "process_code_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "process_name_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "process_category_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "route_id",
+        "INTEGER REFERENCES process_routes(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "route_version_id",
+        "INTEGER REFERENCES process_route_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "work_records",
+        "route_name_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
 
 
 def _backfill_order_version_bindings(db):
@@ -1388,6 +1430,14 @@ def _create_order_binding_indexes(db):
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_order_processes_process_version "
         "ON order_processes(process_version_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_work_records_process_version "
+        "ON work_records(process_version_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_work_records_route_version "
+        "ON work_records(route_version_id)"
     )
     create_unique_index(
         db,

@@ -347,6 +347,13 @@ ROUTE_REFERENCES = (
         label="工时记录",
     ),
     _route(
+        "work_records",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="work_records",
+        label="报工记录",
+    ),
+    _route(
         "work_time_standards",
         ("route_id",),
         version_columns=("route_version_id",),
