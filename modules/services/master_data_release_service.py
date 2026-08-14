@@ -259,6 +259,13 @@ class MasterDataReleaseService:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             process_versions = sorted(batch["process_versions"], key=lambda item: (item["process_id"], item["version"], item["id"]))
             route_versions = sorted(batch["route_versions"], key=lambda item: (item["process_route_id"], item["version"], item["id"]))
+            available_price_ids = [
+                int(item["id"]) for item in batch["price_versions"]
+            ]
+            route_command = {
+                **command,
+                "_available_price_version_ids": available_price_ids,
+            }
             for version in process_versions:
                 current = ProcessVersionRepository.version(version["id"], db=db)
                 if current["status"] == "pending_approval":
@@ -277,7 +284,7 @@ class MasterDataReleaseService:
                         actor,
                         db,
                         f"{key}:route:{current['id']}",
-                        command,
+                        route_command,
                         check_impact=False,
                     )
             for price in sorted(batch["price_versions"], key=lambda item: item["id"]):
@@ -289,8 +296,8 @@ class MasterDataReleaseService:
                 assert_separation_of_duties(current["created_by"], actor["id"])
                 PayrollRepository.close_prior_price_version(
                     current["id"],
-                    current["route_id"],
-                    current["process_id"],
+                    current["route_version_id"],
+                    current["process_version_id"],
                     current["valid_from"],
                     db,
                 )

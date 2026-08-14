@@ -14,6 +14,7 @@ from modules.migration_helpers import (
 
 MIGRATION_KEY = "v060:legacy-baseline"
 ORDER_BINDING_MIGRATION_KEY = "v061:order-version-bindings"
+PRICE_BINDING_MIGRATION_KEY = "v062:price-version-bindings"
 TERMINAL_VERSION_STATUSES = ("published", "superseded", "retired")
 
 
@@ -1598,7 +1599,382 @@ def m061_bind_order_versions(db):
     db.execute("RELEASE process_order_v061")
 
 
+PRICE_VERSION_MUTATION_TRIGGERS = (
+    "prevent_price_version_overlap_insert",
+    "prevent_price_version_overlap_update",
+    "protect_approved_price_version",
+    "validate_price_version_binding_insert",
+    "validate_price_version_binding_update",
+    "validate_approved_price_version_insert",
+    "validate_approved_price_version_update",
+)
+
+
+def _collect_price_binding_issues(db):
+    issues = []
+    required = (
+        ("route_price_versions", ("id", "route_id", "process_id")),
+        ("payroll_detail_lines", ("id", "amount_cents")),
+        ("process_route_versions", ("id", "process_route_id", "version")),
+        (
+            "process_route_version_items",
+            ("id", "route_version_id", "process_id", "process_version_id"),
+        ),
+    )
+    if not all(_required_columns(db, table, columns, issues) for table, columns in required):
+        return issues
+    exact_columns_exist = column_exists(
+        db, "route_price_versions", "route_version_id"
+    ) and column_exists(db, "route_price_versions", "process_version_id")
+    legacy_filter = (
+        "AND (price.route_version_id IS NULL OR price.process_version_id IS NULL) "
+        if exact_columns_exist
+        else ""
+    )
+    rows = db.execute(
+        "SELECT price.id,price.route_id,price.process_id,route_version.id,"
+        "route_item.process_version_id FROM route_price_versions price "
+        "LEFT JOIN process_route_versions route_version "
+        "ON route_version.process_route_id=price.route_id AND route_version.version=1 "
+        "LEFT JOIN process_route_version_items route_item "
+        "ON route_item.route_version_id=route_version.id "
+        "AND route_item.process_id=price.process_id "
+        "WHERE (route_version.id IS NULL OR route_item.process_version_id IS NULL) "
+        + legacy_filter
+        + "ORDER BY price.id"
+    ).fetchall()
+    for row in rows:
+        issues.append(
+            {
+                "entity_type": "route_price_version",
+                "legacy_id": row[0],
+                "reason_code": (
+                    "missing_route_v1"
+                    if row[3] is None
+                    else "process_not_in_route_v1"
+                ),
+                "summary": {"route_id": row[1], "process_id": row[2]},
+            }
+        )
+    if exact_columns_exist:
+        for row in db.execute(
+            "SELECT price.id,price.route_id,price.process_id,"
+            "price.route_version_id,price.process_version_id "
+            "FROM route_price_versions price "
+            "LEFT JOIN process_route_versions route_version "
+            "ON route_version.id=price.route_version_id "
+            "LEFT JOIN process_versions process_version "
+            "ON process_version.id=price.process_version_id "
+            "LEFT JOIN process_route_version_items item "
+            "ON item.route_version_id=price.route_version_id "
+            "AND item.process_id=price.process_id "
+            "AND item.process_version_id=price.process_version_id "
+            "WHERE price.route_version_id IS NOT NULL "
+            "AND price.process_version_id IS NOT NULL "
+            "AND (route_version.id IS NULL OR process_version.id IS NULL "
+            "OR route_version.process_route_id<>price.route_id "
+            "OR process_version.process_id<>price.process_id OR item.id IS NULL) "
+            "ORDER BY price.id"
+        ).fetchall():
+            issues.append(
+                {
+                    "entity_type": "route_price_version",
+                    "legacy_id": row[0],
+                    "reason_code": "invalid_exact_version_binding",
+                    "summary": {
+                        "route_id": row[1],
+                        "process_id": row[2],
+                        "route_version_id": row[3],
+                        "process_version_id": row[4],
+                    },
+                }
+            )
+    return issues
+
+
+def _record_price_binding_issues(db, issues):
+    for issue in issues:
+        db.execute(
+            "INSERT OR IGNORE INTO process_version_migration_exceptions "
+            "(migration_key,entity_type,legacy_id,reason_code,blocking,source_summary_json) "
+            "VALUES (?,?,?,?,1,?)",
+            (
+                PRICE_BINDING_MIGRATION_KEY,
+                issue["entity_type"],
+                issue["legacy_id"],
+                issue["reason_code"],
+                json.dumps(issue["summary"], ensure_ascii=False, sort_keys=True),
+            ),
+        )
+
+
+def _price_binding_metrics(db):
+    return {
+        "prices": db.execute(
+            "SELECT COUNT(*) FROM route_price_versions"
+        ).fetchone()[0],
+        "price_micros": db.execute(
+            "SELECT COALESCE(SUM(normal_unit_price_micros),0) "
+            "FROM route_price_versions"
+        ).fetchone()[0],
+        "payroll_details": db.execute(
+            "SELECT COUNT(*) FROM payroll_detail_lines"
+        ).fetchone()[0],
+        "payroll_amount_cents": db.execute(
+            "SELECT COALESCE(SUM(amount_cents),0) FROM payroll_detail_lines"
+        ).fetchone()[0],
+    }
+
+
+def _drop_price_version_mutation_triggers(db):
+    for name in PRICE_VERSION_MUTATION_TRIGGERS:
+        db.execute("DROP TRIGGER IF EXISTS " + name)
+
+
+def _add_price_binding_columns(db):
+    add_column_if_missing(
+        db,
+        "route_price_versions",
+        "route_version_id",
+        "INTEGER REFERENCES process_route_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "route_price_versions",
+        "process_version_id",
+        "INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "payroll_detail_lines",
+        "route_version_id",
+        "INTEGER REFERENCES process_route_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "payroll_detail_lines",
+        "process_version_id",
+        "INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT",
+    )
+
+
+def _backfill_price_version_bindings(db):
+    db.execute(
+        "UPDATE route_price_versions SET route_version_id=("
+        "SELECT version.id FROM process_route_versions version "
+        "WHERE version.process_route_id=route_price_versions.route_id "
+        "AND version.version=1) WHERE route_version_id IS NULL"
+    )
+    db.execute(
+        "UPDATE route_price_versions SET process_version_id=("
+        "SELECT item.process_version_id FROM process_route_version_items item "
+        "WHERE item.route_version_id=route_price_versions.route_version_id "
+        "AND item.process_id=route_price_versions.process_id) "
+        "WHERE process_version_id IS NULL"
+    )
+
+
+def _create_price_binding_indexes(db):
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_price_versions_exact_lookup "
+        "ON route_price_versions("
+        "route_version_id,process_version_id,status,valid_from,valid_to)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_payroll_detail_route_version "
+        "ON payroll_detail_lines(route_version_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_payroll_detail_process_version "
+        "ON payroll_detail_lines(process_version_id)"
+    )
+
+
+def _create_price_binding_triggers(db):
+    statements = (
+        """
+        CREATE TRIGGER validate_price_version_binding_insert
+        BEFORE INSERT ON route_price_versions
+        WHEN NEW.route_version_id IS NULL OR NEW.process_version_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM process_route_versions route_version
+            JOIN process_versions process_version
+              ON process_version.id=NEW.process_version_id
+            JOIN process_route_version_items item
+              ON item.route_version_id=route_version.id
+             AND item.process_id=NEW.process_id
+             AND item.process_version_id=NEW.process_version_id
+            WHERE route_version.id=NEW.route_version_id
+              AND route_version.process_route_id=NEW.route_id
+              AND process_version.process_id=NEW.process_id
+          )
+        BEGIN SELECT RAISE(ABORT,'price version binding is invalid'); END
+        """,
+        """
+        CREATE TRIGGER validate_price_version_binding_update
+        BEFORE UPDATE OF route_id,process_id,route_version_id,process_version_id
+        ON route_price_versions
+        WHEN NEW.route_version_id IS NULL OR NEW.process_version_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM process_route_versions route_version
+            JOIN process_versions process_version
+              ON process_version.id=NEW.process_version_id
+            JOIN process_route_version_items item
+              ON item.route_version_id=route_version.id
+             AND item.process_id=NEW.process_id
+             AND item.process_version_id=NEW.process_version_id
+            WHERE route_version.id=NEW.route_version_id
+              AND route_version.process_route_id=NEW.route_id
+              AND process_version.process_id=NEW.process_id
+          )
+        BEGIN SELECT RAISE(ABORT,'price version binding is invalid'); END
+        """,
+        """
+        CREATE TRIGGER validate_approved_price_version_insert
+        BEFORE INSERT ON route_price_versions
+        WHEN NEW.status='approved' AND NOT EXISTS (
+            SELECT 1 FROM process_route_versions route_version
+            JOIN process_versions process_version
+              ON process_version.id=NEW.process_version_id
+            WHERE route_version.id=NEW.route_version_id
+              AND route_version.status='published'
+              AND process_version.status='published'
+        )
+        BEGIN SELECT RAISE(ABORT,'approved price requires published versions'); END
+        """,
+        """
+        CREATE TRIGGER validate_approved_price_version_update
+        BEFORE UPDATE OF status ON route_price_versions
+        WHEN OLD.status<>'approved' AND NEW.status='approved' AND NOT EXISTS (
+            SELECT 1 FROM process_route_versions route_version
+            JOIN process_versions process_version
+              ON process_version.id=NEW.process_version_id
+            WHERE route_version.id=NEW.route_version_id
+              AND route_version.status='published'
+              AND process_version.status='published'
+        )
+        BEGIN SELECT RAISE(ABORT,'approved price requires published versions'); END
+        """,
+        """
+        CREATE TRIGGER prevent_price_version_overlap_insert
+        BEFORE INSERT ON route_price_versions
+        WHEN NEW.status='approved' AND EXISTS (
+            SELECT 1 FROM route_price_versions current
+            WHERE current.route_version_id=NEW.route_version_id
+              AND current.process_version_id=NEW.process_version_id
+              AND current.status='approved'
+              AND COALESCE(current.valid_to,'9999-12-31 23:59:59') > NEW.valid_from
+              AND COALESCE(NEW.valid_to,'9999-12-31 23:59:59') > current.valid_from
+        )
+        BEGIN SELECT RAISE(ABORT,'approved price version intervals overlap'); END
+        """,
+        """
+        CREATE TRIGGER prevent_price_version_overlap_update
+        BEFORE UPDATE ON route_price_versions
+        WHEN NEW.status='approved' AND EXISTS (
+            SELECT 1 FROM route_price_versions current
+            WHERE current.id<>NEW.id
+              AND current.route_version_id=NEW.route_version_id
+              AND current.process_version_id=NEW.process_version_id
+              AND current.status='approved'
+              AND COALESCE(current.valid_to,'9999-12-31 23:59:59') > NEW.valid_from
+              AND COALESCE(NEW.valid_to,'9999-12-31 23:59:59') > current.valid_from
+        )
+        BEGIN SELECT RAISE(ABORT,'approved price version intervals overlap'); END
+        """,
+        """
+        CREATE TRIGGER protect_approved_price_version
+        BEFORE UPDATE ON route_price_versions
+        WHEN OLD.status IN ('approved','retired') AND NOT (
+            OLD.status='approved' AND NEW.status='approved'
+            AND OLD.route_id=NEW.route_id AND OLD.process_id=NEW.process_id
+            AND OLD.route_version_id=NEW.route_version_id
+            AND OLD.process_version_id=NEW.process_version_id
+            AND OLD.normal_unit_price_micros=NEW.normal_unit_price_micros
+            AND OLD.rework_rate_basis_points=NEW.rework_rate_basis_points
+            AND OLD.rework_rate_configured=NEW.rework_rate_configured
+            AND OLD.valid_from=NEW.valid_from
+            AND COALESCE(OLD.valid_to,'')=''
+            AND COALESCE(NEW.valid_to,'')<>''
+        )
+        BEGIN SELECT RAISE(ABORT,'approved price versions are immutable'); END
+        """,
+    )
+    for statement in statements:
+        db.execute(statement)
+
+
+def _validate_price_version_bindings(db, before):
+    after = _price_binding_metrics(db)
+    if after != before:
+        raise MigrationInvariantError(
+            f"Migration v62 changed protected payroll totals: {before} -> {after}"
+        )
+    invalid = db.execute(
+        "SELECT price.id FROM route_price_versions price "
+        "LEFT JOIN process_route_versions route_version "
+        "ON route_version.id=price.route_version_id "
+        "LEFT JOIN process_versions process_version "
+        "ON process_version.id=price.process_version_id "
+        "LEFT JOIN process_route_version_items item "
+        "ON item.route_version_id=price.route_version_id "
+        "AND item.process_id=price.process_id "
+        "AND item.process_version_id=price.process_version_id "
+        "WHERE route_version.id IS NULL OR process_version.id IS NULL "
+        "OR route_version.process_route_id<>price.route_id "
+        "OR process_version.process_id<>price.process_id OR item.id IS NULL LIMIT 1"
+    ).fetchone()
+    if invalid is not None:
+        raise MigrationInvariantError(
+            f"Migration v62 blocked: invalid price binding at legacy id {invalid[0]}"
+        )
+    trigger_names = {
+        row[0]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        ).fetchall()
+    }
+    missing = set(PRICE_VERSION_MUTATION_TRIGGERS) - trigger_names
+    if missing:
+        raise MigrationInvariantError(
+            "Migration v62 failed to restore price guards: "
+            + ", ".join(sorted(missing))
+        )
+
+
+def m062_bind_price_versions(db):
+    """Bind legacy prices and new payroll details to exact master-data versions."""
+    _create_exception_table(db)
+    issues = _collect_price_binding_issues(db)
+    if issues:
+        _record_price_binding_issues(db, issues)
+        db.commit()
+        sample = ", ".join(
+            f"{issue['entity_type']}:{issue['legacy_id']}:{issue['reason_code']}"
+            for issue in issues[:5]
+        )
+        raise MigrationInvariantError(
+            f"Migration v62 blocked by {len(issues)} price binding exception(s): {sample}"
+        )
+
+    before = _price_binding_metrics(db)
+    db.execute("SAVEPOINT process_price_v062")
+    try:
+        _drop_price_version_mutation_triggers(db)
+        _add_price_binding_columns(db)
+        _backfill_price_version_bindings(db)
+        _create_price_binding_indexes(db)
+        _create_price_binding_triggers(db)
+        _validate_price_version_bindings(db, before)
+    except Exception:
+        db.execute("ROLLBACK TO process_price_v062")
+        db.execute("RELEASE process_price_v062")
+        raise
+    db.execute("RELEASE process_price_v062")
+
+
 MIGRATIONS = [
     (60, "Add versioned process and route master-data baseline", m060_process_master_versioning),
     (61, "Bind orders to process and route versions", m061_bind_order_versions),
+    (62, "Bind payroll prices to route and process versions", m062_bind_price_versions),
 ]

@@ -15,8 +15,10 @@ class PriceVersionService:
         try:
             route_id = int(data.get("route_id"))
             process_id = int(data.get("process_id"))
+            route_version_id = int(data.get("route_version_id"))
+            process_version_id = int(data.get("process_version_id"))
         except (TypeError, ValueError) as exc:
-            raise ValueError("路线和工序必须有效") from exc
+            raise ValueError("路线版本和工序版本必须有效") from exc
         normal_micros = data.get("normal_unit_price_micros")
         if normal_micros is None:
             normal_micros = yuan_to_micros(data.get("normal_unit_price"))
@@ -35,10 +37,16 @@ class PriceVersionService:
             configured = 1
         valid_from = normalize_timestamp(data.get("valid_from"), "生效时间")
         with BaseService.transaction() as db:
-            if not PayrollRepository.route_process_exists(route_id, process_id, db):
-                raise ValueError("工序不属于该路线")
+            binding = PayrollRepository.exact_price_binding(
+                route_version_id, process_version_id, db
+            )
+            if binding is None:
+                raise ValueError("工序版本不属于该路线版本")
+            if binding["route_id"] != route_id or binding["process_id"] != process_id:
+                raise ValueError("路线、工序根 ID 与版本归属不一致")
             version_id = PayrollRepository.create_price_version({
-                "route_id": route_id, "process_id": process_id,
+                "route_id": route_id, "route_version_id": route_version_id,
+                "process_id": process_id, "process_version_id": process_version_id,
                 "normal_unit_price_micros": normal_micros,
                 "rework_rate_basis_points": rate or 0,
                 "rework_rate_configured": configured,
@@ -47,7 +55,13 @@ class PriceVersionService:
             }, db)
             PayrollRepository.insert_event({
                 "event_type": "price_version_created", "operator_id": actor_id, "operator_name": actor_name,
-                "payload": {"price_version_id": version_id, "route_id": route_id, "process_id": process_id},
+                "payload": {
+                    "price_version_id": version_id,
+                    "route_id": route_id,
+                    "route_version_id": route_version_id,
+                    "process_id": process_id,
+                    "process_version_id": process_version_id,
+                },
             }, db)
             return PayrollRepository.price_version(version_id, db)
 
@@ -67,8 +81,22 @@ class PriceVersionService:
                 raise ValueError("只有草稿工价可以批准")
             if version.get("created_by") == actor_id:
                 raise ValueError("工价制单人与审批人必须不同")
+            binding = PayrollRepository.exact_price_binding(
+                version["route_version_id"], version["process_version_id"], db
+            )
+            if binding is None:
+                raise ValueError("工价版本的路线或工序版本绑定无效")
+            if (
+                binding["route_version_status"] != "published"
+                or binding["process_version_status"] != "published"
+            ):
+                raise ValueError("只能批准绑定已发布路线和工序版本的工价")
             PayrollRepository.close_prior_price_version(
-                version_id, version["route_id"], version["process_id"], version["valid_from"], db
+                version_id,
+                version["route_version_id"],
+                version["process_version_id"],
+                version["valid_from"],
+                db,
             )
             PayrollRepository.approve_price_version(version_id, expected_row_version, {
                 "approved_by": actor_id, "approved_by_name": actor_name,
@@ -80,8 +108,15 @@ class PriceVersionService:
             return PayrollRepository.price_version(version_id, db)
 
     @staticmethod
-    def list_versions(route_id=None, status=""):
-        return PayrollRepository.list_price_versions(route_id, status)
+    def list_versions(
+        route_id=None, status="", route_version_id=None, process_version_id=None
+    ):
+        return PayrollRepository.list_price_versions(
+            route_id,
+            status,
+            route_version_id=route_version_id,
+            process_version_id=process_version_id,
+        )
 
     @staticmethod
     def reference_items():

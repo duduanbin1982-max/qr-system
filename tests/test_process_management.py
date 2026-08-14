@@ -112,11 +112,18 @@ def test_process_impact_includes_price_payroll_and_performance_references(
         db = get_db()
         process_id = _insert_process(db, "跨模块影响目录")
         route_id = _insert_route(db, [process_id])
+        route_version_id = ensure_route_version(db, route_id)
+        process_version_id = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (route_version_id, process_id),
+        ).fetchone()["process_version_id"]
         db.execute(
             "INSERT INTO route_price_versions ("
-            "route_id, process_id, normal_unit_price_micros, valid_from, status) "
-            "VALUES (?, ?, 12000, '2026-08-01 07:00:00', 'draft')",
-            (route_id, process_id),
+            "route_id, route_version_id, process_id, process_version_id, "
+            "normal_unit_price_micros, valid_from, status) "
+            "VALUES (?, ?, ?, ?, 12000, '2026-08-01 07:00:00', 'draft')",
+            (route_id, route_version_id, process_id, process_version_id),
         )
         db.execute(
             "INSERT INTO performance_quality_events "

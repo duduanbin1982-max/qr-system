@@ -144,7 +144,9 @@ def test_atomic_batch_publishes_process_then_route_and_is_idempotent(client):
         price = PriceVersionService.create(
             {
                 "route_id": route_v2["process_route_id"],
+                "route_version_id": route_v2["id"],
                 "process_id": process_v2["process_id"],
+                "process_version_id": process_v2["id"],
                 "normal_unit_price": "1.25",
                 "valid_from": "2026-08-20 07:00:00",
                 "remark": "成组发布工价",
@@ -168,6 +170,14 @@ def test_atomic_batch_publishes_process_then_route_and_is_idempotent(client):
         command = {
             "row_version": submitted["row_version"],
             "idempotency_key": f"approve-batch-{uuid.uuid4().hex}",
+            "required_price_process_ids": [process_v2["process_id"]],
+            "price_dispositions": [
+                {
+                    "process_id": process_v2["process_id"],
+                    "disposition": "price_version",
+                    "price_version_id": price["id"],
+                }
+            ],
         }
         published = MasterDataReleaseService.approve(batch["id"], command, approver)
         replay = MasterDataReleaseService.approve(batch["id"], command, approver)
@@ -180,6 +190,102 @@ def test_atomic_batch_publishes_process_then_route_and_is_idempotent(client):
     assert process_root["current_effective_version_id"] == process_v2["id"]
     assert route_root["current_effective_version_id"] == route_v2["id"]
     assert approved_price["status"] == "approved"
+    assert approved_price["route_version_id"] == route_v2["id"]
+    assert approved_price["process_version_id"] == process_v2["id"]
+
+
+def test_price_approval_failure_rolls_back_process_and_route_switches(
+    client, monkeypatch
+):
+    preparer, approver = _actors(client)
+    process_created = _create_process(client, preparer, "工价失败回滚工序")
+    process_v1 = _publish(
+        client, process_created["version"]["id"], preparer, approver
+    )
+    route_created = _create_route(client, preparer, [process_v1])
+    route_v1 = _publish_route(
+        client, route_created["version"]["id"], preparer, approver
+    )
+    process_v2 = _submitted_process_revision(
+        client, process_v1["process_id"], preparer, name="工价失败回滚工序 V2"
+    )
+    route_v2 = _submitted_route_revision(
+        client,
+        route_v1["process_route_id"],
+        preparer,
+        [
+            {
+                "process_id": process_v2["process_id"],
+                "process_version_id": process_v2["id"],
+                "seq_order": 10,
+                "is_required": 1,
+                "required_audit": 0,
+            }
+        ],
+    )
+    with client.application.app_context():
+        price = PriceVersionService.create(
+            {
+                "route_id": route_v2["process_route_id"],
+                "route_version_id": route_v2["id"],
+                "process_id": process_v2["process_id"],
+                "process_version_id": process_v2["id"],
+                "normal_unit_price": "1.50",
+                "valid_from": "2026-08-21 07:00:00",
+            },
+            preparer,
+        )
+    batch = _create_batch(
+        client,
+        preparer,
+        [process_v2["id"]],
+        [route_v2["id"]],
+        [price["id"]],
+    )
+
+    with client.application.app_context():
+        submitted = MasterDataReleaseService.submit(
+            batch["id"],
+            {
+                "row_version": 0,
+                "idempotency_key": f"submit-batch-{uuid.uuid4().hex}",
+            },
+            preparer,
+        )
+
+        def fail_price_approval(*args, **kwargs):
+            raise RuntimeError("simulated price approval failure")
+
+        monkeypatch.setattr(
+            PayrollRepository, "approve_price_version", fail_price_approval
+        )
+        with pytest.raises(RuntimeError, match="simulated price approval failure"):
+            MasterDataReleaseService.approve(
+                batch["id"],
+                {
+                    "row_version": submitted["row_version"],
+                    "idempotency_key": f"approve-batch-{uuid.uuid4().hex}",
+                    "required_price_process_ids": [process_v2["process_id"]],
+                    "price_dispositions": [
+                        {
+                            "process_id": process_v2["process_id"],
+                            "disposition": "price_version",
+                            "price_version_id": price["id"],
+                        }
+                    ],
+                },
+                approver,
+            )
+
+        assert ProcessVersionRepository.version(process_v2["id"])["status"] == "pending_approval"
+        assert RouteVersionRepository.version(route_v2["id"])["status"] == "pending_approval"
+        assert PayrollRepository.price_version(price["id"])["status"] == "draft"
+        assert ProcessVersionRepository.root(process_v1["process_id"])[
+            "current_effective_version_id"
+        ] == process_v1["id"]
+        assert RouteVersionRepository.root(route_v1["process_route_id"])[
+            "current_effective_version_id"
+        ] == route_v1["id"]
 
 
 def test_batch_failure_rolls_back_all_member_statuses_and_pointers(client, monkeypatch):

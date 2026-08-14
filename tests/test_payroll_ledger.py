@@ -2,7 +2,14 @@ import sqlite3
 
 import pytest
 
-from factories import WORKER_HASH, create_order, create_process_route, ensure_process, ensure_user
+from factories import (
+    WORKER_HASH,
+    bind_order_process_versions,
+    create_order,
+    create_process_route,
+    ensure_process,
+    ensure_user,
+)
 from modules.db import get_db
 from modules.domain.payroll_policy import PayrollConflictError, work_amount_cents
 from modules.services.payroll_service import PayrollWorkflowService
@@ -18,6 +25,22 @@ def _actors(db):
     )
 
 
+def _exact_binding(db, route_id, process_id):
+    return db.execute(
+        "SELECT route_version.id AS route_version_id,"
+        "item.process_version_id,route_version.name AS route_name,"
+        "process_version.name AS process_name "
+        "FROM process_routes route "
+        "JOIN process_route_versions route_version "
+        "ON route_version.id=route.current_effective_version_id "
+        "JOIN process_route_version_items item "
+        "ON item.route_version_id=route_version.id AND item.process_id=? "
+        "JOIN process_versions process_version "
+        "ON process_version.id=item.process_version_id WHERE route.id=?",
+        (process_id, route_id),
+    ).fetchone()
+
+
 def _seed_price_and_work(
     db,
     created_at="2026-07-01 07:00:00",
@@ -30,9 +53,26 @@ def _seed_price_and_work(
     worker_id = ensure_user(db, "payroll-worker", WORKER_HASH, "工资测试员工", "worker", "PAY-WORK")
     order_id = create_order(db, [process_id], quantity=20, product_code="PAY-PRODUCT")
     db.execute("UPDATE orders SET route_id=? WHERE id=?", (route_id, order_id))
+    bind_order_process_versions(db, order_id)
+    binding = _exact_binding(db, route_id, process_id)
     db.execute(
-        "INSERT INTO work_records (order_id,process_id,user_id,type,quantity,status,created_at) VALUES (?,?,?,?,?,'approved',?)",
-        (order_id, process_id, worker_id, work_type, 3, created_at),
+        "INSERT INTO work_records "
+        "(order_id,process_id,process_version_id,process_name_snapshot,user_id,type,"
+        "quantity,status,route_id,route_version_id,route_name_snapshot,created_at) "
+        "VALUES (?,?,?,?,?,?,?,'approved',?,?,?,?)",
+        (
+            order_id,
+            process_id,
+            binding["process_version_id"],
+            binding["process_name"],
+            worker_id,
+            work_type,
+            3,
+            route_id,
+            binding["route_version_id"],
+            binding["route_name"],
+            created_at,
+        ),
     )
     db.commit()
     actor = {"id": worker_id, "name": "工资测试员工"}
@@ -40,7 +80,9 @@ def _seed_price_and_work(
         admin = {"id": 1, "name": "工价制单员"}
         version = PriceVersionService.create({
             "route_id": route_id,
+            "route_version_id": binding["route_version_id"],
             "process_id": process_id,
+            "process_version_id": binding["process_version_id"],
             "normal_unit_price": "1.25",
             "valid_from": "2026-07-01",
             "rework_rate_percent": 50 if work_type == "rework" and configure_rework_rate else None,
@@ -110,11 +152,18 @@ def test_zero_price_is_an_exception_and_cannot_be_manually_confirmed_as_zero(cli
         db.execute(
             """
             INSERT INTO route_price_versions (
-                route_id,process_id,normal_unit_price_micros,valid_from,status,
+                route_id,route_version_id,process_id,process_version_id,
+                normal_unit_price_micros,valid_from,status,
                 created_by_name,approved_by_name,approved_at
-            ) VALUES (?,?,0,'2026-07-01 00:00:00','approved','legacy','legacy',datetime('now'))
+            ) VALUES (?,?,?,?,0,'2026-07-01 00:00:00','approved',
+                      'legacy','legacy',datetime('now'))
             """,
-            (route_id, process_id),
+            (
+                route_id,
+                _exact_binding(db, route_id, process_id)["route_version_id"],
+                process_id,
+                _exact_binding(db, route_id, process_id)["process_version_id"],
+            ),
         )
         db.commit()
 

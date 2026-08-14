@@ -3,6 +3,7 @@ import uuid
 
 import pytest
 
+from factories import ensure_route_version
 from modules.db import get_db
 from modules.master_data_references import (
     PROCESS_REFERENCES,
@@ -79,11 +80,18 @@ def test_route_impact_returns_business_labels_and_ignores_owned_nodes(client):
         db = get_db()
         process_id = _insert_process(db, "路线影响目录工序")
         route_id = _insert_route(db, process_id)
+        route_version_id = ensure_route_version(db, route_id)
+        process_version_id = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (route_version_id, process_id),
+        ).fetchone()["process_version_id"]
         db.execute(
             "INSERT INTO route_price_versions ("
-            "route_id, process_id, normal_unit_price_micros, valid_from, status) "
-            "VALUES (?, ?, 10000, '2026-08-01 07:00:00', 'draft')",
-            (route_id, process_id),
+            "route_id, route_version_id, process_id, process_version_id, "
+            "normal_unit_price_micros, valid_from, status) "
+            "VALUES (?, ?, ?, ?, 10000, '2026-08-01 07:00:00', 'draft')",
+            (route_id, route_version_id, process_id, process_version_id),
         )
         db.execute(
             "INSERT INTO quality_standards ("

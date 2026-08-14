@@ -18,6 +18,7 @@ from modules.domain.process_versioning import (
     validate_route_version_transition,
 )
 from modules.repositories.process_version_repository import ProcessVersionRepository
+from modules.repositories.payroll_repository import PayrollRepository
 from modules.repositories.route_version_repository import RouteVersionRepository
 from modules.services import BaseService
 from modules.services.master_data_impact_service import MasterDataImpactService
@@ -332,6 +333,10 @@ class RouteVersionService:
     @staticmethod
     def _validate_publish_dependencies(version, command, db, available_process_ids=()):
         available = {int(value) for value in available_process_ids}
+        available_price_ids = {
+            int(value)
+            for value in command.get("_available_price_version_ids") or []
+        }
         required_price_ids = {int(value) for value in command.get("required_price_process_ids") or []}
         dispositions = {
             int(item.get("process_id")): item
@@ -369,6 +374,35 @@ class RouteVersionService:
                     disposition.get("reason") or ""
                 ).strip():
                     raise ValidationError("工价不适用处置必须填写原因")
+                if disposition["disposition"] == "price_version":
+                    try:
+                        price_version_id = int(disposition.get("price_version_id"))
+                    except (TypeError, ValueError) as exc:
+                        raise ValidationError("工价处置必须选择精确工价版本") from exc
+                    price = PayrollRepository.price_version(price_version_id, db=db)
+                    if price is None or (
+                        int(price.get("route_version_id") or 0) != int(version["id"])
+                        or int(price.get("process_version_id") or 0)
+                        != int(item["process_version_id"])
+                    ):
+                        raise ReleaseDependencyError(
+                            "工价版本与路线节点版本不匹配",
+                            details={
+                                "reason_code": "PRICE_VERSION_BINDING_INVALID",
+                                "route_version_id": version["id"],
+                                "process_id": item["process_id"],
+                                "process_version_id": item["process_version_id"],
+                                "price_version_id": price_version_id,
+                            },
+                        )
+                    if price["status"] != "approved" and price_version_id not in available_price_ids:
+                        raise ReleaseDependencyError(
+                            "工价版本尚未批准且不在当前发布批次中",
+                            details={
+                                "reason_code": "PRICE_VERSION_NOT_AVAILABLE",
+                                "price_version_id": price_version_id,
+                            },
+                        )
 
     @staticmethod
     def _publish_pending(
@@ -424,6 +458,12 @@ class RouteVersionService:
             db,
             from_status="pending_approval",
             to_status="published",
+            payload={
+                "required_price_process_ids": list(
+                    command.get("required_price_process_ids") or []
+                ),
+                "price_dispositions": list(command.get("price_dispositions") or []),
+            },
         )
         RouteVersionRepository.update_compatibility_projection(
             version["process_route_id"], published["id"], root["row_version"], db

@@ -278,7 +278,7 @@ def test_v061_records_unmapped_orders_and_blocks_the_registered_migration():
         db.close()
 
 
-def test_process_order_version_binding_is_database_version_61():
+def test_process_price_version_binding_is_database_version_62():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 61
+    assert migrations.LATEST_VERSION == 62
