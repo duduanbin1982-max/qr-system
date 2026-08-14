@@ -195,10 +195,10 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_process_versioning_is_database_version_60():
+def test_process_order_version_binding_is_database_version_61():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 60
+    assert migrations.LATEST_VERSION == 61
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

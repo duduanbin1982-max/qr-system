@@ -7,11 +7,13 @@ from modules.migration_helpers import (
     MigrationInvariantError,
     add_column_if_missing,
     column_exists,
+    create_unique_index,
     table_exists,
 )
 
 
 MIGRATION_KEY = "v060:legacy-baseline"
+ORDER_BINDING_MIGRATION_KEY = "v061:order-version-bindings"
 TERMINAL_VERSION_STATUSES = ("published", "superseded", "retired")
 
 
@@ -1126,6 +1128,427 @@ def m060_process_master_versioning(db):
     db.execute("RELEASE process_master_v060")
 
 
+def _append_order_binding_issue(
+    issues, entity_type, legacy_id, reason_code, **summary
+):
+    issues.append(
+        {
+            "entity_type": entity_type,
+            "legacy_id": legacy_id,
+            "reason_code": reason_code,
+            "summary": summary,
+        }
+    )
+
+
+def _collect_order_binding_issues(db):
+    issues = []
+    order_ready = _required_columns(
+        db,
+        "orders",
+        ("id", "route_id", "completed"),
+        issues,
+    )
+    order_process_ready = _required_columns(
+        db,
+        "order_processes",
+        ("id", "order_id", "process_id", "completed"),
+        issues,
+    )
+    process_version_ready = _required_columns(
+        db,
+        "process_versions",
+        ("id", "process_id", "version", "process_code_snapshot", "name", "category"),
+        issues,
+    )
+    route_version_ready = _required_columns(
+        db,
+        "process_route_versions",
+        ("id", "process_route_id", "version", "name"),
+        issues,
+    )
+    route_item_ready = _required_columns(
+        db,
+        "process_route_version_items",
+        ("id", "route_version_id", "process_id", "process_version_id"),
+        issues,
+    )
+    _required_columns(db, "process_route_items", ("id",), issues)
+    _required_columns(db, "work_records", ("id", "quantity"), issues)
+
+    if order_process_ready and order_ready:
+        for row in db.execute(
+            "SELECT op.id,op.order_id,op.process_id FROM order_processes op "
+            "LEFT JOIN orders order_row ON order_row.id=op.order_id "
+            "WHERE order_row.id IS NULL ORDER BY op.id"
+        ).fetchall():
+            _append_order_binding_issue(
+                issues,
+                "order_process",
+                row[0],
+                "missing_order",
+                order_id=row[1],
+                process_id=row[2],
+            )
+
+    route_needs_binding = "1=1"
+    if order_ready and column_exists(db, "orders", "route_version_id"):
+        route_needs_binding = "order_row.route_version_id IS NULL"
+    if order_ready and route_version_ready:
+        for row in db.execute(
+            "SELECT order_row.id,order_row.route_id FROM orders order_row "
+            "LEFT JOIN process_route_versions version "
+            "ON version.process_route_id=order_row.route_id AND version.version=1 "
+            "WHERE order_row.route_id IS NOT NULL AND "
+            + route_needs_binding
+            + " AND version.id IS NULL ORDER BY order_row.id"
+        ).fetchall():
+            _append_order_binding_issue(
+                issues,
+                "order",
+                row[0],
+                "missing_route_v1",
+                route_id=row[1],
+            )
+
+    process_needs_binding = "1=1"
+    if order_process_ready and column_exists(
+        db, "order_processes", "process_version_id"
+    ):
+        process_needs_binding = "op.process_version_id IS NULL"
+    if order_process_ready and process_version_ready:
+        for row in db.execute(
+            "SELECT op.id,op.order_id,op.process_id FROM order_processes op "
+            "LEFT JOIN process_versions version "
+            "ON version.process_id=op.process_id AND version.version=1 "
+            "WHERE "
+            + process_needs_binding
+            + " AND version.id IS NULL ORDER BY op.id"
+        ).fetchall():
+            _append_order_binding_issue(
+                issues,
+                "order_process",
+                row[0],
+                "missing_process_v1",
+                order_id=row[1],
+                process_id=row[2],
+            )
+
+    if all(
+        (
+            order_ready,
+            order_process_ready,
+            route_version_ready,
+            route_item_ready,
+        )
+    ):
+        for row in db.execute(
+            "SELECT op.id,op.order_id,order_row.route_id,op.process_id "
+            "FROM order_processes op "
+            "JOIN orders order_row ON order_row.id=op.order_id "
+            "JOIN process_route_versions route_version "
+            "ON route_version.process_route_id=order_row.route_id "
+            "AND route_version.version=1 "
+            "LEFT JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "AND item.process_id=op.process_id "
+            "WHERE order_row.route_id IS NOT NULL AND "
+            + process_needs_binding
+            + " AND item.id IS NULL ORDER BY op.id"
+        ).fetchall():
+            _append_order_binding_issue(
+                issues,
+                "order_process",
+                row[0],
+                "missing_route_v1_node",
+                order_id=row[1],
+                route_id=row[2],
+                process_id=row[3],
+            )
+
+    return issues
+
+
+def _record_order_binding_issues(db, issues):
+    for issue in issues:
+        db.execute(
+            "INSERT OR IGNORE INTO process_version_migration_exceptions "
+            "(migration_key,entity_type,legacy_id,reason_code,blocking,source_summary_json) "
+            "VALUES (?,?,?,?,1,?)",
+            (
+                ORDER_BINDING_MIGRATION_KEY,
+                issue["entity_type"],
+                issue["legacy_id"],
+                issue["reason_code"],
+                json.dumps(issue["summary"], ensure_ascii=False, sort_keys=True),
+            ),
+        )
+
+
+def _add_order_binding_columns(db):
+    add_column_if_missing(
+        db,
+        "orders",
+        "route_version_id",
+        "INTEGER REFERENCES process_route_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "orders",
+        "route_name_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "order_processes",
+        "process_version_id",
+        "INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT",
+    )
+    add_column_if_missing(
+        db,
+        "order_processes",
+        "process_code_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "order_processes",
+        "process_name_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    add_column_if_missing(
+        db,
+        "order_processes",
+        "process_category_snapshot",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+
+
+def _backfill_order_version_bindings(db):
+    db.execute(
+        "UPDATE orders SET route_version_id=("
+        "SELECT version.id FROM process_route_versions version "
+        "WHERE version.process_route_id=orders.route_id AND version.version=1),"
+        "route_name_snapshot=("
+        "SELECT version.name FROM process_route_versions version "
+        "WHERE version.process_route_id=orders.route_id AND version.version=1) "
+        "WHERE route_id IS NOT NULL AND route_version_id IS NULL"
+    )
+    db.execute(
+        "UPDATE orders SET route_name_snapshot=("
+        "SELECT version.name FROM process_route_versions version "
+        "WHERE version.id=orders.route_version_id) "
+        "WHERE route_version_id IS NOT NULL AND COALESCE(route_name_snapshot,'')=''"
+    )
+
+    db.execute(
+        "UPDATE order_processes SET process_version_id=("
+        "SELECT item.process_version_id FROM orders order_row "
+        "JOIN process_route_version_items item "
+        "ON item.route_version_id=order_row.route_version_id "
+        "AND item.process_id=order_processes.process_id "
+        "WHERE order_row.id=order_processes.order_id) "
+        "WHERE process_version_id IS NULL AND EXISTS ("
+        "SELECT 1 FROM orders order_row "
+        "WHERE order_row.id=order_processes.order_id "
+        "AND order_row.route_version_id IS NOT NULL)"
+    )
+    db.execute(
+        "UPDATE order_processes SET process_version_id=("
+        "SELECT version.id FROM process_versions version "
+        "WHERE version.process_id=order_processes.process_id AND version.version=1) "
+        "WHERE process_version_id IS NULL AND EXISTS ("
+        "SELECT 1 FROM orders order_row "
+        "WHERE order_row.id=order_processes.order_id "
+        "AND order_row.route_version_id IS NULL)"
+    )
+    db.execute(
+        "UPDATE order_processes SET "
+        "process_code_snapshot=CASE WHEN COALESCE(process_code_snapshot,'')='' "
+        "THEN (SELECT version.process_code_snapshot FROM process_versions version "
+        "WHERE version.id=order_processes.process_version_id) "
+        "ELSE process_code_snapshot END,"
+        "process_name_snapshot=CASE WHEN COALESCE(process_name_snapshot,'')='' "
+        "THEN (SELECT version.name FROM process_versions version "
+        "WHERE version.id=order_processes.process_version_id) "
+        "ELSE process_name_snapshot END,"
+        "process_category_snapshot=CASE WHEN COALESCE(process_category_snapshot,'')='' "
+        "THEN (SELECT version.category FROM process_versions version "
+        "WHERE version.id=order_processes.process_version_id) "
+        "ELSE process_category_snapshot END "
+        "WHERE process_version_id IS NOT NULL"
+    )
+
+
+def _create_order_binding_indexes(db):
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_route_version "
+        "ON orders(route_version_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_order_processes_process_version "
+        "ON order_processes(process_version_id)"
+    )
+    create_unique_index(
+        db,
+        "idx_order_processes_order_process_version",
+        "order_processes",
+        "order_id,process_version_id",
+    )
+
+
+def _create_order_binding_triggers(db):
+    statements = (
+        """
+        CREATE TRIGGER IF NOT EXISTS validate_order_route_version_insert
+        BEFORE INSERT ON orders
+        WHEN NEW.route_version_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM process_route_versions version
+            WHERE version.id=NEW.route_version_id
+                AND version.process_route_id=NEW.route_id
+        )
+        BEGIN SELECT RAISE(ABORT,'order route version does not belong to route'); END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS validate_order_route_version_update
+        BEFORE UPDATE OF route_id,route_version_id ON orders
+        WHEN NEW.route_version_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM process_route_versions version
+            WHERE version.id=NEW.route_version_id
+                AND version.process_route_id=NEW.route_id
+        )
+        BEGIN SELECT RAISE(ABORT,'order route version does not belong to route'); END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS validate_order_process_version_insert
+        BEFORE INSERT ON order_processes
+        WHEN NEW.process_version_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM process_versions version
+            WHERE version.id=NEW.process_version_id
+                AND version.process_id=NEW.process_id
+        )
+        BEGIN SELECT RAISE(ABORT,'order process version does not belong to process'); END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS validate_order_process_version_update
+        BEFORE UPDATE OF process_id,process_version_id ON order_processes
+        WHEN NEW.process_version_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM process_versions version
+            WHERE version.id=NEW.process_version_id
+                AND version.process_id=NEW.process_id
+        )
+        BEGIN SELECT RAISE(ABORT,'order process version does not belong to process'); END
+        """,
+    )
+    for statement in statements:
+        db.execute(statement)
+
+
+def _order_binding_metrics(db):
+    return {
+        "orders": db.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
+        "route_nodes": db.execute(
+            "SELECT COUNT(*) FROM process_route_items"
+        ).fetchone()[0],
+        "order_processes": db.execute(
+            "SELECT COUNT(*) FROM order_processes"
+        ).fetchone()[0],
+        "order_completed": db.execute(
+            "SELECT COALESCE(SUM(completed),0) FROM orders"
+        ).fetchone()[0],
+        "process_completed": db.execute(
+            "SELECT COALESCE(SUM(completed),0) FROM order_processes"
+        ).fetchone()[0],
+        "work_records": db.execute(
+            "SELECT COUNT(*) FROM work_records"
+        ).fetchone()[0],
+        "reported_quantity": db.execute(
+            "SELECT COALESCE(SUM(quantity),0) FROM work_records"
+        ).fetchone()[0],
+    }
+
+
+def _validate_order_version_bindings(db, before):
+    after = _order_binding_metrics(db)
+    if after != before:
+        raise MigrationInvariantError(
+            f"Migration v61 changed protected business totals: {before} -> {after}"
+        )
+    checks = (
+        (
+            "order route version binding",
+            "SELECT order_row.id FROM orders order_row "
+            "LEFT JOIN process_route_versions version "
+            "ON version.id=order_row.route_version_id "
+            "WHERE (order_row.route_id IS NULL AND order_row.route_version_id IS NOT NULL) "
+            "OR (order_row.route_id IS NOT NULL AND (version.id IS NULL "
+            "OR version.process_route_id<>order_row.route_id "
+            "OR order_row.route_name_snapshot<>version.name)) LIMIT 1",
+        ),
+        (
+            "order process version binding",
+            "SELECT op.id FROM order_processes op "
+            "LEFT JOIN process_versions version ON version.id=op.process_version_id "
+            "WHERE version.id IS NULL OR version.process_id<>op.process_id "
+            "OR op.process_code_snapshot<>version.process_code_snapshot "
+            "OR op.process_name_snapshot<>version.name "
+            "OR op.process_category_snapshot<>version.category LIMIT 1",
+        ),
+        (
+            "order route node binding",
+            "SELECT op.id FROM order_processes op "
+            "JOIN orders order_row ON order_row.id=op.order_id "
+            "LEFT JOIN process_route_version_items item "
+            "ON item.route_version_id=order_row.route_version_id "
+            "AND item.process_id=op.process_id "
+            "AND item.process_version_id=op.process_version_id "
+            "WHERE order_row.route_version_id IS NOT NULL AND item.id IS NULL LIMIT 1",
+        ),
+    )
+    for label, sql in checks:
+        row = db.execute(sql).fetchone()
+        if row is not None:
+            raise MigrationInvariantError(
+                f"Migration v61 blocked: {label} at legacy id {row[0]}"
+            )
+
+
+def m061_bind_order_versions(db):
+    """Bind legacy orders and copied process rows to immutable V1 master data."""
+    _create_exception_table(db)
+    issues = _collect_order_binding_issues(db)
+    if issues:
+        _record_order_binding_issues(db, issues)
+        db.commit()
+        sample = ", ".join(
+            f"{issue['entity_type']}:{issue['legacy_id']}:{issue['reason_code']}"
+            for issue in issues[:5]
+        )
+        raise MigrationInvariantError(
+            f"Migration v61 blocked by {len(issues)} order binding exception(s): {sample}"
+        )
+
+    before = _order_binding_metrics(db)
+    db.execute("SAVEPOINT process_order_v061")
+    try:
+        _add_order_binding_columns(db)
+        _backfill_order_version_bindings(db)
+        _create_order_binding_indexes(db)
+        _create_order_binding_triggers(db)
+        from modules.migration_process_management import (
+            rebuild_master_data_reference_guards,
+        )
+
+        rebuild_master_data_reference_guards(db)
+        _validate_order_version_bindings(db, before)
+    except Exception:
+        db.execute("ROLLBACK TO process_order_v061")
+        db.execute("RELEASE process_order_v061")
+        raise
+    db.execute("RELEASE process_order_v061")
+
+
 MIGRATIONS = [
     (60, "Add versioned process and route master-data baseline", m060_process_master_versioning),
+    (61, "Bind orders to process and route versions", m061_bind_order_versions),
 ]
