@@ -88,12 +88,14 @@ PROCESS_REFERENCES = (
     _process(
         "material_consumptions",
         ("process_id",),
+        version_columns=("process_version_id",),
         key="material_consumptions",
         label="物料消耗记录",
     ),
     _process(
         "order_completion_focus_events",
         ("process_id",),
+        version_columns=("process_version_id",),
         key="completion_focus_events",
         label="订单完工关注事件",
     ),
@@ -115,6 +117,7 @@ PROCESS_REFERENCES = (
     _process(
         "performance_quality_events",
         ("process_id",),
+        version_columns=("process_version_id",),
         key="performance_quality_events",
         label="绩效质量事件",
     ),
@@ -131,18 +134,27 @@ PROCESS_REFERENCES = (
     _process(
         "process_handoff_reviews",
         ("from_process_id", "to_process_id"),
+        version_columns=("from_process_version_id", "to_process_version_id"),
         key="handoff_reviews",
         label="工序交接评价",
     ),
     _process(
         "process_quality_evaluation_task_audits",
         ("target_process_id", "evaluator_process_id"),
+        version_columns=(
+            "target_process_version_id",
+            "evaluator_process_version_id",
+        ),
         key="quality_task_audits",
         label="工序质量评价任务审计",
     ),
     _process(
         "process_quality_evaluation_tasks",
         ("target_process_id", "evaluator_process_id"),
+        version_columns=(
+            "target_process_version_id",
+            "evaluator_process_version_id",
+        ),
         key="quality_tasks",
         label="工序质量评价任务",
     ),
@@ -155,6 +167,10 @@ PROCESS_REFERENCES = (
     _process(
         "process_quality_evaluations",
         ("target_process_id", "evaluator_process_id"),
+        version_columns=(
+            "target_process_version_id",
+            "evaluator_process_version_id",
+        ),
         key="quality_evaluations",
         label="工序质量评价",
     ),
@@ -177,22 +193,34 @@ PROCESS_REFERENCES = (
     _process(
         "quality_inspection_tasks",
         ("process_id",),
+        version_columns=("process_version_id",),
         key="quality_inspection_tasks",
         label="质检任务",
     ),
     _process(
-        "quality_inspections", ("process_id",), key="quality_inspections", label="质量检验记录"
+        "quality_inspections",
+        ("process_id",),
+        version_columns=("process_version_id",),
+        key="quality_inspections",
+        label="质量检验记录",
     ),
     _process(
         "quality_nonconformances",
         ("process_id", "responsible_process_id"),
+        version_columns=("process_version_id", "responsible_process_version_id"),
         key="quality_nonconformances",
         label="质量不合格项",
     ),
     _process(
         "quality_standards", ("process_id",), key="quality_standards", label="质量标准"
     ),
-    _process("rework_records", ("process_id",), key="rework_records", label="返工记录"),
+    _process(
+        "rework_records",
+        ("process_id",),
+        version_columns=("process_version_id",),
+        key="rework_records",
+        label="返工记录",
+    ),
     _process(
         "route_price_history", ("process_id",), key="price_history", label="历史工价记录"
     ),
@@ -204,7 +232,13 @@ PROCESS_REFERENCES = (
         label="工价版本",
     ),
     _process("route_prices", ("process_id",), key="current_prices", label="当前工价"),
-    _process("scrap_records", ("process_id",), key="scrap_records", label="报废记录"),
+    _process(
+        "scrap_records",
+        ("process_id",),
+        version_columns=("process_version_id",),
+        key="scrap_records",
+        label="报废记录",
+    ),
     _process("user_processes", ("process_id",), key="user_processes", label="员工工序授权"),
     _process(
         "users", csv_columns=("process_ids",), key="legacy_user_processes", label="历史员工工序授权"
@@ -295,6 +329,20 @@ PROCESS_REFERENCES = (
 
 ROUTE_REFERENCES = (
     _route(
+        "material_consumptions",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="material_consumptions",
+        label="物料消耗记录",
+    ),
+    _route(
+        "order_completion_focus_events",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="completion_focus_events",
+        label="订单完工关注事件",
+    ),
+    _route(
         "orders",
         ("route_id",),
         version_columns=("route_version_id",),
@@ -316,6 +364,48 @@ ROUTE_REFERENCES = (
         label="工资明细台账",
     ),
     _route(
+        "performance_quality_events",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="performance_quality_events",
+        label="绩效质量事件",
+    ),
+    _route(
+        "performance_source_facts",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="performance_source_facts",
+        label="绩效来源事实",
+    ),
+    _route(
+        "process_handoff_reviews",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="handoff_reviews",
+        label="工序交接评价",
+    ),
+    _route(
+        "process_quality_evaluation_task_audits",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_task_audits",
+        label="工序质量评价任务审计",
+    ),
+    _route(
+        "process_quality_evaluation_tasks",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_tasks",
+        label="工序质量评价任务",
+    ),
+    _route(
+        "process_quality_evaluations",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_evaluations",
+        label="工序质量评价",
+    ),
+    _route(
         "process_quality_evaluation_templates",
         ("route_id",),
         key="quality_evaluation_templates",
@@ -326,6 +416,27 @@ ROUTE_REFERENCES = (
         ("route_id",),
         key="quality_inspection_plans",
         label="质检计划",
+    ),
+    _route(
+        "quality_inspection_tasks",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_inspection_tasks",
+        label="质检任务",
+    ),
+    _route(
+        "quality_inspections",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_inspections",
+        label="质量检验记录",
+    ),
+    _route(
+        "quality_nonconformances",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="quality_nonconformances",
+        label="质量不合格项",
     ),
     _route("quality_standards", ("route_id",), key="quality_standards", label="质量标准"),
     _route(
@@ -339,6 +450,20 @@ ROUTE_REFERENCES = (
         label="工价版本",
     ),
     _route("route_prices", ("route_id",), key="current_prices", label="当前工价"),
+    _route(
+        "rework_records",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="rework_records",
+        label="返工记录",
+    ),
+    _route(
+        "scrap_records",
+        ("route_id",),
+        version_columns=("route_version_id",),
+        key="scrap_records",
+        label="报废记录",
+    ),
     _route(
         "work_time_records",
         ("route_id",),
@@ -455,7 +580,7 @@ def _looks_like_reference_column(column):
         "route_id",
         "route_version_id",
         "process_route_id",
-    } or column.endswith("_process_id")
+    } or column.endswith("_process_id") or column.endswith("_process_version_id")
 
 
 def find_unregistered_reference_columns(db):
