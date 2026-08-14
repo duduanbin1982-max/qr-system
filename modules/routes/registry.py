@@ -17,6 +17,7 @@ ROUTE_MODULES = (
     "modules.routes.scan_qr",
     "modules.routes.reports",  # stats + production trends + efficiency
     "modules.routes.processes",  # 工序管理
+    "modules.routes.process_versions",  # 工序版本与生命周期
     "modules.routes.users",  # 用户管理
     "modules.routes.order_attachments",  # 订单附件
     "modules.routes.settings",  # 系统设置
@@ -27,6 +28,8 @@ ROUTE_MODULES = (
     "modules.routes.inventory",  # 库存管理
     "modules.routes.shipments",  # 出库管理
     "modules.routes.process_routes",  # 工序路线管理
+    "modules.routes.route_versions",  # 路线版本与生命周期
+    "modules.routes.master_data_releases",  # 主数据成组发布
     "modules.routes.trace",  # 产品追溯
     "modules.routes.approvals",  # 审批管理
     "modules.routes.positions",  # 岗位管理

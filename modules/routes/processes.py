@@ -102,7 +102,7 @@ def update_process(pid):
 
 @app.route('/api/processes/<int:pid>/impact', methods=['GET'])
 @check_auth
-@check_permission('processes:view')
+@check_permission('process_versions:impact')
 def process_impact(pid):
     """查询删除工序的影响范围（不实际删除）。"""
     try:

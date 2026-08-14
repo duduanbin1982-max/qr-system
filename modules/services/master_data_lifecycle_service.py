@@ -3,7 +3,11 @@
 from datetime import datetime
 
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
-from modules.domain.process_versioning import assert_separation_of_duties, require_row_version
+from modules.domain.process_versioning import (
+    assert_row_version,
+    assert_separation_of_duties,
+    require_row_version,
+)
 from modules.repositories.master_data_lifecycle_repository import (
     MasterDataLifecycleRepository,
 )
@@ -64,6 +68,8 @@ class MasterDataLifecycleService:
             root = ProcessVersionRepository.root(process_id, db=db)
             if root is None:
                 raise NotFoundError("工序不存在")
+            if "row_version" in command:
+                assert_row_version(command["row_version"], root["row_version"])
             if action == "retire" and root["lifecycle_status"] != "active":
                 raise ConflictError("工序已经退休")
             if action == "reactivate":
@@ -160,6 +166,10 @@ class MasterDataLifecycleService:
             root = RouteVersionRepository.root(route_id, db=db)
             if root is None:
                 raise NotFoundError("路线不存在")
+            if "row_version" in command:
+                assert_row_version(
+                    command["row_version"], root["row_version"], entity_type="route"
+                )
             if action == "retire" and root["lifecycle_status"] != "active":
                 raise ConflictError("路线已经退休")
             if action == "reactivate":

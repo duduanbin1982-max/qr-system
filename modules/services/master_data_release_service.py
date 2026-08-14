@@ -7,6 +7,7 @@ from modules.domain.process_versioning import (
     assert_separation_of_duties,
     canonical_version_payload,
     payload_sha256,
+    require_row_version,
     validate_release_batch_dependencies,
 )
 from modules.repositories.master_data_release_repository import MasterDataReleaseRepository
@@ -90,6 +91,17 @@ class MasterDataReleaseService:
     def _summary_digest(batch_input):
         summary = validate_release_batch_dependencies(batch_input)
         return payload_sha256(summary), summary
+
+    @staticmethod
+    def list_batches(status=""):
+        return MasterDataReleaseRepository.list_batches(str(status or "").strip())
+
+    @staticmethod
+    def get_batch(batch_id):
+        batch = MasterDataReleaseRepository.batch(batch_id)
+        if batch is None:
+            raise NotFoundError("主数据发布批次不存在")
+        return batch
 
     @staticmethod
     def _validate_exception(exception, batch, db):
@@ -314,6 +326,33 @@ class MasterDataReleaseService:
                     "approved_by_name": actor["name"],
                     "approved_at": now,
                     "published_at": now,
+                },
+                db,
+            )
+
+    @staticmethod
+    def reject(batch_id, command, actor_user):
+        actor = MasterDataReleaseService._actor(actor_user)
+        MasterDataReleaseService._key(command)
+        MasterDataReleaseService._text(command, "reason", "驳回原因")
+        with BaseService.transaction() as db:
+            batch = MasterDataReleaseRepository.batch(batch_id, db=db)
+            if batch is None:
+                raise NotFoundError("主数据发布批次不存在")
+            if batch["status"] == "rejected":
+                return batch
+            if batch["status"] != "pending_approval":
+                raise ConflictError("只有待审批发布批次可以驳回")
+            assert_separation_of_duties(batch["created_by"], actor["id"])
+            return MasterDataReleaseRepository.transition_batch(
+                batch_id,
+                "pending_approval",
+                require_row_version(command.get("row_version")),
+                "rejected",
+                {
+                    "approved_by": actor["id"],
+                    "approved_by_name": actor["name"],
+                    "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 },
                 db,
             )

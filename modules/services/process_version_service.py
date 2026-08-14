@@ -5,6 +5,7 @@ from datetime import datetime
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.domain.process_versioning import (
     assert_root_identity_preserved,
+    assert_row_version,
     assert_separation_of_duties,
     canonical_version_payload,
     copy_revision_content,
@@ -137,6 +138,8 @@ class ProcessVersionService:
             root = ProcessVersionRepository.root(process_id, db=db)
             if root is None:
                 raise NotFoundError("工序不存在")
+            if "row_version" in command:
+                assert_row_version(command["row_version"], root["row_version"])
             if ProcessVersionRepository.open_version(process_id, db=db) is not None:
                 raise ConflictError("该工序已有草稿或待审批修订版")
             current = ProcessVersionRepository.current_version(process_id, db=db)
@@ -192,6 +195,25 @@ class ProcessVersionService:
         if version is None:
             raise NotFoundError("工序版本不存在")
         return version
+
+    @staticmethod
+    def list_versions(process_id):
+        root = ProcessVersionRepository.root(process_id)
+        if root is None:
+            raise NotFoundError("工序不存在")
+        return {
+            "process": root,
+            "versions": ProcessVersionRepository.list_versions(process_id),
+            "events": ProcessVersionRepository.list_events(process_id),
+        }
+
+    @staticmethod
+    def impact(version_id):
+        version = ProcessVersionService.get_version(version_id)
+        return {
+            "version": version,
+            "impact": MasterDataImpactService.process_impact(version["process_id"]),
+        }
 
     @staticmethod
     def update_draft(version_id, command, actor_user):

@@ -67,7 +67,7 @@ def update_process_route(rid):
 
 @app.route('/api/process-routes/<int:rid>/impact', methods=['GET'])
 @check_auth
-@check_permission('routes:view')
+@check_permission('route_versions:impact')
 def process_route_impact(rid):
     try:
         return jsonify(ProcessRouteService.check_impact(rid))

@@ -6,6 +6,7 @@ from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.domain.process_versioning import (
     ReleaseDependencyError,
     assert_root_identity_preserved,
+    assert_row_version,
     assert_route_category_consistency,
     assert_route_process_version_binding,
     assert_separation_of_duties,
@@ -167,6 +168,10 @@ class RouteVersionService:
             root = RouteVersionRepository.root(route_id, db=db)
             if root is None:
                 raise NotFoundError("路线不存在")
+            if "row_version" in command:
+                assert_row_version(
+                    command["row_version"], root["row_version"], entity_type="route"
+                )
             if RouteVersionRepository.open_version(route_id, db=db) is not None:
                 raise ConflictError("该路线已有草稿或待审批修订版")
             current = RouteVersionRepository.current_version(route_id, db=db)
@@ -227,6 +232,27 @@ class RouteVersionService:
         if version is None:
             raise NotFoundError("路线版本不存在")
         return version
+
+    @staticmethod
+    def list_versions(route_id):
+        root = RouteVersionRepository.root(route_id)
+        if root is None:
+            raise NotFoundError("路线不存在")
+        return {
+            "route": root,
+            "versions": RouteVersionRepository.list_versions(route_id),
+            "events": RouteVersionRepository.list_events(route_id),
+        }
+
+    @staticmethod
+    def impact(version_id):
+        version = RouteVersionService.get_version(version_id)
+        return {
+            "version": version,
+            "impact": MasterDataImpactService.route_impact(
+                version["process_route_id"]
+            ),
+        }
 
     @staticmethod
     def update_draft(version_id, command, actor_user):
