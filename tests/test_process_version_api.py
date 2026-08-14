@@ -3,8 +3,10 @@ import uuid
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from factories import TEST_HASH, ensure_user
+from modules import config
 from modules.app import app
 from modules.db import get_db
 from modules.schemas import SCHEMAS
@@ -16,6 +18,12 @@ from tests.test_route_version_workflow import _create_route
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _enable_versioned_writes(monkeypatch):
+    monkeypatch.setattr(config, "PROCESS_VERSIONED_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PROCESS_VERSIONED_WRITE_ENABLED", True)
 
 
 def _login(client, username, password="Test@1234"):

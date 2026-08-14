@@ -168,6 +168,11 @@ class LegacyMasterDataWriteBlockedError(ProcessVersioningError):
     action = "use_versioned_master_data_api"
 
 
+class VersionedMasterDataWriteDisabledError(ProcessVersioningError):
+    code = "PROCESS_VERSIONED_WRITE_DISABLED"
+    action = "enable_process_versioned_write"
+
+
 class MasterDataIdentityChangedError(ProcessVersioningError):
     code = ERROR_ROOT_IDENTITY_CHANGED
     action = "create_new_root_entity"
@@ -833,6 +838,7 @@ __all__ = [
     "RouteProcessVersionInvalidError",
     "RouteVersionImmutableError",
     "RouteVersionStaleError",
+    "VersionedMasterDataWriteDisabledError",
     "VERSION_EVENT_TYPES",
     "VERSION_STATUSES",
     "VERSION_TRANSITIONS",

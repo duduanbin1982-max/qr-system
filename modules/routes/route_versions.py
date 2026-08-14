@@ -7,6 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_versioned_master_data_write,
     safe_audit_log,
     validate_json,
 )
@@ -48,6 +49,7 @@ def get_route_version(version_id):
 @app.route("/api/process-routes/<int:route_id>/revisions", methods=["POST"])
 @check_auth
 @check_permission("route_versions:create")
+@require_versioned_master_data_write
 @validate_json("route_revision_create")
 def create_route_revision(route_id):
     command = get_json_body()
@@ -59,6 +61,7 @@ def create_route_revision(route_id):
 @app.route("/api/process-route-versions/<int:version_id>", methods=["PUT"])
 @check_auth
 @check_permission("route_versions:create")
+@require_versioned_master_data_write
 @validate_json("route_version_update")
 def update_route_version(version_id):
     result = RouteVersionService.update_draft(version_id, get_json_body(), _actor())
@@ -69,6 +72,7 @@ def update_route_version(version_id):
 @app.route("/api/process-route-versions/<int:version_id>/submit", methods=["POST"])
 @check_auth
 @check_permission("route_versions:submit")
+@require_versioned_master_data_write
 @validate_json("version_transition")
 def submit_route_version(version_id):
     result = RouteVersionService.submit(version_id, get_json_body(), _actor())
@@ -79,6 +83,7 @@ def submit_route_version(version_id):
 @app.route("/api/process-route-versions/<int:version_id>/approve", methods=["POST"])
 @check_auth
 @check_permission("route_versions:approve")
+@require_versioned_master_data_write
 @validate_json("route_version_approve")
 def approve_route_version(version_id):
     result = RouteVersionService.approve(version_id, get_json_body(), _actor())
@@ -89,6 +94,7 @@ def approve_route_version(version_id):
 @app.route("/api/process-route-versions/<int:version_id>/reject", methods=["POST"])
 @check_auth
 @check_permission("route_versions:reject")
+@require_versioned_master_data_write
 @validate_json("version_reject")
 def reject_route_version(version_id):
     command = get_json_body()
@@ -114,6 +120,7 @@ def _request_route_lifecycle(route_id, action):
 @app.route("/api/process-routes/<int:route_id>/retirement-requests", methods=["POST"])
 @check_auth
 @check_permission("process_routes:retire")
+@require_versioned_master_data_write
 @validate_json("lifecycle_request")
 def request_route_retirement(route_id):
     return _request_route_lifecycle(route_id, "retire")
@@ -122,6 +129,7 @@ def request_route_retirement(route_id):
 @app.route("/api/process-routes/<int:route_id>/reactivation-requests", methods=["POST"])
 @check_auth
 @check_permission("process_routes:reactivate")
+@require_versioned_master_data_write
 @validate_json("lifecycle_request")
 def request_route_reactivation(route_id):
     return _request_route_lifecycle(route_id, "reactivate")
@@ -141,6 +149,7 @@ def _approve_route_lifecycle(request_id, action):
 )
 @check_auth
 @check_permission("process_routes:retire")
+@require_versioned_master_data_write
 @validate_json("lifecycle_approve")
 def approve_route_retirement(request_id):
     return _approve_route_lifecycle(request_id, "retire")
@@ -152,6 +161,7 @@ def approve_route_retirement(request_id):
 )
 @check_auth
 @check_permission("process_routes:reactivate")
+@require_versioned_master_data_write
 @validate_json("lifecycle_approve")
 def approve_route_reactivation(request_id):
     return _approve_route_lifecycle(request_id, "reactivate")

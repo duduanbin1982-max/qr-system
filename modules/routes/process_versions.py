@@ -7,6 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_versioned_master_data_write,
     safe_audit_log,
     validate_json,
 )
@@ -48,6 +49,7 @@ def get_process_version(version_id):
 @app.route("/api/processes/<int:process_id>/revisions", methods=["POST"])
 @check_auth
 @check_permission("process_versions:create")
+@require_versioned_master_data_write
 @validate_json("process_revision_create")
 def create_process_revision(process_id):
     command = get_json_body()
@@ -59,6 +61,7 @@ def create_process_revision(process_id):
 @app.route("/api/process-versions/<int:version_id>", methods=["PUT"])
 @check_auth
 @check_permission("process_versions:create")
+@require_versioned_master_data_write
 @validate_json("process_version_update")
 def update_process_version(version_id):
     command = get_json_body()
@@ -70,6 +73,7 @@ def update_process_version(version_id):
 @app.route("/api/process-versions/<int:version_id>/submit", methods=["POST"])
 @check_auth
 @check_permission("process_versions:submit")
+@require_versioned_master_data_write
 @validate_json("version_transition")
 def submit_process_version(version_id):
     result = ProcessVersionService.submit(version_id, get_json_body(), _actor())
@@ -80,6 +84,7 @@ def submit_process_version(version_id):
 @app.route("/api/process-versions/<int:version_id>/approve", methods=["POST"])
 @check_auth
 @check_permission("process_versions:approve")
+@require_versioned_master_data_write
 @validate_json("version_transition")
 def approve_process_version(version_id):
     result = ProcessVersionService.approve(version_id, get_json_body(), _actor())
@@ -90,6 +95,7 @@ def approve_process_version(version_id):
 @app.route("/api/process-versions/<int:version_id>/reject", methods=["POST"])
 @check_auth
 @check_permission("process_versions:reject")
+@require_versioned_master_data_write
 @validate_json("version_reject")
 def reject_process_version(version_id):
     command = get_json_body()
@@ -117,6 +123,7 @@ def _request_process_lifecycle(process_id, action):
 @app.route("/api/processes/<int:process_id>/retirement-requests", methods=["POST"])
 @check_auth
 @check_permission("processes:retire")
+@require_versioned_master_data_write
 @validate_json("lifecycle_request")
 def request_process_retirement(process_id):
     return _request_process_lifecycle(process_id, "retire")
@@ -125,6 +132,7 @@ def request_process_retirement(process_id):
 @app.route("/api/processes/<int:process_id>/reactivation-requests", methods=["POST"])
 @check_auth
 @check_permission("processes:reactivate")
+@require_versioned_master_data_write
 @validate_json("lifecycle_request")
 def request_process_reactivation(process_id):
     return _request_process_lifecycle(process_id, "reactivate")
@@ -141,6 +149,7 @@ def _approve_process_lifecycle(request_id, action):
 @app.route("/api/process-retirement-requests/<int:request_id>/approve", methods=["POST"])
 @check_auth
 @check_permission("processes:retire")
+@require_versioned_master_data_write
 @validate_json("lifecycle_approve")
 def approve_process_retirement(request_id):
     return _approve_process_lifecycle(request_id, "retire")
@@ -149,6 +158,7 @@ def approve_process_retirement(request_id):
 @app.route("/api/process-reactivation-requests/<int:request_id>/approve", methods=["POST"])
 @check_auth
 @check_permission("processes:reactivate")
+@require_versioned_master_data_write
 @validate_json("lifecycle_approve")
 def approve_process_reactivation(request_id):
     return _approve_process_lifecycle(request_id, "reactivate")

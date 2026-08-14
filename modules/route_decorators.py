@@ -9,7 +9,12 @@ from functools import wraps
 
 from flask import jsonify, request
 
+from modules import config
 from modules.app import app
+from modules.domain.process_versioning import (
+    VersionedMasterDataWriteDisabledError,
+    assert_legacy_master_data_write_allowed,
+)
 from modules.domain.reporting_day import reporting_range_bounds
 from modules.middleware.audit import safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
@@ -34,6 +39,29 @@ def validate_reporting_range(view):
 
     return wrapped
 
+
+def require_versioned_master_data_write(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not config.PROCESS_VERSIONED_WRITE_ENABLED:
+            raise VersionedMasterDataWriteDisabledError(
+                "版本化工序和路线写入尚未启用"
+            )
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def require_legacy_master_data_write(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        assert_legacy_master_data_write_allowed(
+            not config.PROCESS_LEGACY_WRITE_BLOCKED
+        )
+        return view(*args, **kwargs)
+
+    return wrapped
+
 __all__ = [
     "app",
     "check_auth",
@@ -46,6 +74,8 @@ __all__ = [
     "list_response",
     "parse_pagination",
     "rate_limit",
+    "require_legacy_master_data_write",
+    "require_versioned_master_data_write",
     "safe_audit_log",
     "safe_route",
     "validate_json",

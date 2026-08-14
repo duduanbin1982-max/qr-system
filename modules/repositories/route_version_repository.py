@@ -83,6 +83,7 @@ class RouteVersionRepository:
         rows = db.execute(
             "SELECT item.*,process_version.name AS process_name_snapshot,"
             "process_version.category AS process_category,"
+            "process_version.version AS process_version,"
             "process_version.status AS process_version_status "
             "FROM process_route_version_items item "
             "JOIN process_versions process_version ON process_version.id=item.process_version_id "

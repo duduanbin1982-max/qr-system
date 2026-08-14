@@ -21,6 +21,67 @@ PERFORMANCE_LEDGER_V2_QUERY_ENABLED = (
     in {"1", "true", "yes", "on"}
 )
 
+
+PROCESS_VERSIONING_FLAG_NAMES = (
+    "PROCESS_VERSIONED_QUERY_ENABLED",
+    "PROCESS_VERSION_COMPAT_AUDIT_ENABLED",
+    "PROCESS_VERSIONED_WRITE_ENABLED",
+    "PROCESS_LEGACY_WRITE_BLOCKED",
+)
+
+
+def _environment_flag(name, environ=None):
+    source = os.environ if environ is None else environ
+    return str(source.get(name, "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def get_process_versioning_flags(environ=None):
+    return {
+        name: _environment_flag(name, environ=environ)
+        for name in PROCESS_VERSIONING_FLAG_NAMES
+    }
+
+
+def validate_process_versioning_flags(flags=None):
+    values = dict(flags or {
+        name: globals().get(name, False) for name in PROCESS_VERSIONING_FLAG_NAMES
+    })
+    query_enabled = bool(values.get("PROCESS_VERSIONED_QUERY_ENABLED"))
+    audit_enabled = bool(values.get("PROCESS_VERSION_COMPAT_AUDIT_ENABLED"))
+    write_enabled = bool(values.get("PROCESS_VERSIONED_WRITE_ENABLED"))
+    legacy_blocked = bool(values.get("PROCESS_LEGACY_WRITE_BLOCKED"))
+    violations = []
+    if audit_enabled and not query_enabled:
+        violations.append("兼容双读审计要求先开启版本化查询")
+    if write_enabled and not query_enabled:
+        violations.append("版本化写入要求先开启版本化查询")
+    if legacy_blocked and not write_enabled:
+        violations.append("阻断 Legacy 写入要求先开启版本化写入")
+    if violations:
+        raise RuntimeError("工序版本化功能开关组合无效：" + "；".join(violations))
+    return values
+
+
+_PROCESS_VERSIONING_FLAGS = get_process_versioning_flags()
+PROCESS_VERSIONED_QUERY_ENABLED = _PROCESS_VERSIONING_FLAGS[
+    "PROCESS_VERSIONED_QUERY_ENABLED"
+]
+PROCESS_VERSION_COMPAT_AUDIT_ENABLED = _PROCESS_VERSIONING_FLAGS[
+    "PROCESS_VERSION_COMPAT_AUDIT_ENABLED"
+]
+PROCESS_VERSIONED_WRITE_ENABLED = _PROCESS_VERSIONING_FLAGS[
+    "PROCESS_VERSIONED_WRITE_ENABLED"
+]
+PROCESS_LEGACY_WRITE_BLOCKED = _PROCESS_VERSIONING_FLAGS[
+    "PROCESS_LEGACY_WRITE_BLOCKED"
+]
+validate_process_versioning_flags(_PROCESS_VERSIONING_FLAGS)
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents

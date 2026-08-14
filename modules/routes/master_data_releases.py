@@ -7,6 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_versioned_master_data_write,
     safe_audit_log,
     validate_json,
 )
@@ -38,6 +39,7 @@ def get_master_data_release_batch(batch_id):
 @app.route("/api/master-data-release-batches", methods=["POST"])
 @check_auth
 @check_permission("master_data_releases:create")
+@require_versioned_master_data_write
 @validate_json("master_data_release_create")
 def create_master_data_release_batch():
     command = get_json_body()
@@ -49,6 +51,7 @@ def create_master_data_release_batch():
 @app.route("/api/master-data-release-batches/<int:batch_id>/submit", methods=["POST"])
 @check_auth
 @check_permission("master_data_releases:submit")
+@require_versioned_master_data_write
 @validate_json("master_data_release_submit")
 def submit_master_data_release_batch(batch_id):
     result = MasterDataReleaseService.submit(batch_id, get_json_body(), _actor())
@@ -59,6 +62,7 @@ def submit_master_data_release_batch(batch_id):
 @app.route("/api/master-data-release-batches/<int:batch_id>/approve", methods=["POST"])
 @check_auth
 @check_permission("master_data_releases:approve")
+@require_versioned_master_data_write
 @validate_json("master_data_release_approve")
 def approve_master_data_release_batch(batch_id):
     result = MasterDataReleaseService.approve(batch_id, get_json_body(), _actor())
@@ -69,6 +73,7 @@ def approve_master_data_release_batch(batch_id):
 @app.route("/api/master-data-release-batches/<int:batch_id>/reject", methods=["POST"])
 @check_auth
 @check_permission("master_data_releases:reject")
+@require_versioned_master_data_write
 @validate_json("master_data_release_reject")
 def reject_master_data_release_batch(batch_id):
     command = get_json_body()

@@ -152,9 +152,10 @@ class OrderProcessSyncService:
             )
 
     @staticmethod
-    def apply_route(db, order_id, route_id):
+    def apply_route(db, order_id, route_id, route_items=None):
         """Apply a validated route through the same order synchronization policy."""
-        route_items = OrderProcessSyncService.validate_route_assignment(db, route_id)
+        if route_items is None:
+            route_items = OrderProcessSyncService.validate_route_assignment(db, route_id)
         work_record_count = OrderRepository.count_active_work_records(order_id, db=db)
         if work_record_count:
             raise ValueError(

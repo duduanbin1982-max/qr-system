@@ -10,6 +10,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_legacy_master_data_write,
     safe_audit_log,
     validate_json,
 )
@@ -46,8 +47,13 @@ def list_processes():
             offset = 0
     else:
         limit = None
+    selectable = request.args.get('selectable', '').strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
     try:
-        result = ProcessService.list_processes(category, search, sort_by, sort_dir, limit, offset)
+        result = ProcessService.list_processes(
+            category, search, sort_by, sort_dir, limit, offset, selectable
+        )
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify(result)
@@ -56,6 +62,7 @@ def list_processes():
 @app.route('/api/processes', methods=['POST'])
 @check_auth
 @check_permission('processes:create')
+@require_legacy_master_data_write
 @validate_json('create_process')
 def create_process():
     """
@@ -81,6 +88,7 @@ def create_process():
 @app.route('/api/processes/<int:pid>', methods=['PUT'])
 @check_auth
 @check_permission('processes:edit')
+@require_legacy_master_data_write
 @validate_json('update_process')
 def update_process(pid):
     """
@@ -114,6 +122,7 @@ def process_impact(pid):
 @app.route('/api/processes/<int:pid>', methods=['DELETE'])
 @check_auth
 @check_permission('processes:delete')
+@require_legacy_master_data_write
 def delete_process(pid):
     """
     ---

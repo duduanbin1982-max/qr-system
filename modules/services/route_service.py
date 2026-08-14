@@ -7,6 +7,9 @@ from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.route_repository import RouteRepository
 from modules.services.master_data_impact_service import MasterDataImpactService
+from modules.services.legacy_process_compatibility_service import (
+    LegacyProcessCompatibilityService,
+)
 from modules.services.order_process_sync_service import OrderProcessSyncService
 
 
@@ -15,7 +18,9 @@ class ProcessRouteService:
     VALID_CATEGORIES = ("结构件", "机加工")
 
     @staticmethod
-    def list_routes(category="", search="", limit=None, offset=0):
+    def list_routes(
+        category="", search="", limit=None, offset=0, selectable=False
+    ):
         """获取所有工序路线（含工序明细，批量预取避免 N+1）。"""
         rows, total = RouteRepository.list_routes(category, search, limit, offset)
 
@@ -39,11 +44,19 @@ class ProcessRouteService:
                 "is_locked": usage.get("is_locked", False),
             })
             result.append(route)
-        return {
+        legacy = {
             "routes": result,
             "total": total,
             "summary": RouteRepository.get_route_summary(),
         }
+        return LegacyProcessCompatibilityService.list_routes(
+            legacy,
+            category=category,
+            search=search,
+            limit=limit,
+            offset=offset,
+            selectable=selectable,
+        )
 
     @staticmethod
     def _validate_category(category):
@@ -92,6 +105,7 @@ class ProcessRouteService:
 
     @staticmethod
     def create_route(data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("路线名称不能为空")
@@ -121,6 +135,7 @@ class ProcessRouteService:
 
     @staticmethod
     def update_route(rid, data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         with BaseService.transaction() as txn:
             route = RouteRepository.find_route_by_id(rid, db=txn)
             if not route:
@@ -164,6 +179,7 @@ class ProcessRouteService:
 
     @staticmethod
     def delete_route(rid):
+        LegacyProcessCompatibilityService.require_legacy_write()
         with BaseService.transaction() as txn:
             route = RouteRepository.find_route_by_id(rid, db=txn)
             if not route:
@@ -188,9 +204,13 @@ class ProcessRouteService:
 
     @staticmethod
     def apply_route(rid, order_id):
+        version = LegacyProcessCompatibilityService.current_route_for_legacy_apply(rid)
+        route_items = version.get("items") if version else None
         with BaseService.transaction() as txn:
             if not RouteRepository.find_route_by_id(rid, db=txn):
                 raise NotFoundError("路线不存在")
             if not RouteRepository.check_order_exists(order_id, db=txn):
                 raise NotFoundError("订单不存在")
-            return OrderProcessSyncService.apply_route(txn, order_id, rid)
+            return OrderProcessSyncService.apply_route(
+                txn, order_id, rid, route_items=route_items
+            )

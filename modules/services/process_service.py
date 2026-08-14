@@ -4,6 +4,9 @@ import re
 from modules.services import BaseService
 from modules.repositories.process_repository import ProcessRepository
 from modules.services.master_data_impact_service import MasterDataImpactService
+from modules.services.legacy_process_compatibility_service import (
+    LegacyProcessCompatibilityService,
+)
 
 
 class ProcessService:
@@ -23,7 +26,15 @@ class ProcessService:
         return status
 
     @staticmethod
-    def list_processes(category="", search="", sort_by="seq_order", sort_dir="asc", limit=500, offset=0):
+    def list_processes(
+        category="",
+        search="",
+        sort_by="seq_order",
+        sort_dir="asc",
+        limit=500,
+        offset=0,
+        selectable=False,
+    ):
         allowed_sort = {"seq_order", "name", "category", "status", "created_at"}
         if sort_by not in allowed_sort:
             sort_by = "seq_order"
@@ -45,10 +56,25 @@ class ProcessService:
         category_counts = ProcessRepository.get_category_counts()
         total = ProcessRepository.count_all(conditions, params)
         rows = ProcessRepository.list_all(conditions, params, sort_by, sort_dir, limit, offset)
-        return {"processes": [dict(r) for r in rows], "total": total, "category_counts": category_counts}
+        legacy = {
+            "processes": [dict(r) for r in rows],
+            "total": total,
+            "category_counts": category_counts,
+        }
+        return LegacyProcessCompatibilityService.list_processes(
+            legacy,
+            category=category,
+            search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=limit,
+            offset=offset,
+            selectable=selectable,
+        )
 
     @staticmethod
     def create_process(data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         name = data.get("name", "").strip()
         if not name:
             raise ValueError("Process name required")
@@ -79,6 +105,7 @@ class ProcessService:
 
     @staticmethod
     def update_process(pid, data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
             raise NotFoundError("Process not found")
@@ -127,6 +154,7 @@ class ProcessService:
 
     @staticmethod
     def delete_process(pid):
+        LegacyProcessCompatibilityService.require_legacy_write()
         existing = ProcessRepository.find_by_id(pid)
         if not existing:
             raise NotFoundError("Not found")
