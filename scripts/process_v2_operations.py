@@ -976,13 +976,21 @@ def export_review_diff(
     candidate_before = database_sha256(candidate_path)
     source = database_snapshot(source_path)
     candidate = database_snapshot(candidate_path)
-    compared = compare_snapshots(source, candidate)
+    authorized_price_resolution = _authorized_price_resolution_comparison(
+        source_path, candidate_path
+    )
+    compared = compare_snapshots(
+        source,
+        candidate,
+        authorized_protected_tables=authorized_price_resolution["authorized_tables"],
+    )
     document = {
         "status": "review_required" if compared["differences"] else "no_difference",
         "mode": "review_only",
         "automatic_repairs_applied": False,
         "source_database_sha256": source_before,
         "candidate_database_sha256": candidate_before,
+        "authorized_price_resolution": authorized_price_resolution,
         **compared,
     }
     json_path = output / "process-v2-review-diff.json"
