@@ -68,6 +68,23 @@ def _create_batch(client, preparer, process_ids=(), route_ids=(), price_ids=()):
         )
 
 
+def test_release_batch_members_include_route_nodes_for_dependency_display(client):
+    preparer, approver = _actors(client)
+    process_created = _create_process(client, preparer, "发布批次节点工序")
+    process = _publish(
+        client, process_created["version"]["id"], preparer, approver
+    )
+    route = _create_route(client, preparer, [process])
+    batch = _create_batch(client, preparer, route_ids=[route["version"]["id"]])
+
+    with client.application.app_context():
+        loaded = MasterDataReleaseRepository.batch(batch["id"])
+
+    assert len(loaded["route_versions"]) == 1
+    assert loaded["route_versions"][0]["items"] == route["version"]["items"]
+    assert loaded["route_versions"][0]["items"][0]["process_version_id"] == process["id"]
+
+
 def test_process_change_affecting_current_route_requires_revision_or_approved_exception(client):
     preparer, approver = _actors(client)
     process_created = _create_process(client, preparer, "受影响路线工序")

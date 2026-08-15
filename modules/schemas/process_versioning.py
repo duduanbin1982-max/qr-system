@@ -129,6 +129,18 @@ process_version_update = _object(
     min_properties=2,
 )
 
+route_version_create = _object(
+    ["name", "category", "items", "revision_reason", "idempotency_key"],
+    {
+        "name": _name,
+        "category": _category,
+        "items": _route_content["items"],
+        "revision_reason": _reason,
+        "idempotency_key": _idempotency_key,
+        "description": _route_content["description"],
+    },
+)
+
 route_revision_create = _object(
     ["row_version", "revision_reason", "idempotency_key"],
     {
@@ -270,6 +282,7 @@ process_versioning_schemas = {
     "process_version_create": process_version_create,
     "process_revision_create": process_revision_create,
     "process_version_update": process_version_update,
+    "route_version_create": route_version_create,
     "route_revision_create": route_revision_create,
     "route_version_update": route_version_update,
     "version_transition": version_transition,

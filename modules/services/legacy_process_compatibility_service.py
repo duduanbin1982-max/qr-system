@@ -113,6 +113,7 @@ class LegacyProcessCompatibilityService:
     @staticmethod
     def _route_projection(root, legacy_route, usage):
         version = root.get("current_version") or {}
+        open_version = root.get("open_version") or {}
         route = {
             "id": root["id"],
             "name": version.get("name", root.get("name", "")),
@@ -131,6 +132,9 @@ class LegacyProcessCompatibilityService:
             "effective_to": version.get("effective_to", ""),
             "revision_reason": version.get("revision_reason", ""),
             "version_row_version": version.get("row_version"),
+            "open_version_id": open_version.get("id"),
+            "open_version": open_version.get("version"),
+            "open_version_status": open_version.get("status"),
             "processes": LegacyProcessCompatibilityService._route_items(
                 root["id"], version, legacy_route
             ),

@@ -32,6 +32,18 @@ def _audit(action, resource_id, detail=""):
     safe_audit_log(action, "route_version", int(resource_id), detail)
 
 
+@app.route("/api/process-route-versions", methods=["POST"])
+@check_auth
+@check_permission("route_versions:create")
+@require_versioned_master_data_write
+@validate_json("route_version_create")
+def create_versioned_route():
+    command = get_json_body()
+    result = RouteVersionService.create_route(command, _actor())
+    _audit("route_version_create", result["version"]["id"], command["revision_reason"])
+    return jsonify(result), 201
+
+
 @app.route("/api/process-routes/<int:route_id>/versions", methods=["GET"])
 @check_auth
 @check_permission("route_versions:view")

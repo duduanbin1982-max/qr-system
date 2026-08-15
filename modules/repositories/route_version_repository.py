@@ -68,8 +68,30 @@ class RouteVersionRepository:
             version["id"]: version
             for version in RouteVersionRepository.versions_by_ids(version_ids, db=db)
         }
+        open_rows = []
+        if roots:
+            route_ids = [root["id"] for root in roots]
+            placeholders = ",".join("?" for _ in route_ids)
+            candidates = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM process_route_versions "
+                    "WHERE process_route_id IN (" + placeholders + ") "
+                    "AND status IN ('draft','pending_approval') "
+                    "ORDER BY process_route_id,version DESC,id DESC",
+                    route_ids,
+                ).fetchall()
+            ]
+            seen = set()
+            for candidate in candidates:
+                if candidate["process_route_id"] not in seen:
+                    open_rows.append(candidate)
+                    seen.add(candidate["process_route_id"])
+            RouteVersionRepository._attach_items(open_rows, db)
+        open_by_route = {version["process_route_id"]: version for version in open_rows}
         for root in roots:
             root["current_version"] = versions.get(root.get("current_effective_version_id"))
+            root["open_version"] = open_by_route.get(root["id"])
         return roots
 
     @staticmethod

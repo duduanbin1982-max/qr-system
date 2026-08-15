@@ -12,6 +12,8 @@ import { usersApi } from './api/users.js'
 import { processesApi } from './api/processes.js'
 import { processVersionsApi } from './api/process-versions.js'
 import { processRoutesApi } from './api/process-routes.js'
+import { processRouteVersionsApi } from './api/process-route-versions.js'
+import { masterDataReleasesApi } from './api/master-data-releases.js'
 import { pricingApi } from './api/pricing.js'
 import { wagesApi } from './api/wages.js'
 import { inventoryApi } from './api/inventory.js'
@@ -45,6 +47,8 @@ export const apiNamespaces = Object.freeze({
   processes: processesApi,
   processVersions: processVersionsApi,
   processRoutes: processRoutesApi,
+  processRouteVersions: processRouteVersionsApi,
+  masterDataReleases: masterDataReleasesApi,
   pricing: pricingApi,
   wages: wagesApi,
   inventory: inventoryApi,

@@ -62,6 +62,32 @@ class MasterDataReleaseRepository:
                 item = dict(row)
                 batch_id = item.pop("batch_id")
                 batch_map[batch_id][collection].append(item)
+        route_versions_by_id = {
+            version["id"]: version
+            for batch in batches
+            for version in batch["route_versions"]
+        }
+        for version in route_versions_by_id.values():
+            version["items"] = []
+        if route_versions_by_id:
+            route_placeholders = ",".join("?" for _ in route_versions_by_id)
+            rows = db.execute(
+                'SELECT item.*,'
+                'process_version.process_code_snapshot AS process_code_snapshot,'
+                'process_version.name AS process_name_snapshot,'
+                'process_version.category AS process_category,'
+                'process_version.version AS process_version,'
+                'process_version.status AS process_version_status '
+                'FROM process_route_version_items item '
+                'JOIN process_versions process_version '
+                'ON process_version.id=item.process_version_id '
+                'WHERE item.route_version_id IN (' + route_placeholders + ') '
+                'ORDER BY item.route_version_id,item.seq_order,item.id',
+                list(route_versions_by_id),
+            ).fetchall()
+            for row in rows:
+                item = dict(row)
+                route_versions_by_id[item["route_version_id"]]["items"].append(item)
         for row in db.execute(
             "SELECT * FROM master_data_release_exceptions WHERE batch_id IN ("
             + placeholders

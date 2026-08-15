@@ -32,21 +32,30 @@ const props = defineProps({
   after: { type: Object, default: null },
 })
 
-const fields = [
-  { key: 'name', label: '工序名称' },
+const fields = computed(() => [
+  { key: 'name', label: props.after?.items ? '路线名称' : '工序名称' },
   { key: 'category', label: '分类' },
   { key: 'description', label: '描述' },
   { key: 'seq_order', label: '排序序号' },
-]
+  ...(props.before?.items || props.after?.items ? [{ key: 'items', label: '路线节点' }] : []),
+])
 
 function display(value) {
   if (value === null || value === undefined || value === '') return '-'
+  if (Array.isArray(value)) {
+    return value.map((item, index) => {
+      const name = item.process_name_snapshot || item.process_name || `工序 ${item.process_id}`
+      const version = item.process_version || item.process_version_id || '-'
+      const audit = item.required_audit ? ' / 审批' : ''
+      return `${index + 1}. ${name} V${version}${audit}`
+    }).join('；') || '-'
+  }
   return String(value)
 }
 
 const changes = computed(() => {
   if (!props.before || !props.after) return []
-  return fields
+  return fields.value
     .filter((field) => display(props.before[field.key]) !== display(props.after[field.key]))
     .map((field) => ({
       ...field,

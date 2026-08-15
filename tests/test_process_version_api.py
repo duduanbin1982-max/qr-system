@@ -99,6 +99,21 @@ def test_process_versioning_schemas_are_strict_and_validate_concurrency_fields()
     else:
         raise AssertionError("route schema accepted an invalid node")
 
+    valid_route_create = {
+        "name": "标准机加工路线",
+        "category": "机加工",
+        "description": "版本化路线基线",
+        "revision_reason": "建立路线主数据",
+        "idempotency_key": "route-create-001",
+        "items": valid_route["items"],
+    }
+    jsonschema.validate(valid_route_create, SCHEMAS["route_version_create"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {**valid_route_create, "unexpected": True},
+            SCHEMAS["route_version_create"],
+        )
+
 
 def test_create_versioned_process_api_creates_stable_root_and_v1_draft(
     client, auth_headers
@@ -126,6 +141,49 @@ def test_create_versioned_process_api_creates_stable_root_and_v1_draft(
     assert payload["version"]["version"] == 1
     assert payload["version"]["status"] == "draft"
     assert payload["version"]["name"] == "API 新建精车"
+    assert payload["version"]["idempotency_key"] == idempotency_key
+
+
+def test_create_versioned_route_api_creates_stable_root_and_v1_draft(
+    client, auth_headers
+):
+    preparer, approver = _actors(client)
+    process = _create_process(client, preparer, "API 路线创建工序")
+    published_process = _publish(
+        client, process["version"]["id"], preparer, approver
+    )
+    idempotency_key = f"route-create-{uuid.uuid4().hex}"
+
+    response = client.post(
+        "/api/process-route-versions",
+        headers=auth_headers,
+        json={
+            "name": "API 新建机加工路线",
+            "category": "机加工",
+            "description": "由版本化入口创建",
+            "revision_reason": "建立路线主数据",
+            "idempotency_key": idempotency_key,
+            "items": [
+                {
+                    "process_id": published_process["process_id"],
+                    "process_version_id": published_process["id"],
+                    "seq_order": 10,
+                    "is_required": 1,
+                    "required_audit": 1,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201, response.get_json()
+    payload = response.get_json()
+    assert payload["root"]["route_code"].startswith("ROUTE-")
+    assert payload["root"]["current_effective_version_id"] is None
+    assert payload["root"]["lifecycle_status"] == "active"
+    assert payload["version"]["process_route_id"] == payload["root"]["id"]
+    assert payload["version"]["version"] == 1
+    assert payload["version"]["status"] == "draft"
+    assert payload["version"]["items"][0]["required_audit"] == 1
     assert payload["version"]["idempotency_key"] == idempotency_key
 
 

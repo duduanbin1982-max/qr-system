@@ -93,15 +93,52 @@ class MasterDataReleaseService:
         return payload_sha256(summary), summary
 
     @staticmethod
+    def _present_batches(batches):
+        presented = []
+        process_base_ids = [
+            version.get("supersedes_version_id")
+            for batch in batches
+            for version in batch.get("process_versions") or []
+            if version.get("supersedes_version_id")
+        ]
+        route_base_ids = [
+            version.get("supersedes_version_id")
+            for batch in batches
+            for version in batch.get("route_versions") or []
+            if version.get("supersedes_version_id")
+        ]
+        process_bases = {
+            version["id"]: version
+            for version in ProcessVersionRepository.versions_by_ids(process_base_ids)
+        }
+        route_bases = {
+            version["id"]: version
+            for version in RouteVersionRepository.versions_by_ids(route_base_ids)
+        }
+        for source in batches:
+            batch = dict(source)
+            batch["process_versions"] = [dict(version) for version in source.get("process_versions") or []]
+            batch["route_versions"] = [dict(version) for version in source.get("route_versions") or []]
+            batch["price_versions"] = [dict(version) for version in source.get("price_versions") or []]
+            batch["approved_exceptions"] = [dict(item) for item in source.get("approved_exceptions") or []]
+            for version in batch["process_versions"]:
+                version["comparison_base"] = process_bases.get(version.get("supersedes_version_id"))
+            for version in batch["route_versions"]:
+                version["comparison_base"] = route_bases.get(version.get("supersedes_version_id"))
+            presented.append(batch)
+        return presented
+
+    @staticmethod
     def list_batches(status=""):
-        return MasterDataReleaseRepository.list_batches(str(status or "").strip())
+        batches = MasterDataReleaseRepository.list_batches(str(status or "").strip())
+        return MasterDataReleaseService._present_batches(batches)
 
     @staticmethod
     def get_batch(batch_id):
         batch = MasterDataReleaseRepository.batch(batch_id)
         if batch is None:
             raise NotFoundError("主数据发布批次不存在")
-        return batch
+        return MasterDataReleaseService._present_batches([batch])[0]
 
     @staticmethod
     def _validate_exception(exception, batch, db):
