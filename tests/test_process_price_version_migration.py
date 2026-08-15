@@ -12,6 +12,7 @@ from factories import (
     ensure_user,
 )
 from modules.db import get_db
+from modules.migration_helpers import MigrationInvariantError
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
 from tests.test_process_version_migrations import _legacy_db
@@ -158,6 +159,96 @@ def test_v062_restores_price_guards_and_rejects_naked_root_bindings():
                 "(route_id,process_id,normal_unit_price_micros,valid_from,status) "
                 "VALUES (3,1,13000,'2026-09-01 07:00:00','draft')"
             )
+    finally:
+        db.close()
+
+
+def _add_historical_price_candidate(db, version_number, order_id):
+    route_version_id = db.execute(
+        "INSERT INTO process_route_versions "
+        "(process_route_id,version,route_code_snapshot,name,category,description,status) "
+        "SELECT process_route_id,?,route_code_snapshot,name,category,description,'draft' "
+        "FROM process_route_versions WHERE process_route_id=3 AND version=1",
+        (version_number,),
+    ).lastrowid
+    process_version_id = db.execute(
+        "SELECT id FROM process_versions WHERE process_id=27 AND version=1"
+    ).fetchone()[0]
+    db.execute(
+        "INSERT INTO process_route_version_items "
+        "(route_version_id,process_id,process_version_id,seq_order) VALUES (?,?,?,1)",
+        (route_version_id, 27, process_version_id),
+    )
+    db.execute(
+        "UPDATE process_route_versions SET status='superseded' WHERE id=?",
+        (route_version_id,),
+    )
+    db.execute(
+        "INSERT INTO orders(id,route_id,route_version_id) VALUES (?,?,?)",
+        (order_id, 3, route_version_id),
+    )
+    return route_version_id, process_version_id
+
+
+def test_v062_binds_removed_process_price_to_unique_order_route_revision():
+    from modules.migration_process_versioning import m062_bind_price_versions
+
+    db = _v061_price_db()
+    try:
+        db.executescript(
+            """
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                route_id INTEGER,
+                route_version_id INTEGER
+            );
+            INSERT INTO route_price_versions(
+                id,route_id,process_id,normal_unit_price_micros,valid_from,status
+            ) VALUES (402,3,27,15000,'2026-01-01 07:00:00','approved');
+            """
+        )
+        route_version_id, process_version_id = _add_historical_price_candidate(db, 2, 601)
+
+        m062_bind_price_versions(db)
+
+        assert tuple(
+            db.execute(
+                "SELECT route_version_id,process_version_id FROM route_price_versions "
+                "WHERE id=402"
+            ).fetchone()
+        ) == (route_version_id, process_version_id)
+    finally:
+        db.close()
+
+
+def test_v062_blocks_removed_process_price_with_multiple_order_route_revisions():
+    from modules.migration_process_versioning import m062_bind_price_versions
+
+    db = _v061_price_db()
+    try:
+        db.executescript(
+            """
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY,
+                route_id INTEGER,
+                route_version_id INTEGER
+            );
+            INSERT INTO route_price_versions(
+                id,route_id,process_id,normal_unit_price_micros,valid_from,status
+            ) VALUES (402,3,27,15000,'2026-01-01 07:00:00','approved');
+            """
+        )
+        _add_historical_price_candidate(db, 2, 601)
+        _add_historical_price_candidate(db, 3, 602)
+
+        with pytest.raises(MigrationInvariantError, match="1 price binding exception"):
+            m062_bind_price_versions(db)
+
+        issue = db.execute(
+            "SELECT reason_code FROM process_version_migration_exceptions "
+            "WHERE migration_key='v062:price-version-bindings' AND legacy_id=402"
+        ).fetchone()
+        assert issue[0] == "multiple_historical_route_candidates"
     finally:
         db.close()
 

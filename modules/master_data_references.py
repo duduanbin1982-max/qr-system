@@ -324,6 +324,14 @@ PROCESS_REFERENCES = (
         impact_level=IMPACT_INTERNAL,
         action="保留主数据发布例外证据",
     ),
+    _process(
+        "process_price_binding_migration_events",
+        version_columns=("process_version_id",),
+        key="price_binding_migration_events",
+        label="历史工价绑定迁移事件",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变迁移审计证据",
+    ),
 )
 
 
@@ -551,6 +559,14 @@ ROUTE_REFERENCES = (
         label="主数据发布批准例外",
         impact_level=IMPACT_INTERNAL,
         action="保留主数据发布例外证据",
+    ),
+    _route(
+        "process_price_binding_migration_events",
+        version_columns=("route_version_id",),
+        key="price_binding_migration_events",
+        label="历史工价绑定迁移事件",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变迁移审计证据",
     ),
 )
 
