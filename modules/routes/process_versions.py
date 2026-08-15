@@ -32,6 +32,22 @@ def _audit(action, resource_id, detail=""):
     safe_audit_log(action, "process_version", int(resource_id), detail)
 
 
+@app.route("/api/process-versions", methods=["POST"])
+@check_auth
+@check_permission("process_versions:create")
+@require_versioned_master_data_write
+@validate_json("process_version_create")
+def create_versioned_process():
+    command = get_json_body()
+    result = ProcessVersionService.create_process(command, _actor())
+    _audit(
+        "process_version_create",
+        result["version"]["id"],
+        command["revision_reason"],
+    )
+    return jsonify(result), 201
+
+
 @app.route("/api/processes/<int:process_id>/versions", methods=["GET"])
 @check_auth
 @check_permission("process_versions:view")

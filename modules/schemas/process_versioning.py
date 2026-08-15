@@ -100,6 +100,19 @@ def _object(required, properties, *, min_properties=None):
     return schema
 
 
+process_version_create = _object(
+    ["name", "category", "revision_reason", "idempotency_key"],
+    {
+        "name": _name,
+        "category": _category,
+        "revision_reason": _reason,
+        "idempotency_key": _idempotency_key,
+        "description": _process_content["description"],
+        "seq_order": _process_content["seq_order"],
+    },
+)
+
+
 process_revision_create = _object(
     ["row_version", "revision_reason", "idempotency_key"],
     {
@@ -254,6 +267,7 @@ master_data_release_approve = _object(
 master_data_release_reject = version_reject
 
 process_versioning_schemas = {
+    "process_version_create": process_version_create,
     "process_revision_create": process_revision_create,
     "process_version_update": process_version_update,
     "route_revision_create": route_revision_create,

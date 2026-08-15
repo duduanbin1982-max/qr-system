@@ -37,6 +37,21 @@ def _login(client, username, password="Test@1234"):
 
 
 def test_process_versioning_schemas_are_strict_and_validate_concurrency_fields():
+    valid_create = {
+        "name": "精密车削",
+        "category": "机加工",
+        "revision_reason": "建立新工序主数据",
+        "idempotency_key": "process-create-001",
+        "description": "精加工工序",
+        "seq_order": 20,
+    }
+    jsonschema.validate(valid_create, SCHEMAS["process_version_create"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {**valid_create, "unexpected": True},
+            SCHEMAS["process_version_create"],
+        )
+
     valid_revision = {
         "row_version": 0,
         "revision_reason": "调整工艺参数",
@@ -83,6 +98,35 @@ def test_process_versioning_schemas_are_strict_and_validate_concurrency_fields()
         pass
     else:
         raise AssertionError("route schema accepted an invalid node")
+
+
+def test_create_versioned_process_api_creates_stable_root_and_v1_draft(
+    client, auth_headers
+):
+    idempotency_key = f"process-create-{uuid.uuid4().hex}"
+    response = client.post(
+        "/api/process-versions",
+        headers=auth_headers,
+        json={
+            "name": "API 新建精车",
+            "category": "机加工",
+            "description": "由版本化入口创建",
+            "seq_order": 25,
+            "revision_reason": "建立新工序主数据",
+            "idempotency_key": idempotency_key,
+        },
+    )
+
+    assert response.status_code == 201, response.get_json()
+    payload = response.get_json()
+    assert payload["root"]["process_code"].startswith("PROC-")
+    assert payload["root"]["current_effective_version_id"] is None
+    assert payload["root"]["lifecycle_status"] == "active"
+    assert payload["version"]["process_id"] == payload["root"]["id"]
+    assert payload["version"]["version"] == 1
+    assert payload["version"]["status"] == "draft"
+    assert payload["version"]["name"] == "API 新建精车"
+    assert payload["version"]["idempotency_key"] == idempotency_key
 
 
 def test_version_routes_are_thin_http_adapters():
