@@ -1311,7 +1311,14 @@ def _collect_order_binding_issues(db):
     order_process_ready = _required_columns(
         db,
         "order_processes",
-        ("id", "order_id", "process_id", "completed"),
+        (
+            "id",
+            "order_id",
+            "process_id",
+            "seq_order",
+            "required_audit",
+            "completed",
+        ),
         issues,
     )
     process_version_ready = _required_columns(
@@ -1326,7 +1333,7 @@ def _collect_order_binding_issues(db):
         ("id", "process_route_id", "version", "name"),
         issues,
     )
-    route_item_ready = _required_columns(
+    _required_columns(
         db,
         "process_route_version_items",
         ("id", "route_version_id", "process_id", "process_version_id"),
@@ -1391,38 +1398,6 @@ def _collect_order_binding_issues(db):
                 "missing_process_v1",
                 order_id=row[1],
                 process_id=row[2],
-            )
-
-    if all(
-        (
-            order_ready,
-            order_process_ready,
-            route_version_ready,
-            route_item_ready,
-        )
-    ):
-        for row in db.execute(
-            "SELECT op.id,op.order_id,order_row.route_id,op.process_id "
-            "FROM order_processes op "
-            "JOIN orders order_row ON order_row.id=op.order_id "
-            "JOIN process_route_versions route_version "
-            "ON route_version.process_route_id=order_row.route_id "
-            "AND route_version.version=1 "
-            "LEFT JOIN process_route_version_items item "
-            "ON item.route_version_id=route_version.id "
-            "AND item.process_id=op.process_id "
-            "WHERE order_row.route_id IS NOT NULL AND "
-            + process_needs_binding
-            + " AND item.id IS NULL ORDER BY op.id"
-        ).fetchall():
-            _append_order_binding_issue(
-                issues,
-                "order_process",
-                row[0],
-                "missing_route_v1_node",
-                order_id=row[1],
-                route_id=row[2],
-                process_id=row[3],
             )
 
     return issues
@@ -1523,6 +1498,284 @@ def _add_order_binding_columns(db):
         "route_name_snapshot",
         "TEXT NOT NULL DEFAULT ''",
     )
+
+
+def _historical_route_snapshot_groups(db):
+    """Collect exact legacy order-route snapshots which differ from current V1.
+
+    Legacy order_processes rows are the authoritative copy made when an order was
+    created. Some old rows contain duplicate numeric seq_order values, so the
+    immutable route revision uses their stable `(seq_order, id)` order and dense
+    sequence numbers while retaining the original values in its evidence event.
+    """
+    route_nodes = {}
+    for row in db.execute(
+        "SELECT version.process_route_id,item.process_id,item.process_version_id,"
+        "item.seq_order,item.is_required,item.required_audit,item.id "
+        "FROM process_route_versions version "
+        "JOIN process_route_version_items item ON item.route_version_id=version.id "
+        "WHERE version.version=1 "
+        "ORDER BY version.process_route_id,item.seq_order,item.id"
+    ).fetchall():
+        route_nodes.setdefault(row["process_route_id"], []).append(
+            (
+                int(row["process_id"]),
+                int(row["is_required"]),
+                int(row["required_audit"]),
+            )
+        )
+
+    needs_binding = ""
+    if column_exists(db, "orders", "route_version_id"):
+        needs_binding = " AND order_row.route_version_id IS NULL"
+
+    groups = {}
+    orders = db.execute(
+        "SELECT order_row.id,order_row.route_id FROM orders order_row "
+        "WHERE order_row.route_id IS NOT NULL"
+        + needs_binding
+        + " ORDER BY order_row.id"
+    ).fetchall()
+    for order in orders:
+        rows = db.execute(
+            "SELECT op.id,op.process_id,op.seq_order,COALESCE(op.required_audit,0) "
+            "AS required_audit,version.id AS process_version_id "
+            "FROM order_processes op "
+            "JOIN process_versions version ON version.process_id=op.process_id "
+            "AND version.version=1 "
+            "WHERE op.order_id=? ORDER BY op.seq_order,op.id",
+            (order["id"],),
+        ).fetchall()
+        if not rows:
+            continue
+
+        topology = [
+            (int(row["process_id"]), 1, int(row["required_audit"])) for row in rows
+        ]
+        if topology == route_nodes.get(order["route_id"], []):
+            continue
+
+        source_nodes = [
+            {
+                "source_seq_order": int(row["seq_order"] or 0),
+                "process_id": int(row["process_id"]),
+                "process_version_id": int(row["process_version_id"]),
+                "is_required": 1,
+                "required_audit": int(row["required_audit"]),
+            }
+            for row in rows
+        ]
+        signature_nodes = [
+            {
+                "source_seq_order": node["source_seq_order"],
+                "process_id": node["process_id"],
+                "is_required": node["is_required"],
+                "required_audit": node["required_audit"],
+            }
+            for node in source_nodes
+        ]
+        signature_json = json.dumps(
+            {
+                "process_route_id": int(order["route_id"]),
+                "source_nodes": signature_nodes,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        signature_sha256 = hashlib.sha256(signature_json.encode("utf-8")).hexdigest()
+        key = (int(order["route_id"]), signature_sha256)
+        group = groups.setdefault(
+            key,
+            {
+                "process_route_id": int(order["route_id"]),
+                "signature_sha256": signature_sha256,
+                "signature_json": signature_json,
+                "source_nodes": source_nodes,
+                "order_ids": [],
+            },
+        )
+        if group["signature_json"] != signature_json:
+            raise MigrationInvariantError(
+                "Migration v61 historical route snapshot digest collision"
+            )
+        group["order_ids"].append(int(order["id"]))
+
+    return sorted(
+        groups.values(),
+        key=lambda group: (
+            group["process_route_id"],
+            min(group["order_ids"]),
+            group["signature_sha256"],
+        ),
+    )
+
+
+def _historical_route_items(group):
+    return [
+        {
+            "process_id": node["process_id"],
+            "process_version_id": node["process_version_id"],
+            "seq_order": position,
+            "is_required": 1,
+            "required_audit": node["required_audit"],
+        }
+        for position, node in enumerate(group["source_nodes"], start=1)
+    ]
+
+
+def _validate_existing_historical_route_snapshot(db, version, expected_items):
+    if version["status"] != "superseded":
+        raise MigrationInvariantError(
+            "Migration v61 historical route snapshot is not immutable"
+        )
+    actual = [
+        tuple(row)
+        for row in db.execute(
+            "SELECT process_id,process_version_id,seq_order,is_required,required_audit "
+            "FROM process_route_version_items WHERE route_version_id=? "
+            "ORDER BY seq_order,id",
+            (version["id"],),
+        ).fetchall()
+    ]
+    expected = [
+        (
+            item["process_id"],
+            item["process_version_id"],
+            item["seq_order"],
+            item["is_required"],
+            item["required_audit"],
+        )
+        for item in expected_items
+    ]
+    if actual != expected:
+        raise MigrationInvariantError(
+            "Migration v61 historical route snapshot content mismatch"
+        )
+
+
+def _reconstruct_historical_route_snapshots(db):
+    """Create immutable superseded revisions and bind matching legacy orders."""
+    groups = _historical_route_snapshot_groups(db)
+    for group in groups:
+        route_id = group["process_route_id"]
+        snapshot_digest = group["signature_sha256"]
+        idempotency_key = f"v061:route:{route_id}:order-snapshot:{snapshot_digest}"
+        expected_items = _historical_route_items(group)
+        version = db.execute(
+            "SELECT * FROM process_route_versions WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+        if version is None:
+            baseline = db.execute(
+                "SELECT * FROM process_route_versions "
+                "WHERE process_route_id=? AND version=1",
+                (route_id,),
+            ).fetchone()
+            if baseline is None:
+                raise MigrationInvariantError(
+                    f"Migration v61 missing route V1 for historical route {route_id}"
+                )
+            next_version = db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 FROM process_route_versions "
+                "WHERE process_route_id=?",
+                (route_id,),
+            ).fetchone()[0]
+            reason = (
+                "Reconstructed from exact legacy order-process snapshot; "
+                "prior route revision metadata unavailable"
+            )
+            cursor = db.execute(
+                "INSERT INTO process_route_versions ("
+                "process_route_id,version,route_code_snapshot,name,category,description,"
+                "status,effective_from,effective_to,supersedes_version_id,revision_reason,"
+                "impact_digest,content_digest,legacy_baseline,prior_revision_unavailable,"
+                "created_by,created_by_name,approved_by,approved_by_name,approved_at,"
+                "published_at,idempotency_key,row_version) "
+                "VALUES (?,?,?,?,?,?,'draft','','',NULL,?,?,?,1,1,NULL,'System migration',"
+                "NULL,'System migration','','',?,0)",
+                (
+                    route_id,
+                    next_version,
+                    baseline["route_code_snapshot"],
+                    baseline["name"],
+                    baseline["category"],
+                    baseline["description"],
+                    reason,
+                    snapshot_digest,
+                    snapshot_digest,
+                    idempotency_key,
+                ),
+            )
+            version_id = cursor.lastrowid
+            for item in expected_items:
+                db.execute(
+                    "INSERT INTO process_route_version_items ("
+                    "route_version_id,process_id,process_version_id,seq_order,is_required,"
+                    "required_audit,legacy_route_item_id) VALUES (?,?,?,?,?,?,NULL)",
+                    (
+                        version_id,
+                        item["process_id"],
+                        item["process_version_id"],
+                        item["seq_order"],
+                        item["is_required"],
+                        item["required_audit"],
+                    ),
+                )
+            db.execute(
+                "UPDATE process_route_versions SET status='superseded',row_version=1 "
+                "WHERE id=? AND status='draft'",
+                (version_id,),
+            )
+            event_payload = json.dumps(
+                {
+                    "legacy_baseline": 1,
+                    "prior_revision_unavailable": 1,
+                    "source": "order_processes",
+                    "source_order_ids": group["order_ids"],
+                    "source_signature_sha256": snapshot_digest,
+                    "source_nodes": group["source_nodes"],
+                    "sequence_normalization": "dense order by seq_order then order_process_id",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO process_route_version_events ("
+                "entity_id,version_id,event_type,actor_name,actor_role,reason,impact_digest,"
+                "idempotency_key,from_status,to_status,payload_json) "
+                "VALUES (?,?,'legacy_baseline_created','System migration','system',?,?,?,"
+                "'','superseded',?)",
+                (
+                    route_id,
+                    version_id,
+                    reason,
+                    snapshot_digest,
+                    idempotency_key + ":event",
+                    event_payload,
+                ),
+            )
+            version = db.execute(
+                "SELECT * FROM process_route_versions WHERE id=?", (version_id,)
+            ).fetchone()
+
+        if int(version["process_route_id"]) != route_id:
+            raise MigrationInvariantError(
+                "Migration v61 historical route snapshot root mismatch"
+            )
+        _validate_existing_historical_route_snapshot(db, version, expected_items)
+        placeholders = ",".join("?" for _ in group["order_ids"])
+        db.execute(
+            "UPDATE orders SET route_version_id=?,route_name_snapshot=? "
+            f"WHERE id IN ({placeholders}) AND route_id=? AND route_version_id IS NULL",
+            (
+                version["id"],
+                version["name"],
+                *group["order_ids"],
+                route_id,
+            ),
+        )
 
 
 def _backfill_order_version_bindings(db):
@@ -1674,6 +1927,12 @@ def _order_binding_metrics(db):
         "reported_quantity": db.execute(
             "SELECT COALESCE(SUM(quantity),0) FROM work_records"
         ).fetchone()[0],
+        "route_effective_bindings": [
+            tuple(row)
+            for row in db.execute(
+                "SELECT id,current_effective_version_id FROM process_routes ORDER BY id"
+            ).fetchall()
+        ],
     }
 
 
@@ -1711,7 +1970,8 @@ def _validate_order_version_bindings(db, before):
             "ON item.route_version_id=order_row.route_version_id "
             "AND item.process_id=op.process_id "
             "AND item.process_version_id=op.process_version_id "
-            "WHERE order_row.route_version_id IS NOT NULL AND item.id IS NULL LIMIT 1",
+            "WHERE order_row.route_version_id IS NOT NULL AND (item.id IS NULL "
+            "OR item.required_audit<>COALESCE(op.required_audit,0)) LIMIT 1",
         ),
     )
     for label, sql in checks:
@@ -1741,6 +2001,7 @@ def m061_bind_order_versions(db):
     db.execute("SAVEPOINT process_order_v061")
     try:
         _add_order_binding_columns(db)
+        _reconstruct_historical_route_snapshots(db)
         _backfill_order_version_bindings(db)
         _create_order_binding_indexes(db)
         _create_order_binding_triggers(db)

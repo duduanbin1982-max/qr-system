@@ -268,12 +268,159 @@ def test_v061_records_unmapped_orders_and_blocks_the_registered_migration():
         ).fetchall()
         assert [(row["entity_type"], row["legacy_id"], row["reason_code"]) for row in issues] == [
             ("order", 102, "missing_route_v1"),
-            ("order_process", 1003, "missing_route_v1_node"),
         ]
         assert json.loads(issues[0]["source_summary_json"])["route_id"] == 9999
         assert db.execute("PRAGMA user_version").fetchone()[0] == 60
         assert "route_version_id" not in _column_names(db, "orders")
         assert "process_version_id" not in _column_names(db, "order_processes")
+    finally:
+        db.close()
+
+
+def test_v061_reconstructs_shared_and_distinct_historical_route_snapshots():
+    from modules.migration_process_versioning import m061_bind_order_versions
+    from modules.repositories.route_version_repository import RouteVersionRepository
+
+    db = _order_db()
+    try:
+        db.executescript(
+            """
+            INSERT INTO orders(id,order_no,route_id,quantity,completed) VALUES
+                (102,'HISTORICAL-A1',3,10,2),
+                (103,'HISTORICAL-A2',3,12,3),
+                (104,'HISTORICAL-B',3,8,1);
+            INSERT INTO order_processes(
+                id,order_id,process_id,seq_order,status,required_audit,
+                completed,scrapped,rework
+            ) VALUES
+                (1003,102,1,22,'completed',1,2,0,0),
+                (1004,102,27,22,'pending',0,0,0,0),
+                (1005,103,1,22,'completed',1,3,0,0),
+                (1006,103,27,22,'pending',0,0,0,0),
+                (1007,104,27,1,'completed',1,1,0,0),
+                (1008,104,1,2,'pending',1,0,0,0);
+            """
+        )
+        before = _business_totals(db)
+        current_before = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=3"
+        ).fetchone()[0]
+
+        m061_bind_order_versions(db)
+
+        bindings = {
+            row["id"]: row["route_version_id"]
+            for row in db.execute(
+                "SELECT id,route_version_id FROM orders WHERE id IN (100,102,103,104)"
+            ).fetchall()
+        }
+        assert bindings[100] == current_before
+        assert bindings[102] == bindings[103]
+        assert bindings[102] != bindings[104]
+        assert bindings[102] != current_before
+
+        current_after = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=3"
+        ).fetchone()[0]
+        assert current_after == current_before
+        historical = db.execute(
+            "SELECT id,version,status,legacy_baseline,prior_revision_unavailable,"
+            "idempotency_key FROM process_route_versions "
+            "WHERE process_route_id=3 AND id<>? ORDER BY version",
+            (current_before,),
+        ).fetchall()
+        assert [row["version"] for row in historical] == [2, 3]
+        assert all(row["status"] == "superseded" for row in historical)
+        assert all(row["legacy_baseline"] == 1 for row in historical)
+        assert all(row["prior_revision_unavailable"] == 1 for row in historical)
+        assert all(
+            row["idempotency_key"].startswith("v061:route:3:order-snapshot:")
+            for row in historical
+        )
+
+        shared_items = db.execute(
+            "SELECT item.process_id,item.process_version_id,item.seq_order,item.is_required,"
+            "item.required_audit,version.process_id AS version_process_id "
+            "FROM process_route_version_items item "
+            "JOIN process_versions version ON version.id=item.process_version_id "
+            "WHERE item.route_version_id=? ORDER BY item.seq_order,item.id",
+            (bindings[102],),
+        ).fetchall()
+        assert [
+            (
+                row["process_id"],
+                row["version_process_id"],
+                row["seq_order"],
+                row["is_required"],
+                row["required_audit"],
+            )
+            for row in shared_items
+        ] == [(1, 1, 1, 1, 1), (27, 27, 2, 1, 0)]
+
+        distinct_items = db.execute(
+            "SELECT process_id,seq_order,is_required,required_audit "
+            "FROM process_route_version_items WHERE route_version_id=? "
+            "ORDER BY seq_order,id",
+            (bindings[104],),
+        ).fetchall()
+        assert [tuple(row) for row in distinct_items] == [
+            (27, 1, 1, 1),
+            (1, 2, 1, 1),
+        ]
+        event = db.execute(
+            "SELECT payload_json FROM process_route_version_events "
+            "WHERE version_id=? AND event_type='legacy_baseline_created'",
+            (bindings[102],),
+        ).fetchone()
+        payload = json.loads(event["payload_json"])
+        assert payload["source_order_ids"] == [102, 103]
+        assert [node["source_seq_order"] for node in payload["source_nodes"]] == [22, 22]
+        assert payload["sequence_normalization"] == (
+            "dense order by seq_order then order_process_id"
+        )
+
+        rows_before_replay = [
+            tuple(row)
+            for row in db.execute(
+                "SELECT id,process_route_id,version,status,idempotency_key "
+                "FROM process_route_versions ORDER BY id"
+            ).fetchall()
+        ]
+        m061_bind_order_versions(db)
+        rows_after_replay = [
+            tuple(row)
+            for row in db.execute(
+                "SELECT id,process_route_id,version,status,idempotency_key "
+                "FROM process_route_versions ORDER BY id"
+            ).fetchall()
+        ]
+        assert rows_after_replay == rows_before_replay
+        assert _business_totals(db) == before
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        latest = RouteVersionRepository.create_revision(
+            3,
+            {
+                "route_code_snapshot": "ROUTE-0003",
+                "name": "迁移后新修订",
+                "category": "机加工",
+                "description": "",
+                "status": "draft",
+                "supersedes_version_id": current_before,
+                "idempotency_key": "post-v061-route-revision",
+            },
+            [
+                {
+                    "process_id": 1,
+                    "process_version_id": shared_items[0]["process_version_id"],
+                    "seq_order": 1,
+                    "is_required": 1,
+                    "required_audit": 1,
+                }
+            ],
+            db,
+        )
+        assert latest["version"] == 4
     finally:
         db.close()
 

@@ -247,3 +247,51 @@ def test_route_rejection_and_lifecycle_are_audited(client):
     assert root["lifecycle_status"] == "retired"
     assert version["status"] == "retired"
     assert events[-1]["event_type"] == "retired"
+
+
+def test_route_revision_uses_next_history_number_after_rejected_revision(client):
+    preparer, approver = _actors(client)
+    _, process = _published_process(client, preparer, approver, "路线版本分配工序")
+    route = _create_route(client, preparer, [process])
+    _publish_route(client, route["version"]["id"], preparer, approver)
+
+    with client.application.app_context():
+        first_revision = RouteVersionService.create_revision(
+            route["root"]["id"],
+            {
+                "revision_reason": "第一次修订后驳回",
+                "idempotency_key": f"route-revision-{uuid.uuid4().hex}",
+            },
+            preparer,
+        )
+        submitted = RouteVersionService.submit(
+            first_revision["id"],
+            {
+                "row_version": first_revision["row_version"],
+                "idempotency_key": f"submit-route-{uuid.uuid4().hex}",
+            },
+            preparer,
+        )
+        rejected = RouteVersionService.reject(
+            submitted["id"],
+            {
+                "row_version": submitted["row_version"],
+                "reason": "保留历史后重新制单",
+                "idempotency_key": f"reject-route-{uuid.uuid4().hex}",
+            },
+            approver,
+        )
+        next_revision = RouteVersionService.create_revision(
+            route["root"]["id"],
+            {
+                "revision_reason": "基于当前发布版重新修订",
+                "idempotency_key": f"route-revision-{uuid.uuid4().hex}",
+            },
+            preparer,
+        )
+
+    assert rejected["version"] == 2
+    assert next_revision["version"] == 3
+    assert next_revision["content_digest"] == RouteVersionService._content_digest(
+        next_revision
+    )

@@ -214,6 +214,17 @@ class RouteVersionRepository:
         return RouteVersionRepository._attach_items(versions, db)
 
     @staticmethod
+    def next_version_number(route_id, db=None):
+        db = resolve_db(db)
+        return int(
+            db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 FROM process_route_versions "
+                "WHERE process_route_id=?",
+                (route_id,),
+            ).fetchone()[0]
+        )
+
+    @staticmethod
     def current_versions_for_process_ids(process_ids, db=None):
         db = resolve_db(db)
         normalized = list(dict.fromkeys(int(value) for value in process_ids))

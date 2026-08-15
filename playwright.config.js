@@ -8,6 +8,8 @@ const pythonCommand = process.env.E2E_PYTHON || (
     ? windowsVirtualenvPython
     : process.platform === 'win32' ? 'python' : 'python3'
 )
+const e2ePort = process.env.E2E_PORT || '4173'
+const e2eBaseURL = process.env.E2E_BASE_URL || `http://127.0.0.1:${e2ePort}`
 
 export default defineConfig({
   testDir: './frontend/tests/e2e',
@@ -23,7 +25,7 @@ export default defineConfig({
     ['html', { outputFolder: 'playwright-report', open: 'never' }],
   ],
   use: {
-    baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:4173',
+    baseURL: e2eBaseURL,
     ignoreHTTPSErrors: true,
     serviceWorkers: 'block',
     trace: 'retain-on-failure',
@@ -32,7 +34,7 @@ export default defineConfig({
   },
   webServer: {
     command: `${pythonCommand} scripts/e2e_server.py`,
-    url: 'http://127.0.0.1:4173/api/health',
+    url: `${e2eBaseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
     stdout: 'pipe',

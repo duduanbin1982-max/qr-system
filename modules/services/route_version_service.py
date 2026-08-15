@@ -181,7 +181,7 @@ class RouteVersionService:
             revision = copy_revision_content(
                 "route",
                 current,
-                version=int(current["version"]) + 1,
+                version=RouteVersionRepository.next_version_number(route_id, db=db),
                 revision_reason=command.get("revision_reason"),
             )
             for field in RouteVersionService.EDITABLE_FIELDS:
