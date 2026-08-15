@@ -30,6 +30,7 @@ SNAPSHOT_GROUPS = {
         "process_versions",
         "process_route_versions",
         "process_version_migration_manifests",
+        "process_price_binding_migration_events",
     ),
     "route_nodes": ("process_route_items", "process_route_version_items"),
     "prices": ("route_price_versions", "master_data_release_price_versions"),
@@ -49,6 +50,7 @@ SNAPSHOT_GROUPS = {
         "work_time_records",
         "work_time_standards",
         "payroll_detail_lines",
+        "payroll_work_price_resolutions",
         "performance_quality_events",
         "performance_source_facts",
     ),
@@ -63,6 +65,7 @@ PROTECTED_TABLES = frozenset(
         "orders",
         "order_processes",
         "work_records",
+        "payroll_work_price_resolutions",
         *SNAPSHOT_GROUPS["facts"],
     }
 )
@@ -565,7 +568,316 @@ def _flatten_differences(source: Any, candidate: Any, prefix="") -> list[dict]:
     return []
 
 
-def compare_snapshots(source: dict, candidate: dict) -> dict:
+def _authorized_price_resolution_comparison(
+    source_path: str | Path, candidate_path: str | Path
+) -> dict:
+    from modules.process_v2_price_resolution_manifest import (
+        load_price_binding_resolution_manifest,
+        topology_sha256,
+    )
+
+    manifest = load_price_binding_resolution_manifest()
+    source = _open_read_only(source_path)
+    candidate = _open_read_only(candidate_path)
+    try:
+        actions = {
+            int(item["source_price_version_id"]): ("fanout", item)
+            for item in manifest.get("fanout_prices", [])
+        }
+        actions.update(
+            {
+                int(item["price_version_id"]): ("retire_unbound", item)
+                for item in manifest.get("retire_unbound_prices", [])
+            }
+        )
+        source_prices = {
+            int(row["id"]): dict(row)
+            for row in source.execute(
+                "SELECT * FROM route_price_versions ORDER BY id"
+            ).fetchall()
+        }
+        applicable = {
+            price_id: action
+            for price_id, action in actions.items()
+            if price_id in source_prices
+        }
+        if not applicable:
+            return {
+                "status": "not_applicable",
+                "authorized_tables": [],
+                "authorized_price_ids": [],
+                "clone_count": 0,
+                "payroll_detail_rebind_count": 0,
+                "price_resolution_rebind_count": 0,
+            }
+
+        candidate_prices = {
+            int(row["id"]): dict(row)
+            for row in candidate.execute(
+                "SELECT * FROM route_price_versions ORDER BY id"
+            ).fetchall()
+        }
+        source_columns = [
+            row[1] for row in source.execute("PRAGMA table_info(route_price_versions)")
+        ]
+        retire_time = manifest["retire_effective_at"]
+        for price_id, source_row in source_prices.items():
+            candidate_row = candidate_prices.get(price_id)
+            if candidate_row is None:
+                raise RuntimeError(
+                    f"authorized price migration removed source price {price_id}"
+                )
+            action = applicable.get(price_id)
+            expected = {column: source_row[column] for column in source_columns}
+            if action and action[0] == "retire_unbound":
+                expected["status"] = "retired"
+                expected["valid_to"] = retire_time
+                expected["row_version"] = int(source_row["row_version"]) + 1
+            for column, value in expected.items():
+                if candidate_row[column] != value:
+                    raise RuntimeError(
+                        "authorized price migration changed an unexpected source field: "
+                        f"price={price_id}, field={column}"
+                    )
+
+        event_rows = [
+            dict(row)
+            for row in candidate.execute(
+                "SELECT * FROM process_price_binding_migration_events "
+                "WHERE source_price_version_id IN ("
+                + ",".join("?" for _ in applicable)
+                + ") ORDER BY id",
+                sorted(applicable),
+            ).fetchall()
+        ]
+        events_by_source: dict[int, list[dict]] = {}
+        for event in event_rows:
+            events_by_source.setdefault(int(event["source_price_version_id"]), []).append(
+                event
+            )
+
+        expected_clone_ids = set()
+        family_by_source: dict[int, dict[int, int]] = {}
+        authorization = manifest["authorization"]
+        for price_id, (action, spec) in applicable.items():
+            events = events_by_source.get(price_id, [])
+            if action == "retire_unbound":
+                if len(events) != 1 or events[0]["action"] != "retire_unbound":
+                    raise RuntimeError(
+                        f"authorized retirement event mismatch for price {price_id}"
+                    )
+                if int(events[0]["result_price_version_id"]) != price_id:
+                    raise RuntimeError(
+                        f"authorized retirement result mismatch for price {price_id}"
+                    )
+                continue
+
+            expected_digests = set(spec["target_topology_sha256"])
+            actual_digests = {event["topology_sha256"] for event in events}
+            if actual_digests != expected_digests or len(events) != len(expected_digests):
+                raise RuntimeError(
+                    f"authorized fanout event topology mismatch for price {price_id}"
+                )
+            route_prices = {}
+            for event in events:
+                if (
+                    event["approved_by_name"] != authorization["approved_by"]
+                    or event["approved_at"] != authorization["approved_at"]
+                ):
+                    raise RuntimeError(
+                        f"authorized fanout approval mismatch for price {price_id}"
+                    )
+                route_version_id = int(event["route_version_id"])
+                route_row = candidate.execute(
+                    "SELECT process_route_id FROM process_route_versions WHERE id=?",
+                    (route_version_id,),
+                ).fetchone()
+                nodes = [
+                    {
+                        "process_id": int(row["process_id"]),
+                        "is_required": int(row["is_required"]),
+                        "required_audit": int(row["required_audit"]),
+                    }
+                    for row in candidate.execute(
+                        "SELECT process_id,is_required,required_audit "
+                        "FROM process_route_version_items WHERE route_version_id=? "
+                        "ORDER BY seq_order,id",
+                        (route_version_id,),
+                    ).fetchall()
+                ]
+                if route_row is None or topology_sha256(route_row[0], nodes) != event[
+                    "topology_sha256"
+                ]:
+                    raise RuntimeError(
+                        f"authorized fanout route evidence mismatch for price {price_id}"
+                    )
+                result_price_id = int(event["result_price_version_id"])
+                result_price = candidate_prices.get(result_price_id)
+                if result_price is None:
+                    raise RuntimeError(
+                        f"authorized fanout result price missing: {result_price_id}"
+                    )
+                if (
+                    int(result_price["route_version_id"]) != route_version_id
+                    or int(result_price["process_version_id"])
+                    != int(event["process_version_id"])
+                ):
+                    raise RuntimeError(
+                        f"authorized fanout exact binding mismatch: {result_price_id}"
+                    )
+                route_prices[route_version_id] = result_price_id
+                if event["action"] == "clone_binding":
+                    expected_clone_ids.add(result_price_id)
+                elif (
+                    event["action"] != "bind_primary"
+                    or result_price_id != price_id
+                    or event["topology_sha256"] != spec["primary_topology_sha256"]
+                ):
+                    raise RuntimeError(
+                        f"authorized fanout primary event mismatch for price {price_id}"
+                    )
+            family_by_source[price_id] = route_prices
+
+        extra_price_ids = set(candidate_prices) - set(source_prices)
+        if extra_price_ids != expected_clone_ids:
+            raise RuntimeError("replica contains unauthorized extra price versions")
+        for clone_id in expected_clone_ids:
+            clone = candidate_prices[clone_id]
+            event = next(
+                item
+                for item in event_rows
+                if int(item["result_price_version_id"]) == clone_id
+            )
+            source_row = source_prices[int(event["source_price_version_id"])]
+            for column in source_columns:
+                if column == "id":
+                    continue
+                if column == "legacy_route_price_id":
+                    if clone[column] is not None:
+                        raise RuntimeError(
+                            f"authorized clone retained a legacy price id: {clone_id}"
+                        )
+                    continue
+                if column == "remark":
+                    if "Exact-route migration clone:" not in clone[column]:
+                        raise RuntimeError(
+                            f"authorized clone lacks lineage remark: {clone_id}"
+                        )
+                    continue
+                if clone[column] != source_row[column]:
+                    raise RuntimeError(
+                        "authorized clone changed an unexpected source field: "
+                        f"price={clone_id}, field={column}"
+                    )
+
+        changed_details = 0
+        detail_columns = [
+            row[1] for row in source.execute("PRAGMA table_info(payroll_detail_lines)")
+        ]
+        source_details = {
+            int(row["id"]): dict(row)
+            for row in source.execute("SELECT * FROM payroll_detail_lines ORDER BY id")
+        }
+        candidate_details = {
+            int(row["id"]): dict(row)
+            for row in candidate.execute("SELECT * FROM payroll_detail_lines ORDER BY id")
+        }
+        if set(source_details) != set(candidate_details):
+            raise RuntimeError("authorized price migration changed payroll detail identities")
+        for detail_id, source_row in source_details.items():
+            expected = {column: source_row[column] for column in detail_columns}
+            family = family_by_source.get(source_row.get("price_version_id"))
+            if family:
+                route_version_id = candidate_details[detail_id].get("route_version_id")
+                result_price_id = family.get(route_version_id)
+                if result_price_id is None:
+                    raise RuntimeError(
+                        f"authorized payroll detail route is not covered: {detail_id}"
+                    )
+                expected["price_version_id"] = result_price_id
+            for column, value in expected.items():
+                if candidate_details[detail_id][column] != value:
+                    raise RuntimeError(
+                        "authorized price migration changed an unexpected payroll detail "
+                        f"field: detail={detail_id}, field={column}"
+                    )
+            if expected["price_version_id"] != source_row.get("price_version_id"):
+                changed_details += 1
+
+        changed_resolutions = 0
+        if _table_exists(source, "payroll_work_price_resolutions"):
+            resolution_columns = [
+                row[1]
+                for row in source.execute(
+                    "PRAGMA table_info(payroll_work_price_resolutions)"
+                )
+            ]
+            source_resolutions = {
+                int(row["id"]): dict(row)
+                for row in source.execute(
+                    "SELECT * FROM payroll_work_price_resolutions ORDER BY id"
+                )
+            }
+            candidate_resolutions = {
+                int(row["id"]): dict(row)
+                for row in candidate.execute(
+                    "SELECT * FROM payroll_work_price_resolutions ORDER BY id"
+                )
+            }
+            if set(source_resolutions) != set(candidate_resolutions):
+                raise RuntimeError(
+                    "authorized price migration changed price resolution identities"
+                )
+            for resolution_id, source_row in source_resolutions.items():
+                expected = {
+                    column: source_row[column] for column in resolution_columns
+                }
+                family = family_by_source.get(source_row.get("price_version_id"))
+                if family:
+                    route_version = candidate.execute(
+                        "SELECT COALESCE(work.route_version_id,order_row.route_version_id) "
+                        "FROM work_records work LEFT JOIN orders order_row "
+                        "ON order_row.id=work.order_id WHERE work.id=?",
+                        (source_row["work_record_id"],),
+                    ).fetchone()
+                    result_price_id = family.get(route_version[0] if route_version else None)
+                    if result_price_id is None:
+                        raise RuntimeError(
+                            "authorized payroll resolution route is not covered: "
+                            + str(resolution_id)
+                        )
+                    expected["price_version_id"] = result_price_id
+                for column, value in expected.items():
+                    if candidate_resolutions[resolution_id][column] != value:
+                        raise RuntimeError(
+                            "authorized price migration changed an unexpected price "
+                            f"resolution field: resolution={resolution_id}, field={column}"
+                        )
+                if expected["price_version_id"] != source_row.get("price_version_id"):
+                    changed_resolutions += 1
+
+        authorized_tables = ["route_price_versions"]
+        if changed_details:
+            authorized_tables.append("payroll_detail_lines")
+        if changed_resolutions:
+            authorized_tables.append("payroll_work_price_resolutions")
+        return {
+            "status": "passed",
+            "authorized_tables": authorized_tables,
+            "authorized_price_ids": sorted(applicable),
+            "clone_count": len(expected_clone_ids),
+            "payroll_detail_rebind_count": changed_details,
+            "price_resolution_rebind_count": changed_resolutions,
+        }
+    finally:
+        candidate.close()
+        source.close()
+
+
+def compare_snapshots(
+    source: dict, candidate: dict, *, authorized_protected_tables=()
+) -> dict:
+    authorized_protected_tables = set(authorized_protected_tables)
     comparison = {}
     for group in (*SNAPSHOT_GROUPS, "summary"):
         left = source[group]
@@ -593,7 +905,7 @@ def compare_snapshots(source: dict, candidate: dict) -> dict:
                     for column, digest in source_columns.items()
                 )
             )
-            if not protected_equal:
+            if not protected_equal and table not in authorized_protected_tables:
                 blocking.append(
                     {
                         "group": group,
@@ -629,7 +941,14 @@ def validate_replica(source_path: str | Path, replica_path: str | Path) -> dict:
         replica_path, expected_preflight_sha256=preflight["summary_sha256"]
     )
     candidate_snapshot = database_snapshot(replica_path)
-    result = compare_snapshots(source_snapshot, candidate_snapshot)
+    authorized_price_resolution = _authorized_price_resolution_comparison(
+        source_path, replica_path
+    )
+    result = compare_snapshots(
+        source_snapshot,
+        candidate_snapshot,
+        authorized_protected_tables=authorized_price_resolution["authorized_tables"],
+    )
     if result["blocking_differences"]:
         raise RuntimeError("replica migration changed protected business totals")
     return {
@@ -639,6 +958,7 @@ def validate_replica(source_path: str | Path, replica_path: str | Path) -> dict:
         "preflight_summary_sha256": preflight["summary_sha256"],
         "source_stability": source_stability,
         "migration": migration,
+        "authorized_price_resolution": authorized_price_resolution,
         **result,
     }
 
