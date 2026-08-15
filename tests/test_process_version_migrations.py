@@ -199,6 +199,37 @@ def test_v060_creates_versioned_process_schema_and_legacy_v1_baseline():
         db.close()
 
 
+def test_v060_adds_missing_legacy_route_flags_with_historical_defaults():
+    from modules.migration_process_versioning import m060_process_master_versioning
+
+    db = _legacy_db()
+    try:
+        db.execute("ALTER TABLE process_route_items DROP COLUMN is_required")
+        db.execute("ALTER TABLE process_route_items DROP COLUMN required_audit")
+        db.commit()
+
+        m060_process_master_versioning(db)
+
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(process_route_items)")}
+        assert {"is_required", "required_audit"} <= columns
+        rows = db.execute(
+            "SELECT is_required,required_audit FROM process_route_items ORDER BY id"
+        ).fetchall()
+        assert [(row["is_required"], row["required_audit"]) for row in rows] == [
+            (1, 0),
+            (1, 0),
+        ]
+        version_rows = db.execute(
+            "SELECT is_required,required_audit FROM process_route_version_items "
+            "ORDER BY legacy_route_item_id"
+        ).fetchall()
+        assert [
+            (row["is_required"], row["required_audit"]) for row in version_rows
+        ] == [(1, 0), (1, 0)]
+    finally:
+        db.close()
+
+
 def test_v060_indexes_immutability_and_idempotent_replay():
     from modules.migration_process_versioning import m060_process_master_versioning
 

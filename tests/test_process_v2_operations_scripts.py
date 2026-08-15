@@ -96,6 +96,29 @@ def test_preflight_counts_all_twelve_legacy_price_route_references():
     db.close()
 
 
+def test_preflight_simulates_missing_legacy_route_flags_without_touching_source(tmp_path):
+    from scripts.process_v2_operations import database_sha256, run_preflight
+
+    source = _create_v59_database(tmp_path / "legacy-v59.db")
+    db = sqlite3.connect(source)
+    db.execute("ALTER TABLE process_route_items DROP COLUMN is_required")
+    db.execute("ALTER TABLE process_route_items DROP COLUMN required_audit")
+    db.commit()
+    db.close()
+    before = database_sha256(source)
+
+    report = run_preflight(source)
+
+    assert report["status"] == "passed"
+    assert report["migration_simulation"]["result_version"] == 63
+    assert database_sha256(source) == before
+    db = sqlite3.connect(source)
+    columns = {row[1] for row in db.execute("PRAGMA table_info(process_route_items)")}
+    db.close()
+    assert "is_required" not in columns
+    assert "required_audit" not in columns
+
+
 def test_replica_validation_uses_shared_migration_entry_and_compares_all_groups(tmp_path):
     from scripts.process_v2_operations import validate_replica
 

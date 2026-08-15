@@ -220,7 +220,7 @@ def _collect_preflight_issues(db):
     item_ready = _required_columns(
         db,
         "process_route_items",
-        ("id", "route_id", "process_id", "seq_order", "is_required", "required_audit"),
+        ("id", "route_id", "process_id", "seq_order"),
         issues,
     )
     _required_columns(db, "users", ("id",), issues)
@@ -364,6 +364,23 @@ def _record_blocking_issues(db, issues):
 
 
 def _add_root_columns(db):
+    # Older production databases predate optional route nodes and therefore do
+    # not have these two additive flags.  Every historical node was mandatory;
+    # required-audit was opt-in.  Add both inside the v060 savepoint so a later
+    # invariant failure rolls the compatibility change back with the migration.
+    add_column_if_missing(
+        db,
+        "process_route_items",
+        "is_required",
+        "INTEGER NOT NULL DEFAULT 1 CHECK(is_required IN (0,1))",
+    )
+    add_column_if_missing(
+        db,
+        "process_route_items",
+        "required_audit",
+        "INTEGER NOT NULL DEFAULT 0 CHECK(required_audit IN (0,1))",
+    )
+
     add_column_if_missing(db, "processes", "process_code", "TEXT DEFAULT ''")
     add_column_if_missing(
         db,
