@@ -1,5 +1,10 @@
 """qr-system - ExportRepository"""
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class ExportRepository:
@@ -17,13 +22,15 @@ class ExportRepository:
     @staticmethod
     def get_work_records_export(order_id, date_from, date_to, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("wr", "process_version", "p")
         query = (
-            "SELECT wr.id, o.order_no, p.name as process_name, u.name as worker_name, "
+            "SELECT wr.id,wr.process_id,wr.process_version_id,o.order_no," + process_name + " AS process_name,u.name AS worker_name,"
             "wr.serial_no, wr.quantity, wr.type, wr.remark, wr.created_at "
             "FROM work_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
             "LEFT JOIN processes p ON wr.process_id = p.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN users u ON wr.user_id = u.id "
             "WHERE 1=1"
         )
         params = []
@@ -37,4 +44,6 @@ class ExportRepository:
             query += " AND wr.created_at <= ?"
             params.append(date_to + " 23:59:59")
         query += " ORDER BY wr.id DESC LIMIT 10000"
-        return db.execute(query, params).fetchall()
+        rows = db.execute(query, params).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows

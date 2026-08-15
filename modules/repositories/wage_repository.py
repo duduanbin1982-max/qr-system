@@ -3,6 +3,11 @@ qr-system — WageRepository（工资核算数据访问层）
 """
 from modules.repositories.context import resolve_db
 from modules.domain.reporting_day import reporting_day_bounds
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class WageRepository:
@@ -84,10 +89,13 @@ class WageRepository:
         if not user_ids:
             return []
         placeholders = ",".join(["?" for _ in user_ids])
+        process_name = process_value_sql("wr", "process_version", "p")
         query = (
             """SELECT u.id as user_id, u.name as employee_name, u.employee_no,
-                   wr.quantity, wr.created_at, wr.id as wr_id,
-                   p.name as process_name,
+                   wr.quantity, wr.created_at, wr.id as wr_id,wr.process_id,
+                   wr.process_version_id,"""
+            + process_name
+            + """ as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
                    """
             + cls._PRICE_SELECT
@@ -97,6 +105,9 @@ class WageRepository:
             + wr_where
             + """
             LEFT JOIN processes p ON wr.process_id = p.id
+            """
+            + process_version_join("wr", "process_version")
+            + """
             LEFT JOIN orders o ON wr.order_id = o.id
             """
             + cls._PRICE_JOIN
@@ -106,21 +117,29 @@ class WageRepository:
             + """)
             ORDER BY u.id"""
         )
-        return db.execute(query, wr_params + user_ids).fetchall()
+        rows = db.execute(query, wr_params + user_ids).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @classmethod
     def get_daily_report_rows(cls, date, db=None):
         db = resolve_db(db)
         period_start, period_end = reporting_day_bounds(date)
+        process_name = process_value_sql("wr", "process_version", "p")
         query = (
             """
-            SELECT wr.*, u.name as employee_name, u.employee_no, p.name as process_name,
+            SELECT wr.*, u.name as employee_name, u.employee_no,"""
+            + process_name
+            + """ as process_name,
                    """
             + cls._PRICE_SELECT
             + """
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
             LEFT JOIN processes p ON wr.process_id = p.id
+            """
+            + process_version_join("wr", "process_version")
+            + """
             LEFT JOIN orders o ON wr.order_id = o.id
             """
             + cls._PRICE_JOIN
@@ -130,7 +149,9 @@ class WageRepository:
             ORDER BY wr.user_id, wr.process_id
             """
         )
-        return db.execute(query, (period_start, period_end)).fetchall()
+        rows = db.execute(query, (period_start, period_end)).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def count_active_orders(db=None):
@@ -158,7 +179,9 @@ class WageRepository:
         db = resolve_db(db)
         return db.execute(
             """
-            SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
+            SELECT op.order_id, op.process_id,
+                   COALESCE(NULLIF(op.process_name_snapshot,''),version.name,p.name,'') as process_name,
+                   op.completed,
                    (SELECT COUNT(*) FROM product_items pi WHERE pi.order_id = op.order_id) as total_items,
                    op.required_audit,
                    COALESCE((
@@ -171,6 +194,7 @@ class WageRepository:
                    ), 0) as scrapped
             FROM order_processes op
             JOIN processes p ON op.process_id = p.id
+            LEFT JOIN process_versions version ON version.id=op.process_version_id
             WHERE op.order_id = ? ORDER BY op.seq_order
             """,
             (order_id,),
@@ -232,9 +256,17 @@ class WageRepository:
     def get_process_wage_summary(cls, year_month, db=None):
         db = resolve_db(db)
         month_start = year_month + "-01"
-        return db.execute(
+        process_name = process_value_sql("wr", "process_version", "p")
+        process_category = process_value_sql(
+            "wr", "process_version", "p", field="category"
+        )
+        rows = db.execute(
             """
-            SELECT wr.process_id, p.name as process_name, p.category,
+            SELECT wr.process_id,wr.process_version_id,"""
+            + process_name
+            + """ as process_name,"""
+            + process_category
+            + """ as category,
                    SUM(wr.quantity) as total_quantity,
                    SUM(wr.quantity * """
             + cls._unit_price_expr()
@@ -242,17 +274,26 @@ class WageRepository:
                    COUNT(DISTINCT wr.user_id) as worker_count
             FROM work_records wr
             JOIN processes p ON wr.process_id = p.id
+            """
+            + process_version_join("wr", "process_version")
+            + """
             LEFT JOIN orders o ON wr.order_id = o.id
             """
             + cls._PRICE_JOIN
             + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
-            GROUP BY wr.process_id
+            GROUP BY wr.process_id,wr.process_version_id,"""
+            + process_name
+            + ","
+            + process_category
+            + """
             ORDER BY total_wage DESC
             """,
             (month_start, month_start),
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def upsert_snapshot(employee, year_month, details_json, db=None):
@@ -434,10 +475,13 @@ class WageRepository:
         """获取订单工序完成情况。"""
         db = resolve_db(db)
         return db.execute(
-            """SELECT op.order_id, op.process_id, p.name as process_name, op.completed,
+            """SELECT op.order_id, op.process_id,
+               COALESCE(NULLIF(op.process_name_snapshot,''),version.name,p.name,'') as process_name,
+               op.completed,
                (SELECT COUNT(*) FROM product_items pi WHERE pi.order_id=op.order_id) as total_items
                FROM order_processes op
                JOIN processes p ON op.process_id=p.id
+               LEFT JOIN process_versions version ON version.id=op.process_version_id
                WHERE op.order_id = ? ORDER BY op.seq_order""",
             (order_id,)
         ).fetchall()
@@ -477,14 +521,31 @@ class WageRepository:
         if end:
             date_filter += " AND DATE(wr.created_at) <= ?"
             params.append(end)
-        return db.execute(
-            """SELECT wr.process_id, p.name as process_name, p.category,
+        process_name = process_value_sql("wr", "process_version", "p")
+        process_category = process_value_sql(
+            "wr", "process_version", "p", field="category"
+        )
+        rows = db.execute(
+            """SELECT wr.process_id,wr.process_version_id,"""
+            + process_name
+            + """ as process_name,"""
+            + process_category
+            + """ as category,
                COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output,
                COUNT(DISTINCT wr.user_id) as worker_count
                FROM work_records wr
                JOIN processes p ON wr.process_id=p.id
+               """
+            + process_version_join("wr", "process_version")
+            + """
                JOIN orders o ON wr.order_id=o.id
                WHERE o.deleted_at IS NULL""" + date_filter + """
-               GROUP BY wr.process_id ORDER BY total_output DESC""",
+               GROUP BY wr.process_id,wr.process_version_id,"""
+            + process_name
+            + ","
+            + process_category
+            + " ORDER BY total_output DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows

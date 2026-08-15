@@ -1,5 +1,10 @@
 """qr-system - EmailReportsRepository"""
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class EmailReportsRepository:
@@ -30,11 +35,16 @@ class EmailReportsRepository:
             "FROM work_records wr LEFT JOIN users u ON wr.user_id=u.id "
             "WHERE date(wr.created_at)=? GROUP BY wr.user_id ORDER BY qty DESC LIMIT 5", (today,)
         ).fetchall()
+        process_name = process_value_sql("wr", "process_version", "p")
         proc_breakdown = db.execute(
-            "SELECT p.name, COALESCE(SUM(wr.quantity),0) as qty, COUNT(*) as records "
+            "SELECT wr.process_id,wr.process_version_id," + process_name + " AS name,"
+            "COALESCE(SUM(wr.quantity),0) AS qty,COUNT(*) AS records "
             "FROM work_records wr LEFT JOIN processes p ON wr.process_id=p.id "
-            "WHERE date(wr.created_at)=? GROUP BY wr.process_id ORDER BY qty DESC LIMIT 10", (today,)
+            + process_version_join("wr", "process_version")
+            + "WHERE date(wr.created_at)=? GROUP BY wr.process_id,wr.process_version_id,"
+            + process_name + " ORDER BY qty DESC LIMIT 10", (today,)
         ).fetchall()
+        warn_legacy_fact_rows("work_records", proc_breakdown)
         return wr_sum, top_workers, proc_breakdown
 
     @staticmethod

@@ -4,6 +4,13 @@ import json
 
 from modules.domain.payroll_policy import PayrollConflictError
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class PayrollRepository:
@@ -84,33 +91,36 @@ class PayrollRepository:
     @staticmethod
     def source_work_records(period_start, period_end, cutoff, db=None):
         db = resolve_db(db)
-        return [dict(row) for row in db.execute(
-            """
-            SELECT wr.id AS work_record_id, wr.order_id, wr.process_id, wr.user_id,
-                   wr.type AS work_type, wr.quantity, wr.created_at AS work_recorded_at,
-                   wr.process_version_id,
-                   u.name AS employee_name, u.employee_no,
-                   COALESCE(pos.name,'') AS position_name,
-                   o.order_no, o.product_code, o.product_name,
-                   COALESCE(wr.route_id,o.route_id) AS route_id,
-                   wr.route_version_id,
-                   COALESCE(NULLIF(wr.route_name_snapshot,''),
-                            NULLIF(o.route_name_snapshot,''),route.name,'') AS route_name,
-                   COALESCE(NULLIF(wr.process_name_snapshot,''),proc.name,'') AS process_name,
-                   COALESCE(wr.process_code_snapshot,'') AS process_code,
-                   COALESCE(wr.process_category_snapshot,'') AS process_category
-            FROM work_records wr
-            JOIN users u ON u.id=wr.user_id
-            LEFT JOIN positions pos ON pos.id=u.position_id
-            LEFT JOIN orders o ON o.id=wr.order_id
-            LEFT JOIN process_routes route ON route.id=o.route_id
-            LEFT JOIN processes proc ON proc.id=wr.process_id
-            WHERE wr.status='approved' AND wr.type IN ('normal','rework')
-              AND wr.created_at>=? AND wr.created_at<? AND wr.created_at<=?
-            ORDER BY wr.created_at,wr.id
-            """,
+        process_name = process_value_sql("wr", "process_version", "proc")
+        process_code = process_value_sql(
+            "wr", "process_version", "proc", field="code"
+        )
+        process_category = process_value_sql(
+            "wr", "process_version", "proc", field="category"
+        )
+        route_name = route_name_sql("wr", "route_version", "route")
+        rows = db.execute(
+            "SELECT wr.id AS work_record_id,wr.order_id,wr.process_id,wr.user_id,"
+            "wr.type AS work_type,wr.quantity,wr.created_at AS work_recorded_at,"
+            "wr.process_version_id,u.name AS employee_name,u.employee_no,"
+            "COALESCE(pos.name,'') AS position_name,o.order_no,o.product_code,o.product_name,"
+            "COALESCE(wr.route_id,o.route_id) AS route_id,wr.route_version_id,"
+            + route_name + " AS route_name," + process_name + " AS process_name,"
+            + process_code + " AS process_code," + process_category + " AS process_category "
+            "FROM work_records wr JOIN users u ON u.id=wr.user_id "
+            "LEFT JOIN positions pos ON pos.id=u.position_id "
+            "LEFT JOIN orders o ON o.id=wr.order_id "
+            "LEFT JOIN process_routes route ON route.id=COALESCE(wr.route_id,o.route_id) "
+            + route_version_join("wr", "route_version")
+            + "LEFT JOIN processes proc ON proc.id=wr.process_id "
+            + process_version_join("wr", "process_version")
+            + "WHERE wr.status='approved' AND wr.type IN ('normal','rework') "
+            "AND wr.created_at>=? AND wr.created_at<? AND wr.created_at<=? "
+            "ORDER BY wr.created_at,wr.id",
             (period_start, period_end, cutoff),
-        ).fetchall()]
+        ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return [dict(row) for row in rows]
 
     @staticmethod
     def price_candidates(

@@ -226,6 +226,7 @@ def test_order_mode_multiple_contributors_creates_process_level_task(client):
                 "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
                 (f"订单评价工序{seq_order}-{suffix}", seq_order),
             ).lastrowid)
+            ensure_process_version(db, process_ids[-1])
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
             "VALUES (?, 'Test Customer', '订单评价产品', ?, 10, 'producing', '')",
@@ -237,6 +238,7 @@ def test_order_mode_multiple_contributors_creates_process_level_task(client):
                 "VALUES (?, ?, ?, 'pending', 0, 0, 0)",
                 (order_id, process_id, seq_order),
             )
+        bind_order_process_versions(db, order_id)
         for user_id, quantity in zip(users[:2], (4, 6)):
             db.execute(
                 "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status) "

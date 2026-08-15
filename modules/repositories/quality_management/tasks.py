@@ -1,6 +1,12 @@
 """QualityTaskRepository quality subdomain."""
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class QualityTaskRepository(object):
@@ -72,12 +78,20 @@ class QualityTaskRepository(object):
 
     @staticmethod
     def insert_task(data, db):
+        binding = capture_process_fact_binding(
+            db,
+            order_id=data.get("order_id"),
+            process_id=data.get("process_id"),
+            source_work_record_id=data.get("work_record_id"),
+        )
         cursor = db.execute(
             "INSERT OR IGNORE INTO quality_inspection_tasks "
             "(task_no, trigger_key, plan_id, standard_id, standard_version, order_id, process_id, work_record_id, "
             "shipment_id, supplier_id, material_id, source_evaluation_id, source_ncr_id, serial_no, batch_no, inspection_type, "
-            "trigger_type, gate_mode, sample_qty, priority, status, assigned_to, due_at, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "trigger_type, gate_mode, sample_qty, priority, status, assigned_to, due_at, created_by, "
+            "process_version_id,process_code_snapshot,process_name_snapshot,process_category_snapshot,"
+            "route_id,route_version_id,route_name_snapshot,version_binding_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data["task_no"], data["trigger_key"], data.get("plan_id"), data.get("standard_id"),
                 data.get("standard_version", 1), data.get("order_id"), data.get("process_id"),
@@ -87,6 +101,10 @@ class QualityTaskRepository(object):
                 data.get("gate_mode", "soft"), data.get("sample_qty", 1), data.get("priority", "normal"),
                 data.get("status", "pending"), data.get("assigned_to"), data.get("due_at", ""),
                 data.get("created_by"),
+                binding.get("process_version_id"), binding.get("process_code_snapshot", ""),
+                binding.get("process_name_snapshot", ""), binding.get("process_category_snapshot", ""),
+                binding.get("route_id"), binding.get("route_version_id"), binding.get("route_name_snapshot", ""),
+                binding.get("version_binding_source", ""),
             ),
         )
         if cursor.rowcount:
@@ -111,7 +129,8 @@ class QualityTaskRepository(object):
         if assigned_to:
             where.append("task.assigned_to = ?"); params.append(assigned_to)
         if keyword:
-            where.append("(task.task_no LIKE ? OR o.order_no LIKE ? OR o.product_name LIKE ? OR task.serial_no LIKE ? OR process.name LIKE ?)")
+            process_name = process_value_sql("task", "process_version", "process")
+            where.append("(task.task_no LIKE ? OR o.order_no LIKE ? OR o.product_name LIKE ? OR task.serial_no LIKE ? OR " + process_name + " LIKE ?)")
             value = f"%{keyword}%"; params.extend([value, value, value, value, value])
         if date_from:
             where.append("task.created_at >= ?"); params.append(date_from)
@@ -121,18 +140,21 @@ class QualityTaskRepository(object):
         total = db.execute(
             "SELECT COUNT(*) FROM quality_inspection_tasks task "
             "LEFT JOIN orders o ON o.id=task.order_id LEFT JOIN processes process ON process.id=task.process_id "
-            "WHERE " + clause,
+            + process_version_join("task", "process_version")
+            + "WHERE " + clause,
             params,
         ).fetchone()[0]
+        process_name = process_value_sql("task", "process_version", "process")
         rows = db.execute(
-            "SELECT task.*, o.order_no, o.product_name, o.product_code, process.name AS process_name, "
+            "SELECT task.*, o.order_no, o.product_name, o.product_code, " + process_name + " AS process_name, "
             "standard.standard_no, standard.name AS standard_name, assignee.name AS assigned_name, "
             "shipment.shipment_no, supplier.name AS supplier_name, material.name AS material_name, "
             "CASE WHEN task.status IN ('pending','in_progress') AND task.due_at != '' "
             "AND task.due_at < datetime('now','localtime') THEN 1 ELSE 0 END AS overdue "
             "FROM quality_inspection_tasks task "
             "LEFT JOIN orders o ON o.id=task.order_id LEFT JOIN processes process ON process.id=task.process_id "
-            "LEFT JOIN quality_standards standard ON standard.id=task.standard_id "
+            + process_version_join("task", "process_version")
+            + "LEFT JOIN quality_standards standard ON standard.id=task.standard_id "
             "LEFT JOIN users assignee ON assignee.id=task.assigned_to "
             "LEFT JOIN shipments shipment ON shipment.id=task.shipment_id "
             "LEFT JOIN suppliers supplier ON supplier.id=task.supplier_id "
@@ -142,18 +164,21 @@ class QualityTaskRepository(object):
             "LIMIT ? OFFSET ?",
             params + [limit, (page - 1) * limit],
         ).fetchall()
+        warn_legacy_fact_rows("quality_inspection_tasks", rows)
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
     def task_by_id(task_id, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("task", "process_version", "process")
         row = db.execute(
-            "SELECT task.*, o.order_no, o.product_name, o.product_code, process.name AS process_name, "
+            "SELECT task.*, o.order_no, o.product_name, o.product_code, " + process_name + " AS process_name, "
             "standard.standard_no, standard.name AS standard_name, standard.min_score, "
             "shipment.shipment_no, supplier.name AS supplier_name, material.name AS material_name "
             "FROM quality_inspection_tasks task "
             "LEFT JOIN orders o ON o.id=task.order_id LEFT JOIN processes process ON process.id=task.process_id "
-            "LEFT JOIN quality_standards standard ON standard.id=task.standard_id "
+            + process_version_join("task", "process_version")
+            + "LEFT JOIN quality_standards standard ON standard.id=task.standard_id "
             "LEFT JOIN shipments shipment ON shipment.id=task.shipment_id "
             "LEFT JOIN suppliers supplier ON supplier.id=task.supplier_id "
             "LEFT JOIN materials material ON material.id=task.material_id WHERE task.id=?",
@@ -177,18 +202,23 @@ class QualityTaskRepository(object):
             return None
         params = [order_value]
         process_filter = ""
+        projected_process_name = process_value_sql(
+            "op", "process_version", "process"
+        )
         if process_id:
             process_filter = " AND op.process_id=?"
             params.append(process_id)
         elif process_name:
-            process_filter = " AND process.name=?"
+            process_filter = " AND " + projected_process_name + "=?"
             params.append(process_name)
         return db.execute(
             "SELECT o.id AS order_id,o.order_no,o.product_code,o.product_name,"
-            "op.process_id,process.name AS process_name "
+            "op.process_id,op.process_version_id,"
+            + projected_process_name + " AS process_name "
             "FROM orders o JOIN order_processes op ON op.order_id=o.id "
             "JOIN processes process ON process.id=op.process_id "
-            f"WHERE {where} AND o.deleted_at IS NULL{process_filter} "
+            + process_version_join("op", "process_version")
+            + f"WHERE {where} AND o.deleted_at IS NULL{process_filter} "
             "ORDER BY op.seq_order,op.id LIMIT 1",
             params,
         ).fetchone()

@@ -3,6 +3,11 @@
 All SQL for kanban board data: order counts, output, efficiency, workers.
 """
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class BoardRepository:
@@ -56,16 +61,19 @@ class BoardRepository:
     @staticmethod
     def get_recent_work(cat_sql, cat_params, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("wr", "process_version", "proc")
         rows = db.execute(
-            "SELECT wr.*, o.order_no, proc.name as process_name, u.name as worker_name "
+            "SELECT wr.*,o.order_no," + process_name + " AS process_name,u.name AS worker_name "
             "FROM work_records wr LEFT JOIN orders o ON wr.order_id = o.id "
             "LEFT JOIN order_product_links opl ON opl.order_id = o.id "
             "LEFT JOIN products p ON p.id = opl.product_id "
             "LEFT JOIN processes proc ON wr.process_id = proc.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN users u ON wr.user_id = u.id "
             "WHERE o.deleted_at IS NULL" + cat_sql + " ORDER BY wr.created_at DESC LIMIT 20",
             cat_params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
         return [dict(r) for r in rows]
 
     # ============================================================

@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from factories import ensure_process_version
 from modules.db import get_db
 from modules.services.performance_history_migration_service import (
     PerformanceHistoryMigrationService,
@@ -197,6 +198,7 @@ def _seed_history(db):
     process_id = db.execute(
         "INSERT INTO processes (name,status) VALUES ('历史绩效工序','active')"
     ).lastrowid
+    ensure_process_version(db, process_id)
     order_id = db.execute(
         "INSERT INTO orders (order_no,product_name,product_code,quantity,status) "
         "VALUES ('PERF-HISTORY-ORDER','历史绩效产品','PERF-HISTORY-PRODUCT',"

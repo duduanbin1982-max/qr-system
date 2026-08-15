@@ -5,6 +5,13 @@ Brooks R6 fix: 将所有 orders 表 SQL 集中到此文件。
 Service 层只保留业务逻辑，不再直接写 SQL。
 """
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class OrderRepository:
@@ -18,15 +25,15 @@ class OrderRepository:
     def find_by_id(order_id, db=None, include_deleted=False):
         """按 ID 查询订单（含关联的客户名、路线名）。"""
         db = resolve_db(db)
-        return db.execute(f'''
-            SELECT o.*,
-                COALESCE(NULLIF(o.route_name_snapshot, ''), pr.name) as route_name,
-                c.name as customer_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE o.id = ?{" AND o.deleted_at IS NULL" if not include_deleted else ""}
-        ''', (order_id,)).fetchone()
+        route_name = route_name_sql("o", "route_version", "pr")
+        return db.execute(
+            "SELECT o.*," + route_name + " AS route_name,c.name AS customer_name "
+            "FROM orders o LEFT JOIN process_routes pr ON o.route_id=pr.id "
+            + route_version_join("o", "route_version")
+            + "LEFT JOIN customers c ON o.customer_id=c.id WHERE o.id=?"
+            + ("" if include_deleted else " AND o.deleted_at IS NULL"),
+            (order_id,),
+        ).fetchone()
     @staticmethod
     def find_including_deleted(order_id, db=None):
         """查询订单（含软删除）。回收站操作专用。"""
@@ -105,17 +112,15 @@ class OrderRepository:
             f'SELECT COUNT(*) FROM orders o WHERE {where_sql}', params
         ).fetchone()[0]
         offset = (page - 1) * limit
-        rows = db.execute(f'''
-            SELECT o.*,
-                COALESCE(NULLIF(o.route_name_snapshot, ''), pr.name) as route_name,
-                c.name as customer_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE {where_sql}
-            ORDER BY {order_by}
-            LIMIT ? OFFSET ?
-        ''', params + [limit, offset]).fetchall()
+        route_name = route_name_sql("o", "route_version", "pr")
+        rows = db.execute(
+            "SELECT o.*," + route_name + " AS route_name,c.name AS customer_name "
+            "FROM orders o LEFT JOIN process_routes pr ON o.route_id=pr.id "
+            + route_version_join("o", "route_version")
+            + "LEFT JOIN customers c ON o.customer_id=c.id "
+            + f"WHERE {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
         return rows, total
 
     @staticmethod
@@ -173,14 +178,17 @@ class OrderRepository:
         if not order_ids:
             return []
         placeholders = ','.join('?' for _ in order_ids)
-        sql = """
-            SELECT op.*,
-                COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name
-            FROM order_processes op JOIN processes p ON op.process_id = p.id
-            WHERE op.order_id IN ({})
-            ORDER BY op.order_id, op.seq_order
-        """.format(placeholders)
-        return db.execute(sql, list(order_ids)).fetchall()
+        process_name = process_value_sql("op", "process_version", "p")
+        sql = (
+            "SELECT op.*," + process_name + " AS process_name "
+            "FROM order_processes op JOIN processes p ON op.process_id=p.id "
+            + process_version_join("op", "process_version")
+            + f"WHERE op.order_id IN ({placeholders}) "
+            "ORDER BY op.order_id,op.seq_order"
+        )
+        rows = db.execute(sql, list(order_ids)).fetchall()
+        warn_legacy_fact_rows("order_processes", rows)
+        return rows
 
     @staticmethod
     def find_customer_name(customer_id, db=None):
@@ -351,14 +359,16 @@ class OrderRepository:
     @staticmethod
     def get_processes(order_id, db=None):
         db = resolve_db(db)
-        return db.execute('''
-            SELECT op.*,
-                COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) as process_name
-            FROM order_processes op
-            JOIN processes p ON op.process_id = p.id
-            WHERE op.order_id = ?
-            ORDER BY op.seq_order
-        ''', (order_id,)).fetchall()
+        process_name = process_value_sql("op", "process_version", "p")
+        rows = db.execute(
+            "SELECT op.*," + process_name + " AS process_name "
+            "FROM order_processes op JOIN processes p ON op.process_id=p.id "
+            + process_version_join("op", "process_version")
+            + "WHERE op.order_id=? ORDER BY op.seq_order",
+            (order_id,),
+        ).fetchall()
+        warn_legacy_fact_rows("order_processes", rows)
+        return rows
 
     @staticmethod
     def list_order_process_ids(order_id, db=None):
@@ -475,20 +485,18 @@ class OrderRepository:
         db = resolve_db(db)
         result = {'work': [], 'scrap': [], 'rework': []}
         for table, key in [('work_records', 'work'), ('scrap_records', 'scrap'), ('rework_records', 'rework')]:
-            process_name_sql = (
-                "COALESCE(NULLIF(r.process_name_snapshot, ''), p.name)"
-                if table == "work_records"
-                else "p.name"
-            )
-            result[key] = [dict(r) for r in db.execute(f'''
-                SELECT r.*, u.name as worker_name,
-                    {process_name_sql} as process_name, ? as record_type
-                FROM {table} r
-                LEFT JOIN users u ON r.user_id = u.id
-                LEFT JOIN processes p ON r.process_id = p.id
-                WHERE r.order_id = ?
-                ORDER BY r.created_at DESC
-            ''', (key, order_id)).fetchall()]
+            process_name_sql = process_value_sql("r", "process_version", "p")
+            rows = db.execute(
+                "SELECT r.*,u.name AS worker_name," + process_name_sql
+                + f" AS process_name,? AS record_type FROM {table} r "
+                "LEFT JOIN users u ON r.user_id=u.id "
+                "LEFT JOIN processes p ON r.process_id=p.id "
+                + process_version_join("r", "process_version")
+                + "WHERE r.order_id=? ORDER BY r.created_at DESC",
+                (key, order_id),
+            ).fetchall()
+            warn_legacy_fact_rows(table, rows)
+            result[key] = [dict(row) for row in rows]
         return result
 
     @staticmethod
@@ -526,12 +534,15 @@ class OrderRepository:
         items = db.execute(
             "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
         ).fetchall()
+        process_name = process_value_sql("op", "process_version", "p")
         processes = db.execute(
-            "SELECT op.*, COALESCE(NULLIF(op.process_name_snapshot, ''), p.name) "
-            "as process_name FROM order_processes op "
-            "JOIN processes p ON p.id = op.process_id WHERE op.order_id = ? ORDER BY op.seq_order",
+            "SELECT op.*," + process_name + " AS process_name FROM order_processes op "
+            "JOIN processes p ON p.id=op.process_id "
+            + process_version_join("op", "process_version")
+            + "WHERE op.order_id=? ORDER BY op.seq_order",
             (order_id,)
         ).fetchall()
+        warn_legacy_fact_rows("order_processes", processes)
         work_records = db.execute(
             "SELECT wr.serial_no, wr.process_id, wr.status, wr.created_at, u.name as worker_name "
             "FROM work_records wr "

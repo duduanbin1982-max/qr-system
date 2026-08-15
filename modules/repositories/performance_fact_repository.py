@@ -1,6 +1,14 @@
 """Persistence for canonical performance quality events and source facts."""
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class PerformanceFactRepository:
@@ -69,11 +77,19 @@ class PerformanceFactRepository:
 
     @staticmethod
     def insert_quality_event(payload, db):
+        binding = capture_process_fact_binding(
+            db,
+            order_id=payload.get("order_id"),
+            process_id=payload.get("process_id"),
+            route_id=payload.get("route_id"),
+        )
         cursor = db.execute(
             "INSERT INTO performance_quality_events ("
             "event_type,quantity,order_id,process_id,user_id,business_at,"
-            "snapshot_json,event_digest"
-            ") VALUES (?,?,?,?,?,?,?,?)",
+            "snapshot_json,event_digest,process_version_id,process_code_snapshot,"
+            "process_name_snapshot,process_category_snapshot,route_id,route_version_id,"
+            "route_name_snapshot,version_binding_source"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 payload["event_type"],
                 payload["quantity"],
@@ -83,6 +99,14 @@ class PerformanceFactRepository:
                 payload["business_at"],
                 payload["snapshot_json"],
                 payload["event_digest"],
+                binding["process_version_id"],
+                binding["process_code_snapshot"],
+                binding["process_name_snapshot"],
+                binding["process_category_snapshot"],
+                binding["route_id"],
+                binding["route_version_id"],
+                binding["route_name_snapshot"],
+                binding["version_binding_source"],
             ),
         )
         return cursor.lastrowid
@@ -106,7 +130,10 @@ class PerformanceFactRepository:
     def work_record_context(work_record_id, db=None):
         db = resolve_db(db)
         row = db.execute(
-            "SELECT id,order_id,process_id,user_id,quantity,created_at "
+            "SELECT id,order_id,process_id,user_id,quantity,created_at,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_id,route_version_id,route_name_snapshot,"
+            "version_binding_source "
             "FROM work_records WHERE id=?",
             (work_record_id,),
         ).fetchone()
@@ -144,20 +171,26 @@ class PerformanceFactRepository:
     ):
         """Return each canonical event once with all of its mapped sources."""
         db = resolve_db(db)
-        cutoff_clause = " AND created_at<=?" if source_cutoff_at else ""
+        cutoff_clause = " AND event.created_at<=?" if source_cutoff_at else ""
         params = [period_start, period_end]
         if source_cutoff_at:
             params.append(source_cutoff_at)
-        events = [
-            dict(row)
-            for row in db.execute(
-                "SELECT * FROM performance_quality_events "
-                "WHERE business_at>=? AND business_at<?"
-                + cutoff_clause
-                + " ORDER BY business_at,id",
-                params,
-            ).fetchall()
-        ]
+        process_name = process_value_sql("event", "process_version", "process")
+        route_name = route_name_sql("event", "route_version", "route")
+        event_rows = db.execute(
+            "SELECT event.*," + process_name + " AS process_name," + route_name
+            + " AS route_name FROM performance_quality_events event "
+            "LEFT JOIN processes process ON process.id=event.process_id "
+            + process_version_join("event", "process_version")
+            + "LEFT JOIN process_routes route ON route.id=event.route_id "
+            + route_version_join("event", "route_version")
+            + "WHERE event.business_at>=? AND event.business_at<?"
+            + cutoff_clause
+            + " ORDER BY event.business_at,event.id",
+            params,
+        ).fetchall()
+        warn_legacy_fact_rows("performance_quality_events", event_rows)
+        events = [dict(row) for row in event_rows]
         if not events:
             return []
         source_cutoff_clause = ""
@@ -207,6 +240,8 @@ class PerformanceFactRepository:
                 "AND COALESCE(NULLIF(approval.processed_at,''),approval.created_at)>?)"
             )
             params.append(source_cutoff_at)
+        process_name = process_value_sql("wr", "process_version", "proc")
+        route_name = route_name_sql("wr", "route_version", "route")
         rows = db.execute(
             "SELECT wr.*,"
             + business_at
@@ -215,17 +250,21 @@ class PerformanceFactRepository:
             "COALESCE(o.product_name,'') AS order_product_name,"
             "COALESCE(prod.product_code,'') AS current_product_code,"
             "COALESCE(prod.product_name,'') AS current_product_name,"
-            "COALESCE(proc.name,'') AS process_name "
-            "FROM work_records wr "
+            + process_name + " AS process_name," + route_name + " AS route_name "
+            + "FROM work_records wr "
             "LEFT JOIN orders o ON o.id=wr.order_id "
             "LEFT JOIN order_product_links opl ON opl.order_id=wr.order_id "
             "LEFT JOIN products prod ON prod.id=opl.product_id "
             "LEFT JOIN processes proc ON proc.id=wr.process_id "
-            "WHERE "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN process_routes route ON route.id=wr.route_id "
+            + route_version_join("wr", "route_version")
+            + "WHERE "
             + " AND ".join(clauses)
             + " ORDER BY business_at,wr.id",
             params,
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
         return [dict(row) for row in rows]
 
     @staticmethod
@@ -249,39 +288,52 @@ class PerformanceFactRepository:
                 "COALESCE(NULLIF(wt.reviewed_at,''),wt.created_at)<=?"
             )
             params.append(source_cutoff_at)
+        process_name = process_value_sql("wt", "process_version", "proc")
+        route_name = route_name_sql("wt", "route_version", "route")
         rows = db.execute(
             "SELECT wt.*,"
             + business_at
             + " AS business_at,o.order_no AS current_order_no,opl.product_id,"
             "COALESCE(o.product_code,'') AS order_product_code,"
             "COALESCE(o.product_name,'') AS order_product_name,"
-            "COALESCE(proc.name,'') AS current_process_name "
-            "FROM work_time_records wt "
+            + process_name + " AS current_process_name,"
+            + route_name + " AS route_name_display "
+            + "FROM work_time_records wt "
             "LEFT JOIN orders o ON o.id=wt.order_id "
             "LEFT JOIN order_product_links opl ON opl.order_id=wt.order_id "
             "LEFT JOIN processes proc ON proc.id=wt.process_id "
-            "WHERE "
+            + process_version_join("wt", "process_version")
+            + "LEFT JOIN process_routes route ON route.id=wt.route_id "
+            + route_version_join("wt", "route_version")
+            + "WHERE "
             + " AND ".join(clauses)
             + " ORDER BY business_at,wt.id",
             params,
         ).fetchall()
+        warn_legacy_fact_rows("work_time_records", rows)
         return [dict(row) for row in rows]
 
     @staticmethod
     def business_context(order_id=None, process_id=None, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("op", "process_version", "proc")
         row = db.execute(
             "SELECT o.id AS order_id,COALESCE(o.order_no,'') AS order_no,"
             "opl.product_id,COALESCE(o.product_code,'') AS order_product_code,"
             "COALESCE(o.product_name,'') AS order_product_name,"
             "COALESCE(prod.product_code,'') AS current_product_code,"
             "COALESCE(prod.product_name,'') AS current_product_name,"
-            "proc.id AS process_id,COALESCE(proc.name,'') AS process_name "
+            "proc.id AS process_id," + process_name + " AS process_name,"
+            "op.process_version_id,op.process_code_snapshot,op.process_name_snapshot,"
+            "op.process_category_snapshot,o.route_id,o.route_version_id,o.route_name_snapshot,"
+            "CASE WHEN op.process_version_id IS NOT NULL THEN 'captured' ELSE '' END AS version_binding_source "
             "FROM (SELECT ? AS order_key,? AS process_key) keys "
             "LEFT JOIN orders o ON o.id=keys.order_key "
             "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
             "LEFT JOIN products prod ON prod.id=opl.product_id "
-            "LEFT JOIN processes proc ON proc.id=keys.process_key",
+            "LEFT JOIN processes proc ON proc.id=keys.process_key "
+            "LEFT JOIN order_processes op ON op.order_id=o.id AND op.process_id=proc.id "
+            + process_version_join("op", "process_version"),
             (order_id, process_id),
         ).fetchone()
         return dict(row) if row else {}
@@ -371,14 +423,13 @@ class PerformanceFactRepository:
     @staticmethod
     def list_batch_facts(batch_id, db=None):
         db = resolve_db(db)
-        return [
-            dict(row)
-            for row in db.execute(
+        rows = db.execute(
                 "SELECT * FROM performance_source_facts WHERE batch_id=? "
                 "ORDER BY fact_type,source_type,source_id,id",
                 (batch_id,),
             ).fetchall()
-        ]
+        warn_legacy_fact_rows("performance_source_facts", rows)
+        return [dict(row) for row in rows]
 
     @staticmethod
     def list_batch_exceptions(batch_id, db=None):
@@ -415,6 +466,13 @@ class PerformanceFactRepository:
             "product_name_snapshot",
             "process_id",
             "process_name_snapshot",
+            "process_version_id",
+            "process_code_snapshot",
+            "process_category_snapshot",
+            "route_id",
+            "route_version_id",
+            "route_name_snapshot",
+            "version_binding_source",
             "quantity",
             "payload_json",
             "source_digest",

@@ -2,6 +2,11 @@
 All raw SQL lives here. Methods accept optional db for transaction sharing.
 """
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class DashboardRepository:
@@ -82,16 +87,20 @@ class DashboardRepository:
     @staticmethod
     def get_recent_work_records(limit=10, db=None):
         db = resolve_db(db)
-        return db.execute(
+        process_name = process_value_sql("wr", "process_version", "p")
+        rows = db.execute(
             "SELECT wr.*, COALESCE(o.order_no,'-') as order_no, "
-            "p.name as process_name, u.name as worker_name "
+            + process_name + " AS process_name,u.name AS worker_name "
             "FROM work_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
             "LEFT JOIN processes p ON wr.process_id = p.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN users u ON wr.user_id = u.id "
             "ORDER BY wr.created_at DESC LIMIT ?",
             (limit,)
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def get_company_name(db=None):
