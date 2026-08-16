@@ -9,6 +9,7 @@ from modules.route_decorators import (
     check_permission,
     get_json_body,
 )
+from modules.domain.errors import ConflictError
 from modules.services.scan_qr_service import ScanQRService
 import qrcode as qrcode_lib
 from io import BytesIO
@@ -68,6 +69,11 @@ def batch_qrcode():
             if not items:
                 # 如果还没生成序列号，自动生成
                 items = ScanQRService.generate_serial_numbers(oid, order['order_no'], order['quantity'])
+            elif len(items) != order['quantity']:
+                raise ConflictError(
+                    f"订单 {order['order_no']} 数量为 {order['quantity']}，"
+                    f"但存在 {len(items)} 个有效序列件；请先修正数据"
+                )
 
             # 为每个序列号生成二维码（优先使用订单中的 product_code 字段）
             product_code = (order['product_code'] or '').strip()

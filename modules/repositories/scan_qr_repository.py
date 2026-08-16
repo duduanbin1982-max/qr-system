@@ -30,8 +30,18 @@ class ScanQRRepository:
     def find_items_by_order(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT * FROM product_items WHERE order_id = ? ORDER BY position_no", (order_id,)
+            "SELECT * FROM product_items WHERE order_id = ? AND status != 'deleted' "
+            "ORDER BY position_no",
+            (order_id,),
         ).fetchall()
+
+    @staticmethod
+    def count_all_items_by_order(order_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT COUNT(*) FROM product_items WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()[0]
 
     @staticmethod
     def insert_product_item_txn(serial_no, order_id, position_no, qr_content, db):
