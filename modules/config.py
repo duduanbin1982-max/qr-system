@@ -126,6 +126,7 @@ PREDEFINED_ROLES = {
         'description': '管理生产订单、工艺和工价',
         'group_id': 2, 'level': 2,
         'permissions': [
+            'page:settings', 'page:settings.company-info', 'company_info:view',
             'page:production', 'page:production.orders', 'page:production.customers',
             'page:production.materials', 'page:production.trace', 'page:production.approvals',
             'page:quality-management', 'page:production.rework',

@@ -20,14 +20,11 @@ from modules.migration_inventory_ledger import MIGRATIONS as INVENTORY_LEDGER_MI
 from modules.migration_shipment_lifecycle import MIGRATIONS as SHIPMENT_LIFECYCLE_MIGRATIONS
 from modules.migration_reporting import MIGRATIONS as REPORTING_MIGRATIONS
 from modules.migration_payroll_ledger import MIGRATIONS as PAYROLL_LEDGER_MIGRATIONS
-from modules.migration_performance_department import (
-    MIGRATIONS as PERFORMANCE_DEPARTMENT_MIGRATIONS,
-)
+from modules.migration_performance_department import MIGRATIONS as PERFORMANCE_DEPARTMENT_MIGRATIONS
 from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
 from modules.migration_process_versioning import MIGRATIONS as PROCESS_VERSIONING_MIGRATIONS
 from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_MIGRATIONS
-
-
+from modules.migration_company_profile import MIGRATIONS as COMPANY_PROFILE_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -51,6 +48,7 @@ MIGRATIONS = sorted([
     *USER_MANAGEMENT_MIGRATIONS,
     *PROCESS_VERSIONING_MIGRATIONS,
     *PRODUCT_INTEGRITY_MIGRATIONS,
+    *COMPANY_PROFILE_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]
@@ -59,7 +57,6 @@ if len(_versions) != len(set(_versions)):
 LATEST_VERSION = max(_versions, default=0)
 
 def run_migrations(db=None):
-
     """Run all pending migrations in order."""
     own_db = db is None
     if own_db:

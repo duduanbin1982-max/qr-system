@@ -390,9 +390,12 @@ export const ACTION_PAGE_MAP = {
     "page:settings",
     "page:settings.audit-logs"
   ],
+  "company_info": [
+    "page:settings",
+    "page:settings.company-info"
+  ],
   "settings": [
     "page:settings",
-    "page:settings.company-info",
     "page:settings.admin-users",
     "page:settings.audit-logs",
     "page:settings.process-config",
@@ -403,6 +406,12 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "company_info:edit": [
+    "company_info:view"
+  ],
+  "company_info:audit_history": [
+    "company_info:view"
+  ],
   "processes:view": [
     "process_versions:view"
   ],

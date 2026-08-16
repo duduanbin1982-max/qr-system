@@ -13,6 +13,7 @@ BACKUP_DIR = '/home/dubin/qr-system/data/backups'
 LOG_FILE = '/home/dubin/qr-system/logs/db_maintenance.log'
 MAX_BACKUPS = 7
 OLD_DATA_DAYS = 90
+COMPANY_PROFILE_RETENTION_YEARS = 3
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -127,6 +128,23 @@ def clean_old_data(conn):
     """)
     if old_attempts.rowcount > 0:
         logger.info(f'Cleaned {old_attempts.rowcount} old login attempts')
+
+    company_history_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='company_profile_revisions'"
+    ).fetchone()
+    if company_history_table:
+        old_company_revisions = conn.execute(
+            "DELETE FROM company_profile_revisions "
+            "WHERE profile_id=1 "
+            "AND created_at < datetime('now','localtime',?) "
+            "AND version <> (SELECT version FROM company_profiles WHERE id=1)",
+            (f'-{COMPANY_PROFILE_RETENTION_YEARS} years',),
+        )
+        if old_company_revisions.rowcount > 0:
+            logger.info(
+                f'Cleaned {old_company_revisions.rowcount} expired company profile revisions'
+            )
 
     conn.commit()
 

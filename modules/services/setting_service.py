@@ -9,7 +9,6 @@ from modules.order_focus_config import (
 from modules.shipment_config import SHIPMENT_NO_PREFIX_KEY, normalize_shipment_no_prefix
 
 ALLOWED_KEYS = {
-    'company_name', 'contact', 'phone', 'address', 'description',
     'default_password', 'approval_enabled', 'auto_order_no', 'page_size',
     'process_order_mode', 'delivery_warning_days',
     'limit_by_prev_process', 'limit_by_order_qty',
@@ -88,7 +87,11 @@ class SettingsService:
     @staticmethod
     def get_all():
         rows = SettingRepository.get_all()
-        return {r["key"]: r["value"] for r in rows if r["key"] not in SENSITIVE_KEYS}
+        return {
+            r["key"]: r["value"]
+            for r in rows
+            if r["key"] in ALLOWED_KEYS and r["key"] not in SENSITIVE_KEYS
+        }
 
     @staticmethod
     def get_value(key, default=None):
