@@ -44,6 +44,28 @@ def test_page_operation_bindings_reference_known_pages_and_resources():
 def test_business_permissions_infer_page_permissions():
     assert infer_page_permissions(["performance:view_self"]) == ["page:performance"]
     assert "page:settings.admin-users" in infer_page_permissions(["users:admin"])
+    assert infer_page_permissions(["company_info:view"]) == [
+        "page:settings",
+        "page:settings.company-info",
+    ]
+
+
+def test_company_profile_permissions_are_independent_and_view_only_by_default():
+    assert ACTION_PERMISSION_DEFS["company_info"][1] == [
+        "view",
+        "edit",
+        "audit_history",
+    ]
+    assert PAGE_OPERATION_BINDINGS["page:settings.company-info"] == ["company_info"]
+    assert has_permission_code(["company_info:edit"], "company_info:view")
+    assert has_permission_code(
+        ["company_info:audit_history"], "company_info:view"
+    )
+    assert not has_permission_code(["settings:edit"], "company_info:edit")
+    production_manager = default_role_permission_additions("production_manager")
+    assert "company_info:view" in production_manager
+    assert "company_info:edit" not in production_manager
+    assert "company_info:audit_history" not in production_manager
 
 
 def test_performance_permissions_are_granular_and_labels_are_resource_neutral():

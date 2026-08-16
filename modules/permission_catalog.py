@@ -45,6 +45,7 @@ ACTION_LABELS = {
     "approve": "批准",
     "plan_manage": "改进计划管理",
     "plan_reassess": "改进计划复评",
+    "audit_history": "查看完整历史",
     "reject": "驳回",
     "impact": "影响查询",
     "retire": "退休",
@@ -97,6 +98,7 @@ ACTION_PERMISSION_DEFS = {
     "reports": ("数据分析", ["view"]),
     "board": ("数据看板", ["view"]),
     "settings": ("系统设置", ["manage", "edit"]),
+    "company_info": ("公司资料", ["view", "edit", "audit_history"]),
     "logs": ("操作日志", ["view", "delete"]),
     "materials": ("物料", ["view", "create", "edit", "delete", "stock", "consume", "manage"]),
     "suppliers": ("供应商", ["view", "create", "edit", "delete"]),
@@ -235,9 +237,9 @@ ACTION_PAGE_MAP = {
     "role_groups": ["page:settings", "page:settings.role-groups"],
     "positions": ["page:settings", "page:settings.positions"],
     "logs": ["page:settings", "page:settings.audit-logs"],
+    "company_info": ["page:settings", "page:settings.company-info"],
     "settings": [
         "page:settings",
-        "page:settings.company-info",
         "page:settings.admin-users",
         "page:settings.audit-logs",
         "page:settings.process-config",
@@ -282,7 +284,7 @@ PAGE_OPERATION_BINDINGS = {
     ],
     "page:basic-settings.prices": ["prices"],
     "page:basic-settings.products": ["products"],
-    "page:settings.company-info": ["settings"],
+    "page:settings.company-info": ["company_info"],
     "page:settings.admin-users": ["users"],
     "page:settings.audit-logs": ["logs"],
     "page:settings.process-config": ["settings"],
@@ -309,6 +311,8 @@ ACTION_PERMISSION_CODES = [
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
+    "company_info:edit": ["company_info:view"],
+    "company_info:audit_history": ["company_info:view"],
     "processes:view": ["process_versions:view"],
     "routes:view": ["route_versions:view"],
     "wages:view_self": ["wages:view"],
@@ -488,6 +492,9 @@ def infer_page_permissions(permission_codes):
 
 DEFAULT_ROLE_PERMISSION_ADDITIONS = {
     "production_manager": [
+        "page:settings",
+        "page:settings.company-info",
+        "company_info:view",
         "page:performance",
         "performance:view_department",
         "performance:review_department",
