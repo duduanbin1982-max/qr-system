@@ -1,4 +1,5 @@
 """qr-system — RouteRepository（工序路线数据访问层）"""
+from modules.master_data_references import ROUTE_REFERENCES
 from modules.repositories.context import resolve_db
 
 
@@ -71,29 +72,78 @@ class RouteRepository:
         db = resolve_db(db)
         normalized_ids = list(dict.fromkeys(int(route_id) for route_id in route_ids))
         usage = {
-            route_id: {"used_orders": 0, "used_products": 0, "is_locked": False}
+            route_id: {
+                "used_orders": 0,
+                "used_products": 0,
+                "is_locked": False,
+                "reference_counts": [],
+            }
             for route_id in normalized_ids
         }
         if not normalized_ids:
             return usage
 
         placeholders = ",".join("?" for _ in normalized_ids)
-        for table, count_key in (("orders", "used_orders"), ("products", "used_products")):
+        table_cache = {}
+        for reference in ROUTE_REFERENCES:
+            table_exists = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (reference.table,),
+            ).fetchone()
+            if not table_exists:
+                continue
+            available_columns = table_cache.setdefault(
+                reference.table,
+                {
+                    row[1]
+                    for row in db.execute(f'PRAGMA table_info("{reference.table}")')
+                },
+            )
+            scalar_columns = [
+                column
+                for column in reference.root_columns
+                if column in available_columns
+            ]
+            if not scalar_columns:
+                continue
+            predicate = " OR ".join(
+                f'"{column}" IN ({placeholders})' for column in scalar_columns
+            )
+            select_value = f'"{scalar_columns[0]}"'
+            if len(scalar_columns) > 1:
+                select_value = "COALESCE(" + ",".join(
+                    f'"{column}"' for column in scalar_columns
+                ) + ")"
+            params = normalized_ids * len(scalar_columns)
             rows = db.execute(
-                f"SELECT route_id, COUNT(*) AS cnt FROM {table} "
-                f"WHERE route_id IN ({placeholders}) GROUP BY route_id",
-                normalized_ids,
+                f'SELECT {select_value} AS reference_id, COUNT(*) AS cnt '
+                f'FROM "{reference.table}" WHERE {predicate} GROUP BY reference_id',
+                params,
             ).fetchall()
-            for row in rows:
-                usage[row["route_id"]][count_key] = row["cnt"]
+            by_id = {row["reference_id"]: row["cnt"] for row in rows}
+            for route_id in normalized_ids:
+                count = by_id.get(route_id, 0)
+                usage[route_id]["reference_counts"].append((reference, count))
 
-        for counts in usage.values():
-            counts["is_locked"] = bool(counts["used_orders"] or counts["used_products"])
+        for route_id, counts in usage.items():
+            for reference, count in counts["reference_counts"]:
+                if reference.business_key == "orders":
+                    counts["used_orders"] = count
+                elif reference.business_key == "products":
+                    counts["used_products"] = count
+            counts["is_locked"] = any(
+                count and reference.impact_level != "internal"
+                for reference, count in counts["reference_counts"]
+            )
         return usage
 
     @staticmethod
     def get_route_usage(rid, db=None):
         return RouteRepository.get_route_usage_counts([rid], db=db)[int(rid)]
+
+    @staticmethod
+    def reference_counts(rid, db=None):
+        return RouteRepository.get_route_usage(rid, db=db)["reference_counts"]
 
     @staticmethod
     def find_route_by_name(name, db=None):
@@ -192,35 +242,3 @@ class RouteRepository:
             "WHERE pri.route_id = ? ORDER BY pri.seq_order, pri.id",
             (rid,),
         ).fetchall()
-
-    @staticmethod
-    def count_work_records_for_order_txn(order_id, db):
-        row = db.execute(
-            "SELECT COUNT(*) as cnt FROM work_records WHERE order_id = ?", (order_id,)
-        ).fetchone()
-        return row["cnt"] if row else 0
-
-    @staticmethod
-    def update_order_route_txn(rid, order_id, db):
-        db.execute("UPDATE orders SET route_id = ? WHERE id = ?", (rid, order_id))
-
-    @staticmethod
-    def delete_order_processes_txn(order_id, db):
-        db.execute("DELETE FROM order_processes WHERE order_id = ?", (order_id,))
-
-    @staticmethod
-    def insert_order_process_txn(order_id, process_id, seq_order, required_audit, db):
-        db.execute(
-            "INSERT INTO order_processes (order_id, process_id, seq_order, required_audit) "
-            "VALUES (?, ?, ?, ?)",
-            (order_id, process_id, seq_order, required_audit)
-        )
-
-    @staticmethod
-    def replace_order_processes_txn(order_id, route_items, db):
-        RouteRepository.delete_order_processes_txn(order_id, db=db)
-        for item in route_items:
-            RouteRepository.insert_order_process_txn(
-                order_id, item["process_id"], item["seq_order"], item["required_audit"], db=db
-            )
-        return len(route_items)

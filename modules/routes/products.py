@@ -121,6 +121,15 @@ def create_product():
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
 
+@app.route('/api/products/code-preview', methods=['POST'])
+@check_auth
+@check_permission('products:view')
+@validate_json('product_code_preview')
+def preview_product_code():
+    """Return the authoritative product code without persisting a product."""
+    return jsonify({'product_code': ProductService.preview_product_code(get_json_body())})
+
+
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 @check_auth
 @check_permission('products:edit')
@@ -169,10 +178,7 @@ def update_product(pid):
 @check_auth
 @check_permission('products:view')
 def product_impact(pid):
-    try:
-        return jsonify(ProductService.check_product_impact(pid))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    return jsonify(ProductService.check_product_impact(pid))
 
 
 
@@ -182,10 +188,7 @@ def product_impact(pid):
 @check_permission('products:edit')
 def restore_product(pid):
     """恢复已软删除的产品"""
-    try:
-        ProductService.restore_product(pid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+    ProductService.restore_product(pid)
     safe_audit_log('restore_product', 'product', pid)
     return jsonify({'message': '恢复成功'})
 
@@ -221,10 +224,7 @@ def delete_product(pid):
 @check_permission('products:delete')
 def purge_product(pid):
     """物理删除产品及关联数据"""
-    try:
-        ProductService.purge_product(pid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+    ProductService.purge_product(pid)
     safe_audit_log('purge_product', 'product', pid)
     return jsonify({'message': '彻底删除成功'})
 
@@ -335,10 +335,7 @@ def upload_product_attachment(product_id):
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
         return jsonify({'error': f'File type {ext} not allowed'}), 400
     file_data = file.read()
-    try:
-        ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+    ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])
     safe_audit_log('upload_attachment', 'product', product_id, file.filename)
     return jsonify({'message': '上传成功'})
 
@@ -442,10 +439,7 @@ def delete_product_attachment(attachment_id):
         description: 删除成功
     security: [{Bearer: []}]
     """
-    try:
-        row = ProductService.delete_attachment(attachment_id)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+    row = ProductService.delete_attachment(attachment_id)
     safe_audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
     return jsonify({'message': '删除成功'})
 
@@ -463,6 +457,7 @@ def list_product_bom(product_id):
 @app.route("/api/products/<int:product_id>/bom", methods=["POST"])
 @check_auth
 @check_permission("products:edit")
+@validate_json('add_product_bom')
 def add_product_bom(product_id):
     """Add one material to a product recipe."""
     bom = ProductService.add_product_bom(product_id, request.get_json(silent=True) or {})

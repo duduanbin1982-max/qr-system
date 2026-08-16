@@ -2,7 +2,7 @@
 <template>
 <div style="padding:var(--space-6)">
     <div class="summary-bar">
-      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ products.length }}</div><div class="s-label">产品总数</div></div></div>
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ totalProducts }}</div><div class="s-label">产品总数</div></div></div>
       <div class="summary-item"><span class="s-icon">🏗️</span><div><div class="s-val text-primary">{{ structCount }}</div><div class="s-label">结构件</div></div></div>
       <div class="summary-item"><span class="s-icon">🔧</span><div><div class="s-val text-success">{{ machCount }}</div><div class="s-label">机加工</div></div></div>
     </div>
@@ -19,9 +19,9 @@
         <div style="display:flex;gap:var(--space-2);align-items:center">
           <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/型号/规格..." @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/型号/规格..." @keyup.enter="searchAndLoad" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
-          <button class="btn btn-default btn-sm" @click="load" style="white-space:nowrap">搜索</button>
+          <button class="btn btn-default btn-sm" @click="searchAndLoad" style="white-space:nowrap">搜索</button>
           <button v-if="can('products:create')" class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加产品</button>
           <button v-if="can('products:create')" class="btn btn-success btn-sm" @click="triggerImport" style="white-space:nowrap">📥 导入Excel</button>
           <button v-if="can('products:delete')" class="btn btn-sm" :style="{whiteSpace:'nowrap',background:showTrash?'var(--danger)':'var(--bg-hover)',color:showTrash?'#fff':'var(--text-muted)',border:'1px solid '+(showTrash?'var(--danger)':'var(--border-light)'),borderRadius:'var(--radius-md)'}" @click="toggleTrash">🗑️ 回收站 <span v-if="trashedProducts.length" style="background:#fff;color:var(--danger);border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px">{{ trashedProducts.length }}</span></button>
@@ -47,14 +47,14 @@
             </thead>
             <tbody>
               <tr v-for="(p, idx) in products" :key="p.id">
-                <td style="text-align:center"><span class="row-num">{{ idx + 1 }}</span></td>
+                <td style="text-align:center"><span class="row-num">{{ (page - 1) * limit + idx + 1 }}</span></td>
                 <td style="font-weight:600">{{ p.product_name }}</td>
                 <td><code style="font-size:var(--text-sm);font-weight:600;color:var(--primary);background:var(--primary-light);padding:3px 8px;border-radius:var(--radius-sm)">{{ p.product_code }}</code></td>
                 <td>{{ p.model || '-' }}</td>
                 <td style="font-size:var(--text-sm);color:var(--text-placeholder)">{{ p.spec || '-' }}</td>
                 <td style="white-space:nowrap"><span class="badge" :class="p.category === '结构件' ? 'badge-info' : 'badge-warning'" style="font-size:var(--text-xs-alt)">{{ p.category || '-' }}</span></td>
-                <td style="text-align:center">{{ p.weight || '-' }}</td>
-                <td style="text-align:center;color:var(--success);font-weight:500">{{ p.price ? '¥' + p.price : '-' }}</td>
+                <td style="text-align:center">{{ p.weight ?? '-' }}</td>
+                <td style="text-align:center;color:var(--success);font-weight:500">{{ p.price != null ? '¥' + p.price : '-' }}</td>
                 <td style="text-align:center;vertical-align:middle">
                   <div v-if="p.thumbnail_id" style="cursor:pointer;display:inline-block" @click.stop="openThumbnail(p.thumbnail_id)" :title="'点击查看附件'">
                     <img :src="getThumbnailUrl(p.thumbnail_id)" style="width:48px;height:48px;border-radius:var(--radius-sm);object-fit:cover;border:1px solid var(--border-light)">
@@ -75,6 +75,11 @@
             <div class="empty-icon">📦</div>
             <div class="empty-text">暂无产品数据</div>
           </div>
+        </div>
+        <div v-if="total" style="display:flex;justify-content:flex-end;align-items:center;gap:var(--space-3);padding-top:var(--space-3)">
+          <span style="color:var(--text-muted);font-size:var(--text-sm)">共 {{ total }} 条，第 {{ page }} / {{ totalPages }} 页</span>
+          <button class="btn btn-default btn-sm" :disabled="page <= 1" @click="previousPage">上一页</button>
+          <button class="btn btn-default btn-sm" :disabled="page >= totalPages" @click="nextPage">下一页</button>
         </div>
       </div>
     </div>

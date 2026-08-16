@@ -124,10 +124,12 @@ class OrderService:
     # ============================================================
 
     @staticmethod
-    def _assign_processes(db, order_id, route_id=None, process_ids=None):
+    def _assign_processes(
+        db, order_id, route_id=None, process_ids=None, assignment=None
+    ):
         """Backward-compatible wrapper for order process assignment."""
         OrderService._process_sync_service().assign_processes(
-            db, order_id, route_id, process_ids
+            db, order_id, route_id, process_ids, assignment=assignment
         )
 
     @staticmethod
@@ -198,12 +200,27 @@ class OrderService:
     ):
         """Persist the order aggregate and snapshots atomically."""
         route_id = normalized_data.get('route_id')
+        assignment = cls._process_sync_service().prepare_assignment(
+            txn, route_id=route_id, process_ids=process_ids
+        )
         extra = cls._create_order_extra(normalized_data)
         payload = cls._build_create_payload(
             normalized_data, order_no, customer, customer_id, route_id, extra
         )
+        payload.update(
+            {
+                "route_version_id": assignment["route_version_id"],
+                "route_name_snapshot": assignment["route_name_snapshot"],
+            }
+        )
         order_id = repository.insert_from_order_form(payload, db=txn)
-        cls._assign_processes(txn, order_id, route_id, process_ids)
+        cls._assign_processes(
+            txn,
+            order_id,
+            route_id,
+            process_ids,
+            assignment=assignment,
+        )
         cls._material_snapshot_service().copy_product_bom(
             order_id,
             normalized_data.get('product_id'),
@@ -395,7 +412,12 @@ class OrderService:
             process_sync_service.sync_processes(txn, oid, data['process_ids'])
         elif route_changed:
             if data['route_id']:
-                process_sync_service.sync_route(txn, oid, data['route_id'])
+                process_sync_service.sync_route(
+                    txn,
+                    oid,
+                    data['route_id'],
+                    route_version_id=data.get('route_version_id'),
+                )
             else:
                 process_sync_service.clear_processes(txn, oid)
 

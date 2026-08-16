@@ -23,7 +23,10 @@ def _process_db():
     )
     db.execute(
         "CREATE TABLE order_processes ("
-        "order_id INTEGER, process_id INTEGER, seq_order INTEGER, required_audit INTEGER DEFAULT 0)"
+        "order_id INTEGER, process_id INTEGER, seq_order INTEGER, "
+        "required_audit INTEGER DEFAULT 0, process_version_id INTEGER, "
+        "process_code_snapshot TEXT, process_name_snapshot TEXT, "
+        "process_category_snapshot TEXT)"
     )
     return db
 
@@ -51,7 +54,28 @@ def test_order_process_assignment_uses_route_items_when_route_selected():
         "VALUES (2, 10, 1, 1)"
     )
 
-    OrderProcessSyncService.assign_processes(db, order_id=1, route_id=2, process_ids=None)
+    OrderProcessSyncService.assign_processes(
+        db,
+        order_id=1,
+        route_id=2,
+        process_ids=None,
+        assignment={
+            "route_id": 2,
+            "route_version_id": 20,
+            "route_name_snapshot": "Fixture Route",
+            "processes": [
+                {
+                    "process_id": 10,
+                    "process_version_id": 100,
+                    "process_code_snapshot": "PROC-0010",
+                    "process_name_snapshot": "Fixture Process",
+                    "process_category_snapshot": "结构件",
+                    "seq_order": 1,
+                    "required_audit": 1,
+                }
+            ],
+        },
+    )
 
     assert _assigned_processes(db) == [
         {"order_id": 1, "process_id": 10, "seq_order": 1, "required_audit": 1}
@@ -65,7 +89,26 @@ def test_order_process_assignment_falls_back_to_active_processes():
         [(20, 2, "active"), (30, 1, "inactive")],
     )
 
-    OrderProcessSyncService.assign_processes(db, order_id=1, route_id=None, process_ids=None)
+    OrderProcessSyncService.assign_processes(
+        db,
+        order_id=1,
+        assignment={
+            "route_id": None,
+            "route_version_id": None,
+            "route_name_snapshot": "",
+            "processes": [
+                {
+                    "process_id": 20,
+                    "process_version_id": 200,
+                    "process_code_snapshot": "PROC-0020",
+                    "process_name_snapshot": "",
+                    "process_category_snapshot": "结构件",
+                    "seq_order": 2,
+                    "required_audit": 0,
+                }
+            ],
+        },
+    )
 
     assert _assigned_processes(db) == [
         {"order_id": 1, "process_id": 20, "seq_order": 2, "required_audit": 0}

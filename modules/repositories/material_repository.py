@@ -1,5 +1,11 @@
 """Persistence operations for materials, inventory movements, consumption, and suppliers."""
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class MaterialRepository:
@@ -195,31 +201,41 @@ class MaterialRepository:
     def find_consumptions_by_material(mid, limit=100, db=None):
         """Return material consumptions with order, process, and operator details."""
         db = resolve_db(db)
-        return db.execute('''
-            SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
+        process_name = process_value_sql("mc", "process_version", "p")
+        rows = db.execute('''
+            SELECT mc.*,o.order_no,o.product_name,'''
+            + process_name + ''' as process_name,
                    u.name as operator_name_from_fk
             FROM material_consumptions mc
             LEFT JOIN orders o ON mc.order_id = o.id
             LEFT JOIN processes p ON mc.process_id = p.id
+            ''' + process_version_join("mc", "process_version") + '''
             LEFT JOIN users u ON mc.operator_id = u.id
             WHERE mc.material_id = ?
             ORDER BY mc.created_at DESC LIMIT ?
         ''', (mid, limit)).fetchall()
+        warn_legacy_fact_rows("material_consumptions", rows)
+        return rows
 
     @staticmethod
     def find_consumptions_by_material_paginated(mid, limit, offset, db=None):
         """Return paginated material consumptions with joined business details."""
         db = resolve_db(db)
-        return db.execute('''
-            SELECT mc.*, o.order_no, o.product_name, p.name as process_name,
+        process_name = process_value_sql("mc", "process_version", "p")
+        rows = db.execute('''
+            SELECT mc.*,o.order_no,o.product_name,'''
+            + process_name + ''' as process_name,
                    u.name as operator_name_from_fk
             FROM material_consumptions mc
             LEFT JOIN orders o ON mc.order_id = o.id
             LEFT JOIN processes p ON mc.process_id = p.id
+            ''' + process_version_join("mc", "process_version") + '''
             LEFT JOIN users u ON mc.operator_id = u.id
             WHERE mc.material_id = ?
             ORDER BY mc.created_at DESC LIMIT ? OFFSET ?
         ''', (mid, limit, offset)).fetchall()
+        warn_legacy_fact_rows("material_consumptions", rows)
+        return rows
 
     @staticmethod
     def find_consumption_by_id(cid, db=None):
@@ -402,13 +418,45 @@ class MaterialRepository:
                            source_work_record_id=None, db=None):
         """Insert a material consumption record."""
         db = resolve_db(db)
+        columns = {
+            row[1] for row in db.execute("PRAGMA table_info(material_consumptions)")
+        }
+        if "process_version_id" not in columns:
+            cursor = db.execute(
+                "INSERT INTO material_consumptions "
+                "(material_id,order_id,process_id,quantity,operator_id,operator_name,"
+                "notes,source_work_record_id) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    material_id,
+                    order_id or None,
+                    process_id or None,
+                    quantity,
+                    user_id,
+                    operator_name,
+                    notes,
+                    source_work_record_id,
+                ),
+            )
+            return cursor.lastrowid
+        binding = capture_process_fact_binding(
+            db,
+            order_id=order_id or None,
+            process_id=process_id or None,
+            source_work_record_id=source_work_record_id,
+        )
         cursor = db.execute(
             'INSERT INTO material_consumptions '
             '(material_id, order_id, process_id, quantity, '
-            'operator_id, operator_name, notes, source_work_record_id) '
-            'VALUES (?,?,?,?,?,?,?,?)',
+            'operator_id,operator_name,notes,source_work_record_id,'
+            'process_version_id,process_code_snapshot,process_name_snapshot,'
+            'process_category_snapshot,route_id,route_version_id,route_name_snapshot,'
+            'version_binding_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (material_id, order_id or None, process_id or None, quantity,
-             user_id, operator_name, notes, source_work_record_id)
+             user_id, operator_name, notes, source_work_record_id,
+             binding["process_version_id"], binding["process_code_snapshot"],
+             binding["process_name_snapshot"], binding["process_category_snapshot"],
+             binding["route_id"], binding["route_version_id"],
+             binding["route_name_snapshot"], binding["version_binding_source"])
         )
         return cursor.lastrowid
 

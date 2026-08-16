@@ -8,18 +8,22 @@ const mocks = vi.hoisted(() => ({
   permissions: new Set(),
   listProcessRoutes: vi.fn(),
   listProcesses: vi.fn(),
+  listRouteVersions: vi.fn(),
+  getRouteVersionImpact: vi.fn(),
+  listRoutePriceVersions: vi.fn(),
   showToast: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
   api: {
     domains: {
-      processRoutes: {
-        listProcessRoutes: mocks.listProcessRoutes,
+      processRoutes: { listProcessRoutes: mocks.listProcessRoutes },
+      processes: { listProcesses: mocks.listProcesses },
+      processRouteVersions: {
+        listRouteVersions: mocks.listRouteVersions,
+        getRouteVersionImpact: mocks.getRouteVersionImpact,
       },
-      processes: {
-        listProcesses: mocks.listProcesses,
-      },
+      wages: { listRoutePriceVersions: mocks.listRoutePriceVersions },
     },
   },
 }))
@@ -27,76 +31,64 @@ vi.mock('@/lib/api.js', () => ({
 vi.mock('@/lib/auth.js', () => ({
   can: vi.fn(permission => mocks.permissions.has(permission)),
 }))
-
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
 
+const published = {
+  id: 11,
+  process_route_id: 1,
+  version: 1,
+  name: '已引用路线',
+  category: '结构件',
+  status: 'published',
+  row_version: 1,
+  items: [],
+}
 
-describe('RouteList reference locking', () => {
+describe('RouteList versioned changes', () => {
   beforeEach(() => {
-    mocks.permissions = new Set(['routes:view', 'routes:edit', 'routes:delete'])
-    mocks.listProcessRoutes.mockReset()
-    mocks.listProcesses.mockReset()
-    mocks.showToast.mockReset()
+    mocks.permissions = new Set(['routes:view', 'route_versions:create', 'process_routes:retire'])
+    Object.values(mocks).filter(value => typeof value?.mockReset === 'function').forEach(mock => mock.mockReset())
     mocks.listProcesses.mockResolvedValue({ processes: [] })
+    mocks.getRouteVersionImpact.mockResolvedValue({ impact: { total_references: 3, references: [] } })
+    mocks.listRoutePriceVersions.mockResolvedValue({ versions: [] })
+    mocks.listRouteVersions.mockResolvedValue({
+      route: { id: 1, route_code: 'ROUTE-0001', lifecycle_status: 'active', current_effective_version_id: 11, row_version: 3 },
+      versions: [published],
+      events: [],
+    })
     mocks.listProcessRoutes.mockResolvedValue({
       routes: [
-        {
-          id: 1,
-          name: '已引用路线',
-          status: 'active',
-          processes: [],
-          used_orders: 2,
-          used_products: 1,
-          is_locked: true,
-        },
-        {
-          id: 2,
-          name: '未引用路线',
-          status: 'active',
-          processes: [],
-          used_orders: 0,
-          used_products: 0,
-          is_locked: false,
-        },
+        { id: 1, route_code: 'ROUTE-0001', name: '已引用路线', category: '结构件', lifecycle_status: 'active', route_version: 1, version_status: 'published', processes: [], used_orders: 2, used_products: 1, is_locked: true },
+        { id: 2, route_code: 'ROUTE-0002', name: '未引用路线', category: '结构件', lifecycle_status: 'active', route_version: 1, version_status: 'published', processes: [], used_orders: 0, used_products: 0, is_locked: false },
       ],
       total: 2,
-      summary: {
-        total_routes: 49,
-        category_counts: { '结构件': 43, '机加工': 6 },
-        process_nodes_total: 296,
-      },
+      summary: { total_routes: 49, category_counts: { '结构件': 43, '机加工': 6 }, process_nodes_total: 296 },
     })
   })
 
-  it('shows reference counts and disables changes for locked routes', async () => {
+  it('keeps references visible and replaces edit/delete with revision and retirement', async () => {
     const wrapper = mount(RouteList)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('订单引用 2 · 产品引用 1')
-    expect(wrapper.get('[data-testid="route-edit-1"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="route-delete-1"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="route-edit-1"]').attributes('title')).toContain('不能修改或删除')
-    expect(wrapper.get('[data-testid="route-edit-2"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-testid="route-delete-2"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('订单 2 / 产品 1')
+    expect(wrapper.find('[data-testid="route-edit-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="route-delete-1"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="route-revision-1"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="route-revision-2"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('申请退休')
     expect(wrapper.text()).toContain('49')
     expect(wrapper.text()).toContain('296')
   })
 
-  it('guards programmatic edit attempts for locked routes', async () => {
+  it('allows an already referenced route to enter the revision workflow', async () => {
     const wrapper = mount(RouteList)
     await flushPromises()
 
-    wrapper.vm.openEdit({
-      id: 1,
-      is_locked: true,
-      used_orders: 2,
-      used_products: 1,
-    })
+    await wrapper.get('[data-testid="route-revision-1"]').trigger('click')
+    await flushPromises()
 
-    expect(wrapper.vm.showModal).toBe(false)
-    expect(mocks.showToast).toHaveBeenCalledWith(
-      '已被2 个订单、1 个产品引用，不能修改或删除；请新建路线供后续业务使用',
-      'warn',
-    )
+    expect(mocks.listRouteVersions).toHaveBeenCalledWith(1)
+    expect(wrapper.text()).toContain('创建路线修订版')
+    expect(wrapper.find('.command-modal').exists()).toBe(true)
   })
 })

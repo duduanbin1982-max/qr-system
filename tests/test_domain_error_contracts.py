@@ -19,7 +19,6 @@ ALLOWED_ROUTE_EXCEPTION_RECOVERY = {
     ("email_reports.py", "_send_email"),
     ("imports.py", "import_preview"),
     ("imports.py", "bulk_import_orders"),
-    ("imports.py", "bulk_import_products"),
     ("imports.py", "bulk_import_customers"),
     ("settings.py", "save_settings"),
     ("settings.py", "save_company_info"),
@@ -104,6 +103,7 @@ def test_product_bom_unique_constraint_becomes_domain_conflict(monkeypatch):
         lambda: nullcontext(transaction),
     )
     monkeypatch.setattr(ProductBomRepository, "product_exists", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(ProductBomRepository, "material_exists", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ProductBomRepository, "insert_unique", lambda *_args, **_kwargs: None)
 
     with pytest.raises(ConflictError, match="该物料已存在于产品配方中"):

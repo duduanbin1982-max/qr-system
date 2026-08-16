@@ -1,17 +1,56 @@
 """QualityNonconformanceRepository quality persistence subdomain."""
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class QualityNonconformanceRepository:
     @staticmethod
     def insert_ncr(data, user_id, db):
+        binding = None
+        source_table = None
+        source_id = None
+        if data.get("inspection_id"):
+            source_table = "quality_inspections"
+            source_id = data["inspection_id"]
+        elif data.get("task_id"):
+            source_table = "quality_inspection_tasks"
+            source_id = data["task_id"]
+        if source_table:
+            source = db.execute(
+                "SELECT process_id,process_version_id,process_code_snapshot,process_name_snapshot,"
+                "process_category_snapshot,route_id,route_version_id,route_name_snapshot "
+                f"FROM {source_table} WHERE id=?",
+                (source_id,),
+            ).fetchone()
+            if source:
+                binding = dict(source)
+        if not binding or binding.get("process_version_id") is None:
+            binding = capture_process_fact_binding(
+                db,
+                order_id=data.get("order_id"),
+                process_id=data.get("process_id"),
+            )
+        responsible_binding = capture_process_fact_binding(
+            db,
+            order_id=data.get("order_id"),
+            process_id=data.get("responsible_process_id"),
+            route_id=binding.get("route_id"),
+        )
         cursor = db.execute(
             "INSERT INTO quality_nonconformances "
             "(ncr_no, task_id, inspection_id, order_id, process_id, serial_no, supplier_id, material_id, "
             "defect_category, defect_level, defect_quantity, description, disposition, status, "
-            "responsible_user_id, responsible_process_id, owner_id, due_at, source_type, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "responsible_user_id, responsible_process_id, owner_id, due_at, source_type, created_by, "
+            "process_version_id,process_code_snapshot,process_name_snapshot,process_category_snapshot,"
+            "responsible_process_version_id,responsible_process_code_snapshot,responsible_process_name_snapshot,"
+            "responsible_process_category_snapshot,route_id,route_version_id,route_name_snapshot,version_binding_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data["ncr_no"], data.get("task_id"), data.get("inspection_id"), data.get("order_id"),
                 data.get("process_id"), data.get("serial_no", ""), data.get("supplier_id"), data.get("material_id"),
@@ -19,6 +58,14 @@ class QualityNonconformanceRepository:
                 data.get("description", ""), data.get("disposition", "pending"), data.get("status", "open"),
                 data.get("responsible_user_id"), data.get("responsible_process_id"), data.get("owner_id"),
                 data.get("due_at", ""), data.get("source_type", "inspection"), user_id,
+                binding.get("process_version_id"), binding.get("process_code_snapshot", ""),
+                binding.get("process_name_snapshot", ""), binding.get("process_category_snapshot", ""),
+                responsible_binding.get("process_version_id"), responsible_binding.get("process_code_snapshot", ""),
+                responsible_binding.get("process_name_snapshot", ""), responsible_binding.get("process_category_snapshot", ""),
+                binding.get("route_id") or responsible_binding.get("route_id"),
+                binding.get("route_version_id") or responsible_binding.get("route_version_id"),
+                binding.get("route_name_snapshot") or responsible_binding.get("route_name_snapshot", ""),
+                "captured" if binding.get("process_version_id") or responsible_binding.get("process_version_id") else "",
             ),
         )
         return cursor.lastrowid
@@ -33,21 +80,31 @@ class QualityNonconformanceRepository:
         if disposition:
             where.append("ncr.disposition=?"); params.append(disposition)
         if keyword:
-            where.append("(ncr.ncr_no LIKE ? OR o.order_no LIKE ? OR process.name LIKE ? OR ncr.description LIKE ?)")
+            process_name = process_value_sql("ncr", "process_version", "process")
+            where.append("(ncr.ncr_no LIKE ? OR o.order_no LIKE ? OR " + process_name + " LIKE ? OR ncr.description LIKE ?)")
             value = f"%{keyword}%"; params.extend([value, value, value, value])
         clause = " AND ".join(where) if where else "1=1"
         total = db.execute(
             "SELECT COUNT(*) FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
-            "LEFT JOIN processes process ON process.id=ncr.process_id WHERE " + clause,
+            "LEFT JOIN processes process ON process.id=ncr.process_id "
+            + process_version_join("ncr", "process_version") + "WHERE " + clause,
             params,
         ).fetchone()[0]
+        process_name = process_value_sql("ncr", "process_version", "process")
+        responsible_process_name = process_value_sql(
+            "ncr", "responsible_process_version", "responsible_process", role="responsible_process"
+        )
         rows = db.execute(
-            "SELECT ncr.*, o.order_no, o.product_name, process.name AS process_name, "
-            "responsible.name AS responsible_user_name, owner.name AS owner_name, supplier.name AS supplier_name, "
+            "SELECT ncr.*, o.order_no, o.product_name, " + process_name + " AS process_name, "
+            + responsible_process_name + " AS responsible_process_name, "
+            + "responsible.name AS responsible_user_name, owner.name AS owner_name, supplier.name AS supplier_name, "
             "material.name AS material_name, task.task_no "
             "FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
             "LEFT JOIN processes process ON process.id=ncr.process_id "
-            "LEFT JOIN users responsible ON responsible.id=ncr.responsible_user_id "
+            + process_version_join("ncr", "process_version")
+            + "LEFT JOIN processes responsible_process ON responsible_process.id=ncr.responsible_process_id "
+            + process_version_join("ncr", "responsible_process_version", "responsible_process")
+            + "LEFT JOIN users responsible ON responsible.id=ncr.responsible_user_id "
             "LEFT JOIN users owner ON owner.id=ncr.owner_id LEFT JOIN suppliers supplier ON supplier.id=ncr.supplier_id "
             "LEFT JOIN materials material ON material.id=ncr.material_id "
             "LEFT JOIN quality_inspection_tasks task ON task.id=ncr.task_id "
@@ -55,6 +112,7 @@ class QualityNonconformanceRepository:
             "WHEN 'pending_reinspection' THEN 2 ELSE 3 END, ncr.id DESC LIMIT ? OFFSET ?",
             params + [limit, (page - 1) * limit],
         ).fetchall()
+        warn_legacy_fact_rows("quality_nonconformances", rows, roles=("process", "responsible_process"))
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "limit": limit}
 
     @staticmethod
@@ -73,13 +131,21 @@ class QualityNonconformanceRepository:
     @staticmethod
     def ncr_detail(ncr_id, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("ncr", "process_version", "process")
+        responsible_process_name = process_value_sql(
+            "ncr", "responsible_process_version", "responsible_process", role="responsible_process"
+        )
         row = db.execute(
-            "SELECT ncr.*, o.order_no, o.product_name, o.product_code, process.name AS process_name, "
-            "responsible.name AS responsible_user_name, owner.name AS owner_name, "
+            "SELECT ncr.*, o.order_no, o.product_name, o.product_code, " + process_name + " AS process_name, "
+            + responsible_process_name + " AS responsible_process_name, "
+            + "responsible.name AS responsible_user_name, owner.name AS owner_name, "
             "supplier.name AS supplier_name, material.name AS material_name "
             "FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
             "LEFT JOIN processes process ON process.id=ncr.process_id "
-            "LEFT JOIN users responsible ON responsible.id=ncr.responsible_user_id "
+            + process_version_join("ncr", "process_version")
+            + "LEFT JOIN processes responsible_process ON responsible_process.id=ncr.responsible_process_id "
+            + process_version_join("ncr", "responsible_process_version", "responsible_process")
+            + "LEFT JOIN users responsible ON responsible.id=ncr.responsible_user_id "
             "LEFT JOIN users owner ON owner.id=ncr.owner_id "
             "LEFT JOIN suppliers supplier ON supplier.id=ncr.supplier_id "
             "LEFT JOIN materials material ON material.id=ncr.material_id "
@@ -102,15 +168,29 @@ class QualityNonconformanceRepository:
 
     @staticmethod
     def update_ncr(ncr_id, data, db):
+        current = db.execute(
+            "SELECT order_id,route_id FROM quality_nonconformances WHERE id=?", (ncr_id,)
+        ).fetchone()
+        responsible_binding = capture_process_fact_binding(
+            db,
+            order_id=current["order_id"] if current else None,
+            process_id=data.get("responsible_process_id"),
+            route_id=current["route_id"] if current else None,
+        )
         db.execute(
             "UPDATE quality_nonconformances SET disposition=?, status=?, responsible_user_id=?, "
             "responsible_process_id=?, owner_id=?, due_at=?, root_cause=?, corrective_action=?, "
-            "verification_result=?, closed_by=?, closed_at=?, updated_at=datetime('now','localtime') WHERE id=?",
+            "verification_result=?, closed_by=?, closed_at=?, responsible_process_version_id=?,"
+            "responsible_process_code_snapshot=?,responsible_process_name_snapshot=?,"
+            "responsible_process_category_snapshot=?,updated_at=datetime('now','localtime') WHERE id=?",
             (
                 data.get("disposition", "pending"), data.get("status", "open"), data.get("responsible_user_id"),
                 data.get("responsible_process_id"), data.get("owner_id"), data.get("due_at", ""),
                 data.get("root_cause", ""), data.get("corrective_action", ""),
-                data.get("verification_result", ""), data.get("closed_by"), data.get("closed_at", ""), ncr_id,
+                data.get("verification_result", ""), data.get("closed_by"), data.get("closed_at", ""),
+                responsible_binding.get("process_version_id"), responsible_binding.get("process_code_snapshot", ""),
+                responsible_binding.get("process_name_snapshot", ""),
+                responsible_binding.get("process_category_snapshot", ""), ncr_id,
             ),
         )
 

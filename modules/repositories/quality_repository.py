@@ -10,6 +10,12 @@ from modules.domain.reporting_day import (
 )
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class QualityRepository:
@@ -59,7 +65,8 @@ class QualityRepository:
             where_parts.append("qi.result = ?")
             params.append(result)
         if search:
-            where_parts.append("(o.order_no LIKE ? OR p.name LIKE ?)")
+            process_name = process_value_sql("qi", "process_version", "p")
+            where_parts.append("(o.order_no LIKE ? OR " + process_name + " LIKE ?)")
             like = "%" + search + "%"
             params.extend([like, like])
         if date_from:
@@ -75,26 +82,35 @@ class QualityRepository:
             "SELECT COUNT(*) FROM quality_inspections qi "
             "JOIN orders o ON qi.order_id = o.id "
             "JOIN processes p ON qi.process_id = p.id "
-            "WHERE " + where_clause, params
+            + process_version_join("qi", "process_version")
+            + "WHERE " + where_clause, params
         ).fetchone()[0]
 
         offset = (page - 1) * per_page
+        process_name = process_value_sql("qi", "process_version", "p")
         rows = db.execute(
             "SELECT qi.*, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer_name, "
-            "p.name as process_name, u.name as inspector_name "
-            "FROM quality_inspections qi "
+            + process_name + " as process_name_display, u.name as inspector_name "
+            + "FROM quality_inspections qi "
             "JOIN orders o ON qi.order_id = o.id "
             "LEFT JOIN customers c ON o.customer_id = c.id "
             "JOIN processes p ON qi.process_id = p.id "
-            "LEFT JOIN users u ON qi.inspector_id = u.id "
+            + process_version_join("qi", "process_version")
+            + "LEFT JOIN users u ON qi.inspector_id = u.id "
             "WHERE " + where_clause + " "
             "ORDER BY qi.inspected_at DESC LIMIT ? OFFSET ?",
             params + [per_page, offset]
         ).fetchall()
+        warn_legacy_fact_rows("quality_inspections", rows)
 
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["process_name"] = item.pop("process_name_display", item.get("process_name", ""))
+            items.append(item)
         return {
-            "ok": True, "items": [dict(r) for r in rows],
+            "ok": True, "items": items,
             "total": total, "page": page, "per_page": per_page
         }
 
@@ -113,7 +129,8 @@ class QualityRepository:
         if result:
             where_parts.append("qi.result = ?"); params.append(result)
         if search:
-            where_parts.append("(o.order_no LIKE ? OR p.name LIKE ?)")
+            process_name = process_value_sql("qi", "process_version", "p")
+            where_parts.append("(o.order_no LIKE ? OR " + process_name + " LIKE ?)")
             like = "%" + search + "%"
             params.extend([like, like])
         if date_from:
@@ -122,19 +139,28 @@ class QualityRepository:
             where_parts.append("qi.inspected_at <= ?"); params.append(date_to + " 23:59:59")
         where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
-        return db.execute(
+        process_name = process_value_sql("qi", "process_version", "p")
+        rows = db.execute(
             "SELECT qi.*, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer_name, "
-            "p.name as process_name, u.name as inspector_name "
-            "FROM quality_inspections qi "
+            + process_name + " as process_name_display, u.name as inspector_name "
+            + "FROM quality_inspections qi "
             "JOIN orders o ON qi.order_id = o.id "
             "LEFT JOIN customers c ON o.customer_id = c.id "
             "JOIN processes p ON qi.process_id = p.id "
-            "LEFT JOIN users u ON qi.inspector_id = u.id "
+            + process_version_join("qi", "process_version")
+            + "LEFT JOIN users u ON qi.inspector_id = u.id "
             "WHERE " + where_clause + " "
             "ORDER BY qi.inspected_at DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("quality_inspections", rows)
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["process_name"] = item.pop("process_name_display", item.get("process_name", ""))
+            items.append(item)
+        return items
 
     @staticmethod
     def find_by_id(inspection_id, db=None):
@@ -152,13 +178,18 @@ class QualityRepository:
 
     @staticmethod
     def insert_inspection_txn(data, user_id, db):
+        binding = capture_process_fact_binding(
+            db, order_id=data["order_id"], process_id=data["process_id"]
+        )
         cur = db.execute(
             "INSERT INTO quality_inspections "
             "(order_id, process_id, inspection_type, inspector_id, quantity_checked, "
             "quantity_passed, quantity_failed, result, defect_category, defect_quantity, "
             "notes, inspected_at, score_total, score_detail_json, defect_level, "
-            "defect_items_json, suggested_result, final_result, override_reason) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "defect_items_json, suggested_result, final_result, override_reason, "
+            "process_version_id,process_code_snapshot,process_name_snapshot,process_category_snapshot,"
+            "route_id,route_version_id,route_name_snapshot,version_binding_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["process_id"], data.get("inspection_type", "first_article"),
              user_id, data.get("quantity_checked", 0), data.get("quantity_passed", 0),
              data.get("quantity_failed", 0), data.get("result", "pending"),
@@ -167,7 +198,10 @@ class QualityRepository:
              data.get("score_total", 0), data.get("score_detail_json", "{}"),
              data.get("defect_level", ""), data.get("defect_items_json", "[]"),
              data.get("suggested_result", ""), data.get("final_result", ""),
-             data.get("override_reason", ""))
+             data.get("override_reason", ""), binding["process_version_id"],
+             binding.get("process_code_snapshot", ""), binding.get("process_name_snapshot", ""),
+             binding.get("process_category_snapshot", ""), binding.get("route_id"),
+             binding.get("route_version_id"), binding.get("route_name_snapshot", ""), "captured")
         )
         return cur.lastrowid
 
@@ -416,10 +450,12 @@ class QualityRepository:
         if process_id == "" or process_id == 0:
             process_id = None
         if not process_id and data.get("process_name") and data.get("order_id"):
+            process_name = process_value_sql("op", "process_version", "p")
             row = db.execute(
                 "SELECT op.process_id FROM order_processes op "
                 "JOIN processes p ON op.process_id = p.id "
-                "WHERE op.order_id = ? AND p.name = ?",
+                + process_version_join("op", "process_version")
+                + "WHERE op.order_id = ? AND " + process_name + " = ?",
                 (data["order_id"], data["process_name"])
             ).fetchone()
             if row:
@@ -437,17 +473,22 @@ class QualityRepository:
                     process_id = row["process_id"]
         if not process_id:
             raise ValueError("无法确定抽检工序，请选择工序后重试")
+        binding = capture_process_fact_binding(
+            db, order_id=data.get("order_id"), process_id=process_id
+        )
         cur = db.execute(
             "INSERT INTO quality_inspections "
             "(order_id, process_id, order_no, product_code, process_name, inspector_name, "
             "inspector_id, result, notes, rework_process, remark, serial_no, "
             "quantity_checked, quantity_passed, quantity_failed, score_total, "
             "score_detail_json, defect_level, defect_items_json, suggested_result, "
-            "final_result, override_reason) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "final_result, override_reason, process_version_id,process_code_snapshot,"
+            "process_name_snapshot,process_category_snapshot,route_id,route_version_id,"
+            "route_name_snapshot,version_binding_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data.get("order_id"), process_id,
              data.get("order_no", ""), data.get("product_code", ""),
-             data.get("process_name", ""), data.get("inspector_name", ""),
+             data.get("process_name") or binding.get("process_name_snapshot", ""), data.get("inspector_name", ""),
              user_id, data.get("result", ""), data.get("notes", ""),
              data.get("rework_process", ""), data.get("remark", ""),
              data.get("serial_no", ""), data.get("quantity_checked", 1),
@@ -456,7 +497,10 @@ class QualityRepository:
              data.get("score_total", 0), data.get("score_detail_json", "{}"),
              data.get("defect_level", ""), data.get("defect_items_json", "[]"),
              data.get("suggested_result", ""), data.get("final_result", ""),
-             data.get("override_reason", ""))
+             data.get("override_reason", ""), binding["process_version_id"],
+             binding.get("process_code_snapshot", ""), binding.get("process_name_snapshot", ""),
+             binding.get("process_category_snapshot", ""), binding.get("route_id"),
+             binding.get("route_version_id"), binding.get("route_name_snapshot", ""), "captured")
         )
         return cur.lastrowid
 

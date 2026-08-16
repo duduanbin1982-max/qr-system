@@ -1,7 +1,6 @@
 """Database migration registry and runner."""
 
 import sqlite3
-
 from modules.config import DB_PATH
 from modules.migration_auth import MIGRATIONS as AUTH_MIGRATIONS
 from modules.migration_baseline import MIGRATIONS as BASELINE_MIGRATIONS
@@ -25,6 +24,8 @@ from modules.migration_performance_department import (
     MIGRATIONS as PERFORMANCE_DEPARTMENT_MIGRATIONS,
 )
 from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
+from modules.migration_process_versioning import MIGRATIONS as PROCESS_VERSIONING_MIGRATIONS
+from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_MIGRATIONS
 
 
 MIGRATIONS = sorted([
@@ -48,6 +49,8 @@ MIGRATIONS = sorted([
     *PAYROLL_LEDGER_MIGRATIONS,
     *PERFORMANCE_DEPARTMENT_MIGRATIONS,
     *USER_MANAGEMENT_MIGRATIONS,
+    *PROCESS_VERSIONING_MIGRATIONS,
+    *PRODUCT_INTEGRITY_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]

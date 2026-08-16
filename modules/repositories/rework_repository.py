@@ -4,6 +4,12 @@ qr-system - ReworkRepository
 All SQL for rework_records table.
 """
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class ReworkRepository:
@@ -21,9 +27,12 @@ class ReworkRepository:
             where_parts.append("rw.status = ?")
             params.append(status)
         if search:
-            where_parts.append("(o.order_no LIKE ? OR p.name LIKE ? OR u.name LIKE ?)")
+            where_parts.append(
+                "(o.order_no LIKE ? OR rw.process_name_snapshot LIKE ? "
+                "OR process_version.name LIKE ? OR p.name LIKE ? OR u.name LIKE ?)"
+            )
             like = "%" + search + "%"
-            params.extend([like, like, like])
+            params.extend([like] * 5)
         if date_from:
             where_parts.append("rw.created_at >= ?")
             params.append(date_from)
@@ -43,26 +52,30 @@ class ReworkRepository:
             "SELECT COUNT(*) FROM rework_records rw "
             "JOIN orders o ON rw.order_id = o.id "
             "JOIN processes p ON rw.process_id = p.id "
-            "LEFT JOIN users u ON rw.user_id = u.id "
+            + process_version_join("rw", "process_version")
+            + "LEFT JOIN users u ON rw.user_id = u.id "
             "WHERE " + where_clause, params
         ).fetchone()[0]
 
         offset = (page - 1) * per_page
+        process_name = process_value_sql("rw", "process_version", "p")
         rows = db.execute(
             "SELECT rw.*, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer_name, "
-            "p.name as process_name, u.name as worker_name, "
+            + process_name + " as process_name,u.name as worker_name,"
             "cu.name as completed_by_name "
             "FROM rework_records rw "
             "JOIN orders o ON rw.order_id = o.id "
             "LEFT JOIN customers c ON o.customer_id = c.id "
             "JOIN processes p ON rw.process_id = p.id "
-            "LEFT JOIN users u ON rw.user_id = u.id "
+            + process_version_join("rw", "process_version")
+            + "LEFT JOIN users u ON rw.user_id = u.id "
             "LEFT JOIN users cu ON rw.completed_by = cu.id "
             "WHERE " + where_clause + " "
             "ORDER BY rw.created_at DESC LIMIT ? OFFSET ?",
             params + [per_page, offset]
         ).fetchall()
+        warn_legacy_fact_rows("rework_records", rows)
 
         return {
             "ok": True, "items": [dict(r) for r in rows],
@@ -122,11 +135,22 @@ class ReworkRepository:
     def insert_rework_txn(
         order_id, process_id, user_id, quantity, reason, db, source_ncr_id=None
     ):
+        binding = capture_process_fact_binding(
+            db, order_id=order_id, process_id=process_id
+        )
         cur = db.execute(
             "INSERT INTO rework_records "
-            "(order_id, process_id, user_id, quantity, reason, source_ncr_id) "
-            "VALUES (?,?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason, source_ncr_id)
+            "(order_id,process_id,user_id,quantity,reason,source_ncr_id,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_id,route_version_id,route_name_snapshot,"
+            "version_binding_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                order_id, process_id, user_id, quantity, reason, source_ncr_id,
+                binding["process_version_id"], binding["process_code_snapshot"],
+                binding["process_name_snapshot"], binding["process_category_snapshot"],
+                binding["route_id"], binding["route_version_id"],
+                binding["route_name_snapshot"], binding["version_binding_source"],
+            )
         )
         return cur.lastrowid
 
@@ -246,30 +270,37 @@ class ReworkRepository:
     @staticmethod
     def top_rework_processes(top_n=5, db=None):
         db = resolve_db(db)
+        process_name = process_value_sql("rw", "process_version", "p")
         rows = db.execute(
-            "SELECT p.id as process_id, p.name as process_name, COUNT(*) as rework_count, "
+            "SELECT rw.process_id,rw.process_version_id," + process_name + " AS process_name,"
+            "COUNT(*) as rework_count, "
             "COALESCE(SUM(rw.quantity),0) as rework_qty "
             "FROM rework_records rw "
-            "JOIN processes p ON rw.process_id = p.id "
-            "GROUP BY rw.process_id "
+            "JOIN processes p ON rw.process_id=p.id "
+            + process_version_join("rw", "process_version")
+            + "GROUP BY rw.process_id,rw.process_version_id," + process_name + " "
             "ORDER BY rework_count DESC LIMIT ?",
             (top_n,)
         ).fetchall()
         total_work = db.execute(
-            "SELECT p.id as process_id, COALESCE(SUM(wr.quantity),0) as total_qty "
+            "SELECT wr.process_id,wr.process_version_id,COALESCE(SUM(wr.quantity),0) as total_qty "
             "FROM work_records wr "
-            "JOIN processes p ON wr.process_id = p.id "
             "WHERE wr.type != 'scrap' "
-            "GROUP BY wr.process_id"
+            "GROUP BY wr.process_id,wr.process_version_id"
         ).fetchall()
-        work_map = {r["process_id"]: r["total_qty"] for r in total_work}
+        work_map = {
+            (r["process_id"], r["process_version_id"]): r["total_qty"]
+            for r in total_work
+        }
+        warn_legacy_fact_rows("rework_records", rows)
         result = []
         for r in rows:
-            total = work_map.get(r["process_id"], 0)
+            total = work_map.get((r["process_id"], r["process_version_id"]), 0)
             rate = round(r["rework_qty"] / total * 100, 1) if total > 0 else 0
             result.append({
                 "process_name": r["process_name"],
                 "process_id": r["process_id"],
+                "process_version_id": r["process_version_id"],
                 "rework_count": r["rework_count"],
                 "rework_qty": r["rework_qty"],
                 "total_qty": total,
@@ -322,6 +353,7 @@ class ReworkRepository:
                             worker_id=None, process_id=None, db=None):
         """Get all matching rework records for export (no pagination)."""
         db = resolve_db(db)
+        process_name = process_value_sql("rw", "process_version", "p")
         where_parts = []
         params = []
 
@@ -329,7 +361,9 @@ class ReworkRepository:
             where_parts.append("rw.status = ?")
             params.append(status)
         if search:
-            where_parts.append("(o.order_no LIKE ? OR p.name LIKE ? OR u.name LIKE ?)")
+            where_parts.append(
+                "(o.order_no LIKE ? OR " + process_name + " LIKE ? OR u.name LIKE ?)"
+            )
             like = "%" + search + "%"
             params.extend([like, like, like])
         if date_from:
@@ -347,16 +381,18 @@ class ReworkRepository:
 
         where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
-        return db.execute(
+        rows = db.execute(
             "SELECT rw.*, o.order_no, o.product_name, "
             "COALESCE(c.name, o.customer) as customer_name, "
-            "p.name as process_name, u.name as worker_name "
+            + process_name + " AS process_name,u.name as worker_name "
             "FROM rework_records rw "
             "JOIN orders o ON rw.order_id = o.id "
             "LEFT JOIN customers c ON o.customer_id = c.id "
             "JOIN processes p ON rw.process_id = p.id "
-            "LEFT JOIN users u ON rw.user_id = u.id "
-            "WHERE " + where_clause + " "
+            + process_version_join("rw", "process_version")
+            + "LEFT JOIN users u ON rw.user_id = u.id WHERE " + where_clause + " "
             "ORDER BY rw.created_at DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("rework_records", rows)
+        return rows

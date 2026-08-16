@@ -3,6 +3,11 @@ from datetime import datetime, timedelta
 
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 from modules.domain.reporting_day import (
     current_reporting_day,
     reporting_day_bounds,
@@ -261,32 +266,47 @@ class ReportsRepository:
     @staticmethod
     def fetch_quality_by_process(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT p.id, p.name, p.category, "
+        process_name = process_value_sql("wr", "process_version", "p")
+        process_category = process_value_sql(
+            "wr", "process_version", "p", field="category"
+        )
+        rows = db.execute(
+            "SELECT p.id," + process_name + " AS name," + process_category
+            + " AS category,wr.process_id,wr.process_version_id,"
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap, "
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as rework "
             "FROM processes p JOIN work_records wr ON wr.process_id=p.id "
-            "WHERE " + where_clause + " GROUP BY p.id ORDER BY output DESC",
+            + process_version_join("wr", "process_version")
+            + "WHERE " + where_clause + " GROUP BY wr.process_id,wr.process_version_id,"
+            + process_name + "," + process_category + " ORDER BY output DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def fetch_quality_inspection_by_process(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT p.name, COUNT(*) as total_inspections, "
+        process_name = process_value_sql("qi", "process_version", "p")
+        rows = db.execute(
+            "SELECT " + process_name + " AS name,qi.process_id,qi.process_version_id,"
+            "COUNT(*) as total_inspections, "
             "COALESCE(SUM(CASE WHEN qi.result='pass' THEN 1 ELSE 0 END),0) as pass_count, "
             "COALESCE(SUM(CASE WHEN qi.result IN('fail','partial') THEN 1 ELSE 0 END),0) as fail_count, "
             "COALESCE(SUM(CASE WHEN qi.result='scrap' THEN 1 ELSE 0 END),0) as scrap_count, "
             "COALESCE(SUM(CASE WHEN qi.result='rework' THEN 1 ELSE 0 END),0) as rework_count "
             "FROM quality_inspections qi "
             "JOIN processes p ON qi.process_id = p.id "
-            "JOIN orders o ON qi.order_id = o.id AND o.deleted_at IS NULL "
+            + process_version_join("qi", "process_version")
+            + "JOIN orders o ON qi.order_id = o.id AND o.deleted_at IS NULL "
             "WHERE " + where_clause + " "
-            "GROUP BY p.name ORDER BY total_inspections DESC",
+            "GROUP BY qi.process_id,qi.process_version_id," + process_name
+            + " ORDER BY total_inspections DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("quality_inspections", rows)
+        return rows
 
     # ========== product_report ==========
     @staticmethod
@@ -421,26 +441,34 @@ class ReportsRepository:
     @staticmethod
     def fetch_product_process_matrix(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
+        process_name = process_value_sql("wr", "process_version", "pr")
+        rows = db.execute(
             "SELECT p.product_code, p.product_name, p.model, p.spec, "
-            "pr.id as process_id, pr.name as process_name, pr.seq_order, "
+            "pr.id as process_id,wr.process_version_id," + process_name
+            + " as process_name,pr.seq_order,"
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output "
             "FROM products p "
             "JOIN order_product_links opl ON opl.product_id=p.id "
             "JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "JOIN work_records wr ON wr.order_id=o.id AND " + where_clause + " "
             "JOIN processes pr ON wr.process_id=pr.id "
-            "GROUP BY p.product_code, p.product_name, p.model, p.spec, pr.id, pr.name, pr.seq_order "
-            "ORDER BY p.product_code, pr.seq_order, pr.name",
+            + process_version_join("wr", "process_version")
+            + "GROUP BY p.product_code,p.product_name,p.model,p.spec,pr.id,"
+            "wr.process_version_id," + process_name + ",pr.seq_order "
+            "ORDER BY p.product_code,pr.seq_order,process_name",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     # ========== model_process_stats ==========
     @staticmethod
     def fetch_model_process_stats(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT p.model, pr.name as process_name, "
+        process_name = process_value_sql("wr", "process_version", "pr")
+        rows = db.execute(
+            "SELECT p.model,wr.process_id,wr.process_version_id," + process_name
+            + " as process_name,"
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
             "FROM products p "
@@ -448,27 +476,37 @@ class ReportsRepository:
             "JOIN orders o ON o.id=opl.order_id AND o.deleted_at IS NULL "
             "JOIN work_records wr ON wr.order_id=o.id AND " + where_clause + " "
             "JOIN processes pr ON wr.process_id=pr.id "
-            "GROUP BY p.model, pr.name ORDER BY output DESC",
+            + process_version_join("wr", "process_version")
+            + "GROUP BY p.model,wr.process_id,wr.process_version_id," + process_name
+            + " ORDER BY output DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     # ========== product_process_stats ==========
     @staticmethod
     def fetch_product_process_proc_names(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT DISTINCT pr.name FROM processes pr "
+        process_name = process_value_sql("wr", "process_version", "pr")
+        rows = db.execute(
+            "SELECT DISTINCT " + process_name + " AS name,wr.process_id,"
+            "wr.process_version_id FROM processes pr "
             "JOIN work_records wr ON wr.process_id=pr.id "
-            "JOIN orders o ON wr.order_id=o.id "
-            "WHERE " + where_clause + " ORDER BY pr.name", params
+            + process_version_join("wr", "process_version")
+            + "JOIN orders o ON wr.order_id=o.id "
+            "WHERE " + where_clause + " ORDER BY name", params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def fetch_product_process_matrix_data(where_clause, params, db=None):
         db = resolve_db(db)
-        return db.execute(
+        process_name = process_value_sql("wr", "process_version", "pr")
+        rows = db.execute(
             "SELECT p.product_code, p.product_name, p.model, p.spec, p.category, "
-            "pr.name as process_name, "
+            "wr.process_id,wr.process_version_id," + process_name + " as process_name,"
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as scrap "
             "FROM products p "
@@ -476,9 +514,13 @@ class ReportsRepository:
             "JOIN orders o ON o.id=opl.order_id "
             "JOIN work_records wr ON wr.order_id=o.id "
             "JOIN processes pr ON wr.process_id=pr.id "
-            "WHERE " + where_clause + " GROUP BY p.product_code, pr.name ORDER BY p.product_code",
+            + process_version_join("wr", "process_version")
+            + "WHERE " + where_clause + " GROUP BY p.product_code,wr.process_id,"
+            "wr.process_version_id," + process_name + " ORDER BY p.product_code",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     # ========== customer_stats ==========
     @staticmethod

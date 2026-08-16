@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "authorization": {
+    "approved_by": "杜斌",
+    "approved_at": "2026-08-15",
+    "scope": "Task 16 production process V2 historical price binding resolution"
+  },
+  "backup_route_revisions": [
+    {
+      "route_id": 3,
+      "required_price_version_ids": [41],
+      "topology_sha256": "f31d42a06dd77ecc9a59b04fb7f163c7a3228db31b32ac1a8ce18f9639de0fef",
+      "observed_from": "2026-07-05T03:00:01+08:00",
+      "observed_to": "2026-07-29T16:54:13+08:00",
+      "representative_backup": "weekly_20260705_030001.db",
+      "representative_backup_sha256": "bc7e98007d88d2b0131a7ca508697f5e96034603b8a8875a5e9f24c034b3e316",
+      "nodes": [
+        {"process_id": 10730, "is_required": 1, "required_audit": 0},
+        {"process_id": 328, "is_required": 1, "required_audit": 0},
+        {"process_id": 195, "is_required": 1, "required_audit": 0},
+        {"process_id": 329, "is_required": 1, "required_audit": 0},
+        {"process_id": 324, "is_required": 1, "required_audit": 0},
+        {"process_id": 330, "is_required": 1, "required_audit": 0},
+        {"process_id": 223, "is_required": 1, "required_audit": 0},
+        {"process_id": 12316, "is_required": 1, "required_audit": 0}
+      ]
+    },
+    {
+      "route_id": 40,
+      "required_price_version_ids": [142],
+      "topology_sha256": "8dab257aa6b18fda4b065b7c4b2c85edece3160b1d0136cac945a17285e0bc02",
+      "observed_from": "2026-07-05T03:00:01+08:00",
+      "observed_to": "2026-07-17T03:00:01+08:00",
+      "representative_backup": "weekly_20260705_030001.db",
+      "representative_backup_sha256": "bc7e98007d88d2b0131a7ca508697f5e96034603b8a8875a5e9f24c034b3e316",
+      "nodes": [
+        {"process_id": 10730, "is_required": 1, "required_audit": 0},
+        {"process_id": 328, "is_required": 1, "required_audit": 0},
+        {"process_id": 195, "is_required": 1, "required_audit": 0},
+        {"process_id": 329, "is_required": 1, "required_audit": 0},
+        {"process_id": 324, "is_required": 1, "required_audit": 0},
+        {"process_id": 330, "is_required": 1, "required_audit": 0},
+        {"process_id": 223, "is_required": 1, "required_audit": 0},
+        {"process_id": 423, "is_required": 1, "required_audit": 0}
+      ]
+    },
+    {
+      "route_id": 40,
+      "required_price_version_ids": [142],
+      "topology_sha256": "f49ab140cad2d1f0038a4adae7692a672cb76bbd5eaad0414f4befa2b0b2b2b8",
+      "observed_from": "2026-07-18T00:00:21+08:00",
+      "observed_to": "2026-07-29T16:54:13+08:00",
+      "representative_backup": "production_20260718_000021.db",
+      "representative_backup_sha256": "2e6c00085eec33dd15e4f776c4459be937290b507a4c62b595fd6a9c4b41199b",
+      "nodes": [
+        {"process_id": 10730, "is_required": 1, "required_audit": 0},
+        {"process_id": 328, "is_required": 1, "required_audit": 0},
+        {"process_id": 195, "is_required": 1, "required_audit": 0},
+        {"process_id": 329, "is_required": 1, "required_audit": 0},
+        {"process_id": 324, "is_required": 1, "required_audit": 0},
+        {"process_id": 223, "is_required": 1, "required_audit": 0},
+        {"process_id": 423, "is_required": 1, "required_audit": 0}
+      ]
+    },
+    {
+      "route_id": 49,
+      "required_price_version_ids": [199],
+      "topology_sha256": "d4a8898c98a6b168ec16761f181440bf5986a8682808dc6ad21e57296ad9beb2",
+      "observed_from": "2026-07-12T03:00:01+08:00",
+      "observed_to": "2026-07-29T16:54:13+08:00",
+      "representative_backup": "weekly_20260712_030001.db",
+      "representative_backup_sha256": "3bb970247383c9efa5c044a82cb0ed7e7e78b70d1efed9345d88d4627ad70f30",
+      "nodes": [
+        {"process_id": 10730, "is_required": 1, "required_audit": 0},
+        {"process_id": 328, "is_required": 1, "required_audit": 0},
+        {"process_id": 195, "is_required": 1, "required_audit": 0},
+        {"process_id": 329, "is_required": 1, "required_audit": 0},
+        {"process_id": 324, "is_required": 1, "required_audit": 0},
+        {"process_id": 330, "is_required": 1, "required_audit": 0},
+        {"process_id": 423, "is_required": 1, "required_audit": 0},
+        {"process_id": 223, "is_required": 1, "required_audit": 0}
+      ]
+    }
+  ],
+  "fanout_prices": [
+    {
+      "source_price_version_id": 30,
+      "expected": {
+        "route_id": 7,
+        "process_id": 423,
+        "normal_unit_price_micros": 400000,
+        "valid_from": "2026-06-01 00:00:00",
+        "status": "approved",
+        "payroll_detail_count": 10,
+        "payroll_amount_cents": 40000,
+        "price_resolution_count": 10
+      },
+      "primary_topology_sha256": "523c74bcecb55beb2cf57c7d5e75056fb98b8e9eaa29c682a1005e9fe5510e12",
+      "target_topology_sha256": [
+        "eeb7016aff000ede173ca5b9af9bc6d8ef8524283343853302f0da123ef4fc26",
+        "523c74bcecb55beb2cf57c7d5e75056fb98b8e9eaa29c682a1005e9fe5510e12",
+        "7dd446396547b6bbcbf1f948b829f140f28d8581582156b69032850dda7af85a"
+      ],
+      "reason": "Preserve the root-scoped legacy price across all three actual order route revisions; rebind immutable payroll evidence by order revision."
+    },
+    {
+      "source_price_version_id": 142,
+      "expected": {
+        "route_id": 40,
+        "process_id": 423,
+        "normal_unit_price_micros": 400000,
+        "valid_from": "2026-06-01 00:00:00",
+        "status": "approved",
+        "payroll_detail_count": 0,
+        "payroll_amount_cents": 0,
+        "price_resolution_count": 0
+      },
+      "primary_topology_sha256": "f49ab140cad2d1f0038a4adae7692a672cb76bbd5eaad0414f4befa2b0b2b2b8",
+      "target_topology_sha256": [
+        "8dab257aa6b18fda4b065b7c4b2c85edece3160b1d0136cac945a17285e0bc02",
+        "f49ab140cad2d1f0038a4adae7692a672cb76bbd5eaad0414f4befa2b0b2b2b8"
+      ],
+      "reason": "Preserve the approved legacy price across both independently evidenced backup route revisions."
+    }
+  ],
+  "retire_unbound_prices": [
+    {"price_version_id": 14, "route_id": 5, "process_id": 990},
+    {"price_version_id": 15, "route_id": 5, "process_id": 986},
+    {"price_version_id": 48, "route_id": 27, "process_id": 207},
+    {"price_version_id": 49, "route_id": 27, "process_id": 218}
+  ],
+  "retire_effective_at": "2026-08-15 07:00:00"
+}

@@ -165,6 +165,12 @@ class ScanHelperService:
         submit_position_name="",
         db=None,
     ):
+        transaction_db = ScanHelperService._db(db)
+        binding = ScanRepository.get_work_fact_binding(
+            order_id, process_id, db=transaction_db
+        )
+        if binding is None or binding["process_version_id"] is None:
+            raise ValueError("订单工序缺少版本绑定，禁止报工")
         return ScanRepository.insert_report_work_record(
             order_id,
             process_id,
@@ -179,7 +185,8 @@ class ScanHelperService:
             backfill_reason,
             submit_position_id,
             submit_position_name,
-            db=ScanHelperService._db(db),
+            fact_binding=binding,
+            db=transaction_db,
         )
 
     @staticmethod

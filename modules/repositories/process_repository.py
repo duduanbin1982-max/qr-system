@@ -1,8 +1,8 @@
 """qr-system - ProcessRepository"""
 import sqlite3
 
+from modules.master_data_references import PROCESS_REFERENCES
 from modules.repositories.context import resolve_db
-from modules.process_references import PROCESS_REFERENCES
 
 
 class ProcessRepository:
@@ -110,9 +110,9 @@ class ProcessRepository:
         ).fetchone()[0]
 
     @staticmethod
-    def check_impact(pid, db=None):
+    def reference_counts(pid, db=None):
         db = resolve_db(db)
-        impact = {}
+        counts = []
         for reference in PROCESS_REFERENCES:
             table_exists = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -125,7 +125,7 @@ class ProcessRepository:
             }
             predicates = [
                 f'"{column}" = ?'
-                for column in reference.columns
+                for column in reference.root_columns
                 if column in available_columns
             ]
             params = [pid] * len(predicates)
@@ -144,6 +144,14 @@ class ProcessRepository:
                 + " OR ".join(predicates),
                 params,
             ).fetchone()[0]
-            if count:
-                impact[reference.table] = count
-        return impact
+            counts.append((reference, count))
+        return counts
+
+    @staticmethod
+    def check_impact(pid, db=None):
+        """Legacy table/count projection retained for existing callers."""
+        return {
+            reference.table: count
+            for reference, count in ProcessRepository.reference_counts(pid, db=db)
+            if count and reference.impact_level != "internal"
+        }

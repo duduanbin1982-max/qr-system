@@ -2,6 +2,7 @@ from datetime import datetime
 import uuid
 
 from modules.db import get_db
+from factories import ensure_process_version, ensure_route_version
 
 
 def _seed_route_bundle(client):
@@ -20,7 +21,9 @@ def _seed_route_bundle(client):
                 "VALUES (?, ?, ?, ?, 'active', datetime('now','localtime'))",
                 (name, "cross module fixture", "fixture", seq_order),
             )
-            process_ids.append(cursor.lastrowid)
+            process_id = cursor.lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         cursor = db.execute(
             "INSERT INTO process_routes (name, description, status, category, updated_at) "
@@ -29,23 +32,35 @@ def _seed_route_bundle(client):
         )
         route_id = cursor.lastrowid
 
-        for seq_order, (process_id, unit_price) in enumerate(zip(process_ids, (10.0, 12.5)), start=1):
+        for seq_order, process_id in enumerate(process_ids, start=1):
             db.execute(
                 "INSERT INTO process_route_items (route_id, process_id, seq_order, required_audit) "
                 "VALUES (?, ?, ?, 0)",
                 (route_id, process_id, seq_order),
             )
+
+        route_version_id = ensure_route_version(db, route_id)
+        for process_id, unit_price in zip(process_ids, (10.0, 12.5)):
+            process_version_id = db.execute(
+                "SELECT process_version_id FROM process_route_version_items "
+                "WHERE route_version_id=? AND process_id=?",
+                (route_version_id, process_id),
+            ).fetchone()["process_version_id"]
             db.execute(
                 """
                 INSERT INTO route_price_versions (
-                    route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
+                    route_id,route_version_id,process_id,process_version_id,
+                    normal_unit_price_micros,rework_rate_basis_points,
                     rework_rate_configured,valid_from,status,created_by_name,approved_by_name,
                     approved_at,remark
-                ) VALUES (?,?,?,0,0,?,'approved','fixture','fixture',datetime('now','localtime'),'fixture')
+                ) VALUES (?,?,?,?,?,0,0,?,'approved','fixture','fixture',
+                          datetime('now','localtime'),'fixture')
                 """,
                 (
                     route_id,
+                    route_version_id,
                     process_id,
+                    process_version_id,
                     int(unit_price * 10000),
                     datetime.now().strftime("%Y-%m-%d 00:00:00"),
                 ),

@@ -53,7 +53,8 @@ class ProductRepository:
         return db.execute(
             "SELECT id, product_name, product_code, model, spec, style, "
             "upper_opening, lower_opening, plate_thickness, category, "
-            "weight, price, route_id "
+            "weight, price, COALESCE(process_route_id, route_id) AS process_route_id, "
+            "COALESCE(process_route_id, route_id) AS route_id "
             "FROM products WHERE id = ? AND deleted_at IS NULL",
             (pid,),
         ).fetchone()
@@ -65,7 +66,8 @@ class ProductRepository:
         return db.execute(
             "SELECT p.id, p.product_name, p.product_code, p.model, p.spec, p.style, "
             "p.upper_opening, p.lower_opening, p.plate_thickness, p.category, "
-            "p.weight, p.price, p.route_id "
+            "p.weight, p.price, COALESCE(p.process_route_id, p.route_id) AS process_route_id, "
+            "COALESCE(p.process_route_id, p.route_id) AS route_id "
             "FROM product_code_aliases a "
             "JOIN products p ON p.id = a.product_id "
             "WHERE a.product_code = ? AND p.deleted_at IS NULL",
@@ -139,13 +141,32 @@ class ProductRepository:
         return rows, total
 
     @staticmethod
+    def summary(deleted=False, db=None):
+        """Return authoritative counts independent from list pagination."""
+        db = resolve_db(db)
+        predicate = "deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"
+        row = db.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN category='结构件' THEN 1 ELSE 0 END) AS structural, "
+            "SUM(CASE WHEN category='机加工' THEN 1 ELSE 0 END) AS machining "
+            f"FROM products WHERE {predicate}"
+        ).fetchone()
+        return {
+            "total": int(row["total"] or 0),
+            "structural": int(row["structural"] or 0),
+            "machining": int(row["machining"] or 0),
+        }
+
+    @staticmethod
     def list_search(q, limit, db=None):
         """快速搜索产品，返回 id/product_name/product_code/category 等。"""
         db = resolve_db(db)
         if q:
             return db.execute(
                 "SELECT id, product_name, product_code, category, model, spec, style, "
-                "upper_opening, plate_thickness, weight, price, route_id FROM products "
+                "upper_opening, plate_thickness, weight, price, "
+                "COALESCE(process_route_id, route_id) AS process_route_id, "
+                "COALESCE(process_route_id, route_id) AS route_id FROM products "
                 "WHERE deleted_at IS NULL AND (product_name LIKE ? OR product_code LIKE ?) "
                 "ORDER BY product_code LIMIT ?",
                 (f"%{q}%", f"%{q}%", limit)
@@ -153,7 +174,9 @@ class ProductRepository:
         else:
             return db.execute(
                 "SELECT id, product_name, product_code, category, model, spec, style, "
-                "upper_opening, plate_thickness, weight, price, route_id FROM products "
+                "upper_opening, plate_thickness, weight, price, "
+                "COALESCE(process_route_id, route_id) AS process_route_id, "
+                "COALESCE(process_route_id, route_id) AS route_id FROM products "
                 "WHERE deleted_at IS NULL ORDER BY product_code LIMIT ?",
                 (limit,)
             ).fetchall()
@@ -171,6 +194,29 @@ class ProductRepository:
         ).fetchone()[0]
 
     @staticmethod
+    def reference_counts(product_id, db=None):
+        """Return historical references that make physical deletion unsafe."""
+        db = resolve_db(db)
+        return {
+            "orders": int(ProductRepository.count_orders_referencing_product(product_id, db=db)),
+            "work_time_standards": int(db.execute(
+                "SELECT COUNT(*) FROM work_time_standards WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()[0]),
+            "performance_source_facts": int(db.execute(
+                "SELECT COUNT(*) FROM performance_source_facts WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()[0]),
+        }
+
+    @staticmethod
+    def route_exists(route_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM process_routes WHERE id = ?", (route_id,)
+        ).fetchone() is not None
+
+    @staticmethod
     def find_with_fields(pid, db=None):
         """按 ID 查询产品（仅关键字段，用于更新前获取旧值）。"""
         db = resolve_db(db)
@@ -180,7 +226,8 @@ class ProductRepository:
             "IFNULL(upper_opening,'') as upper_opening, "
             "IFNULL(lower_opening,'') as lower_opening, "
             "IFNULL(plate_thickness,'') as plate_thickness, "
-            "IFNULL(category,'结构件') as category "
+            "IFNULL(category,'结构件') as category, weight, price, description, "
+            "COALESCE(process_route_id, route_id) AS process_route_id "
             "FROM products WHERE id = ?", (pid,)
         ).fetchone()
 
@@ -195,8 +242,8 @@ class ProductRepository:
         cur = db.execute("""
             INSERT INTO products (product_name, model, product_code, spec, style,
                 upper_opening, lower_opening, plate_thickness, category, weight, price,
-                description, route_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                description, route_id, process_route_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data["product_name"],
             data["model"],
@@ -207,10 +254,11 @@ class ProductRepository:
             data.get("lower_opening", ""),
             data.get("plate_thickness", ""),
             data.get("category", "结构件"),
-            float(data.get("weight") or 0),
-            float(data.get("price") or 0),
+            data.get("weight"),
+            data.get("price"),
             data.get("description", ""),
-            data.get("route_id") or None
+            data.get("process_route_id") or None,
+            data.get("process_route_id") or None,
         ))
         return cur.lastrowid
 

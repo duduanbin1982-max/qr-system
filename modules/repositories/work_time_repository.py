@@ -3,6 +3,14 @@
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 from modules.domain.reporting_day import reporting_day_bounds
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class WorkTimeRepository:
@@ -83,25 +91,31 @@ class WorkTimeRepository:
     @staticmethod
     def find_order(order_id, db=None):
         db = resolve_db(db)
+        route_name = route_name_sql("o", "route_version", "r")
         return db.execute(
             "SELECT o.id, o.order_no, o.product_code, o.product_name, o.route_id, "
-            "COALESCE(r.name, '') AS route_name "
+            "o.route_version_id," + route_name + " AS route_name "
             "FROM orders o "
             "LEFT JOIN process_routes r ON o.route_id = r.id "
-            "WHERE o.id = ? AND o.deleted_at IS NULL",
+            + route_version_join("o", "route_version")
+            + "WHERE o.id = ? AND o.deleted_at IS NULL",
             (order_id,),
         ).fetchone()
 
     @staticmethod
     def find_order_process(order_id, process_id, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT op.*, p.name AS process_name "
+        process_name = process_value_sql("op", "process_version", "p")
+        row = db.execute(
+            "SELECT op.*," + process_name + " AS process_name "
             "FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? AND op.process_id = ?",
+            + process_version_join("op", "process_version")
+            + "WHERE op.order_id = ? AND op.process_id = ?",
             (order_id, process_id),
         ).fetchone()
+        warn_legacy_fact_rows("order_processes", [row] if row else [])
+        return row
 
     @staticmethod
     def find_standard(standard_id, db=None):
@@ -139,13 +153,15 @@ class WorkTimeRepository:
     def list_standards(filters, page=1, per_page=20, db=None):
         db = resolve_db(db)
         page, per_page, offset = WorkTimeRepository._pagination(page, per_page)
+        process_name = process_value_sql("w", "process_version", "pr")
+        route_name = route_name_sql("w", "route_version", "r")
         where = []
         params = []
         keyword = (filters.get("keyword") or "").strip()
         if keyword:
             like = f"%{keyword}%"
             where.append(
-                "(pr.name LIKE ? OR r.name LIKE ?)"
+                "(" + process_name + " LIKE ? OR " + route_name + " LIKE ?)"
             )
             params.extend([like, like])
         if filters.get("status"):
@@ -161,25 +177,34 @@ class WorkTimeRepository:
         total = db.execute(
             "SELECT COUNT(*) FROM work_time_standards w "
             "LEFT JOIN processes pr ON w.process_id = pr.id "
-            "LEFT JOIN process_routes r ON w.route_id = r.id "
-            "LEFT JOIN process_route_items pri ON pri.route_id = w.route_id AND pri.process_id = w.process_id "
+            + process_version_join("w", "process_version")
+            + "LEFT JOIN process_routes r ON w.route_id = r.id "
+            + route_version_join("w", "route_version")
+            + "LEFT JOIN process_route_items pri ON pri.route_id = w.route_id AND pri.process_id = w.process_id "
             + where_clause,
             params,
         ).fetchone()[0]
         rows = db.execute(
             "SELECT w.*, "
-            "pr.name AS process_name, r.name AS route_name, pri.seq_order AS route_seq_order, "
+            + process_name + " AS process_name," + route_name + " AS route_name,"
+            + "COALESCE(version_item.seq_order,pri.seq_order) AS route_seq_order, "
             "creator.name AS created_by_name, updater.name AS updated_by_name "
             "FROM work_time_standards w "
             "LEFT JOIN processes pr ON w.process_id = pr.id "
-            "LEFT JOIN process_routes r ON w.route_id = r.id "
-            "LEFT JOIN process_route_items pri ON pri.route_id = w.route_id AND pri.process_id = w.process_id "
-            "LEFT JOIN users creator ON w.created_by = creator.id "
+            + process_version_join("w", "process_version")
+            + "LEFT JOIN process_routes r ON w.route_id = r.id "
+            + route_version_join("w", "route_version")
+            + "LEFT JOIN process_route_version_items version_item "
+            "ON version_item.route_version_id=w.route_version_id "
+            "AND version_item.process_version_id=w.process_version_id "
+            + "LEFT JOIN process_route_items pri ON pri.route_id = w.route_id AND pri.process_id = w.process_id "
+            + "LEFT JOIN users creator ON w.created_by = creator.id "
             "LEFT JOIN users updater ON w.updated_by = updater.id " + where_clause + " "
-            "ORDER BY r.name ASC, COALESCE(pri.seq_order, 9999) ASC, w.status ASC, w.id DESC "
+            "ORDER BY " + route_name + " ASC, COALESCE(version_item.seq_order,pri.seq_order,9999) ASC, w.status ASC, w.id DESC "
             "LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
+        warn_legacy_fact_rows("work_time_standards", rows)
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "per_page": per_page}
 
     @staticmethod
@@ -291,12 +316,19 @@ class WorkTimeRepository:
 
     @staticmethod
     def insert_standard(data, db):
+        binding = capture_process_fact_binding(
+            db,
+            process_id=data["process_id"],
+            route_id=data.get("route_id"),
+        )
         cur = db.execute(
             "INSERT INTO work_time_standards ("
             "product_id, product_code, product_name, route_id, process_id, "
             "standard_minutes_per_unit, setup_minutes, difficulty_factor, "
-            "effective_from, effective_to, status, version, remark, created_by, updated_by"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "effective_from,effective_to,status,version,remark,created_by,updated_by,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_version_id,route_name_snapshot,version_binding_source"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data.get("product_id"), data.get("product_code", ""), data.get("product_name", ""),
                 data.get("route_id"), data["process_id"], data["standard_minutes_per_unit"],
@@ -304,17 +336,29 @@ class WorkTimeRepository:
                 data.get("effective_from", ""), data.get("effective_to", ""),
                 data.get("status", "active"), data.get("version", 1), data.get("remark", ""),
                 data.get("created_by"), data.get("updated_by"),
+                binding["process_version_id"], binding["process_code_snapshot"],
+                binding["process_name_snapshot"], binding["process_category_snapshot"],
+                binding["route_version_id"], binding["route_name_snapshot"],
+                binding["version_binding_source"],
             ),
         )
         return cur.lastrowid
 
     @staticmethod
     def update_standard(standard_id, data, db):
+        binding = capture_process_fact_binding(
+            db,
+            process_id=data["process_id"],
+            route_id=data.get("route_id"),
+        )
         db.execute(
             "UPDATE work_time_standards SET "
             "product_id=?, product_code=?, product_name=?, route_id=?, process_id=?, "
             "standard_minutes_per_unit=?, setup_minutes=?, difficulty_factor=?, "
             "effective_from=?, effective_to=?, status=?, version=?, remark=?, updated_by=?, "
+            "process_version_id=?,process_code_snapshot=?,process_name_snapshot=?,"
+            "process_category_snapshot=?,route_version_id=?,route_name_snapshot=?,"
+            "version_binding_source=?,"
             "updated_at=datetime('now','localtime') WHERE id=?",
             (
                 data.get("product_id"), data.get("product_code", ""), data.get("product_name", ""),
@@ -322,7 +366,11 @@ class WorkTimeRepository:
                 data.get("setup_minutes", 0), data.get("difficulty_factor", 1),
                 data.get("effective_from", ""), data.get("effective_to", ""),
                 data.get("status", "active"), data.get("version", 1), data.get("remark", ""),
-                data.get("updated_by"), standard_id,
+                data.get("updated_by"), binding["process_version_id"],
+                binding["process_code_snapshot"], binding["process_name_snapshot"],
+                binding["process_category_snapshot"], binding["route_version_id"],
+                binding["route_name_snapshot"], binding["version_binding_source"],
+                standard_id,
             ),
         )
 
@@ -346,10 +394,11 @@ class WorkTimeRepository:
             where.append(
                 "(wr.order_no LIKE ? OR o.order_no LIKE ? OR wr.serial_no LIKE ? "
                 "OR wr.product_code LIKE ? OR wr.product_name LIKE ? OR o.product_code LIKE ? OR o.product_name LIKE ? "
-                "OR wr.route_name LIKE ? OR r.name LIKE ? "
-                "OR wr.user_name LIKE ? OR u.name LIKE ? OR wr.process_name LIKE ? OR p.name LIKE ?)"
+                "OR wr.route_name LIKE ? OR wr.route_name_snapshot LIKE ? OR route_version.name LIKE ? OR r.name LIKE ? "
+                "OR wr.user_name LIKE ? OR u.name LIKE ? OR wr.process_name LIKE ? "
+                "OR wr.process_name_snapshot LIKE ? OR process_version.name LIKE ? OR p.name LIKE ?)"
             )
-            params.extend([like, like, like, like, like, like, like, like, like, like, like, like, like])
+            params.extend([like] * 17)
         for key in ("status", "review_status"):
             if filters.get(key):
                 where.append(f"wr.{key} = ?")
@@ -380,27 +429,37 @@ class WorkTimeRepository:
             "SELECT COUNT(*) FROM work_time_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
             "LEFT JOIN process_routes r ON wr.route_id = r.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
-            "LEFT JOIN processes p ON wr.process_id = p.id" + where_clause,
+            + route_version_join("wr", "route_version")
+            + "LEFT JOIN users u ON wr.user_id = u.id "
+            + "LEFT JOIN processes p ON wr.process_id = p.id "
+            + process_version_join("wr", "process_version")
+            + where_clause,
             params,
         ).fetchone()[0]
+        process_name = process_value_sql("wr", "process_version", "p")
+        route_name = route_name_sql("wr", "route_version", "r")
         rows = db.execute(
             "SELECT wr.*, COALESCE(o.order_no, wr.order_no, '') AS order_no_display, "
             "COALESCE(wr.product_code, o.product_code, '') AS product_code_display, "
             "COALESCE(wr.product_name, o.product_name, '') AS product_name_display, "
-            "COALESCE(wr.route_name, r.name, '') AS route_name_display, "
+            "COALESCE(NULLIF(wr.route_name_snapshot,''),NULLIF(wr.route_name,''),"
+            + route_name + ") AS route_name_display,"
             "COALESCE(u.name, wr.user_name, '') AS user_name_display, "
-            "COALESCE(p.name, wr.process_name, '') AS process_name_display, "
+            "COALESCE(NULLIF(wr.process_name_snapshot,''),NULLIF(wr.process_name,''),"
+            + process_name + ") AS process_name_display,"
             "reviewer.name AS reviewer_name "
             "FROM work_time_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
             "LEFT JOIN process_routes r ON wr.route_id = r.id "
-            "LEFT JOIN users u ON wr.user_id = u.id "
+            + route_version_join("wr", "route_version")
+            + "LEFT JOIN users u ON wr.user_id = u.id "
             "LEFT JOIN processes p ON wr.process_id = p.id "
-            "LEFT JOIN users reviewer ON wr.reviewed_by = reviewer.id" + where_clause + " "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN users reviewer ON wr.reviewed_by = reviewer.id" + where_clause + " "
             "ORDER BY wr.start_time DESC, wr.id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
+        warn_legacy_fact_rows("work_time_records", rows)
         return {"items": [dict(row) for row in rows], "total": total, "page": page, "per_page": per_page}
 
     @staticmethod
@@ -413,13 +472,22 @@ class WorkTimeRepository:
 
     @staticmethod
     def insert_record(data, db):
+        binding = capture_process_fact_binding(
+            db,
+            order_id=data.get("order_id"),
+            process_id=data["process_id"],
+            source_work_record_id=data.get("source_work_record_id"),
+            route_id=data.get("route_id"),
+        )
         cur = db.execute(
             "INSERT INTO work_time_records ("
             "order_id, order_no, serial_no, route_id, route_name, product_code, product_name, standard_missing, "
             "process_id, process_name, user_id, user_name, standard_id, source_work_record_id, "
             "quantity, standard_minutes, start_time, end_time, pause_minutes, actual_minutes, "
-            "effective_minutes, status, abnormal_reason, review_status, reviewed_by, reviewed_at, review_note, created_by"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "effective_minutes,status,abnormal_reason,review_status,reviewed_by,reviewed_at,review_note,created_by,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,process_category_snapshot,"
+            "route_version_id,route_name_snapshot,version_binding_source"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data.get("order_id"), data.get("order_no", ""), data.get("serial_no", ""),
                 data.get("route_id"), data.get("route_name", ""), data.get("product_code", ""),
@@ -432,6 +500,10 @@ class WorkTimeRepository:
                 data.get("abnormal_reason", ""), data.get("review_status", "approved"),
                 data.get("reviewed_by"), data.get("reviewed_at", ""), data.get("review_note", ""),
                 data.get("created_by"),
+                binding["process_version_id"], binding["process_code_snapshot"],
+                binding["process_name_snapshot"], binding["process_category_snapshot"],
+                binding["route_version_id"], binding["route_name_snapshot"],
+                binding["version_binding_source"],
             ),
         )
         return cur.lastrowid

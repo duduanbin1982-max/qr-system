@@ -1,6 +1,11 @@
 """QualityAnalyticsRepository quality persistence subdomain."""
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 from modules.repositories.quality_management.partners import QualityPartnerRepository
 
 
@@ -48,28 +53,40 @@ class QualityAnalyticsRepository(QualityPartnerRepository):
             "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status='active' AND next_calibration_at!='' "
             "AND next_calibration_at<date('now','localtime') THEN 1 ELSE 0 END),0) AS overdue FROM quality_gauges"
         ).fetchone()
+        task_process_name = process_value_sql("task", "task_process_version", "process")
         recent_tasks = db.execute(
-            "SELECT task.task_no,task.inspection_type,task.status,task.due_at,o.order_no,process.name AS process_name "
+            "SELECT task.*,o.order_no," + task_process_name + " AS process_name "
             "FROM quality_inspection_tasks task LEFT JOIN orders o ON o.id=task.order_id "
             "LEFT JOIN processes process ON process.id=task.process_id "
+            + process_version_join("task", "task_process_version")
+            +
             "WHERE task.status IN ('pending','in_progress') ORDER BY CASE WHEN task.due_at!='' AND task.due_at<datetime('now','localtime') THEN 0 ELSE 1 END,task.id DESC LIMIT 10"
         ).fetchall()
+        ncr_process_name = process_value_sql("ncr", "ncr_process_version", "process")
         open_ncr = db.execute(
-            "SELECT ncr.ncr_no,ncr.defect_level,ncr.status,ncr.due_at,o.order_no,process.name AS process_name, "
+            "SELECT ncr.*,o.order_no," + ncr_process_name + " AS process_name, "
             "CASE WHEN ncr.due_at!='' AND DATE(ncr.due_at)<DATE('now','localtime') THEN 1 ELSE 0 END AS overdue "
             "FROM quality_nonconformances ncr LEFT JOIN orders o ON o.id=ncr.order_id "
-            "LEFT JOIN processes process ON process.id=ncr.process_id WHERE ncr.status NOT IN ('closed','cancelled') "
+            "LEFT JOIN processes process ON process.id=ncr.process_id "
+            + process_version_join("ncr", "ncr_process_version")
+            + "WHERE ncr.status NOT IN ('closed','cancelled') "
             "ORDER BY ncr.id DESC LIMIT 10"
         ).fetchall()
+        inspection_process_name = process_value_sql("qi", "inspection_process_version", "process")
         pending_reviews = db.execute(
-            "SELECT qi.id,qi.result,qi.score_total,qi.inspected_at,task.task_no,o.order_no, "
-            "process.name AS process_name,inspector.name AS inspector_name "
+            "SELECT qi.id,qi.process_id,qi.process_version_id,qi.result,qi.score_total,"
+            "qi.inspected_at,task.task_no,o.order_no," + inspection_process_name + " AS process_name,"
+            "inspector.name AS inspector_name "
             "FROM quality_inspections qi LEFT JOIN quality_inspection_tasks task ON task.id=qi.task_id "
             "LEFT JOIN orders o ON o.id=qi.order_id LEFT JOIN processes process ON process.id=qi.process_id "
-            "LEFT JOIN users inspector ON inspector.id=qi.inspector_id "
+            + process_version_join("qi", "inspection_process_version")
+            + "LEFT JOIN users inspector ON inspector.id=qi.inspector_id "
             "WHERE COALESCE(qi.review_status,'unreviewed')='unreviewed' "
             "ORDER BY qi.inspected_at DESC,qi.id DESC LIMIT 10"
         ).fetchall()
+        warn_legacy_fact_rows("quality_inspection_tasks", recent_tasks)
+        warn_legacy_fact_rows("quality_nonconformances", open_ncr)
+        warn_legacy_fact_rows("quality_inspections", pending_reviews)
         checked = int(inspection["checked"] or 0)
         failed = int(inspection["failed"] or 0)
         return {
@@ -104,12 +121,16 @@ class QualityAnalyticsRepository(QualityPartnerRepository):
             " AND qi.result!='pass' GROUP BY category ORDER BY quantity DESC,records DESC LIMIT 10",
             params,
         ).fetchall()
+        process_name = process_value_sql("qi", "process_version", "process")
         processes = db.execute(
-            "SELECT process.id AS process_id,process.name AS process_name,COUNT(qi.id) AS inspections,"
+            "SELECT process.id AS process_id,qi.process_version_id," + process_name + " AS process_name,COUNT(qi.id) AS inspections,"
             "COALESCE(SUM(qi.quantity_checked),0) AS checked,COALESCE(SUM(qi.quantity_failed),0) AS failed,"
             "ROUND(AVG(NULLIF(qi.score_total,0)),1) AS avg_score FROM quality_inspections qi "
-            "JOIN processes process ON process.id=qi.process_id WHERE " + clause +
-            " GROUP BY process.id ORDER BY failed DESC,inspections DESC LIMIT 20",
+            "JOIN processes process ON process.id=qi.process_id "
+            + process_version_join("qi", "process_version")
+            + "WHERE " + clause +
+            " GROUP BY process.id,qi.process_version_id," + process_name +
+            " ORDER BY failed DESC,inspections DESC LIMIT 20",
             params,
         ).fetchall()
         return {

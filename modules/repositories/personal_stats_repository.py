@@ -1,5 +1,10 @@
 """qr-system - PersonalStatsRepository"""
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class PersonalStatsRepository:
@@ -7,14 +12,18 @@ class PersonalStatsRepository:
     @staticmethod
     def get_today_records(user_id, today_start, db=None):
         db = resolve_db(db)
-        return db.execute(
+        process_name = process_value_sql("wr", "process_version", "p")
+        rows = db.execute(
             "SELECT wr.id, wr.order_id, wr.process_id, wr.serial_no, wr.quantity, wr.type, wr.remark, wr.created_at, "
-            "o.order_no, o.product_name, p.name as process_name "
+            "wr.process_version_id,o.order_no,o.product_name," + process_name + " AS process_name "
             "FROM work_records wr LEFT JOIN orders o ON wr.order_id=o.id "
             "LEFT JOIN processes p ON wr.process_id=p.id "
-            "WHERE wr.user_id=? AND wr.created_at>=? ORDER BY wr.created_at DESC LIMIT 50",
+            + process_version_join("wr", "process_version")
+            + "WHERE wr.user_id=? AND wr.created_at>=? ORDER BY wr.created_at DESC LIMIT 50",
             (user_id, today_start)
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def get_today_summary(user_id, today_start, db=None):
@@ -46,12 +55,18 @@ class PersonalStatsRepository:
     @staticmethod
     def get_process_breakdown(user_id, today_start, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT p.name as process_name, COUNT(*) as count, COALESCE(SUM(wr.quantity),0) as total_qty "
+        process_name = process_value_sql("wr", "process_version", "p")
+        rows = db.execute(
+            "SELECT wr.process_id,wr.process_version_id," + process_name + " AS process_name,"
+            "COUNT(*) AS count,COALESCE(SUM(wr.quantity),0) AS total_qty "
             "FROM work_records wr LEFT JOIN processes p ON wr.process_id=p.id "
-            "WHERE wr.user_id=? AND wr.created_at>=? GROUP BY wr.process_id ORDER BY total_qty DESC",
+            + process_version_join("wr", "process_version")
+            + "WHERE wr.user_id=? AND wr.created_at>=? GROUP BY wr.process_id,"
+            "wr.process_version_id," + process_name + " ORDER BY total_qty DESC",
             (user_id, today_start)
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def get_active_orders(user_id, db=None):
