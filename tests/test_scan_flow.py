@@ -2,7 +2,12 @@
 import json, time, pytest
 import uuid
 from modules.db import get_db
-from factories import WORKER_HASH, ensure_user
+from factories import (
+    WORKER_HASH,
+    bind_order_process_versions,
+    ensure_process_version,
+    ensure_user,
+)
 
 
 def _order_no_for(client, order_id):
@@ -23,7 +28,9 @@ def _seed_order_mode_two_step_order(client):
                 "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
                 (name, seq_order),
             )
-            process_ids.append(cursor.lastrowid)
+            process_id = cursor.lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         order_no = f"TEST-ORDER-MODE-{suffix}"
         order_id = db.execute(
@@ -37,6 +44,7 @@ def _seed_order_mode_two_step_order(client):
                 "VALUES (?, ?, ?, 'pending', 0, 0, 0)",
                 (order_id, process_id, seq_order),
             )
+        bind_order_process_versions(db, order_id)
         db.commit()
         return order_id, order_no, process_ids
 
@@ -91,7 +99,9 @@ def _seed_serial_handoff_order(client):
                 "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
                 (name, seq_order),
             )
-            process_ids.append(cursor.lastrowid)
+            process_id = cursor.lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         order_no = f"TEST-HANDOFF-{suffix}"
         serial_no = f"TEST-HANDOFF-{suffix}-001"
@@ -108,6 +118,7 @@ def _seed_serial_handoff_order(client):
                 "VALUES (?, ?, ?, ?, ?, 0, 0)",
                 (order_id, process_id, index + 1, status, completed),
             )
+        bind_order_process_versions(db, order_id)
         db.execute(
             "INSERT INTO product_items (serial_no, order_id, order_no, position_no, qr_content, status, current_process_id) "
             "VALUES (?, ?, ?, 1, ?, 'in_progress', ?)",

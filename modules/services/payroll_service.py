@@ -3,7 +3,9 @@
 from datetime import datetime
 import hashlib
 import json
+import logging
 
+from modules import config
 from modules.domain.payroll_policy import (
     PayrollConflictError,
     cents_to_yuan,
@@ -15,6 +17,9 @@ from modules.domain.payroll_policy import (
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.services import BaseService
+
+
+logger = logging.getLogger("qr-system.payroll")
 
 
 def _actor(user):
@@ -38,8 +43,12 @@ def _snapshot(row):
         "product_code": row.get("product_code") or "",
         "product_name": row.get("product_name") or "",
         "route_id": row.get("route_id"),
+        "route_version_id": row.get("route_version_id"),
         "route_name": row.get("route_name") or "",
         "process_name": row.get("process_name") or "",
+        "process_version_id": row.get("process_version_id"),
+        "process_code": row.get("process_code") or "",
+        "process_category": row.get("process_category") or "",
     }
 
 
@@ -83,9 +92,29 @@ class PayrollCalculationService:
             return None, approved_exception, "invalid_amount"
         if not row.get("route_id"):
             return None, None, "missing_route"
-        candidates = PayrollRepository.price_candidates(
-            row["route_id"], row["process_id"], row["work_recorded_at"], db
+        has_exact_binding = (
+            row.get("route_version_id") is not None
+            and row.get("process_version_id") is not None
         )
+        candidates = PayrollRepository.price_candidates(
+            row["route_id"],
+            row["process_id"],
+            row["work_recorded_at"],
+            db,
+            route_version_id=(
+                row["route_version_id"] if has_exact_binding else None
+            ),
+            process_version_id=(
+                row["process_version_id"] if has_exact_binding else None
+            ),
+        )
+        if not has_exact_binding and config.PROCESS_VERSION_COMPAT_AUDIT_ENABLED:
+            logger.warning(
+                "payroll_price_legacy_fallback work_record_id=%s route_id=%s process_id=%s",
+                row.get("work_record_id"),
+                row.get("route_id"),
+                row.get("process_id"),
+            )
         if len(candidates) > 1:
             return None, None, "overlapping_price"
         if not candidates:
@@ -101,7 +130,11 @@ class PayrollCalculationService:
             "rework_rate_basis_points": price["rework_rate_basis_points"],
             "rework_rate_configured": price["rework_rate_configured"],
             "resolution_method": "versioned_price",
-            "resolution_reason": "Matched approved price version at work-report time",
+            "resolution_reason": (
+                "Matched exact route and process versions at work-report time"
+                if has_exact_binding
+                else "Legacy root-ID price fallback for unversioned work record"
+            ),
             "resolved_by": None,
             "resolved_by_name": "",
             "resolved_at": "",
@@ -141,7 +174,9 @@ class PayrollCalculationService:
             digest_items.append({
                 "id": row["work_record_id"], "type": row["work_type"], "quantity": row["quantity"],
                 "created_at": row["work_recorded_at"], "route_id": row.get("route_id"),
+                "route_version_id": row.get("route_version_id"),
                 "process_id": row.get("process_id"),
+                "process_version_id": row.get("process_version_id"),
             })
             price, approved_exception, exception_type = PayrollCalculationService._resolve(row, batch, db)
             bucket = employee_bucket(row)
@@ -176,8 +211,12 @@ class PayrollCalculationService:
                 "order_id": row.get("order_id"), "order_no_snapshot": row.get("order_no") or "",
                 "product_code_snapshot": row.get("product_code") or "",
                 "product_name_snapshot": row.get("product_name") or "",
-                "route_id": row.get("route_id"), "route_name_snapshot": row.get("route_name") or "",
-                "process_id": row.get("process_id"), "process_name_snapshot": row.get("process_name") or "",
+                "route_id": row.get("route_id"),
+                "route_version_id": row.get("route_version_id"),
+                "route_name_snapshot": row.get("route_name") or "",
+                "process_id": row.get("process_id"),
+                "process_version_id": row.get("process_version_id"),
+                "process_name_snapshot": row.get("process_name") or "",
                 "quantity": int(row["quantity"]), "price_version_id": price.get("price_version_id"),
                 "unit_price_micros": price["normal_unit_price_micros"],
                 "rework_rate_basis_points": price.get("rework_rate_basis_points") or 0,
@@ -224,8 +263,10 @@ class PayrollCalculationService:
                 "source_snapshot_json": _fixed_snapshot(adjustment),
                 "work_record_id": None, "work_recorded_at": adjustment.get("created_at") or "",
                 "order_id": None, "order_no_snapshot": "", "product_code_snapshot": "",
-                "product_name_snapshot": "", "route_id": None, "route_name_snapshot": "",
-                "process_id": None, "process_name_snapshot": "", "price_version_id": None,
+                "product_name_snapshot": "", "route_id": None,
+                "route_version_id": None, "route_name_snapshot": "",
+                "process_id": None, "process_version_id": None,
+                "process_name_snapshot": "", "price_version_id": None,
                 "unit_price_micros": 0, "rework_rate_basis_points": 0,
             })
 
@@ -479,7 +520,12 @@ class PayrollWorkflowService:
             override_price = exception.get("proposed_price_micros")
             if override_price is None:
                 candidates = PayrollRepository.price_candidates(
-                    snapshot.get("route_id"), snapshot.get("process_id"), snapshot.get("created_at"), db
+                    snapshot.get("route_id"),
+                    snapshot.get("process_id"),
+                    snapshot.get("created_at"),
+                    db,
+                    route_version_id=snapshot.get("route_version_id"),
+                    process_version_id=snapshot.get("process_version_id"),
                 )
                 if len(candidates) != 1:
                     raise ValueError("无法唯一确定基础工价，请由制单人补充人工核定工价")

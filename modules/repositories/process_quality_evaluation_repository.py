@@ -6,6 +6,12 @@ import sqlite3
 from modules.domain.errors import ConflictError
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class ProcessQualityEvaluationRepository:
@@ -18,15 +24,62 @@ class ProcessQualityEvaluationRepository:
         return parsed if isinstance(parsed, type(default)) else default
 
     @staticmethod
+    def _task_binding(task_row, role):
+        if not task_row:
+            return None
+        task_row = dict(task_row)
+        return {
+            "process_id": task_row[f"{role}_process_id"],
+            "process_version_id": task_row.get(f"{role}_process_version_id"),
+            "process_code_snapshot": task_row.get(f"{role}_process_code_snapshot", ""),
+            "process_name_snapshot": task_row.get(f"{role}_process_name_snapshot", ""),
+            "process_category_snapshot": task_row.get(f"{role}_process_category_snapshot", ""),
+            "route_id": task_row.get("route_id"),
+            "route_version_id": task_row.get("route_version_id"),
+            "route_name_snapshot": task_row.get("route_name_snapshot", ""),
+        }
+
+    @classmethod
+    def _fact_bindings(cls, data, db):
+        task_row = None
+        task_id = data.get("task_id")
+        if task_id:
+            task_row = db.execute(
+                "SELECT * FROM process_quality_evaluation_tasks WHERE id=?", (task_id,)
+            ).fetchone()
+        target = cls._task_binding(task_row, "target")
+        evaluator = cls._task_binding(task_row, "evaluator")
+        if not target or target.get("process_version_id") is None:
+            target = capture_process_fact_binding(
+                db,
+                order_id=data["order_id"],
+                process_id=data["target_process_id"],
+                source_work_record_id=data.get("target_work_record_id"),
+            )
+        if not evaluator or evaluator.get("process_version_id") is None:
+            evaluator = capture_process_fact_binding(
+                db,
+                order_id=data["order_id"],
+                process_id=data["evaluator_process_id"],
+                source_work_record_id=data.get("trigger_work_record_id"),
+            )
+        return target, evaluator
+
+    @staticmethod
     def insert_evaluation(data, db):
+        target_binding, evaluator_binding = ProcessQualityEvaluationRepository._fact_bindings(data, db)
         cursor = db.execute(
             "INSERT INTO process_quality_evaluations ("
             "task_id, order_id, serial_no, target_process_id, evaluator_process_id, target_work_record_id, "
             "trigger_work_record_id, target_user_id, evaluator_user_id, quantity, attribution_type, "
             "processing_quality, dimensional_accuracy, appearance_quality, process_continuity, "
             "cleanliness_protection, total_score, grade, issue_tags_json, comment, status, source_type, "
-            "source_handoff_review_id, template_id, dimension_scores_json, template_snapshot_json, severity"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "source_handoff_review_id, template_id, dimension_scores_json, template_snapshot_json, severity, "
+            "target_process_version_id,target_process_code_snapshot,target_process_name_snapshot,"
+            "target_process_category_snapshot,evaluator_process_version_id,evaluator_process_code_snapshot,"
+            "evaluator_process_name_snapshot,evaluator_process_category_snapshot,route_id,route_version_id,"
+            "route_name_snapshot,version_binding_source"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data.get("task_id"), data["order_id"], data.get("serial_no", ""), data["target_process_id"],
                 data["evaluator_process_id"], data.get("target_work_record_id"), data.get("trigger_work_record_id"),
@@ -39,6 +92,14 @@ class ProcessQualityEvaluationRepository:
                 json.dumps(data.get("dimension_scores", {}), ensure_ascii=False),
                 json.dumps(data.get("template_snapshot", {}), ensure_ascii=False),
                 data.get("severity", "normal"),
+                target_binding["process_version_id"], target_binding.get("process_code_snapshot", ""),
+                target_binding.get("process_name_snapshot", ""), target_binding.get("process_category_snapshot", ""),
+                evaluator_binding["process_version_id"], evaluator_binding.get("process_code_snapshot", ""),
+                evaluator_binding.get("process_name_snapshot", ""), evaluator_binding.get("process_category_snapshot", ""),
+                evaluator_binding.get("route_id") or target_binding.get("route_id"),
+                evaluator_binding.get("route_version_id") or target_binding.get("route_version_id"),
+                evaluator_binding.get("route_name_snapshot") or target_binding.get("route_name_snapshot", ""),
+                "captured",
             ),
         )
         return cursor.lastrowid
@@ -62,28 +123,34 @@ class ProcessQualityEvaluationRepository:
             where.append("evaluation.target_user_id = ?")
             params.append(user_id)
         if keyword:
-            where.append("(o.order_no LIKE ? OR o.product_name LIKE ? OR evaluation.serial_no LIKE ? OR target_p.name LIKE ?)")
+            target_name = process_value_sql("evaluation", "target_version", "target_p", role="target_process")
+            where.append("(o.order_no LIKE ? OR o.product_name LIKE ? OR evaluation.serial_no LIKE ? OR " + target_name + " LIKE ?)")
             value = f"%{keyword}%"
             params.extend([value, value, value, value])
         where_clause = " AND ".join(where) if where else "1=1"
         total = db.execute(
             "SELECT COUNT(*) FROM process_quality_evaluations evaluation "
             "JOIN orders o ON o.id = evaluation.order_id JOIN processes target_p ON target_p.id = evaluation.target_process_id "
+            + process_version_join("evaluation", "target_version", "target_process") +
             "WHERE " + where_clause,
             params,
         ).fetchone()[0]
         offset = (page - 1) * per_page
+        target_name = process_value_sql("evaluation", "target_version", "target_p", role="target_process")
+        evaluator_name = process_value_sql("evaluation", "evaluator_version", "evaluator_p", role="evaluator_process")
         rows = db.execute(
             "SELECT evaluation.*, o.order_no, o.product_name, o.product_code, "
-            "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
-            "target_u.name AS target_user_name, evaluator_u.name AS evaluator_name, reviewer.name AS reviewer_name, "
+            + target_name + " AS target_process_name, " + evaluator_name + " AS evaluator_process_name, "
+            + "target_u.name AS target_user_name, evaluator_u.name AS evaluator_name, reviewer.name AS reviewer_name, "
             "appeal.id AS appeal_id, appeal.status AS appeal_status, appeal.reason AS appeal_reason, "
             "appeal.review_note AS appeal_review_note, appeal.created_at AS appeal_created_at "
             "FROM process_quality_evaluations evaluation "
             "JOIN orders o ON o.id = evaluation.order_id "
             "JOIN processes target_p ON target_p.id = evaluation.target_process_id "
             "JOIN processes evaluator_p ON evaluator_p.id = evaluation.evaluator_process_id "
-            "LEFT JOIN users target_u ON target_u.id = evaluation.target_user_id "
+            + process_version_join("evaluation", "target_version", "target_process")
+            + process_version_join("evaluation", "evaluator_version", "evaluator_process")
+            + "LEFT JOIN users target_u ON target_u.id = evaluation.target_user_id "
             "JOIN users evaluator_u ON evaluator_u.id = evaluation.evaluator_user_id "
             "LEFT JOIN users reviewer ON reviewer.id = evaluation.reviewed_by "
             "LEFT JOIN process_quality_evaluation_appeals appeal ON appeal.id = ("
@@ -92,6 +159,7 @@ class ProcessQualityEvaluationRepository:
             "WHERE " + where_clause + " ORDER BY evaluation.created_at DESC, evaluation.id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
+        warn_legacy_fact_rows("process_quality_evaluations", rows, roles=("target_process", "evaluator_process"))
         items = []
         for row in rows:
             item = dict(row)
@@ -112,7 +180,16 @@ class ProcessQualityEvaluationRepository:
     def evaluation_by_id(evaluation_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT * FROM process_quality_evaluations WHERE id = ?",
+            "SELECT evaluation.*, "
+            + process_value_sql("evaluation", "target_version", "target_p", role="target_process")
+            + " AS target_process_name, "
+            + process_value_sql("evaluation", "evaluator_version", "evaluator_p", role="evaluator_process")
+            + " AS evaluator_process_name FROM process_quality_evaluations evaluation "
+            "JOIN processes target_p ON target_p.id=evaluation.target_process_id "
+            "JOIN processes evaluator_p ON evaluator_p.id=evaluation.evaluator_process_id "
+            + process_version_join("evaluation", "target_version", "target_process")
+            + process_version_join("evaluation", "evaluator_version", "evaluator_process")
+            + " WHERE evaluation.id = ?",
             (evaluation_id,),
         ).fetchone()
 
@@ -317,12 +394,14 @@ class ProcessQualityEvaluationRepository:
         rows = db.execute(
             "SELECT appeal.*, evaluation.total_score, evaluation.grade, evaluation.serial_no, "
             "evaluation.target_process_id, evaluation.target_user_id, o.order_no, o.product_name, "
-            "process.name AS target_process_name, requester.name AS requester_name, reviewer.name AS reviewer_name "
-            "FROM process_quality_evaluation_appeals appeal "
+            + process_value_sql("evaluation", "target_version", "process", role="target_process")
+            + " AS target_process_name, requester.name AS requester_name, reviewer.name AS reviewer_name "
+            + "FROM process_quality_evaluation_appeals appeal "
             "JOIN process_quality_evaluations evaluation ON evaluation.id = appeal.evaluation_id "
             "JOIN orders o ON o.id = evaluation.order_id "
             "JOIN processes process ON process.id = evaluation.target_process_id "
-            "JOIN users requester ON requester.id = appeal.requester_user_id "
+            + process_version_join("evaluation", "target_version", "target_process")
+            + "JOIN users requester ON requester.id = appeal.requester_user_id "
             "LEFT JOIN users reviewer ON reviewer.id = appeal.reviewed_by "
             "WHERE " + clause + " ORDER BY appeal.created_at DESC, appeal.id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
@@ -362,12 +441,14 @@ class ProcessQualityEvaluationRepository:
             "FROM process_quality_evaluations evaluation " + date_clause,
             date_params,
         ).fetchone())
+        process_name = process_value_sql("evaluation", "target_version", "p", role="target_process")
         process_rows = db.execute(
-            "SELECT p.id AS process_id, p.name AS process_name, COUNT(*) AS evaluation_count, "
+            "SELECT p.id AS process_id, evaluation.target_process_version_id, " + process_name + " AS process_name, COUNT(*) AS evaluation_count, "
             "ROUND(AVG(evaluation.total_score), 1) AS avg_score, "
             "SUM(CASE WHEN evaluation.severity IN ('warning','critical') THEN 1 ELSE 0 END) AS low_score_count "
             "FROM process_quality_evaluations evaluation JOIN processes p ON p.id = evaluation.target_process_id "
-            + date_clause + " GROUP BY p.id, p.name ORDER BY avg_score ASC, evaluation_count DESC",
+            + process_version_join("evaluation", "target_version", "target_process")
+            + date_clause + " GROUP BY p.id, evaluation.target_process_version_id, " + process_name + " ORDER BY avg_score ASC, evaluation_count DESC",
             date_params,
         ).fetchall()
         evaluator_rows = db.execute(

@@ -345,8 +345,25 @@ export const ACTION_PAGE_MAP = {
     "page:basic-settings",
     "page:basic-settings.processes"
   ],
+  "process_versions": [
+    "page:basic-settings",
+    "page:basic-settings.processes"
+  ],
   "routes": [
     "page:basic-settings",
+    "page:basic-settings.routes"
+  ],
+  "route_versions": [
+    "page:basic-settings",
+    "page:basic-settings.routes"
+  ],
+  "process_routes": [
+    "page:basic-settings",
+    "page:basic-settings.routes"
+  ],
+  "master_data_releases": [
+    "page:basic-settings",
+    "page:basic-settings.processes",
     "page:basic-settings.routes"
   ],
   "prices": [
@@ -386,6 +403,12 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "processes:view": [
+    "process_versions:view"
+  ],
+  "routes:view": [
+    "route_versions:view"
+  ],
   "wages:view_self": [
     "wages:view"
   ],

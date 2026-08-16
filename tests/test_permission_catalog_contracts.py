@@ -123,3 +123,60 @@ def test_legacy_material_manage_permission_implies_granular_operations():
     assert ACTION_PERMISSION_DEFS["suppliers"][1] == ["view", "create", "edit", "delete"]
     assert all(has_permission_code(["materials:manage"], code) for code in expected)
     assert PAGE_OPERATION_BINDINGS["page:production.materials"] == ["materials", "suppliers"]
+
+
+def test_process_version_permissions_are_granular_and_resource_neutral():
+    expected_version_actions = [
+        "view",
+        "create",
+        "submit",
+        "approve",
+        "reject",
+        "impact",
+    ]
+
+    assert ACTION_PERMISSION_DEFS["process_versions"][1] == expected_version_actions
+    assert ACTION_PERMISSION_DEFS["route_versions"][1] == expected_version_actions
+    assert ACTION_PERMISSION_DEFS["processes"][1][-2:] == ["retire", "reactivate"]
+    assert ACTION_PERMISSION_DEFS["process_routes"][1] == ["retire", "reactivate"]
+    assert ACTION_PERMISSION_DEFS["master_data_releases"][1] == [
+        "view",
+        "create",
+        "submit",
+        "approve",
+        "reject",
+    ]
+    assert {"submit", "approve", "reject", "impact", "retire", "reactivate"}.issubset(
+        ACTION_LABELS
+    )
+    assert ACTION_LABELS["submit"] == "提交"
+    assert ACTION_LABELS["impact"] == "影响查询"
+
+
+def test_legacy_process_permissions_only_imply_version_read_access():
+    assert has_permission_code(["processes:view"], "process_versions:view")
+    assert has_permission_code(["routes:view"], "route_versions:view")
+
+    forbidden_migrations = {
+        "process_versions:approve",
+        "process_versions:reject",
+        "processes:retire",
+        "processes:reactivate",
+        "route_versions:approve",
+        "route_versions:reject",
+        "process_routes:retire",
+        "process_routes:reactivate",
+        "master_data_releases:approve",
+    }
+    for legacy_permission in (
+        "processes:create",
+        "processes:edit",
+        "processes:delete",
+        "routes:create",
+        "routes:edit",
+        "routes:delete",
+    ):
+        assert all(
+            not has_permission_code([legacy_permission], permission)
+            for permission in forbidden_migrations
+        )

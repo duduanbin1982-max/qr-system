@@ -1,5 +1,10 @@
 """Persistence operations for approval records and approval configuration."""
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class ApprovalRepository:
@@ -27,21 +32,24 @@ class ApprovalRepository:
         db = resolve_db(db)
         op = '=' if status_condition == 'pending' else '!='
         order_column = 'ar.created_at' if status_condition == 'pending' else 'COALESCE(ar.processed_at, ar.created_at)'
-        return db.execute(f'''
-            SELECT ar.*, o.order_no, wr.process_id, p.name as process_name,
-                   u.name as worker_name, wr.quantity, wr.serial_no,
-                   wr.report_source, wr.actual_completed_at, wr.backfill_reason,
-                   wr.submit_position_id, wr.submit_position_name,
-                   wr.remark
-            FROM approval_records ar
-            LEFT JOIN work_records wr ON ar.work_record_id = wr.id
-            LEFT JOIN orders o ON wr.order_id = o.id
-            LEFT JOIN processes p ON wr.process_id = p.id
-            LEFT JOIN users u ON wr.user_id = u.id
-            WHERE ar.status {op} 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL)
-            ORDER BY {order_column} DESC, ar.id DESC
-            LIMIT ? OFFSET ?
-        ''', (limit, offset)).fetchall()
+        process_name = process_value_sql("wr", "process_version", "p")
+        rows = db.execute(
+            "SELECT ar.*,o.order_no,wr.process_id,wr.process_version_id,"
+            + process_name + " AS process_name,u.name AS worker_name,wr.quantity,"
+            "wr.serial_no,wr.report_source,wr.actual_completed_at,wr.backfill_reason,"
+            "wr.submit_position_id,wr.submit_position_name,wr.remark "
+            "FROM approval_records ar "
+            "LEFT JOIN work_records wr ON ar.work_record_id=wr.id "
+            "LEFT JOIN orders o ON wr.order_id=o.id "
+            "LEFT JOIN processes p ON wr.process_id=p.id "
+            + process_version_join("wr", "process_version")
+            + "LEFT JOIN users u ON wr.user_id=u.id "
+            f"WHERE ar.status {op} 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL) "
+            f"ORDER BY {order_column} DESC,ar.id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return rows
 
     @staticmethod
     def find_by_id(record_id, db=None):

@@ -3,6 +3,13 @@
 import json
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    prefixed_process_binding,
+    process_value_sql,
+    process_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class ProcessQualityEvaluationTaskRepository:
@@ -18,11 +25,14 @@ class ProcessQualityEvaluationTaskRepository:
     def upstream_processes(order_id, evaluator_process_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT upstream.process_id, upstream.seq_order, p.name AS process_name, o.route_id "
+            "SELECT upstream.process_id,upstream.process_version_id,upstream.seq_order,"
+            "COALESCE(NULLIF(upstream.process_name_snapshot,''),version.name,p.name,'') "
+            "AS process_name,o.route_id "
             "FROM order_processes current "
             "JOIN order_processes upstream ON upstream.order_id = current.order_id "
             "AND upstream.seq_order < current.seq_order "
             "JOIN processes p ON p.id = upstream.process_id "
+            "LEFT JOIN process_versions version ON version.id=upstream.process_version_id "
             "JOIN orders o ON o.id = current.order_id "
             "WHERE current.order_id = ? AND current.process_id = ? "
             "ORDER BY upstream.seq_order DESC",
@@ -66,12 +76,33 @@ class ProcessQualityEvaluationTaskRepository:
 
     @staticmethod
     def insert_task(data, db):
+        target_binding = capture_process_fact_binding(
+            db,
+            order_id=data["order_id"],
+            process_id=data["target_process_id"],
+            source_work_record_id=data.get("target_work_record_id"),
+        )
+        evaluator_binding = capture_process_fact_binding(
+            db,
+            order_id=data["order_id"],
+            process_id=data["evaluator_process_id"],
+            source_work_record_id=data.get("trigger_work_record_id"),
+        )
+        version_values = {
+            **prefixed_process_binding(target_binding, "target_process"),
+            **prefixed_process_binding(evaluator_binding, "evaluator_process"),
+        }
         cursor = db.execute(
             "INSERT OR IGNORE INTO process_quality_evaluation_tasks ("
             "trigger_work_record_id, order_id, serial_no, target_process_id, evaluator_process_id, "
             "target_work_record_id, target_user_id, evaluator_user_id, quantity, is_required, attribution_type, "
-            "template_id, template_snapshot_json"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "template_id,template_snapshot_json,target_process_version_id,"
+            "target_process_code_snapshot,target_process_name_snapshot,"
+            "target_process_category_snapshot,evaluator_process_version_id,"
+            "evaluator_process_code_snapshot,evaluator_process_name_snapshot,"
+            "evaluator_process_category_snapshot,route_id,route_version_id,"
+            "route_name_snapshot,version_binding_source"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 data["trigger_work_record_id"], data["order_id"], data.get("serial_no", ""),
                 data["target_process_id"], data["evaluator_process_id"], data.get("target_work_record_id"),
@@ -79,6 +110,20 @@ class ProcessQualityEvaluationTaskRepository:
                 1 if data.get("is_required") else 0, data.get("attribution_type", "worker"),
                 data.get("template_id"),
                 json.dumps(data.get("template_snapshot", {}), ensure_ascii=False),
+                version_values["target_process_version_id"],
+                version_values["target_process_code_snapshot"],
+                version_values["target_process_name_snapshot"],
+                version_values["target_process_category_snapshot"],
+                version_values["evaluator_process_version_id"],
+                version_values["evaluator_process_code_snapshot"],
+                version_values["evaluator_process_name_snapshot"],
+                version_values["evaluator_process_category_snapshot"],
+                evaluator_binding["route_id"] or target_binding["route_id"],
+                evaluator_binding["route_version_id"]
+                or target_binding["route_version_id"],
+                evaluator_binding["route_name_snapshot"]
+                or target_binding["route_name_snapshot"],
+                "captured",
             ),
         )
         return cursor.rowcount
@@ -86,17 +131,26 @@ class ProcessQualityEvaluationTaskRepository:
     @classmethod
     def task_by_id(cls, task_id, db=None):
         db = resolve_db(db)
+        target_name = process_value_sql(
+            "task", "target_version", "target_p", role="target_process"
+        )
+        evaluator_name = process_value_sql(
+            "task", "evaluator_version", "evaluator_p", role="evaluator_process"
+        )
         row = db.execute(
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
             "o.status AS order_status, COALESCE(o.deleted_at, '') AS order_deleted_at, "
-            "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
-            "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
+            + target_name + " AS target_process_name," + evaluator_name
+            + " AS evaluator_process_name,"
+            + "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
             "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name "
             "FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_p ON target_p.id = task.target_process_id "
             "JOIN processes evaluator_p ON evaluator_p.id = task.evaluator_process_id "
-            "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
+            + process_version_join("task", "target_version", "target_process")
+            + process_version_join("task", "evaluator_version", "evaluator_process")
+            + "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
             "JOIN users evaluator_u ON evaluator_u.id = task.evaluator_user_id "
             "LEFT JOIN users waiver_u ON waiver_u.id = task.waived_by "
             "WHERE task.id = ?",
@@ -104,6 +158,11 @@ class ProcessQualityEvaluationTaskRepository:
         ).fetchone()
         if not row:
             return None
+        warn_legacy_fact_rows(
+            "process_quality_evaluation_tasks",
+            [row],
+            roles=("target_process", "evaluator_process"),
+        )
         item = dict(row)
         item["template_snapshot"] = cls._json_value(
             item.pop("template_snapshot_json", "{}"), {}
@@ -136,22 +195,34 @@ class ProcessQualityEvaluationTaskRepository:
             where.append("task.status = ?")
             params.append(status)
         if keyword:
-            where.append("(o.order_no LIKE ? OR o.product_name LIKE ? OR task.serial_no LIKE ? OR target_p.name LIKE ?)")
+            where.append(
+                "(o.order_no LIKE ? OR o.product_name LIKE ? OR task.serial_no LIKE ? "
+                "OR task.target_process_name_snapshot LIKE ? OR target_version.name LIKE ? "
+                "OR target_p.name LIKE ?)"
+            )
             value = f"%{keyword}%"
-            params.extend([value, value, value, value])
+            params.extend([value] * 6)
         where_clause = " AND ".join(where) if where else "1=1"
         total = db.execute(
             "SELECT COUNT(*) FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id JOIN processes target_p ON target_p.id = task.target_process_id "
-            "WHERE " + where_clause,
+            + process_version_join("task", "target_version", "target_process")
+            + "WHERE " + where_clause,
             params,
         ).fetchone()[0]
         offset = (page - 1) * per_page
+        target_name = process_value_sql(
+            "task", "target_version", "target_p", role="target_process"
+        )
+        evaluator_name = process_value_sql(
+            "task", "evaluator_version", "evaluator_p", role="evaluator_process"
+        )
         rows = db.execute(
             "SELECT task.*, o.order_no, o.product_name, o.product_code, "
             "o.status AS order_status, COALESCE(o.deleted_at, '') AS order_deleted_at, "
-            "target_p.name AS target_process_name, evaluator_p.name AS evaluator_process_name, "
-            "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
+            + target_name + " AS target_process_name," + evaluator_name
+            + " AS evaluator_process_name,"
+            + "target_u.name AS target_user_name, target_u.employee_no AS target_employee_no, "
             "evaluator_u.name AS evaluator_name, waiver_u.name AS waived_by_name, "
             "ROUND(MAX(0, (julianday('now','localtime') - julianday(task.created_at)) * 24), 1) AS age_hours, "
             "CASE WHEN task.created_at <= datetime('now','localtime','-72 hours') THEN 'critical' "
@@ -161,13 +232,20 @@ class ProcessQualityEvaluationTaskRepository:
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_p ON target_p.id = task.target_process_id "
             "JOIN processes evaluator_p ON evaluator_p.id = task.evaluator_process_id "
-            "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
+            + process_version_join("task", "target_version", "target_process")
+            + process_version_join("task", "evaluator_version", "evaluator_process")
+            + "LEFT JOIN users target_u ON target_u.id = task.target_user_id "
             "JOIN users evaluator_u ON evaluator_u.id = task.evaluator_user_id "
             "LEFT JOIN users waiver_u ON waiver_u.id = task.waived_by "
             "WHERE " + where_clause + " ORDER BY task.is_required DESC, task.created_at DESC, task.id DESC "
             "LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
+        warn_legacy_fact_rows(
+            "process_quality_evaluation_tasks",
+            rows,
+            roles=("target_process", "evaluator_process"),
+        )
         items = []
         for row in rows:
             item = dict(row)
@@ -197,14 +275,22 @@ class ProcessQualityEvaluationTaskRepository:
     @staticmethod
     def pending_required_task(evaluator_user_id, db=None):
         db = resolve_db(db)
+        target_name = process_value_sql(
+            "task", "target_version", "target_process", role="target_process"
+        )
+        evaluator_name = process_value_sql(
+            "task", "evaluator_version", "evaluator_process", role="evaluator_process"
+        )
         return db.execute(
-            "SELECT task.id, o.order_no, target_process.name AS target_process_name, "
-            "evaluator_process.name AS evaluator_process_name "
-            "FROM process_quality_evaluation_tasks task "
+            "SELECT task.id,o.order_no," + target_name + " AS target_process_name,"
+            + evaluator_name + " AS evaluator_process_name "
+            + "FROM process_quality_evaluation_tasks task "
             "JOIN orders o ON o.id = task.order_id "
             "JOIN processes target_process ON target_process.id = task.target_process_id "
             "JOIN processes evaluator_process ON evaluator_process.id = task.evaluator_process_id "
-            "WHERE task.evaluator_user_id = ? AND task.status = 'pending' "
+            + process_version_join("task", "target_version", "target_process")
+            + process_version_join("task", "evaluator_version", "evaluator_process")
+            + "WHERE task.evaluator_user_id = ? AND task.status = 'pending' "
             "AND task.is_required = 1 ORDER BY task.created_at, task.id LIMIT 1",
             (evaluator_user_id,),
         ).fetchone()
@@ -289,6 +375,18 @@ class ProcessQualityEvaluationTaskRepository:
             [reason_code, reason, operator_user_id, *task_ids],
         )
         if cursor.rowcount:
+            target_process_name = process_value_sql(
+                "task",
+                "target_process_version",
+                "target_process",
+                role="target_process",
+            )
+            evaluator_process_name = process_value_sql(
+                "task",
+                "evaluator_process_version",
+                "evaluator_process",
+                role="evaluator_process",
+            )
             for task_id in task_ids:
                 audit_cursor = db.execute(
                     "INSERT INTO process_quality_evaluation_task_audits ("
@@ -296,18 +394,36 @@ class ProcessQualityEvaluationTaskRepository:
                     "order_id, order_no, order_status, order_deleted_at, product_code, product_name, "
                     "serial_no, target_process_id, target_process_name, evaluator_process_id, "
                     "evaluator_process_name, target_user_id, target_user_name, evaluator_user_id, "
-                    "evaluator_name, is_required, task_status, task_created_at) "
+                    "evaluator_name,is_required,task_status,task_created_at,"
+                    "target_process_version_id,target_process_code_snapshot,"
+                    "target_process_name_snapshot,target_process_category_snapshot,"
+                    "evaluator_process_version_id,evaluator_process_code_snapshot,"
+                    "evaluator_process_name_snapshot,evaluator_process_category_snapshot,"
+                    "route_id,route_version_id,route_name_snapshot,version_binding_source) "
                     "SELECT task.id, 'waived', ?, COALESCE(operator.name, ''), ?, ?, "
                     "task.order_id, orders.order_no, orders.status, COALESCE(orders.deleted_at, ''), "
                     "orders.product_code, orders.product_name, task.serial_no, task.target_process_id, "
-                    "target_process.name, task.evaluator_process_id, evaluator_process.name, "
+                    + target_process_name + ",task.evaluator_process_id,"
+                    + evaluator_process_name + ","
                     "task.target_user_id, COALESCE(target_user.name, ''), task.evaluator_user_id, "
-                    "evaluator.name, task.is_required, task.status, task.created_at "
+                    "evaluator.name,task.is_required,task.status,task.created_at,"
+                    "task.target_process_version_id,task.target_process_code_snapshot,"
+                    "task.target_process_name_snapshot,task.target_process_category_snapshot,"
+                    "task.evaluator_process_version_id,task.evaluator_process_code_snapshot,"
+                    "task.evaluator_process_name_snapshot,task.evaluator_process_category_snapshot,"
+                    "task.route_id,task.route_version_id,task.route_name_snapshot,"
+                    "task.version_binding_source "
                     "FROM process_quality_evaluation_tasks task "
                     "JOIN orders ON orders.id = task.order_id "
                     "JOIN processes target_process ON target_process.id = task.target_process_id "
                     "JOIN processes evaluator_process ON evaluator_process.id = task.evaluator_process_id "
-                    "JOIN users evaluator ON evaluator.id = task.evaluator_user_id "
+                    + process_version_join(
+                        "task", "target_process_version", role="target_process"
+                    )
+                    + process_version_join(
+                        "task", "evaluator_process_version", role="evaluator_process"
+                    )
+                    + "JOIN users evaluator ON evaluator.id = task.evaluator_user_id "
                     "LEFT JOIN users target_user ON target_user.id = task.target_user_id "
                     "LEFT JOIN users operator ON operator.id = ? WHERE task.id = ?",
                     (operator_user_id, reason_code, reason, operator_user_id, task_id),
@@ -345,6 +461,11 @@ class ProcessQualityEvaluationTaskRepository:
             " ORDER BY audit.created_at DESC, audit.id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
+        warn_legacy_fact_rows(
+            "process_quality_evaluation_task_audits",
+            rows,
+            roles=("target_process", "evaluator_process"),
+        )
         items = []
         for row in rows:
             item = dict(row)

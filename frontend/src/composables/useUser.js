@@ -3,17 +3,12 @@ import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
 
-let _instance = null
-
 export function useUser() {
-  if (_instance) return _instance
-
   const users = ref([])
   const positions = ref([])
   const processes = ref([])
   const processDropdownOpen = ref(false)
   const dropdownStyle = ref({})
-  const pwResult = ref(null)
   const processSearch = ref('')
   const selectedProcessIds = ref([])
   const loading = ref(true)
@@ -21,6 +16,7 @@ export function useUser() {
   const searchKeyword = ref('')
   const page = ref(1)
   const total = ref(0)
+  const summary = ref({ total: 0, active: 0, inactive: 0, deleted: 0 })
   const pageSize = 20
 
   const showModal = ref(false)
@@ -36,9 +32,11 @@ export function useUser() {
   const canCreate = computed(() => can('users:create'))
   const canEdit = computed(() => can('users:edit'))
   const canDelete = computed(() => can('users:delete'))
+  const canAdmin = computed(() => can('users:admin'))
 
-  const activeCount = computed(() => users.value.filter(u => u.status === 'active').length)
-  const inactiveCount = computed(() => users.value.filter(u => u.status !== 'active').length)
+  const activeCount = computed(() => summary.value.active)
+  const inactiveCount = computed(() => summary.value.inactive)
+  const deletedCount = computed(() => summary.value.deleted)
   const totalStaff = computed(() => activeCount.value + inactiveCount.value)
 
   const positionMap = computed(() => {
@@ -87,6 +85,12 @@ export function useUser() {
         ])
       users.value = userData.users || []
       total.value = userData.total || 0
+      summary.value = {
+        total: Number(userData.summary?.total || 0),
+        active: Number(userData.summary?.active || 0),
+        inactive: Number(userData.summary?.inactive || 0),
+        deleted: Number(userData.summary?.deleted || 0)
+      }
       positions.value = posData.positions || []
       processes.value = procData.processes || []
     } catch(e) {
@@ -185,6 +189,10 @@ export function useUser() {
       showToast('用户名和姓名不能为空', 'error')
       return
     }
+    if (!modalEdit.value && (!form.value.password || form.value.password.length < 6)) {
+      showToast('新员工密码至少需要6位', 'error')
+      return
+    }
       saving.value = true
       try {
         const data = { ...form.value }
@@ -193,9 +201,10 @@ export function useUser() {
         if (!data.email) delete data.email
         if (!data.phone) delete data.phone
         if (!data.employee_no) delete data.employee_no
-      if (!data.process_ids) delete data.process_ids
+      if (!modalEdit.value && !data.process_ids) delete data.process_ids
       if (data.position_id === '' || data.position_id === null || data.position_id === undefined) {
-        delete data.position_id
+        if (modalEdit.value) data.position_id = null
+        else delete data.position_id
       } else {
         data.position_id = parseInt(data.position_id)
       }
@@ -204,18 +213,7 @@ export function useUser() {
         await api.domains.users.updateUser(modalId.value, data)
         showToast('更新成功')
       } else {
-        const result = await api.domains.users.createUser(data)
-        if (result.password) {
-          showModal.value = false
-          await load()
-          const pwMsg = '员工 ' + form.value.name + ' 创建成功！\n\n' +
-              '用户名: ' + form.value.username + '\n' +
-              '随机密码: ' + result.password + '\n\n' +
-              '请将密码告知员工，首次登录需修改密码。'
-          alert(pwMsg)
-          showToast(form.value.name + ' 已创建，密码 ' + result.password)
-          return
-        }
+        await api.domains.users.createUser(data)
         showToast('创建成功')
       }
       showModal.value = false
@@ -242,21 +240,44 @@ export function useUser() {
     }
   }
 
-  async function purgeUser(uid, name) {
-    if (!confirm('确定彻底删除员工 "' + name + '" 吗？\n\n此操作不可恢复！')) return
-    if (!confirm('再次确认：这将从数据库中永久移除该员工')) return
+  async function restoreUser(u) {
+    if (!confirm('确定恢复员工 "' + u.name + '" 吗？')) return
     try {
-      await api.domains.users.permanentDeleteUser(uid)
-      showToast('已彻底删除')
+      await api.domains.users.restoreUser(u.id)
+      showToast('恢复成功')
+      await load()
+    } catch (e) {
+      showToast(e.message || '恢复失败', 'error')
+    }
+  }
+
+  async function purgeUser(uid, name) {
+    const reason = prompt(
+      '请输入匿名化原因（至少4个字符）。身份信息会清除，工资、绩效和审计历史继续保留：',
+      ''
+    )
+    if (reason === null) return
+    if (reason.trim().length < 4) {
+      showToast('匿名化原因至少需要4个字符', 'error')
+      return
+    }
+    if (!confirm('确认匿名化员工 "' + name + '" 的身份信息？此操作不可恢复。')) return
+    try {
+      await api.domains.users.permanentDeleteUser(uid, { reason: reason.trim() })
+      showToast('身份已匿名化，历史记录已保留')
       await load()
     } catch(e) {
-      showToast(e.message || '彻底删除失败', 'error')
+      showToast(e.message || '匿名化失败', 'error')
     }
   }
 
   async function resetPwd(u) {
-    const pw = prompt('请输入新密码（留空则随机生成）：', '')
-    if (!pw) return
+    const pw = prompt('请输入新密码（至少8位，需包含字母和数字）：', '')
+    if (pw === null) return
+    if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+      showToast('新密码至少8位，且必须包含字母和数字', 'error')
+      return
+    }
     try {
       await api.domains.users.resetPassword(u.id, { password: pw })
       showToast('密码已重置')
@@ -278,15 +299,14 @@ export function useUser() {
 
   onMounted(() => load())
 
-  _instance = {
+  return {
     users, positions, loading, searchKeyword,
-    showModal, modalEdit, form, canCreate, canEdit, canDelete,
-    activeCount, inactiveCount, totalStaff,
+    showModal, modalEdit, form, canCreate, canEdit, canDelete, canAdmin,
+    activeCount, inactiveCount, deletedCount, totalStaff,
     processes, processDropdownOpen, processSearch, selectedProcessIds, filteredProcessList, selectedProcessNames, onProcessChange, dropdownStyle, toggleProcessDropdown,
     page, total, pageSize,
     getPositionName, positionMap, getWorkProcesses, getWorkProcessTitle,
-    saving, pwResult, openAdd, openEdit, save, del, purgeUser, resetPwd, unlock, load, searchAndLoad,
+    saving, openAdd, openEdit, save, del, restoreUser, purgeUser, resetPwd, unlock, load, searchAndLoad,
     prevPage, nextPage
   }
-  return _instance
 }

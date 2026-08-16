@@ -9,6 +9,7 @@ from modules.services.order_service import OrderService
 from modules.services.approval_service import ApprovalService
 from modules.services.work_report_writer import WorkReportWriter
 from modules.domain.work_report import WorkReportCommand
+from factories import bind_order_process_versions, ensure_process_version
 
 
 def _seed_completed_serial_order(client, quantity=2, status="producing"):
@@ -20,6 +21,7 @@ def _seed_completed_serial_order(client, quantity=2, status="producing"):
             "VALUES (?, 'completion fixture', 'fixture', 1, 'active', datetime('now','localtime'))",
             (f"Completion Process {suffix}",),
         ).lastrowid
+        ensure_process_version(db, process_id)
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, "
             "completed, status, qr_mode, extra_fields) "
@@ -32,6 +34,7 @@ def _seed_completed_serial_order(client, quantity=2, status="producing"):
             "VALUES (?, ?, 1, 'completed', ?, 0, 0)",
             (order_id, process_id, quantity),
         )
+        bind_order_process_versions(db, order_id)
         for position in range(1, quantity + 1):
             serial_no = f"TEST-COMP-{suffix}-{position:03d}"
             db.execute(
@@ -64,6 +67,7 @@ def _seed_pending_serial_approval(client):
             "VALUES (?, 'approval fixture', 'fixture', 1, 'active', datetime('now','localtime'))",
             (f"Approval Completion Process {suffix}",),
         ).lastrowid
+        ensure_process_version(db, process_id)
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, "
             "completed, status, qr_mode) "
@@ -76,6 +80,7 @@ def _seed_pending_serial_approval(client):
             "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
             (order_id, process_id),
         )
+        bind_order_process_versions(db, order_id)
         serial_no = f"TEST-APPROVAL-COMP-{suffix}-001"
         db.execute(
             "INSERT INTO product_items "
@@ -190,6 +195,7 @@ def test_new_pending_process_keeps_reopened_order_active(client):
             "VALUES (?, 'completion fixture', 'fixture', 2, 'active', datetime('now','localtime'))",
             (f"Pending Completion Process {suffix}",),
         ).lastrowid
+        ensure_process_version(db, pending_process_id)
         db.commit()
         OrderService.reopen_order(order_id, "新增遗漏工序")
         OrderService.update_order(

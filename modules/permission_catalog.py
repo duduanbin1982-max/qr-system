@@ -18,7 +18,7 @@ ACTION_LABELS = {
     "serial_backfill_approve": "序列号补报审批",
     "admin": "管理员",
     "audit": "审核",
-    "submit": "提交评价",
+    "submit": "提交",
     "review": "质量核验",
     "waive": "历史任务豁免",
     "waive_live": "生产中例外豁免",
@@ -45,6 +45,10 @@ ACTION_LABELS = {
     "approve": "批准",
     "plan_manage": "改进计划管理",
     "plan_reassess": "改进计划复评",
+    "reject": "驳回",
+    "impact": "影响查询",
+    "retire": "退休",
+    "reactivate": "重新启用",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -52,8 +56,24 @@ ACTION_PERMISSION_DEFS = {
     "orders": ("订单", ["view", "create", "edit", "delete"]),
     "customers": ("客户", ["view", "create", "edit", "delete"]),
     "products": ("产品", ["view", "create", "edit", "delete"]),
-    "processes": ("工序", ["view", "create", "edit", "delete"]),
+    "processes": (
+        "工序",
+        ["view", "create", "edit", "delete", "retire", "reactivate"],
+    ),
+    "process_versions": (
+        "工序版本",
+        ["view", "create", "submit", "approve", "reject", "impact"],
+    ),
     "routes": ("工序路线", ["view", "create", "edit", "delete"]),
+    "route_versions": (
+        "路线版本",
+        ["view", "create", "submit", "approve", "reject", "impact"],
+    ),
+    "process_routes": ("工序路线生命周期", ["retire", "reactivate"]),
+    "master_data_releases": (
+        "主数据成组发布",
+        ["view", "create", "submit", "approve", "reject"],
+    ),
     "prices": ("工价", ["view", "create", "edit", "delete"]),
     "users": ("用户/员工", ["view", "create", "edit", "delete", "admin"]),
     "roles": ("角色", ["view", "create", "edit", "delete"]),
@@ -200,7 +220,15 @@ ACTION_PAGE_MAP = {
     "board": ["page:board"],
     "users": ["page:basic-settings", "page:basic-settings.users"],
     "processes": ["page:basic-settings", "page:basic-settings.processes"],
+    "process_versions": ["page:basic-settings", "page:basic-settings.processes"],
     "routes": ["page:basic-settings", "page:basic-settings.routes"],
+    "route_versions": ["page:basic-settings", "page:basic-settings.routes"],
+    "process_routes": ["page:basic-settings", "page:basic-settings.routes"],
+    "master_data_releases": [
+        "page:basic-settings",
+        "page:basic-settings.processes",
+        "page:basic-settings.routes",
+    ],
     "prices": ["page:basic-settings", "page:basic-settings.prices"],
     "products": ["page:basic-settings", "page:basic-settings.products"],
     "roles": ["page:settings", "page:settings.role-manage"],
@@ -241,8 +269,17 @@ PAGE_OPERATION_BINDINGS = {
     "page:work-time": ["work_time"],
     "page:board": ["board"],
     "page:basic-settings.users": ["users"],
-    "page:basic-settings.processes": ["processes"],
-    "page:basic-settings.routes": ["routes"],
+    "page:basic-settings.processes": [
+        "processes",
+        "process_versions",
+        "master_data_releases",
+    ],
+    "page:basic-settings.routes": [
+        "routes",
+        "route_versions",
+        "process_routes",
+        "master_data_releases",
+    ],
     "page:basic-settings.prices": ["prices"],
     "page:basic-settings.products": ["products"],
     "page:settings.company-info": ["settings"],
@@ -272,6 +309,8 @@ ACTION_PERMISSION_CODES = [
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
+    "processes:view": ["process_versions:view"],
+    "routes:view": ["route_versions:view"],
     "wages:view_self": ["wages:view"],
     "wages:view_all": ["wages:view"],
     "wages:prepare": ["wages:view", "wages:view_all"],

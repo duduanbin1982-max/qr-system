@@ -5,6 +5,13 @@ All SQL for stats: daily records, scrap records, order progress, worker stats.
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
 from modules.domain.reporting_day import reporting_day_bounds, reporting_range_bounds
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class StatsRepository:
@@ -84,9 +91,11 @@ class StatsRepository:
     def get_daily_records(date, product_code, limit, offset, db=None):
         db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code, db)
+        process_name = process_value_sql("wr", "process_version", "p")
+        route_name = route_name_sql("wr", "route_version", "route")
         rows = db.execute(
             "SELECT wr.id, wr.created_at, wr.quantity, wr.type, wr.status, wr.serial_no, wr.remark, "
-            "wr.order_id, wr.process_id, "
+            "wr.order_id, wr.process_id, wr.process_version_id, wr.route_version_id, "
             "o.order_no, o.qr_mode, o.customer, o.product_code, opl.product_id, "
             "CASE WHEN o.qr_mode = 'serial' AND COALESCE(wr.serial_no, '') != '' "
             "THEN wr.serial_no ELSE o.order_no END as display_order_no, "
@@ -94,8 +103,8 @@ class StatsRepository:
             "COALESCE(prod.model, '') as product_model, "
             "COALESCE(prod.spec, '') as product_spec, "
             "COALESCE(prod.category, '') as product_category, "
-            "COALESCE(route.name, '') as route_name, "
-            "p.name as process_name, p.id as process_id, "
+            + route_name + " as route_name, "
+            + process_name + " as process_name, p.id as process_id, "
             "u.id as user_id, u.name as worker_name, u.employee_no, COALESCE(u.group_name, '') as group_name, "
             "COALESCE(dept.name, '') as department_name, COALESCE(pos.name, '') as position_name, "
             "COALESCE((SELECT qi.result FROM quality_inspections qi "
@@ -111,12 +120,15 @@ class StatsRepository:
             "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
             "LEFT JOIN products prod ON prod.id=opl.product_id "
             "LEFT JOIN process_routes route ON route.id=o.route_id "
-            "LEFT JOIN departments dept ON dept.id=u.department_id "
+            + process_version_join("wr", "process_version")
+            + route_version_join("wr", "route_version")
+            + "LEFT JOIN departments dept ON dept.id=u.department_id "
             "LEFT JOIN positions pos ON pos.id=u.position_id "
             "WHERE " + where_clause
             + " ORDER BY u.name COLLATE NOCASE ASC, u.employee_no ASC, wr.created_at ASC, wr.id ASC LIMIT ? OFFSET ?",
             params + [limit, offset]
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
         return [dict(r) for r in rows]
 
     @staticmethod
@@ -144,19 +156,24 @@ class StatsRepository:
     def get_daily_summary(date, product_code, db=None):
         db = resolve_db(db)
         where_clause, params = StatsRepository._daily_where(date, product_code, db)
+        process_name = process_value_sql("wr", "process_version", "p")
         rows = db.execute(
-            "SELECT p.id, p.name, COUNT(*) as record_count, "
+            "SELECT p.id, " + process_name + " AS name, wr.process_id, "
+            "wr.process_version_id, COUNT(*) as record_count, "
             "COALESCE(SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END),0) as total_output, "
             "COALESCE(SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END),0) as total_scrap, "
             "COALESCE(SUM(CASE WHEN wr.type='rework' THEN wr.quantity ELSE 0 END),0) as total_rework "
             "FROM work_records wr "
             "JOIN orders o ON wr.order_id=o.id "
             "JOIN processes p ON wr.process_id=p.id "
-            "JOIN users u ON wr.user_id=u.id "
+            + process_version_join("wr", "process_version")
+            + "JOIN users u ON wr.user_id=u.id "
             "WHERE " + where_clause
-            + " GROUP BY p.id ORDER BY record_count DESC",
+            + " GROUP BY wr.process_id,wr.process_version_id," + process_name
+            + " ORDER BY record_count DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
         return [dict(s) for s in rows]
 
     @staticmethod
@@ -177,17 +194,21 @@ class StatsRepository:
     def get_scrap_records(start, end, product_code, db=None):
         db = resolve_db(db)
         w, params = StatsRepository._scrap_where(start, end, product_code, db)
+        process_name = process_value_sql("sr", "process_version", "p")
         rows = db.execute(
             "SELECT sr.id, sr.created_at, sr.quantity, sr.reason, "
-            "o.order_no, o.product_name, p.name as process_name, "
+            "sr.process_id,sr.process_version_id,o.order_no,o.product_name,"
+            + process_name + " as process_name, "
             "u.id as user_id, u.name as worker_name, u.employee_no "
             "FROM scrap_records sr "
             "JOIN orders o ON sr.order_id=o.id "
             "JOIN processes p ON sr.process_id=p.id "
-            "JOIN users u ON sr.user_id=u.id "
+            + process_version_join("sr", "process_version")
+            + "JOIN users u ON sr.user_id=u.id "
             "WHERE " + w + " ORDER BY sr.created_at DESC",
             params
         ).fetchall()
+        warn_legacy_fact_rows("scrap_records", rows)
         return [dict(r) for r in rows]
 
     @staticmethod
@@ -208,15 +229,20 @@ class StatsRepository:
     def get_scrap_by_process(start, end, product_code, db=None):
         db = resolve_db(db)
         w, params = StatsRepository._scrap_where(start, end, product_code, db)
+        process_name = process_value_sql("sr", "process_version", "p")
         rows = db.execute(
-            "SELECT p.name, COUNT(*) as cnt, COALESCE(SUM(sr.quantity),0) as qty "
+            "SELECT " + process_name + " AS name,sr.process_id,sr.process_version_id,"
+            "COUNT(*) as cnt,COALESCE(SUM(sr.quantity),0) as qty "
             "FROM scrap_records sr "
             "JOIN orders o ON sr.order_id=o.id "
             "JOIN processes p ON sr.process_id=p.id "
-            "JOIN users u ON sr.user_id=u.id "
-            "WHERE " + w + " GROUP BY p.id ORDER BY qty DESC LIMIT 10",
+            + process_version_join("sr", "process_version")
+            + "JOIN users u ON sr.user_id=u.id "
+            "WHERE " + w + " GROUP BY sr.process_id,sr.process_version_id," + process_name
+            + " ORDER BY qty DESC LIMIT 10",
             params
         ).fetchall()
+        warn_legacy_fact_rows("scrap_records", rows)
         return [dict(r) for r in rows]
 
     # ============================================================
@@ -275,10 +301,11 @@ class StatsRepository:
             where, params, start, end, "wr.created_at"
         )
         w = ' AND '.join(where)
+        process_name = process_value_sql("wr", "process_version", "p")
         rows = db.execute(
             "SELECT o.product_name, "
             "pr.model AS model, pr.spec AS spec, "
-            "p.name AS process_name, "
+            + process_name + " AS process_name,wr.process_id,wr.process_version_id,"
             "SUM(CASE WHEN wr.type='normal' THEN wr.quantity ELSE 0 END) AS output, "
             "SUM(CASE WHEN wr.type='scrap' THEN wr.quantity ELSE 0 END) AS scrap "
             "FROM work_records wr "
@@ -286,10 +313,13 @@ class StatsRepository:
             "LEFT JOIN order_product_links opl ON opl.order_id=o.id "
             "LEFT JOIN products pr ON pr.id=opl.product_id AND pr.deleted_at IS NULL "
             "JOIN processes p ON wr.process_id=p.id "
-            "WHERE " + w + " GROUP BY o.product_name, pr.model, pr.spec, p.id "
-            "ORDER BY o.product_name, pr.model, p.name",
+            + process_version_join("wr", "process_version")
+            + "WHERE " + w + " GROUP BY o.product_name,pr.model,pr.spec,wr.process_id,"
+            "wr.process_version_id," + process_name + " "
+            "ORDER BY o.product_name,pr.model,process_name",
             params
         ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
         return [dict(r) for r in rows]
 
     @staticmethod
@@ -301,12 +331,16 @@ class StatsRepository:
             where, params, start, end, "mc.created_at"
         )
         w = " AND ".join(where)
+        process_name = process_value_sql("mc", "process_version", "p")
         rows = db.execute(
             "SELECT mc.id, mc.quantity, mc.created_at, o.order_no, o.product_name, "
-            "p.name as process_name FROM material_consumptions mc "
+            "mc.process_id,mc.process_version_id," + process_name
+            + " as process_name FROM material_consumptions mc "
             "LEFT JOIN orders o ON mc.order_id = o.id "
             "LEFT JOIN processes p ON mc.process_id = p.id "
-            "WHERE " + w + " ORDER BY mc.created_at DESC LIMIT 200",
+            + process_version_join("mc", "process_version")
+            + "WHERE " + w + " ORDER BY mc.created_at DESC LIMIT 200",
             params
         ).fetchall()
+        warn_legacy_fact_rows("material_consumptions", rows)
         return [dict(r) for r in rows]

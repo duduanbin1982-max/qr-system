@@ -7,6 +7,13 @@ Service 层只保留业务逻辑，不再直接写 SQL。
 import sqlite3
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class DuplicateCustomerNameError(Exception):
@@ -171,13 +178,14 @@ class CustomerRepository:
             params,
         ).fetchone()[0]
         offset = (page - 1) * limit
-        rows = db.execute("""
-            SELECT o.*, pr.name as route_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            WHERE {where_sql}
-            ORDER BY o.created_at DESC LIMIT ? OFFSET ?
-        """.format(where_sql=where_sql), params + [limit, offset]).fetchall()
+        route_name = route_name_sql("o", "route_version", "pr")
+        rows = db.execute(
+            "SELECT o.*," + route_name + " AS route_name FROM orders o "
+            "LEFT JOIN process_routes pr ON o.route_id=pr.id "
+            + route_version_join("o", "route_version")
+            + f"WHERE {where_sql} ORDER BY o.created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
         return rows, total
 
     @staticmethod
@@ -192,13 +200,16 @@ class CustomerRepository:
             placeholders = ",".join("?" for _ in data_scope_pids)
             where.append(f"op.process_id IN ({placeholders})")
             params.extend(data_scope_pids)
-        return db.execute("""
-            SELECT op.*, p.name as process_name
-            FROM order_processes op
-            JOIN processes p ON op.process_id = p.id
-            WHERE {where_sql}
-            ORDER BY op.seq_order
-        """.format(where_sql=" AND ".join(where)), params).fetchall()
+        process_name = process_value_sql("op", "process_version", "p")
+        rows = db.execute(
+            "SELECT op.*," + process_name + " AS process_name FROM order_processes op "
+            "JOIN processes p ON op.process_id=p.id "
+            + process_version_join("op", "process_version")
+            + "WHERE " + " AND ".join(where) + " ORDER BY op.seq_order",
+            params,
+        ).fetchall()
+        warn_legacy_fact_rows("order_processes", rows)
+        return rows
 
     # ============================================================
     # 写操作

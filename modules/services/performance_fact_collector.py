@@ -432,6 +432,18 @@ class PerformanceFactCollector:
             "product_name_snapshot": product_name,
             "process_id": context.get("process_id"),
             "process_name_snapshot": process_name,
+            "process_version_id": context.get("process_version_id"),
+            "process_code_snapshot": context.get("process_code_snapshot") or "",
+            "process_category_snapshot": context.get(
+                "process_category_snapshot"
+            ) or "",
+            "route_id": context.get("route_id"),
+            "route_version_id": context.get("route_version_id"),
+            "route_name_snapshot": context.get("route_name_snapshot")
+            or context.get("route_name_display")
+            or context.get("route_name")
+            or "",
+            "version_binding_source": context.get("version_binding_source") or "",
             "quantity": cls._number(quantity),
             "payload_json": payload_json,
         }
@@ -600,6 +612,20 @@ class PerformanceFactCollector:
         context = PerformanceFactRepository.business_context(
             event.get("order_id"), event.get("process_id"), db=db
         )
+        for field in (
+            "process_version_id",
+            "process_code_snapshot",
+            "process_name_snapshot",
+            "process_category_snapshot",
+            "route_id",
+            "route_version_id",
+            "route_name_snapshot",
+            "version_binding_source",
+        ):
+            value = event.get(field)
+            if value not in (None, ""):
+                context[field] = value
+        context["process_name"] = event.get("process_name") or ""
         payload = {
             "event_type": event.get("event_type") or "",
             "event_digest": event.get("event_digest") or "",

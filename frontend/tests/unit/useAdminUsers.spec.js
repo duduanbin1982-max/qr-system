@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setUserRoles: vi.fn(),
   updateUser: vi.fn(),
   createUser: vi.fn(),
+  permanentDeleteUser: vi.fn(),
   listRoles: vi.fn(),
   listRoleGroups: vi.fn(),
   showToast: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/lib/api.js', () => ({
       setUserRoles: mocks.setUserRoles,
       updateUser: mocks.updateUser,
       createUser: mocks.createUser,
+      permanentDeleteUser: mocks.permanentDeleteUser,
     },
     roles: {
       listRoles: mocks.listRoles,
@@ -40,6 +42,7 @@ describe('admin user role payload contracts', () => {
     mocks.setUserRoles.mockResolvedValue({ message: 'saved' })
     mocks.updateUser.mockResolvedValue({ message: 'updated' })
     mocks.createUser.mockResolvedValue({ id: 88 })
+    mocks.permanentDeleteUser.mockResolvedValue({ message: 'anonymized' })
     mocks.listRoles.mockResolvedValue({ roles: [] })
     mocks.listRoleGroups.mockResolvedValue({ role_groups: [] })
   })
@@ -79,5 +82,17 @@ describe('admin user role payload contracts', () => {
     await users.saveAdmin()
 
     expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'admin' }))
+  })
+
+  it('passes an explicit reason when anonymizing a deleted administrator', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('管理员账号离职归档')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const users = useAdminUsers()
+
+    await users.permanentDeleteAdminUser(10336)
+
+    expect(mocks.permanentDeleteUser).toHaveBeenCalledWith(
+      10336, { reason: '管理员账号离职归档' },
+    )
   })
 })

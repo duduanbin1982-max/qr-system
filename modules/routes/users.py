@@ -78,12 +78,16 @@ def user_restore_api(uid):
 @check_auth
 @check_permission('users:admin')
 def user_permanent_delete_api(uid):
+    data = get_json_body()
     try:
-        UserService.permanent_delete_user(uid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    safe_audit_log('permanent_delete_user', 'user', uid)
-    return jsonify({'message': 'user permanently deleted'})
+        UserService.permanent_delete_user(
+            uid,
+            g.current_user.get('id'),
+            data.get('reason', ''),
+        )
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify({'message': '员工身份已匿名化，历史记录已保留'})
 
 
 @app.route('/api/users/<int:uid>', methods=['DELETE'])
@@ -154,7 +158,11 @@ def import_users():
     try:
         file.save(tmp.name)
         tmp.close()
-        result = UserService.import_users(tmp.name)
+        result = UserService.import_users(
+            tmp.name, g.current_user.get('id')
+        )
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     finally:

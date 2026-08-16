@@ -291,7 +291,10 @@ def route_price_versions():
     if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
         return _deny()
     return jsonify({"versions": PriceVersionService.list_versions(
-        request.args.get("route_id", type=int), request.args.get("status", "")
+        request.args.get("route_id", type=int),
+        request.args.get("status", ""),
+        request.args.get("route_version_id", type=int),
+        request.args.get("process_version_id", type=int),
     )})
 
 

@@ -1,6 +1,6 @@
 """Transaction-aware lifecycle rules for performance assignments."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from modules.repositories.performance_assignment_repository import (
@@ -16,6 +16,17 @@ class PerformanceAssignmentService:
     @staticmethod
     def _current_timestamp():
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    @staticmethod
+    def _next_effective_timestamp(user_id, effective_at, db):
+        """Keep assignment events strictly ordered on coarse system clocks."""
+        current = PerformanceAssignmentRepository.open_assignment(user_id, db=db)
+        if not current or effective_at > current["valid_from"]:
+            return effective_at
+        next_value = datetime.fromisoformat(current["valid_from"]) + timedelta(
+            microseconds=1
+        )
+        return next_value.strftime("%Y-%m-%d %H:%M:%S.%f")
 
     @staticmethod
     def _source_key(user_id, source_type, effective_at):
@@ -56,7 +67,12 @@ class PerformanceAssignmentService:
     def record_user_change(before, after, created_by=None, effective_at=None, db=None):
         before = dict(before)
         after = dict(after)
-        effective_at = effective_at or PerformanceAssignmentService._current_timestamp()
+        if effective_at is None:
+            effective_at = PerformanceAssignmentService._next_effective_timestamp(
+                after["user_id"],
+                PerformanceAssignmentService._current_timestamp(),
+                db,
+            )
         was_active = before.get("status") == PerformanceAssignmentService.ACTIVE_STATUS
         is_active = after.get("status") == PerformanceAssignmentService.ACTIVE_STATUS
 

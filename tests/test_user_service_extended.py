@@ -106,19 +106,186 @@ def test_batch_status_soft_delete_restore_and_permanent_delete(client):
         second_id, _ = UserService.create_user({
             "username": "batchuser2", "name": "批量员工二", "password": "Worker123"
         })
+        db.execute(
+            "UPDATE users SET token = 'batch-session-token' WHERE id = ?",
+            (first_id,),
+        )
+        db.execute(
+            "INSERT INTO user_sessions (user_id, token) VALUES (?, 'batch-session-token')",
+            (first_id,),
+        )
+        db.commit()
 
         assert UserService.batch_update_status([first_id, second_id], "inactive") == 2
+        assert db.execute(
+            "SELECT token FROM users WHERE id = ?", (first_id,)
+        ).fetchone()["token"] is None
+        assert db.execute(
+            "SELECT COUNT(*) FROM user_sessions WHERE user_id = ?", (first_id,)
+        ).fetchone()[0] == 0
         with pytest.raises(ValueError, match="Invalid status"):
             UserService.batch_update_status([first_id], "deleted")
 
         assert UserService.batch_delete_users([first_id, second_id], _admin_id(db)) == 2
         assert UserService.restore_user(first_id) is True
         assert UserService.delete_user(first_id, _admin_id(db)) is True
-        with pytest.raises(ConflictError, match="assignment history"):
-            UserService.permanent_delete_user(first_id)
+        admin_id = _admin_id(db)
+        db.execute(
+            "INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) "
+            "VALUES (?, 'historical_action', 'user', ?, 'must remain')",
+            (first_id, first_id),
+        )
+        batch_id = db.execute(
+            "INSERT INTO payroll_batches "
+            "(payroll_month, version, period_start, period_end, source_cutoff_at) "
+            "VALUES ('2099-01', 1, '2099-01-01 07:00:00', "
+            "'2099-02-01 07:00:00', '2099-02-02 00:00:00')"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO payroll_employee_lines "
+            "(batch_id, employee_id, employee_name_snapshot, employee_no_snapshot) "
+            "VALUES (?, ?, '批量员工一', 'HIST-001')",
+            (batch_id, first_id),
+        )
+        db.commit()
+
+        assert UserService.permanent_delete_user(
+            first_id, admin_id, "员工已离职并完成归档"
+        ) is True
+        user = db.execute(
+            "SELECT * FROM users WHERE id = ?", (first_id,)
+        ).fetchone()
+        assert user["status"] == "deleted"
+        assert user["username"] == "purged_user_" + str(first_id)
+        assert user["name"] == "已删除员工#" + str(first_id)
+        assert user["employee_no"] is None
+        assert user["purged_at"]
+        assert user["purged_by"] == admin_id
+        assert user["purge_reason"] == "员工已离职并完成归档"
         assert db.execute(
-            "SELECT status FROM users WHERE id = ?", (first_id,)
-        ).fetchone()["status"] == "deleted"
+            "SELECT COUNT(*) FROM audit_logs "
+            "WHERE user_id = ? AND action = 'historical_action'",
+            (first_id,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT employee_id FROM payroll_employee_lines WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()["employee_id"] == first_id
+        assert db.execute(
+            "SELECT COUNT(*) FROM performance_assignment_history WHERE user_id = ?",
+            (first_id,),
+        ).fetchone()[0] >= 2
+        assert db.execute(
+            "SELECT COUNT(*) FROM user_roles WHERE user_id = ?", (first_id,)
+        ).fetchone()[0] == 0
+        with pytest.raises(ConflictError, match="cannot be restored"):
+            UserService.restore_user(first_id)
+        assert UserService.permanent_delete_user(
+            second_id, admin_id, "第二名员工离职归档"
+        ) is True
+        assert db.execute(
+            "SELECT employee_no FROM users WHERE id = ?", (second_id,)
+        ).fetchone()["employee_no"] is None
+
+
+def test_role_changes_require_admin_and_batch_is_atomic(client):
+    with client.application.app_context():
+        db = get_db()
+        admin_id = _admin_id(db)
+        worker_role_id = db.execute(
+            "SELECT id FROM roles WHERE code = 'worker'"
+        ).fetchone()["id"]
+        admin_role_id = db.execute(
+            "SELECT id FROM roles WHERE code = 'admin'"
+        ).fetchone()["id"]
+        first_id, _ = UserService.create_user({
+            "username": "roleworker1", "name": "角色员工一", "password": "Worker123"
+        })
+        second_id, _ = UserService.create_user({
+            "username": "roleworker2", "name": "角色员工二", "password": "Worker123"
+        })
+
+        with pytest.raises(PermissionError, match="users:admin"):
+            UserService.set_user_roles(first_id, [admin_role_id], second_id)
+        with pytest.raises(ConflictError, match="own roles"):
+            UserService.set_user_roles(admin_id, [worker_role_id], admin_id)
+        active_admin_ids = [
+            row["id"]
+            for row in db.execute(
+                "SELECT DISTINCT u.id FROM users u "
+                "JOIN user_roles ur ON ur.user_id = u.id "
+                "JOIN roles r ON r.id = ur.role_id "
+                "WHERE r.code = 'admin' AND u.status = 'active'"
+            ).fetchall()
+        ]
+        with pytest.raises(ConflictError, match="deactivate all administrators"):
+            UserService.batch_update_status(active_admin_ids, "inactive")
+        with pytest.raises(ValueError, match="User not found"):
+            UserService.batch_set_user_roles(
+                [first_id, 999999], [admin_role_id], "add", admin_id
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM user_roles "
+            "WHERE user_id = ? AND role_id = ?",
+            (first_id, admin_role_id),
+        ).fetchone()[0] == 0
+
+
+def test_employee_number_is_normalized_unique_and_position_can_be_cleared(client):
+    with client.application.app_context():
+        db = get_db()
+        position_id = db.execute(
+            "INSERT INTO positions (name, status) VALUES ('临时岗位', 'active')"
+        ).lastrowid
+        db.commit()
+        first_id, _ = UserService.create_user({
+            "username": "employeenumber1",
+            "name": "工号员工一",
+            "password": "Worker123",
+            "employee_no": " Staff-01 ",
+            "position_id": position_id,
+        })
+        with pytest.raises(ConflictError, match="Employee number"):
+            UserService.create_user({
+                "username": "employeenumber2",
+                "name": "工号员工二",
+                "password": "Worker123",
+                "employee_no": "staff-01",
+            })
+        UserService.update_user(
+            first_id, {"position_id": None}, current_user_id=_admin_id(db)
+        )
+        row = db.execute(
+            "SELECT employee_no, position_id FROM users WHERE id = ?", (first_id,)
+        ).fetchone()
+        assert tuple(row) == ("Staff-01", None)
+
+
+def test_privileged_import_requires_admin_and_rolls_back_file(client, tmp_path):
+    with client.application.app_context():
+        db = get_db()
+        from openpyxl import Workbook
+
+        worker_id, _ = UserService.create_user({
+            "username": "importcaller",
+            "name": "普通导入人",
+            "password": "Worker123",
+        })
+        workbook_path = tmp_path / "privileged-users.xlsx"
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["username", "name", "password", "role"])
+        worksheet.append(["rollbackworker", "应回滚员工", "Worker123", "worker"])
+        worksheet.append(["blockedimportadmin", "越权管理员", "Admin123", "admin"])
+        workbook.save(workbook_path)
+        workbook.close()
+
+        with pytest.raises(PermissionError, match="administrators"):
+            UserService.import_users(str(workbook_path), caller_id=worker_id)
+        assert db.execute(
+            "SELECT 1 FROM users WHERE username IN "
+            "('rollbackworker', 'blockedimportadmin')"
+        ).fetchone() is None
 
 
 def test_reset_password_validates_strength_and_unlocks_account(client):
@@ -162,7 +329,7 @@ def test_import_export_and_document_lifecycle(client, tmp_path):
         workbook.save(workbook_path)
         workbook.close()
 
-        imported = UserService.import_users(str(workbook_path))
+        imported = UserService.import_users(str(workbook_path), caller_id=_admin_id(db))
         assert imported["success"] == 1
         assert imported["skipped"] == 1
         user_id = db.execute(

@@ -2,6 +2,14 @@
 
 from modules.product_query import ProductQueryFilter
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class CompletionFocusRepository:
@@ -23,16 +31,14 @@ class CompletionFocusRepository:
                 f"WHERE scope_op.order_id = o.id AND scope_op.process_id IN ({placeholders}))"
             )
             params.extend(data_scope_pids)
+        route_name = route_name_sql("o", "route_version", "pr")
         return db.execute(
-            """
-            SELECT o.*, pr.name AS route_name, c.name AS customer_name
-            FROM orders o
-            LEFT JOIN process_routes pr ON o.route_id = pr.id
-            LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE """ + " AND ".join(where) + """
-            ORDER BY o.created_at ASC, o.id ASC
-            LIMIT ?
-            """,
+            "SELECT o.*," + route_name + " AS route_name,c.name AS customer_name "
+            "FROM orders o LEFT JOIN process_routes pr ON o.route_id=pr.id "
+            + route_version_join("o", "route_version")
+            + "LEFT JOIN customers c ON o.customer_id=c.id WHERE "
+            + " AND ".join(where)
+            + " ORDER BY o.created_at ASC,o.id ASC LIMIT ?",
             params + [limit],
         ).fetchall()
 
@@ -56,35 +62,36 @@ class CompletionFocusRepository:
             ).order_clause("o")
             scope_sql = "AND " + clause
             params.extend(clause_params)
-        return db.execute(
-            f"""
-            SELECT o.id, o.order_no, o.product_name, o.product_code, o.quantity,
-                   o.completed, o.created_at, o.deadline, o.plan_end,
-                   pr.name AS route_name, p.name AS process_name,
-                   op.process_id, op.seq_order, COALESCE(op.completed, 0) AS process_completed,
-                   MAX(COALESCE(o.quantity, 0) - COALESCE(op.completed, 0), 0) AS backlog
-            FROM orders o
-            JOIN order_processes op ON op.order_id = o.id AND op.process_id = ?
-            JOIN processes p ON p.id = op.process_id
-            LEFT JOIN process_routes pr ON pr.id = o.route_id
-            WHERE o.deleted_at IS NULL
-              AND COALESCE(o.status, '') IN ('pending', 'producing')
-              AND o.id != ?
-              AND (datetime(COALESCE(o.created_at, '1970-01-01 00:00:00')) < datetime(?)
-                   OR (COALESCE(o.created_at, '') = ? AND o.id < ?))
-              AND COALESCE(o.quantity, 0) > COALESCE(op.completed, 0)
-              AND NOT EXISTS (
-                  SELECT 1 FROM order_completion_focus_exceptions ex
-                  WHERE ex.order_id = o.id
-                    AND ex.status = 'active'
-                    AND (COALESCE(ex.expires_at, '') = '' OR datetime(ex.expires_at) >= datetime('now','localtime'))
-              )
-              {scope_sql}
-            ORDER BY o.created_at ASC, o.id ASC
-            LIMIT 1
-            """,
+        process_name = process_value_sql("op", "process_version", "p")
+        route_name = route_name_sql("o", "route_version", "pr")
+        row = db.execute(
+            "SELECT o.id,o.order_no,o.product_name,o.product_code,o.quantity,"
+            "o.completed,o.created_at,o.deadline,o.plan_end,"
+            + route_name + " AS route_name," + process_name + " AS process_name,"
+            "op.process_id,op.process_version_id,op.seq_order,"
+            "COALESCE(op.completed,0) AS process_completed,"
+            "MAX(COALESCE(o.quantity,0)-COALESCE(op.completed,0),0) AS backlog "
+            "FROM orders o JOIN order_processes op "
+            "ON op.order_id=o.id AND op.process_id=? "
+            "JOIN processes p ON p.id=op.process_id "
+            + process_version_join("op", "process_version")
+            + "LEFT JOIN process_routes pr ON pr.id=o.route_id "
+            + route_version_join("o", "route_version")
+            + "WHERE o.deleted_at IS NULL "
+            "AND COALESCE(o.status,'') IN ('pending','producing') AND o.id!=? "
+            "AND (datetime(COALESCE(o.created_at,'1970-01-01 00:00:00'))<datetime(?) "
+            "OR (COALESCE(o.created_at,'')=? AND o.id<?)) "
+            "AND COALESCE(o.quantity,0)>COALESCE(op.completed,0) "
+            "AND NOT EXISTS (SELECT 1 FROM order_completion_focus_exceptions ex "
+            "WHERE ex.order_id=o.id AND ex.status='active' "
+            "AND (COALESCE(ex.expires_at,'')='' "
+            "OR datetime(ex.expires_at)>=datetime('now','localtime'))) "
+            + scope_sql
+            + " ORDER BY o.created_at ASC,o.id ASC LIMIT 1",
             params,
         ).fetchone()
+        warn_legacy_fact_rows("order_processes", [row] if row else [])
+        return row
 
     @staticmethod
     def list_active_exceptions(order_ids=None, db=None):
@@ -178,12 +185,18 @@ class CompletionFocusRepository:
     ):
         should_commit = db is None
         db = resolve_db(db)
+        binding = capture_process_fact_binding(
+            db, order_id=order_id, process_id=process_id
+        )
         cursor = db.execute(
             """
             INSERT INTO order_completion_focus_events
                 (event_type, order_id, process_id, recommended_order_id, recommended_order_no,
-                 mode, blocking, bypass_allowed, reason, detail, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 mode,blocking,bypass_allowed,reason,detail,user_id,user_name,
+                 process_version_id,process_code_snapshot,process_name_snapshot,
+                 process_category_snapshot,route_id,route_version_id,route_name_snapshot,
+                 version_binding_source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 event_type,
@@ -198,6 +211,14 @@ class CompletionFocusRepository:
                 detail or "",
                 user_id,
                 user_name or "",
+                binding["process_version_id"],
+                binding["process_code_snapshot"],
+                binding["process_name_snapshot"],
+                binding["process_category_snapshot"],
+                binding["route_id"],
+                binding["route_version_id"],
+                binding["route_name_snapshot"],
+                binding["version_binding_source"],
             ),
         )
         if should_commit:

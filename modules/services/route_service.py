@@ -6,6 +6,10 @@ qr-system — 工序路线管理 Service 层（Repository-refactored）
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.route_repository import RouteRepository
+from modules.services.master_data_impact_service import MasterDataImpactService
+from modules.services.legacy_process_compatibility_service import (
+    LegacyProcessCompatibilityService,
+)
 from modules.services.order_process_sync_service import OrderProcessSyncService
 
 
@@ -14,7 +18,9 @@ class ProcessRouteService:
     VALID_CATEGORIES = ("结构件", "机加工")
 
     @staticmethod
-    def list_routes(category="", search="", limit=None, offset=0):
+    def list_routes(
+        category="", search="", limit=None, offset=0, selectable=False
+    ):
         """获取所有工序路线（含工序明细，批量预取避免 N+1）。"""
         rows, total = RouteRepository.list_routes(category, search, limit, offset)
 
@@ -31,17 +37,26 @@ class ProcessRouteService:
         for r in rows:
             route = dict(r)
             route["processes"] = items_by_route.get(r["id"], [])
-            route.update(usage_by_route.get(r["id"], {
-                "used_orders": 0,
-                "used_products": 0,
-                "is_locked": False,
-            }))
+            usage = usage_by_route.get(r["id"], {})
+            route.update({
+                "used_orders": usage.get("used_orders", 0),
+                "used_products": usage.get("used_products", 0),
+                "is_locked": usage.get("is_locked", False),
+            })
             result.append(route)
-        return {
+        legacy = {
             "routes": result,
             "total": total,
             "summary": RouteRepository.get_route_summary(),
         }
+        return LegacyProcessCompatibilityService.list_routes(
+            legacy,
+            category=category,
+            search=search,
+            limit=limit,
+            offset=offset,
+            selectable=selectable,
+        )
 
     @staticmethod
     def _validate_category(category):
@@ -77,11 +92,12 @@ class ProcessRouteService:
     def _ensure_route_unreferenced(usage, action):
         if not usage["is_locked"]:
             return
-        references = []
-        if usage["used_orders"]:
-            references.append(f'{usage["used_orders"]} 个订单')
-        if usage["used_products"]:
-            references.append(f'{usage["used_products"]} 个产品')
+        legacy_labels = {"orders": "订单", "products": "产品"}
+        references = [
+            f'{count} 个{legacy_labels.get(reference.business_key, reference.business_label)}'
+            for reference, count in usage.get("reference_counts", ())
+            if count and reference.impact_level != "internal"
+        ]
         raise ConflictError(
             "该工序路线已被" + "、".join(references) + f"引用，无法{action}。"
             "请新建工序路线，并将后续订单或产品改用新路线"
@@ -89,6 +105,7 @@ class ProcessRouteService:
 
     @staticmethod
     def create_route(data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("路线名称不能为空")
@@ -118,6 +135,7 @@ class ProcessRouteService:
 
     @staticmethod
     def update_route(rid, data):
+        LegacyProcessCompatibilityService.require_legacy_write()
         with BaseService.transaction() as txn:
             route = RouteRepository.find_route_by_id(rid, db=txn)
             if not route:
@@ -161,6 +179,7 @@ class ProcessRouteService:
 
     @staticmethod
     def delete_route(rid):
+        LegacyProcessCompatibilityService.require_legacy_write()
         with BaseService.transaction() as txn:
             route = RouteRepository.find_route_by_id(rid, db=txn)
             if not route:
@@ -174,11 +193,7 @@ class ProcessRouteService:
 
     @staticmethod
     def check_impact(rid):
-        route = RouteRepository.find_route_name(rid)
-        if not route:
-            raise NotFoundError("Route not found")
-        usage = RouteRepository.get_route_usage(rid)
-        return {"route_id": rid, "name": route["name"], **usage}
+        return MasterDataImpactService.route_impact(rid)
 
     @staticmethod
     def check_order_exists(order_id):
@@ -194,4 +209,6 @@ class ProcessRouteService:
                 raise NotFoundError("路线不存在")
             if not RouteRepository.check_order_exists(order_id, db=txn):
                 raise NotFoundError("订单不存在")
-            return OrderProcessSyncService.apply_route(txn, order_id, rid)
+            return OrderProcessSyncService.apply_route(
+                txn, order_id, rid
+            )

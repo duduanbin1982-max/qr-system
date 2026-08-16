@@ -4,6 +4,13 @@ import json
 
 from modules.domain.payroll_policy import PayrollConflictError
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    process_value_sql,
+    process_version_join,
+    route_name_sql,
+    route_version_join,
+    warn_legacy_fact_rows,
+)
 
 
 class PayrollRepository:
@@ -84,38 +91,61 @@ class PayrollRepository:
     @staticmethod
     def source_work_records(period_start, period_end, cutoff, db=None):
         db = resolve_db(db)
-        return [dict(row) for row in db.execute(
-            """
-            SELECT wr.id AS work_record_id, wr.order_id, wr.process_id, wr.user_id,
-                   wr.type AS work_type, wr.quantity, wr.created_at AS work_recorded_at,
-                   u.name AS employee_name, u.employee_no,
-                   COALESCE(pos.name,'') AS position_name,
-                   o.order_no, o.product_code, o.product_name, o.route_id,
-                   COALESCE(route.name,'') AS route_name,
-                   COALESCE(proc.name,'') AS process_name
-            FROM work_records wr
-            JOIN users u ON u.id=wr.user_id
-            LEFT JOIN positions pos ON pos.id=u.position_id
-            LEFT JOIN orders o ON o.id=wr.order_id
-            LEFT JOIN process_routes route ON route.id=o.route_id
-            LEFT JOIN processes proc ON proc.id=wr.process_id
-            WHERE wr.status='approved' AND wr.type IN ('normal','rework')
-              AND wr.created_at>=? AND wr.created_at<? AND wr.created_at<=?
-            ORDER BY wr.created_at,wr.id
-            """,
+        process_name = process_value_sql("wr", "process_version", "proc")
+        process_code = process_value_sql(
+            "wr", "process_version", "proc", field="code"
+        )
+        process_category = process_value_sql(
+            "wr", "process_version", "proc", field="category"
+        )
+        route_name = route_name_sql("wr", "route_version", "route")
+        rows = db.execute(
+            "SELECT wr.id AS work_record_id,wr.order_id,wr.process_id,wr.user_id,"
+            "wr.type AS work_type,wr.quantity,wr.created_at AS work_recorded_at,"
+            "wr.process_version_id,u.name AS employee_name,u.employee_no,"
+            "COALESCE(pos.name,'') AS position_name,o.order_no,o.product_code,o.product_name,"
+            "COALESCE(wr.route_id,o.route_id) AS route_id,wr.route_version_id,"
+            + route_name + " AS route_name," + process_name + " AS process_name,"
+            + process_code + " AS process_code," + process_category + " AS process_category "
+            "FROM work_records wr JOIN users u ON u.id=wr.user_id "
+            "LEFT JOIN positions pos ON pos.id=u.position_id "
+            "LEFT JOIN orders o ON o.id=wr.order_id "
+            "LEFT JOIN process_routes route ON route.id=COALESCE(wr.route_id,o.route_id) "
+            + route_version_join("wr", "route_version")
+            + "LEFT JOIN processes proc ON proc.id=wr.process_id "
+            + process_version_join("wr", "process_version")
+            + "WHERE wr.status='approved' AND wr.type IN ('normal','rework') "
+            "AND wr.created_at>=? AND wr.created_at<? AND wr.created_at<=? "
+            "ORDER BY wr.created_at,wr.id",
             (period_start, period_end, cutoff),
-        ).fetchall()]
+        ).fetchall()
+        warn_legacy_fact_rows("work_records", rows)
+        return [dict(row) for row in rows]
 
     @staticmethod
-    def price_candidates(route_id, process_id, at, db=None):
+    def price_candidates(
+        route_id,
+        process_id,
+        at,
+        db=None,
+        *,
+        route_version_id=None,
+        process_version_id=None,
+    ):
         db = resolve_db(db)
+        if route_version_id is not None and process_version_id is not None:
+            where = "route_version_id=? AND process_version_id=?"
+            params = (route_version_id, process_version_id, at, at)
+        else:
+            where = "route_id=? AND process_id=?"
+            params = (route_id, process_id, at, at)
         return [dict(row) for row in db.execute(
-            """
+            f"""
             SELECT * FROM route_price_versions
-            WHERE route_id=? AND process_id=? AND status='approved'
+            WHERE {where} AND status='approved'
               AND valid_from<=? AND (COALESCE(valid_to,'')='' OR valid_to>?)
             ORDER BY valid_from DESC,id DESC
-            """, (route_id, process_id, at, at)
+            """, params
         ).fetchall()]
 
     @staticmethod
@@ -203,8 +233,9 @@ class PayrollRepository:
         columns = (
             "batch_id", "employee_line_id", "source_type", "source_id", "work_record_id",
             "work_recorded_at", "order_id", "order_no_snapshot", "product_code_snapshot",
-            "product_name_snapshot", "route_id", "route_name_snapshot", "process_id",
-            "process_name_snapshot", "quantity", "price_version_id", "unit_price_micros",
+            "product_name_snapshot", "route_id", "route_version_id", "route_name_snapshot",
+            "process_id", "process_version_id", "process_name_snapshot", "quantity",
+            "price_version_id", "unit_price_micros",
             "rework_rate_basis_points", "amount_cents", "resolution_method", "resolution_reason",
             "resolved_by", "resolved_by_name", "resolved_at", "source_snapshot_json",
         )
@@ -488,12 +519,15 @@ class PayrollRepository:
         cursor = db.execute(
             """
             INSERT INTO route_price_versions (
-                route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
+                route_id,route_version_id,process_id,process_version_id,
+                normal_unit_price_micros,rework_rate_basis_points,
                 rework_rate_configured,valid_from,status,created_by,created_by_name,remark
-            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                payload["route_id"], payload["process_id"], payload["normal_unit_price_micros"],
+                payload["route_id"], payload["route_version_id"],
+                payload["process_id"], payload["process_version_id"],
+                payload["normal_unit_price_micros"],
                 payload.get("rework_rate_basis_points", 0), payload.get("rework_rate_configured", 0),
                 payload["valid_from"], "draft", payload.get("created_by"), payload.get("created_by_name", ""),
                 payload.get("remark", ""),
@@ -508,7 +542,13 @@ class PayrollRepository:
         return dict(row) if row else None
 
     @staticmethod
-    def list_price_versions(route_id=None, status="", db=None):
+    def list_price_versions(
+        route_id=None,
+        status="",
+        route_version_id=None,
+        process_version_id=None,
+        db=None,
+    ):
         db = resolve_db(db)
         clauses, params = ["1=1"], []
         if route_id is not None:
@@ -517,9 +557,19 @@ class PayrollRepository:
         if status:
             clauses.append("v.status=?")
             params.append(status)
+        if route_version_id is not None:
+            clauses.append("v.route_version_id=?")
+            params.append(route_version_id)
+        if process_version_id is not None:
+            clauses.append("v.process_version_id=?")
+            params.append(process_version_id)
         return [dict(row) for row in db.execute(
-            "SELECT v.*,r.name AS route_name,p.name AS process_name FROM route_price_versions v "
-            "LEFT JOIN process_routes r ON r.id=v.route_id LEFT JOIN processes p ON p.id=v.process_id "
+            "SELECT v.*,COALESCE(rv.name,r.name) AS route_name,"
+            "COALESCE(pv.name,p.name) AS process_name FROM route_price_versions v "
+            "LEFT JOIN process_routes r ON r.id=v.route_id "
+            "LEFT JOIN process_route_versions rv ON rv.id=v.route_version_id "
+            "LEFT JOIN processes p ON p.id=v.process_id "
+            "LEFT JOIN process_versions pv ON pv.id=v.process_version_id "
             "WHERE " + " AND ".join(clauses) + " ORDER BY v.route_id,v.process_id,v.valid_from DESC,v.id DESC", params
         ).fetchall()]
 
@@ -527,12 +577,23 @@ class PayrollRepository:
     def list_route_process_references(db=None):
         db = resolve_db(db)
         rows = db.execute(
-            "SELECT r.id AS route_id,r.name AS route_name,r.category AS route_category,"
-            "p.id AS process_id,p.name AS process_name,pri.seq_order "
-            "FROM process_routes r JOIN process_route_items pri ON pri.route_id=r.id "
-            "JOIN processes p ON p.id=pri.process_id "
-            "WHERE r.status='active' AND p.status='active' "
-            "ORDER BY r.category,r.name,pri.seq_order,pri.id"
+            "SELECT route.id AS route_id,route_version.id AS route_version_id,"
+            "route_version.name AS route_name,route_version.category AS route_category,"
+            "process.id AS process_id,process_version.id AS process_version_id,"
+            "process_version.name AS process_name,item.seq_order "
+            "FROM process_routes route "
+            "JOIN process_route_versions route_version "
+            "ON route_version.id=route.current_effective_version_id "
+            "JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "JOIN processes process ON process.id=item.process_id "
+            "JOIN process_versions process_version "
+            "ON process_version.id=item.process_version_id "
+            "WHERE route.lifecycle_status='active' "
+            "AND route_version.status='published' "
+            "AND process.lifecycle_status='active' "
+            "AND process_version.status='published' "
+            "ORDER BY route_version.category,route_version.name,item.seq_order,item.id"
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -542,6 +603,26 @@ class PayrollRepository:
         return bool(db.execute(
             "SELECT 1 FROM process_route_items WHERE route_id=? AND process_id=?", (route_id, process_id)
         ).fetchone())
+
+    @staticmethod
+    def exact_price_binding(route_version_id, process_version_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT route_version.id AS route_version_id,"
+            "route_version.process_route_id AS route_id,"
+            "route_version.status AS route_version_status,"
+            "process_version.id AS process_version_id,"
+            "process_version.process_id AS process_id,"
+            "process_version.status AS process_version_status "
+            "FROM process_route_versions route_version "
+            "JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "JOIN process_versions process_version "
+            "ON process_version.id=item.process_version_id "
+            "WHERE route_version.id=? AND process_version.id=?",
+            (route_version_id, process_version_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def approve_price_version(version_id, expected_row_version, payload, db):
@@ -557,13 +638,22 @@ class PayrollRepository:
             raise PayrollConflictError("工价版本状态已变化，请刷新")
 
     @staticmethod
-    def close_prior_price_version(version_id, route_id, process_id, valid_to, db):
+    def close_prior_price_version(
+        version_id, route_version_id, process_version_id, valid_to, db
+    ):
         db.execute(
             """
             UPDATE route_price_versions SET valid_to=?,row_version=row_version+1
-            WHERE id<>? AND route_id=? AND process_id=? AND status='approved'
+            WHERE id<>? AND route_version_id=? AND process_version_id=?
+              AND status='approved'
               AND COALESCE(valid_to,'')='' AND valid_from<?
-            """, (valid_to, version_id, route_id, process_id, valid_to)
+            """, (
+                valid_to,
+                version_id,
+                route_version_id,
+                process_version_id,
+                valid_to,
+            )
         )
 
     @staticmethod

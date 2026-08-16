@@ -1,6 +1,7 @@
 import uuid
 
 from factories import TEST_USER
+from factories import ensure_process_version, ensure_route_version
 from modules.db import get_db
 
 
@@ -17,7 +18,9 @@ def _seed_route(client):
                 "VALUES (?, ?, ?, ?, 'active', datetime('now','localtime'))",
                 (f"Fixture {label} {suffix}", "cross module fixture", "结构件", seq_order),
             )
-            process_ids.append(cursor.lastrowid)
+            process_id = cursor.lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         route_id = db.execute(
             "SELECT MAX(value) + 10000 FROM ("
@@ -44,6 +47,10 @@ def _seed_route(client):
 
 
 def _create_order_with_route(client, auth_headers, route_id):
+    with client.application.app_context():
+        db = get_db()
+        ensure_route_version(db, route_id)
+        db.commit()
     response = client.post(
         "/api/orders",
         headers=auth_headers,
@@ -114,8 +121,9 @@ def _seed_alternate_route(client, process_id):
             "VALUES (?, ?, 1, 1)",
             (route_id, process_id),
         )
+        ensure_route_version(db, route_id)
         db.commit()
-        return route_id
+    return route_id
 
 
 def test_unreferenced_route_can_be_updated(client, auth_headers):

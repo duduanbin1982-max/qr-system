@@ -4,6 +4,11 @@ qr-system — ScanRepository（扫码报工数据访问层）
 import sqlite3
 
 from modules.repositories.context import resolve_db
+from modules.process_fact_projection import (
+    capture_process_fact_binding,
+    compatible_process_projection,
+    warn_legacy_fact_rows,
+)
 
 
 class ScanRepository:
@@ -47,13 +52,18 @@ class ScanRepository:
     @staticmethod
     def get_order_processes(order_id, db=None):
         db = resolve_db(db)
-        return db.execute(
-            """SELECT op.*, p.name as process_name
-               FROM order_processes op
-               JOIN processes p ON op.process_id=p.id
-               WHERE op.order_id = ? ORDER BY op.seq_order""",
+        process_name, version_join, _ = compatible_process_projection(
+            db, "op", "process_version", "p"
+        )
+        rows = db.execute(
+            "SELECT op.*," + process_name + " AS process_name "
+            "FROM order_processes op JOIN processes p ON op.process_id=p.id "
+            + version_join
+            + "WHERE op.order_id=? ORDER BY op.seq_order",
             (order_id,)
         ).fetchall()
+        warn_legacy_fact_rows("order_processes", rows)
+        return rows
 
     @staticmethod
     def get_item_by_serial(serial_no, db=None):
@@ -87,6 +97,20 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
+    def get_work_fact_binding(order_id, process_id, db=None):
+        """Return the exact order binding inherited by a new work fact."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT op.process_id,op.process_version_id,op.process_code_snapshot,"
+            "op.process_name_snapshot,op.process_category_snapshot,"
+            "order_row.route_id,order_row.route_version_id,"
+            "order_row.route_name_snapshot "
+            "FROM order_processes op JOIN orders order_row ON order_row.id=op.order_id "
+            "WHERE op.order_id=? AND op.process_id=?",
+            (order_id, process_id),
+        ).fetchone()
+
+    @staticmethod
     def find_order_process_id(order_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -97,24 +121,39 @@ class ScanRepository:
     @staticmethod
     def get_prev_incomplete_processes(order_id, current_seq, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT op.seq_order, p.name as process_name FROM order_processes op "
+        process_name, version_join, version_id = compatible_process_projection(
+            db, "op", "process_version", "p"
+        )
+        rows = db.execute(
+            "SELECT op.process_id," + version_id + " AS process_version_id,op.seq_order," + process_name
+            + " AS process_name "
+            "FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? AND op.seq_order < ? AND (op.completed IS NULL OR op.completed = 0) "
+            + version_join
+            + "WHERE op.order_id = ? AND op.seq_order < ? "
+            "AND (op.completed IS NULL OR op.completed = 0) "
             "ORDER BY op.seq_order",
             (order_id, current_seq)
         ).fetchall()
+        warn_legacy_fact_rows("order_processes", rows)
+        return rows
 
     @staticmethod
     def get_prev_order_process(order_id, current_seq, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT op.*, p.name as process_name FROM order_processes op "
+        process_name, version_join, _ = compatible_process_projection(
+            db, "op", "process_version", "p"
+        )
+        row = db.execute(
+            "SELECT op.*," + process_name + " AS process_name FROM order_processes op "
             "JOIN processes p ON op.process_id = p.id "
-            "WHERE op.order_id = ? AND op.seq_order < ? "
+            + version_join
+            + "WHERE op.order_id = ? AND op.seq_order < ? "
             "ORDER BY op.seq_order DESC LIMIT 1",
             (order_id, current_seq)
         ).fetchone()
+        warn_legacy_fact_rows("order_processes", [row] if row else [])
+        return row
 
     @staticmethod
     def find_next_process(order_id, current_seq, db=None):
@@ -228,15 +267,19 @@ class ScanRepository:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        fact_binding=None,
         db=None,
     ):
         db = resolve_db(db)
+        binding = dict(fact_binding or {})
         cur = db.execute(
             "INSERT INTO work_records "
             "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
             "report_source, actual_completed_at, backfill_reason, "
-            "submit_position_id, submit_position_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "submit_position_id, submit_position_name, process_version_id, "
+            "process_code_snapshot, process_name_snapshot, process_category_snapshot, "
+            "route_id, route_version_id, route_name_snapshot, version_binding_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 order_id,
                 process_id,
@@ -251,6 +294,17 @@ class ScanRepository:
                 backfill_reason,
                 submit_position_id,
                 submit_position_name,
+                binding.get("process_version_id"),
+                binding.get("process_code_snapshot", ""),
+                binding.get("process_name_snapshot", ""),
+                binding.get("process_category_snapshot", ""),
+                binding.get("route_id"),
+                binding.get("route_version_id"),
+                binding.get("route_name_snapshot", ""),
+                binding.get(
+                    "version_binding_source",
+                    "captured" if binding.get("process_version_id") else "",
+                ),
             ),
         )
         return cur.lastrowid
@@ -294,16 +348,22 @@ class ScanRepository:
     @staticmethod
     def find_first_unreported_serial_process(order_id, serial_no, db=None):
         db = resolve_db(db)
-        return db.execute(
-            "SELECT op.*, p.name AS process_name FROM order_processes op "
+        process_name, version_join, _ = compatible_process_projection(
+            db, "op", "process_version", "p"
+        )
+        row = db.execute(
+            "SELECT op.*," + process_name + " AS process_name FROM order_processes op "
             "JOIN processes p ON p.id = op.process_id "
-            "WHERE op.order_id = ? AND NOT EXISTS ("
+            + version_join
+            + "WHERE op.order_id = ? AND NOT EXISTS ("
             "SELECT 1 FROM work_records wr WHERE wr.order_id = op.order_id "
             "AND wr.process_id = op.process_id AND wr.serial_no = ? "
             "AND wr.type = 'normal' AND wr.status = 'approved') "
             "ORDER BY op.seq_order, op.id LIMIT 1",
             (order_id, serial_no),
         ).fetchone()
+        warn_legacy_fact_rows("order_processes", [row] if row else [])
+        return row
 
     @staticmethod
     def insert_approval_record(work_record_id, db=None):
@@ -399,9 +459,21 @@ class ScanRepository:
     @staticmethod
     def insert_scrap_record(order_id, process_id, user_id, quantity, reason, db=None):
         db = resolve_db(db)
+        binding = capture_process_fact_binding(
+            db, order_id=order_id, process_id=process_id
+        )
         cursor = db.execute(
-            "INSERT INTO scrap_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason),
+            "INSERT INTO scrap_records (order_id,process_id,user_id,quantity,reason,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_id,route_version_id,route_name_snapshot,"
+            "version_binding_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                order_id, process_id, user_id, quantity, reason,
+                binding["process_version_id"], binding["process_code_snapshot"],
+                binding["process_name_snapshot"], binding["process_category_snapshot"],
+                binding["route_id"], binding["route_version_id"],
+                binding["route_name_snapshot"], binding["version_binding_source"],
+            ),
         )
         return cursor.lastrowid
 
@@ -425,9 +497,21 @@ class ScanRepository:
     @staticmethod
     def insert_rework_record(order_id, process_id, user_id, quantity, reason, db=None):
         db = resolve_db(db)
+        binding = capture_process_fact_binding(
+            db, order_id=order_id, process_id=process_id
+        )
         db.execute(
-            "INSERT INTO rework_records (order_id, process_id, user_id, quantity, reason) VALUES (?,?,?,?,?)",
-            (order_id, process_id, user_id, quantity, reason),
+            "INSERT INTO rework_records (order_id,process_id,user_id,quantity,reason,"
+            "process_version_id,process_code_snapshot,process_name_snapshot,"
+            "process_category_snapshot,route_id,route_version_id,route_name_snapshot,"
+            "version_binding_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                order_id, process_id, user_id, quantity, reason,
+                binding["process_version_id"], binding["process_code_snapshot"],
+                binding["process_name_snapshot"], binding["process_category_snapshot"],
+                binding["route_id"], binding["route_version_id"],
+                binding["route_name_snapshot"], binding["version_binding_source"],
+            ),
         )
 
     @staticmethod
@@ -505,15 +589,23 @@ class ScanRepository:
     @staticmethod
     def insert_work_record(data, db=None):
         db = resolve_db(db)
-        cur = db.execute(
-            """INSERT INTO work_records
-               (order_id, process_id, user_id, serial_no, quantity, type, status, remark)
-               VALUES (?,?,?,?,?,?,'approved',?)""",
-            (data['order_id'], data['process_id'], data['user_id'],
-             data.get('serial_no', ''), data.get('quantity', 1),
-             data.get('type', 'normal'), data.get('remark', ''))
+        binding = ScanRepository.get_work_fact_binding(
+            data["order_id"], data["process_id"], db=db
         )
-        return cur.lastrowid
+        if binding is None or binding["process_version_id"] is None:
+            raise ValueError("订单工序缺少版本绑定，禁止报工")
+        return ScanRepository.insert_report_work_record(
+            data["order_id"],
+            data["process_id"],
+            data["user_id"],
+            data.get("type", "normal"),
+            data.get("quantity", 1),
+            data.get("remark", ""),
+            "approved",
+            data.get("serial_no", ""),
+            fact_binding=binding,
+            db=db,
+        )
 
 
     @staticmethod

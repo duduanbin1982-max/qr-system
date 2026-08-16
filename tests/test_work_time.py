@@ -2,6 +2,11 @@ import json
 import bcrypt
 
 from modules.db import get_db
+from factories import (
+    bind_order_process_versions,
+    create_process_route,
+    ensure_process_version,
+)
 
 
 def _fixture_ids(client, test_order_id):
@@ -11,15 +16,11 @@ def _fixture_ids(client, test_order_id):
             "SELECT process_id FROM order_processes WHERE order_id = ? ORDER BY seq_order LIMIT 1",
             (test_order_id,),
         ).fetchone()
-        route = db.execute(
-            "INSERT INTO process_routes (name, description, category, updated_at) "
-            "VALUES ('Fixture Work Time Route', 'pytest fixture route', 'fixture', datetime('now','localtime'))"
-        )
-        route_id = route.lastrowid
-        db.execute(
-            "INSERT INTO process_route_items (route_id, process_id, seq_order, required_audit) "
-            "VALUES (?, ?, 0, 0)",
-            (route_id, process["process_id"]),
+        route_id = create_process_route(
+            db,
+            [process["process_id"]],
+            name="Fixture Work Time Route",
+            category="fixture",
         )
         db.execute(
             "UPDATE orders SET route_id = ?, "
@@ -28,6 +29,7 @@ def _fixture_ids(client, test_order_id):
             "WHERE id = ?",
             (route_id, test_order_id),
         )
+        bind_order_process_versions(db, test_order_id)
         db.commit()
         user = db.execute(
             "SELECT id FROM users WHERE username = 'testrunner'",
@@ -193,10 +195,12 @@ def _create_work_time_route_batch(client, auth_headers, test_order_id):
             "VALUES ('Fixture Batch Process', 'pytest fixture process', 'fixture', 100, 'active', datetime('now','localtime'))"
         )
         second_process_id = cursor.lastrowid
-        db.execute(
-            "INSERT INTO process_route_items (route_id, process_id, seq_order, required_audit) "
-            "VALUES (?, ?, 1, 0)",
-            (ids["route_id"], second_process_id),
+        ensure_process_version(db, second_process_id)
+        ids["route_id"] = create_process_route(
+            db,
+            [ids["process_id"], second_process_id],
+            name="Fixture Work Time Batch Route",
+            category="fixture",
         )
         db.commit()
 
@@ -253,7 +257,7 @@ def test_work_time_route_batch_groups_processes_by_route(client, auth_headers, t
     assert group["route_id"] == ids["route_id"]
     assert group["process_count"] == 2
     assert group["active_count"] == 2
-    assert [item["route_seq_order"] for item in group["items"]] == [0, 1]
+    assert [item["route_seq_order"] for item in group["items"]] == [1, 2]
 
 
 

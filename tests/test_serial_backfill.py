@@ -4,6 +4,7 @@ import json
 import uuid
 from modules.db import clear_settings_cache, get_db
 from modules.services.approval_service import ApprovalService
+from factories import bind_order_process_versions, ensure_process_version
 
 
 def _seed_serial_order(client):
@@ -23,15 +24,15 @@ def _seed_serial_order(client):
             (f"Backfill A {suffix}", f"Backfill B {suffix}", f"Backfill C {suffix}"),
             start=1,
         ):
-            process_ids.append(
-                db.execute(
-                    "INSERT INTO processes "
-                    "(name, description, category, seq_order, status, updated_at) "
-                    "VALUES (?, 'serial backfill test', 'fixture', ?, 'active', "
-                    "datetime('now','localtime'))",
-                    (name, sequence),
-                ).lastrowid
-            )
+            process_id = db.execute(
+                "INSERT INTO processes "
+                "(name, description, category, seq_order, status, updated_at) "
+                "VALUES (?, 'serial backfill test', 'fixture', ?, 'active', "
+                "datetime('now','localtime'))",
+                (name, sequence),
+            ).lastrowid
+            ensure_process_version(db, process_id)
+            process_ids.append(process_id)
 
         position_id = db.execute(
             "INSERT INTO positions (name, description, status) "
@@ -71,6 +72,7 @@ def _seed_serial_order(client):
                 "VALUES (?, ?, ?, 'pending', 0, 0, 0)",
                 (order_id, process_id, sequence),
             )
+        bind_order_process_versions(db, order_id)
         db.execute(
             "INSERT INTO product_items "
             "(serial_no, order_id, order_no, position_no, qr_content, status, current_process_id) "

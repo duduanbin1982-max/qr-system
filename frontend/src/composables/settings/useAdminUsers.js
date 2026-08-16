@@ -51,7 +51,9 @@ export function useAdminUsers() {
   })
 
   const isAllSelected = computed(() => {
-    const ids = filteredAdminList.value.filter(user => !user.is_admin_user).map(user => user.id)
+    const ids = filteredAdminList.value
+      .filter(user => !user.is_admin_user && user.status !== 'deleted')
+      .map(user => user.id)
     return ids.length > 0 && ids.every(id => selectedAdmins.value.includes(id))
   })
 
@@ -87,7 +89,9 @@ export function useAdminUsers() {
 
   function toggleSelectAllAdmins() {
     if (!isAllSelected.value) {
-      selectedAdmins.value = filteredAdminList.value.filter(user => !user.is_admin_user).map(user => user.id)
+      selectedAdmins.value = filteredAdminList.value
+        .filter(user => !user.is_admin_user && user.status !== 'deleted')
+        .map(user => user.id)
     } else {
       selectedAdmins.value = []
     }
@@ -226,10 +230,19 @@ export function useAdminUsers() {
   }
 
   async function permanentDeleteAdminUser(uid) {
-    if (!confirm('彻底删除将无法恢复，确定继续？')) return
+    const reason = prompt(
+      '请输入匿名化原因（至少4个字符）。身份信息会清除，历史业务记录继续保留：',
+      ''
+    )
+    if (reason === null) return
+    if (reason.trim().length < 4) {
+      showToast('匿名化原因至少需要4个字符', 'error')
+      return
+    }
+    if (!confirm('匿名化身份后无法恢复，确定继续？')) return
     try {
-      await api.domains.users.permanentDeleteUser(uid)
-      showToast('已彻底删除')
+      await api.domains.users.permanentDeleteUser(uid, { reason: reason.trim() })
+      showToast('身份已匿名化，历史记录已保留')
       loadAllUsers()
     } catch (error) {
       showToast(error.message, 'error')

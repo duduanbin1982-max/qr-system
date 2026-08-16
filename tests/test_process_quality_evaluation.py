@@ -10,7 +10,13 @@ from modules.domain.errors import ConflictError
 from modules.domain.work_report import WorkReportCommand
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 from modules.services.quality_management_service import QualityManagementService
-from factories import WORKER_HASH, WORKER_PASS, ensure_user
+from factories import (
+    WORKER_HASH,
+    WORKER_PASS,
+    bind_order_process_versions,
+    ensure_process_version,
+    ensure_user,
+)
 
 
 def _seed_serial_flow(client):
@@ -26,11 +32,13 @@ def _seed_serial_flow(client):
         assert evaluator
         process_ids = []
         for seq_order in (1, 2, 3):
-            process_ids.append(db.execute(
+            process_id = db.execute(
                 "INSERT INTO processes (name, description, category, seq_order, status, updated_at) "
                 "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
                 (f"全流程评价工序{seq_order}-{suffix}", seq_order),
-            ).lastrowid)
+            ).lastrowid
+            process_ids.append(process_id)
+            ensure_process_version(db, process_id)
         order_no = f"TEST-PQE-{suffix}"
         serial_no = f"{order_no}-001"
         order_id = db.execute(
@@ -45,6 +53,7 @@ def _seed_serial_flow(client):
                 "VALUES (?, ?, ?, ?, ?, 0, 0)",
                 (order_id, process_id, index + 1, "completed" if completed else "pending", completed),
             )
+        bind_order_process_versions(db, order_id)
         db.execute(
             "INSERT INTO product_items (serial_no, order_id, order_no, position_no, qr_content, status, current_process_id) "
             "VALUES (?, ?, ?, 1, ?, 'in_progress', ?)",
@@ -217,6 +226,7 @@ def test_order_mode_multiple_contributors_creates_process_level_task(client):
                 "VALUES (?, 'pytest fixture process', 'fixture', ?, 'active', datetime('now','localtime'))",
                 (f"订单评价工序{seq_order}-{suffix}", seq_order),
             ).lastrowid)
+            ensure_process_version(db, process_ids[-1])
         order_id = db.execute(
             "INSERT INTO orders (order_no, customer, product_name, product_code, quantity, status, qr_mode) "
             "VALUES (?, 'Test Customer', '订单评价产品', ?, 10, 'producing', '')",
@@ -228,6 +238,7 @@ def test_order_mode_multiple_contributors_creates_process_level_task(client):
                 "VALUES (?, ?, ?, 'pending', 0, 0, 0)",
                 (order_id, process_id, seq_order),
             )
+        bind_order_process_versions(db, order_id)
         for user_id, quantity in zip(users[:2], (4, 6)):
             db.execute(
                 "INSERT INTO work_records (order_id, process_id, user_id, type, quantity, status) "
@@ -433,6 +444,7 @@ def test_quality_admin_can_waive_required_tasks_by_order_and_release_gate(
             "VALUES (?, ?, 1, 'pending', 0, 0, 0)",
             (order_id, flow["process_ids"][2]),
         )
+        bind_order_process_versions(db, order_id)
         db.commit()
 
     released = client.post(

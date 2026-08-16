@@ -9,6 +9,19 @@ from modules.domain.reporting_day import reporting_month_bounds
 from modules.services.payroll_history_migration_service import PayrollHistoryMigrationService
 
 
+def _exact_binding(db, route_id, process_id):
+    return db.execute(
+        "SELECT route_version.id AS route_version_id,item.process_version_id "
+        "FROM process_routes route "
+        "JOIN process_route_versions route_version "
+        "ON route_version.id=route.current_effective_version_id "
+        "JOIN process_route_version_items item "
+        "ON item.route_version_id=route_version.id AND item.process_id=? "
+        "WHERE route.id=?",
+        (process_id, route_id),
+    ).fetchone()
+
+
 def test_historical_cutover_creates_exact_v2_and_keeps_unmatched_as_exception(client):
     with client.application.app_context():
         db = get_db()
@@ -24,15 +37,24 @@ def test_historical_cutover_creates_exact_v2_and_keeps_unmatched_as_exception(cl
             "INSERT INTO route_prices (route_id,process_id,unit_price,effective_date,status) VALUES (?,?,1.25,'2026-08-01','active')",
             (route_id, priced_process),
         ).lastrowid
+        binding = _exact_binding(db, route_id, priced_process)
         version_id = db.execute(
             """
             INSERT INTO route_price_versions (
-                route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
+                route_id,route_version_id,process_id,process_version_id,
+                normal_unit_price_micros,rework_rate_basis_points,
                 rework_rate_configured,valid_from,status,created_by_name,approved_by_name,
                 approved_at,legacy_route_price_id
-            ) VALUES (?,?,12500,0,0,'2026-08-01 00:00:00','approved','migration','migration',datetime('now'),?)
+            ) VALUES (?,?,?,?,12500,0,0,'2026-08-01 00:00:00','approved',
+                      'migration','migration',datetime('now'),?)
             """,
-            (route_id, priced_process, legacy_price_id),
+            (
+                route_id,
+                binding["route_version_id"],
+                priced_process,
+                binding["process_version_id"],
+                legacy_price_id,
+            ),
         ).lastrowid
         for process_id in (priced_process, missing_process):
             db.execute(
@@ -137,15 +159,24 @@ def test_historical_analysis_classifies_zero_current_price_as_unresolved(client)
             "VALUES (?,?,0,'2026-08-01','active')",
             (route_id, process_id),
         ).lastrowid
+        binding = _exact_binding(db, route_id, process_id)
         db.execute(
             """
             INSERT INTO route_price_versions (
-                route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
+                route_id,route_version_id,process_id,process_version_id,
+                normal_unit_price_micros,rework_rate_basis_points,
                 rework_rate_configured,valid_from,status,created_by_name,approved_by_name,
                 approved_at,legacy_route_price_id
-            ) VALUES (?,?,0,0,0,'2026-08-01 00:00:00','approved','migration','migration',datetime('now'),?)
+            ) VALUES (?,?,?,?,0,0,0,'2026-08-01 00:00:00','approved',
+                      'migration','migration',datetime('now'),?)
             """,
-            (route_id, process_id, legacy_price_id),
+            (
+                route_id,
+                binding["route_version_id"],
+                process_id,
+                binding["process_version_id"],
+                legacy_price_id,
+            ),
         )
         work_record_id = db.execute(
             "INSERT INTO work_records (order_id,process_id,user_id,type,quantity,status,created_at) "

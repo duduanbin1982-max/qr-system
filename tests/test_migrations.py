@@ -70,6 +70,16 @@ def test_run_migrations_uses_supplied_connection():
                 "SELECT name FROM sqlite_master WHERE type='index'"
             ).fetchall()
         }
+        user_columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()
+        }
+        assert {"purged_at", "purged_by", "purge_reason"}.issubset(user_columns)
+        assert "idx_users_employee_no_normalized" in {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
     finally:
         db.close()
 
@@ -77,6 +87,35 @@ def test_latest_version_matches_highest_registered_migration():
     from modules import migrations
 
     assert migrations.LATEST_VERSION == max(version for version, _, _ in migrations.MIGRATIONS)
+
+
+def test_user_management_migration_blocks_normalized_employee_number_duplicates():
+    from modules.migration_user_management import (
+        m059_harden_user_identity_and_retention,
+    )
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        db.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                employee_no TEXT DEFAULT ''
+            );
+            INSERT INTO users VALUES (1, 'first', ' STAFF-01 ');
+            INSERT INTO users VALUES (2, 'second', 'staff-01');
+            """
+        )
+        with pytest.raises(RuntimeError, match="1:first.*2:second"):
+            m059_harden_user_identity_and_retention(db)
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_users_employee_no_normalized'"
+        ).fetchone() is None
+    finally:
+        db.close()
 
 
 def test_process_quality_state_migration_records_anomalies_and_locks_terminal_states():
@@ -150,8 +189,17 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_reporting",
             "modules.migration_payroll_ledger",
             "modules.migration_performance_department",
+            "modules.migration_user_management",
+            "modules.migration_process_versioning",
+            "modules.migration_product_integrity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
+
+
+def test_product_integrity_is_database_version_64():
+    from modules import migrations
+
+    assert migrations.LATEST_VERSION == 64
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

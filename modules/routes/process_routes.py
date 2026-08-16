@@ -9,6 +9,7 @@ from modules.route_decorators import (
     check_order_data_scope,
     check_permission,
     get_json_body,
+    require_legacy_master_data_write,
     safe_audit_log,
     validate_json,
 )
@@ -33,12 +34,20 @@ def get_process_routes():
             offset = 0
     else:
         limit = None
-    return jsonify(ProcessRouteService.list_routes(category, search, limit, offset))
+    selectable = request.args.get('selectable', '').strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
+    return jsonify(
+        ProcessRouteService.list_routes(
+            category, search, limit, offset, selectable=selectable
+        )
+    )
 
 
 @app.route('/api/process-routes', methods=['POST'])
 @check_auth
 @check_permission('routes:create')
+@require_legacy_master_data_write
 @validate_json('process_route')
 def create_process_route():
     """创建工序路线"""
@@ -54,6 +63,7 @@ def create_process_route():
 @app.route('/api/process-routes/<int:rid>', methods=['PUT'])
 @check_auth
 @check_permission('routes:edit')
+@require_legacy_master_data_write
 @validate_json('process_route')
 def update_process_route(rid):
     """更新工序路线"""
@@ -67,7 +77,7 @@ def update_process_route(rid):
 
 @app.route('/api/process-routes/<int:rid>/impact', methods=['GET'])
 @check_auth
-@check_permission('routes:view')
+@check_permission('route_versions:impact')
 def process_route_impact(rid):
     try:
         return jsonify(ProcessRouteService.check_impact(rid))
@@ -78,6 +88,7 @@ def process_route_impact(rid):
 @app.route('/api/process-routes/<int:rid>', methods=['DELETE'])
 @check_auth
 @check_permission('routes:delete')
+@require_legacy_master_data_write
 def delete_process_route(rid):
     """删除工序路线"""
     name = ProcessRouteService.delete_route(rid)

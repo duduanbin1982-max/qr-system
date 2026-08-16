@@ -82,6 +82,8 @@ class UserService:
     def _next_employee_no(data, db):
         employee_no = (data.get("employee_no") or "").strip()
         if employee_no:
+            if UserRepository.find_user_by_employee_no(employee_no, db=db):
+                raise ConflictError("Employee number already exists")
             return employee_no
         next_no = UserRepository.get_next_employee_no(db=db)
         employee_no = str(next_no).zfill(4)
@@ -183,8 +185,10 @@ class UserService:
         }
         for field, label in field_labels.items():
             old_val = existing[field] if field in existing.keys() else None
+            if field not in data:
+                continue
             new_val = data.get(field)
-            if new_val is not None and str(old_val) != str(new_val):
+            if str(old_val) != str(new_val):
                 changed.append(label + ": " + str(old_val) + " -> " + str(new_val))
         if "password" in data and data["password"]:
             changed.append("Password: changed")
@@ -205,6 +209,125 @@ class UserService:
             page=page, limit=limit, role_filter=role_filter,
             role_not=role_not, keyword=keyword, status=status
         )
+
+    # ============================================================
+    # Role administration
+    # ============================================================
+
+    @staticmethod
+    def _normalize_ids(values, label):
+        if not isinstance(values, list):
+            raise ValueError(label + " must be a list")
+        try:
+            normalized = sorted({int(value) for value in values})
+        except (TypeError, ValueError):
+            raise ValueError(label + " must contain integers") from None
+        if any(value <= 0 for value in normalized):
+            raise ValueError(label + " must contain positive integers")
+        return normalized
+
+    @staticmethod
+    def _require_role_administrator(actor_id, db):
+        if not actor_id or not UserRepository.check_admin_role(actor_id, db=db):
+            raise PermissionError("users:admin permission is required")
+
+    @staticmethod
+    def _prepare_role_change(user_id, role_ids, action, db):
+        if action not in {"set", "add", "remove"}:
+            raise ValueError("Invalid role action")
+        target = UserRepository.find_user_by_id_for_update(user_id, db=db)
+        if not target:
+            raise NotFoundError("User not found")
+        if target["status"] == "deleted":
+            raise ConflictError("Cannot change roles for a deleted user")
+
+        requested_rows = UserRepository.find_active_roles_by_ids(role_ids, db=db)
+        if len(requested_rows) != len(role_ids):
+            valid_ids = {row["id"] for row in requested_rows}
+            invalid = [str(role_id) for role_id in role_ids if role_id not in valid_ids]
+            raise ValueError("Invalid or inactive role IDs: " + ", ".join(invalid))
+
+        current_rows = UserRepository.get_user_role_rows(user_id, db=db)
+        role_codes = {row["id"]: row["code"] for row in current_rows}
+        role_codes.update({row["id"]: row["code"] for row in requested_rows})
+        current_ids = {row["id"] for row in current_rows}
+        requested_ids = set(role_ids)
+        if action == "set":
+            proposed_ids = requested_ids
+        elif action == "add":
+            proposed_ids = current_ids | requested_ids
+        else:
+            proposed_ids = current_ids - requested_ids
+        if not proposed_ids:
+            raise ConflictError("A user must retain at least one role")
+
+        current_codes = {row["code"] for row in current_rows}
+        proposed_codes = {role_codes[role_id] for role_id in proposed_ids}
+        if (
+            "admin" in current_codes
+            and "admin" not in proposed_codes
+            and UserRepository.count_admin_roles_excluding(user_id, db=db) == 0
+        ):
+            raise ConflictError("Cannot remove the last administrator")
+        return sorted(current_ids), sorted(proposed_ids), sorted(current_codes), sorted(proposed_codes)
+
+    @staticmethod
+    def _apply_role_change(user_id, requested_ids, proposed_ids, proposed_codes, action, actor_id, db):
+        if action == "set":
+            UserRepository.replace_user_roles_txn(user_id, proposed_ids, db=db)
+        elif action == "add":
+            UserRepository.add_user_roles_txn(user_id, requested_ids, db=db)
+        else:
+            UserRepository.remove_user_roles_txn(user_id, requested_ids, db=db)
+        UserRepository.update_user_base_role_txn(
+            user_id, "admin" if "admin" in proposed_codes else "worker", db=db
+        )
+        UserRepository.insert_audit_log_txn(
+            actor_id,
+            "set_user_roles" if action == "set" else "batch_set_roles",
+            "user",
+            user_id,
+            "action=" + action + "; roles=" + ",".join(proposed_codes),
+            db=db,
+        )
+
+    @staticmethod
+    def set_user_roles(user_id, role_ids, actor_id):
+        role_ids = UserService._normalize_ids(role_ids, "role_ids")
+        if not role_ids:
+            raise ConflictError("A user must retain at least one role")
+        if user_id == actor_id:
+            raise ConflictError("Cannot change your own roles")
+        with BaseService.transaction() as txn:
+            UserService._require_role_administrator(actor_id, txn)
+            _, proposed_ids, _, proposed_codes = UserService._prepare_role_change(
+                user_id, role_ids, "set", txn
+            )
+            UserService._apply_role_change(
+                user_id, role_ids, proposed_ids, proposed_codes, "set", actor_id, txn
+            )
+        return {"user_id": user_id, "role_ids": proposed_ids}
+
+    @staticmethod
+    def batch_set_user_roles(user_ids, role_ids, action, actor_id):
+        user_ids = UserService._normalize_ids(user_ids, "user_ids")
+        role_ids = UserService._normalize_ids(role_ids, "role_ids")
+        if not user_ids or not role_ids:
+            raise ValueError("user_ids and role_ids are required")
+        if actor_id in user_ids:
+            raise ConflictError("Cannot change your own roles")
+        changed = 0
+        with BaseService.transaction() as txn:
+            UserService._require_role_administrator(actor_id, txn)
+            for user_id in user_ids:
+                _, proposed_ids, _, proposed_codes = UserService._prepare_role_change(
+                    user_id, role_ids, action, txn
+                )
+                UserService._apply_role_change(
+                    user_id, role_ids, proposed_ids, proposed_codes, action, actor_id, txn
+                )
+                changed += 1
+        return changed
 
     # ============================================================
     # Create
@@ -239,10 +362,12 @@ class UserService:
         # Process validation
         UserService._validate_process_ids(data)
 
-        data["employee_no"] = UserService._next_employee_no(data, db)
         raw_pw, pw = UserService._hash_or_generate_password(data)
 
         with BaseService.transaction() as txn:
+            if UserRepository.find_user_by_username(username, db=txn):
+                raise ConflictError("Username already exists")
+            data["employee_no"] = UserService._next_employee_no(data, txn)
             uid = UserRepository.insert_user_txn(
                 username=username, pw_hash=pw, name=name,
                 nickname=data.get("nickname", ""),
@@ -305,12 +430,20 @@ class UserService:
         new_role_id, new_role_code = UserService._resolve_update_role(
             uid, data, old_role, current_user_id, db
         )
+        if "employee_no" in data:
+            data["employee_no"] = (data.get("employee_no") or "").strip()
         sets, params = UserService._build_update_fields(data)
 
         with BaseService.transaction() as txn:
             existing = UserRepository.find_user_by_id_for_update(uid, db=txn)
             if not existing:
                 raise NotFoundError("User not found")
+            if "employee_no" in data:
+                conflict = UserRepository.find_user_by_employee_no(
+                    data["employee_no"], exclude_user_id=uid, db=txn
+                )
+                if conflict:
+                    raise ConflictError("Employee number already exists")
             UserService._sync_user_processes(uid, data, txn)
             UserRepository.update_user_txn(uid, ", ".join(sets), params, db=txn)
             UserService._apply_role_update(uid, old_role, new_role_id, new_role_code, txn)
@@ -337,22 +470,39 @@ class UserService:
             user = UserRepository.find_user_by_id_for_update(uid, db=txn)
             if not user or user["status"] != "deleted":
                 raise NotFoundError("User not found or not deleted")
+            if user["purged_at"]:
+                raise ConflictError("An anonymized employee identity cannot be restored")
             UserRepository.restore_user_txn(uid, db=txn)
             updated = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
             PerformanceAssignmentService.record_user_change(user, updated, db=txn)
         return True
 
     @staticmethod
-    def permanent_delete_user(uid):
+    def permanent_delete_user(uid, actor_id, reason):
+        reason = (reason or "").strip()
+        if len(reason) < 4:
+            raise ValueError("Purge reason must be at least 4 characters")
         with BaseService.transaction() as txn:
+            UserService._require_role_administrator(actor_id, txn)
             user = UserRepository.find_deleted_user(uid, db=txn)
             if not user:
                 raise ConflictError("Can only permanently delete trashed users")
-            if PerformanceAssignmentRepository.has_assignment_history(uid, db=txn):
-                raise ConflictError(
-                    "Cannot permanently delete a user with performance assignment history"
-                )
-            UserRepository.permanent_delete_cascade_txn(uid, db=txn)
+            if user["purged_at"]:
+                raise ConflictError("User identity has already been purged")
+            password_hash = bcrypt.hashpw(
+                secrets.token_urlsafe(32).encode(), bcrypt.gensalt(rounds=12)
+            ).decode()
+            UserRepository.anonymize_deleted_user_txn(
+                uid, actor_id, reason, password_hash, db=txn
+            )
+            UserRepository.insert_audit_log_txn(
+                actor_id,
+                "anonymize_user_identity",
+                "user",
+                uid,
+                "reason=" + reason,
+                db=txn,
+            )
         return True
 
     @staticmethod
@@ -361,18 +511,13 @@ class UserService:
         if uid == current_user_id:
             raise ConflictError("Cannot delete self")
 
-        db = BaseService.db()
-        user = UserRepository.find_user_by_id_basic(uid, db=db)
-        if not user:
-            raise NotFoundError("User not found")
-
-        # Admin role check via junction table
-        if UserRepository.check_admin_role(uid, db=db):
-            if UserRepository.count_admin_roles(db=db) <= 1:
-                raise ConflictError("Cannot delete the last administrator")
-
         with BaseService.transaction() as txn:
             before = UserRepository.find_user_by_id_for_update(uid, db=txn)
+            if not before:
+                raise NotFoundError("User not found")
+            if UserRepository.check_admin_role(uid, db=txn):
+                if UserRepository.count_admin_roles(db=txn) <= 1:
+                    raise ConflictError("Cannot delete the last administrator")
             UserRepository.soft_delete_user_txn(uid, db=txn)
             after = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
             PerformanceAssignmentService.record_user_change(
@@ -385,11 +530,19 @@ class UserService:
         """Batch update user status (active/inactive)."""
         if not ids:
             return 0
+        ids = UserService._normalize_ids(ids, "ids")
         if current_user_id and current_user_id in ids:
             raise ConflictError("Cannot change own status")
         if status not in ("active", "inactive"):
             raise ValueError("Invalid status")
         with BaseService.transaction() as txn:
+            if status == "inactive":
+                admin_count = UserRepository.count_admin_roles_in_ids(ids, db=txn)
+                if (
+                    admin_count > 0
+                    and UserRepository.count_admin_roles(db=txn) <= admin_count
+                ):
+                    raise ConflictError("Cannot deactivate all administrators")
             before_rows = {
                 row["id"]: row
                 for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
@@ -399,7 +552,6 @@ class UserService:
                 row["id"]: row
                 for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
             }
-            effective_at = PerformanceAssignmentService._current_timestamp()
             for user_id, before in before_rows.items():
                 after = after_rows.get(user_id)
                 if after and before["status"] != after["status"]:
@@ -410,7 +562,6 @@ class UserService:
                         before,
                         snapshot,
                         created_by=current_user_id,
-                        effective_at=effective_at,
                         db=txn,
                     )
         return count
@@ -420,21 +571,21 @@ class UserService:
         """Soft-delete multiple users."""
         if not ids:
             return 0
-        db = BaseService.db()
+        ids = UserService._normalize_ids(ids, "ids")
         if current_user_id in ids:
             raise ConflictError("Cannot delete self")
-        # Prevent deleting last admin
-        admin_count = UserRepository.count_admin_roles_in_ids(ids, db=db)
-        if admin_count > 0:
-            if UserRepository.count_admin_roles(db=db) <= admin_count:
-                raise ConflictError("Cannot remove all administrators")
         with BaseService.transaction() as txn:
+            admin_count = UserRepository.count_admin_roles_in_ids(ids, db=txn)
+            if (
+                admin_count > 0
+                and UserRepository.count_admin_roles(db=txn) <= admin_count
+            ):
+                raise ConflictError("Cannot remove all administrators")
             before_rows = {
                 row["id"]: row
                 for row in UserRepository.find_users_by_ids_for_update(ids, db=txn)
             }
             count = UserRepository.batch_soft_delete_users_txn(ids, db=txn)
-            effective_at = PerformanceAssignmentService._current_timestamp()
             for user_id, before in before_rows.items():
                 snapshot = PerformanceAssignmentRepository.user_snapshot(user_id, db=txn)
                 if snapshot and before["status"] != snapshot["status"]:
@@ -442,7 +593,6 @@ class UserService:
                         before,
                         snapshot,
                         created_by=current_user_id,
-                        effective_at=effective_at,
                         db=txn,
                     )
         return count
@@ -535,54 +685,59 @@ class UserService:
         return pos_map.get(pos_name) if pos_name else None
 
     @staticmethod
-    def _resolve_user_import_role(row_data, db):
-        role = row_data.get("role", "worker")
-        role_row = UserRepository.find_role_by_code(role, db=db)
-        return role, role_row[0] if role_row else 2
+    def _resolve_user_import_role(row_data, caller_id, db):
+        role = (row_data.get("role") or "worker").strip()
+        role_row = UserRepository.find_active_role_by_code(role, db=db)
+        if not role_row:
+            raise ValueError("Unknown or inactive role: " + role)
+        if role != "worker" and not UserRepository.check_admin_role(caller_id, db=db):
+            raise PermissionError("Only administrators can import privileged roles")
+        return role, role_row["id"]
 
     @staticmethod
     def _next_import_employee_no(row_data, db):
-        employee_no = row_data.get("employee_no", "")
-        if employee_no:
-            return employee_no
-        next_no = UserRepository.get_next_employee_no(db=db)
-        return str(next_no).zfill(4)
+        return UserService._next_employee_no(row_data, db)
 
     @staticmethod
-    def _insert_import_user(row_data, username, name, position_id, role, role_id):
-        raw_pw = row_data.get("password", "") or secrets.token_urlsafe(8)
-        pw_hash = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
-        with BaseService.transaction() as txn:
-            uid = UserRepository.insert_user_import_txn(
-                username=username, pw_hash=pw_hash, name=name,
-                nickname=row_data.get("nickname", ""),
-                email=row_data.get("email", ""),
-                role=role, employee_no=row_data.get("employee_no", ""),
-                phone=row_data.get("phone", ""),
-                position_id=position_id, db=txn
-            )
-            UserRepository.insert_user_role_txn(uid, role_id, db=txn)
-            PerformanceAssignmentService.record_initial_assignment(
-                uid, source_type="user_imported", db=txn
-            )
+    def _insert_import_user(row_data, username, name, position_id, role, role_id, caller_id, db):
+        _, pw_hash = UserService._hash_or_generate_password(row_data)
+        uid = UserRepository.insert_user_import_txn(
+            username=username, pw_hash=pw_hash, name=name,
+            nickname=row_data.get("nickname", ""),
+            email=row_data.get("email", ""),
+            role="admin" if role == "admin" else "worker",
+            employee_no=row_data.get("employee_no", ""),
+            phone=row_data.get("phone", ""),
+            position_id=position_id, db=db
+        )
+        UserRepository.insert_user_role_txn(uid, role_id, db=db)
+        PerformanceAssignmentService.record_initial_assignment(
+            uid, created_by=caller_id, source_type="user_imported", db=db
+        )
+        return uid
 
     @staticmethod
-    def _import_user_row(row_idx, row, col_map, pos_map, db):
+    def _import_user_row(row_idx, row, col_map, pos_map, caller_id, db):
         row_data = UserService._user_import_row_data(row, col_map)
         username, name, identity_error = UserService._normalize_user_import_identity(row_idx, row_data)
         if identity_error:
             return False, identity_error
+        UserService._validate_username(username, name)
         if UserRepository.find_user_by_username(username, db=db):
             return False, "Row " + str(row_idx) + ": username " + username + " already exists"
 
         position_id = UserService._resolve_user_import_position(row_data, pos_map)
-        role, role_id = UserService._resolve_user_import_role(row_data, db)
+        if row_data.get("position_name") and not position_id:
+            return False, "Row " + str(row_idx) + ": unknown position " + row_data["position_name"]
+        role, role_id = UserService._resolve_user_import_role(row_data, caller_id, db)
         row_data["employee_no"] = UserService._next_import_employee_no(row_data, db)
-        UserService._insert_import_user(row_data, username, name, position_id, role, role_id)
+        UserService._insert_import_user(
+            row_data, username, name, position_id, role, role_id, caller_id, db
+        )
         return True, None
 
     @staticmethod
-    def import_users(filepath):
+    def import_users(filepath, caller_id=None):
         """Import users from .xlsx file. Returns {success, skipped, errors}."""
         wb, ws = UserService._open_user_import_workbook(filepath)
         try:
@@ -595,17 +750,22 @@ class UserService:
             success = 0
             skipped = 0
             errors = []
-            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                try:
-                    created, error = UserService._import_user_row(row_idx, row, col_map, pos_map, db)
-                    if created:
-                        success += 1
-                    else:
+            with BaseService.transaction() as txn:
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        created, error = UserService._import_user_row(
+                            row_idx, row, col_map, pos_map, caller_id, txn
+                        )
+                        if created:
+                            success += 1
+                        else:
+                            skipped += 1
+                            errors.append(error)
+                    except PermissionError:
+                        raise
+                    except Exception as e:
                         skipped += 1
-                        errors.append(error)
-                except Exception as e:
-                    skipped += 1
-                    errors.append("Row " + str(row_idx) + ": " + str(e)[:80])
+                        errors.append("Row " + str(row_idx) + ": " + str(e)[:80])
         finally:
             wb.close()
 
