@@ -3,12 +3,13 @@
 All business logic (validation, bcrypt, secrets) stays here.
 All SQL delegated to UserRepository.
 """
-from modules.domain.errors import ConflictError, NotFoundError
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 import bcrypt
-import logging
 import secrets
 import os
+import tempfile
 import uuid
+import zipfile
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -20,8 +21,11 @@ from modules.repositories.performance_assignment_repository import (
 from modules.services.performance_assignment_service import (
     PerformanceAssignmentService,
 )
-
-_logger = logging.getLogger(__name__)
+from modules.services.administrator_policy import AdministratorPolicy
+from modules.config import (
+    EMPLOYEE_DOCUMENT_ALLOWED_EXTENSIONS,
+    EMPLOYEE_DOCUMENT_MAX_BYTES,
+)
 
 USER_IMPORT_FIELDS = [
     "username", "name", "employee_no", "phone", "email", "nickname",
@@ -73,10 +77,13 @@ class UserService:
 
     @staticmethod
     def _ensure_admin_creator(role_code, caller_id, db):
-        if role_code != "admin":
+        if role_code == "worker":
             return
-        if not caller_id or not UserRepository.check_admin_role(caller_id, db=db):
-            raise ValueError("Only administrators can create admin accounts")
+        AdministratorPolicy.require_actual_admin(
+            caller_id,
+            db,
+            message="仅系统管理员可以创建特权账号",
+        )
 
     @staticmethod
     def _next_employee_no(data, db):
@@ -196,7 +203,6 @@ class UserService:
             UserRepository.insert_audit_log_txn(
                 current_user_id, "update_user", "user", uid, "; ".join(changed), db=db
             )
-            db.commit()
 
     # ============================================================
     # Query
@@ -338,6 +344,7 @@ class UserService:
         """Create a new user. Returns (uid, password)."""
         username = data.get("username", "").strip()
         name = data.get("name", "").strip()
+        status = AdministratorPolicy.normalize_status(data.get("status", "active"))
         if not name and data.get("role") == "admin":
             name = username
         UserService._validate_username(username, name)
@@ -365,6 +372,9 @@ class UserService:
         raw_pw, pw = UserService._hash_or_generate_password(data)
 
         with BaseService.transaction() as txn:
+            UserService._ensure_admin_creator(
+                role_code, data.get("_caller_user_id"), txn
+            )
             if UserRepository.find_user_by_username(username, db=txn):
                 raise ConflictError("Username already exists")
             data["employee_no"] = UserService._next_employee_no(data, txn)
@@ -379,7 +389,7 @@ class UserService:
                 phone=data.get("phone", ""),
                 position_id=position_id or None,
                 department_id=department_id or None,
-                status=data.get("status", "active"),
+                status=status,
                 db=txn
             )
             UserRepository.insert_user_role_txn(uid, role_id, db=txn)
@@ -395,6 +405,14 @@ class UserService:
                 source_type="user_created",
                 db=txn,
             )
+            UserRepository.insert_audit_log_txn(
+                data.get("_caller_user_id"),
+                "create_user",
+                "user",
+                uid,
+                "role=" + role_code + "; status=" + status,
+                db=txn,
+            )
 
         return uid, raw_pw
 
@@ -405,6 +423,8 @@ class UserService:
     @staticmethod
     def update_user(uid, data, current_user_id=None):
         """Update user info."""
+        if "status" in data:
+            data["status"] = AdministratorPolicy.normalize_status(data["status"])
         db = BaseService.db()
         existing = UserRepository.find_user_by_id_for_update(uid, db=db)
         if not existing:
@@ -438,6 +458,21 @@ class UserService:
             existing = UserRepository.find_user_by_id_for_update(uid, db=txn)
             if not existing:
                 raise NotFoundError("User not found")
+            AdministratorPolicy.protect_admin_accounts(
+                current_user_id, [uid], txn
+            )
+            if (
+                uid == current_user_id
+                and data.get("status")
+                and data["status"] != existing["status"]
+            ):
+                raise ConflictError("Cannot change your own status")
+            if (
+                data.get("status") == "inactive"
+                and UserRepository.has_admin_assignment(uid, db=txn)
+                and UserRepository.count_admin_roles(db=txn) <= 1
+            ):
+                raise ConflictError("Cannot deactivate the last administrator")
             if "employee_no" in data:
                 conflict = UserRepository.find_user_by_employee_no(
                     data["employee_no"], exclude_user_id=uid, db=txn
@@ -451,12 +486,9 @@ class UserService:
             PerformanceAssignmentService.record_user_change(
                 existing, updated, created_by=current_user_id, db=txn
             )
-
-        # Audit field changes
-        try:
-            UserService._audit_user_update(uid, data, existing, current_user_id, db)
-        except Exception as exc:
-            _logger.warning("update_user audit log failed: user_id=%s error=%s", uid, exc)
+            UserService._audit_user_update(
+                uid, data, existing, current_user_id, txn
+            )
 
         return True
 
@@ -465,16 +497,20 @@ class UserService:
     # ============================================================
 
     @staticmethod
-    def restore_user(uid):
+    def restore_user(uid, actor_id=None):
         with BaseService.transaction() as txn:
             user = UserRepository.find_user_by_id_for_update(uid, db=txn)
             if not user or user["status"] != "deleted":
                 raise NotFoundError("User not found or not deleted")
+            AdministratorPolicy.protect_admin_accounts(actor_id, [uid], txn)
             if user["purged_at"]:
                 raise ConflictError("An anonymized employee identity cannot be restored")
             UserRepository.restore_user_txn(uid, db=txn)
             updated = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
             PerformanceAssignmentService.record_user_change(user, updated, db=txn)
+            UserRepository.insert_audit_log_txn(
+                actor_id, "restore_user", "user", uid, "status=active", db=txn
+            )
         return True
 
     @staticmethod
@@ -515,6 +551,9 @@ class UserService:
             before = UserRepository.find_user_by_id_for_update(uid, db=txn)
             if not before:
                 raise NotFoundError("User not found")
+            AdministratorPolicy.protect_admin_accounts(
+                current_user_id, [uid], txn
+            )
             if UserRepository.check_admin_role(uid, db=txn):
                 if UserRepository.count_admin_roles(db=txn) <= 1:
                     raise ConflictError("Cannot delete the last administrator")
@@ -522,6 +561,14 @@ class UserService:
             after = PerformanceAssignmentRepository.user_snapshot(uid, db=txn)
             PerformanceAssignmentService.record_user_change(
                 before, after, created_by=current_user_id, db=txn
+            )
+            UserRepository.insert_audit_log_txn(
+                current_user_id,
+                "delete_user",
+                "user",
+                uid,
+                "status=deleted",
+                db=txn,
             )
         return True
 
@@ -536,6 +583,9 @@ class UserService:
         if status not in ("active", "inactive"):
             raise ValueError("Invalid status")
         with BaseService.transaction() as txn:
+            AdministratorPolicy.protect_admin_accounts(
+                current_user_id, ids, txn
+            )
             if status == "inactive":
                 admin_count = UserRepository.count_admin_roles_in_ids(ids, db=txn)
                 if (
@@ -564,6 +614,14 @@ class UserService:
                         created_by=current_user_id,
                         db=txn,
                     )
+            UserRepository.insert_audit_log_txn(
+                current_user_id,
+                "batch_update_status",
+                "user",
+                0,
+                "status=" + status + "; user_ids=" + ",".join(str(item) for item in ids),
+                db=txn,
+            )
         return count
 
     @staticmethod
@@ -575,6 +633,9 @@ class UserService:
         if current_user_id in ids:
             raise ConflictError("Cannot delete self")
         with BaseService.transaction() as txn:
+            AdministratorPolicy.protect_admin_accounts(
+                current_user_id, ids, txn
+            )
             admin_count = UserRepository.count_admin_roles_in_ids(ids, db=txn)
             if (
                 admin_count > 0
@@ -595,6 +656,14 @@ class UserService:
                         created_by=current_user_id,
                         db=txn,
                     )
+            UserRepository.insert_audit_log_txn(
+                current_user_id,
+                "batch_delete_users",
+                "user",
+                0,
+                "user_ids=" + ",".join(str(item) for item in ids),
+                db=txn,
+            )
         return count
 
     # ============================================================
@@ -602,7 +671,7 @@ class UserService:
     # ============================================================
 
     @staticmethod
-    def reset_password(uid, password=None):
+    def reset_password(uid, password=None, actor_id=None):
         """Reset user password with validation and account unlock."""
         new_pw = password if password else secrets.token_urlsafe(8)
         if password:
@@ -622,19 +691,32 @@ class UserService:
             raise ConflictError("User is disabled, cannot reset password")
 
         with BaseService.transaction() as txn:
+            AdministratorPolicy.require_actual_admin(actor_id, txn)
             UserRepository.reset_password_txn(uid, hashed, db=txn)
+            UserRepository.insert_audit_log_txn(
+                actor_id,
+                "reset_password",
+                "user",
+                uid,
+                "password_changed=true",
+                db=txn,
+            )
 
         return new_pw
 
     @staticmethod
-    def unlock_user(uid):
+    def unlock_user(uid, actor_id=None):
         """Unlock user (clear brute-force lockout)."""
         db = BaseService.db()
         row = UserRepository.find_user_by_id_basic(uid, db=db)
         if not row:
             raise NotFoundError("User not found")
         with BaseService.transaction() as txn:
+            AdministratorPolicy.require_actual_admin(actor_id, txn)
             UserRepository.unlock_user_txn(uid, db=txn)
+            UserRepository.insert_audit_log_txn(
+                actor_id, "unlock_user", "user", uid, "account_unlocked=true", db=txn
+            )
         return row["username"]
 
     # ============================================================
@@ -766,6 +848,14 @@ class UserService:
                     except Exception as e:
                         skipped += 1
                         errors.append("Row " + str(row_idx) + ": " + str(e)[:80])
+                UserRepository.insert_audit_log_txn(
+                    caller_id,
+                    "import_users",
+                    "user",
+                    0,
+                    "created=" + str(success) + "; skipped=" + str(skipped),
+                    db=txn,
+                )
         finally:
             wb.close()
 
@@ -831,46 +921,169 @@ class UserService:
         return [dict(row) for row in UserRepository.list_user_documents(uid)]
 
     @staticmethod
-    def upload_user_document(uid, file_storage, doc_type, uploaded_by, upload_dir):
-        if not UserRepository.find_user_by_id_basic(uid):
-            raise NotFoundError("User not found")
-        os.makedirs(upload_dir, exist_ok=True)
-        ext = file_storage.filename.rsplit(".", 1)[-1].lower() if "." in file_storage.filename else ""
-        safe_name = str(uid) + "_" + uuid.uuid4().hex
-        if ext:
-            safe_name += "." + ext
-        filepath = os.path.join(upload_dir, safe_name)
-        file_size = 0
-        with open(filepath, "wb") as target:
-            while chunk := file_storage.stream.read(64 * 1024):
-                target.write(chunk)
-                file_size += len(chunk)
-        with BaseService.transaction() as txn:
-            UserRepository.insert_user_document_txn(
-                uid, file_storage.filename, doc_type, safe_name, file_size, uploaded_by, db=txn
-            )
-        return {"filename": file_storage.filename, "size": file_size}
+    def _employee_document_name(filename):
+        filename = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if not filename or len(filename) > 255 or "\x00" in filename:
+            raise ValidationError("附件文件名无效")
+        extension = os.path.splitext(filename)[1].lower()
+        if extension not in EMPLOYEE_DOCUMENT_ALLOWED_EXTENSIONS:
+            raise ValidationError("附件类型不支持")
+        return filename, extension
 
     @staticmethod
-    def get_user_document_file(uid, doc_id, upload_dir):
+    def _validate_employee_document_content(filepath, extension, header):
+        if extension == ".pdf" and not header.startswith(b"%PDF-"):
+            raise ValidationError("PDF 文件内容与扩展名不一致")
+        if extension in {".jpg", ".jpeg"} and not header.startswith(b"\xff\xd8\xff"):
+            raise ValidationError("JPEG 文件内容与扩展名不一致")
+        if extension == ".png" and not header.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValidationError("PNG 文件内容与扩展名不一致")
+        if extension in {".doc", ".xls"} and not header.startswith(
+            b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        ):
+            raise ValidationError("Office 文件内容与扩展名不一致")
+        if extension in {".docx", ".xlsx"}:
+            try:
+                with zipfile.ZipFile(filepath) as archive:
+                    names = archive.namelist()
+            except (OSError, zipfile.BadZipFile) as exc:
+                raise ValidationError("Office 文件内容与扩展名不一致") from exc
+            required_prefix = "word/" if extension == ".docx" else "xl/"
+            if not any(name.startswith(required_prefix) for name in names):
+                raise ValidationError("Office 文件内容与扩展名不一致")
+
+    @staticmethod
+    def _employee_document_path(upload_dir, stored_name):
+        base = os.path.realpath(upload_dir)
+        filepath = os.path.realpath(os.path.join(base, stored_name))
+        if os.path.commonpath([base, filepath]) != base:
+            raise ConflictError("附件存储路径无效")
+        return filepath
+
+    @staticmethod
+    def _existing_employee_document_path(
+        upload_dir, stored_name, legacy_upload_dir=None
+    ):
+        filepath = UserService._employee_document_path(upload_dir, stored_name)
+        if os.path.exists(filepath) or not legacy_upload_dir:
+            return filepath
+        legacy_path = UserService._employee_document_path(
+            legacy_upload_dir, stored_name
+        )
+        return legacy_path if os.path.exists(legacy_path) else filepath
+
+    @staticmethod
+    def upload_user_document(uid, file_storage, doc_type, uploaded_by, upload_dir):
+        original_name, extension = UserService._employee_document_name(
+            file_storage.filename
+        )
+        os.makedirs(upload_dir, mode=0o700, exist_ok=True)
+        stored_name = str(uid) + "_" + uuid.uuid4().hex + extension
+        filepath = UserService._employee_document_path(upload_dir, stored_name)
+        descriptor, temp_path = tempfile.mkstemp(prefix=".employee-upload-", dir=upload_dir)
+        file_size = 0
+        header = b""
+        installed = False
+        try:
+            with os.fdopen(descriptor, "wb") as target:
+                while True:
+                    chunk = file_storage.stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    if not header:
+                        header = chunk[:16]
+                    file_size += len(chunk)
+                    if file_size > EMPLOYEE_DOCUMENT_MAX_BYTES:
+                        raise ValidationError("员工附件最大允许 20MB")
+                    target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            if file_size == 0:
+                raise ValidationError("附件内容不能为空")
+            UserService._validate_employee_document_content(
+                temp_path, extension, header
+            )
+            with BaseService.transaction() as txn:
+                if not UserRepository.find_user_by_id_basic(uid, db=txn):
+                    raise NotFoundError("User not found")
+                document_id = UserRepository.insert_user_document_txn(
+                    uid,
+                    original_name,
+                    str(doc_type or "")[:64],
+                    stored_name,
+                    file_size,
+                    uploaded_by,
+                    db=txn,
+                )
+                os.replace(temp_path, filepath)
+                installed = True
+                os.chmod(filepath, 0o600)
+                UserRepository.insert_audit_log_txn(
+                    uploaded_by,
+                    "upload_document",
+                    "user",
+                    uid,
+                    "document_id=" + str(document_id) + "; size=" + str(file_size),
+                    db=txn,
+                )
+        except Exception:
+            if installed and os.path.exists(filepath):
+                os.remove(filepath)
+            raise
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        return {"filename": original_name, "size": file_size}
+
+    @staticmethod
+    def get_user_document_file(uid, doc_id, upload_dir, legacy_upload_dir=None):
         doc = UserRepository.find_user_document(uid, doc_id)
         if not doc:
             raise NotFoundError("Document not found")
         doc = dict(doc)
-        filepath = os.path.join(upload_dir, doc["file_path"])
+        filepath = UserService._existing_employee_document_path(
+            upload_dir, doc["file_path"], legacy_upload_dir
+        )
         if not os.path.exists(filepath):
             raise FileNotFoundError("File not found on disk")
         return doc, filepath
 
     @staticmethod
-    def delete_user_document(uid, doc_id, upload_dir):
-        doc = UserRepository.find_user_document(uid, doc_id)
-        if not doc:
-            raise NotFoundError("Document not found")
-        doc = dict(doc)
-        filepath = os.path.join(upload_dir, doc["file_path"])
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        with BaseService.transaction() as txn:
-            UserRepository.delete_user_document_txn(doc_id, db=txn)
+    def delete_user_document(
+        uid, doc_id, upload_dir, actor_id=None, legacy_upload_dir=None
+    ):
+        os.makedirs(upload_dir, mode=0o700, exist_ok=True)
+        quarantine_dir = os.path.join(upload_dir, ".quarantine")
+        os.makedirs(quarantine_dir, mode=0o700, exist_ok=True)
+        quarantine_path = None
+        filepath = None
+        try:
+            with BaseService.transaction() as txn:
+                row = UserRepository.find_user_document(uid, doc_id, db=txn)
+                if not row:
+                    raise NotFoundError("Document not found")
+                doc = dict(row)
+                filepath = UserService._existing_employee_document_path(
+                    upload_dir, doc["file_path"], legacy_upload_dir
+                )
+                if os.path.exists(filepath):
+                    quarantine_path = os.path.join(
+                        quarantine_dir, uuid.uuid4().hex + ".deleted"
+                    )
+                    os.replace(filepath, quarantine_path)
+                UserRepository.delete_user_document_txn(doc_id, db=txn)
+                UserRepository.insert_audit_log_txn(
+                    actor_id,
+                    "delete_document",
+                    "user",
+                    uid,
+                    "document_id=" + str(doc_id),
+                    db=txn,
+                )
+        except Exception:
+            if quarantine_path and os.path.exists(quarantine_path) and filepath:
+                os.replace(quarantine_path, filepath)
+            raise
+        if quarantine_path and os.path.exists(quarantine_path):
+            os.remove(quarantine_path)
         return doc

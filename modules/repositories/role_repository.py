@@ -18,7 +18,7 @@ class RoleGroupRepository:
     @staticmethod
     def find_by_id(gid, db=None):
         db = resolve_db(db)
-        return db.execute("SELECT id, name FROM role_groups WHERE id = ?", (gid,)).fetchone()
+        return db.execute("SELECT * FROM role_groups WHERE id = ?", (gid,)).fetchone()
 
     @staticmethod
     def insert_txn(name, description, parent_id, status, permissions, db):
@@ -94,7 +94,7 @@ class RoleRepository:
     @staticmethod
     def find_by_id(rid, db=None):
         db = resolve_db(db)
-        return db.execute("SELECT id, name, is_builtin FROM roles WHERE id = ?", (rid,)).fetchone()
+        return db.execute("SELECT * FROM roles WHERE id = ?", (rid,)).fetchone()
 
     @staticmethod
     def find_by_name_exclude(name, rid, db=None):

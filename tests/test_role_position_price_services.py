@@ -2,23 +2,49 @@ import pytest
 
 from factories import create_process_route, ensure_process
 from modules.db import get_db
+from modules.domain.errors import AuthorizationError, ConflictError, ValidationError
+from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.services.position_service import PositionService
 from modules.services.price_service import RoutePriceService
 from modules.services.role_service import RoleGroupService, RoleService
 
 
+def _admin_id(db):
+    return db.execute(
+        "SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id "
+        "JOIN roles r ON r.id = ur.role_id WHERE r.code = 'admin' LIMIT 1"
+    ).fetchone()["id"]
+
+
+def _worker_id(db):
+    role_id = db.execute("SELECT id FROM roles WHERE code = 'worker'").fetchone()["id"]
+    user_id = db.execute(
+        "INSERT INTO users (username,password,name,role,status,employee_no) "
+        "VALUES ('role_policy_worker','hash','角色策略员工','worker','active','ROLE-WORKER')"
+    ).lastrowid
+    db.execute(
+        "INSERT INTO user_roles (user_id,role_id) VALUES (?,?)", (user_id, role_id)
+    )
+    db.commit()
+    return user_id
+
+
 def test_role_group_hierarchy_rejects_cycles_and_parent_deletion(client):
     with client.application.app_context():
-        parent_id = RoleGroupService.create_group({"name": "生产管理组"})
-        child_id = RoleGroupService.create_group({"name": "班组长组", "parent_id": parent_id})
+        db = get_db()
+        actor_id = _admin_id(db)
+        parent_id = RoleGroupService.create_group({"name": "生产管理组"}, actor_id)
+        child_id = RoleGroupService.create_group(
+            {"name": "班组长组", "parent_id": parent_id}, actor_id
+        )
 
         with pytest.raises(ValueError, match="循环引用"):
-            RoleGroupService.update_group(parent_id, {"parent_id": child_id})
+            RoleGroupService.update_group(parent_id, {"parent_id": child_id}, actor_id)
         with pytest.raises(ValueError, match="有下级"):
-            RoleGroupService.delete_group(parent_id)
+            RoleGroupService.delete_group(parent_id, actor_id)
 
-        RoleGroupService.delete_group(child_id)
-        RoleGroupService.delete_group(parent_id)
+        RoleGroupService.delete_group(child_id, actor_id)
+        RoleGroupService.delete_group(parent_id, actor_id)
         names = {group["name"] for group in RoleGroupService.list_groups()["role_groups"]}
         assert "生产管理组" not in names
         assert "班组长组" not in names
@@ -27,16 +53,25 @@ def test_role_group_hierarchy_rejects_cycles_and_parent_deletion(client):
 def test_role_auto_code_update_and_assignment_guards(client):
     with client.application.app_context():
         db = get_db()
-        role_id = RoleService.create_role({"name": "质量主管"})
+        actor_id = _admin_id(db)
+        role_id = RoleService.create_role({"name": "质量主管"}, actor_id)
         role = db.execute("SELECT code FROM roles WHERE id = ?", (role_id,)).fetchone()
         assert role["code"]
 
-        RoleService.update_role(role_id, {"name": "质量负责人", "permissions": ["quality.view"]})
+        RoleService.update_role(
+            role_id,
+            {"name": "质量负责人", "permissions": ["quality:view"]},
+            actor_id,
+        )
         updated = db.execute(
             "SELECT name, permissions FROM roles WHERE id = ?", (role_id,)
         ).fetchone()
         assert updated["name"] == "质量负责人"
-        assert "quality.view" in updated["permissions"]
+        assert "quality:view" in updated["permissions"]
+        assert db.execute(
+            "SELECT COUNT(*) FROM audit_logs WHERE target_type='role' AND target_id=?",
+            (role_id,),
+        ).fetchone()[0] == 2
 
         user_id = db.execute(
             "INSERT INTO users (username, password, name, role, employee_no, status) "
@@ -45,25 +80,92 @@ def test_role_auto_code_update_and_assignment_guards(client):
         db.execute("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_id, role_id))
         db.commit()
         with pytest.raises(ValueError, match="已分配"):
-            RoleService.delete_role(role_id)
+            RoleService.delete_role(role_id, actor_id)
 
 
 def test_role_rejects_duplicate_code_and_builtin_deletion(client):
     with client.application.app_context():
-        first_id = RoleService.create_role({"name": "计划员", "code": "planner_test"})
-        second_id = RoleService.create_role({"name": "调度员", "code": "dispatcher_test"})
+        db = get_db()
+        actor_id = _admin_id(db)
+        first_id = RoleService.create_role(
+            {"name": "计划员", "code": "planner_test"}, actor_id
+        )
+        second_id = RoleService.create_role(
+            {"name": "调度员", "code": "dispatcher_test"}, actor_id
+        )
 
         with pytest.raises(ValueError, match="已存在"):
-            RoleService.update_role(second_id, {"code": "planner_test"})
+            RoleService.update_role(second_id, {"code": "planner_test"}, actor_id)
 
-        db = get_db()
         builtin = db.execute("SELECT id FROM roles WHERE is_builtin = 1 LIMIT 1").fetchone()
         assert builtin is not None
         with pytest.raises(ValueError, match="内置角色"):
-            RoleService.delete_role(builtin["id"])
+            RoleService.delete_role(builtin["id"], actor_id)
 
-        RoleService.delete_role(first_id)
-        RoleService.delete_role(second_id)
+        RoleService.delete_role(first_id, actor_id)
+        RoleService.delete_role(second_id, actor_id)
+
+
+def test_role_permission_mutations_require_actual_admin_and_catalog(client):
+    with client.application.app_context():
+        db = get_db()
+        admin_id = _admin_id(db)
+        worker_id = _worker_id(db)
+
+        with pytest.raises(AuthorizationError, match="仅系统管理员"):
+            RoleService.create_role({"name": "越权角色"}, worker_id)
+        with pytest.raises(ConflictError, match="通配权限"):
+            RoleService.create_role(
+                {"name": "通配角色", "permissions": ["*"]}, admin_id
+            )
+        with pytest.raises(ValidationError, match="未知权限编码"):
+            RoleService.create_role(
+                {"name": "未知权限角色", "permissions": ["quality.view"]}, admin_id
+            )
+        with pytest.raises(ValidationError, match="active.*inactive"):
+            RoleService.create_role(
+                {"name": "非法状态角色", "status": "deleted"}, admin_id
+            )
+        with pytest.raises(ConflictError, match="仅用于分类"):
+            RoleGroupService.create_group(
+                {"name": "越权角色组", "permissions": ["orders:view"]}, admin_id
+            )
+
+
+def test_builtin_admin_security_fields_are_immutable(client):
+    with client.application.app_context():
+        db = get_db()
+        actor_id = _admin_id(db)
+        admin_role = db.execute(
+            "SELECT id FROM roles WHERE code='admin' AND is_builtin=1"
+        ).fetchone()
+
+        for change in (
+            {"code": "renamed_admin"},
+            {"status": "inactive"},
+            {"permissions": []},
+            {"group_id": None},
+        ):
+            with pytest.raises(ConflictError, match="安全字段不可修改"):
+                RoleService.update_role(admin_role["id"], change, actor_id)
+
+
+def test_role_create_rolls_back_when_audit_write_fails(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        actor_id = _admin_id(db)
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+
+        monkeypatch.setattr(AuditLogRepository, "insert_log", fail_audit)
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            RoleService.create_role(
+                {"name": "应回滚角色", "code": "rollback_role"}, actor_id
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM roles WHERE code='rollback_role'"
+        ).fetchone()[0] == 0
 
 
 def test_position_crud_keeps_process_assignments(client):

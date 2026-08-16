@@ -3,13 +3,12 @@ qr-system — 角色管理（路由层）
 
 注：Swagger docstring 仅供文档参考。
 """
-from flask import request, jsonify
+from flask import g, jsonify
 from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
 )
 from modules.services.role_service import RoleGroupService, RoleService
 
@@ -51,8 +50,7 @@ def create_role_group():
       - Bearer: []
     """
     data = get_json_body()
-    gid = RoleGroupService.create_group(data)
-    safe_audit_log('create_role_group', 'role_group', gid, data.get('name', ''))
+    gid = RoleGroupService.create_group(data, g.current_user.get('id'))
     return jsonify({'message': '添加成功', 'id': gid})
 
 
@@ -72,8 +70,7 @@ def update_role_group(gid):
       - Bearer: []
     """
     data = get_json_body()
-    RoleGroupService.update_group(gid, data)
-    safe_audit_log('update_role_group', 'role_group', gid, str(data))
+    RoleGroupService.update_group(gid, data, g.current_user.get('id'))
     return jsonify({'message': '更新成功'})
 
 
@@ -92,11 +89,7 @@ def delete_role_group(gid):
     security:
       - Bearer: []
     """
-    try:
-        RoleGroupService.delete_group(gid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    safe_audit_log('delete_role_group', 'role_group', gid)
+    RoleGroupService.delete_group(gid, g.current_user.get('id'))
     return jsonify({'message': '删除成功'})
 
 
@@ -137,8 +130,7 @@ def create_role():
       - Bearer: []
     """
     data = get_json_body()
-    rid = RoleService.create_role(data)
-    safe_audit_log('create_role', 'role', rid, f'{data.get("name","")}/{data.get("code","")}')
+    rid = RoleService.create_role(data, g.current_user.get('id'))
     return jsonify({'message': '添加成功', 'id': rid})
 
 
@@ -158,8 +150,7 @@ def update_role(rid):
       - Bearer: []
     """
     data = get_json_body()
-    RoleService.update_role(rid, data)
-    safe_audit_log('update_role', 'role', rid, str(data))
+    RoleService.update_role(rid, data, g.current_user.get('id'))
     return jsonify({'message': '更新成功'})
 
 
@@ -178,9 +169,5 @@ def delete_role(rid):
     security:
       - Bearer: []
     """
-    try:
-        RoleService.delete_role(rid)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    safe_audit_log('delete_role', 'role', rid)
+    RoleService.delete_role(rid, g.current_user.get('id'))
     return jsonify({'message': '删除成功'})
