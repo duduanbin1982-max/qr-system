@@ -6,6 +6,7 @@ const ORDERS_API = '/api/orders'
 export const productsApi = {
   listProducts: (params) => request('GET', PRODUCTS_API + buildQuery(params)),
   createProduct: (data) => request('POST', PRODUCTS_API, data),
+  previewProductCode: (data) => request('POST', PRODUCTS_API + '/code-preview', data),
   updateProduct: (id, data) => request('PUT', PRODUCTS_API + '/' + id, data),
   deleteProduct: (id) => request('DELETE', PRODUCTS_API + '/' + id),
   restoreProduct: (id) => request('PUT', PRODUCTS_API + '/' + id + '/restore'),

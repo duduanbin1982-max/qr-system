@@ -359,8 +359,7 @@ ROUTE_REFERENCES = (
     ),
     _route(
         "products",
-        ("route_id",),
-        version_columns=("route_version_id",),
+        ("process_route_id", "route_id"),
         key="products",
         label="产品档案",
     ),

@@ -342,7 +342,11 @@ def test_new_price_and_payroll_detail_use_exact_master_data_versions(client):
         assert detail["amount_cents"] == 375
 
 
-def test_latest_migration_is_v063():
-    from modules.migrations import LATEST_VERSION
+def test_process_fact_migration_is_v063():
+    from modules.migrations import MIGRATIONS
 
-    assert LATEST_VERSION == 63
+    assert next(
+        version
+        for version, _, migration in MIGRATIONS
+        if migration.__name__ == "m063_version_process_facts"
+    ) == 63

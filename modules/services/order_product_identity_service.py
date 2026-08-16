@@ -57,6 +57,8 @@ class OrderProductIdentityService:
         normalized["product_id"] = product["id"]
         for field in OrderProductIdentityService.SNAPSHOT_FIELDS:
             normalized[field] = product.get(field)
+        if "route_id" not in normalized and product.get("process_route_id") is not None:
+            normalized["route_id"] = product["process_route_id"]
         return normalized
 
     @staticmethod
