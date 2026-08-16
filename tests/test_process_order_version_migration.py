@@ -428,4 +428,8 @@ def test_v061_reconstructs_shared_and_distinct_historical_route_snapshots():
 def test_process_fact_version_binding_is_database_version_63():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 63
+    assert next(
+        version
+        for version, _, migration in migrations.MIGRATIONS
+        if migration.__name__ == "m063_version_process_facts"
+    ) == 63

@@ -191,14 +191,15 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_performance_department",
             "modules.migration_user_management",
             "modules.migration_process_versioning",
+            "modules.migration_product_integrity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_process_fact_version_binding_is_database_version_63():
+def test_product_integrity_is_database_version_64():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 63
+    assert migrations.LATEST_VERSION == 64
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

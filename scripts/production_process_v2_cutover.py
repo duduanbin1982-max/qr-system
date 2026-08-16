@@ -220,8 +220,8 @@ def run(args):
     flags_before = read_process_flags(env_path)
     if args.stage == "migrate" and any(flags_before.values()):
         raise RuntimeError("migration stage requires all process versioning flags to be disabled")
-    if args.stage != "migrate" and before_checks["user_version"] != 63:
-        raise RuntimeError("feature flags require a completed v063 database migration")
+    if args.stage != "migrate" and before_checks["user_version"] < 63:
+        raise RuntimeError("feature flags require database migration v063 or later")
 
     if not args.apply:
         stage_plan = (

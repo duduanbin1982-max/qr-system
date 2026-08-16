@@ -1192,8 +1192,8 @@ def evaluate_post_cutover(
     *, database: dict, flags: dict, health: dict, api_results: dict, missing_bindings: dict
 ) -> dict:
     failures = []
-    if database.get("user_version") != 63:
-        failures.append("database user_version must be 63")
+    if int(database.get("user_version") or 0) < 63:
+        failures.append("database user_version must be v063 or later")
     if database.get("integrity_check") != "ok":
         failures.append("database integrity_check must be ok")
     if database.get("foreign_key_violations") != 0:

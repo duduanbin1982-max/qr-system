@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.config import DB_PATH
+from modules.migrations import LATEST_VERSION
 
 
 def _copy_test_database(tmp_path, name="source.db"):
@@ -42,7 +43,7 @@ def test_preflight_is_read_only_and_reports_required_sections(tmp_path):
 
     assert database_sha256(source) == before
     assert report["mode"] == "read_only_preflight"
-    assert report["database"]["user_version"] == 63
+    assert report["database"]["user_version"] == LATEST_VERSION
     assert report["database"]["integrity_check"] == "ok"
     assert report["database"]["query_only"] == 1
     assert set(report["counts"]) >= {
@@ -110,7 +111,7 @@ def test_preflight_simulates_missing_legacy_route_flags_without_touching_source(
     report = run_preflight(source)
 
     assert report["status"] == "passed"
-    assert report["migration_simulation"]["result_version"] == 63
+    assert report["migration_simulation"]["result_version"] == LATEST_VERSION
     assert database_sha256(source) == before
     db = sqlite3.connect(source)
     columns = {row[1] for row in db.execute("PRAGMA table_info(process_route_items)")}
@@ -130,8 +131,8 @@ def test_replica_validation_uses_shared_migration_entry_and_compares_all_groups(
     assert replica.is_file()
     assert report["status"] == "passed"
     assert report["migration"]["source_version"] == 59
-    assert report["migration"]["target_version"] == 63
-    assert report["migration"]["executed_migrations"] == 4
+    assert report["migration"]["target_version"] == LATEST_VERSION
+    assert report["migration"]["executed_migrations"] == LATEST_VERSION - 59
     assert report["source_stability"]["blocking_differences"] == []
     assert set(report["comparison"]) >= {
         "roots",

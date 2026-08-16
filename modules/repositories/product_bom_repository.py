@@ -37,8 +37,11 @@ class ProductBomRepository:
                 process_id,
                 db=db,
             )
-        except sqlite3.IntegrityError:
-            return None
+        except sqlite3.IntegrityError as exc:
+            message = str(exc).lower()
+            if "unique" in message or "uq_product_bom_identity" in message:
+                return None
+            raise
 
     @staticmethod
     def delete(bom_id, db=None):
@@ -59,6 +62,20 @@ class ProductBomRepository:
         return db.execute(
             "SELECT id FROM products WHERE id = ? AND deleted_at IS NULL",
             (product_id,)
+        ).fetchone() is not None
+
+    @staticmethod
+    def material_exists(material_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM materials WHERE id = ?", (material_id,)
+        ).fetchone() is not None
+
+    @staticmethod
+    def process_exists(process_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM processes WHERE id = ? AND status = 'active'", (process_id,)
         ).fetchone() is not None
 
     @staticmethod

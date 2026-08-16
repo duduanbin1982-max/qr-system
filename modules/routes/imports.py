@@ -16,6 +16,7 @@ from modules.route_decorators import (
     safe_audit_log,
 )
 from modules.services.imports_service import ImportsService
+from modules.services.product_service import ProductService
 
 try:
     import openpyxl
@@ -37,7 +38,11 @@ IMPORT_FIELDS = {
     },
     'products': {
         'required': ['product_name'],
-        'optional': ['model', 'spec', 'upper_opening', 'plate_thickness', 'style', 'description', 'unit'],
+        'optional': [
+            'model', 'spec', 'upper_opening', 'lower_opening', 'plate_thickness',
+            'style', 'category', 'weight', 'price', 'description',
+            'process_route_id', 'route_id',
+        ],
         'label': '产品',
         'perms': 'products:create',
     },
@@ -148,6 +153,12 @@ def import_preview():
             if not row.get(req, '').strip():
                 errors.append({'row': i + 2, 'field': req, 'error': 'Required field empty'})
                 row_ok = False
+        if row_ok and import_type == 'products':
+            try:
+                ProductService.normalize_product_payload(row, partial=False)
+            except ValueError as exc:
+                errors.append({'row': i + 2, 'field': 'product', 'error': str(exc)})
+                row_ok = False
         if row_ok:
             valid_count += 1
 
@@ -235,38 +246,17 @@ def bulk_import_products():
     if len(rows) > MAX_IMPORT_ROWS:
         return jsonify({'error': f'Max {MAX_IMPORT_ROWS} rows per import'}), 400
 
-    imported = 0
-    skipped = 0
-    errors = []
-
-    for i, row in enumerate(rows):
-        product_name = (row.get('product_name') or '').strip()
-        if not product_name:
-            errors.append({'row': i + 1, 'error': 'Missing product_name'})
-            skipped += 1
-            continue
-
-        model = (row.get('model') or '').strip()
-        spec = (row.get('spec') or '').strip()
-        category = (row.get('category') or '').strip()
-        weight = row.get('weight', 0)
-        price = row.get('price', 0)
-
-        try:
-            ImportsService.insert_product({
-                'product_name': product_name, 'model': model, 'spec': spec,
-                'category': category, 'weight': weight, 'price': price
-            })
-            imported += 1
-        except Exception as e:
-            errors.append({'row': i + 1, 'error': str(e)[:100]})
-            skipped += 1
-
-    safe_audit_log('import_products', detail=f'imported={imported}')
-    return jsonify({
-        'imported': imported,
-        'errors': errors[:50],
+    result = ProductService.import_product_rows(rows)
+    safe_audit_log(
+        'import_products',
+        detail=f'imported={result["success"]} skipped={result["skipped"]}',
+    )
+    result.update({
+        'errors': result['errors'][:50],
+        'deprecated': True,
+        'replacement': '/api/products/import',
     })
+    return jsonify(result)
 
 
 @app.route('/api/import/customers', methods=['POST'])
