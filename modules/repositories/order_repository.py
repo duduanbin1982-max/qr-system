@@ -202,6 +202,15 @@ class OrderRepository:
         return db.execute('SELECT remark FROM orders WHERE id = ?', (order_id,)).fetchone()
 
     @staticmethod
+    def count_active_product_items(order_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT COUNT(*) FROM product_items "
+            "WHERE order_id = ? AND status != 'deleted'",
+            (order_id,),
+        ).fetchone()[0]
+
+    @staticmethod
     def insert_remark_history(order_id, old_remark, new_remark, user_id, user_name, db=None):
         db = resolve_db(db)
         db.execute(
