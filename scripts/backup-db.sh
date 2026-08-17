@@ -6,6 +6,7 @@ umask 077
 
 DB_PATH="/home/dubin/qr-system/data/production.db"
 ATTACH_DIR="/home/dubin/qr-system/data/attachments"
+LEGACY_ATTACH_DIR="/home/dubin/qr-system/uploads/employee_docs"
 BACKUP_DIR="/home/dubin/qr-system/data/backups"
 KEEP_DAYS=30
 LOG_TAG="[$(date '+%Y-%m-%d %H:%M:%S')]"
@@ -51,15 +52,26 @@ if [ "$WEEKDAY" = "7" ]; then
     echo "$LOG_TAG Weekly archive saved"
 fi
 
-if [ -d "$ATTACH_DIR" ] && [ "$(ls -A $ATTACH_DIR 2>/dev/null)" ]; then
+attachment_paths=()
+if [ -d "$ATTACH_DIR" ] && [ "$(ls -A "$ATTACH_DIR" 2>/dev/null)" ]; then
+    attachment_paths+=("data/attachments")
+fi
+if [ -d "$LEGACY_ATTACH_DIR" ] && [ "$(ls -A "$LEGACY_ATTACH_DIR" 2>/dev/null)" ]; then
+    attachment_paths+=("uploads/employee_docs")
+fi
+if [ "${#attachment_paths[@]}" -gt 0 ]; then
     ATTACH_BACKUP="$BACKUP_DIR/attachments_${TIMESTAMP}.tar.gz"
-    tar -czf "$ATTACH_BACKUP" -C "$(dirname $ATTACH_DIR)" "$(basename $ATTACH_DIR)" 2>/dev/null
+    tar -czf "$ATTACH_BACKUP" -C "/home/dubin/qr-system" "${attachment_paths[@]}" 2>/dev/null
+    tar -tzf "$ATTACH_BACKUP" >/dev/null
     chmod 0600 "$ATTACH_BACKUP"
+    sha256sum "$ATTACH_BACKUP" > "$ATTACH_BACKUP.sha256"
+    chmod 0600 "$ATTACH_BACKUP.sha256"
     echo "$LOG_TAG Attachments backup: $ATTACH_BACKUP"
 fi
 
 find "$BACKUP_DIR" -name "production_*.db" -mtime +$KEEP_DAYS -delete 2>/dev/null
 find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$KEEP_DAYS -delete 2>/dev/null
+find "$BACKUP_DIR" -name "attachments_*.tar.gz.sha256" -mtime +$KEEP_DAYS -delete 2>/dev/null
 find "$BACKUP_DIR" -name "weekly_*.db" -mtime +90 -delete 2>/dev/null
 
 # Restore verification: test the backup can be opened

@@ -93,6 +93,9 @@ npm run test:e2e
 log "backing up production database"
 bash scripts/backup-db.sh
 
+log "copying legacy employee documents into managed attachment storage"
+bash scripts/migrate-employee-documents.sh
+
 log "running production database migrations"
 python3 -c "from dotenv import load_dotenv; load_dotenv('.env'); from modules.migrations import run_migrations; run_migrations()"
 

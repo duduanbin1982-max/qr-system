@@ -93,6 +93,12 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     # CAD/Drawings
     ".dwg", ".dxf", ".step", ".stp", ".igs", ".iges",
 }
+EMPLOYEE_DOCUMENT_DIR = os.path.join(DATA_DIR, "attachments", "employee_docs")
+LEGACY_EMPLOYEE_DOCUMENT_DIR = os.path.join(BASE_DIR, "uploads", "employee_docs")
+EMPLOYEE_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024
+EMPLOYEE_DOCUMENT_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png",
+}
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError('SECRET_KEY 环境变量未设置！请在生产环境通过 ecosystem.config.js 或系统环境变量设置强密钥。')

@@ -10,11 +10,16 @@ function isNonWorkerUser(user) {
   return roles.some(role => (role?.code || '').toLowerCase() !== 'worker')
 }
 
+function roleItems(user) {
+  return Array.isArray(user?.roles) ? user.roles : []
+}
+
 export function useAdminUsers() {
   const allUsers = ref([])
   const allRoles = ref([])
   const adminSearch = ref('')
   const adminLoading = ref(false)
+  const accountMode = ref('admin')
   const selectedAdmins = ref([])
   const showAdminModal = ref(false)
   const adminModalEdit = ref(false)
@@ -34,9 +39,21 @@ export function useAdminUsers() {
   const roleGroups = ref([])
   const userRoleIds = ref([])
 
+  const systemAdminList = computed(() =>
+    allUsers.value.filter(user => user.is_admin_user)
+  )
+
+  const serviceAccountList = computed(() =>
+    allUsers.value.filter(user => isNonWorkerUser(user) && !user.is_admin_user)
+  )
+
+  const currentAccountList = computed(() =>
+    accountMode.value === 'admin' ? systemAdminList.value : serviceAccountList.value
+  )
+
   const filteredAdminList = computed(() => {
     const kw = adminSearch.value.trim().toLowerCase()
-    let list = allUsers.value.filter(isNonWorkerUser)
+    let list = currentAccountList.value
     if (kw) {
       list = list.filter(user =>
         (user.username || '').toLowerCase().includes(kw) ||
@@ -49,6 +66,34 @@ export function useAdminUsers() {
     }
     return list
   })
+
+  function setAccountMode(mode) {
+    accountMode.value = mode === 'service' ? 'service' : 'admin'
+    selectedAdmins.value = []
+  }
+
+  function userRoleNames(user) {
+    const names = roleItems(user).map(role => role?.name || role?.code).filter(Boolean)
+    return names.length ? names : [user?.role_code || user?.role || '未分配']
+  }
+
+  function userPermissionSummary(user) {
+    const rolesById = new Map(allRoles.value.map(role => [role.id, role]))
+    const rolesByCode = new Map(allRoles.value.map(role => [role.code, role]))
+    const permissions = new Set()
+    for (const assigned of roleItems(user)) {
+      const role = rolesById.get(assigned?.id) || rolesByCode.get(assigned?.code) || assigned
+      let values = role?.permissions || []
+      if (typeof values === 'string') {
+        try { values = JSON.parse(values || '[]') } catch { values = [] }
+      }
+      for (const permission of Array.isArray(values) ? values : []) {
+        if (permission === '*') return '全部权限'
+        if (permission) permissions.add(permission)
+      }
+    }
+    return permissions.size + ' 项权限'
+  }
 
   const isAllSelected = computed(() => {
     const ids = filteredAdminList.value
@@ -207,8 +252,10 @@ export function useAdminUsers() {
     }
   }
 
-  async function deleteAdminUser(uid) {
-    if (!confirm('确定删除该管理员？')) return
+  async function deleteAdminUser(user) {
+    const uid = typeof user === 'object' ? user.id : user
+    const label = typeof user === 'object' && user.is_admin_user ? '系统管理员' : '业务专用账号'
+    if (!confirm('确定删除该' + label + '？')) return
     try {
       await api.domains.users.deleteUser(uid)
       showToast('删除成功')
@@ -254,7 +301,7 @@ export function useAdminUsers() {
       showToast('请选择要删除的管理员', 'warn')
       return
     }
-    if (!confirm('确定删除选中的 ' + selectedAdmins.value.length + ' 个管理员？')) return
+    if (!confirm('确定删除选中的 ' + selectedAdmins.value.length + ' 个业务专用账号？')) return
     try {
       await api.domains.users.batchDeleteUsers([...selectedAdmins.value])
       showToast('已删除 ' + selectedAdmins.value.length + ' 个管理员')
@@ -274,6 +321,7 @@ export function useAdminUsers() {
   return {
     allUsers,
     allRoles,
+    accountMode,
     adminSearch,
     adminLoading,
     selectedAdmins,
@@ -283,9 +331,15 @@ export function useAdminUsers() {
     roleGroups,
     userRoleIds,
     filteredAdminList,
+    systemAdminList,
+    serviceAccountList,
+    currentAccountList,
     isAllSelected,
     loadAllUsers,
     toggleSelectAllAdmins,
+    setAccountMode,
+    userRoleNames,
+    userPermissionSummary,
     openAddAdmin,
     openEditAdmin,
     saveAdmin,

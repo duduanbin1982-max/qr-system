@@ -294,9 +294,38 @@ class UserRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT 1 FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? AND r.code = 'admin' LIMIT 1",
+            "JOIN users u ON u.id = ur.user_id "
+            "WHERE ur.user_id = ? AND r.code = 'admin' "
+            "AND r.status = 'active' AND u.status = 'active' LIMIT 1",
             (user_id,)
         ).fetchone()
+
+    @staticmethod
+    def has_admin_assignment(user_id, db=None):
+        """Return whether a user is an administrator, including inactive/deleted users."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM users u WHERE u.id = ? AND (u.role = 'admin' OR EXISTS ("
+            "SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id "
+            "WHERE ur.user_id = u.id AND r.code = 'admin')) LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    @staticmethod
+    def admin_assignment_ids(user_ids, db=None):
+        """Return administrator IDs from a target set regardless of account status."""
+        db = resolve_db(db)
+        if not user_ids:
+            return set()
+        placeholders = ",".join("?" for _ in user_ids)
+        rows = db.execute(
+            "SELECT u.id FROM users u WHERE u.id IN (" + placeholders + ") "
+            "AND (u.role = 'admin' OR EXISTS ("
+            "SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id "
+            "WHERE ur.user_id = u.id AND r.code = 'admin'))",
+            list(user_ids),
+        ).fetchall()
+        return {row["id"] for row in rows}
 
     @staticmethod
     def get_role_group_name(role_id, db=None):
@@ -640,10 +669,11 @@ class UserRepository:
 
     @staticmethod
     def insert_user_document_txn(user_id, doc_name, doc_type, file_path, file_size, uploaded_by, db):
-        db.execute(
+        cursor = db.execute(
             "INSERT INTO employee_documents (user_id, doc_name, doc_type, file_path, file_size, uploaded_by) VALUES (?,?,?,?,?,?)",
             (user_id, doc_name, doc_type, file_path, file_size, uploaded_by)
         )
+        return cursor.lastrowid
 
     @staticmethod
     def delete_user_document_txn(doc_id, db):

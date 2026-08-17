@@ -28,9 +28,34 @@ def test_deploy_script_has_required_release_gates():
     assert "--skip-tests" not in content
 
     backup_index = content.index("scripts/backup-db.sh")
+    attachment_migration_index = content.index("scripts/migrate-employee-documents.sh")
     migration_index = content.index("from modules.migrations import run_migrations")
     build_index = content.rindex("scripts/publish-frontend.sh")
-    assert backup_index < migration_index < build_index
+    assert backup_index < attachment_migration_index < migration_index < build_index
+
+
+def test_employee_documents_share_verified_attachment_backup_boundary():
+    config = (PROJECT_ROOT / "modules" / "config.py").read_text(encoding="utf-8")
+    users_route = (PROJECT_ROOT / "modules" / "routes" / "users.py").read_text(
+        encoding="utf-8"
+    )
+    backup = (PROJECT_ROOT / "scripts" / "backup-db.sh").read_text(encoding="utf-8")
+    migration = (
+        PROJECT_ROOT / "scripts" / "migrate-employee-documents.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'EMPLOYEE_DOCUMENT_DIR = os.path.join(DATA_DIR, "attachments", "employee_docs")' in config
+    assert 'LEGACY_EMPLOYEE_DOCUMENT_DIR = os.path.join(BASE_DIR, "uploads", "employee_docs")' in config
+    assert "EMPLOYEE_DOCUMENT_DIR" in users_route
+    assert 'ATTACH_DIR="/home/dubin/qr-system/data/attachments"' in backup
+    assert 'LEGACY_ATTACH_DIR="/home/dubin/qr-system/uploads/employee_docs"' in backup
+    assert 'attachment_paths+=("data/attachments")' in backup
+    assert 'attachment_paths+=("uploads/employee_docs")' in backup
+    assert 'tar -tzf "$ATTACH_BACKUP"' in backup
+    assert 'sha256sum "$ATTACH_BACKUP"' in backup
+    assert 'secure_chmod 0600 "$partial_file"' in migration
+    assert 'mv "$partial_file" "$target_file"' in migration
+    assert 'cmp -s "$source_file" "$target_file"' in migration
 
 
 def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
