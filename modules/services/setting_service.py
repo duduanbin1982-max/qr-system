@@ -1,6 +1,7 @@
 """qr-system - SettingsService (Repository-refactored)"""
 from modules.services import BaseService
 from modules.repositories.setting_repository import SettingRepository
+from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.order_focus_config import (
     COMPLETION_FOCUS_MODE_KEY,
     COMPLETION_FOCUS_MODES,
@@ -105,7 +106,7 @@ class SettingsService:
         clear_settings_cache()
 
     @staticmethod
-    def save(updates, deleted_keys):
+    def save(updates, deleted_keys, actor=None):
         validated = {}
         for k, v in updates.items():
             val, err = validate_setting(k, v)
@@ -118,3 +119,15 @@ class SettingsService:
                 SettingRepository.upsert_txn(k, v, db=txn)
             for k in valid_deletes:
                 SettingRepository.delete_txn(k, db=txn)
+            if actor:
+                AuditLogRepository.insert_log(
+                    actor.get('id'),
+                    'save_settings',
+                    'system',
+                    0,
+                    {
+                        'changed_keys': sorted(validated),
+                        'deleted_keys': sorted(valid_deletes),
+                    },
+                    db=txn,
+                )

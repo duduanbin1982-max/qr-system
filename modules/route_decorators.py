@@ -16,7 +16,7 @@ from modules.domain.process_versioning import (
     assert_legacy_master_data_write_allowed,
 )
 from modules.domain.reporting_day import reporting_range_bounds
-from modules.middleware.audit import safe_audit_log
+from modules.middleware.audit import required_audit_log, safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
 from modules.middleware.data_scope import check_order_data_scope, get_user_process_ids
 from modules.middleware.error_handler import handle_unexpected_error
@@ -76,6 +76,7 @@ __all__ = [
     "rate_limit",
     "require_legacy_master_data_write",
     "require_versioned_master_data_write",
+    "required_audit_log",
     "safe_audit_log",
     "safe_route",
     "validate_json",

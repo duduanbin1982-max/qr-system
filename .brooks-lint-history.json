@@ -405,5 +405,16 @@
       "suggestion": 2
     },
     "scope": "192.168.1.8:/home/dubin/qr-system HEAD 1102eb22; inventory routes/service/repository, scan auto-inbound, shipment posting, schemas, Vue API/composable/view, migrations, production.db snapshot, and 54 focused tests"
+  },
+  {
+    "date": "2026-08-17T09:35:58+08:00",
+    "mode": "PR Review",
+    "score": 39,
+    "findings": {
+      "critical": 2,
+      "warning": 6,
+      "suggestion": 1
+    },
+    "scope": "操作日志模块：middleware/audit.py、routes/audit_logs.py、services/audit_log_service.py、repositories/audit_log_repository.py、migration_baseline.py、权限目录、Vue 日志页面/API/composable及关键业务调用方；当前工作树 codex/admin-management-repair @ d488138，跳过生成文件"
   }
 ]

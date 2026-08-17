@@ -6,7 +6,7 @@ from modules.route_decorators import (
     check_permission,
     get_json_body,
 )
-from modules.services.audit_log_service import AuditLogService
+from modules.services.permission_query_service import PermissionQueryService
 from modules.services.user_service import UserService
 
 
@@ -17,7 +17,7 @@ from modules.services.user_service import UserService
 @check_auth
 @check_permission("users:view")
 def get_user_roles(uid):
-    return jsonify({"roles": AuditLogService.get_user_roles(uid)})
+    return jsonify({"roles": PermissionQueryService.get_user_roles(uid)})
 
 
 @app.route("/api/users/<int:uid>/roles", methods=["PUT"])
@@ -41,7 +41,7 @@ def set_user_roles(uid):
 @check_auth
 @check_permission("users:view")
 def get_permission_matrix():
-    data = AuditLogService.get_permission_matrix()
+    data = PermissionQueryService.get_permission_matrix()
     users = data["users"]
     all_rows = data["all_rows"]
     all_roles = data["all_roles"]

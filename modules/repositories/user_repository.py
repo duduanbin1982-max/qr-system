@@ -5,6 +5,7 @@ Extracted from user_service.py.
 """
 import json
 from modules.repositories.context import resolve_db
+from modules.audit_writer import insert_audit_log
 from modules.query_utils import paginate, build_sort_clause
 
 
@@ -705,7 +706,11 @@ class UserRepository:
     @staticmethod
     def insert_audit_log_txn(user_id, action, target_type, target_id, detail, db):
         """Insert an audit log entry."""
-        db.execute(
-            "INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) VALUES (?,?,?,?,?)",
-            (user_id, action, target_type, target_id, detail)
+        insert_audit_log(
+            db,
+            user_id,
+            action,
+            target_type,
+            target_id,
+            detail,
         )

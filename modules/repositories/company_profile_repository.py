@@ -7,6 +7,7 @@ from modules.domain.company_profile import (
     COMPANY_PROFILE_RETENTION_YEARS,
 )
 from modules.repositories.context import resolve_db
+from modules.audit_writer import insert_audit_log
 
 
 class CompanyProfileRepository:
@@ -80,10 +81,13 @@ class CompanyProfileRepository:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        db.execute(
-            "INSERT INTO audit_logs (user_id, action, target_type, target_id, detail) "
-            "VALUES (?,?,?,?,?)",
-            (actor.get("id"), "company_profile_update", "company_profile", 1, detail),
+        insert_audit_log(
+            db,
+            actor.get("id"),
+            "company_profile_update",
+            "company_profile",
+            1,
+            detail,
         )
 
     @staticmethod
