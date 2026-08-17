@@ -25,6 +25,7 @@ from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGR
 from modules.migration_process_versioning import MIGRATIONS as PROCESS_VERSIONING_MIGRATIONS
 from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_MIGRATIONS
 from modules.migration_company_profile import MIGRATIONS as COMPANY_PROFILE_MIGRATIONS
+from modules.migration_audit import MIGRATIONS as AUDIT_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -49,6 +50,7 @@ MIGRATIONS = sorted([
     *PROCESS_VERSIONING_MIGRATIONS,
     *PRODUCT_INTEGRITY_MIGRATIONS,
     *COMPANY_PROFILE_MIGRATIONS,
+    *AUDIT_MIGRATIONS,
 ], key=lambda migration: migration[0])
 
 _versions = [version for version, _, _ in MIGRATIONS]

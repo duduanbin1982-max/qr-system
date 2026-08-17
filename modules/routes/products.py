@@ -117,7 +117,9 @@ def create_product():
     """
     data = get_json_body()
     pid, product_code = ProductService.create_product(data)
-    safe_audit_log('create_product', 'product', pid, data.get('product_name', ''))
+    safe_audit_log(
+        'create_product', 'product', pid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '创建成功', 'id': pid, 'product_code': product_code})
 
 
@@ -170,7 +172,9 @@ def update_product(pid):
     """
     data = get_json_body()
     product_code = ProductService.update_product(pid, data)
-    safe_audit_log('update_product', 'product', pid, str(data))
+    safe_audit_log(
+        'update_product', 'product', pid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '更新成功', 'product_code': product_code})
 
 
@@ -336,7 +340,10 @@ def upload_product_attachment(product_id):
         return jsonify({'error': f'File type {ext} not allowed'}), 400
     file_data = file.read()
     ProductService.upload_attachment(product_id, file.filename, file.content_type or '', file_data, g.current_user['id'])
-    safe_audit_log('upload_attachment', 'product', product_id, file.filename)
+    safe_audit_log(
+        'upload_attachment', 'product', product_id,
+        {'extension': ext, 'size_bytes': len(file_data)},
+    )
     return jsonify({'message': '上传成功'})
 
 
@@ -439,8 +446,10 @@ def delete_product_attachment(attachment_id):
         description: 删除成功
     security: [{Bearer: []}]
     """
-    row = ProductService.delete_attachment(attachment_id)
-    safe_audit_log('delete_attachment', 'product', attachment_id, row['file_name'])
+    ProductService.delete_attachment(attachment_id)
+    safe_audit_log(
+        'delete_attachment', 'product', attachment_id, {'file_removed': True}
+    )
     return jsonify({'message': '删除成功'})
 
 # ============================================================

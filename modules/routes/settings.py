@@ -10,7 +10,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
 )
 from modules.services.company_profile_service import CompanyProfileService
 from modules.services.setting_service import SettingsService
@@ -60,7 +59,7 @@ def save_settings():
         deleted_keys = []
 
     try:
-        SettingsService.save(data, deleted_keys)
+        SettingsService.save(data, deleted_keys, actor=g.current_user)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -69,10 +68,6 @@ def save_settings():
     except Exception:
         pass
 
-    parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
-    if deleted_keys:
-        parts.append(f'_deleted={",".join(deleted_keys[:20])}')
-    safe_audit_log('save_settings', detail=', '.join(parts)[:1900])
     return jsonify({'message': '保存成功'})
 
 

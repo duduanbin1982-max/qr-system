@@ -38,7 +38,12 @@ def quality_management_rules():
 @check_permission("quality:standards")
 def quality_management_rules_update():
     rules = QualityManagementService.save_rules(get_json_body())
-    safe_audit_log("quality_rules_update", "quality_management", 0, str(rules))
+    safe_audit_log(
+        "quality_rules_update",
+        "quality_management",
+        0,
+        {"changed_fields": sorted(rules)},
+    )
     return jsonify({"ok": True, **rules})
 
 

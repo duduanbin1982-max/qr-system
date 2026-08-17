@@ -5,24 +5,23 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
     validate_json,
 )
-from modules.services.password_service import PasswordService
+from modules.services.user_service import UserService
 
 
 @app.route('/api/auth/reset-password/<int:user_id>', methods=['POST'])
 @check_auth
-@check_permission('users:edit')
+@check_permission('users:admin')
 @validate_json('change_password')
 def admin_reset_password(user_id):
     data = get_json_body()
     try:
-        username = PasswordService.admin_reset_password(
-            user_id, data.get('new_password', '').strip()
+        UserService.reset_password(
+            user_id,
+            data.get('new_password', '').strip(),
+            g.current_user.get('id'),
         )
-        safe_audit_log('reset_password', 'user', user_id,
-                       f'Admin {g.current_user.get("username","")} reset password for {username}')
-        return jsonify({'message': f'已重置用户 {username} 的密码，下次登录需修改密码'})
+        return jsonify({'message': '密码已重置，下次登录需修改密码'})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
