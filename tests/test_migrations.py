@@ -194,7 +194,8 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_product_integrity",
             "modules.migration_company_profile",
             "modules.migration_audit",
-            "modules.migration_process_config",
+        "modules.migration_process_config",
+        "modules.migration_role_group_permissions",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -208,7 +209,8 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     }
     assert by_version[66] == "modules.migration_audit"
     assert by_version[67] == "modules.migration_process_config"
-    assert migrations.LATEST_VERSION == 67
+    assert by_version[68] == "modules.migration_role_group_permissions"
+    assert migrations.LATEST_VERSION == 68
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

@@ -416,5 +416,16 @@
       "suggestion": 1
     },
     "scope": "操作日志模块：middleware/audit.py、routes/audit_logs.py、services/audit_log_service.py、repositories/audit_log_repository.py、migration_baseline.py、权限目录、Vue 日志页面/API/composable及关键业务调用方；当前工作树 codex/admin-management-repair @ d488138，跳过生成文件"
+  },
+  {
+    "date": "2026-08-18T17:50:00+08:00",
+    "mode": "PR Review",
+    "score": 84,
+    "findings": {
+      "critical": 1,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "角色组模块：生产 da2f8e8b0b7e352f4dfec6124eaf18e3fd582043 对应路由、服务、仓储、权限策略、权限目录、Vue 页面/composable、角色权限测试及生产数据库只读快照；跳过生成文件和打包产物"
   }
 ]

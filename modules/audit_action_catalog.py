@@ -51,6 +51,7 @@ _PERMISSION_ACTIONS = {
     "save_permissions",
     "replace_performance_department_scopes",
     "performance_v57_account_base_role_repair",
+    "role_group_permission_cutover",
 }
 
 _SYSTEM_ACTIONS = {
