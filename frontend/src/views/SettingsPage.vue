@@ -54,7 +54,7 @@ export default {
       if (nextTab === activeTab.value) return
       if (
         activeComponent.value?.hasUnsavedChanges?.()
-        && !window.confirm('公司资料有未保存的改动，确定离开吗？')
+        && !window.confirm(`${tabs.value.find(t => t.key === activeTab.value)?.label || '当前页面'}有未保存的改动，确定离开吗？`)
       ) return
       activeTab.value = nextTab
     }

@@ -194,14 +194,21 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_product_integrity",
             "modules.migration_company_profile",
             "modules.migration_audit",
+            "modules.migration_process_config",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_audit_event_foundation_is_database_version_66():
+def test_audit_event_and_process_config_migration_versions_are_stable():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 66
+    by_version = {
+        version: migration_fn.__module__
+        for version, _, migration_fn in migrations.MIGRATIONS
+    }
+    assert by_version[66] == "modules.migration_audit"
+    assert by_version[67] == "modules.migration_process_config"
+    assert migrations.LATEST_VERSION == 67
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

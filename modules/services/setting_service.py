@@ -8,6 +8,12 @@ from modules.order_focus_config import (
     COMPLETION_FOCUS_TAIL_PCT_KEY,
 )
 from modules.shipment_config import SHIPMENT_NO_PREFIX_KEY, normalize_shipment_no_prefix
+from modules.domain.process_config import (
+    LegacyProcessConfigWriteBlockedError,
+    PROCESS_CONFIG_FIELDS,
+)
+
+PROCESS_CONFIG_KEYS = frozenset(PROCESS_CONFIG_FIELDS)
 
 ALLOWED_KEYS = {
     'default_password', 'approval_enabled', 'auto_order_no', 'page_size',
@@ -23,7 +29,7 @@ ALLOWED_KEYS = {
     COMPLETION_FOCUS_MODE_KEY, COMPLETION_FOCUS_TAIL_PCT_KEY,
 }
 
-SENSITIVE_KEYS = {'smtp_password', 'board_token'}
+SENSITIVE_KEYS = {'default_password', 'smtp_password', 'board_token'}
 
 SETTING_VALIDATORS = {
     'page_size': (int, 1, 500, 'Page size must be 1-500'),
@@ -43,7 +49,7 @@ def validate_setting(key, value):
     if key not in ALLOWED_KEYS:
         return None, 'Invalid setting: ' + key
     if value is None:
-        return '', None
+        return None, 'Setting value cannot be null'
     if key not in SETTING_VALIDATORS:
         return str(value), None
     parse_fn, vmin, vmax, err_msg = SETTING_VALIDATORS[key]
@@ -83,7 +89,7 @@ class SettingsService:
 
     @staticmethod
     def get_allowed_keys():
-        return sorted(ALLOWED_KEYS)
+        return sorted(ALLOWED_KEYS - PROCESS_CONFIG_KEYS)
 
     @staticmethod
     def get_all():
@@ -91,12 +97,14 @@ class SettingsService:
         return {
             r["key"]: r["value"]
             for r in rows
-            if r["key"] in ALLOWED_KEYS and r["key"] not in SENSITIVE_KEYS
+            if r["key"] in ALLOWED_KEYS
+            and r["key"] not in SENSITIVE_KEYS
+            and r["key"] not in PROCESS_CONFIG_KEYS
         }
 
     @staticmethod
     def get_value(key, default=None):
-        if key not in ALLOWED_KEYS:
+        if key not in ALLOWED_KEYS or key in PROCESS_CONFIG_KEYS or key in SENSITIVE_KEYS:
             return default
         return SettingRepository.get_value(key, default)
 
@@ -107,6 +115,16 @@ class SettingsService:
 
     @staticmethod
     def save(updates, deleted_keys, actor=None):
+        if not isinstance(updates, dict):
+            raise ValueError('设置必须是对象')
+        if not isinstance(deleted_keys, list):
+            raise ValueError('删除设置键必须是数组')
+        legacy_process_keys = (set(updates) | set(deleted_keys)) & PROCESS_CONFIG_KEYS
+        if legacy_process_keys:
+            raise LegacyProcessConfigWriteBlockedError(
+                '工艺配置必须通过版本化工艺配置页面提交',
+                details={'fields': sorted(legacy_process_keys)},
+            )
         validated = {}
         for k, v in updates.items():
             val, err = validate_setting(k, v)

@@ -398,7 +398,6 @@ export const ACTION_PAGE_MAP = {
     "page:settings",
     "page:settings.admin-users",
     "page:settings.audit-logs",
-    "page:settings.process-config",
     "page:settings.role-groups",
     "page:settings.role-manage",
     "page:settings.positions",
@@ -411,6 +410,21 @@ export const IMPLIED_PERMISSIONS = {
   ],
   "company_info:audit_history": [
     "company_info:view"
+  ],
+  "process_config:create": [
+    "process_config:view"
+  ],
+  "process_config:submit": [
+    "process_config:view"
+  ],
+  "process_config:approve": [
+    "process_config:view"
+  ],
+  "process_config:reject": [
+    "process_config:view"
+  ],
+  "process_config:history": [
+    "process_config:view"
   ],
   "processes:view": [
     "process_versions:view"
