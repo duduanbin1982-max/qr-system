@@ -68,6 +68,26 @@ def test_company_profile_permissions_are_independent_and_view_only_by_default():
     assert "company_info:audit_history" not in production_manager
 
 
+def test_process_config_permissions_are_scoped_and_actions_imply_view():
+    assert ACTION_PERMISSION_DEFS["process_config"][1] == [
+        "view",
+        "create",
+        "submit",
+        "approve",
+        "reject",
+        "history",
+    ]
+    assert PAGE_OPERATION_BINDINGS["page:settings.process-config"] == [
+        "process_config"
+    ]
+    assert "process_config" not in PAGE_OPERATION_BINDINGS.get("page:settings", [])
+    for action in ("create", "submit", "approve", "reject", "history"):
+        assert has_permission_code(
+            [f"process_config:{action}"], "process_config:view"
+        )
+    assert not has_permission_code(["settings:manage"], "process_config:approve")
+
+
 def test_performance_permissions_are_granular_and_labels_are_resource_neutral():
     assert ACTION_PERMISSION_DEFS["performance"][1] == [
         "view_self",

@@ -5,6 +5,7 @@ qr-system — 系统设置
 """
 from flask import g, request, jsonify
 
+from modules.domain.errors import DomainError
 from modules.route_decorators import (
     app,
     check_auth,
@@ -50,16 +51,21 @@ def get_settings():
 @check_auth
 @check_permission('settings:manage')
 def save_settings():
-    data = get_json_body()
+    raw_data = request.get_json(force=True, silent=True)
+    if not isinstance(raw_data, dict):
+        return jsonify({'error': '提交数据必须是对象'}), 400
+    data = dict(raw_data)
     if not data:
         return jsonify({'error': '提交数据为空'}), 400
 
     deleted_keys = data.pop('_deleted_keys', [])
     if not isinstance(deleted_keys, list):
-        deleted_keys = []
+        return jsonify({'error': '_deleted_keys 必须是数组'}), 400
 
     try:
         SettingsService.save(data, deleted_keys, actor=g.current_user)
+    except DomainError:
+        raise
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 

@@ -21,6 +21,7 @@ ROUTE_MODULES = (
     "modules.routes.users",  # 用户管理
     "modules.routes.order_attachments",  # 订单附件
     "modules.routes.settings",  # 系统设置
+    "modules.routes.process_config",  # 版本化工艺配置
     "modules.routes.roles",  # 角色组+角色管理
     "modules.routes.audit_logs",  # 操作日志
     "modules.routes.permissions",  # 权限+菜单权限
