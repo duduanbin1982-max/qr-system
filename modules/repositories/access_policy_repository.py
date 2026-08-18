@@ -6,7 +6,13 @@ class AccessPolicyRepository:
     @staticmethod
     def get_permission_rows(user_id, db=None):
         db = resolve_db(db)
-        return db.execute("\n            SELECT r.permissions as role_perms, rg.permissions as group_perms\n            FROM user_roles ur\n            JOIN roles r ON ur.role_id = r.id\n            LEFT JOIN role_groups rg ON r.group_id = rg.id\n            WHERE ur.user_id = ? AND r.status = 'active'\n        ", (user_id,)).fetchall()
+        return db.execute(
+            "SELECT r.permissions AS role_perms "
+            "FROM user_roles ur "
+            "JOIN roles r ON ur.role_id = r.id "
+            "WHERE ur.user_id = ? AND r.status = 'active'",
+            (user_id,),
+        ).fetchall()
 
     @staticmethod
     def list_position_process_ids(position_id, db=None):

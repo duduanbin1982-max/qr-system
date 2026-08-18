@@ -1,5 +1,4 @@
 """Database migration registry and runner."""
-
 import sqlite3
 from modules.config import DB_PATH
 from modules.migration_auth import MIGRATIONS as AUTH_MIGRATIONS
@@ -27,6 +26,7 @@ from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_
 from modules.migration_company_profile import MIGRATIONS as COMPANY_PROFILE_MIGRATIONS
 from modules.migration_audit import MIGRATIONS as AUDIT_MIGRATIONS
 from modules.migration_process_config import MIGRATIONS as PROCESS_CONFIG_MIGRATIONS
+from modules.migration_role_group_permissions import MIGRATIONS as ROLE_GROUP_PERMISSION_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -53,12 +53,12 @@ MIGRATIONS = sorted([
     *COMPANY_PROFILE_MIGRATIONS,
     *AUDIT_MIGRATIONS,
     *PROCESS_CONFIG_MIGRATIONS,
+    *ROLE_GROUP_PERMISSION_MIGRATIONS,
 ], key=lambda migration: migration[0])
 _versions = [version for version, _, _ in MIGRATIONS]
 if len(_versions) != len(set(_versions)):
     raise RuntimeError("duplicate database migration versions registered")
 LATEST_VERSION = max(_versions, default=0)
-
 def run_migrations(db=None):
     """Run all pending migrations in order."""
     own_db = db is None

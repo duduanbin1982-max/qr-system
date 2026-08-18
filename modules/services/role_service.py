@@ -94,15 +94,14 @@ class RoleGroupService:
                 data["name"] = name
 
             if "permissions" in data:
-                data["permissions"] = AdministratorPolicy.normalize_group_permissions(
-                    data["permissions"]
-                )
+                AdministratorPolicy.normalize_group_permissions(data["permissions"])
+                data.pop("permissions")
             if "status" in data:
                 data["status"] = AdministratorPolicy.normalize_status(data["status"])
 
             sets = []
             params = []
-            for field in ["name", "description", "parent_id", "status", "permissions"]:
+            for field in ["name", "description", "parent_id", "status"]:
                 if field in data:
                     sets.append(field + " = ?")
                     value = data[field]

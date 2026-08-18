@@ -8,7 +8,10 @@ class RoleGroupRepository:
     @staticmethod
     def list_all(db=None):
         db = resolve_db(db)
-        return db.execute("SELECT * FROM role_groups ORDER BY id").fetchall()
+        return db.execute(
+            "SELECT id,name,description,parent_id,status,created_at,updated_at "
+            "FROM role_groups ORDER BY id"
+        ).fetchall()
 
     @staticmethod
     def find_by_name(name, db=None):

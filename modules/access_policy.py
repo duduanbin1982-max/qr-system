@@ -19,22 +19,20 @@ def collect_permission_codes(permission_rows: Iterable, user_id=None, logger=Non
     logger = logger or logging.getLogger("qr")
     permissions: Set[str] = set()
     for row in permission_rows or []:
-        for column in ("role_perms", "group_perms"):
-            raw_value = _row_value(row, column)
-            if not raw_value:
-                continue
-            try:
-                parsed = json.loads(raw_value)
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning(
-                    "access_policy: invalid %s JSON for user %s: %s",
-                    column,
-                    user_id,
-                    exc,
-                )
-                continue
-            if isinstance(parsed, list):
-                permissions.update(str(item) for item in parsed if item)
+        raw_value = _row_value(row, "role_perms")
+        if not raw_value:
+            continue
+        try:
+            parsed = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "access_policy: invalid role_perms JSON for user %s: %s",
+                user_id,
+                exc,
+            )
+            continue
+        if isinstance(parsed, list):
+            permissions.update(str(item) for item in parsed if item)
     return sorted(permissions)
 
 
