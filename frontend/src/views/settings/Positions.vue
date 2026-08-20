@@ -5,7 +5,7 @@
       <div class="card">
         <div class="card-header">
           <h3>💼 岗位管理</h3>
-          <button class="btn btn-primary btn-sm" @click="openAddPosition">+ 新增岗位</button>
+          <button v-if="canCreate" class="btn btn-primary btn-sm" title="新增岗位" @click="openAddPosition">+ 新增岗位</button>
         </div>
         <div class="card-body">
           <div v-if="positionLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
@@ -35,8 +35,8 @@
                     </td>
                     <td><span class="badge" :class="p.status==='active'?'completed':'pending'">{{ p.status==='active'?'启用':'停用' }}</span></td>
                     <td style="text-align:center;white-space:nowrap">
-                      <button class="o-abtn edit" @click="openEditPosition(p)">✏️</button>
-                      <button class="o-abtn del" @click="deletePosition(p.id)">🗑️</button>
+                      <button v-if="canEdit" class="o-abtn edit" title="编辑岗位" @click="openEditPosition(p)">✏️</button>
+                      <button v-if="canDelete" class="o-abtn del" title="删除岗位" @click="deletePosition(p.id)">🗑️</button>
                     </td>
                   </tr>
                 </tbody>

@@ -22,7 +22,9 @@ class PositionService:
         result = []
         for r in rows:
             pos = dict(r)
-            pos['processes'] = proc_map.get(pos['id'], [])
+            processes = proc_map.get(pos['id'], [])
+            pos['processes'] = processes
+            pos['process_ids'] = [int(item['process_id']) for item in processes]
             result.append(pos)
         return {'positions': result, 'total': total, 'page': page, 'limit': limit}
 

@@ -30,7 +30,8 @@ class PositionRepository:
             'SELECT pp.position_id, pp.process_id, p.name as process_name'
             ' FROM position_processes pp'
             ' JOIN processes p ON pp.process_id = p.id'
-            ' WHERE pp.position_id IN (' + placeholders + ')',
+            ' WHERE pp.position_id IN (' + placeholders + ')'
+            ' ORDER BY pp.position_id, pp.id',
             pos_ids
         ).fetchall()
 
