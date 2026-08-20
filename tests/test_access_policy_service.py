@@ -41,7 +41,12 @@ def test_collect_permission_codes_ignores_legacy_group_permissions(caplog):
 
     permissions = collect_permission_codes(rows, user_id=7)
 
-    assert permissions == ["orders:edit", "orders:view"]
+    assert permissions == [
+        "orders:edit",
+        "orders:view",
+        "page:production",
+        "page:production.orders",
+    ]
     assert "invalid role_perms JSON for user 7" in caplog.text
 
 
@@ -92,7 +97,10 @@ def test_access_policy_service_uses_repository_only_in_service_layer(monkeypatch
 
     user = {"id": 9, "process_ids": "12,99"}
 
-    assert AccessPolicyService.get_user_permissions(user) == ["quality:view"]
+    assert AccessPolicyService.get_user_permissions(user) == [
+        "page:quality-management",
+        "quality:view",
+    ]
     assert AccessPolicyService.has_permission(user, "quality:view") is True
     assert AccessPolicyService.get_user_process_ids(user) == [12]
     assert FakeAccessPolicyRepository.requested_process_ids == [12, 99]
