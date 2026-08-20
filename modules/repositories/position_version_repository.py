@@ -187,6 +187,19 @@ class PositionVersionRepository:
         )
 
     @staticmethod
+    def version_at(position_id, occurred_at, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT id FROM position_versions WHERE position_id=? "
+            "AND status IN ('published','superseded','retired') "
+            "AND effective_from<>'' AND effective_from<=? "
+            "AND (effective_to='' OR effective_to>?) "
+            "ORDER BY effective_from DESC,version DESC,id DESC LIMIT 1",
+            (position_id, occurred_at, occurred_at),
+        ).fetchone()
+        return PositionVersionRepository.version(row["id"], db=db) if row else None
+
+    @staticmethod
     def create_root(payload, db):
         cursor = db.execute(
             "INSERT INTO positions ("
