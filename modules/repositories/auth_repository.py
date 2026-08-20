@@ -139,7 +139,7 @@ class AuthRepository:
         db = resolve_db(db)
         row = db.execute(
             "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? "
+            "WHERE ur.user_id = ? AND r.status = 'active' "
             "ORDER BY CASE WHEN r.code = 'admin' THEN 0 WHEN r.code <> 'worker' THEN 1 ELSE 2 END, r.level, r.id "
             "LIMIT 1",
             (user_id,)
@@ -147,7 +147,8 @@ class AuthRepository:
         if row:
             return row['code']
         fallback = db.execute(
-            "SELECT role FROM users WHERE id = ? LIMIT 1",
+            "SELECT u.role FROM users u JOIN roles r ON r.code = u.role "
+            "WHERE u.id = ? AND r.status = 'active' LIMIT 1",
             (user_id,)
         ).fetchone()
         return fallback['role'] if fallback else 'worker'

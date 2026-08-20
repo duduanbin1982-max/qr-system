@@ -19,6 +19,9 @@ approval_config_item = {
         'approver_role': {'maxLength': 64, 'type': 'string'},
         'approver_role_2': {'maxLength': 64, 'type': 'string'},
         'approver_role_3': {'maxLength': 64, 'type': 'string'},
+        'approver_role_id': {'type': 'integer', 'minimum': 1},
+        'approver_role_2_id': {'type': 'integer', 'minimum': 1},
+        'approver_role_3_id': {'type': 'integer', 'minimum': 1},
     },
 }
 

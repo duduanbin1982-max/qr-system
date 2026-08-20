@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Iterable, List, Optional, Sequence, Set
 
-from modules.permission_catalog import PERMISSION_IMPLICATIONS
+from modules.permission_catalog import PERMISSION_IMPLICATIONS, infer_page_permissions
 
 
 def _row_value(row, key):
@@ -33,6 +33,21 @@ def collect_permission_codes(permission_rows: Iterable, user_id=None, logger=Non
             continue
         if isinstance(parsed, list):
             permissions.update(str(item) for item in parsed if item)
+    if "*" in permissions:
+        return ["*"]
+    # Materialize the same transitive permission closure used by middleware
+    # and the browser so API consumers cannot observe a weaker policy.
+    changed = True
+    while changed:
+        changed = False
+        for granted, implied in PERMISSION_IMPLICATIONS.items():
+            if granted not in permissions:
+                continue
+            for code in implied:
+                if code not in permissions:
+                    permissions.add(code)
+                    changed = True
+    permissions.update(infer_page_permissions(permissions))
     return sorted(permissions)
 
 

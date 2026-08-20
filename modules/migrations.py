@@ -27,6 +27,7 @@ from modules.migration_company_profile import MIGRATIONS as COMPANY_PROFILE_MIGR
 from modules.migration_audit import MIGRATIONS as AUDIT_MIGRATIONS
 from modules.migration_process_config import MIGRATIONS as PROCESS_CONFIG_MIGRATIONS
 from modules.migration_role_group_permissions import MIGRATIONS as ROLE_GROUP_PERMISSION_MIGRATIONS
+from modules.migration_role_management import MIGRATIONS as ROLE_MANAGEMENT_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -54,6 +55,7 @@ MIGRATIONS = sorted([
     *AUDIT_MIGRATIONS,
     *PROCESS_CONFIG_MIGRATIONS,
     *ROLE_GROUP_PERMISSION_MIGRATIONS,
+    *ROLE_MANAGEMENT_MIGRATIONS,
 ], key=lambda migration: migration[0])
 _versions = [version for version, _, _ in MIGRATIONS]
 if len(_versions) != len(set(_versions)):

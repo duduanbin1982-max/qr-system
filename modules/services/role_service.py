@@ -1,8 +1,9 @@
 """Role and role-group services with administrator-owned invariants."""
 import json
+import re
 
 from modules.config import _get_pinyin_initial
-from modules.domain.errors import ConflictError, NotFoundError
+from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.repositories.role_repository import RoleGroupRepository, RoleRepository
 from modules.services import BaseService
@@ -150,6 +151,27 @@ class RoleGroupService:
 
 class RoleService:
 
+    ROLE_CODE_RE = re.compile(r"^[a-z0-9_]{2,64}$")
+
+    @classmethod
+    def _normalize_code(cls, value):
+        code = str(value or "").strip()
+        if not code:
+            raise ValidationError("角色编码不能为空")
+        if not cls.ROLE_CODE_RE.fullmatch(code):
+            raise ValidationError("角色编码必须为 2-64 位小写字母、数字或下划线")
+        return code
+
+    @staticmethod
+    def _normalize_level(value):
+        try:
+            level = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("角色级别必须为正整数") from exc
+        if level < 1 or str(value).strip() not in {str(level), str(float(level))}:
+            raise ValidationError("角色级别必须为正整数")
+        return level
+
     @staticmethod
     def list_roles():
         rows = RoleRepository.list_all()
@@ -158,7 +180,7 @@ class RoleService:
     @staticmethod
     def create_role(data, actor_id):
         name = data.get("name", "").strip()
-        code = data.get("code", "").strip()
+        code = str(data.get("code", "") or "").strip()
         if not name:
             raise ValueError("角色名称不能为空")
         if not code:
@@ -170,6 +192,7 @@ class RoleService:
             if len(code) < 3:
                 import time
                 code = "role_" + hex(int(time.time() * 1000))[2:]
+        code = RoleService._normalize_code(code)
 
         with BaseService.transaction() as txn:
             AdministratorPolicy.require_actual_admin(actor_id, txn)
@@ -179,23 +202,33 @@ class RoleService:
             parent_id = data.get("parent_id")
             if parent_id and not RoleRepository.role_exists(parent_id, db=txn):
                 raise NotFoundError("父级角色不存在")
-            if RoleRepository.find_by_code(code, db=txn):
+            if RoleRepository.find_by_code_or_alias(code, db=txn):
                 raise ConflictError("角色编码【" + code + "】已存在")
+            if RoleRepository.find_by_name(name, db=txn):
+                raise ConflictError("角色名称【" + name + "】已存在")
             permissions = AdministratorPolicy.normalize_permissions(
                 data.get("permissions", [])
             )
             status = AdministratorPolicy.normalize_status(
                 data.get("status", "active")
             )
+            level = RoleService._normalize_level(data.get("level", 1))
             role_id = RoleRepository.insert_txn(
                 name,
                 code,
                 data.get("description", ""),
                 group_id,
                 parent_id,
-                data.get("level", 1),
+                level,
                 json.dumps(permissions, ensure_ascii=False),
                 status,
+                db=txn,
+            )
+            RoleRepository.insert_code_alias_txn(
+                role_id,
+                code,
+                "role created",
+                actor_id,
                 db=txn,
             )
             after = dict(RoleRepository.find_by_id(role_id, db=txn))
@@ -261,10 +294,10 @@ class RoleService:
                         if parent not in visited:
                             to_check.append(parent)
             if "code" in data:
-                code = data["code"].strip()
-                if not code:
-                    raise ValueError("角色编码不能为空")
-                duplicate = RoleRepository.find_by_code_exclude(code, role_id, db=txn)
+                code = RoleService._normalize_code(data["code"])
+                duplicate = RoleRepository.find_by_code_or_alias(code, db=txn)
+                if duplicate and duplicate["id"] == role_id and duplicate["code"] == code:
+                    duplicate = None
                 if duplicate:
                     raise ConflictError("角色编码【" + code + "】已存在")
                 data["code"] = code
@@ -279,6 +312,24 @@ class RoleService:
                 )
             if "status" in data:
                 data["status"] = AdministratorPolicy.normalize_status(data["status"])
+            if "level" in data:
+                data["level"] = RoleService._normalize_level(data["level"])
+
+            old_code = role["code"]
+            if "code" in data and data["code"] != old_code:
+                refs = RoleRepository.count_references(role_id, old_code, db=txn)
+                if refs["total"]:
+                    raise ConflictError(
+                        "角色编码已被用户或审批配置引用，不能直接修改；请新建角色并迁移授权"
+                    )
+                RoleRepository.close_code_alias_txn(role_id, old_code, db=txn)
+                RoleRepository.insert_code_alias_txn(
+                    role_id,
+                    data["code"],
+                    "role code changed",
+                    actor_id,
+                    db=txn,
+                )
 
             sets = []
             params = []

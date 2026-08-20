@@ -178,20 +178,20 @@
                   <input type="checkbox" v-model="p.require_approval" :true-value="1" :false-value="0" @change="saveConfig(p)" style="accent-color:var(--primary);cursor:pointer">
                 </td>
                 <td>
-                  <select v-model="p.approver_role" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
+                  <select v-model.number="p.approver_role_id" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
                   </select>
                 </td>
                 <td>
-                  <select v-model="p.approver_role_2" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                  <select v-model.number="p.approver_role_2_id" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
                     <option value="">-- 无 --</option>
-                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
+                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
                   </select>
                 </td>
                 <td>
-                  <select v-model="p.approver_role_3" :disabled="!p.require_approval || !p.approver_role_2" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+                  <select v-model.number="p.approver_role_3_id" :disabled="!p.require_approval || !p.approver_role_2_id" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
                     <option value="">-- 无 --</option>
-                    <option v-for="role in roleOptions" :key="role.code" :value="role.code">{{ role.name }}</option>
+                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
                   </select>
                 </td>
               </tr>
@@ -328,20 +328,31 @@ export default {
     async function loadConfig() {
       try {
         const d = await api.domains.approvals.approvalConfig()
-        configProcesses.value = d.configs || []
         roleOptions.value = d.role_options || []
+        const roleIdByCode = Object.fromEntries(roleOptions.value.map(role => [role.code, role.id]))
+        configProcesses.value = (d.configs || []).map(config => ({
+          ...config,
+          approver_role_id: config.approver_role_id || roleIdByCode[config.approver_role] || null,
+          approver_role_2_id: config.approver_role_2_id || roleIdByCode[config.approver_role_2] || '',
+          approver_role_3_id: config.approver_role_3_id || roleIdByCode[config.approver_role_3] || '',
+        }))
       } catch(e) { showToast('加载配置失败', 'error') }
     }
 
     async function saveConfig(p) {
       try {
-        const level = p.approver_role_3 ? 3 : (p.approver_role_2 ? 2 : 1)
+        if (!p.approver_role_2_id) p.approver_role_3_id = ''
+        const roleById = id => roleOptions.value.find(role => role.id === Number(id))
+        const level = p.approver_role_3_id ? 3 : (p.approver_role_2_id ? 2 : 1)
         await api.domains.approvals.saveApprovalConfig({
           process_id: p.process_id,
           require_approval: p.require_approval,
-          approver_role: p.approver_role || 'admin',
-          approver_role_2: p.approver_role_2 || '',
-          approver_role_3: p.approver_role_3 || '',
+          approver_role_id: p.approver_role_id,
+          approver_role_2_id: p.approver_role_2_id || undefined,
+          approver_role_3_id: p.approver_role_3_id || undefined,
+          approver_role: roleById(p.approver_role_id)?.code || p.approver_role || 'admin',
+          approver_role_2: roleById(p.approver_role_2_id)?.code || '',
+          approver_role_3: roleById(p.approver_role_3_id)?.code || '',
           approval_level: level
         })
       } catch(e) {

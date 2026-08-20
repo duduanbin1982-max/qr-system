@@ -45,6 +45,17 @@ def test_collect_permission_codes_ignores_legacy_group_permissions(caplog):
     assert "invalid role_perms JSON for user 7" in caplog.text
 
 
+def test_collect_permission_codes_materializes_implied_page_chain():
+    permissions = collect_permission_codes(
+        [{"role_perms": '["roles:edit"]', "group_perms": "[]"}],
+        user_id=8,
+    )
+    assert "roles:edit" in permissions
+    assert "roles:view" in permissions
+    assert "page:settings" in permissions
+    assert "page:settings.role-manage" in permissions
+
+
 def test_has_permission_code_supports_wildcard():
     assert has_permission_code(["*"], "inventory:delete") is True
     assert has_permission_code(["orders:view"], "inventory:delete") is False
