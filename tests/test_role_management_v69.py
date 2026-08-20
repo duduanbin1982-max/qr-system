@@ -1,3 +1,4 @@
+import sqlite3
 import uuid
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from factories import ensure_process
 from modules.db import get_db
 from modules.domain.errors import ConflictError
+from modules.repositories.role_repository import RoleRepository
 from modules.services.approval_service import ApprovalService
 from modules.services.role_service import RoleService
 
@@ -15,6 +17,23 @@ def _admin_id(db):
         "JOIN roles r ON r.id=ur.role_id "
         "WHERE r.code='admin' AND r.status='active' LIMIT 1"
     ).fetchone()["id"]
+
+
+def test_role_code_alias_repository_insert_contract():
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        "CREATE TABLE role_code_aliases ("
+        "role_id INTEGER, role_code TEXT, reason TEXT, changed_by INTEGER, "
+        "UNIQUE(role_id, role_code))"
+    )
+
+    RoleRepository.insert_code_alias_txn(
+        17, "quality_reviewer", "role created", 1000, db=db
+    )
+
+    assert db.execute(
+        "SELECT role_id, role_code, reason, changed_by FROM role_code_aliases"
+    ).fetchone() == (17, "quality_reviewer", "role created", 1000)
 
 
 def test_role_code_alias_and_reference_guard(client):

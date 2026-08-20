@@ -221,7 +221,7 @@ class RoleRepository:
     def insert_code_alias_txn(role_id, code, reason, changed_by, db):
         db.execute(
             "INSERT OR IGNORE INTO role_code_aliases "
-            "(role_id, role_code, reason, changed_by) VALUES (?,?,?,?,?)",
+            "(role_id, role_code, reason, changed_by) VALUES (?,?,?,?)",
             (role_id, code, reason, changed_by),
         )
 
