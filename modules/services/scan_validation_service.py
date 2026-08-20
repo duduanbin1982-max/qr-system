@@ -98,7 +98,7 @@ class ScanValidationService:
         if initial_error:
             return initial_error, None, None
 
-        user_process_ids = get_user_process_ids(user)
+        user_process_ids = get_user_process_ids(user, order_id=order_id)
         preflight_error = ScanValidationService._report_preflight_error(
             order_id, process_id, user, serial_no, report_type, user_process_ids
         )

@@ -3,8 +3,10 @@ from typing import List, Optional, Tuple
 from modules.services.access_policy_service import get_user_process_ids as _get_user_process_ids
 
 
-def get_user_process_ids(user: Optional[dict]) -> Optional[List[int]]:
-    return _get_user_process_ids(user)
+def get_user_process_ids(
+    user: Optional[dict], order_id=None, db=None
+) -> Optional[List[int]]:
+    return _get_user_process_ids(user, order_id=order_id, db=db)
 
 
 def check_order_data_scope(order_id: int, user: Optional[dict], db=None) -> bool:
@@ -13,7 +15,7 @@ def check_order_data_scope(order_id: int, user: Optional[dict], db=None) -> bool
 
     return ScanHelperService.check_order_scope(
         order_id,
-        get_user_process_ids(user),
+        get_user_process_ids(user, order_id=order_id, db=db),
         db=db,
     )
 
