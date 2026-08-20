@@ -359,7 +359,7 @@ PERMISSION_IMPLICATIONS = {
         "suppliers:edit",
         "suppliers:delete",
     ],
-    "materials:view": ["suppliers:view"],
+    "materials:view": [],
     "materials:create": ["materials:view", "suppliers:view"],
     "materials:edit": ["materials:view", "suppliers:view"],
     "materials:delete": ["materials:view"],

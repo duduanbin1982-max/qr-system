@@ -93,9 +93,4 @@ def run_migrations(db=None):
 
 def init_db():
     """Thin wrapper - runs pending migrations."""
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    try:
-        run_migrations(db)
-    finally:
-        db.close()
+    run_migrations()

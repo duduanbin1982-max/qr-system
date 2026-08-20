@@ -405,6 +405,24 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "roles:create": [
+    "roles:view"
+  ],
+  "roles:edit": [
+    "roles:view"
+  ],
+  "roles:delete": [
+    "roles:view"
+  ],
+  "role_groups:create": [
+    "role_groups:view"
+  ],
+  "role_groups:edit": [
+    "role_groups:view"
+  ],
+  "role_groups:delete": [
+    "role_groups:view"
+  ],
   "company_info:edit": [
     "company_info:view"
   ],
@@ -484,9 +502,7 @@ export const IMPLIED_PERMISSIONS = {
     "suppliers:edit",
     "suppliers:delete"
   ],
-  "materials:view": [
-    "suppliers:view"
-  ],
+  "materials:view": [],
   "materials:create": [
     "materials:view",
     "suppliers:view"
