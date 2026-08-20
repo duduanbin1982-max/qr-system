@@ -1,4 +1,4 @@
-"""Authoritative process and route reference catalog.
+"""Authoritative process, route and position reference catalog.
 
 Every stable process/route identity and version reference belongs here.  The
 catalog drives impact reporting, contract coverage checks and database delete
@@ -26,6 +26,9 @@ class ReferenceSpec:
     impact_level: str = IMPACT_BLOCKING
     suggested_action: str = ""
     delete_policy: str = DELETE_BLOCK
+    where_clause: str = ""
+    required_columns: tuple[str, ...] = ()
+    block_operations: tuple[str, ...] = ()
 
     @property
     def columns(self):
@@ -83,6 +86,34 @@ def _route(
     )
 
 
+def _position(
+    table,
+    root_columns=(),
+    *,
+    version_columns=(),
+    key,
+    label,
+    impact_level="high",
+    action="保留岗位根和历史修订版",
+    where_clause="",
+    required_columns=(),
+    block_operations=("delete",),
+):
+    return ReferenceSpec(
+        entity_type="position",
+        table=table,
+        root_columns=tuple(root_columns),
+        version_columns=tuple(version_columns),
+        business_key=key,
+        business_label=label,
+        impact_level=impact_level,
+        suggested_action=action,
+        where_clause=where_clause,
+        required_columns=tuple(required_columns),
+        block_operations=tuple(block_operations),
+    )
+
+
 PROCESS_REFERENCES = (
     _process("approval_config", ("process_id",), key="approval_config", label="审批配置"),
     _process(
@@ -130,6 +161,14 @@ PROCESS_REFERENCES = (
     ),
     _process(
         "position_processes", ("process_id",), key="position_processes", label="岗位工序"
+    ),
+    _process(
+        "position_version_processes",
+        ("process_id",),
+        key="position_version_processes",
+        label="岗位修订版工序",
+        impact_level=IMPACT_INTERNAL,
+        action="由岗位版本服务维护",
     ),
     _process(
         "process_handoff_reviews",
@@ -570,9 +609,140 @@ ROUTE_REFERENCES = (
 )
 
 
-MASTER_DATA_REFERENCES = PROCESS_REFERENCES + ROUTE_REFERENCES
+POSITION_REFERENCES = (
+    _position(
+        "users",
+        ("position_id",),
+        key="active_employees",
+        label="启用员工",
+        impact_level="blocking",
+        action="先完成启用员工调岗",
+        where_clause="status = 'active' AND deleted_at IS NULL",
+        required_columns=("status", "deleted_at"),
+        block_operations=("delete", "retire"),
+    ),
+    _position(
+        "users",
+        ("position_id",),
+        key="inactive_employees",
+        label="停用员工",
+        action="保留员工岗位历史",
+        where_clause="COALESCE(status, '') <> 'active' AND deleted_at IS NULL",
+        required_columns=("status", "deleted_at"),
+    ),
+    _position(
+        "users",
+        ("position_id",),
+        key="deleted_employees",
+        label="已删除员工",
+        impact_level="warning",
+        action="保留已删除员工岗位历史",
+        where_clause="deleted_at IS NOT NULL",
+        required_columns=("deleted_at",),
+    ),
+    _position(
+        "user_sessions",
+        ("active_position_id",),
+        key="active_sessions",
+        label="活跃会话",
+        impact_level="blocking",
+        action="先失效该岗位的活跃会话",
+        where_clause="is_active = 1",
+        required_columns=("is_active",),
+        block_operations=("delete", "retire"),
+    ),
+    _position(
+        "position_processes",
+        ("position_id",),
+        key="current_position_processes",
+        label="当前岗位工序",
+        action="删除无引用草稿岗位时随根清理",
+        block_operations=(),
+    ),
+    _position(
+        "position_version_processes",
+        version_columns=("position_version_id",),
+        key="historical_position_processes",
+        label="版本化岗位工序",
+    ),
+    _position(
+        "performance_assignment_history",
+        ("position_id",),
+        version_columns=("position_version_id",),
+        key="assignment_history",
+        label="绩效岗位分配历史",
+    ),
+    _position(
+        "performance_source_facts",
+        ("position_id_snapshot",),
+        version_columns=("position_version_id",),
+        key="source_facts",
+        label="绩效来源事实",
+    ),
+    _position(
+        "performance_score_revisions",
+        ("position_id_snapshot",),
+        version_columns=("position_version_id_snapshot",),
+        key="score_revisions",
+        label="绩效评分修订版",
+    ),
+    _position(
+        "performance_position_target_versions",
+        ("position_id",),
+        version_columns=("position_version_id_snapshot",),
+        key="target_versions",
+        label="绩效岗位目标版本",
+    ),
+    _position(
+        "work_records",
+        ("submit_position_id",),
+        version_columns=("submit_position_version_id",),
+        key="work_records",
+        label="报工记录",
+    ),
+    # Root ownership and workflow evidence remain deletion guards but are hidden
+    # from the business-facing impact categories.
+    _position(
+        "positions",
+        version_columns=("current_effective_version_id",),
+        key="current_position_version",
+        label="当前有效岗位版本",
+        impact_level=IMPACT_INTERNAL,
+        action="由岗位版本服务维护",
+    ),
+    _position(
+        "position_versions",
+        ("position_id",),
+        version_columns=("supersedes_version_id",),
+        key="position_versions",
+        label="岗位修订版",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变岗位修订版",
+    ),
+    _position(
+        "position_version_events",
+        ("position_id",),
+        version_columns=("position_version_id",),
+        key="position_version_events",
+        label="岗位版本事件",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变岗位版本事件",
+    ),
+    _position(
+        "position_lifecycle_requests",
+        ("position_id",),
+        key="position_lifecycle_requests",
+        label="岗位生命周期申请",
+        impact_level=IMPACT_INTERNAL,
+        action="保留岗位生命周期审批证据",
+    ),
+)
+
+
+MASTER_DATA_REFERENCES = PROCESS_REFERENCES + ROUTE_REFERENCES + POSITION_REFERENCES
 PROCESS_REFERENCE_TABLES = frozenset(spec.table for spec in PROCESS_REFERENCES)
 ROUTE_REFERENCE_TABLES = frozenset(spec.table for spec in ROUTE_REFERENCES)
+POSITION_REFERENCE_TABLES = frozenset(spec.table for spec in POSITION_REFERENCES)
 
 
 # Explicit exceptions must stay narrow and documented.  These columns are roots,
@@ -588,6 +758,31 @@ def cataloged_reference_columns():
     }
 
 
+def registered_position_reference_columns():
+    return {
+        (spec.table, column)
+        for spec in POSITION_REFERENCES
+        for column in spec.root_columns + spec.version_columns
+    }
+
+
+def _looks_like_position_reference_column(column):
+    return column in {
+        "position_id",
+        "position_version_id",
+        "position_id_snapshot",
+        "position_version_id_snapshot",
+    } or any(
+        column.endswith(suffix)
+        for suffix in (
+            "_position_id",
+            "_position_version_id",
+            "_position_id_snapshot",
+            "_position_version_id_snapshot",
+        )
+    )
+
+
 def _looks_like_reference_column(column):
     return column in {
         "process_id",
@@ -595,7 +790,27 @@ def _looks_like_reference_column(column):
         "route_id",
         "route_version_id",
         "process_route_id",
-    } or column.endswith("_process_id") or column.endswith("_process_version_id")
+    } or any(
+        column.endswith(suffix)
+        for suffix in (
+            "_process_id",
+            "_process_version_id",
+        )
+    ) or _looks_like_position_reference_column(column)
+
+
+def discover_position_reference_columns(db):
+    discovered = set()
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for row in tables:
+        table = row[0]
+        for column_row in db.execute(f'PRAGMA table_info("{table}")').fetchall():
+            column = column_row[1]
+            if _looks_like_position_reference_column(column):
+                discovered.add((table, column))
+    return discovered
 
 
 def find_unregistered_reference_columns(db):
@@ -625,6 +840,8 @@ __all__ = [
     "IMPACT_BLOCKING",
     "IMPACT_INTERNAL",
     "MASTER_DATA_REFERENCES",
+    "POSITION_REFERENCES",
+    "POSITION_REFERENCE_TABLES",
     "PROCESS_REFERENCES",
     "PROCESS_REFERENCE_TABLES",
     "REFERENCE_COLUMN_EXEMPTIONS",
@@ -632,5 +849,7 @@ __all__ = [
     "ROUTE_REFERENCE_TABLES",
     "ReferenceSpec",
     "cataloged_reference_columns",
+    "discover_position_reference_columns",
     "find_unregistered_reference_columns",
+    "registered_position_reference_columns",
 ]

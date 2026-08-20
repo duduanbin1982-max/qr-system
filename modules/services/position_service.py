@@ -4,6 +4,7 @@ qr-system — 岗位管理 Service 层 (Repository pattern)
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.position_repository import PositionRepository
+from modules.services.position_impact_service import PositionImpactService
 
 
 class PositionService:
@@ -115,5 +116,7 @@ class PositionService:
         if user_count > 0:
             raise ValueError("该岗位下有 " + str(user_count) + " 个用户，请先将用户调岗后再删除")
         with BaseService.transaction() as txn:
+            PositionImpactService.assert_deletable(pos_id, db=txn)
+            PositionRepository.delete_position_processes_by_pos(pos_id, db=txn)
             PositionRepository.delete_position_by_id(pos_id, db=txn)
         return pos['name']

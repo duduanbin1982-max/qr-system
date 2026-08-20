@@ -6,10 +6,13 @@ import pytest
 from factories import ensure_route_version
 from modules.db import get_db
 from modules.master_data_references import (
+    POSITION_REFERENCES,
     PROCESS_REFERENCES,
     ROUTE_REFERENCES,
     cataloged_reference_columns,
+    discover_position_reference_columns,
     find_unregistered_reference_columns,
+    registered_position_reference_columns,
 )
 from modules.migration_process_management import rebuild_master_data_reference_guards
 from modules.services.master_data_impact_service import MasterDataImpactService
@@ -73,6 +76,25 @@ def test_reference_catalog_includes_payroll_performance_price_time_and_quality()
     assert expected.issubset(columns)
     assert all(reference.business_label for reference in PROCESS_REFERENCES)
     assert all(reference.suggested_action for reference in ROUTE_REFERENCES)
+
+
+def test_position_reference_catalog_covers_all_live_columns(client):
+    with client.application.app_context():
+        db = get_db()
+        discovered = discover_position_reference_columns(db)
+
+    assert discovered - registered_position_reference_columns() == set()
+    assert {
+        ("users", "position_id"),
+        ("user_sessions", "active_position_id"),
+        ("performance_assignment_history", "position_version_id"),
+        ("performance_source_facts", "position_id_snapshot"),
+        ("performance_score_revisions", "position_version_id_snapshot"),
+        ("performance_position_target_versions", "position_id"),
+        ("work_records", "submit_position_version_id"),
+    }.issubset(registered_position_reference_columns())
+    assert all(reference.business_label for reference in POSITION_REFERENCES)
+    assert all(reference.suggested_action for reference in POSITION_REFERENCES)
 
 
 def test_route_impact_returns_business_labels_and_ignores_owned_nodes(client):
