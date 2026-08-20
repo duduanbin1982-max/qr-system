@@ -84,7 +84,7 @@ class ApprovalService:
             if not code or code in seen:
                 continue
             seen.add(code)
-            options.append({'code': code, 'name': row['name']})
+            options.append({'id': row['id'], 'code': code, 'name': row['name']})
         return options
 
     @staticmethod
@@ -94,6 +94,26 @@ class ApprovalService:
         cfg['approver_role_2'] = ApprovalService._normalize_role_code(cfg.get('approver_role_2'))
         cfg['approver_role_3'] = ApprovalService._normalize_role_code(cfg.get('approver_role_3'))
         return cfg
+
+    @staticmethod
+    def _resolve_role_selection(cfg, id_key, code_key, default_code, db):
+        """Resolve an approval role by stable ID, retaining code compatibility."""
+        role_id = cfg.get(id_key)
+        if role_id not in (None, ""):
+            try:
+                role_id = int(role_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(f"{id_key} 必须是整数") from exc
+            row = ApprovalService._role_repository().find_active_by_id(role_id, db=db)
+            if not row:
+                raise ValidationError("审批角色不存在或已停用")
+            return row["id"], ApprovalService._normalize_role_code(row["code"])
+
+        code = ApprovalService._normalize_role_code(cfg.get(code_key) or default_code)
+        row = ApprovalService._role_repository().find_active_by_code(code, db=db)
+        if not row:
+            raise ValidationError(f"角色“{code}”不存在或已停用")
+        return row["id"], ApprovalService._normalize_role_code(row["code"])
 
     @staticmethod
     def _approval_roles_from_config(cfg_row):
@@ -360,10 +380,21 @@ class ApprovalService:
                 if level < 1 or level > 3:
                     raise ValidationError('审批级别必须为 1 到 3 级')
 
-                role1 = ApprovalService._normalize_role_code(cfg.get('approver_role') or ApprovalService.DEFAULT_APPROVER_ROLE)
-                role2 = ApprovalService._normalize_role_code(cfg.get('approver_role_2'))
-                role3 = ApprovalService._normalize_role_code(cfg.get('approver_role_3'))
+                role1_id, role1 = ApprovalService._resolve_role_selection(
+                    cfg, 'approver_role_id', 'approver_role', ApprovalService.DEFAULT_APPROVER_ROLE, txn
+                )
+                role2_id = role3_id = None
+                role2 = role3 = ''
+                if cfg.get('approver_role_2_id') not in (None, '') or cfg.get('approver_role_2'):
+                    role2_id, role2 = ApprovalService._resolve_role_selection(
+                        cfg, 'approver_role_2_id', 'approver_role_2', '', txn
+                    )
+                if cfg.get('approver_role_3_id') not in (None, '') or cfg.get('approver_role_3'):
+                    role3_id, role3 = ApprovalService._resolve_role_selection(
+                        cfg, 'approver_role_3_id', 'approver_role_3', '', txn
+                    )
                 effective_roles = [role for role in (role1, role2, role3) if role]
+                effective_role_ids = [role_id for role_id in (role1_id, role2_id, role3_id) if role_id]
                 if not effective_roles:
                     raise ValidationError('启用审批时至少需要一个审批角色')
                 if len(effective_roles) != level:
@@ -373,9 +404,14 @@ class ApprovalService:
                 invalid_roles = [role for role in effective_roles if role not in allowed_roles]
                 if invalid_roles:
                     raise ValidationError(f'角色“{invalid_roles[0]}”不存在或已停用')
+                if len(set(effective_role_ids)) != len(effective_role_ids):
+                    raise ValidationError('各级审批角色不能重复')
 
                 ApprovalService._approval_repository().upsert_config(
-                    pid, 1, role1, role2, role3, level, db=txn
+                    pid, 1, role1, role2, role3, level, db=txn,
+                    approver_role_id=role1_id,
+                    approver_role_2_id=role2_id,
+                    approver_role_3_id=role3_id,
                 )
         return True
 

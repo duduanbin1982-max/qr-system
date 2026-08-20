@@ -427,5 +427,16 @@
       "suggestion": 1
     },
     "scope": "角色组模块：生产 da2f8e8b0b7e352f4dfec6124eaf18e3fd582043 对应路由、服务、仓储、权限策略、权限目录、Vue 页面/composable、角色权限测试及生产数据库只读快照；跳过生成文件和打包产物"
+  },
+  {
+    "date": "2026-08-20T00:53:02+08:00",
+    "mode": "PR Review",
+    "score": 74,
+    "findings": {
+      "critical": 0,
+      "warning": 5,
+      "suggestion": 1
+    },
+    "scope": "角色管理模块：生产 4008e4ba 对应路由、服务、仓储、管理员策略、有效权限/主角色/审批角色解析、权限目录、Vue 页面/composable/API、相关测试及生产数据库只读快照；跳过生成文件和打包产物"
   }
 ]

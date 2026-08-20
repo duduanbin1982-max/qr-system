@@ -165,6 +165,7 @@ class ApprovalRepository:
         db = resolve_db(db)
         return db.execute("""
             SELECT ac.id, p.id as process_id, COALESCE(ac.require_approval, 0) as require_approval,
+                   ac.approver_role_id, ac.approver_role_2_id, ac.approver_role_3_id,
                    COALESCE(ac.approver_role, 'admin') as approver_role,
                    COALESCE(ac.approval_level, 1) as approval_level,
                    COALESCE(ac.approver_role_2, '') as approver_role_2,
@@ -176,7 +177,10 @@ class ApprovalRepository:
         """).fetchall()
 
     @staticmethod
-    def upsert_config(process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level, db=None):
+    def upsert_config(process_id, require_approval, approver_role, approver_role_2,
+                      approver_role_3, approval_level, db=None,
+                      approver_role_id=None, approver_role_2_id=None,
+                      approver_role_3_id=None):
         """插入或更新审批配置；关闭审批时删除配置。"""
         db = resolve_db(db)
         existing = db.execute(
@@ -185,13 +189,20 @@ class ApprovalRepository:
         if require_approval:
             if existing:
                 db.execute(
-                    "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, approver_role_3=?, approval_level=? WHERE process_id=?",
-                    (require_approval, approver_role, approver_role_2, approver_role_3, approval_level, process_id)
+                    "UPDATE approval_config SET require_approval=?, approver_role=?, approver_role_2=?, "
+                    "approver_role_3=?, approver_role_id=?, approver_role_2_id=?, approver_role_3_id=?, "
+                    "approval_level=? WHERE process_id=?",
+                    (require_approval, approver_role, approver_role_2, approver_role_3,
+                     approver_role_id, approver_role_2_id, approver_role_3_id,
+                     approval_level, process_id)
                 )
             else:
                 db.execute(
-                    "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level) VALUES (?,?,?,?,?,?)",
-                    (process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level)
+                    "INSERT INTO approval_config (process_id, require_approval, approver_role, approver_role_2, "
+                    "approver_role_3, approver_role_id, approver_role_2_id, approver_role_3_id, approval_level) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (process_id, require_approval, approver_role, approver_role_2, approver_role_3,
+                     approver_role_id, approver_role_2_id, approver_role_3_id, approval_level)
                 )
         else:
             # 关闭审批时直接删除，避免保留无效角色配置。

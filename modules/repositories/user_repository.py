@@ -39,17 +39,18 @@ class UserRepository:
         role_summary_cte = (
             "WITH role_summary AS ("
             "SELECT u.id AS user_id, "
-            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) = 'worker' THEN 1 ELSE 0 END), 0) AS has_worker_role, "
-            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) <> 'worker' THEN 1 ELSE 0 END), 0) AS has_non_worker_role, "
-            "COALESCE(MAX(CASE WHEN COALESCE(r.code, u.role) = 'admin' THEN 1 ELSE 0 END), 0) AS has_admin_role, "
-            "COUNT(ur.role_id) AS role_count, "
+            "COALESCE(MAX(CASE WHEN r.id IS NOT NULL AND r.code = 'worker' THEN 1 ELSE 0 END), 0) AS has_worker_role, "
+            "COALESCE(MAX(CASE WHEN r.id IS NOT NULL AND r.code <> 'worker' THEN 1 ELSE 0 END), 0) AS has_non_worker_role, "
+            "COALESCE(MAX(CASE WHEN r.id IS NOT NULL AND r.code = 'admin' THEN 1 ELSE 0 END), 0) AS has_admin_role, "
+            "COUNT(r.id) AS role_count, "
             "COALESCE((SELECT r2.code FROM user_roles ur2 JOIN roles r2 ON ur2.role_id = r2.id "
             "WHERE ur2.user_id = u.id "
+            "AND r2.status = 'active' "
             "ORDER BY CASE WHEN r2.code = 'admin' THEN 0 WHEN r2.code <> 'worker' THEN 1 ELSE 2 END, r2.level, r2.id "
-            "LIMIT 1), u.role) AS role_code "
+            "LIMIT 1), (SELECT r3.code FROM roles r3 WHERE r3.code = u.role AND r3.status = 'active' LIMIT 1), 'worker') AS role_code "
             "FROM users u "
             "LEFT JOIN user_roles ur ON ur.user_id = u.id "
-            "LEFT JOIN roles r ON ur.role_id = r.id "
+            "LEFT JOIN roles r ON ur.role_id = r.id AND r.status = 'active' "
             "GROUP BY u.id"
             ") "
         )
@@ -113,7 +114,7 @@ class UserRepository:
             "WHERE pp3.position_id = u.position_id ORDER BY p3.seq_order, p3.id), '[]') AS position_process_items, "
             "u.last_active, u.position_id, u.locked_until, "
             "rs.role_code, rs.has_admin_role, rs.has_worker_role, rs.has_non_worker_role, rs.role_count, "
-            "COALESCE((SELECT json_group_array(json_object('id', r2.id, 'name', r2.name, 'code', r2.code, 'level', r2.level, 'group_name', rg2.name)) "
+            "COALESCE((SELECT json_group_array(json_object('id', r2.id, 'name', r2.name, 'code', r2.code, 'level', r2.level, 'status', r2.status, 'group_name', rg2.name)) "
             "FROM user_roles ur2 JOIN roles r2 ON ur2.role_id = r2.id "
             "LEFT JOIN role_groups rg2 ON r2.group_id = rg2.id "
             "WHERE ur2.user_id = u.id), '[]') AS role_items "
@@ -250,14 +251,21 @@ class UserRepository:
     def find_role_by_code(code, db=None):
         """Find role row by code. Returns row or None."""
         db = resolve_db(db)
-        return db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
+        return db.execute(
+            "SELECT id FROM roles WHERE code = ? AND status = 'active' "
+            "UNION ALL SELECT r.id FROM role_code_aliases a JOIN roles r ON r.id=a.role_id "
+            "WHERE a.role_code = ? AND r.status = 'active' ORDER BY id LIMIT 1",
+            (code, code),
+        ).fetchone()
 
     @staticmethod
     def find_active_role_by_code(code, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, code FROM roles WHERE code = ? AND status = 'active' LIMIT 1",
-            (code,),
+            "SELECT id, code FROM roles WHERE code = ? AND status = 'active' "
+            "UNION ALL SELECT r.id, r.code FROM role_code_aliases a JOIN roles r ON r.id=a.role_id "
+            "WHERE a.role_code = ? AND r.status = 'active' ORDER BY id LIMIT 1",
+            (code, code),
         ).fetchone()
 
     @staticmethod
@@ -278,7 +286,8 @@ class UserRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT r.id, r.code FROM user_roles ur "
-            "JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.id",
+            "JOIN roles r ON r.id = ur.role_id "
+            "WHERE ur.user_id = ? AND r.status = 'active' ORDER BY r.id",
             (user_id,),
         ).fetchall()
 
@@ -286,7 +295,10 @@ class UserRepository:
     def find_role_code_by_id(role_id, db=None):
         """Find role code by role ID. Returns string or None."""
         db = resolve_db(db)
-        row = db.execute("SELECT code FROM roles WHERE id = ? LIMIT 1", (role_id,)).fetchone()
+        row = db.execute(
+            "SELECT code FROM roles WHERE id = ? AND status = 'active' LIMIT 1",
+            (role_id,),
+        ).fetchone()
         return row["code"] if row else None
 
     @staticmethod
@@ -388,7 +400,12 @@ class UserRepository:
     def find_role_id_by_code(code, db=None):
         """Find role ID by old role column value. Returns int or None."""
         db = resolve_db(db)
-        row = db.execute("SELECT id FROM roles WHERE code = ? LIMIT 1", (code,)).fetchone()
+        row = db.execute(
+            "SELECT id FROM roles WHERE code = ? AND status = 'active' "
+            "UNION ALL SELECT r.id FROM role_code_aliases a JOIN roles r ON r.id=a.role_id "
+            "WHERE a.role_code = ? AND r.status = 'active' ORDER BY id LIMIT 1",
+            (code, code),
+        ).fetchone()
         return row[0] if row else None
 
     @staticmethod
@@ -397,14 +414,18 @@ class UserRepository:
         db = resolve_db(db)
         row = db.execute(
             "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? "
+            "WHERE ur.user_id = ? AND r.status = 'active' "
             "ORDER BY CASE WHEN r.code = 'admin' THEN 0 WHEN r.code <> 'worker' THEN 1 ELSE 2 END, r.level, r.id "
             "LIMIT 1",
             (user_id,)
         ).fetchone()
         if row:
             return row["code"]
-        row = db.execute("SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+        row = db.execute(
+            "SELECT u.role FROM users u JOIN roles r ON r.code = u.role "
+            "WHERE u.id = ? AND r.status = 'active' LIMIT 1",
+            (user_id,),
+        ).fetchone()
         return row["role"] if row else None
 
     # ============================================================

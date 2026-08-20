@@ -2,7 +2,7 @@
 import json
 
 from modules.domain.errors import AuthorizationError, ConflictError, ValidationError
-from modules.permission_catalog import ALL_PERMISSION_CODES
+from modules.permission_catalog import ALL_PERMISSION_CODES, infer_page_permissions
 from modules.repositories.user_repository import UserRepository
 
 
@@ -61,6 +61,12 @@ class AdministratorPolicy:
         invalid = sorted(set(normalized) - catalog)
         if invalid:
             raise ValidationError("未知权限编码：" + "、".join(invalid))
+        # Persist the same page chain used by the server and frontend. This
+        # keeps newly-created roles from relying on a client-side inference.
+        normalized.extend(
+            code for code in infer_page_permissions(normalized)
+            if code not in normalized
+        )
         return normalized
 
     @staticmethod

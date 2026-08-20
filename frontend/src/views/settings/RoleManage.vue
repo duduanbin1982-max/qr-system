@@ -11,7 +11,7 @@
               <option :value="null">全部角色</option>
               <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </select>
-            <button class="btn btn-primary btn-sm" @click="openAddRole()">+ 添加角色</button>
+            <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAddRole()">+ 添加角色</button>
           </div>
         </div>
         <div class="card-body">
@@ -35,7 +35,12 @@
                 <tr v-for="(r, idx) in filteredRoles" :key="r.id">
                   <td style="text-align:center">{{ idx+1 }}</td>
                   <td style="font-weight:500">{{ r.name }}</td>
-                  <td><code style="font-size:var(--text-xs)">{{ r.code }}</code></td>
+                  <td>
+                    <code style="font-size:var(--text-xs)">{{ r.code }}</code>
+                    <div v-if="aliasCodes(r).length > 1" style="font-size:var(--text-2xs);color:var(--text-placeholder)">
+                      历史编码：{{ aliasCodes(r).filter(code => code !== r.code).join('、') }}
+                    </div>
+                  </td>
                   <td style="color:var(--text-placeholder);font-size:var(--text-sm)">{{ getGroupName(r.group_id) }}</td>
                   <td>{{ r.level }}</td>
                   <td style="white-space:nowrap"><span class="badge" :class="r.status==='active'?'completed':'pending'">{{ r.status==='active'?'启用':'停用' }}</span></td>
@@ -46,8 +51,8 @@
                     </span>
                   </td>
                   <td style="text-align:center;white-space:nowrap">
-                    <button class="o-abtn edit" @click="openEditRole(r)">✏️</button>
-                    <button v-if="!r.is_builtin" class="o-abtn del" @click="deleteRole(r.id)" title="删除">🗑️</button>
+                    <button v-if="canEdit" class="o-abtn edit" @click="openEditRole(r)">✏️</button>
+                    <button v-if="canDelete && !r.is_builtin" class="o-abtn del" @click="deleteRole(r.id)" title="删除">🗑️</button>
                   </td>
                 </tr>
               </tbody>

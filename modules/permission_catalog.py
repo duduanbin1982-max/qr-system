@@ -315,6 +315,12 @@ ACTION_PERMISSION_CODES = [
 ALL_PERMISSION_CODES = PAGE_PERMISSION_CODES + ACTION_PERMISSION_CODES
 
 PERMISSION_IMPLICATIONS = {
+    "roles:create": ["roles:view"],
+    "roles:edit": ["roles:view"],
+    "roles:delete": ["roles:view"],
+    "role_groups:create": ["role_groups:view"],
+    "role_groups:edit": ["role_groups:view"],
+    "role_groups:delete": ["role_groups:view"],
     "company_info:edit": ["company_info:view"],
     "company_info:audit_history": ["company_info:view"],
     "process_config:create": ["process_config:view"],
