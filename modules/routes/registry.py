@@ -34,6 +34,7 @@ ROUTE_MODULES = (
     "modules.routes.trace",  # 产品追溯
     "modules.routes.approvals",  # 审批管理
     "modules.routes.positions",  # 岗位管理
+    "modules.routes.position_versions",  # 岗位版本与生命周期
     "modules.routes.materials",  # 物料管理
     "modules.routes.departments",  # 部门班组管理
     "modules.routes.schedule",  # 生产排程
