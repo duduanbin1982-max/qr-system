@@ -111,6 +111,21 @@ class ScanRepository:
         ).fetchone()
 
     @staticmethod
+    def get_user_position(user_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT user.position_id,COALESCE(position.name,'') AS position_name "
+            "FROM users user LEFT JOIN positions position "
+            "ON position.id=user.position_id WHERE user.id=?",
+            (user_id,),
+        ).fetchone()
+
+    @staticmethod
+    def database_now(db=None):
+        db = resolve_db(db)
+        return db.execute("SELECT datetime('now','localtime')").fetchone()[0]
+
+    @staticmethod
     def find_order_process_id(order_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -267,6 +282,7 @@ class ScanRepository:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        submit_position_version_id=None,
         fact_binding=None,
         db=None,
     ):
@@ -276,10 +292,11 @@ class ScanRepository:
             "INSERT INTO work_records "
             "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
             "report_source, actual_completed_at, backfill_reason, "
-            "submit_position_id, submit_position_name, process_version_id, "
+            "submit_position_id, submit_position_name, submit_position_version_id, "
+            "process_version_id, "
             "process_code_snapshot, process_name_snapshot, process_category_snapshot, "
             "route_id, route_version_id, route_name_snapshot, version_binding_source) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 order_id,
                 process_id,
@@ -294,6 +311,7 @@ class ScanRepository:
                 backfill_reason,
                 submit_position_id,
                 submit_position_name,
+                submit_position_version_id,
                 binding.get("process_version_id"),
                 binding.get("process_code_snapshot", ""),
                 binding.get("process_name_snapshot", ""),
@@ -326,6 +344,7 @@ class ScanRepository:
             "SELECT wr.id, wr.order_id, wr.process_id, wr.user_id, wr.serial_no, "
             "wr.quantity, wr.report_source, wr.actual_completed_at, wr.backfill_reason, "
             "wr.submit_position_id, wr.submit_position_name, "
+            "wr.submit_position_version_id, "
             "COALESCE(u.name, u.username, '') AS user_name "
             "FROM work_records wr LEFT JOIN users u ON u.id = wr.user_id "
             "LEFT JOIN order_processes op ON op.order_id = wr.order_id "

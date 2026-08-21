@@ -28,6 +28,7 @@ from modules.services import BaseService
 from modules.services.performance_authorization_service import (
     PerformanceAuthorizationService,
 )
+from modules.services.position_snapshot_service import PositionSnapshotService
 from modules.services.performance_fact_collector import PerformanceFactCollector
 from modules.services.performance_scoring_policy import PerformanceScoringPolicy
 
@@ -1415,6 +1416,9 @@ class PerformanceLedgerService:
         if previous is None:
             return True
         fields = (
+            "position_id_snapshot",
+            "position_version_id_snapshot",
+            "position_name_snapshot",
             "eligibility_status",
             "eligibility_reason_code",
             "eligibility_reason",
@@ -1485,6 +1489,16 @@ class PerformanceLedgerService:
             position_id = position_ids[0] if len(position_ids) == 1 else None
             department_id = department_ids[0] if len(department_ids) == 1 else None
             representative = cls._representative_fact(user_facts, position_id)
+            position_version = None
+            if position_id is not None and any(
+                fact.get("position_version_id") is not None
+                for fact in user_facts
+                if fact.get("position_id_snapshot") == position_id
+            ):
+                _, period_end = reporting_month_bounds(production_month)
+                position_version = PositionSnapshotService.version_at(
+                    position_id, period_end, db=db
+                )
 
             if record_exceptions and len(position_ids) > 1:
                 cls._insert_candidate_exception(
@@ -1571,8 +1585,15 @@ class PerformanceLedgerService:
                         else ""
                     ),
                     "position_id_snapshot": position_id,
+                    "position_version_id_snapshot": (
+                        position_version["id"] if position_version else None
+                    ),
                     "position_name_snapshot": (
-                        representative.get("position_name_snapshot", "")
+                        (
+                            position_version["name"]
+                            if position_version
+                            else representative.get("position_name_snapshot", "")
+                        )
                         if position_id is not None
                         else ""
                     ),
@@ -1766,6 +1787,9 @@ class PerformanceLedgerService:
             "department_id_snapshot": result["department_id_snapshot"],
             "department_name_snapshot": result["department_name_snapshot"],
             "position_id_snapshot": result["position_id_snapshot"],
+            "position_version_id_snapshot": result.get(
+                "position_version_id_snapshot"
+            ),
             "position_name_snapshot": result["position_name_snapshot"],
             "eligibility_status": result["eligibility_status"],
             "eligibility_reason_code": result["eligibility_reason_code"],
