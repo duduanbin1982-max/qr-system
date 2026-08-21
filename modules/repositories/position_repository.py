@@ -118,6 +118,20 @@ class PositionRepository:
         ).fetchone()[0]
 
     @staticmethod
+    def count_active_users_by_positions(pos_ids, db=None):
+        db = resolve_db(db)
+        if not pos_ids:
+            return {}
+        placeholders = ','.join('?' for _ in pos_ids)
+        rows = db.execute(
+            'SELECT position_id,COUNT(*) AS employee_count FROM users '
+            "WHERE status='active' AND position_id IN (" + placeholders + ') '
+            'GROUP BY position_id',
+            pos_ids,
+        ).fetchall()
+        return {int(row['position_id']): int(row['employee_count']) for row in rows}
+
+    @staticmethod
     def delete_position_by_id(pos_id, db=None):
         db = resolve_db(db)
         db.execute('DELETE FROM positions WHERE id = ?', (pos_id,))

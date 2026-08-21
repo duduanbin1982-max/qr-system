@@ -127,6 +127,23 @@ def test_create_position_api_builds_inactive_root_and_v1_draft(
     assert payload["version"]["status"] == "draft"
     assert payload["version"]["process_ids"] == [process["process_id"]]
     assert payload["version"]["idempotency_key"] == key
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE users SET position_id=? WHERE id=?",
+            (payload["root"]["id"], payload["version"]["created_by"]),
+        )
+        db.commit()
+
+    listed = client.get("/api/positions", headers=auth_headers)
+    listed_position = next(
+        item
+        for item in listed.get_json()["positions"]
+        if item["id"] == payload["root"]["id"]
+    )
+    assert listed_position["open_version"]["id"] == payload["version"]["id"]
+    assert listed_position["pending_lifecycle_request"] is None
+    assert listed_position["employee_count"] == 1
 
 
 def test_position_version_api_exposes_workflow_history_impact_and_projection(

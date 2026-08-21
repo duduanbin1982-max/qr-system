@@ -1,9 +1,11 @@
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   normalizePositionProcessIds,
   usePositions,
 } from '@/composables/settings/usePositions.js'
+import Positions from '@/views/settings/Positions.vue'
 
 
 const mocks = vi.hoisted(() => ({
@@ -15,10 +17,13 @@ const mocks = vi.hoisted(() => ({
   updatePosition: vi.fn(),
   deletePosition: vi.fn(),
   getPositionImpact: vi.fn(),
+  listPositionVersions: vi.fn(),
+  getPositionVersionImpact: vi.fn(),
+  listPositionLifecycleRequests: vi.fn(),
   showToast: vi.fn(),
 }))
 
-vi.mock('@/lib/auth.js', () => ({ can: mocks.can }))
+vi.mock('@/lib/auth.js', () => ({ auth: { user: { id: 2000 } }, can: mocks.can }))
 vi.mock('@/lib/api.js', () => ({
   api: {
     domains: {
@@ -28,6 +33,11 @@ vi.mock('@/lib/api.js', () => ({
         updatePosition: mocks.updatePosition,
         deletePosition: mocks.deletePosition,
         getPositionImpact: mocks.getPositionImpact,
+      },
+      positionVersions: {
+        listPositionVersions: mocks.listPositionVersions,
+        getPositionVersionImpact: mocks.getPositionVersionImpact,
+        listPositionLifecycleRequests: mocks.listPositionLifecycleRequests,
       },
       processes: { listProcesses: mocks.listProcesses },
     },
@@ -51,6 +61,8 @@ describe('position management P0 contracts', () => {
     mocks.updatePosition.mockResolvedValue({ message: 'updated' })
     mocks.deletePosition.mockResolvedValue({ message: 'deleted' })
     mocks.getPositionImpact.mockResolvedValue({ users: 0 })
+    mocks.listPositionLifecycleRequests.mockResolvedValue([])
+    mocks.getPositionVersionImpact.mockResolvedValue({ impact: { total_references: 0, references: [] } })
     vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
@@ -122,5 +134,80 @@ describe('position management P0 contracts', () => {
     expect(positions.showPositionModal.value).toBe(false)
     expect(mocks.getPositionImpact).not.toHaveBeenCalled()
     expect(mocks.deletePosition).not.toHaveBeenCalled()
+  })
+
+  it('shows stable list data and current pending history and impact views', async () => {
+    mocks.permissions.add('positions:history')
+    mocks.permissions.add('positions:impact')
+    mocks.permissions.add('positions:submit')
+    mocks.permissions.add('positions:approve')
+    mocks.permissions.add('positions:reject')
+    const published = {
+      id: 71,
+      position_id: 7,
+      version: 1,
+      name: '车工',
+      description: '机加工岗位',
+      process_ids: [11],
+      status: 'published',
+      row_version: 2,
+    }
+    const pending = {
+      ...published,
+      id: 72,
+      version: 2,
+      status: 'pending_approval',
+      supersedes_version_id: 71,
+      created_by: 1000,
+    }
+    const history = { ...published, id: 70, version: 0, status: 'superseded' }
+    mocks.listPositions.mockResolvedValue({
+      positions: [{
+        id: 7,
+        position_code: 'POS-0007',
+        name: '车工',
+        description: '机加工岗位',
+        lifecycle_status: 'active',
+        current_effective_version_id: 71,
+        current_version: published,
+        open_version: pending,
+        employee_count: 27,
+        processes: [{ process_id: 11, process_name: '精车' }],
+      }],
+      total: 1,
+    })
+    mocks.listProcesses.mockResolvedValue({ processes: [{ id: 11, process_name: '精车' }] })
+    mocks.listPositionVersions.mockResolvedValue({
+      position: {
+        id: 7,
+        position_code: 'POS-0007',
+        name: '车工',
+        lifecycle_status: 'active',
+        current_effective_version_id: 71,
+        row_version: 4,
+      },
+      versions: [published, pending, history],
+      events: [],
+    })
+
+    const wrapper = mount(Positions)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('POS-0007')
+    expect(wrapper.text()).toContain('27')
+    await wrapper.get('.name-link').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-tab="current"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tab="pending"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tab="history"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tab="impact"]').exists()).toBe(true)
+    expect(wrapper.get('.version-editor input').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-tab="pending"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('待审批')
+    await wrapper.get('[data-tab="impact"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getPositionVersionImpact).toHaveBeenCalled()
   })
 })

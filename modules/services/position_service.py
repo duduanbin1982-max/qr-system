@@ -31,6 +31,11 @@ class PositionService:
             version["id"]: version
             for version in PositionVersionRepository.versions_by_ids(version_ids)
         }
+        open_versions = PositionVersionRepository.open_versions(pos_ids)
+        lifecycle_requests = (
+            PositionVersionRepository.pending_lifecycle_requests(pos_ids)
+        )
+        employee_counts = PositionRepository.count_active_users_by_positions(pos_ids)
         for r in rows:
             pos = dict(r)
             processes = proc_map.get(pos['id'], [])
@@ -39,6 +44,9 @@ class PositionService:
             pos['current_version'] = versions.get(
                 pos.get('current_effective_version_id')
             )
+            pos['open_version'] = open_versions.get(pos['id'])
+            pos['pending_lifecycle_request'] = lifecycle_requests.get(pos['id'])
+            pos['employee_count'] = employee_counts.get(pos['id'], 0)
             result.append(pos)
         return {'positions': result, 'total': total, 'page': page, 'limit': limit}
 

@@ -20,6 +20,7 @@ export function normalizePositionProcessIds(position = {}) {
 
 export function usePositions({ autoLoad = true } = {}) {
   const positions = ref([])
+  const positionTotal = ref(0)
   const positionLoading = ref(false)
   const showPositionModal = ref(false)
   const positionModalEdit = ref(false)
@@ -28,10 +29,21 @@ export function usePositions({ autoLoad = true } = {}) {
   const canCreate = computed(() => can('positions:create'))
   const canEdit = computed(() => can('positions:edit'))
   const canDelete = computed(() => can('positions:delete'))
+  const canHistory = computed(() => can('positions:history'))
+  const canImpact = computed(() => can('positions:impact'))
+  const canSubmit = computed(() => can('positions:submit'))
+  const canApprove = computed(() => can('positions:approve'))
+  const canReject = computed(() => can('positions:reject'))
+  const canRetire = computed(() => can('positions:retire'))
+  const canReactivate = computed(() => can('positions:reactivate'))
 
   async function loadPositions() {
     positionLoading.value = true
-    try { const d = await api.domains.positions.listPositions(); positions.value = d.positions||[] }
+    try {
+      const d = await api.domains.positions.listPositions({ limit: 500 })
+      positions.value = d.positions || []
+      positionTotal.value = Number(d.total ?? positions.value.length)
+    }
     catch(e) { showToast(e.message,'error') }
     finally { positionLoading.value = false }
   }
@@ -108,8 +120,9 @@ export function usePositions({ autoLoad = true } = {}) {
   if (autoLoad) onMounted(() => { loadPositions(); loadAllProcesses() })
 
   return {
-    positions, positionLoading, showPositionModal, positionModalEdit, positionForm, allProcesses,
-    canCreate, canEdit, canDelete,
+    positions, positionTotal, positionLoading, showPositionModal, positionModalEdit, positionForm, allProcesses,
+    canCreate, canEdit, canDelete, canHistory, canImpact, canSubmit, canApprove,
+    canReject, canRetire, canReactivate,
     loadPositions, loadAllProcesses, openAddPosition, openEditPosition, savePosition, deletePosition, toggleProcessInPosition,
   }
 }

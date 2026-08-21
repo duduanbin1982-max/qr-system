@@ -33,10 +33,22 @@ const props = defineProps({
 })
 
 const fields = computed(() => [
-  { key: 'name', label: props.after?.items ? '路线名称' : '工序名称' },
-  { key: 'category', label: '分类' },
+  {
+    key: 'name',
+    label: props.after?.process_ids
+      ? '岗位名称'
+      : (props.after?.items ? '路线名称' : '工序名称'),
+  },
+  ...(!props.before?.process_ids && !props.after?.process_ids
+    ? [{ key: 'category', label: '分类' }]
+    : []),
   { key: 'description', label: '描述' },
-  { key: 'seq_order', label: '排序序号' },
+  ...(!props.before?.process_ids && !props.after?.process_ids
+    ? [{ key: 'seq_order', label: '排序序号' }]
+    : []),
+  ...(props.before?.process_ids || props.after?.process_ids
+    ? [{ key: 'processes', label: '可报工工序' }]
+    : []),
   ...(props.before?.items || props.after?.items ? [{ key: 'items', label: '路线节点' }] : []),
 ])
 
@@ -45,9 +57,9 @@ function display(value) {
   if (Array.isArray(value)) {
     return value.map((item, index) => {
       const name = item.process_name_snapshot || item.process_name || `工序 ${item.process_id}`
-      const version = item.process_version || item.process_version_id || '-'
+      const version = item.process_version || item.process_version_id
       const audit = item.required_audit ? ' / 审批' : ''
-      return `${index + 1}. ${name} V${version}${audit}`
+      return `${index + 1}. ${name}${version ? ` V${version}` : ''}${audit}`
     }).join('；') || '-'
   }
   return String(value)

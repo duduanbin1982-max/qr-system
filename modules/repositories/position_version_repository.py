@@ -176,6 +176,25 @@ class PositionVersionRepository:
         return PositionVersionRepository.version(row["id"], db=db) if row else None
 
     @staticmethod
+    def open_versions(position_ids, db=None):
+        db = resolve_db(db)
+        normalized = list(dict.fromkeys(int(value) for value in position_ids))
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        rows = db.execute(
+            "SELECT id FROM position_versions WHERE position_id IN ("
+            + placeholders
+            + ") AND status IN ('draft','pending_approval') "
+            "ORDER BY position_id,version DESC,id DESC",
+            normalized,
+        ).fetchall()
+        versions = PositionVersionRepository.versions_by_ids(
+            [row["id"] for row in rows], db=db
+        )
+        return {int(version["position_id"]): version for version in versions}
+
+    @staticmethod
     def list_versions(position_id, db=None):
         db = resolve_db(db)
         rows = db.execute(
@@ -499,6 +518,21 @@ class PositionVersionRepository:
             (position_id,),
         ).fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def pending_lifecycle_requests(position_ids, db=None):
+        db = resolve_db(db)
+        normalized = list(dict.fromkeys(int(value) for value in position_ids))
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        rows = db.execute(
+            "SELECT * FROM position_lifecycle_requests WHERE position_id IN ("
+            + placeholders
+            + ") AND status='pending' ORDER BY position_id,id DESC",
+            normalized,
+        ).fetchall()
+        return {int(row["position_id"]): dict(row) for row in rows}
 
     @staticmethod
     def list_lifecycle_requests(position_id, db=None):
