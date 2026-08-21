@@ -154,6 +154,21 @@ class AuthRepository:
         return fallback['role'] if fallback else 'worker'
 
     @staticmethod
+    def get_user_role_codes(user_id, db=None):
+        """Return every active role code assigned to a user."""
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id=r.id "
+            "WHERE ur.user_id=? AND r.status='active' ORDER BY r.level,r.id",
+            (user_id,),
+        ).fetchall()
+        codes = [row["code"] for row in rows if row["code"]]
+        if codes:
+            return codes
+        fallback = db.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        return [fallback["role"]] if fallback and fallback["role"] else ["worker"]
+
+    @staticmethod
     def logout_update_user(user_id, db=None):
         db = resolve_db(db)
         db.execute("UPDATE users SET token = NULL WHERE id = ?", (user_id,))

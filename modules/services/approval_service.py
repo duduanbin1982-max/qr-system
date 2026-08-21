@@ -14,6 +14,9 @@ from modules.services.work_report_writer import WorkReportWriter
 from modules.domain.work_report import WorkReportCommand
 from modules.services.access_policy_service import has_permission
 from modules.services.serial_backfill_service import SerialBackfillService
+import json
+from modules.repositories.process_config_repository import ProcessConfigRepository
+from modules import config
 
 
 class ApprovalService:
@@ -168,7 +171,8 @@ class ApprovalService:
 
     @staticmethod
     def _insert_step(record_id, decision, approver_id, approver_name, comment, txn):
-        ApprovalService._approval_repository().insert_approval_step(
+        repository = ApprovalService._approval_repository()
+        step_id = repository.insert_approval_step(
             record_id,
             decision.current_level,
             approver_id,
@@ -178,6 +182,17 @@ class ApprovalService:
             comment,
             db=txn,
         )
+        if hasattr(repository, 'set_step_role_snapshot'):
+            role = ApprovalService._role_repository().find_active_by_code(
+                decision.required_role, db=txn
+            )
+            repository.set_step_role_snapshot(
+                step_id,
+                role['id'] if role else None,
+                role['code'] if role else decision.required_role,
+                role['name'] if role else decision.required_role,
+                db=txn,
+            )
 
     @staticmethod
     def _apply_final_approval(record_id, record, work_record, decision, approver, comment, txn):
@@ -258,12 +273,35 @@ class ApprovalService:
     def _current_user_role(approver, db=None):
         approver_id = approver.get('id')
         if approver_id is not None:
+            role_codes = getattr(ApprovalService._auth_repository(), 'get_user_role_codes', None)
+            if role_codes and hasattr(db, 'execute'):
+                roles = [ApprovalService._normalize_role_code(code) for code in role_codes(approver_id, db=db)]
+                if roles:
+                    return roles
             role = ApprovalService._normalize_role_code(
                 ApprovalService._auth_repository().get_user_role_code(approver_id, db=db)
             )
             if role:
-                return role
-        return ApprovalService._normalize_role_code(approver.get('role', ''))
+                return [role]
+        return [ApprovalService._normalize_role_code(approver.get('role', ''))]
+
+    @staticmethod
+    def _snapshot_config(record):
+        raw = record.get('policy_snapshot_json') or '{}'
+        try:
+            snapshot = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            snapshot = {}
+        if not isinstance(snapshot, dict) or 'approval_level' not in snapshot:
+            return None
+        roles = snapshot.get('roles') or []
+        return {
+            'require_approval': 1 if snapshot.get('require_approval') else 0,
+            'approval_level': snapshot.get('approval_level', 1),
+            'approver_role': roles[0].get('code', '') if len(roles) > 0 else '',
+            'approver_role_2': roles[1].get('code', '') if len(roles) > 1 else '',
+            'approver_role_3': roles[2].get('code', '') if len(roles) > 2 else '',
+        }
 
     @staticmethod
     def list_pending(page, limit):
@@ -306,9 +344,11 @@ class ApprovalService:
         with ApprovalService._unit_of_work().transaction() as txn:
             record, work_record = ApprovalService._load_pending_context(record_id, txn)
             ApprovalService._assert_backfill_permission(work_record, approver)
-            cfg_row = ApprovalService._approval_repository().find_approval_config(
-                work_record.get('process_id'), db=txn
-            )
+            cfg_row = ApprovalService._snapshot_config(record)
+            if cfg_row is None:
+                cfg_row = ApprovalService._approval_repository().find_approval_config(
+                    work_record.get('process_id'), db=txn
+                )
             current_role = ApprovalService._current_user_role(approver, db=txn)
             decision = ApprovalService._decide_workflow(
                 action,
@@ -336,9 +376,28 @@ class ApprovalService:
     def list_configs():
         """获取全部工序审批配置及可选审批角色。"""
         rows = ApprovalService._approval_repository().find_all_configs()
+        configs = [ApprovalService._normalized_config_row(r) for r in rows]
+        if config.APPROVAL_POLICY_VERSIONED_QUERY_ENABLED:
+            from modules.services.approval_policy_service import ApprovalPolicyService
+            for item in configs:
+                snapshot, revision_id = ApprovalPolicyService.effective_snapshot(
+                    item['process_id'], use_versioned=True
+                )
+                roles = snapshot.get('roles') or []
+                item.update({
+                    'require_approval': 1 if snapshot.get('require_approval') else 0,
+                    'approval_level': snapshot.get('approval_level', 1),
+                    'approver_role': roles[0].get('code', '') if len(roles) > 0 else '',
+                    'approver_role_2': roles[1].get('code', '') if len(roles) > 1 else '',
+                    'approver_role_3': roles[2].get('code', '') if len(roles) > 2 else '',
+                    'approval_policy_revision_id': revision_id,
+                    'policy_source': snapshot.get('source'),
+                })
+        process_config = ProcessConfigRepository.get_active()
         return {
-            'configs': [ApprovalService._normalized_config_row(r) for r in rows],
+            'configs': configs,
             'role_options': ApprovalService._role_options(),
+            'global_approval_enabled': bool(process_config['approval_enabled']) if process_config else True,
         }
 
     @staticmethod
@@ -347,6 +406,8 @@ class ApprovalService:
         Args:
             configs: list of dict {process_id, require_approval, approver_role, approver_role_2, approver_role_3, approval_level}
         """
+        if config.APPROVAL_POLICY_LEGACY_WRITE_BLOCKED:
+            raise ConflictError('Legacy 审批配置写入已关闭，请使用版本化审批策略接口')
         if isinstance(configs, dict):
             configs = [configs]
         if not isinstance(configs, list):

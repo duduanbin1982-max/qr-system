@@ -444,6 +444,27 @@ export const IMPLIED_PERMISSIONS = {
   "process_config:history": [
     "process_config:view"
   ],
+  "approval_policies:create": [
+    "approval_policies:view"
+  ],
+  "approval_policies:submit": [
+    "approval_policies:view"
+  ],
+  "approval_policies:approve": [
+    "approval_policies:view"
+  ],
+  "approval_policies:reject": [
+    "approval_policies:view"
+  ],
+  "approval_policies:history": [
+    "approval_policies:view"
+  ],
+  "approval_policies:impact": [
+    "approval_policies:view"
+  ],
+  "approvals:decision": [
+    "approvals:view"
+  ],
   "processes:view": [
     "process_versions:view"
   ],

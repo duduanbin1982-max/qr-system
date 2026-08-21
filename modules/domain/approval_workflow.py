@@ -80,9 +80,15 @@ class ApprovalWorkflow:
         if level < 1 or level > len(roles):
             raise ValidationError("审批级别配置无效")
 
-        normalized_role = cls.normalize_role_code(current_role)
+        if isinstance(current_role, (list, tuple, set)):
+            normalized_roles = {
+                cls.normalize_role_code(role) for role in current_role if role
+            }
+        else:
+            normalized_roles = {cls.normalize_role_code(current_role)}
+        normalized_role = next(iter(normalized_roles), "")
         required_role = roles[level - 1]
-        if normalized_role != required_role:
+        if required_role not in normalized_roles:
             names = role_names or {}
             raise ConflictError(
                 f"当前审批步骤需要“{names.get(required_role, required_role)}”角色处理"

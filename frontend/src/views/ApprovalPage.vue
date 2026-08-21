@@ -17,9 +17,6 @@
       <button class="tab-btn" :class="{active: activeTab==='history'}" @click="setTab('history')">
         📋 审批历史
       </button>
-      <button class="tab-btn" :class="{active: activeTab==='config'}" @click="setTab('config')" v-if="canApprove">
-        ⚙️ 审批配置
-      </button>
     </div>
 
     <!-- 筛选栏 -->
@@ -163,44 +160,6 @@
       </div>
     </div>
 
-    <!-- 审批配置 -->
-    <div v-if="activeTab==='config'">
-      <div class="card">
-        <div class="card-header"><h3>⚙️ 工序审批配置</h3></div>
-        <div class="card-body">
-          <table class="data-table" v-if="configProcesses.length">
-            <thead><tr><th>工序名称</th><th>分类</th><th>需审批</th><th>一级审批</th><th>二级审批</th><th>三级审批</th></tr></thead>
-            <tbody>
-              <tr v-for="p in configProcesses" :key="p.process_id">
-                <td style="font-weight:500">{{ p.process_name || '-' }}</td>
-                <td style="color:var(--text-placeholder);font-size:12px">{{ p.category || '-' }}</td>
-                <td>
-                  <input type="checkbox" v-model="p.require_approval" :true-value="1" :false-value="0" @change="saveConfig(p)" style="accent-color:var(--primary);cursor:pointer">
-                </td>
-                <td>
-                  <select v-model.number="p.approver_role_id" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
-                  </select>
-                </td>
-                <td>
-                  <select v-model.number="p.approver_role_2_id" :disabled="!p.require_approval" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-                    <option value="">-- 无 --</option>
-                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
-                  </select>
-                </td>
-                <td>
-                  <select v-model.number="p.approver_role_3_id" :disabled="!p.require_approval || !p.approver_role_2_id" @change="saveConfig(p)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-                    <option value="">-- 无 --</option>
-                    <option v-for="role in roleOptions" :key="role.id" :value="role.id">{{ role.name }}</option>
-                  </select>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-else style="text-align:center;padding:40px;color:var(--text-placeholder)">暂无工序数据</p>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -223,17 +182,15 @@ export default {
     const selectedIds = ref([])
     const selectAll = ref(false)
     const processing = ref({})
-    const activeTab = ref('pending')  // 'pending' | 'history' | 'config'
+    const activeTab = ref('pending')  // 'pending' | 'history'
     const stats = ref({ pending: 0, avg_hours: 0, pending_over_24h: 0, total: 0 })
-    const configProcesses = ref([])
-    const roleOptions = ref([])
     const history = ref([])
     const historyTotal = ref(0)
     const historyPage = ref(1)
     const historyLoading = ref(false)
     const rejectComment = ref({})  // { [id]: comment }
 
-    const canApprove = computed(() => can('approvals:edit'))
+    const canApprove = computed(() => can('approvals:decision'))
     const filteredApprovals = computed(() => {
       let arr = approvals.value
       if (filterOrderNo.value) {
@@ -315,7 +272,6 @@ export default {
     function setTab(tab) {
       activeTab.value = tab
       if (tab === 'history') loadHistory()
-      if (tab === 'config') loadConfig()
     }
 
     async function loadStats() {
@@ -323,42 +279,6 @@ export default {
         const d = await api.domains.approvals.approvalStats()
         stats.value = d
       } catch(e) { console.warn('Approval stats load failed:', e) }
-    }
-
-    async function loadConfig() {
-      try {
-        const d = await api.domains.approvals.approvalConfig()
-        roleOptions.value = d.role_options || []
-        const roleIdByCode = Object.fromEntries(roleOptions.value.map(role => [role.code, role.id]))
-        configProcesses.value = (d.configs || []).map(config => ({
-          ...config,
-          approver_role_id: config.approver_role_id || roleIdByCode[config.approver_role] || null,
-          approver_role_2_id: config.approver_role_2_id || roleIdByCode[config.approver_role_2] || '',
-          approver_role_3_id: config.approver_role_3_id || roleIdByCode[config.approver_role_3] || '',
-        }))
-      } catch(e) { showToast('加载配置失败', 'error') }
-    }
-
-    async function saveConfig(p) {
-      try {
-        if (!p.approver_role_2_id) p.approver_role_3_id = ''
-        const roleById = id => roleOptions.value.find(role => role.id === Number(id))
-        const level = p.approver_role_3_id ? 3 : (p.approver_role_2_id ? 2 : 1)
-        await api.domains.approvals.saveApprovalConfig({
-          process_id: p.process_id,
-          require_approval: p.require_approval,
-          approver_role_id: p.approver_role_id,
-          approver_role_2_id: p.approver_role_2_id || undefined,
-          approver_role_3_id: p.approver_role_3_id || undefined,
-          approver_role: roleById(p.approver_role_id)?.code || p.approver_role || 'admin',
-          approver_role_2: roleById(p.approver_role_2_id)?.code || '',
-          approver_role_3: roleById(p.approver_role_3_id)?.code || '',
-          approval_level: level
-        })
-      } catch(e) {
-        showToast(e.message || '保存失败', 'error')
-        await loadConfig()
-      }
     }
 
     async function handle(id, action) {
@@ -381,7 +301,7 @@ export default {
       filterOrderNo, filterWorker, filterProcess,
       activeTab, setTab, history, historyTotal, historyPage, historyLoading, loadHistory,
       rejectComment, handle, selectedIds, selectAll, toggleSelectAll, batchHandle,
-      stats, configProcesses, roleOptions, loadConfig, saveConfig, changeApprovalPage
+      stats, changeApprovalPage
     }
   }
 }

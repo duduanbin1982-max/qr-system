@@ -29,6 +29,7 @@ from modules.migration_process_config import MIGRATIONS as PROCESS_CONFIG_MIGRAT
 from modules.migration_role_group_permissions import MIGRATIONS as ROLE_GROUP_PERMISSION_MIGRATIONS
 from modules.migration_role_management import MIGRATIONS as ROLE_MANAGEMENT_MIGRATIONS
 from modules.migration_position_versioning import MIGRATIONS as POSITION_VERSIONING_MIGRATIONS
+from modules.migration_approval_policy import MIGRATIONS as APPROVAL_POLICY_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -58,6 +59,7 @@ MIGRATIONS = sorted([
     *ROLE_GROUP_PERMISSION_MIGRATIONS,
     *ROLE_MANAGEMENT_MIGRATIONS,
     *POSITION_VERSIONING_MIGRATIONS,
+    *APPROVAL_POLICY_MIGRATIONS,
 ], key=lambda migration: migration[0])
 _versions = [version for version, _, _ in MIGRATIONS]
 if len(_versions) != len(set(_versions)):
@@ -91,7 +93,6 @@ def run_migrations(db=None):
     finally:
         if own_db:
             db.close()
-
 
 def init_db():
     """Thin wrapper - runs pending migrations."""

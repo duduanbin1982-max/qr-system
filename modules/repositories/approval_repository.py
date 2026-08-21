@@ -106,6 +106,14 @@ class ApprovalRepository:
         return cur.rowcount
 
     @staticmethod
+    def find_approval_record_snapshot(record_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT approval_policy_revision_id,policy_source,policy_snapshot_json "
+            "FROM approval_records WHERE id=?", (record_id,)
+        ).fetchone()
+
+    @staticmethod
     def reject(record_id, approver_id, approver_name, comment, db=None):
         """Mark an approval record rejected and store approver details."""
         db = resolve_db(db)
@@ -144,16 +152,36 @@ class ApprovalRepository:
                              approver_role, action, comment, db=None):
         """Append a step-level audit row for approval history."""
         db = resolve_db(db)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(approval_steps)")}
+        if "role_code_snapshot" not in columns:
+            cur = db.execute(
+                "INSERT INTO approval_steps (approval_record_id,step_level,approver_id,"
+                "approver_name,approver_role,action,comment) VALUES (?,?,?,?,?,?,?)",
+                (approval_record_id, step_level, approver_id, approver_name,
+                 approver_role, action, comment),
+            )
+            return cur.lastrowid
         cur = db.execute("""
             INSERT INTO approval_steps (
                 approval_record_id, step_level, approver_id, approver_name,
-                approver_role, action, comment
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                approver_role, action, comment, role_code_snapshot, role_name_snapshot
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             approval_record_id, step_level, approver_id, approver_name,
-            approver_role, action, comment,
+            approver_role, action, comment, approver_role, approver_role,
         ))
         return cur.lastrowid
+
+    @staticmethod
+    def set_step_role_snapshot(step_id, role_id, role_code, role_name, db=None):
+        db = resolve_db(db)
+        if not any(row[1] == "role_code_snapshot" for row in db.execute("PRAGMA table_info(approval_steps)")):
+            return
+        db.execute(
+            "UPDATE approval_steps SET role_id_snapshot=?,role_code_snapshot=?,role_name_snapshot=? "
+            "WHERE id=?",
+            (role_id, role_code, role_name, step_id),
+        )
 
     # ============================================================
     # 审批配置

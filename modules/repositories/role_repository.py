@@ -87,7 +87,8 @@ class RoleRepository:
             "SELECT id, name, code, group_id, level, status, is_builtin "
             "FROM roles "
             "WHERE status = 'active' AND code <> 'worker' "
-            "AND (code = 'admin' OR permissions LIKE '%\"approvals:edit\"%') "
+            "AND (code = 'admin' OR permissions LIKE '%\"approvals:decision\"%' "
+            "OR permissions LIKE '%\"approvals:edit\"%') "
             "ORDER BY CASE WHEN code = 'admin' THEN 0 ELSE 1 END, level, id"
         ).fetchall()
 

@@ -14,6 +14,10 @@ from modules.process_fact_projection import (
 )
 
 
+def _has_column(db, table, column):
+    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
+
+
 class OrderRepository:
     """订单数据访问 — 所有 orders 表 CRUD 集中管理。"""
 
@@ -426,14 +430,27 @@ class OrderRepository:
         process_code_snapshot="",
         process_name_snapshot="",
         process_category_snapshot="",
+        approval_policy_revision_id=None,
+        approval_policy_source="order_assignment",
         db=None,
     ):
         db = resolve_db(db)
+        if not _has_column(db, "order_processes", "approval_policy_revision_id"):
+            db.execute(
+                "INSERT INTO order_processes "
+                "(order_id,process_id,seq_order,required_audit,process_version_id,"
+                "process_code_snapshot,process_name_snapshot,process_category_snapshot) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (order_id, process_id, seq_order, 0 if required_audit is None else required_audit,
+                 process_version_id, process_code_snapshot, process_name_snapshot, process_category_snapshot),
+            )
+            return
         db.execute(
             "INSERT INTO order_processes "
             "(order_id,process_id,seq_order,required_audit,process_version_id,"
-            "process_code_snapshot,process_name_snapshot,process_category_snapshot) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "process_code_snapshot,process_name_snapshot,process_category_snapshot,"
+            "approval_policy_revision_id,approval_policy_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 order_id,
                 process_id,
@@ -443,6 +460,8 @@ class OrderRepository:
                 process_code_snapshot,
                 process_name_snapshot,
                 process_category_snapshot,
+                approval_policy_revision_id,
+                approval_policy_source,
             ),
         )
 
