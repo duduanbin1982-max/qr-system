@@ -163,6 +163,7 @@ class ScanHelperService:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        submit_position_version_id=None,
         db=None,
     ):
         transaction_db = ScanHelperService._db(db)
@@ -185,6 +186,7 @@ class ScanHelperService:
             backfill_reason,
             submit_position_id,
             submit_position_name,
+            submit_position_version_id,
             fact_binding=binding,
             db=transaction_db,
         )

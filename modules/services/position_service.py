@@ -4,6 +4,8 @@ qr-system — 岗位管理 Service 层 (Repository pattern)
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.position_repository import PositionRepository
+from modules.repositories.position_version_repository import PositionVersionRepository
+from modules.services.position_impact_service import PositionImpactService
 
 
 class PositionService:
@@ -20,9 +22,31 @@ class PositionService:
             for p in procs:
                 proc_map.setdefault(p['position_id'], []).append(dict(p))
         result = []
+        version_ids = [
+            row["current_effective_version_id"]
+            for row in rows
+            if row["current_effective_version_id"] is not None
+        ]
+        versions = {
+            version["id"]: version
+            for version in PositionVersionRepository.versions_by_ids(version_ids)
+        }
+        open_versions = PositionVersionRepository.open_versions(pos_ids)
+        lifecycle_requests = (
+            PositionVersionRepository.pending_lifecycle_requests(pos_ids)
+        )
+        employee_counts = PositionRepository.count_active_users_by_positions(pos_ids)
         for r in rows:
             pos = dict(r)
-            pos['processes'] = proc_map.get(pos['id'], [])
+            processes = proc_map.get(pos['id'], [])
+            pos['processes'] = processes
+            pos['process_ids'] = [int(item['process_id']) for item in processes]
+            pos['current_version'] = versions.get(
+                pos.get('current_effective_version_id')
+            )
+            pos['open_version'] = open_versions.get(pos['id'])
+            pos['pending_lifecycle_request'] = lifecycle_requests.get(pos['id'])
+            pos['employee_count'] = employee_counts.get(pos['id'], 0)
             result.append(pos)
         return {'positions': result, 'total': total, 'page': page, 'limit': limit}
 
@@ -113,5 +137,7 @@ class PositionService:
         if user_count > 0:
             raise ValueError("该岗位下有 " + str(user_count) + " 个用户，请先将用户调岗后再删除")
         with BaseService.transaction() as txn:
+            PositionImpactService.assert_deletable(pos_id, db=txn)
+            PositionRepository.delete_position_processes_by_pos(pos_id, db=txn)
             PositionRepository.delete_position_by_id(pos_id, db=txn)
         return pos['name']

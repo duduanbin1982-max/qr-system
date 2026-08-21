@@ -96,7 +96,14 @@ def describe_action(action: str) -> AuditAction:
         return AuditAction("inventory", "info", True)
     if name.startswith(("quality_", "process_quality_", "ncr_", "capa_")):
         return AuditAction("quality", "info", True)
-    if name.startswith(("create_process", "update_process", "delete_process", "process_", "route_")):
+    if name.startswith((
+        "create_process",
+        "update_process",
+        "delete_process",
+        "process_",
+        "route_",
+        "position_",
+    )):
         return AuditAction("master_data", "info", True)
     if name.startswith(("create_", "update_", "delete_", "restore_", "purge_", "cancel_", "complete_")):
         return AuditAction("business", "info", True)

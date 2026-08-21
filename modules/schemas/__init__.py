@@ -7,6 +7,7 @@ from modules.schemas.inventory import inventory_schemas
 from modules.schemas.materials import materials_schemas
 from modules.schemas.orders import orders_schemas
 from modules.schemas.positions import positions_schemas
+from modules.schemas.position_versioning import position_versioning_schemas
 from modules.schemas.process_versioning import process_versioning_schemas
 from modules.schemas.process_config import process_config_schemas
 from modules.schemas.processes import processes_schemas
@@ -26,6 +27,7 @@ SCHEMAS.update(inventory_schemas)
 SCHEMAS.update(materials_schemas)
 SCHEMAS.update(orders_schemas)
 SCHEMAS.update(positions_schemas)
+SCHEMAS.update(position_versioning_schemas)
 SCHEMAS.update(process_versioning_schemas)
 SCHEMAS.update(process_config_schemas)
 SCHEMAS.update(processes_schemas)

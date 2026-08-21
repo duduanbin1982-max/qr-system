@@ -82,6 +82,61 @@ PROCESS_LEGACY_WRITE_BLOCKED = _PROCESS_VERSIONING_FLAGS[
 ]
 validate_process_versioning_flags(_PROCESS_VERSIONING_FLAGS)
 
+
+POSITION_VERSIONING_FLAG_NAMES = (
+    "POSITION_VERSIONED_QUERY_ENABLED",
+    "POSITION_COMPAT_AUDIT_ENABLED",
+    "POSITION_VERSIONED_WRITE_ENABLED",
+    "POSITION_LEGACY_WRITE_BLOCKED",
+)
+
+
+def get_position_versioning_flags(environ=None):
+    return {
+        name: _environment_flag(name, environ=environ)
+        for name in POSITION_VERSIONING_FLAG_NAMES
+    }
+
+
+def validate_position_versioning_flags(flags=None):
+    values = dict(
+        flags
+        or {
+            name: globals().get(name, False)
+            for name in POSITION_VERSIONING_FLAG_NAMES
+        }
+    )
+    query_enabled = bool(values.get("POSITION_VERSIONED_QUERY_ENABLED"))
+    audit_enabled = bool(values.get("POSITION_COMPAT_AUDIT_ENABLED"))
+    write_enabled = bool(values.get("POSITION_VERSIONED_WRITE_ENABLED"))
+    legacy_blocked = bool(values.get("POSITION_LEGACY_WRITE_BLOCKED"))
+    violations = []
+    if audit_enabled and not query_enabled:
+        violations.append("兼容双读审计要求先开启岗位版本化查询")
+    if write_enabled and not query_enabled:
+        violations.append("岗位版本化写入要求先开启版本化查询")
+    if legacy_blocked and not write_enabled:
+        violations.append("阻断岗位 Legacy 写入要求先开启版本化写入")
+    if violations:
+        raise RuntimeError("岗位版本化功能开关组合无效：" + "；".join(violations))
+    return values
+
+
+_POSITION_VERSIONING_FLAGS = get_position_versioning_flags()
+POSITION_VERSIONED_QUERY_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_VERSIONED_QUERY_ENABLED"
+]
+POSITION_COMPAT_AUDIT_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_COMPAT_AUDIT_ENABLED"
+]
+POSITION_VERSIONED_WRITE_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_VERSIONED_WRITE_ENABLED"
+]
+POSITION_LEGACY_WRITE_BLOCKED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_LEGACY_WRITE_BLOCKED"
+]
+validate_position_versioning_flags(_POSITION_VERSIONING_FLAGS)
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents

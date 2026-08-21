@@ -25,6 +25,7 @@ import { traceApi } from './api/trace.js'
 import { approvalsApi } from './api/approvals.js'
 import { settingsApi } from './api/settings.js'
 import { positionsApi } from './api/positions.js'
+import { positionVersionsApi } from './api/position-versions.js'
 import { rolesApi } from './api/roles.js'
 import { logsApi } from './api/logs.js'
 import { qualityApi } from './api/quality.js'
@@ -60,6 +61,7 @@ export const apiNamespaces = Object.freeze({
   approvals: approvalsApi,
   settings: settingsApi,
   positions: positionsApi,
+  positionVersions: positionVersionsApi,
   roles: rolesApi,
   logs: logsApi,
   quality: qualityApi,

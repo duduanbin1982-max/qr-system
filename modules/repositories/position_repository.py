@@ -2,6 +2,7 @@
 All raw SQL lives here. Methods accept optional db for transaction sharing.
 """
 from modules.repositories.context import resolve_db
+from modules.master_data_references import POSITION_REFERENCES
 
 
 class PositionRepository:
@@ -30,7 +31,8 @@ class PositionRepository:
             'SELECT pp.position_id, pp.process_id, p.name as process_name'
             ' FROM position_processes pp'
             ' JOIN processes p ON pp.process_id = p.id'
-            ' WHERE pp.position_id IN (' + placeholders + ')',
+            ' WHERE pp.position_id IN (' + placeholders + ')'
+            ' ORDER BY pp.position_id, pp.id',
             pos_ids
         ).fetchall()
 
@@ -116,6 +118,20 @@ class PositionRepository:
         ).fetchone()[0]
 
     @staticmethod
+    def count_active_users_by_positions(pos_ids, db=None):
+        db = resolve_db(db)
+        if not pos_ids:
+            return {}
+        placeholders = ','.join('?' for _ in pos_ids)
+        rows = db.execute(
+            'SELECT position_id,COUNT(*) AS employee_count FROM users '
+            "WHERE status='active' AND position_id IN (" + placeholders + ') '
+            'GROUP BY position_id',
+            pos_ids,
+        ).fetchall()
+        return {int(row['position_id']): int(row['employee_count']) for row in rows}
+
+    @staticmethod
     def delete_position_by_id(pos_id, db=None):
         db = resolve_db(db)
         db.execute('DELETE FROM positions WHERE id = ?', (pos_id,))
@@ -145,3 +161,83 @@ class PositionRepository:
             "ORDER BY p.id",
             list(process_ids),
         ).fetchall()
+
+    @staticmethod
+    def position_reference_counts(position_id, db=None):
+        """Return de-duplicated row counts for every registered reference."""
+        db = resolve_db(db)
+        version_subquery = "SELECT id FROM position_versions WHERE position_id = ?"
+        table_columns = {}
+        counts = []
+        for reference in POSITION_REFERENCES:
+            exists = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (reference.table,),
+            ).fetchone()
+            if not exists:
+                continue
+            available = table_columns.setdefault(
+                reference.table,
+                {
+                    row[1]
+                    for row in db.execute(
+                        f'PRAGMA table_info("{reference.table}")'
+                    ).fetchall()
+                },
+            )
+            if not set(reference.required_columns).issubset(available):
+                continue
+            predicates = []
+            params = []
+            for column in reference.root_columns:
+                if column in available:
+                    predicates.append(f'"{column}" = ?')
+                    params.append(position_id)
+            for column in reference.version_columns:
+                if column in available:
+                    predicates.append(f'"{column}" IN ({version_subquery})')
+                    params.append(position_id)
+            if not predicates:
+                continue
+            where = "(" + " OR ".join(predicates) + ")"
+            if reference.where_clause:
+                where += " AND (" + reference.where_clause + ")"
+            count = db.execute(
+                f'SELECT COUNT(*) FROM "{reference.table}" WHERE {where}',
+                params,
+            ).fetchone()[0]
+            counts.append((reference, int(count)))
+        return counts
+
+    @staticmethod
+    def position_indirect_counts(position_id, db=None):
+        """Count only open orders and current routes reached by this position."""
+        db = resolve_db(db)
+        process_scope = (
+            "SELECT process_id FROM position_processes WHERE position_id = ?"
+        )
+        open_orders = db.execute(
+            "SELECT COUNT(DISTINCT orders.id) FROM orders "
+            "JOIN order_processes ON order_processes.order_id = orders.id "
+            f"WHERE order_processes.process_id IN ({process_scope}) "
+            "AND orders.deleted_at IS NULL "
+            "AND orders.status NOT IN ('completed','cancelled')",
+            (position_id,),
+        ).fetchone()[0]
+        current_routes = db.execute(
+            "SELECT COUNT(DISTINCT route.id) FROM process_routes route "
+            "WHERE COALESCE(route.status,'active')='active' "
+            "AND COALESCE(route.lifecycle_status,'active')='active' AND ("
+            "EXISTS (SELECT 1 FROM process_route_version_items item "
+            "WHERE item.route_version_id=route.current_effective_version_id "
+            f"AND item.process_id IN ({process_scope})) OR "
+            "(route.current_effective_version_id IS NULL AND EXISTS ("
+            "SELECT 1 FROM process_route_items legacy_item "
+            "WHERE legacy_item.route_id=route.id "
+            f"AND legacy_item.process_id IN ({process_scope}))))",
+            (position_id, position_id),
+        ).fetchone()[0]
+        return {
+            "open_orders": int(open_orders),
+            "current_routes": int(current_routes),
+        }

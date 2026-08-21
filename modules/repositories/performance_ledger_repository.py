@@ -438,6 +438,7 @@ class PerformanceLedgerRepository:
             "department_id_snapshot",
             "department_name_snapshot",
             "position_id_snapshot",
+            "position_version_id_snapshot",
             "position_name_snapshot",
             "eligibility_status",
             "eligibility_reason_code",

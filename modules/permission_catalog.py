@@ -80,7 +80,22 @@ ACTION_PERMISSION_DEFS = {
     "users": ("用户/员工", ["view", "create", "edit", "delete", "admin"]),
     "roles": ("角色", ["view", "create", "edit", "delete"]),
     "role_groups": ("角色组", ["view", "create", "edit", "delete"]),
-    "positions": ("岗位", ["view", "create", "edit", "delete"]),
+    "positions": (
+        "岗位",
+        [
+            "view",
+            "create",
+            "edit",
+            "delete",
+            "submit",
+            "approve",
+            "reject",
+            "history",
+            "impact",
+            "retire",
+            "reactivate",
+        ],
+    ),
     "inventory": ("库存", ["view", "create", "edit", "delete"]),
     "shipments": (
         "发货",

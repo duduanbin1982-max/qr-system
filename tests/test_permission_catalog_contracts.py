@@ -3,6 +3,7 @@ from pathlib import Path
 from modules.permission_catalog import (
     ACTION_LABELS,
     ACTION_PERMISSION_DEFS,
+    ALL_PERMISSION_CODES,
     PAGE_OPERATION_BINDINGS,
     PAGE_PERMISSION_CODES,
     SIDEBAR_ITEMS,
@@ -222,3 +223,36 @@ def test_legacy_process_permissions_only_imply_version_read_access():
             not has_permission_code([legacy_permission], permission)
             for permission in forbidden_migrations
         )
+
+
+def test_position_version_permissions_are_granular():
+    assert ACTION_PERMISSION_DEFS["positions"][1] == [
+        "view",
+        "create",
+        "edit",
+        "delete",
+        "submit",
+        "approve",
+        "reject",
+        "history",
+        "impact",
+        "retire",
+        "reactivate",
+    ]
+    assert {
+        "positions:submit",
+        "positions:approve",
+        "positions:reject",
+        "positions:history",
+        "positions:impact",
+        "positions:retire",
+        "positions:reactivate",
+    }.issubset(ALL_PERMISSION_CODES)
+    assert all(
+        not has_permission_code(["positions:edit"], permission)
+        for permission in (
+            "positions:approve",
+            "positions:retire",
+            "positions:reactivate",
+        )
+    )

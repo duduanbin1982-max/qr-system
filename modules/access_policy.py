@@ -62,6 +62,19 @@ def has_permission_code(permissions: Sequence[str], perm: str) -> bool:
     )
 
 
+def has_global_data_scope(
+    permissions: Sequence[str], global_data_scope_permissions: Set[str]
+) -> bool:
+    permission_set = set(permissions or [])
+    return bool(
+        permission_set
+        and (
+            "*" in permission_set
+            or permission_set & set(global_data_scope_permissions)
+        )
+    )
+
+
 def parse_process_ids(process_ids_text: str) -> List[int]:
     text = (process_ids_text or "").strip()
     if not text:

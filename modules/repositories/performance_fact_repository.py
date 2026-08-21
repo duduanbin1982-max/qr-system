@@ -458,6 +458,7 @@ class PerformanceFactRepository:
             "department_id_snapshot",
             "department_name_snapshot",
             "position_id_snapshot",
+            "position_version_id",
             "position_name_snapshot",
             "order_id",
             "order_no_snapshot",

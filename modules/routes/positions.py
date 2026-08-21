@@ -3,16 +3,42 @@ qr-system — 岗位管理（路由层）
 
 注：Swagger docstring 仅供文档参考。
 """
-from flask import request, jsonify
+from flask import g, request, jsonify
+from modules import config
+from modules.domain.position_versioning import PositionVersionedWriteDisabledError
 from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
     get_json_body,
+    require_legacy_position_write,
     safe_audit_log,
     validate_json,
 )
 from modules.services.position_service import PositionService
+from modules.services.position_version_service import PositionVersionService
+
+
+def _actor():
+    return getattr(g, 'current_user', {}) or {}
+
+
+@validate_json('create_position')
+def _create_legacy_position():
+    data = get_json_body()
+    pos_id = PositionService.create_position(data)
+    safe_audit_log('create_position', 'position', pos_id, data.get('name', ''))
+    return jsonify({'message': '创建成功', 'id': pos_id})
+
+
+@validate_json('position_version_create')
+def _create_versioned_position():
+    result = PositionVersionService.create_position(
+        get_json_body(),
+        _actor(),
+        request.headers.get('X-Request-ID', ''),
+    )
+    return jsonify(result), 201
 
 
 @app.route('/api/positions', methods=['GET'])
@@ -38,7 +64,6 @@ def list_positions():
 @app.route('/api/positions', methods=['POST'])
 @check_auth
 @check_permission('positions:create')
-@validate_json('create_position')
 def create_position():
     """
     ---
@@ -52,14 +77,20 @@ def create_position():
       - Bearer: []
     """
     data = get_json_body()
-    pos_id = PositionService.create_position(data)
-    safe_audit_log('create_position', 'position', pos_id, data.get('name', ''))
-    return jsonify({'message': '创建成功', 'id': pos_id})
+    is_versioned_command = bool(
+        data.get('idempotency_key') or data.get('revision_reason')
+    )
+    if config.POSITION_VERSIONED_WRITE_ENABLED:
+        return _create_versioned_position()
+    if is_versioned_command:
+        raise PositionVersionedWriteDisabledError('岗位版本化写入尚未启用')
+    return _create_legacy_position()
 
 
 @app.route('/api/positions/<int:pos_id>', methods=['PUT'])
 @check_auth
 @check_permission('positions:edit')
+@require_legacy_position_write
 @validate_json('update_position')
 def update_position(pos_id):
     """
@@ -81,7 +112,7 @@ def update_position(pos_id):
 
 @app.route('/api/positions/<int:pos_id>/impact', methods=['GET'])
 @check_auth
-@check_permission('positions:view')
+@check_permission('positions:impact')
 def position_impact(pos_id):
     try:
         return jsonify(PositionService.check_impact(pos_id))
@@ -92,6 +123,7 @@ def position_impact(pos_id):
 @app.route('/api/positions/<int:pos_id>', methods=['DELETE'])
 @check_auth
 @check_permission('positions:delete')
+@require_legacy_position_write
 def delete_position(pos_id):
     """
     ---

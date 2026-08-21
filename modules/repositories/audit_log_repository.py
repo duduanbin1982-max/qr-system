@@ -42,6 +42,14 @@ class AuditLogRepository:
         )
 
     @staticmethod
+    def find_by_event_id(event_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM audit_logs WHERE event_id=?", (str(event_id or ""),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def enqueue_event_txn(
         user_id,
         action,

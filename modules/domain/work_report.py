@@ -80,7 +80,11 @@ class WorkReportCommand:
             report_source=data.get("report_source", "standard"),
             actual_completed_at=data.get("actual_completed_at"),
             backfill_reason=data.get("backfill_reason", ""),
-            submit_position_id=data.get("submit_position_id"),
+            submit_position_id=(
+                user.get("active_position_id")
+                or user.get("position_id")
+                or data.get("submit_position_id")
+            ),
             submit_position_name=data.get("submit_position_name", ""),
         )
 

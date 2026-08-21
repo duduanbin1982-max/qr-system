@@ -15,12 +15,25 @@ class PerformanceAssignmentRepository:
         ).fetchone() is not None
 
     @staticmethod
+    def _supports_position_versions(db):
+        return any(
+            row[1] == "position_version_id"
+            for row in db.execute(
+                "PRAGMA table_info(performance_assignment_history)"
+            ).fetchall()
+        )
+
+    @staticmethod
     def _effective_select(db):
         base = (
             "SELECT assignment.id,assignment.user_id,"
             "assignment.employee_name_snapshot,assignment.employee_no_snapshot,"
             "assignment.position_id,assignment.position_name_snapshot,"
         )
+        if PerformanceAssignmentRepository._supports_position_versions(db):
+            base += "assignment.position_version_id,"
+        else:
+            base += "NULL AS position_version_id,"
         tail = (
             "assignment.valid_from,assignment.valid_to,assignment.source_type,"
             "assignment.source_key,assignment.created_by,assignment.created_at,"
@@ -193,31 +206,75 @@ class PerformanceAssignmentRepository:
             user_id, valid_from, valid_to, db=db
         ):
             raise ConflictError("Performance assignment interval overlaps existing history")
+        columns = [
+            "user_id",
+            "employee_name_snapshot",
+            "employee_no_snapshot",
+            "position_id",
+            "position_name_snapshot",
+            "department_id",
+            "department_name_snapshot",
+            "valid_from",
+            "valid_to",
+            "source_type",
+            "source_key",
+            "created_by",
+        ]
+        values = [
+            user_id,
+            payload.get("employee_name_snapshot", ""),
+            payload.get("employee_no_snapshot", ""),
+            payload.get("position_id"),
+            payload.get("position_name_snapshot", ""),
+            payload.get("department_id"),
+            payload.get("department_name_snapshot", ""),
+            valid_from,
+            valid_to,
+            payload.get("source_type", "application"),
+            payload["source_key"],
+            payload.get("created_by"),
+        ]
+        if PerformanceAssignmentRepository._supports_position_versions(db):
+            columns.insert(4, "position_version_id")
+            values.insert(4, payload.get("position_version_id"))
         cursor = db.execute(
-            """
-            INSERT INTO performance_assignment_history (
-                user_id,employee_name_snapshot,employee_no_snapshot,
-                position_id,position_name_snapshot,department_id,
-                department_name_snapshot,valid_from,valid_to,source_type,
-                source_key,created_by
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                user_id,
-                payload.get("employee_name_snapshot", ""),
-                payload.get("employee_no_snapshot", ""),
-                payload.get("position_id"),
-                payload.get("position_name_snapshot", ""),
-                payload.get("department_id"),
-                payload.get("department_name_snapshot", ""),
-                valid_from,
-                valid_to,
-                payload.get("source_type", "application"),
-                payload["source_key"],
-                payload.get("created_by"),
-            ),
+            "INSERT INTO performance_assignment_history ("
+            + ",".join(columns)
+            + ") VALUES ("
+            + ",".join("?" for _ in values)
+            + ")",
+            values,
         )
         return cursor.lastrowid
+
+    @staticmethod
+    def open_assignments_for_position(position_id, db=None):
+        db = resolve_db(db)
+        return [
+            dict(row)
+            for row in db.execute(
+                PerformanceAssignmentRepository._effective_select(db)
+                + "JOIN users active_user ON active_user.id=assignment.user_id "
+                "AND active_user.status='active' AND active_user.deleted_at IS NULL "
+                "WHERE assignment.position_id=? AND assignment.valid_to='' "
+                "ORDER BY assignment.user_id,assignment.id",
+                (position_id,),
+            ).fetchall()
+        ]
+
+    @staticmethod
+    def close_assignment(assignment_id, valid_to, db=None):
+        db = resolve_db(db)
+        cursor = db.execute(
+            "UPDATE performance_assignment_history SET valid_to=? "
+            "WHERE id=? AND valid_to=''",
+            (valid_to, assignment_id),
+        )
+        return cursor.rowcount
+
+    @staticmethod
+    def create_assignment(payload, db=None):
+        return PerformanceAssignmentRepository.insert_assignment(payload, db=db)
 
     @staticmethod
     def close_open_assignment(user_id, valid_to, db=None):
