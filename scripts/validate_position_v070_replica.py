@@ -36,6 +36,13 @@ EXACT_PROTECTED_TABLES = (
     "performance_position_target_versions",
 )
 
+BUSINESS_FACT_TABLES = (
+    "work_records",
+    "performance_source_facts",
+    "performance_score_revisions",
+    "performance_position_target_versions",
+)
+
 
 def _canonical(value: Any) -> str:
     return json.dumps(
@@ -102,6 +109,31 @@ def _snapshot_tables(
             "sha256": _digest(rows),
         }
     return result
+
+
+def _business_fact_baseline(
+    source_snapshot: dict[str, dict[str, Any]],
+    candidate_snapshot: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    tables = {
+        table: {
+            "source_count": source_snapshot[table]["count"],
+            "candidate_count": candidate_snapshot[table]["count"],
+            "count_delta": (
+                candidate_snapshot[table]["count"]
+                - source_snapshot[table]["count"]
+            ),
+            "source_sha256": source_snapshot[table]["sha256"],
+            "candidate_sha256": candidate_snapshot[table]["sha256"],
+            "equal": source_snapshot[table] == candidate_snapshot[table],
+        }
+        for table in BUSINESS_FACT_TABLES
+    }
+    return {
+        "source": "migration input snapshot from stop-window online backup",
+        "tables": tables,
+        "ok": all(item["equal"] for item in tables.values()),
+    }
 
 
 def _logical_database_snapshot(db: sqlite3.Connection) -> dict[str, Any]:
@@ -362,6 +394,9 @@ def validate_replica(
         after_migration = _snapshot_tables(
             db, EXACT_PROTECTED_TABLES, columns_by_table=source_columns
         )
+        fact_baseline = _business_fact_baseline(
+            before_migration, after_migration
+        )
         protected_comparison = {
             table: {
                 "source": before_migration[table],
@@ -393,6 +428,8 @@ def validate_replica(
         failures.append("database integrity or foreign-key validation failed")
     if any(not item["equal"] for item in protected_comparison.values()):
         failures.append("migration changed a protected source table snapshot")
+    if not fact_baseline["ok"]:
+        failures.append("migration changed the dynamic business fact baseline")
     if not assignments["ok"]:
         failures.append("assignment cutover did not preserve source snapshots")
     if not parity["ok"]:
@@ -417,6 +454,7 @@ def validate_replica(
             "checks": checks,
         },
         "protected_comparison": protected_comparison,
+        "business_fact_baseline": fact_baseline,
         "assignments": assignments,
         "legacy_v1_parity": parity,
         "idempotent_replay": {

@@ -4,7 +4,9 @@ qr-system — 岗位管理 Service 层 (Repository pattern)
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.services import BaseService
 from modules.repositories.position_repository import PositionRepository
-from modules.repositories.position_version_repository import PositionVersionRepository
+from modules.services.legacy_position_compatibility_service import (
+    LegacyPositionCompatibilityService,
+)
 from modules.services.position_impact_service import PositionImpactService
 
 
@@ -22,33 +24,19 @@ class PositionService:
             for p in procs:
                 proc_map.setdefault(p['position_id'], []).append(dict(p))
         result = []
-        version_ids = [
-            row["current_effective_version_id"]
-            for row in rows
-            if row["current_effective_version_id"] is not None
-        ]
-        versions = {
-            version["id"]: version
-            for version in PositionVersionRepository.versions_by_ids(version_ids)
-        }
-        open_versions = PositionVersionRepository.open_versions(pos_ids)
-        lifecycle_requests = (
-            PositionVersionRepository.pending_lifecycle_requests(pos_ids)
-        )
-        employee_counts = PositionRepository.count_active_users_by_positions(pos_ids)
         for r in rows:
             pos = dict(r)
             processes = proc_map.get(pos['id'], [])
             pos['processes'] = processes
             pos['process_ids'] = [int(item['process_id']) for item in processes]
-            pos['current_version'] = versions.get(
-                pos.get('current_effective_version_id')
-            )
-            pos['open_version'] = open_versions.get(pos['id'])
-            pos['pending_lifecycle_request'] = lifecycle_requests.get(pos['id'])
-            pos['employee_count'] = employee_counts.get(pos['id'], 0)
             result.append(pos)
-        return {'positions': result, 'total': total, 'page': page, 'limit': limit}
+        legacy = {
+            'positions': result,
+            'total': total,
+            'page': page,
+            'limit': limit,
+        }
+        return LegacyPositionCompatibilityService.list_positions(legacy)
 
     @staticmethod
     def create_position(data):

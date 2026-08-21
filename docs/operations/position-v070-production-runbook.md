@@ -83,6 +83,7 @@ python scripts/validate_position_v070_replica.py \
 - `status=passed`、`source_unchanged=true`、`blocking_failures=[]`。
 - 数据库版本达到 V070 或当前更高的已审核版本，完整性为 `ok`，外键异常为零。
 - 岗位、岗位工序、员工、报工、绩效来源事实、评分修订版和岗位目标的迁移前字段快照不变。
+- `business_fact_baseline` 必须从停服窗口最终在线备份动态生成，报工、绩效来源事实、评分修订版和岗位目标的源/候选计数、SHA-256 摘要须一致且 `count_delta=0`；不得使用历史固定条数作为门槛。
 - 仅按批准 manifest 恢复岗位工序；恢复外的受保护记录不得变化。
 - Legacy 岗位与 V1 当前投影的名称、描述、状态、稳定编码及工序集合完全一致。
 - 07:00 生产口径的历史绩效分配快照保持不变；仅合格的开放分配在切换点关闭并生成绑定 V1 的新分配。
@@ -96,7 +97,7 @@ python scripts/validate_position_v070_replica.py \
 3. 创建停服前最终备份，验证可打开、完整性、外键、SHA-256和文件大小；备份不得放在会被代码部署覆盖的目录。
 4. 停止写入流量并确认应用进程已退出；记录停服时间。
 5. 对批准 manifest 中有精确证据的映射执行受控恢复；恢复条数和集合必须与副本演练一致。
-6. 执行数据库迁移，确认 `PRAGMA user_version`、完整性、外键、V070 manifest 计数与副本演练一致。
+6. 执行数据库迁移，确认 `PRAGMA user_version`、完整性、外键、V070 manifest 计数及本次最终备份动态生成的 `business_fact_baseline` 全部通过；不得套用副本演练时的固定事实条数。
 7. 启动服务，先保持 Legacy 查询和写入路径，完成健康检查后按四阶段切换功能开关。
 
 ## 8. 四阶段功能开关

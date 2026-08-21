@@ -17,7 +17,8 @@ class PositionRepository:
     def find_positions_paginated(limit, offset, db=None):
         db = resolve_db(db)
         return db.execute(
-            'SELECT * FROM positions ORDER BY id LIMIT ? OFFSET ?',
+            'SELECT id,name,description,status,created_at FROM positions '
+            'ORDER BY id LIMIT ? OFFSET ?',
             (limit, offset)
         ).fetchall()
 
@@ -98,6 +99,18 @@ class PositionRepository:
             process_ids
         ).fetchall()
         return {r[0] for r in rows}
+
+    @staticmethod
+    def find_process_details_by_ids(process_ids, db=None):
+        db = resolve_db(db)
+        normalized = sorted({int(process_id) for process_id in process_ids})
+        if not normalized:
+            return []
+        placeholders = ','.join('?' for _ in normalized)
+        return db.execute(
+            'SELECT id,name FROM processes WHERE id IN (' + placeholders + ')',
+            normalized,
+        ).fetchall()
 
     @staticmethod
     def find_process_ids_by_position(pos_id, db=None):

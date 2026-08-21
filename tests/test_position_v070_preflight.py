@@ -128,7 +128,68 @@ def test_replica_validation_runs_v070_and_preserves_source(replica_db, tmp_path)
     assert report["migration"]["checks"]["user_version"] >= 70
     assert report["legacy_v1_parity"]["ok"] is True
     assert report["assignments"]["ok"] is True
+    assert report["business_fact_baseline"]["ok"] is True
+    assert report["business_fact_baseline"]["tables"]["work_records"][
+        "source_count"
+    ] == 1
+    assert report["business_fact_baseline"]["tables"]["work_records"][
+        "candidate_count"
+    ] == 1
+    assert report["business_fact_baseline"]["tables"]["work_records"][
+        "count_delta"
+    ] == 0
     assert report["idempotent_replay"]["ok"] is True
     assert report["source_unchanged"] is True
     assert file_sha256(replica_db) == source_hash
     assert replica_db.stat().st_size == source_size
+
+
+def test_replica_fact_baseline_uses_latest_source_counts(replica_db, tmp_path):
+    from scripts.validate_position_v070_replica import validate_replica
+
+    db = sqlite3.connect(replica_db)
+    existing = db.execute(
+        "SELECT order_id,process_id,user_id FROM work_records ORDER BY id LIMIT 1"
+    ).fetchone()
+    db.execute(
+        "INSERT INTO work_records(order_id,process_id,user_id,status,quantity,created_at) "
+        "VALUES (?,?,?,'approved',3,'2026-08-21 14:59:59')",
+        existing,
+    )
+    db.commit()
+    db.close()
+
+    report = validate_replica(replica_db, tmp_path / "latest-facts-v070.db")
+
+    facts = report["business_fact_baseline"]
+    assert report["status"] == "passed", report["blocking_failures"]
+    assert facts["ok"] is True
+    assert facts["tables"]["work_records"]["source_count"] == 2
+    assert facts["tables"]["work_records"]["candidate_count"] == 2
+    assert facts["tables"]["work_records"]["count_delta"] == 0
+
+
+def test_replica_fact_baseline_blocks_migration_fact_mutation(
+    replica_db, tmp_path, monkeypatch
+):
+    import modules.migrations as migrations
+    from scripts.validate_position_v070_replica import validate_replica
+
+    real_run_migrations = migrations.run_migrations
+
+    def mutate_fact_after_migration(db):
+        executed = real_run_migrations(db)
+        db.execute("UPDATE work_records SET quantity=quantity+1")
+        return executed
+
+    monkeypatch.setattr(migrations, "run_migrations", mutate_fact_after_migration)
+
+    report = validate_replica(replica_db, tmp_path / "mutated-facts-v070.db")
+
+    facts = report["business_fact_baseline"]
+    assert report["status"] == "failed"
+    assert facts["ok"] is False
+    assert facts["tables"]["work_records"]["equal"] is False
+    assert "migration changed the dynamic business fact baseline" in report[
+        "blocking_failures"
+    ]

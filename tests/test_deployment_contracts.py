@@ -125,6 +125,18 @@ def test_build_restart_runs_migrations_before_restarting_service():
     assert content.index("init_db") < content.index("systemctl --user restart")
 
 
+def test_build_restart_atomically_syncs_deployed_commit_before_restart():
+    content = (PROJECT_ROOT / "scripts" / "build.sh").read_text(encoding="utf-8")
+
+    assert 'git rev-parse --verify HEAD' in content
+    assert '[[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]' in content
+    assert '.deployed_commit.tmp.' in content
+    assert 'mv -f "$deployed_commit_tmp" .deployed_commit' in content
+    sync_index = content.index('mv -f "$deployed_commit_tmp" .deployed_commit')
+    restart_index = content.index("systemctl --user restart qr-system.service")
+    assert sync_index < restart_index
+
+
 def test_legacy_entrypoints_delegate_to_authoritative_tools():
     start_content = (PROJECT_ROOT / "start.sh").read_text(encoding="utf-8")
     script_deploy_content = (PROJECT_ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
