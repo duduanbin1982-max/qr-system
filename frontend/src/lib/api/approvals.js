@@ -9,4 +9,10 @@ export const approvalsApi = {
   approvalStats:    ()       => request('GET', '/api/approvals/stats'),
   approvalConfig:   ()       => request('GET', '/api/approvals/config'),
   saveApprovalConfig: (data) => request('POST', '/api/approvals/config', data),
+  approvalPolicies:   (params = {}) => request('GET', '/api/approval-policies' + buildQuery(params)),
+  createPolicyRevision: (data) => request('POST', '/api/approval-policies/revisions', data),
+  policyHistory: (id) => request('GET', '/api/approval-policies/' + id + '/history'),
+  submitPolicy: (id) => request('POST', '/api/approval-policies/revisions/' + id + '/submit'),
+  approvePolicy: (id) => request('POST', '/api/approval-policies/revisions/' + id + '/approve'),
+  rejectPolicy: (id) => request('POST', '/api/approval-policies/revisions/' + id + '/reject'),
 }

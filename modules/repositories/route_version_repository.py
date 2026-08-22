@@ -8,6 +8,10 @@ from modules.domain.process_versioning import RouteVersionStaleError
 from modules.repositories.context import resolve_db
 
 
+def _has_column(db, table, column):
+    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
+
+
 class RouteVersionRepository:
     """SQL-only route version access, including bounded item prefetching."""
 
@@ -277,10 +281,24 @@ class RouteVersionRepository:
     @staticmethod
     def _insert_items(route_version_id, items, db):
         for item in items:
+            if not _has_column(db, "process_route_version_items", "approval_policy_revision_id"):
+                db.execute(
+                    "INSERT INTO process_route_version_items ("
+                    "route_version_id,process_id,process_version_id,seq_order,is_required,"
+                    "required_audit,legacy_route_item_id) VALUES (?,?,?,?,?,?,?)",
+                    (route_version_id, item["process_id"], item["process_version_id"],
+                     item.get("seq_order", 0), int(bool(item.get("is_required", 1))),
+                     int(bool(item.get("required_audit", 0))), item.get("legacy_route_item_id")),
+                )
+                continue
             db.execute(
                 "INSERT INTO process_route_version_items ("
                 "route_version_id,process_id,process_version_id,seq_order,is_required,"
-                "required_audit,legacy_route_item_id) VALUES (?,?,?,?,?,?,?)",
+                "required_audit,legacy_route_item_id,approval_policy_revision_id,approval_policy_source) "
+                "VALUES (?,?,?,?,?,?,?,(SELECT revision.id FROM approval_policy_revisions revision "
+                "JOIN approval_policies policy ON policy.id=revision.policy_id "
+                "WHERE policy.process_id=? AND revision.status='published' "
+                "ORDER BY revision.version DESC LIMIT 1),'versioned_binding')",
                 (
                     route_version_id,
                     item["process_id"],
@@ -289,6 +307,7 @@ class RouteVersionRepository:
                     int(bool(item.get("is_required", 1))),
                     int(bool(item.get("required_audit", 0))),
                     item.get("legacy_route_item_id"),
+                    item["process_id"],
                 ),
             )
 

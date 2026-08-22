@@ -117,6 +117,22 @@ def _position(
 PROCESS_REFERENCES = (
     _process("approval_config", ("process_id",), key="approval_config", label="审批配置"),
     _process(
+        "approval_policies",
+        ("process_id",),
+        key="approval_policies",
+        label="版本化审批策略",
+        impact_level=IMPACT_INTERNAL,
+        action="由审批策略版本服务维护",
+    ),
+    _process(
+        "approval_policy_compat_audit",
+        ("process_id",),
+        key="approval_policy_compat_audit",
+        label="审批策略兼容审计",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变双读差异证据",
+    ),
+    _process(
         "material_consumptions",
         ("process_id",),
         version_columns=("process_version_id",),

@@ -204,7 +204,7 @@ def mobile_report():
             return jsonify(err), code
 
         # Approval check
-        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id, order_id)
 
         # Execute report write
         command = ScanReportService.build_command(
@@ -278,7 +278,7 @@ def work_report():
             return jsonify(err), code
 
         # Approval check
-        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id, order_id)
 
         # Execute report write
         command = ScanReportService.build_command(

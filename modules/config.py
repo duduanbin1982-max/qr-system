@@ -137,6 +137,44 @@ POSITION_LEGACY_WRITE_BLOCKED = _POSITION_VERSIONING_FLAGS[
 ]
 validate_position_versioning_flags(_POSITION_VERSIONING_FLAGS)
 
+
+APPROVAL_POLICY_FLAG_NAMES = (
+    "APPROVAL_POLICY_VERSIONED_QUERY_ENABLED",
+    "APPROVAL_POLICY_COMPAT_AUDIT_ENABLED",
+    "APPROVAL_POLICY_VERSIONED_WRITE_ENABLED",
+    "APPROVAL_POLICY_LEGACY_WRITE_BLOCKED",
+)
+
+
+def get_approval_policy_flags(environ=None):
+    return {name: _environment_flag(name, environ=environ) for name in APPROVAL_POLICY_FLAG_NAMES}
+
+
+def validate_approval_policy_flags(flags=None):
+    values = dict(flags or {name: globals().get(name, False) for name in APPROVAL_POLICY_FLAG_NAMES})
+    query = bool(values.get("APPROVAL_POLICY_VERSIONED_QUERY_ENABLED"))
+    audit = bool(values.get("APPROVAL_POLICY_COMPAT_AUDIT_ENABLED"))
+    write = bool(values.get("APPROVAL_POLICY_VERSIONED_WRITE_ENABLED"))
+    legacy_blocked = bool(values.get("APPROVAL_POLICY_LEGACY_WRITE_BLOCKED"))
+    violations = []
+    if audit and not query:
+        violations.append("审批策略兼容审计要求先开启版本化查询")
+    if write and not query:
+        violations.append("审批策略版本化写入要求先开启版本化查询")
+    if legacy_blocked and not write:
+        violations.append("阻断审批 Legacy 写入要求先开启版本化写入")
+    if violations:
+        raise RuntimeError("审批策略功能开关组合无效：" + "；".join(violations))
+    return values
+
+
+_APPROVAL_POLICY_FLAGS = get_approval_policy_flags()
+APPROVAL_POLICY_VERSIONED_QUERY_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_VERSIONED_QUERY_ENABLED"]
+APPROVAL_POLICY_COMPAT_AUDIT_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_COMPAT_AUDIT_ENABLED"]
+APPROVAL_POLICY_VERSIONED_WRITE_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_VERSIONED_WRITE_ENABLED"]
+APPROVAL_POLICY_LEGACY_WRITE_BLOCKED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_LEGACY_WRITE_BLOCKED"]
+validate_approval_policy_flags(_APPROVAL_POLICY_FLAGS)
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents
@@ -200,6 +238,8 @@ PREDEFINED_ROLES = {
             'scan:view', 'scan:report', 'scan:serial_backfill', 'scan:serial_backfill_approve',
             'stats:view', 'trace:view', 'reports:view', 'board:view',
             'approvals:view', 'approvals:edit','inventory:view','materials:view','quality:view','rework:view','rework:create','rework:edit',
+            'approvals:decision', 'approval_policies:view', 'approval_policies:create',
+            'approval_policies:submit', 'approval_policies:history', 'approval_policies:impact',
             'work_time:view','work_time:create','work_time:edit','work_time:audit','work_time:export',
         ]
     },
