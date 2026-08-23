@@ -1,4 +1,4 @@
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
@@ -312,11 +312,13 @@ export function useAdminUsers() {
     }
   }
 
-  onMounted(() => {
-    loadAllUsers()
-    loadRoleGroups()
-    loadAllRoles()
-  })
+  if (getCurrentInstance()) {
+    onMounted(() => {
+      loadAllUsers()
+      loadRoleGroups()
+      loadAllRoles()
+    })
+  }
 
   return {
     allUsers,

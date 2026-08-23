@@ -20,6 +20,26 @@ def test_v2_fact_collection_has_no_legacy_calendar_month_dependency():
     assert "Legacy V1" in (PerformanceRepository.worker_month_metrics.__doc__ or "")
 
 
+def test_performance_ledger_responsibilities_have_stable_module_boundaries():
+    from modules.services.performance_ledger_service import PerformanceLedgerService
+
+    assert PerformanceLedgerService.create_batch.__func__.__module__.endswith(
+        "performance_ledger_service"
+    )
+    assert PerformanceLedgerService.submit_approval.__func__.__module__.endswith(
+        "performance_ledger_workflow"
+    )
+    assert PerformanceLedgerService.save_supervisor_review.__func__.__module__.endswith(
+        "performance_ledger_review"
+    )
+    assert PerformanceLedgerService.list_batches.__func__.__module__.endswith(
+        "performance_ledger_queries"
+    )
+    assert PerformanceLedgerService._score_candidates.__func__.__module__.endswith(
+        "performance_ledger_scoring"
+    )
+
+
 def _worker_id(db):
     ensure_user(db, "perfworker", WORKER_HASH, "绩效测试员工", "worker", "TEST-PERF-WORKER")
     row = db.execute("SELECT id FROM users WHERE username = 'perfworker'").fetchone()

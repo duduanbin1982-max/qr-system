@@ -1,8 +1,8 @@
 import os
-from dotenv import load_dotenv
-_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-if os.path.exists(_env_path):
-    load_dotenv(_env_path)
+from modules.bootstrap import load_environment
+
+base_dir = os.path.dirname(os.path.abspath(__file__))
+load_environment(base_dir)
 
 # gunicorn config for qr-system
 import gunicorn
@@ -10,7 +10,6 @@ import gunicorn
 # 隐藏 Server 响应头（默认暴露 gunicorn 版本号）
 gunicorn.SERVER = 'webserver'
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
 chdir = base_dir
 bind = '127.0.0.1:3000'
 certfile = os.environ.get('SSL_CERT_FILE', 'server.crt')
@@ -26,5 +25,5 @@ raw_env = [
 
 def on_starting(server):
     os.chdir(base_dir)
-    from modules.db import init_db
-    init_db()
+    from modules.db import verify_schema
+    verify_schema()

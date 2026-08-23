@@ -1,7 +1,15 @@
+import io
 import json
+import shutil
+import sqlite3
+import tarfile
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from modules.runtime_version import get_application_version
+from scripts import deployment_manifest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,20 +26,39 @@ def test_deploy_script_has_required_release_gates():
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
-    assert "load_dotenv('.env')" in content
+    assert "from modules.bootstrap import load_environment" in content
     assert "from modules.migrations import run_migrations" in content
     assert "scripts/publish-frontend.sh" in content
-    assert "systemctl --user reload" in content
+    assert "systemctl --user stop qr-system.service" in content
+    assert "systemctl --user start qr-system.service" in content
+    assert "scripts/rollback-deployment.sh" in content
+    assert "deployment_manifest.py" in content
     assert "health_is_ok" in content
-    assert "> .deployed_commit" in content
+    assert "atomic_write_deployed_commit" in content
     assert "git pull" not in content
+    assert "systemctl --user reload" not in content
     assert "--skip-tests" not in content
+    assert 'git -C "$PROJECT_ROOT" switch --detach "$before_commit"' in content
+    assert content.index('"${1:-}" == "--check-only"') < content.index(
+        "if [[ ! -f .deployed_commit ]]"
+    )
 
+    stop_index = content.index("systemctl --user stop qr-system.service")
     backup_index = content.index("scripts/backup-db.sh")
     attachment_migration_index = content.index("scripts/migrate-employee-documents.sh")
     migration_index = content.index("from modules.migrations import run_migrations")
     build_index = content.rindex("scripts/publish-frontend.sh")
-    assert backup_index < attachment_migration_index < migration_index < build_index
+    marker_index = content.rindex('atomic_write_deployed_commit "$commit"')
+    start_index = content.rindex("systemctl --user start qr-system.service")
+    assert (
+        stop_index
+        < backup_index
+        < attachment_migration_index
+        < migration_index
+        < build_index
+        < marker_index
+        < start_index
+    )
 
 
 def test_employee_documents_share_verified_attachment_backup_boundary():
@@ -47,8 +74,8 @@ def test_employee_documents_share_verified_attachment_backup_boundary():
     assert 'EMPLOYEE_DOCUMENT_DIR = os.path.join(DATA_DIR, "attachments", "employee_docs")' in config
     assert 'LEGACY_EMPLOYEE_DOCUMENT_DIR = os.path.join(BASE_DIR, "uploads", "employee_docs")' in config
     assert "EMPLOYEE_DOCUMENT_DIR" in users_route
-    assert 'ATTACH_DIR="/home/dubin/qr-system/data/attachments"' in backup
-    assert 'LEGACY_ATTACH_DIR="/home/dubin/qr-system/uploads/employee_docs"' in backup
+    assert 'ATTACH_DIR="$QR_PROJECT_ROOT/data/attachments"' in backup
+    assert 'LEGACY_ATTACH_DIR="$QR_PROJECT_ROOT/uploads/employee_docs"' in backup
     assert 'attachment_paths+=("data/attachments")' in backup
     assert 'attachment_paths+=("uploads/employee_docs")' in backup
     assert 'tar -tzf "$ATTACH_BACKUP"' in backup
@@ -56,6 +83,143 @@ def test_employee_documents_share_verified_attachment_backup_boundary():
     assert 'secure_chmod 0600 "$partial_file"' in migration
     assert 'mv "$partial_file" "$target_file"' in migration
     assert 'cmp -s "$source_file" "$target_file"' in migration
+
+
+def _create_database(path, version):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    try:
+        db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
+        db.execute("INSERT INTO users (username) VALUES ('operator')")
+        db.execute(f"PRAGMA user_version={version}")
+        db.commit()
+    finally:
+        db.close()
+
+
+def _archive_tree(path, project_root, relative_root):
+    with tarfile.open(path, "w:gz") as archive:
+        source = project_root / relative_root
+        if source.exists():
+            archive.add(source, arcname=relative_root.as_posix())
+
+
+def test_deployment_manifest_restores_database_attachments_and_release(tmp_path):
+    project_root = tmp_path / "project"
+    backup_root = tmp_path / "backups"
+    source_database = project_root / "data" / "production.db"
+    _create_database(source_database, 72)
+
+    attachment = project_root / "data" / "attachments" / "employee_docs" / "old.pdf"
+    attachment.parent.mkdir(parents=True)
+    attachment.write_bytes(b"verified attachment")
+    static_asset = project_root / "public" / "static" / "app.js"
+    static_asset.parent.mkdir(parents=True)
+    static_asset.write_text("old release", encoding="utf-8")
+
+    backup_root.mkdir()
+    database_backup = backup_root / "production.db"
+    shutil.copy2(source_database, database_backup)
+    attachment_backup = backup_root / "attachments.tar.gz"
+    release_backup = backup_root / "release.tar.gz"
+    _archive_tree(
+        attachment_backup, project_root, Path("data") / "attachments"
+    )
+    _archive_tree(release_backup, project_root, Path("public") / "static")
+
+    backup_metadata = backup_root / "backup.json"
+    deployment_manifest.create_backup_metadata(
+        SimpleNamespace(
+            database=str(database_backup),
+            attachments=str(attachment_backup),
+            attachment_root=["data/attachments"],
+            output=str(backup_metadata),
+        )
+    )
+    manifest_path = backup_root / "deployment.json"
+    deployment_manifest.prepare_deployment_manifest(
+        SimpleNamespace(
+            backup_metadata=str(backup_metadata),
+            release_backup=str(release_backup),
+            deployment_key="test-deployment",
+            before_commit="a" * 40,
+            target_commit="b" * 40,
+            target_database_version=73,
+            output=str(manifest_path),
+        )
+    )
+
+    source_database.unlink()
+    _create_database(source_database, 73)
+    attachment.write_bytes(b"changed attachment")
+    (attachment.parent / "new.pdf").write_bytes(b"new attachment")
+    static_asset.write_text("new release", encoding="utf-8")
+
+    deployment_manifest.restore_deployment(
+        SimpleNamespace(
+            manifest=str(manifest_path),
+            database=str(source_database),
+            project_root=str(project_root),
+        )
+    )
+
+    with sqlite3.connect(source_database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 72
+        assert db.execute("SELECT username FROM users").fetchone()[0] == "operator"
+    assert attachment.read_bytes() == b"verified attachment"
+    assert not (attachment.parent / "new.pdf").exists()
+    assert static_asset.read_text(encoding="utf-8") == "old release"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "data_restored"
+
+
+def test_backup_verification_rejects_attachment_path_traversal(tmp_path):
+    database = tmp_path / "production.db"
+    _create_database(database, 73)
+    archive_path = tmp_path / "attachments.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        payload = b"unsafe"
+        member = tarfile.TarInfo("../outside.txt")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+
+    metadata_path = tmp_path / "backup.json"
+    deployment_manifest.create_backup_metadata(
+        SimpleNamespace(
+            database=str(database),
+            attachments=str(archive_path),
+            attachment_root=[],
+            output=str(metadata_path),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe attachment archive path"):
+        deployment_manifest.verify_backup_metadata(metadata_path)
+
+
+def test_deployment_manifest_refuses_to_overwrite_existing_evidence(tmp_path):
+    manifest_path = tmp_path / "deployment.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="already exists"):
+        deployment_manifest.prepare_deployment_manifest(
+            SimpleNamespace(output=str(manifest_path))
+        )
+
+
+def test_rollback_script_records_failures_and_restores_all_release_state():
+    content = (PROJECT_ROOT / "scripts" / "rollback-deployment.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "trap record_rollback_failure ERR" in content
+    assert 'systemctl --user stop qr-system.service || true' in content
+    assert 'deployment_manifest.py" restore' in content
+    assert 'git -C "$PROJECT_ROOT" switch --detach "$before_commit"' in content
+    assert '.deployed_commit.tmp.$$' in content
+    assert "systemctl --user start qr-system.service" in content
+    assert "--status rolled_back" in content
+    assert "--status rollback_failed" in content
 
 
 def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
@@ -123,6 +287,27 @@ def test_build_restart_runs_migrations_before_restarting_service():
     assert "systemctl --user restart qr-system.service" in content
     assert "reload-or-restart" not in content
     assert content.index("init_db") < content.index("systemctl --user restart")
+
+
+def test_gunicorn_startup_only_verifies_schema_and_never_runs_migrations():
+    content = (PROJECT_ROOT / "gunicorn.conf.py").read_text(encoding="utf-8")
+
+    assert "from modules.db import verify_schema" in content
+    assert "verify_schema()" in content
+    assert "init_db" not in content
+    assert "run_migrations" not in content
+
+
+def test_all_application_entrypoints_load_environment_before_config_or_app():
+    app_content = (PROJECT_ROOT / "modules" / "app.py").read_text(encoding="utf-8")
+    server_content = (PROJECT_ROOT / "server.py").read_text(encoding="utf-8")
+    gunicorn_content = (PROJECT_ROOT / "gunicorn.conf.py").read_text(encoding="utf-8")
+
+    assert app_content.index("load_environment()") < app_content.index("from modules.config")
+    assert server_content.index("load_environment()") < server_content.index("from modules.app")
+    assert gunicorn_content.index("load_environment(base_dir)") < gunicorn_content.index(
+        "import gunicorn"
+    )
 
 
 def test_build_restart_atomically_syncs_deployed_commit_before_restart():

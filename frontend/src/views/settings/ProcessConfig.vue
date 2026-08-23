@@ -151,6 +151,7 @@ const {
   config, current, openRevision, draft, pending, revisions, form, revisionReason,
   loading, historyLoading, busy, operationError,
   canCreate, canSubmit, canApprove, canReject, canEditDraft, isDraftOwner,
+  canHistory,
   configValuesDirty, processConfigDirty,
   loadProcessConfig, loadHistory, saveDraft, submitRevision, approveRevision,
   rejectRevision, discardChanges, processConfigStatusLabel,

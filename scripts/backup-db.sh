@@ -4,10 +4,11 @@ umask 077
 # QR System DB Backup with integrity verification
 # cron: 0 3 * * * /home/dubin/qr-system/scripts/backup-db.sh >> /home/dubin/qr-system/data/backups/backup.log 2>&1
 
-DB_PATH="/home/dubin/qr-system/data/production.db"
-ATTACH_DIR="/home/dubin/qr-system/data/attachments"
-LEGACY_ATTACH_DIR="/home/dubin/qr-system/uploads/employee_docs"
-BACKUP_DIR="/home/dubin/qr-system/data/backups"
+QR_PROJECT_ROOT="${QR_PROJECT_ROOT:-/home/dubin/qr-system}"
+DB_PATH="${DB_PATH:-$QR_PROJECT_ROOT/data/production.db}"
+ATTACH_DIR="$QR_PROJECT_ROOT/data/attachments"
+LEGACY_ATTACH_DIR="$QR_PROJECT_ROOT/uploads/employee_docs"
+BACKUP_DIR="${BACKUP_DIR:-$QR_PROJECT_ROOT/data/backups}"
 KEEP_DAYS=30
 LOG_TAG="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
@@ -59,23 +60,42 @@ fi
 if [ -d "$LEGACY_ATTACH_DIR" ] && [ "$(ls -A "$LEGACY_ATTACH_DIR" 2>/dev/null)" ]; then
     attachment_paths+=("uploads/employee_docs")
 fi
+ATTACH_BACKUP="$BACKUP_DIR/attachments_${TIMESTAMP}.tar.gz"
 if [ "${#attachment_paths[@]}" -gt 0 ]; then
-    ATTACH_BACKUP="$BACKUP_DIR/attachments_${TIMESTAMP}.tar.gz"
-    tar -czf "$ATTACH_BACKUP" -C "/home/dubin/qr-system" "${attachment_paths[@]}" 2>/dev/null
-    tar -tzf "$ATTACH_BACKUP" >/dev/null
-    chmod 0600 "$ATTACH_BACKUP"
-    sha256sum "$ATTACH_BACKUP" > "$ATTACH_BACKUP.sha256"
-    chmod 0600 "$ATTACH_BACKUP.sha256"
-    echo "$LOG_TAG Attachments backup: $ATTACH_BACKUP"
+    tar -czf "$ATTACH_BACKUP" -C "$QR_PROJECT_ROOT" "${attachment_paths[@]}" 2>/dev/null
+else
+    tar -czf "$ATTACH_BACKUP" --files-from /dev/null
 fi
+tar -tzf "$ATTACH_BACKUP" >/dev/null
+chmod 0600 "$ATTACH_BACKUP"
+sha256sum "$ATTACH_BACKUP" > "$ATTACH_BACKUP.sha256"
+chmod 0600 "$ATTACH_BACKUP.sha256"
+echo "$LOG_TAG Attachments backup: $ATTACH_BACKUP"
 
 find "$BACKUP_DIR" -name "production_*.db" -mtime +$KEEP_DAYS -delete 2>/dev/null
 find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$KEEP_DAYS -delete 2>/dev/null
 find "$BACKUP_DIR" -name "attachments_*.tar.gz.sha256" -mtime +$KEEP_DAYS -delete 2>/dev/null
 find "$BACKUP_DIR" -name "weekly_*.db" -mtime +90 -delete 2>/dev/null
+find "$BACKUP_DIR" -name "backup_*.json" -mtime +$KEEP_DAYS -delete 2>/dev/null
 
 # Restore verification: test the backup can be opened
 RESTORE_TEST=$(/usr/bin/sqlite3 "$BACKUP_FILE" "SELECT COUNT(*) FROM users" 2>&1)
 if [ -z "$RESTORE_TEST" ] || [ "$RESTORE_TEST" -lt 1 ] 2>/dev/null; then
-    echo "$LOG_TAG WARNING: restore test returned unexpected result: $RESTORE_TEST"
+    echo "$LOG_TAG RESTORE TEST FAILED: $RESTORE_TEST" >&2
+    exit 1
 fi
+
+BACKUP_METADATA_FILE="${BACKUP_METADATA_FILE:-$BACKUP_DIR/backup_${TIMESTAMP}.json}"
+metadata_args=(
+    backup
+    --output "$BACKUP_METADATA_FILE"
+    --database "$BACKUP_FILE"
+    --attachments "$ATTACH_BACKUP"
+)
+for attachment_path in "${attachment_paths[@]}"; do
+    metadata_args+=(--attachment-root "$attachment_path")
+done
+python3 "$QR_PROJECT_ROOT/scripts/deployment_manifest.py" "${metadata_args[@]}"
+python3 "$QR_PROJECT_ROOT/scripts/deployment_manifest.py" verify-backup \
+    --metadata "$BACKUP_METADATA_FILE"
+echo "BACKUP_METADATA=$BACKUP_METADATA_FILE"

@@ -5,14 +5,15 @@ qr-system — Flask 应用实例
 from flask import Flask, request, jsonify
 from flasgger import Swagger
 import os
-from dotenv import load_dotenv
+
+from modules.bootstrap import load_environment
+
+# Load secrets before importing modules.config, which deliberately fails closed
+# when SECRET_KEY is absent.
+load_environment()
+
 from modules.config import DB_PATH, EMPLOYEE_DOCUMENT_MAX_BYTES
 from modules.runtime_version import get_application_version, get_deployed_commit
-
-# Load .env file (production secrets)
-_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
-if os.path.exists(_env_file):
-    load_dotenv(_env_file)
 
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.environ.get('PUBLIC_DIR') or os.path.join(_base, 'public')
