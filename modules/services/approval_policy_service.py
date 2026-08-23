@@ -145,8 +145,18 @@ class ApprovalPolicyService:
         }
         if legacy_snapshot is not None and db is not None:
             def digest(value):
-                comparable = dict(value)
-                comparable.pop("source", None)
+                comparable = {
+                    "require_approval": bool(value.get("require_approval")),
+                    "approval_level": int(value.get("approval_level") or 1),
+                    "roles": [
+                        {
+                            "level": int(role.get("level") or 0),
+                            "role_id": role.get("role_id"),
+                            "code": str(role.get("code") or "").strip().lower(),
+                        }
+                        for role in value.get("roles") or []
+                    ],
+                }
                 return hashlib.sha256(json.dumps(comparable, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
             legacy_digest = digest(legacy_snapshot)
             versioned_digest = digest(snapshot)
