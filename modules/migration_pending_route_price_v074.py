@@ -48,12 +48,12 @@ def _duplicate_pending_draft_price_ids(db):
         "JOIN process_versions draft_process "
         "ON draft_process.id=draft.process_version_id "
         "WHERE draft.status='draft' AND draft_route.status='pending_approval' "
-        "AND draft_process.status='pending_approval' "
+        "AND draft_process.status IN ('published','pending_approval') "
         "GROUP BY draft.route_version_id,draft.process_version_id HAVING COUNT(*)>1"
         ") duplicate ON duplicate.route_version_id=price.route_version_id "
         "AND duplicate.process_version_id=price.process_version_id "
         "WHERE price.status='draft' AND route_version.status='pending_approval' "
-        "AND process_version.status='pending_approval' ORDER BY price.id"
+        "AND process_version.status IN ('published','pending_approval') ORDER BY price.id"
     ).fetchall()
     return [int(row[0]) for row in rows]
 
@@ -66,7 +66,6 @@ def _rebuild_route_price_versions(db):
     if V074_PRICE_COLUMNS.issubset(_route_price_columns(db)):
         return
 
-    foreign_keys_enabled = bool(db.execute("PRAGMA foreign_keys").fetchone()[0])
     managed_triggers = set(PRICE_VERSION_MUTATION_TRIGGERS) | {
         "prevent_referenced_price_version_delete",
     }
@@ -78,14 +77,11 @@ def _rebuild_route_price_versions(db):
         ).fetchall()
         if row["name"] not in managed_triggers and row["sql"]
     ]
-    if foreign_keys_enabled:
-        db.execute("PRAGMA foreign_keys=OFF")
-    try:
-        for trigger_name in (*PRICE_VERSION_MUTATION_TRIGGERS, "prevent_referenced_price_version_delete"):
-            db.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
-        for trigger_name, _ in preserved_triggers:
-            db.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
-        db.execute(
+    for trigger_name in (*PRICE_VERSION_MUTATION_TRIGGERS, "prevent_referenced_price_version_delete"):
+        db.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    for trigger_name, _ in preserved_triggers:
+        db.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    db.execute(
             """
             CREATE TABLE route_price_versions_v074 (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,11 +109,11 @@ def _rebuild_route_price_versions(db):
                 process_version_id INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT,
                 legacy_binding_unavailable INTEGER NOT NULL DEFAULT 0
                     CHECK(legacy_binding_unavailable IN (0,1)),
-                idempotency_key TEXT NOT NULL DEFAULT '',
+                idempotency_key TEXT,
                 request_digest TEXT NOT NULL DEFAULT '',
                 route_content_digest_snapshot TEXT NOT NULL DEFAULT '',
                 process_content_digest_snapshot TEXT NOT NULL DEFAULT '',
-                voided_at TEXT NOT NULL DEFAULT '',
+                voided_at TEXT,
                 voided_by INTEGER,
                 voided_by_name TEXT NOT NULL DEFAULT '',
                 void_reason TEXT NOT NULL DEFAULT '',
@@ -130,8 +126,8 @@ def _rebuild_route_price_versions(db):
                 CHECK(valid_to IS NULL OR valid_to = '' OR valid_to > valid_from)
             )
             """
-        )
-        db.execute(
+    )
+    db.execute(
             """
             INSERT INTO route_price_versions_v074 (
                 id,route_id,process_id,normal_unit_price_micros,rework_rate_basis_points,
@@ -145,21 +141,11 @@ def _rebuild_route_price_versions(db):
                 row_version,route_version_id,process_version_id,legacy_binding_unavailable
             FROM route_price_versions
             """
-        )
-        db.execute("DROP TABLE route_price_versions")
-        db.execute("ALTER TABLE route_price_versions_v074 RENAME TO route_price_versions")
-        for _, trigger_sql in preserved_triggers:
-            db.execute(trigger_sql)
-    except Exception:
-        if foreign_keys_enabled and not db.in_transaction:
-            db.execute("PRAGMA foreign_keys=ON")
-        raise
-
-    # The migration runner calls each migration outside a transaction. Commit the
-    # table swap before restoring its connection-level foreign-key setting.
-    if foreign_keys_enabled:
-        db.commit()
-        db.execute("PRAGMA foreign_keys=ON")
+    )
+    db.execute("DROP TABLE route_price_versions")
+    db.execute("ALTER TABLE route_price_versions_v074 RENAME TO route_price_versions")
+    for _, trigger_sql in preserved_triggers:
+        db.execute(trigger_sql)
 
 
 def _create_member_event_table(db):
@@ -315,12 +301,22 @@ def m074_pending_route_price_controls(db):
         raise MigrationInvariantError(
             "V074 invalid exact price bindings: " + ",".join(map(str, blocking))
         )
-    _rebuild_route_price_versions(db)
-    _backfill_price_digest_snapshots(db)
-    _create_member_event_table(db)
-    _create_reference_audit_table(db)
-    _create_price_v074_indexes(db)
-    _create_price_v074_triggers(db)
+    db.execute("SAVEPOINT pending_route_price_v074")
+    try:
+        # Keep connection-level foreign-key enforcement intact. SQLite defers
+        # checks until the table swap has recreated the referenced table.
+        db.execute("PRAGMA defer_foreign_keys=ON")
+        _rebuild_route_price_versions(db)
+        _backfill_price_digest_snapshots(db)
+        _create_member_event_table(db)
+        _create_reference_audit_table(db)
+        _create_price_v074_indexes(db)
+        _create_price_v074_triggers(db)
+    except Exception:
+        db.execute("ROLLBACK TO pending_route_price_v074")
+        db.execute("RELEASE pending_route_price_v074")
+        raise
+    db.execute("RELEASE pending_route_price_v074")
 
 
 PENDING_ROUTE_PRICE_MIGRATIONS = [
