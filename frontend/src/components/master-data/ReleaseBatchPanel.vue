@@ -76,8 +76,15 @@
             <div v-for="price in selectedBatch.price_versions" :key="price.id" class="price-line">
               <span>工序 {{ price.process_id }} · 路线版本 {{ price.route_version_id }}</span>
               <strong>{{ money(price.normal_unit_price_micros) }}</strong>
-              <span>{{ priceStatus(price.status) }}</span>
+              <span :class="{ 'text-danger': invalidPriceIds.has(Number(price.id)) }">{{ priceStatus(price.status) }}</span>
+              <div v-if="selectedBatch.status === 'draft' && invalidPriceIds.has(Number(price.id))" class="member-repair-actions">
+                <button type="button" class="btn btn-default btn-sm" :disabled="busy" :data-testid="`remove-invalid-price-${price.id}`" @click="removeInvalidPrice(price)">移除</button>
+                <button type="button" class="btn btn-default btn-sm" :disabled="busy" :data-testid="`replace-invalid-price-${price.id}`" @click="replaceInvalidPrice(price)">替换</button>
+              </div>
             </div>
+            <p v-if="invalidPrices.length" class="release-error" data-testid="invalid-release-members">
+              {{ invalidPrices.map(price => `工价 #${price.id} ${price.status === 'voided' ? '已作废' : '未匹配路线节点'}`).join('；') }}
+            </p>
           </section>
 
           <section v-if="selectedBatch.status === 'pending_approval'" class="dependency-section disposition-section">
@@ -100,7 +107,7 @@
 
           <p v-if="operationError" class="release-error">{{ operationError }}</p>
           <footer class="batch-actions">
-            <button v-if="selectedBatch.status === 'draft' && canSubmit" type="button" class="btn btn-primary" :disabled="busy" @click="submitSelected">提交审批</button>
+            <button v-if="selectedBatch.status === 'draft' && canSubmit" type="button" class="btn btn-primary" :disabled="busy || invalidPrices.length > 0" @click="submitSelected">提交审批</button>
             <button v-if="selectedBatch.status === 'pending_approval' && canReject" type="button" class="btn btn-default" :disabled="busy" @click="rejectSelected">驳回</button>
             <button v-if="selectedBatch.status === 'pending_approval' && canApprove" type="button" class="btn btn-primary" :disabled="busy || !approvalReady" @click="approveSelected">批准并原子发布</button>
           </footer>
@@ -168,6 +175,17 @@ const approvalReady = computed(() => {
     return false
   }
 })
+const routeNodeBindings = computed(() => new Set(
+  (selectedBatch.value?.route_versions || []).flatMap(route => (
+    route.items || []
+  ).map(node => `${Number(route.id)}:${Number(node.process_version_id)}`))
+))
+const invalidPrices = computed(() => (selectedBatch.value?.price_versions || []).filter(
+  price => price.status === 'voided' || !routeNodeBindings.value.has(
+    `${Number(price.route_version_id)}:${Number(price.process_version_id)}`
+  )
+))
+const invalidPriceIds = computed(() => new Set(invalidPrices.value.map(price => Number(price.id))))
 
 watch(uniqueNodes, nodes => {
   Object.keys(dispositions).forEach(key => delete dispositions[key])
@@ -180,7 +198,10 @@ function versionStatus(status) { return routeVersionStatusLabel(status) }
 function priceStatus(status) { return ({ draft: '草稿', approved: '已批准', retired: '已结束' }[status] || status || '-') }
 function money(micros) { return Number.isFinite(Number(micros)) ? `¥${(Number(micros) / 1000000).toFixed(4)}` : '-' }
 function exactPrices(node) {
-  return (selectedBatch.value?.price_versions || []).filter(price => Number(price.process_version_id) === Number(node.process_version_id))
+  return (selectedBatch.value?.price_versions || []).filter(price => (
+    Number(price.process_version_id) === Number(node.process_version_id)
+    && ['draft', 'approved'].includes(price.status)
+  ))
 }
 
 async function reload() {
@@ -202,7 +223,11 @@ function openCreate() {
   createForm.revision_reason = route ? `发布路线 ${route.name} V${route.version}` : ''
   createForm.route_version_ids = route?.id ? [Number(route.id)] : []
   createForm.process_version_ids = [...new Set((route?.items || []).filter(node => node.process_version_status !== 'published').map(node => Number(node.process_version_id)))]
-  createForm.price_version_ids = props.defaultPriceVersions.filter(price => price.status === 'draft').map(price => Number(price.id))
+  createForm.price_version_ids = props.defaultPriceVersions.filter(price => (
+    price.status === 'draft'
+    && Number(price.route_version_id) === Number(route?.id)
+    && (route?.items || []).some(node => Number(node.process_version_id) === Number(price.process_version_id))
+  )).map(price => Number(price.id))
   showCreate.value = true
 }
 
@@ -234,6 +259,26 @@ async function rejectSelected() {
   const reason = globalThis.prompt?.('请输入驳回原因')
   if (!reason) return
   try { await state.rejectBatch(reason); showToast('发布批次已驳回') } catch (error) { showToast(error.message || '驳回失败', 'error') }
+}
+
+async function removeInvalidPrice(price) {
+  const reason = globalThis.prompt?.('请输入移除原因')
+  if (!reason) return
+  try {
+    await state.removeMember('price_version', price.id, reason)
+    showToast('失效工价成员已移除')
+  } catch (error) { showToast(error.message || '移除失败', 'error') }
+}
+
+async function replaceInvalidPrice(price) {
+  const replacementId = Number(globalThis.prompt?.('请输入替换工价版本 ID'))
+  if (!replacementId) return
+  const reason = globalThis.prompt?.('请输入替换原因')
+  if (!reason) return
+  try {
+    await state.replaceMember('price_version', price.id, replacementId, reason)
+    showToast('失效工价成员已替换')
+  } catch (error) { showToast(error.message || '替换失败', 'error') }
 }
 
 onMounted(reload)
@@ -269,7 +314,8 @@ onMounted(reload)
 .route-dependencies { margin:10px 0 14px; padding-left:22px; }
 .route-dependencies li { display:flex; justify-content:space-between; gap:12px; padding:5px 0; font-size:13px; }
 .route-dependencies li span:last-child { color:var(--text-placeholder); }
-.price-line { display:grid; grid-template-columns:minmax(0, 1fr) 120px 90px; gap:12px; padding:7px 0; font-size:13px; }
+.price-line { display:grid; grid-template-columns:minmax(0, 1fr) 120px 90px auto; gap:12px; align-items:center; padding:7px 0; font-size:13px; }
+.member-repair-actions { display:flex; gap:6px; }
 .dependency-empty, .release-empty { padding:30px 10px; color:var(--text-placeholder); text-align:center; }
 .disposition-row { display:grid; grid-template-columns:minmax(150px, 1fr) minmax(150px, .8fr) minmax(180px, 1.2fr); gap:10px; align-items:center; padding:8px 0; }
 .disposition-row > div { display:grid; gap:2px; }

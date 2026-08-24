@@ -7,4 +7,6 @@ export const masterDataReleasesApi = {
   submitReleaseBatch: (batchId, data) => request('POST', `/api/master-data-release-batches/${batchId}/submit`, data),
   approveReleaseBatch: (batchId, data) => request('POST', `/api/master-data-release-batches/${batchId}/approve`, data),
   rejectReleaseBatch: (batchId, data) => request('POST', `/api/master-data-release-batches/${batchId}/reject`, data),
+  removeReleaseBatchMember: (batchId, data) => request('POST', `/api/master-data-release-batches/${batchId}/members/remove`, data),
+  replaceReleaseBatchMember: (batchId, data) => request('POST', `/api/master-data-release-batches/${batchId}/members/replace`, data),
 }

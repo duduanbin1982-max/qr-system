@@ -179,6 +179,12 @@ import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
 
 
+const props = defineProps({
+  routeVersionId: { type: Number, default: null },
+  processVersionId: { type: Number, default: null },
+  createIntent: { type: Boolean, default: false },
+})
+
 const {
   references,
   versions,
@@ -192,6 +198,7 @@ const viewMode = ref('published')
 const editorOpen = ref(false)
 const selectedRow = ref(null)
 const approving = ref(false)
+const intentHandled = ref(false)
 
 const canPrepare = computed(() => can('wages:prepare'))
 const canApprove = computed(() => can('wages:approve'))
@@ -296,9 +303,24 @@ function closeEditor() {
 async function refresh() {
   try {
     await load()
+    restoreExactIntent()
   } catch (error) {
     showToast(error.message || '工价版本加载失败', 'error')
   }
+}
+
+function restoreExactIntent() {
+  if (intentHandled.value || !props.routeVersionId || !props.processVersionId) return
+  const row = referenceRows.value.find(item => (
+    Number(item.route_version_id) === Number(props.routeVersionId)
+    && Number(item.process_version_id) === Number(props.processVersionId)
+  ))
+  if (!row) return
+  viewMode.value = row.route_version_status === 'pending_approval'
+    ? 'pending-route'
+    : 'published'
+  intentHandled.value = true
+  if (props.createIntent) openEditor(row)
 }
 
 async function handleEditorResult() {
