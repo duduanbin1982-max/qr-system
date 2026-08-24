@@ -4,6 +4,7 @@ qr-system — 数据库层：连接管理、初始化、设置缓存
 import os
 import sqlite3
 import hashlib
+from pathlib import Path
 from typing import Any, Optional, Tuple
 import bcrypt
 import json
@@ -11,7 +12,7 @@ import time
 from flask import g
 
 from modules.config import DB_PATH, PREDEFINED_ROLES
-from modules.migrations import run_migrations
+from modules.migrations import LATEST_VERSION, run_migrations
 
 # 缓存系统设置（避免每次查询）
 _settings_cache = None
@@ -91,5 +92,27 @@ def init_db() -> None:
     try:
         db.execute("PRAGMA journal_mode=WAL")
         run_migrations(db)
+    finally:
+        db.close()
+
+
+def verify_schema() -> int:
+    """Read-only startup guard that rejects missing or stale production schemas."""
+    database_path = Path(DB_PATH).resolve()
+    if not database_path.is_file():
+        raise RuntimeError(f"数据库不存在：{database_path}")
+    uri = database_path.as_uri() + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True)
+    try:
+        current = int(db.execute("PRAGMA user_version").fetchone()[0])
+        if current != LATEST_VERSION:
+            raise RuntimeError(
+                f"数据库版本不匹配：当前 v{current}，应用要求 v{LATEST_VERSION}；"
+                "请先通过受控部署流程执行迁移"
+            )
+        result = db.execute("PRAGMA quick_check").fetchone()[0]
+        if result != "ok":
+            raise RuntimeError(f"数据库快速完整性检查失败：{result}")
+        return current
     finally:
         db.close()

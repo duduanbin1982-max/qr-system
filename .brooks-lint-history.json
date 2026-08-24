@@ -438,5 +438,16 @@
       "suggestion": 1
     },
     "scope": "角色管理模块：生产 4008e4ba 对应路由、服务、仓储、管理员策略、有效权限/主角色/审批角色解析、权限目录、Vue 页面/composable/API、相关测试及生产数据库只读快照；跳过生成文件和打包产物"
+  },
+  {
+    "date": "2026-08-23T16:15:00+08:00",
+    "mode": "Architecture Audit",
+    "score": 68,
+    "findings": {
+      "critical": 0,
+      "warning": 6,
+      "suggestion": 2
+    },
+    "scope": "全量本地工作树 qr-system-position-v070-cutover-fix @ e8b1c52（与 github/master c106671 同树）；modules、frontend/src、public、scripts、tests、迁移/部署边界，排除 node_modules、data、缓存和打包产物"
   }
 ]

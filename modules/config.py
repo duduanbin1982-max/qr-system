@@ -6,6 +6,11 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.permission_catalog import ACTION_PERMISSION_DEFS, ALL_PERMISSION_CODES
+from modules.versioning_flags import (
+    environment_flag as _environment_flag,
+    get_versioning_flags,
+    validate_versioning_flags,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -30,41 +35,22 @@ PROCESS_VERSIONING_FLAG_NAMES = (
 )
 
 
-def _environment_flag(name, environ=None):
-    source = os.environ if environ is None else environ
-    return str(source.get(name, "false")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def get_process_versioning_flags(environ=None):
-    return {
-        name: _environment_flag(name, environ=environ)
-        for name in PROCESS_VERSIONING_FLAG_NAMES
-    }
+    return get_versioning_flags(PROCESS_VERSIONING_FLAG_NAMES, environ=environ)
 
 
 def validate_process_versioning_flags(flags=None):
-    values = dict(flags or {
+    values = flags or {
         name: globals().get(name, False) for name in PROCESS_VERSIONING_FLAG_NAMES
-    })
-    query_enabled = bool(values.get("PROCESS_VERSIONED_QUERY_ENABLED"))
-    audit_enabled = bool(values.get("PROCESS_VERSION_COMPAT_AUDIT_ENABLED"))
-    write_enabled = bool(values.get("PROCESS_VERSIONED_WRITE_ENABLED"))
-    legacy_blocked = bool(values.get("PROCESS_LEGACY_WRITE_BLOCKED"))
-    violations = []
-    if audit_enabled and not query_enabled:
-        violations.append("兼容双读审计要求先开启版本化查询")
-    if write_enabled and not query_enabled:
-        violations.append("版本化写入要求先开启版本化查询")
-    if legacy_blocked and not write_enabled:
-        violations.append("阻断 Legacy 写入要求先开启版本化写入")
-    if violations:
-        raise RuntimeError("工序版本化功能开关组合无效：" + "；".join(violations))
-    return values
+    }
+    return validate_versioning_flags(
+        values,
+        label="工序版本化",
+        query_key="PROCESS_VERSIONED_QUERY_ENABLED",
+        audit_key="PROCESS_VERSION_COMPAT_AUDIT_ENABLED",
+        write_key="PROCESS_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="PROCESS_LEGACY_WRITE_BLOCKED",
+    )
 
 
 _PROCESS_VERSIONING_FLAGS = get_process_versioning_flags()
@@ -92,34 +78,21 @@ POSITION_VERSIONING_FLAG_NAMES = (
 
 
 def get_position_versioning_flags(environ=None):
-    return {
-        name: _environment_flag(name, environ=environ)
-        for name in POSITION_VERSIONING_FLAG_NAMES
-    }
+    return get_versioning_flags(POSITION_VERSIONING_FLAG_NAMES, environ=environ)
 
 
 def validate_position_versioning_flags(flags=None):
-    values = dict(
-        flags
-        or {
-            name: globals().get(name, False)
-            for name in POSITION_VERSIONING_FLAG_NAMES
-        }
+    values = flags or {
+        name: globals().get(name, False) for name in POSITION_VERSIONING_FLAG_NAMES
+    }
+    return validate_versioning_flags(
+        values,
+        label="岗位版本化",
+        query_key="POSITION_VERSIONED_QUERY_ENABLED",
+        audit_key="POSITION_COMPAT_AUDIT_ENABLED",
+        write_key="POSITION_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="POSITION_LEGACY_WRITE_BLOCKED",
     )
-    query_enabled = bool(values.get("POSITION_VERSIONED_QUERY_ENABLED"))
-    audit_enabled = bool(values.get("POSITION_COMPAT_AUDIT_ENABLED"))
-    write_enabled = bool(values.get("POSITION_VERSIONED_WRITE_ENABLED"))
-    legacy_blocked = bool(values.get("POSITION_LEGACY_WRITE_BLOCKED"))
-    violations = []
-    if audit_enabled and not query_enabled:
-        violations.append("兼容双读审计要求先开启岗位版本化查询")
-    if write_enabled and not query_enabled:
-        violations.append("岗位版本化写入要求先开启版本化查询")
-    if legacy_blocked and not write_enabled:
-        violations.append("阻断岗位 Legacy 写入要求先开启版本化写入")
-    if violations:
-        raise RuntimeError("岗位版本化功能开关组合无效：" + "；".join(violations))
-    return values
 
 
 _POSITION_VERSIONING_FLAGS = get_position_versioning_flags()
@@ -147,25 +120,21 @@ APPROVAL_POLICY_FLAG_NAMES = (
 
 
 def get_approval_policy_flags(environ=None):
-    return {name: _environment_flag(name, environ=environ) for name in APPROVAL_POLICY_FLAG_NAMES}
+    return get_versioning_flags(APPROVAL_POLICY_FLAG_NAMES, environ=environ)
 
 
 def validate_approval_policy_flags(flags=None):
-    values = dict(flags or {name: globals().get(name, False) for name in APPROVAL_POLICY_FLAG_NAMES})
-    query = bool(values.get("APPROVAL_POLICY_VERSIONED_QUERY_ENABLED"))
-    audit = bool(values.get("APPROVAL_POLICY_COMPAT_AUDIT_ENABLED"))
-    write = bool(values.get("APPROVAL_POLICY_VERSIONED_WRITE_ENABLED"))
-    legacy_blocked = bool(values.get("APPROVAL_POLICY_LEGACY_WRITE_BLOCKED"))
-    violations = []
-    if audit and not query:
-        violations.append("审批策略兼容审计要求先开启版本化查询")
-    if write and not query:
-        violations.append("审批策略版本化写入要求先开启版本化查询")
-    if legacy_blocked and not write:
-        violations.append("阻断审批 Legacy 写入要求先开启版本化写入")
-    if violations:
-        raise RuntimeError("审批策略功能开关组合无效：" + "；".join(violations))
-    return values
+    values = flags or {
+        name: globals().get(name, False) for name in APPROVAL_POLICY_FLAG_NAMES
+    }
+    return validate_versioning_flags(
+        values,
+        label="审批策略",
+        query_key="APPROVAL_POLICY_VERSIONED_QUERY_ENABLED",
+        audit_key="APPROVAL_POLICY_COMPAT_AUDIT_ENABLED",
+        write_key="APPROVAL_POLICY_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="APPROVAL_POLICY_LEGACY_WRITE_BLOCKED",
+    )
 
 
 _APPROVAL_POLICY_FLAGS = get_approval_policy_flags()
