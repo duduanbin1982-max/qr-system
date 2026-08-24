@@ -141,6 +141,64 @@ class MasterDataReleaseRepository:
         return MasterDataReleaseRepository._attach_members(batches, db)
 
     @staticmethod
+    def active_batches_for_route_version(route_version_id, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT batch.* FROM master_data_release_batches batch "
+            "JOIN master_data_release_route_versions member ON member.batch_id=batch.id "
+            "WHERE member.route_version_id=? "
+            "AND batch.status IN ('draft','pending_approval') "
+            "ORDER BY batch.id",
+            (route_version_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def insert_release_member_event(payload, db):
+        key = str(payload.get("idempotency_key") or "")
+        existing = db.execute(
+            "SELECT * FROM master_data_release_member_events WHERE idempotency_key=?",
+            (key,),
+        ).fetchone()
+        if existing is not None:
+            return dict(existing)
+        try:
+            cursor = db.execute(
+                "INSERT INTO master_data_release_member_events ("
+                "batch_id,action,member_type,member_id,replacement_member_id,"
+                "actor_id,actor_name,reason,idempotency_key) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    payload["batch_id"], payload["action"], payload["member_type"],
+                    payload["member_id"], payload.get("replacement_member_id"),
+                    payload.get("actor_id"), payload.get("actor_name", ""),
+                    payload["reason"], key,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            replay = db.execute(
+                "SELECT * FROM master_data_release_member_events "
+                "WHERE idempotency_key=?", (key,)
+            ).fetchone()
+            if replay is None:
+                raise
+            return dict(replay)
+        row = db.execute(
+            "SELECT * FROM master_data_release_member_events WHERE id=?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        return dict(row)
+
+    @staticmethod
+    def list_release_member_events(batch_id, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT * FROM master_data_release_member_events "
+            "WHERE batch_id=? ORDER BY created_at,id", (batch_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
     def create_batch(payload, db):
         key = str(payload.get("idempotency_key") or "")
         existing = MasterDataReleaseRepository.batch_by_idempotency_key(key, db=db)
