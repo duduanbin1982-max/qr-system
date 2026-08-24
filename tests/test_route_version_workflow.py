@@ -8,6 +8,7 @@ from modules.domain.process_versioning import (
     ReleaseDependencyError,
     RouteProcessCategoryMismatchError,
 )
+from modules.domain.price_versioning import ProcessVersionNotFrozenError
 from modules.repositories.route_version_repository import RouteVersionRepository
 from modules.services.master_data_lifecycle_service import MasterDataLifecycleService
 from modules.services.process_version_service import ProcessVersionService
@@ -143,21 +144,16 @@ def test_route_publish_requires_published_process_versions_and_price_disposition
     draft_process = _create_process(client, preparer, "路线草稿依赖")["version"]
     created = _create_route(client, preparer, [draft_process])
     with client.application.app_context():
-        submitted = RouteVersionService.submit(
-            created["version"]["id"],
-            {"row_version": 0, "idempotency_key": f"submit-route-{uuid.uuid4().hex}"},
-            preparer,
-        )
-        with pytest.raises(ReleaseDependencyError) as process_error:
-            RouteVersionService.approve(
-                submitted["id"],
+        with pytest.raises(ProcessVersionNotFrozenError) as process_error:
+            RouteVersionService.submit(
+                created["version"]["id"],
                 {
-                    "row_version": submitted["row_version"],
-                    "idempotency_key": f"approve-route-{uuid.uuid4().hex}",
+                    "row_version": 0,
+                    "idempotency_key": f"submit-route-{uuid.uuid4().hex}",
                 },
-                approver,
+                preparer,
             )
-        assert process_error.value.details["reason_code"] == "ROUTE_PROCESS_VERSION_INVALID"
+        assert process_error.value.details["process_version_ids"] == [draft_process["id"]]
 
     _, process = _published_process(client, preparer, approver, "计件路线工序")
     route = _create_route(client, preparer, [process])
@@ -217,7 +213,13 @@ def test_route_rejection_and_lifecycle_are_audited(client):
             },
             approver,
         )
-    assert rejected["status"] == "rejected"
+        rejection_events = RouteVersionRepository.list_events(
+            rejected_route["root"]["id"]
+        )
+    assert rejected["status"] == "draft"
+    assert rejection_events[-1]["event_type"] == "rejected"
+    assert rejection_events[-1]["from_status"] == "pending_approval"
+    assert rejection_events[-1]["to_status"] == "draft"
 
     route = _create_route(client, preparer, [process])
     published = _publish_route(client, route["version"]["id"], preparer, approver)
@@ -249,7 +251,7 @@ def test_route_rejection_and_lifecycle_are_audited(client):
     assert events[-1]["event_type"] == "retired"
 
 
-def test_route_revision_uses_next_history_number_after_rejected_revision(client):
+def test_rejected_route_revision_is_edited_and_resubmitted_in_place(client):
     preparer, approver = _actors(client)
     _, process = _published_process(client, preparer, approver, "路线版本分配工序")
     route = _create_route(client, preparer, [process])
@@ -281,17 +283,29 @@ def test_route_revision_uses_next_history_number_after_rejected_revision(client)
             },
             approver,
         )
-        next_revision = RouteVersionService.create_revision(
-            route["root"]["id"],
+        updated = RouteVersionService.update_draft(
+            rejected["id"],
             {
-                "revision_reason": "基于当前发布版重新修订",
-                "idempotency_key": f"route-revision-{uuid.uuid4().hex}",
+                "row_version": rejected["row_version"],
+                "description": "驳回后修改节点说明",
+            },
+            preparer,
+        )
+        resubmitted = RouteVersionService.submit(
+            updated["id"],
+            {
+                "row_version": updated["row_version"],
+                "idempotency_key": f"resubmit-route-{uuid.uuid4().hex}",
             },
             preparer,
         )
 
     assert rejected["version"] == 2
-    assert next_revision["version"] == 3
-    assert next_revision["content_digest"] == RouteVersionService._content_digest(
-        next_revision
+    assert rejected["status"] == "draft"
+    assert updated["id"] == rejected["id"]
+    assert resubmitted["id"] == rejected["id"]
+    assert resubmitted["version"] == 2
+    assert resubmitted["status"] == "pending_approval"
+    assert resubmitted["content_digest"] == RouteVersionService._content_digest(
+        resubmitted
     )

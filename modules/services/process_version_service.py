@@ -386,11 +386,23 @@ class ProcessVersionService:
             if version is None:
                 raise NotFoundError("工序版本不存在")
             validate_process_version_transition(version["status"], "rejected")
+            expected = require_row_version(command.get("row_version"))
+            assert_row_version(expected, version["row_version"])
             assert_separation_of_duties(version["created_by"], actor["id"])
+            pending_routes = ProcessVersionRepository.pending_routes_for_process_version(
+                version_id, db=db
+            )
+            if pending_routes:
+                raise ConflictError(
+                    "工序版本仍被待审批路线引用，请先驳回依赖路线",
+                    details={
+                        "route_version_ids": [route["id"] for route in pending_routes]
+                    },
+                )
             rejected = ProcessVersionRepository.transition_version(
                 version_id,
                 "pending_approval",
-                require_row_version(command.get("row_version")),
+                expected,
                 "rejected",
                 {},
                 db,
