@@ -62,6 +62,78 @@ def _route_price_columns(db):
     return {row["name"] for row in db.execute("PRAGMA table_info(route_price_versions)")}
 
 
+def _direct_price_reference_tables(db):
+    tables = [
+        row[0]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    ]
+    return [
+        table
+        for table in tables
+        if table != "route_price_versions"
+        and any(
+            row[2] == "route_price_versions"
+            for row in db.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+        )
+    ]
+
+
+def _detach_price_reference_tables(db):
+    detached = []
+    for table in _direct_price_reference_tables(db):
+        schema = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()[0]
+        columns = [
+            row[1] for row in db.execute(f'PRAGMA table_info("{table}")').fetchall()
+        ]
+        dependent_objects = [
+            row[0]
+            for row in db.execute(
+                "SELECT sql FROM sqlite_master WHERE tbl_name=? "
+                "AND type IN ('index','trigger') AND sql IS NOT NULL "
+                "ORDER BY type,name",
+                (table,),
+            ).fetchall()
+        ]
+        backup_table = f"__v074_{table}_backup"
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (backup_table,),
+        ).fetchone():
+            raise MigrationInvariantError(
+                f"V074 temporary backup table already exists: {backup_table}"
+            )
+        db.execute(f'CREATE TABLE "{backup_table}" AS SELECT * FROM "{table}"')
+        db.execute(f'DROP TABLE "{table}"')
+        detached.append(
+            {
+                "table": table,
+                "backup_table": backup_table,
+                "schema": schema,
+                "columns": columns,
+                "dependent_objects": dependent_objects,
+            }
+        )
+    return detached
+
+
+def _restore_price_reference_tables(db, detached):
+    for item in detached:
+        db.execute(item["schema"])
+        columns = ",".join(f'"{column}"' for column in item["columns"])
+        db.execute(
+            f'INSERT INTO "{item["table"]}" ({columns}) '
+            f'SELECT {columns} FROM "{item["backup_table"]}"'
+        )
+        for statement in item["dependent_objects"]:
+            db.execute(statement)
+        db.execute(f'DROP TABLE "{item["backup_table"]}"')
+
+
 def _rebuild_route_price_versions(db):
     if V074_PRICE_COLUMNS.issubset(_route_price_columns(db)):
         return
@@ -306,7 +378,14 @@ def m074_pending_route_price_controls(db):
         # Keep connection-level foreign-key enforcement intact. SQLite defers
         # checks until the table swap has recreated the referenced table.
         db.execute("PRAGMA defer_foreign_keys=ON")
+        rebuilding_price_table = not V074_PRICE_COLUMNS.issubset(
+            _route_price_columns(db)
+        )
+        price_reference_tables = (
+            _detach_price_reference_tables(db) if rebuilding_price_table else []
+        )
         _rebuild_route_price_versions(db)
+        _restore_price_reference_tables(db, price_reference_tables)
         _backfill_price_digest_snapshots(db)
         _create_member_event_table(db)
         _create_reference_audit_table(db)

@@ -270,6 +270,53 @@ def test_v074_preserves_prices_and_adds_voided_lifecycle():
         db.execute("UPDATE route_price_versions SET idempotency_key='v074-unique' WHERE id=?", (null_price_id,))
 
 
+def test_v074_preserves_release_batch_price_members_during_price_table_rebuild():
+    db = migrate_database_through(73)
+    price_ids = seed_price_lifecycles_with_references(db)
+    batch_id = db.execute(
+        "INSERT INTO master_data_release_batches(release_no,revision_reason) "
+        "VALUES ('V074-PRICE-MEMBER','preserve exact member')"
+    ).lastrowid
+    member_id = db.execute(
+        "INSERT INTO master_data_release_price_versions(batch_id,price_version_id) "
+        "VALUES (?,?)",
+        (batch_id, price_ids[0]),
+    ).lastrowid
+    before = db.execute(
+        "SELECT id,batch_id,price_version_id FROM master_data_release_price_versions"
+    ).fetchall()
+
+    m074_pending_route_price_controls(db)
+
+    assert db.execute(
+        "SELECT id,batch_id,price_version_id FROM master_data_release_price_versions"
+    ).fetchall() == before
+    assert db.execute(
+        "SELECT price_version_id FROM master_data_release_price_versions WHERE id=?",
+        (member_id,),
+    ).fetchone()[0] == price_ids[0]
+    assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_v074_refuses_to_overwrite_unexpected_temporary_backup_table():
+    db = seed_pending_price_binding(migrate_database_through(73))
+    db.execute(
+        "CREATE TABLE __v074_master_data_release_price_versions_backup "
+        "(evidence TEXT NOT NULL)"
+    )
+    db.execute(
+        "INSERT INTO __v074_master_data_release_price_versions_backup(evidence) "
+        "VALUES ('preserve-me')"
+    )
+
+    with pytest.raises(MigrationInvariantError, match="temporary backup table already exists"):
+        m074_pending_route_price_controls(db)
+
+    assert db.execute(
+        "SELECT evidence FROM __v074_master_data_release_price_versions_backup"
+    ).fetchone()[0] == "preserve-me"
+
+
 def test_v074_voided_price_is_immutable():
     db = migrated_v074_database_with_draft_price()
     db.execute(
