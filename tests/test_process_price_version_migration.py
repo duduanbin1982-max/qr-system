@@ -15,6 +15,7 @@ from modules.db import get_db
 from modules.migration_helpers import MigrationInvariantError
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
+from modules.repositories.payroll_repository import PayrollRepository
 from tests.test_process_version_migrations import _legacy_db
 
 
@@ -313,8 +314,15 @@ def test_new_price_and_payroll_detail_use_exact_master_data_versions(client):
                 "route_version_id": binding["route_version_id"],
                 "process_id": process_id,
                 "process_version_id": binding["process_version_id"],
+                "expected_route_content_digest": PayrollRepository.exact_price_binding(
+                    binding["route_version_id"], binding["process_version_id"], db
+                )["route_content_digest"],
+                "expected_process_content_digest": PayrollRepository.exact_price_binding(
+                    binding["route_version_id"], binding["process_version_id"], db
+                )["process_content_digest"],
                 "normal_unit_price": "1.25",
                 "valid_from": "2026-08-01 07:00:00",
+                "idempotency_key": f"exact-price-create-{uuid.uuid4().hex}",
             },
             preparer,
         )

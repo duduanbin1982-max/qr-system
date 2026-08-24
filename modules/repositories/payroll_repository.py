@@ -316,6 +316,11 @@ class PayrollRepository:
 
     @staticmethod
     def insert_event(payload, db):
+        key = str(payload.get("idempotency_key") or "")
+        if key:
+            existing = PayrollRepository.event_by_idempotency_key(key, db=db)
+            if existing is not None:
+                return existing
         db.execute(
             """
             INSERT INTO payroll_events (
@@ -330,6 +335,19 @@ class PayrollRepository:
                 payload.get("request_id", ""), payload.get("idempotency_key", ""),
             ),
         )
+        return PayrollRepository.event_by_idempotency_key(key, db=db) if key else None
+
+    @staticmethod
+    def event_by_idempotency_key(idempotency_key, db=None):
+        key = str(idempotency_key or "")
+        if not key:
+            return None
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_events WHERE idempotency_key=? ORDER BY id LIMIT 1",
+            (key,),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def list_lines(batch_id, employee_id=None, db=None):
@@ -712,6 +730,58 @@ class PayrollRepository:
             )
             for row in drafts
         ]
+
+    @staticmethod
+    def record_reference_compat_audit(
+        legacy_published_digest, versioned_published_digest, db
+    ):
+        rows = db.execute(
+            "SELECT price.id AS price_version_id,"
+            "route_version.content_digest AS route_content_digest,"
+            "process_version.content_digest AS process_content_digest,"
+            "price.route_content_digest_snapshot,"
+            "price.process_content_digest_snapshot "
+            "FROM route_price_versions price "
+            "JOIN process_routes route ON route.id=price.route_id "
+            "JOIN process_route_versions route_version "
+            "ON route_version.id=route.current_effective_version_id "
+            "AND route_version.id=price.route_version_id "
+            "JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "AND item.process_version_id=price.process_version_id "
+            "JOIN process_versions process_version "
+            "ON process_version.id=price.process_version_id "
+            "WHERE route_version.status='published' "
+            "AND process_version.status='published' "
+            "AND price.status<>'voided' ORDER BY price.id"
+        ).fetchall()
+        for row in rows:
+            mismatch = int(
+                legacy_published_digest != versioned_published_digest
+                or row["route_content_digest"] != row["route_content_digest_snapshot"]
+                or row["process_content_digest"] != row["process_content_digest_snapshot"]
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO route_price_reference_compat_audit ("
+                "price_version_id,published_route_content_digest,"
+                "published_process_content_digest,price_route_content_digest_snapshot,"
+                "price_process_content_digest_snapshot,mismatch,detail_json) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    row["price_version_id"], row["route_content_digest"],
+                    row["process_content_digest"],
+                    row["route_content_digest_snapshot"],
+                    row["process_content_digest_snapshot"], mismatch,
+                    json.dumps(
+                        {
+                            "legacy_published_digest": legacy_published_digest,
+                            "versioned_published_digest": versioned_published_digest,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                ),
+            )
 
     @staticmethod
     def approve_price_version(version_id, expected_row_version, payload, db):

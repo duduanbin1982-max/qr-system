@@ -144,6 +144,51 @@ APPROVAL_POLICY_VERSIONED_WRITE_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLIC
 APPROVAL_POLICY_LEGACY_WRITE_BLOCKED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_LEGACY_WRITE_BLOCKED"]
 validate_approval_policy_flags(_APPROVAL_POLICY_FLAGS)
 
+
+PENDING_ROUTE_PRICE_FLAG_NAMES = (
+    "ROUTE_PRICE_PENDING_REFERENCE_ENABLED",
+    "ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED",
+    "ROUTE_PRICE_PENDING_WRITE_ENABLED",
+)
+
+
+def get_pending_route_price_flags(environ=None):
+    return get_versioning_flags(PENDING_ROUTE_PRICE_FLAG_NAMES, environ=environ)
+
+
+def validate_pending_route_price_flags(flags=None):
+    values = flags or {
+        name: globals().get(name, False) for name in PENDING_ROUTE_PRICE_FLAG_NAMES
+    }
+    if (
+        values["ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"]
+        and not values["ROUTE_PRICE_PENDING_REFERENCE_ENABLED"]
+    ):
+        raise RuntimeError(
+            "待发布路线工价功能开关组合无效：兼容审计要求先开启引用查询"
+        )
+    if values["ROUTE_PRICE_PENDING_WRITE_ENABLED"] and not (
+        values["ROUTE_PRICE_PENDING_REFERENCE_ENABLED"]
+        and values["ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"]
+    ):
+        raise RuntimeError(
+            "待发布路线工价功能开关组合无效：写入要求先完成引用兼容审计"
+        )
+    return values
+
+
+_PENDING_ROUTE_PRICE_FLAGS = get_pending_route_price_flags()
+ROUTE_PRICE_PENDING_REFERENCE_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_REFERENCE_ENABLED"
+]
+ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"
+]
+ROUTE_PRICE_PENDING_WRITE_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_WRITE_ENABLED"
+]
+validate_pending_route_price_flags(_PENDING_ROUTE_PRICE_FLAGS)
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents
