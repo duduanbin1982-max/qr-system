@@ -23,11 +23,18 @@ V074_PRICE_COLUMNS = {
 def _blocking_price_issues(db):
     rows = db.execute(
         "SELECT price.id FROM route_price_versions price "
+        "LEFT JOIN process_route_versions route_version "
+        "ON route_version.id=price.route_version_id "
+        "LEFT JOIN process_versions process_version "
+        "ON process_version.id=price.process_version_id "
         "LEFT JOIN process_route_version_items item "
         "ON item.route_version_id=price.route_version_id "
         "AND item.process_id=price.process_id "
         "AND item.process_version_id=price.process_version_id "
         "WHERE price.route_version_id IS NULL OR price.process_version_id IS NULL "
+        "OR route_version.id IS NULL OR process_version.id IS NULL "
+        "OR route_version.process_route_id<>price.route_id "
+        "OR process_version.process_id<>price.process_id "
         "OR item.id IS NULL ORDER BY price.id"
     ).fetchall()
     return [int(row[0]) for row in rows]

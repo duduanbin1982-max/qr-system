@@ -341,6 +341,22 @@ def test_v074_rejects_null_exact_bindings_with_blocking_price_ids():
         m074_pending_route_price_controls(db)
 
 
+def test_v074_rejects_root_and_version_binding_mismatch():
+    db = seed_pending_price_binding(migrate_database_through(73))
+    mismatched_route_id = db.execute(
+        "INSERT INTO process_routes(name,category,status,route_code,lifecycle_status) "
+        "VALUES ('V074 错配路线','机加工','inactive','ROUTE-V074-MISMATCH','active')"
+    ).lastrowid
+    db.execute("DROP TRIGGER validate_price_version_binding_update")
+    db.execute(
+        "UPDATE route_price_versions SET route_id=? WHERE id=1",
+        (mismatched_route_id,),
+    )
+
+    with pytest.raises(MigrationInvariantError, match=r"\b1\b"):
+        m074_pending_route_price_controls(db)
+
+
 def test_v074_rejects_duplicate_drafts_for_one_pending_node():
     db = seed_pending_price_binding(migrate_database_through(73), price_count=2)
     price_ids = [row[0] for row in db.execute("SELECT id FROM route_price_versions ORDER BY id")]
