@@ -314,12 +314,20 @@ class PriceVersionService:
                 include_pending=pending_enabled
             )
         with BaseService.transaction() as db:
-            legacy = PayrollRepository.list_route_process_references(db=db)
+            legacy = PayrollRepository.list_legacy_route_process_reference_identities(db=db)
             items = PayrollRepository.list_route_process_references(
                 include_pending=pending_enabled, db=db
             )
             published = [
-                row for row in items if row["route_version_status"] == "published"
+                {
+                    "route_id": row["route_id"],
+                    "route_version_id": row["route_version_id"],
+                    "process_id": row["process_id"],
+                    "process_version_id": row["process_version_id"],
+                    "seq_order": row["seq_order"],
+                }
+                for row in items
+                if row["route_version_status"] == "published"
             ]
             legacy_digest = payload_sha256(legacy)
             versioned_digest = payload_sha256(published)

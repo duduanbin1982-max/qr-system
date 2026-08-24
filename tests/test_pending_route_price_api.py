@@ -6,6 +6,7 @@ from modules import config
 from modules.db import get_db
 from modules.domain.price_versioning import PriceBindingStaleError
 from modules.services.price_version_service import PriceVersionService
+from modules.repositories.payroll_repository import PayrollRepository
 from tests.test_pending_route_price_policy import _seed_versioned_reference
 
 
@@ -197,3 +198,40 @@ def test_reference_compat_audit_ignores_pending_additions(
         detail = json.loads(audit["detail_json"])
     assert audit["mismatch"] == 0
     assert detail["legacy_published_digest"] == detail["versioned_published_digest"]
+
+
+def test_reference_compat_audit_detects_versioned_published_omission(
+    client, auth_headers, monkeypatch
+):
+    _enable_pending(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        ids = _seed_versioned_reference(db)
+        price = PriceVersionService.create(
+            _payload(ids, pending=False, key="published-price-mismatch"),
+            {"id": 1, "name": "工价制单人"},
+        )
+    original = PayrollRepository.list_route_process_references
+
+    def omit_published(*args, **kwargs):
+        return [
+            row for row in original(*args, **kwargs)
+            if row["route_version_id"] != ids["route_v1"]
+        ]
+
+    monkeypatch.setattr(
+        PayrollRepository, "list_route_process_references", staticmethod(omit_published)
+    )
+    response = client.get(
+        "/api/route-price-versions/reference?include_pending=true",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    with client.application.app_context():
+        audit = get_db().execute(
+            "SELECT mismatch,detail_json FROM route_price_reference_compat_audit "
+            "WHERE price_version_id=? ORDER BY id DESC LIMIT 1", (price["id"],)
+        ).fetchone()
+    assert audit["mismatch"] == 1
+    detail = json.loads(audit["detail_json"])
+    assert detail["legacy_published_digest"] != detail["versioned_published_digest"]

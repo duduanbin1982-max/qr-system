@@ -646,6 +646,29 @@ class PayrollRepository:
         return [dict(row) for row in rows]
 
     @staticmethod
+    def list_legacy_route_process_reference_identities(db=None):
+        """Read the pre-V074 published catalog independently for dual-read audit."""
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT route.id AS route_id,route_version.id AS route_version_id,"
+            "item.process_id,process_version.id AS process_version_id,item.seq_order "
+            "FROM process_routes route "
+            "JOIN process_route_versions route_version "
+            "ON route_version.id=route.current_effective_version_id "
+            "JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "JOIN processes process ON process.id=item.process_id "
+            "JOIN process_versions process_version "
+            "ON process_version.id=item.process_version_id "
+            "WHERE route.lifecycle_status='active' "
+            "AND route_version.status='published' "
+            "AND process.lifecycle_status='active' "
+            "AND process_version.status='published' "
+            "ORDER BY route_version.category,route_version.name,item.seq_order,item.id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
     def route_process_exists(route_id, process_id, db=None):
         db = resolve_db(db)
         return bool(db.execute(
