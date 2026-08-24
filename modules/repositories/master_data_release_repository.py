@@ -7,6 +7,20 @@ from modules.repositories.context import resolve_db
 
 
 class MasterDataReleaseRepository:
+    MEMBER_TABLES = {
+        "process_version": (
+            "master_data_release_process_versions",
+            "process_version_id",
+        ),
+        "route_version": (
+            "master_data_release_route_versions",
+            "route_version_id",
+        ),
+        "price_version": (
+            "master_data_release_price_versions",
+            "price_version_id",
+        ),
+    }
     _TRANSITION_FIELDS = {
         "revision_reason",
         "impact_digest",
@@ -156,12 +170,11 @@ class MasterDataReleaseRepository:
     @staticmethod
     def insert_release_member_event(payload, db):
         key = str(payload.get("idempotency_key") or "")
-        existing = db.execute(
-            "SELECT * FROM master_data_release_member_events WHERE idempotency_key=?",
-            (key,),
-        ).fetchone()
+        existing = MasterDataReleaseRepository.release_member_event_by_idempotency_key(
+            key, db=db
+        )
         if existing is not None:
-            return dict(existing)
+            return existing
         try:
             cursor = db.execute(
                 "INSERT INTO master_data_release_member_events ("
@@ -188,6 +201,18 @@ class MasterDataReleaseRepository:
             (cursor.lastrowid,),
         ).fetchone()
         return dict(row)
+
+    @staticmethod
+    def release_member_event_by_idempotency_key(idempotency_key, db=None):
+        key = str(idempotency_key or "")
+        if not key:
+            return None
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM master_data_release_member_events WHERE idempotency_key=?",
+            (key,),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def list_release_member_events(batch_id, db=None):
@@ -282,6 +307,73 @@ class MasterDataReleaseRepository:
             label="工价版本",
             db=db,
         )
+
+    @staticmethod
+    def _member_binding(member_type):
+        try:
+            return MasterDataReleaseRepository.MEMBER_TABLES[str(member_type)]
+        except KeyError as exc:
+            raise ValueError("发布批次成员类型无效") from exc
+
+    @staticmethod
+    def remove_member(batch_id, member_type, member_id, db):
+        table, column = MasterDataReleaseRepository._member_binding(member_type)
+        cursor = db.execute(
+            f"DELETE FROM {table} WHERE batch_id=? AND {column}=?",
+            (batch_id, member_id),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "发布批次中不存在指定成员",
+                details={
+                    "batch_id": batch_id,
+                    "member_type": member_type,
+                    "member_id": member_id,
+                },
+            )
+
+    @staticmethod
+    def replace_member(
+        batch_id, member_type, member_id, replacement_member_id, db
+    ):
+        table, column = MasterDataReleaseRepository._member_binding(member_type)
+        try:
+            cursor = db.execute(
+                f"UPDATE {table} SET {column}=? WHERE batch_id=? AND {column}=?",
+                (replacement_member_id, batch_id, member_id),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError(
+                "发布批次替换成员冲突",
+                details={
+                    "batch_id": batch_id,
+                    "member_type": member_type,
+                    "member_id": member_id,
+                    "replacement_member_id": replacement_member_id,
+                },
+            ) from exc
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "发布批次中不存在待替换成员",
+                details={
+                    "batch_id": batch_id,
+                    "member_type": member_type,
+                    "member_id": member_id,
+                },
+            )
+
+    @staticmethod
+    def update_draft_after_member_change(
+        batch_id, expected_row_version, impact_digest, db
+    ):
+        cursor = db.execute(
+            "UPDATE master_data_release_batches SET impact_digest=?,"
+            "row_version=row_version+1 WHERE id=? AND status='draft' AND row_version=?",
+            (impact_digest, batch_id, expected_row_version),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError("主数据发布批次状态已变化，请刷新后重试")
+        return MasterDataReleaseRepository.batch(batch_id, db=db)
 
     @staticmethod
     def add_approved_exception(batch_id, payload, db):
