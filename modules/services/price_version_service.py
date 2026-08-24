@@ -1,7 +1,6 @@
 """Approved, time-effective route price versions for payroll."""
 
 import json
-import sqlite3
 
 from modules import config
 from modules.domain.errors import AuthorizationError, NotFoundError
@@ -19,7 +18,10 @@ from modules.domain.price_versioning import (
     pricing_mode,
 )
 from modules.domain.process_versioning import payload_sha256
-from modules.repositories.payroll_repository import PayrollRepository
+from modules.repositories.payroll_repository import (
+    DuplicatePriceVersionIdempotencyKeyError,
+    PayrollRepository,
+)
 from modules.services import BaseService
 
 
@@ -147,7 +149,7 @@ class PriceVersionService:
             }
             try:
                 version_id = PayrollRepository.create_price_version(create_payload, db)
-            except sqlite3.IntegrityError as exc:
+            except DuplicatePriceVersionIdempotencyKeyError as exc:
                 replay = PayrollRepository.price_version_by_idempotency_key(
                     values["idempotency_key"], db=db
                 )

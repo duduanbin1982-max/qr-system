@@ -1,6 +1,7 @@
 """SQL access for the versioned payroll ledger."""
 
 import json
+import sqlite3
 
 from modules.domain.payroll_policy import PayrollConflictError
 from modules.domain.price_versioning import StaleRowVersionError
@@ -12,6 +13,10 @@ from modules.process_fact_projection import (
     route_version_join,
     warn_legacy_fact_rows,
 )
+
+
+class DuplicatePriceVersionIdempotencyKeyError(Exception):
+    """Raised when another request has already claimed a price idempotency key."""
 
 
 class PayrollRepository:
@@ -535,28 +540,36 @@ class PayrollRepository:
 
     @staticmethod
     def create_price_version(payload, db):
-        cursor = db.execute(
-            """
-            INSERT INTO route_price_versions (
-                route_id,route_version_id,process_id,process_version_id,
-                normal_unit_price_micros,rework_rate_basis_points,
-                rework_rate_configured,valid_from,status,created_by,created_by_name,remark,
-                idempotency_key,request_digest,route_content_digest_snapshot,
-                process_content_digest_snapshot
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                payload["route_id"], payload["route_version_id"],
-                payload["process_id"], payload["process_version_id"],
-                payload["normal_unit_price_micros"],
-                payload.get("rework_rate_basis_points", 0), payload.get("rework_rate_configured", 0),
-                payload["valid_from"], "draft", payload.get("created_by"), payload.get("created_by_name", ""),
-                payload.get("remark", ""),
-                payload.get("idempotency_key"), payload.get("request_digest", ""),
-                payload.get("route_content_digest_snapshot", ""),
-                payload.get("process_content_digest_snapshot", ""),
-            ),
-        )
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO route_price_versions (
+                    route_id,route_version_id,process_id,process_version_id,
+                    normal_unit_price_micros,rework_rate_basis_points,
+                    rework_rate_configured,valid_from,status,created_by,created_by_name,remark,
+                    idempotency_key,request_digest,route_content_digest_snapshot,
+                    process_content_digest_snapshot
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    payload["route_id"], payload["route_version_id"],
+                    payload["process_id"], payload["process_version_id"],
+                    payload["normal_unit_price_micros"],
+                    payload.get("rework_rate_basis_points", 0), payload.get("rework_rate_configured", 0),
+                    payload["valid_from"], "draft", payload.get("created_by"), payload.get("created_by_name", ""),
+                    payload.get("remark", ""),
+                    payload.get("idempotency_key"), payload.get("request_digest", ""),
+                    payload.get("route_content_digest_snapshot", ""),
+                    payload.get("process_content_digest_snapshot", ""),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            replay = PayrollRepository.price_version_by_idempotency_key(
+                payload.get("idempotency_key"), db=db
+            )
+            if replay is not None:
+                raise DuplicatePriceVersionIdempotencyKeyError from exc
+            raise
         return cursor.lastrowid
 
     @staticmethod
