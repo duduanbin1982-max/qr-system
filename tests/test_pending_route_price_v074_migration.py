@@ -341,6 +341,55 @@ def test_v074_rejects_null_exact_bindings_with_blocking_price_ids():
         m074_pending_route_price_controls(db)
 
 
+def test_v074_preserves_unreferenced_retired_legacy_unbound_price():
+    db = seed_pending_price_binding(migrate_database_through(73))
+    binding = db.execute(
+        "SELECT route_id,process_id FROM route_price_versions WHERE id=1"
+    ).fetchone()
+    price_id = db.execute(
+        "INSERT INTO route_price_versions(route_id,process_id,normal_unit_price_micros,"
+        "valid_from,status,legacy_binding_unavailable,remark) "
+        "VALUES (?,?,100000,'2026-01-01 07:00:00','retired',1,'legacy tombstone')",
+        tuple(binding),
+    ).lastrowid
+
+    m074_pending_route_price_controls(db)
+
+    preserved = db.execute(
+        "SELECT status,legacy_binding_unavailable,route_version_id,process_version_id,"
+        "normal_unit_price_micros,remark FROM route_price_versions WHERE id=?",
+        (price_id,),
+    ).fetchone()
+    assert tuple(preserved) == (
+        "retired", 1, None, None, 100000, "legacy tombstone"
+    )
+    assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_v074_rejects_referenced_retired_legacy_unbound_price():
+    db = migrate_database_through(73)
+    seed_price_lifecycles_with_references(db)
+    binding = db.execute(
+        "SELECT route_id,process_id FROM route_price_versions WHERE id=1"
+    ).fetchone()
+    price_id = db.execute(
+        "INSERT INTO route_price_versions(route_id,process_id,normal_unit_price_micros,"
+        "valid_from,status,legacy_binding_unavailable,remark) "
+        "VALUES (?,?,100000,'2026-01-01 07:00:00','retired',1,'invalid reference')",
+        tuple(binding),
+    ).lastrowid
+    db.execute("DROP TRIGGER reject_unbound_price_resolution_update")
+    db.execute("DROP TRIGGER prevent_payroll_resolution_update")
+    db.execute(
+        "UPDATE payroll_work_price_resolutions SET price_version_id=? WHERE id=("
+        "SELECT MIN(id) FROM payroll_work_price_resolutions)",
+        (price_id,),
+    )
+
+    with pytest.raises(MigrationInvariantError, match=rf"{price_id}"):
+        m074_pending_route_price_controls(db)
+
+
 def test_v074_rejects_root_and_version_binding_mismatch():
     db = seed_pending_price_binding(migrate_database_through(73))
     mismatched_route_id = db.execute(
