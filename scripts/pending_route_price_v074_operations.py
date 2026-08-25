@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only V074 preflight and disposable replica validation controls."""
+"""Read-only V074/V075 preflight and disposable replica validation controls."""
 
 from __future__ import annotations
 
@@ -17,7 +17,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 SOURCE_VERSION = 73
-TARGET_VERSION = 74
+# V075 repairs the legacy empty process/route content digests required by the
+# V074 exact pending-route price API. Keep this runbook's replica validation
+# inclusive of both migrations so it cannot report a partially repaired DB as
+# production-ready.
+TARGET_VERSION = 75
 PRICE_STATUSES = ("draft", "approved", "retired", "voided")
 PENDING_PRICE_FLAGS = (
     "ROUTE_PRICE_PENDING_REFERENCE_ENABLED",
