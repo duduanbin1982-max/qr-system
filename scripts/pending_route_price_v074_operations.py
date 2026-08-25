@@ -150,6 +150,19 @@ def price_aggregates(db: sqlite3.Connection) -> dict[str, Any]:
             "WHERE price.status='draft' ORDER BY price.id"
         ).fetchall()
     ]
+    preserved_legacy_unbound_rows = int(
+        db.execute(
+            "SELECT COUNT(*) FROM route_price_versions price "
+            "WHERE price.status='retired' "
+            "AND price.legacy_binding_unavailable=1 "
+            "AND price.route_version_id IS NULL "
+            "AND price.process_version_id IS NULL "
+            "AND NOT EXISTS (SELECT 1 FROM payroll_detail_lines detail "
+            "WHERE detail.price_version_id=price.id) "
+            "AND NOT EXISTS (SELECT 1 FROM payroll_work_price_resolutions resolution "
+            "WHERE resolution.price_version_id=price.id)"
+        ).fetchone()[0]
+    )
     return {
         "by_status": by_status,
         "total": {
@@ -157,6 +170,7 @@ def price_aggregates(db: sqlite3.Connection) -> dict[str, Any]:
             "normal_unit_price_micros": sum(
                 item["normal_unit_price_micros"] for item in by_status.values()
             ),
+            "preserved_legacy_unbound_rows": preserved_legacy_unbound_rows,
         },
         "draft_bindings": draft_bindings,
     }
@@ -168,8 +182,14 @@ def blocking_price_differences(db: sqlite3.Connection) -> dict[str, list[dict[st
         for row in db.execute(
             "SELECT id AS price_version_id,status,route_id,route_version_id,"
             "process_id,process_version_id,legacy_binding_unavailable "
-            "FROM route_price_versions WHERE route_version_id IS NULL "
-            "OR process_version_id IS NULL ORDER BY id"
+            "FROM route_price_versions price WHERE (route_version_id IS NULL "
+            "OR process_version_id IS NULL) AND NOT (status='retired' "
+            "AND legacy_binding_unavailable=1 AND route_version_id IS NULL "
+            "AND process_version_id IS NULL "
+            "AND NOT EXISTS (SELECT 1 FROM payroll_detail_lines detail "
+            "WHERE detail.price_version_id=price.id) "
+            "AND NOT EXISTS (SELECT 1 FROM payroll_work_price_resolutions resolution "
+            "WHERE resolution.price_version_id=price.id)) ORDER BY id"
         ).fetchall()
     ]
     binding_mismatches = [

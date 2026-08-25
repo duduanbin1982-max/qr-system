@@ -31,11 +31,18 @@ def _blocking_price_issues(db):
         "ON item.route_version_id=price.route_version_id "
         "AND item.process_id=price.process_id "
         "AND item.process_version_id=price.process_version_id "
-        "WHERE price.route_version_id IS NULL OR price.process_version_id IS NULL "
+        "WHERE NOT (price.status='retired' "
+        "AND price.legacy_binding_unavailable=1 "
+        "AND price.route_version_id IS NULL AND price.process_version_id IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM payroll_detail_lines detail "
+        "WHERE detail.price_version_id=price.id) "
+        "AND NOT EXISTS (SELECT 1 FROM payroll_work_price_resolutions resolution "
+        "WHERE resolution.price_version_id=price.id)) AND ("
+        "price.route_version_id IS NULL OR price.process_version_id IS NULL "
         "OR route_version.id IS NULL OR process_version.id IS NULL "
         "OR route_version.process_route_id<>price.route_id "
         "OR process_version.process_id<>price.process_id "
-        "OR item.id IS NULL ORDER BY price.id"
+        "OR item.id IS NULL) ORDER BY price.id"
     ).fetchall()
     return [int(row[0]) for row in rows]
 

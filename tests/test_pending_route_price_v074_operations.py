@@ -217,7 +217,7 @@ def test_v074_preflight_is_read_only_and_lists_blockers(tmp_path):
     db.execute(
         "INSERT INTO route_price_versions(route_id,process_id,normal_unit_price_micros,"
         "valid_from,status,legacy_binding_unavailable) "
-        "VALUES (?,?,100000,'2026-01-01 07:00:00','retired',1)",
+        "VALUES (?,?,100000,'2026-01-01 07:00:00','draft',0)",
         (binding["route_id"], binding["process_id"]),
     )
     other = _seed_exact_binding(db, suffix="OTHER")
@@ -249,6 +249,44 @@ def test_v074_preflight_is_read_only_and_lists_blockers(tmp_path):
     }
     assert all(report["blocking"].values())
     assert report["status"] == "blocked"
+
+
+def test_v074_preflight_and_replica_preserve_legacy_unbound_tombstone(tmp_path):
+    from scripts.pending_route_price_v074_operations import (
+        run_preflight,
+        validate_replica,
+    )
+
+    source = copy_v073_database(tmp_path)
+    db = sqlite3.connect(source)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    binding = _seed_exact_binding(db, suffix="LEGACY")
+    price_id = db.execute(
+        "INSERT INTO route_price_versions(route_id,process_id,normal_unit_price_micros,"
+        "valid_from,status,legacy_binding_unavailable,remark) "
+        "VALUES (?,?,100000,'2026-01-01 07:00:00','retired',1,'legacy tombstone')",
+        (binding["route_id"], binding["process_id"]),
+    ).lastrowid
+    db.commit()
+    db.close()
+
+    source_report = run_preflight(source)
+    replica = tmp_path / "legacy-unbound-v074.db"
+    report = validate_replica(source, replica)
+
+    assert source_report["status"] == "passed"
+    assert source_report["blocking"]["empty_bindings"] == []
+    assert source_report["price_aggregates"]["total"][
+        "preserved_legacy_unbound_rows"
+    ] == 1
+    assert report["status"] == "passed", report["blocking_differences"]
+    migrated = sqlite3.connect(replica).execute(
+        "SELECT status,legacy_binding_unavailable,route_version_id,process_version_id,"
+        "remark FROM route_price_versions WHERE id=?",
+        (price_id,),
+    ).fetchone()
+    assert migrated == ("retired", 1, None, None, "legacy tombstone")
 
 
 def test_v074_replica_validation_preserves_business_aggregates(tmp_path):
