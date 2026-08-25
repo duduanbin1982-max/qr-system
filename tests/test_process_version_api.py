@@ -346,7 +346,7 @@ def test_route_version_and_release_batch_apis_expose_stable_workflow_states(
         },
     )
     assert rejected_route.status_code == 200, rejected_route.get_json()
-    assert rejected_route.get_json()["status"] == "rejected"
+    assert rejected_route.get_json()["status"] == "draft"
 
     with client.application.app_context():
         batch = MasterDataReleaseService.create_batch(

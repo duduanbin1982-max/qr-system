@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   submitReleaseBatch: vi.fn(),
   approveReleaseBatch: vi.fn(),
   rejectReleaseBatch: vi.fn(),
+  removeReleaseBatchMember: vi.fn(),
+  replaceReleaseBatchMember: vi.fn(),
   request: vi.fn(),
   permissions: new Set(),
   showToast: vi.fn(),
@@ -117,6 +119,21 @@ describe('useMasterDataReleases', () => {
     })
   })
 
+  it('repairs a draft member with exact IDs, row version, and idempotency', async () => {
+    mocks.replaceReleaseBatchMember.mockResolvedValue(batch({ status: 'draft', row_version: 1 }))
+    const state = useMasterDataReleases()
+    state.selectedBatch.value = batch({ status: 'draft', row_version: 0 })
+    await state.replaceMember('price_version', 92, 93, '替换已作废工价')
+    expect(mocks.replaceReleaseBatchMember).toHaveBeenCalledWith(41, {
+      member_type: 'price_version',
+      member_id: 92,
+      replacement_member_id: 93,
+      row_version: 0,
+      reason: '替换已作废工价',
+      idempotency_key: expect.stringMatching(/^release-member-replace:/),
+    })
+  })
+
   it('renders complete dependencies and keeps approval disabled until price disposition is complete', async () => {
     const wrapper = mount(ReleaseBatchPanel)
     await flushPromises()
@@ -137,6 +154,26 @@ describe('useMasterDataReleases', () => {
     await flushPromises()
     expect(approve.attributes('disabled')).toBeUndefined()
   })
+
+  it('names invalid draft members and blocks submit until repaired', async () => {
+    mocks.permissions = new Set(['master_data_releases:view', 'master_data_releases:submit'])
+    const invalid = batch({
+      status: 'draft',
+      row_version: 0,
+      price_versions: [{
+        id: 92, route_version_id: 82, process_version_id: 72, status: 'voided',
+      }],
+    })
+    mocks.listReleaseBatches.mockResolvedValue([invalid])
+    mocks.getReleaseBatch.mockResolvedValue(invalid)
+    const wrapper = mount(ReleaseBatchPanel)
+    await flushPromises()
+    await wrapper.find('.batch-row').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="invalid-release-members"]').text()).toContain('工价 #92 已作废')
+    const submit = wrapper.findAll('button').find(button => button.text() === '提交审批')
+    expect(submit.attributes('disabled')).toBeDefined()
+  })
 })
 
 describe('master-data release API', () => {
@@ -153,6 +190,8 @@ describe('master-data release API', () => {
     await masterDataReleasesApi.submitReleaseBatch(41, payload)
     await masterDataReleasesApi.approveReleaseBatch(41, payload)
     await masterDataReleasesApi.rejectReleaseBatch(41, payload)
+    await masterDataReleasesApi.removeReleaseBatchMember(41, payload)
+    await masterDataReleasesApi.replaceReleaseBatchMember(41, payload)
 
     expect(mocks.request.mock.calls).toEqual([
       ['GET', '/api/master-data-release-batches'],
@@ -161,6 +200,8 @@ describe('master-data release API', () => {
       ['POST', '/api/master-data-release-batches/41/submit', payload],
       ['POST', '/api/master-data-release-batches/41/approve', payload],
       ['POST', '/api/master-data-release-batches/41/reject', payload],
+      ['POST', '/api/master-data-release-batches/41/members/remove', payload],
+      ['POST', '/api/master-data-release-batches/41/members/replace', payload],
     ])
   })
 })

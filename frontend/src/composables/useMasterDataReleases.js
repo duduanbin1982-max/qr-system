@@ -175,6 +175,45 @@ export function useMasterDataReleases() {
     })
   }
 
+  async function removeMember(memberType, memberId, reason) {
+    return runOperation(async () => {
+      const batch = selectedBatch.value
+      if (!batch) throw new Error('未选择发布批次')
+      const result = await api.domains.masterDataReleases.removeReleaseBatchMember(
+        batch.id,
+        {
+          member_type: memberType,
+          member_id: Number(memberId),
+          row_version: Number(batch.row_version || 0),
+          reason: String(reason || '').trim(),
+          idempotency_key: commandKey('release-member-remove'),
+        }
+      )
+      selectedBatch.value = result
+      return result
+    })
+  }
+
+  async function replaceMember(memberType, memberId, replacementMemberId, reason) {
+    return runOperation(async () => {
+      const batch = selectedBatch.value
+      if (!batch) throw new Error('未选择发布批次')
+      const result = await api.domains.masterDataReleases.replaceReleaseBatchMember(
+        batch.id,
+        {
+          member_type: memberType,
+          member_id: Number(memberId),
+          replacement_member_id: Number(replacementMemberId),
+          row_version: Number(batch.row_version || 0),
+          reason: String(reason || '').trim(),
+          idempotency_key: commandKey('release-member-replace'),
+        }
+      )
+      selectedBatch.value = result
+      return result
+    })
+  }
+
   return {
     batches,
     selectedBatch,
@@ -187,6 +226,8 @@ export function useMasterDataReleases() {
     submitBatch,
     approveBatch,
     rejectBatch,
+    removeMember,
+    replaceMember,
     requiredProcessIds,
     validatePriceDispositions,
   }

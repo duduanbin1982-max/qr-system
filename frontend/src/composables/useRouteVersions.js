@@ -73,6 +73,7 @@ export function useRouteVersions() {
   const selectedVersion = ref(null)
   const impact = ref(null)
   const priceVersions = ref([])
+  const referencePriceVersions = ref([])
   const loadingDetail = ref(false)
   const loadingContext = ref(false)
   const busy = ref(false)
@@ -101,25 +102,48 @@ export function useRouteVersions() {
       .filter(item => Number(item.version) < Number(selected.version))
       .sort((a, b) => Number(b.version) - Number(a.version))[0] || null
   })
-  const coverageRows = computed(() => (selectedVersion.value?.items || []).map(node => ({
-    ...node,
-    price_versions: priceVersions.value.filter(price => (
+  const coverageRows = computed(() => (selectedVersion.value?.items || []).map(node => {
+    const exactPrices = priceVersions.value.filter(price => (
       Number(price.route_version_id) === Number(selectedVersion.value?.id)
       && Number(price.process_version_id) === Number(node.process_version_id)
-    )),
-  })))
+    ))
+    const referencePrice = referencePriceVersions.value
+      .filter(price => (
+        Number(price.process_id) === Number(node.process_id)
+        && price.status === 'approved'
+      ))
+      .sort((a, b) => `${b.valid_from || ''}:${b.id}`.localeCompare(`${a.valid_from || ''}:${a.id}`))[0] || null
+    const coverageStatus = exactPrices.some(price => price.status === 'approved')
+      ? 'approved'
+      : exactPrices.some(price => price.status === 'draft')
+        ? 'draft'
+        : exactPrices.some(price => price.status === 'voided') ? 'voided' : 'missing'
+    return {
+      ...node,
+      price_versions: exactPrices,
+      reference_price: selectedVersion.value?.status === 'draft' ? referencePrice : null,
+      coverage_status: coverageStatus,
+    }
+  }))
 
   async function loadSelectedContext(versionId) {
     if (!versionId) {
       impact.value = null
       priceVersions.value = []
+      referencePriceVersions.value = []
       return
     }
     loadingContext.value = true
     contextError.value = ''
-    const [impactResult, priceResult] = await Promise.allSettled([
+    const baseVersionId = selectedVersion.value?.status === 'draft'
+      ? comparisonBase.value?.id
+      : null
+    const [impactResult, priceResult, referencePriceResult] = await Promise.allSettled([
       api.domains.processRouteVersions.getRouteVersionImpact(versionId),
       api.domains.wages.listRoutePriceVersions({ route_version_id: versionId }),
+      baseVersionId
+        ? api.domains.wages.listRoutePriceVersions({ route_version_id: baseVersionId })
+        : Promise.resolve({ versions: [] }),
     ])
     if (impactResult.status === 'fulfilled') {
       impact.value = impactResult.value.impact || impactResult.value
@@ -127,6 +151,9 @@ export function useRouteVersions() {
       impact.value = null
       contextError.value = routeVersionErrorMessage(impactResult.reason)
     }
+    referencePriceVersions.value = referencePriceResult.status === 'fulfilled'
+      ? (referencePriceResult.value.versions || referencePriceResult.value || [])
+      : []
     if (priceResult.status === 'fulfilled') {
       priceVersions.value = priceResult.value.versions || priceResult.value || []
     } else {
@@ -324,6 +351,7 @@ export function useRouteVersions() {
     comparisonBase,
     impact,
     priceVersions,
+    referencePriceVersions,
     coverageRows,
     loadingDetail,
     loadingContext,

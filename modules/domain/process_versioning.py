@@ -46,6 +46,13 @@ VERSION_TRANSITIONS = {
     STATUS_RETIRED: frozenset({STATUS_RETIRED}),
 }
 
+ROUTE_VERSION_TRANSITIONS = {
+    **VERSION_TRANSITIONS,
+    STATUS_PENDING_APPROVAL: frozenset(
+        {STATUS_PENDING_APPROVAL, STATUS_PUBLISHED, STATUS_DRAFT}
+    ),
+}
+
 EVENT_CREATED = "created"
 EVENT_REVISION_CREATED = "revision_created"
 EVENT_SUBMITTED = "submitted"
@@ -221,7 +228,14 @@ def validate_process_version_transition(current, target):
 
 
 def validate_route_version_transition(current, target):
-    return validate_version_transition(current, target, entity_type="route")
+    current_status = _require_status(current)
+    target_status = _require_status(target)
+    if target_status in ROUTE_VERSION_TRANSITIONS[current_status]:
+        return target_status
+    raise RouteVersionImmutableError(
+        "当前路线版本状态不允许执行该转换",
+        details={"current_status": current_status, "target_status": target_status},
+    )
 
 
 def require_row_version(value):
@@ -842,6 +856,7 @@ __all__ = [
     "VERSION_EVENT_TYPES",
     "VERSION_STATUSES",
     "VERSION_TRANSITIONS",
+    "ROUTE_VERSION_TRANSITIONS",
     "assert_legacy_master_data_write_allowed",
     "assert_root_identity_preserved",
     "assert_route_category_consistency",

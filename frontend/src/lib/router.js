@@ -19,6 +19,9 @@ export function requestedNavigation(search = window.location.search) {
   return {
     page: (params.get('page') || '').trim(),
     settingsTab: (params.get('settings_tab') || '').trim(),
+    wageTab: (params.get('wage_tab') || '').trim(),
+    routeVersionId: Number(params.get('route_version_id')) || null,
+    processVersionId: Number(params.get('process_version_id')) || null,
   }
 }
 

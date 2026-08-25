@@ -3,6 +3,10 @@
 from datetime import datetime
 
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.price_versioning import (
+    ActiveReleaseBatchConflictError,
+    ProcessVersionNotFrozenError,
+)
 from modules.domain.process_versioning import (
     ReleaseDependencyError,
     assert_root_identity_preserved,
@@ -17,8 +21,11 @@ from modules.domain.process_versioning import (
     require_row_version,
     validate_route_version_transition,
 )
-from modules.repositories.process_version_repository import ProcessVersionRepository
+from modules.repositories.master_data_release_repository import (
+    MasterDataReleaseRepository,
+)
 from modules.repositories.payroll_repository import PayrollRepository
+from modules.repositories.process_version_repository import ProcessVersionRepository
 from modules.repositories.route_version_repository import RouteVersionRepository
 from modules.services import BaseService
 from modules.services.master_data_impact_service import MasterDataImpactService
@@ -308,6 +315,24 @@ class RouteVersionService:
                 raise NotFoundError("路线版本不存在")
             validate_route_version_transition(version["status"], "pending_approval")
             RouteVersionService._validate_items(version["category"], version["items"], db)
+            process_versions = {
+                row["id"]: row
+                for row in ProcessVersionRepository.versions_by_ids(
+                    [item["process_version_id"] for item in version["items"]], db=db
+                )
+            }
+            invalid_process_version_ids = [
+                item["process_version_id"]
+                for item in version["items"]
+                if process_versions[item["process_version_id"]]["status"]
+                not in {"published", "pending_approval"}
+            ]
+            if invalid_process_version_ids:
+                raise ProcessVersionNotFrozenError(
+                    details={
+                        "process_version_ids": invalid_process_version_ids,
+                    }
+                )
             updated = RouteVersionRepository.transition_version(
                 version_id,
                 "draft",
@@ -513,15 +538,55 @@ class RouteVersionService:
             version = RouteVersionRepository.version(version_id, db=db)
             if version is None:
                 raise NotFoundError("路线版本不存在")
-            validate_route_version_transition(version["status"], "rejected")
+            validate_route_version_transition(version["status"], "draft")
+            expected = require_row_version(command.get("row_version"))
+            assert_row_version(expected, version["row_version"], entity_type="route")
             assert_separation_of_duties(
                 version["created_by"], actor["id"], entity_type="route"
             )
+            pending_batches = [
+                batch
+                for batch in MasterDataReleaseRepository.active_batches_for_route_version(
+                    version_id, db=db
+                )
+                if batch["status"] == "pending_approval"
+            ]
+            if pending_batches:
+                raise ActiveReleaseBatchConflictError(
+                    details={"batch_ids": [batch["id"] for batch in pending_batches]}
+                )
+            now = RouteVersionService._now()
+            voided_prices = PayrollRepository.void_draft_prices_for_route(
+                version_id,
+                {
+                    "voided_at": now,
+                    "voided_by": actor["id"],
+                    "voided_by_name": actor["name"],
+                    "void_reason": reason,
+                },
+                db,
+            )
+            for price in voided_prices:
+                PayrollRepository.insert_event(
+                    {
+                        "event_type": "price_version_voided",
+                        "operator_id": actor["id"],
+                        "operator_name": actor["name"],
+                        "reason": reason,
+                        "idempotency_key": f"{key}:price:{price['id']}",
+                        "payload": {
+                            "price_version_id": price["id"],
+                            "route_version_id": version_id,
+                            "reason": reason,
+                        },
+                    },
+                    db,
+                )
             rejected = RouteVersionRepository.transition_version(
                 version_id,
                 "pending_approval",
-                require_row_version(command.get("row_version")),
-                "rejected",
+                expected,
+                "draft",
                 {},
                 db,
             )
@@ -533,7 +598,8 @@ class RouteVersionService:
                 db,
                 reason=reason,
                 from_status="pending_approval",
-                to_status="rejected",
+                to_status="draft",
+                payload={"voided_price_version_ids": [row["id"] for row in voided_prices]},
             )
             return rejected
 

@@ -33,7 +33,22 @@ describe('navigation state', () => {
     expect(requestedNavigation('?page=settings&settings_tab=audit-logs')).toEqual({
       page: 'settings',
       settingsTab: 'audit-logs',
+      wageTab: '',
+      routeVersionId: null,
+      processVersionId: null,
     })
     expect(router.page).toBe('login')
+  })
+
+  it('parses exact route price navigation intent', () => {
+    expect(requestedNavigation(
+      '?page=wages&wage_tab=priceversions&route_version_id=82&process_version_id=72'
+    )).toEqual({
+      page: 'wages',
+      settingsTab: '',
+      wageTab: 'priceversions',
+      routeVersionId: 82,
+      processVersionId: 72,
+    })
   })
 })

@@ -6,10 +6,12 @@ import io
 from flask import g, jsonify, request, send_file
 
 from modules.middleware.auth import has_permission
+from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
 from modules.domain.payroll_policy import PayrollConflictError
+from modules.domain.errors import DomainError
 
 
 def _allowed(*permissions):
@@ -22,6 +24,8 @@ def _deny():
 
 
 def _json_error(exc):
+    if isinstance(exc, DomainError):
+        return jsonify(exc.to_payload()), exc.status_code
     if isinstance(exc, PayrollConflictError):
         return jsonify({"error": str(exc)}), 409
     return jsonify({"error": str(exc)}), 400
@@ -303,16 +307,34 @@ def route_price_versions():
 def route_price_version_reference():
     if not _allowed("wages:prepare", "wages:approve"):
         return _deny()
-    return jsonify({"items": PriceVersionService.reference_items()})
+    include_pending = str(request.args.get("include_pending") or "").lower() in {
+        "1", "true", "yes", "on"
+    }
+    return jsonify({"items": PriceVersionService.reference_items(include_pending)})
 
 
 @app.route("/api/route-price-versions", methods=["POST"])
 @check_auth
+@validate_json("route_price_version_create")
 def route_price_version_create():
     if not _allowed("wages:prepare"):
         return _deny()
     try:
         return jsonify(PriceVersionService.create(request.get_json() or {}, _actor()))
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/route-price-versions/<int:version_id>/void", methods=["POST"])
+@check_auth
+@validate_json("route_price_version_void")
+def route_price_version_void(version_id):
+    if not _allowed("wages:prepare"):
+        return _deny()
+    try:
+        return jsonify(
+            PriceVersionService.void(version_id, request.get_json() or {}, _actor())
+        )
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)
 
