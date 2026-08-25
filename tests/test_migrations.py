@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 74
-    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74]
+    assert report["target_version"] == 75
+    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75]
     assert database.read_bytes() == before
 
 
@@ -254,6 +254,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_position_versioning",
             "modules.migration_approval_policy",
             "modules.migration_pending_route_price_v074",
+            "modules.migration_process_content_digest_v075",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -274,7 +275,8 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[72] == "modules.migration_approval_policy"
     assert by_version[73] == "modules.migration_approval_policy"
     assert by_version[74] == "modules.migration_pending_route_price_v074"
-    assert migrations.LATEST_VERSION == 74
+    assert by_version[75] == "modules.migration_process_content_digest_v075"
+    assert migrations.LATEST_VERSION == 75
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

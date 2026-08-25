@@ -310,8 +310,8 @@ def test_v074_replica_validation_preserves_business_aggregates(tmp_path):
     assert report["source_unchanged"] is True
     assert report["migration"] == {
         "source_version": 73,
-        "target_version": 74,
-        "executed_migrations": 1,
+        "target_version": 75,
+        "executed_migrations": 2,
     }
     assert report["aggregate_comparison"]["approved"]["equal"] is True
     assert report["aggregate_comparison"]["retired"]["equal"] is True
@@ -320,7 +320,7 @@ def test_v074_replica_validation_preserves_business_aggregates(tmp_path):
     assert report["blocking_differences"] == []
     assert report["replica"]["database"]["foreign_key_check"] == []
     assert report["replica"]["database"]["integrity_check"] == "ok"
-    assert report["replica"]["database"]["user_version"] == 74
+    assert report["replica"]["database"]["user_version"] == 75
     assert report["replica"]["blocking"] == {
         "empty_bindings": [],
         "binding_mismatches": [],
