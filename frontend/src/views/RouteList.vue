@@ -99,7 +99,11 @@
 
             <section class="coverage-section">
               <div class="section-heading">
-                <div><h4>工价覆盖</h4><span>按路线版本和工序版本精确匹配</span></div>
+                <div>
+                  <h4>工价覆盖</h4>
+                  <span v-if="selectedVersion.status === 'draft'">提交审批后即可在本页填写精确工价</span>
+                  <span v-else>按路线版本和工序版本精确匹配</span>
+                </div>
                 <div class="coverage-heading-actions">
                   <span>{{ coveredNodeCount }} / {{ coverageRows.length }} 已覆盖</span>
                   <button
@@ -123,12 +127,21 @@
                       <td><span v-if="row.price_versions.length">{{ row.price_versions.map(price => `#${price.id} ${priceStatus(price.status)} ${money(price.normal_unit_price_micros)}`).join('、') }}</span><span v-else>-</span></td>
                       <td>
                         <button
+                          v-if="selectedVersion.status === 'draft' && canSubmit && canPreparePrice"
+                          type="button"
+                          class="btn btn-primary btn-sm"
+                          :data-testid="`submit-and-create-exact-price-${row.process_version_id}`"
+                          :disabled="busy"
+                          @click="submitAndOpenPrice(row)"
+                        >提交审批并填写工价</button>
+                        <button
+                          v-else
                           type="button"
                           class="btn btn-default btn-sm"
                           :data-testid="`create-exact-price-${row.process_version_id}`"
                           :disabled="selectedVersion.status !== 'pending_approval' || !canPreparePrice"
                           @click="openPriceVersion(row)"
-                        >建立工价</button>
+                        >{{ selectedVersion.status === 'pending_approval' ? '填写工价' : '提交审批后可定价' }}</button>
                       </td>
                     </tr>
                   </tbody>
@@ -267,6 +280,17 @@ function openPriceVersion(row) {
     process_version_id: Number(row.process_version_id),
     create_price: true,
   })
+}
+
+async function submitAndOpenPrice(row) {
+  if (selectedVersion.value?.status !== 'draft' || !canSubmit.value || !canPreparePrice.value) return
+  try {
+    await state.transition('submit')
+    showToast('路线已提交审批，请填写精确工价')
+    openPriceVersion(row)
+  } catch (error) {
+    showToast(error.message || '提交审批失败，暂不能填写工价', 'error')
+  }
 }
 
 async function load() {
