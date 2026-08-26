@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-position-v070-replica-validation")
 
+from modules.domain import evidence_protocol  # noqa: E402
 from scripts.preflight_position_v070 import preflight  # noqa: E402
 from scripts.recover_position_processes import (  # noqa: E402
     apply_exact_recovery_manifest,
@@ -45,17 +46,11 @@ BUSINESS_FACT_TABLES = (
 
 
 def _canonical(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
+    return evidence_protocol.canonical_json_v1(value)
 
 
 def _digest(value: Any) -> str:
-    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+    return evidence_protocol.sha256_digest_v1(value)
 
 
 def _table_exists(db: sqlite3.Connection, table: str) -> bool:

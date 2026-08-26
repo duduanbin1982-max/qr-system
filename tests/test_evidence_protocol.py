@@ -1,4 +1,8 @@
 import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -19,6 +23,15 @@ from modules.services.performance_quality_event_service import (
     PerformanceQualityEventService,
 )
 from modules.services.performance_scoring_policy import PerformanceScoringPolicy
+from scripts import export_performance_v2_review_diff as review_export
+from scripts import pending_route_price_v074_operations as pending_route_price
+from scripts import production_performance_v2_apply as performance_apply
+from scripts import production_performance_v2_approve as performance_approve
+from scripts import production_performance_v2_post_cutover_smoke as performance_smoke
+from scripts import production_performance_v2_preflight as performance_preflight
+from scripts import production_performance_v2_supervisor_review as performance_review
+from scripts import validate_performance_v57_replica as performance_replica
+from scripts import validate_position_v070_replica as position_replica
 
 
 VALUE = {
@@ -46,6 +59,40 @@ SERVICE_SERIALIZERS = (
 SERVICE_DIGESTERS = (
     PerformanceFactCollector._digest,
     PerformanceHistoryMigrationService._digest,
+)
+
+SCRIPT_SERIALIZERS = (
+    review_export._canonical,
+    performance_apply._canonical,
+    performance_approve._canonical,
+    performance_smoke._canonical,
+    performance_preflight._canonical,
+    performance_review._canonical,
+    performance_replica._canonical,
+    position_replica._canonical,
+)
+
+SCRIPT_DIGESTERS = (
+    review_export._digest,
+    pending_route_price.canonical_sha256,
+    performance_apply._digest,
+    performance_approve._digest,
+    performance_preflight._digest,
+    performance_review._digest,
+    position_replica._digest,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_ENTRYPOINTS = (
+    "export_performance_v2_review_diff.py",
+    "pending_route_price_v074_operations.py",
+    "production_performance_v2_apply.py",
+    "production_performance_v2_approve.py",
+    "production_performance_v2_post_cutover_smoke.py",
+    "production_performance_v2_preflight.py",
+    "production_performance_v2_supervisor_review.py",
+    "validate_performance_v57_replica.py",
+    "validate_position_v070_replica.py",
 )
 
 
@@ -135,3 +182,50 @@ def test_domain_digesters_normalize_before_delegating(
 
     assert getattr(module, digester_name)({"values": {"乙", "甲"}}) == "shared-digest"
     assert seen == [{"values": ["乙", "甲"]}]
+
+
+@pytest.mark.parametrize("serializer", SCRIPT_SERIALIZERS)
+def test_script_serializers_delegate_to_v1(monkeypatch, serializer):
+    seen = []
+    monkeypatch.setattr(
+        evidence_protocol,
+        "canonical_json_v1",
+        lambda value: seen.append(value) or "shared",
+    )
+    value = {"source": "script"}
+
+    assert serializer(value) == "shared"
+    assert seen == [value]
+
+
+@pytest.mark.parametrize("digester", SCRIPT_DIGESTERS)
+def test_script_digesters_delegate_to_v1(monkeypatch, digester):
+    seen = []
+    monkeypatch.setattr(
+        evidence_protocol,
+        "sha256_digest_v1",
+        lambda value: seen.append(value) or "shared-digest",
+    )
+    value = {"source": "script"}
+
+    assert digester(value) == "shared-digest"
+    assert seen == [value]
+
+
+@pytest.mark.parametrize("script_name", SCRIPT_ENTRYPOINTS)
+def test_migrated_scripts_keep_direct_help_entrypoint(tmp_path, script_name):
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "scripts" / script_name), "--help"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+    assert "usage:" in completed.stdout
