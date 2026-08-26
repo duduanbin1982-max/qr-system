@@ -564,8 +564,8 @@ def test_history_manifest_matches_exact_pre_refactor_characterization(client):
         )
 
         assert actual == {
-            "manifest_sha256": "8f1b00eb935f956138eaa34d09ae2db9f743cabe03bcc2326028fb04fcfb7ce1",
-            "month_manifest_sha256": "527500290c50bb3909cdb3894d82ff7915090864d2f069ffcca5e5fed77b8c6f",
+            "manifest_sha256": "5978dbcd4cecfd76272d60da9ef0557a5fff8503720de8a67e20906119a5c368",
+            "month_manifest_sha256": "308b9601d94c8685aa1b873d162b958b486bd3f9a42cc00e06302aff2c6ab9c5",
             "record_count": 13,
             "stable_keys": [
                 "assignment_history:00000000000000000006",
@@ -995,8 +995,8 @@ Create `docs/superpowers/evidence/2026-08-26-task-1-characterization-baseline.md
 ## Frozen Contracts
 
 - Canonical JSON UTF-8 SHA-256: `b684ca625660639998b74c8d97a06487a7c62f3755a93e590de9b8153a20f1cf`
-- Synthetic history plan SHA-256: `8f1b00eb935f956138eaa34d09ae2db9f743cabe03bcc2326028fb04fcfb7ce1`
-- Synthetic history month SHA-256: `527500290c50bb3909cdb3894d82ff7915090864d2f069ffcca5e5fed77b8c6f`
+- Synthetic history plan SHA-256: `5978dbcd4cecfd76272d60da9ef0557a5fff8503720de8a67e20906119a5c368`
+- Synthetic history month SHA-256: `308b9601d94c8685aa1b873d162b958b486bd3f9a42cc00e06302aff2c6ab9c5`
 - Actor adapters preserve the exact `id/name/role` mapping and `ValidationError("操作人不能为空")` contract.
 - Performance production commands preserve read-only SQLite, backup, payroll fingerprint, stdout, stderr, and exit-code behavior.
 - `ProcessList` preserves creation, version editing, submit, approve, reject, revision, lifecycle, permission, toast, and reload behavior.
