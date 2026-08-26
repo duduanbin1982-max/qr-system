@@ -9,9 +9,11 @@ const mocks = vi.hoisted(() => ({
   listProcessRoutes: vi.fn(),
   listProcesses: vi.fn(),
   listRouteVersions: vi.fn(),
+  submitRouteVersion: vi.fn(),
   getRouteVersionImpact: vi.fn(),
   listRoutePriceVersions: vi.fn(),
   showToast: vi.fn(),
+  navigate: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
@@ -21,6 +23,7 @@ vi.mock('@/lib/api.js', () => ({
       processes: { listProcesses: mocks.listProcesses },
       processRouteVersions: {
         listRouteVersions: mocks.listRouteVersions,
+        submitRouteVersion: mocks.submitRouteVersion,
         getRouteVersionImpact: mocks.getRouteVersionImpact,
       },
       wages: { listRoutePriceVersions: mocks.listRoutePriceVersions },
@@ -32,6 +35,7 @@ vi.mock('@/lib/auth.js', () => ({
   can: vi.fn(permission => mocks.permissions.has(permission)),
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
+vi.mock('@/lib/router.js', () => ({ navigate: mocks.navigate }))
 
 const published = {
   id: 11,
@@ -90,5 +94,81 @@ describe('RouteList versioned changes', () => {
     expect(mocks.listRouteVersions).toHaveBeenCalledWith(1)
     expect(wrapper.text()).toContain('创建路线修订版')
     expect(wrapper.find('.command-modal').exists()).toBe(true)
+  })
+
+  it('submits a draft route before opening its exact price editor', async () => {
+    const draftItem = {
+      id: 1201,
+      process_id: 7,
+      process_version_id: 71,
+      process_name_snapshot: '精车',
+      process_version: 3,
+      seq_order: 10,
+      is_required: 1,
+      required_audit: 0,
+    }
+    const draft = {
+      id: 12,
+      process_route_id: 1,
+      version: 2,
+      name: '待发布路线',
+      category: '结构件',
+      status: 'draft',
+      row_version: 4,
+      items: [draftItem],
+    }
+    mocks.permissions = new Set([
+      'routes:view',
+      'route_versions:submit',
+      'wages:prepare',
+    ])
+    mocks.listProcessRoutes.mockResolvedValue({
+      routes: [{
+        id: 1,
+        route_code: 'ROUTE-0001',
+        name: '待发布路线',
+        category: '结构件',
+        lifecycle_status: 'active',
+        route_version: 1,
+        open_version_status: 'draft',
+        processes: [draftItem],
+        used_orders: 0,
+        used_products: 0,
+      }],
+      total: 1,
+      summary: { total_routes: 1, category_counts: { '结构件': 1 }, process_nodes_total: 1 },
+    })
+    mocks.listRouteVersions
+      .mockResolvedValueOnce({
+        route: { id: 1, route_code: 'ROUTE-0001', lifecycle_status: 'active', current_effective_version_id: 11, row_version: 3 },
+        versions: [published, draft],
+        events: [],
+      })
+      .mockResolvedValue({
+        route: { id: 1, route_code: 'ROUTE-0001', lifecycle_status: 'active', current_effective_version_id: 11, row_version: 4 },
+        versions: [{ ...draft, status: 'pending_approval' }],
+        events: [],
+      })
+    mocks.submitRouteVersion.mockResolvedValue({ ...draft, status: 'pending_approval' })
+
+    const wrapper = mount(RouteList)
+    await flushPromises()
+    await wrapper.get('.route-name-link').trigger('click')
+    await flushPromises()
+
+    const action = wrapper.get('[data-testid="submit-and-create-exact-price-71"]')
+    await action.trigger('click')
+    await flushPromises()
+
+    expect(mocks.submitRouteVersion).toHaveBeenCalledWith(12, expect.objectContaining({
+      row_version: 4,
+      idempotency_key: expect.stringMatching(/^route-submit:/),
+    }))
+    expect(mocks.navigate).toHaveBeenCalledWith('wages', {
+      wage_tab: 'priceversions',
+      route_version_id: 12,
+      process_version_id: 71,
+      create_price: true,
+    })
   })
 })
