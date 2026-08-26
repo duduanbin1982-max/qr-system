@@ -1,10 +1,10 @@
 """Canonical quality-event registration for performance source accounting."""
 
 import hashlib
-import json
 import math
 import re
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.repositories.performance_fact_repository import PerformanceFactRepository
 from modules.services import BaseService
@@ -16,13 +16,7 @@ class PerformanceQualityEventService:
 
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @classmethod
     def _source(cls, value):

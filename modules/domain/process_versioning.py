@@ -2,10 +2,9 @@
 
 from collections import Counter
 from copy import deepcopy
-import hashlib
-import json
 from math import isfinite
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, ValidationError
 
 
@@ -319,17 +318,11 @@ def canonicalize(value):
 
 
 def canonical_json(value):
-    return json.dumps(
-        canonicalize(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
+    return evidence_protocol.canonical_json_v1(canonicalize(value))
 
 
 def payload_sha256(value):
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    return evidence_protocol.sha256_digest_v1(canonicalize(value))
 
 
 def _impact_sort_key(item):

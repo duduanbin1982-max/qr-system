@@ -3,6 +3,7 @@
 from datetime import datetime
 import json
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.domain.performance_policy import (
     ELIGIBILITY_ELIGIBLE,
@@ -34,13 +35,7 @@ class PerformanceLedgerService(
 ):
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @staticmethod
     def _json_object(value):

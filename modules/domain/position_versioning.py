@@ -1,9 +1,8 @@
 """Pure policy for immutable position revisions and lifecycle commands."""
 
-import hashlib
-import json
 from math import isfinite
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 
 
@@ -230,17 +229,11 @@ def canonicalize(value):
 
 
 def canonical_json(value):
-    return json.dumps(
-        canonicalize(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
+    return evidence_protocol.canonical_json_v1(canonicalize(value))
 
 
 def stable_digest(value):
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    return evidence_protocol.sha256_digest_v1(canonicalize(value))
 
 
 def _positive_process_id(value):
