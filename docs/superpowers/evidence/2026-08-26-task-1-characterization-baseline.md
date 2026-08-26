@@ -1,8 +1,8 @@
 # Task 1 Behavior Characterization Baseline
 
-**Date:** 2026-08-26  
-**Source production baseline:** `cd6f999836de47a78f0b36f9b251c6f1faa47f49`  
-**Database schema:** `user_version=75`  
+**Date:** 2026-08-26
+**Source production baseline:** `cd6f999836de47a78f0b36f9b251c6f1faa47f49`
+**Database schema:** `user_version=75`
 **Scope:** tests and evidence only; production code, APIs, permissions, state machines, migrations, and feature flags unchanged
 
 ## Frozen Contracts

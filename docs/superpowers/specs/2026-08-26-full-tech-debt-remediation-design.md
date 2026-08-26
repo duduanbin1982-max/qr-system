@@ -1,8 +1,8 @@
 # Full Technical Debt Remediation Design
 
-**Date:** 2026-08-26  
-**Status:** Approved  
-**Production baseline:** `cd6f999836de47a78f0b36f9b251c6f1faa47f49`  
+**Date:** 2026-08-26
+**Status:** Approved
+**Production baseline:** `cd6f999836de47a78f0b36f9b251c6f1faa47f49`
 **Strategy:** Foundation first, behavior preserving, independently accepted and merged stages
 
 ## 1. Context
@@ -257,4 +257,3 @@ Tasks 7 and 8 depend on Task 1. Task 9 requires Tasks 2 through 8 to be complete
 - Legacy code is removed only after its gate is satisfied and a separate approval is recorded.
 - Production deployment, stop, restart, migration, or feature-flag change always requires a new,
   explicit authorization for the exact merged commit and maintenance window.
-
