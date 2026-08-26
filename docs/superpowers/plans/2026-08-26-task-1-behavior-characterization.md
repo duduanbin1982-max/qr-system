@@ -938,7 +938,7 @@ Run: `& "C:\Program Files\Git\bin\bash.exe" -c 'git diff --name-only cd6f999836d
 
 Expected: only the approved design/plan, the four backend test files, and `frontend/tests/unit/ProcessList.spec.js` appear at this point; no path under `modules/`, `scripts/`, or `frontend/src/` appears. The evidence document is added only in Step 5 below.
 
-Run: `& "C:\Program Files\Git\bin\bash.exe" -c 'python -c "from modules.migrations import LATEST_VERSION; assert LATEST_VERSION == 75; print(LATEST_VERSION)"'`
+Run: `& "C:\Program Files\Git\bin\bash.exe" -c 'SECRET_KEY=task-1-schema-check python -c "from modules.migrations import LATEST_VERSION; assert LATEST_VERSION == 75; print(LATEST_VERSION)"'`
 
 Expected stdout: `75`.
 
