@@ -53,6 +53,8 @@ EXPECTED_UTF8_HEX = (
 )
 EXPECTED_SHA256 = "b684ca625660639998b74c8d97a06487a7c62f3755a93e590de9b8153a20f1cf"
 
+# Characterization seam: keep the compatibility contract in this file only; new
+# business tests should exercise public services or HTTP endpoints instead.
 SERIALIZERS = (
     ("process-domain", process_json),
     ("position-domain", position_json),

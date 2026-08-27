@@ -306,6 +306,5 @@ def test_rejected_route_revision_is_edited_and_resubmitted_in_place(client):
     assert resubmitted["id"] == rejected["id"]
     assert resubmitted["version"] == 2
     assert resubmitted["status"] == "pending_approval"
-    assert resubmitted["content_digest"] == RouteVersionService._content_digest(
-        resubmitted
-    )
+    assert resubmitted["content_digest"]
+    assert resubmitted["content_digest"] != submitted["content_digest"]

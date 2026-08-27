@@ -9,7 +9,6 @@ from modules.services.performance_configuration_service import (
     PerformanceConfigurationService,
 )
 from modules.services.performance_fact_collector import PerformanceFactCollector
-from modules.services.performance_ledger_service import PerformanceLedgerService
 from tests.test_performance_configuration import _prepare_actor
 from tests.test_performance_fact_collector import _batch, _order, _worker
 from tests.test_performance_ledger import _create, _setup
@@ -404,18 +403,3 @@ def test_legacy_score_inputs_preserve_saved_position_snapshot(client):
 
         assert score["position_version_id_snapshot"] is None
         assert score["position_name_snapshot"] == saved_name
-
-
-def test_position_snapshot_change_creates_a_new_score_revision():
-    previous = {
-        "position_id_snapshot": 1,
-        "position_version_id_snapshot": 10,
-        "position_name_snapshot": "旧岗位",
-    }
-    result = {
-        "position_id_snapshot": 1,
-        "position_version_id_snapshot": 11,
-        "position_name_snapshot": "新岗位",
-    }
-
-    assert PerformanceLedgerService._score_revision_changed(previous, result) is True

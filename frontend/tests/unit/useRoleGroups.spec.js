@@ -1,3 +1,5 @@
+import { defineComponent, h } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRoleGroups } from '@/composables/settings/useRoleGroups.js'
@@ -26,6 +28,17 @@ vi.mock('@/lib/api.js', () => ({
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
 
+function mountHarness() {
+  let state
+  const harness = defineComponent({
+    setup() {
+      state = useRoleGroups()
+      return () => h('div')
+    },
+  })
+  return { wrapper: mount(harness), get state() { return state } }
+}
+
 
 describe('role group permission UI contracts', () => {
   beforeEach(() => {
@@ -39,7 +52,9 @@ describe('role group permission UI contracts', () => {
   })
 
   it('guards create and edit actions and never sends legacy permissions', async () => {
-    const groups = useRoleGroups()
+    const harness = mountHarness()
+    await flushPromises()
+    const groups = harness.state
 
     expect(groups.canCreate.value).toBe(true)
     expect(groups.canEdit.value).toBe(true)
@@ -60,11 +75,14 @@ describe('role group permission UI contracts', () => {
       status: 'active',
     })
     expect(mocks.createRoleGroup.mock.calls[0][0]).not.toHaveProperty('permissions')
+    harness.wrapper.unmount()
   })
 
   it('does not open or invoke destructive actions without permission', async () => {
     mocks.permissions = new Set(['role_groups:view'])
-    const groups = useRoleGroups()
+    const harness = mountHarness()
+    await flushPromises()
+    const groups = harness.state
 
     groups.openAddGroup()
     expect(groups.showGroupModal.value).toBe(false)
@@ -73,5 +91,6 @@ describe('role group permission UI contracts', () => {
     await groups.deleteGroup(1)
     expect(mocks.deleteRoleGroup).not.toHaveBeenCalled()
     expect(mocks.showToast).toHaveBeenCalledWith('无权删除角色组', 'error')
+    harness.wrapper.unmount()
   })
 })

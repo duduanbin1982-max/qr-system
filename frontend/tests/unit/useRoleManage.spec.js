@@ -1,3 +1,5 @@
+import { defineComponent, h } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRoleManage } from '@/composables/settings/useRoleManage.js'
@@ -25,6 +27,17 @@ vi.mock('@/lib/api.js', () => ({
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
 
+function mountHarness() {
+  let state
+  const harness = defineComponent({
+    setup() {
+      state = useRoleManage()
+      return () => h('div')
+    },
+  })
+  return { wrapper: mount(harness), get state() { return state } }
+}
+
 
 describe('role management security contracts', () => {
   beforeEach(() => {
@@ -41,7 +54,9 @@ describe('role management security contracts', () => {
   })
 
   it('keeps the built-in administrator wildcard immutable when saving', async () => {
-    const roles = useRoleManage()
+    const harness = mountHarness()
+    await flushPromises()
+    const roles = harness.state
     roles.permissionCodes.value = ['page:settings', 'roles:view', 'roles:edit']
     roles.openEditRole({
       id: 1,
@@ -67,10 +82,13 @@ describe('role management security contracts', () => {
       status: 'active',
       permissions: '["*"]',
     }))
+    harness.wrapper.unmount()
   })
 
   it('normalizes and deduplicates custom role permissions without a wildcard', async () => {
-    const roles = useRoleManage()
+    const harness = mountHarness()
+    await flushPromises()
+    const roles = harness.state
     roles.openAddRole()
     Object.assign(roles.roleForm, { name: '生产排程员', code: 'scheduler' })
     roles.selectedPerms.value = ['roles:view', 'roles:view', 'page:settings']
@@ -83,5 +101,6 @@ describe('role management security contracts', () => {
       permissions: '["roles:view","page:settings","page:settings.role-manage"]',
     }))
     expect(mocks.createRole.mock.calls[0][0]).not.toHaveProperty('is_builtin')
+    harness.wrapper.unmount()
   })
 })
