@@ -4,7 +4,6 @@
 import argparse
 from collections import Counter
 from datetime import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from modules.domain import evidence_protocol  # noqa: E402
+from scripts import production_operations  # noqa: E402
 
 
 EXPECTED_PAYROLL = {
@@ -54,11 +54,7 @@ def _digest(value):
 
 
 def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return production_operations.file_fingerprint(path)["sha256"]
 
 
 def _rows(db, sql, params=()):
@@ -70,14 +66,7 @@ def _scalar(db, sql, params=()):
 
 
 def _open_ro(path):
-    uri = "file:" + Path(path).resolve().as_posix() + "?mode=ro"
-    db = sqlite3.connect(uri, uri=True)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=10000")
-    db.execute("PRAGMA query_only=ON")
-    db.execute("BEGIN")
-    return db
+    return production_operations.open_read_only_sqlite(path)
 
 
 def _checks(db):
@@ -99,7 +88,7 @@ def _payroll(db):
         "payroll_events",
         "payroll_migration_manifests",
     )
-    return {table: int(_scalar(db, "SELECT COUNT(*) FROM " + table)) for table in tables}
+    return production_operations.table_count_fingerprint(db, tables)
 
 
 def _batch_counts(db):
@@ -131,14 +120,7 @@ def _commit(root):
 
 
 def _backup(source_path, target_path):
-    source = _open_ro(source_path)
-    target = sqlite3.connect(str(target_path))
-    try:
-        source.backup(target)
-        target.commit()
-    finally:
-        target.close()
-        source.close()
+    production_operations.online_database_backup(source_path, target_path)
 
 
 def _actor(db, username, access_policy_repository, collect_permission_codes):
@@ -348,7 +330,7 @@ def run(args):
         "batches": reviewed,
     }
     evidence["content_digest"] = _digest(evidence)
-    evidence_path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    production_operations.write_evidence_json(evidence_path, evidence)
     return {
         "status": "passed",
         "run_directory": str(run_dir),
@@ -362,14 +344,9 @@ def run(args):
 
 
 def main(argv=None):
-    args = _parser().parse_args(argv)
-    try:
-        result = run(args)
-    except Exception as exc:
-        print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return production_operations.run_json_cli(
+        _parser, run, argv, failure_indent=None
+    )
 
 
 if __name__ == "__main__":

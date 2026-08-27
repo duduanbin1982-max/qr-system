@@ -4,10 +4,8 @@
 import argparse
 from collections import Counter
 from datetime import datetime
-import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import sys
 
 
@@ -16,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from modules.domain import evidence_protocol  # noqa: E402
+from scripts import production_operations  # noqa: E402
 
 
 def _parser():
@@ -38,11 +37,7 @@ def _digest(value):
 
 
 def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return production_operations.file_fingerprint(path)["sha256"]
 
 
 def _rows(db, sql, params=()):
@@ -54,17 +49,7 @@ def _scalar(db, sql, params=()):
 
 
 def _open_ro(path):
-    uri = "file:" + Path(path).resolve().as_posix() + "?mode=ro"
-    db = sqlite3.connect(uri, uri=True)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=10000")
-    db.execute("PRAGMA query_only=ON")
-    if int(_scalar(db, "PRAGMA query_only")) != 1:
-        db.close()
-        raise RuntimeError("SQLite query_only 未生效")
-    db.execute("BEGIN")
-    return db
+    return production_operations.open_read_only_sqlite(path)
 
 
 def _query_flag(system_root):
@@ -82,7 +67,7 @@ def _query_flag(system_root):
 
 
 def _write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    production_operations.write_evidence_json(path, value)
 
 
 def _write_csv(path, rows):
@@ -231,14 +216,9 @@ def run(args):
 
 
 def main(argv=None):
-    args = _parser().parse_args(argv)
-    try:
-        result = run(args)
-    except Exception as exc:
-        print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return production_operations.run_json_cli(
+        _parser, run, argv, failure_indent=None
+    )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts import production_operations
 from scripts import export_performance_v2_review_diff as review_export
 from scripts import production_performance_v2_apply as performance_apply
 from scripts import production_performance_v2_approve as performance_approve
@@ -28,6 +29,7 @@ BACKUP_FUNCTIONS = (
     performance_approve._backup,
     performance_review._backup,
     performance_cutover._database_backup,
+    performance_replica._online_backup,
 )
 
 PAYROLL_FUNCTIONS = (
@@ -60,6 +62,49 @@ PAYROLL_TABLES = (
 )
 
 
+READ_ONLY_MODULES = (
+    (performance_apply, "_open_ro"),
+    (performance_approve, "_open_ro"),
+    (performance_cutover, "_open_ro"),
+    (performance_smoke, "_open_ro"),
+    (performance_preflight, "_open_read_only"),
+    (performance_review, "_open_ro"),
+    (review_export, "_open_ro"),
+)
+
+BACKUP_MODULES = (
+    (performance_apply, "_backup"),
+    (performance_approve, "_backup"),
+    (performance_review, "_backup"),
+    (performance_cutover, "_database_backup"),
+    (performance_replica, "_online_backup"),
+)
+
+PAYROLL_MODULES = (
+    (performance_apply, "_payroll_fingerprint"),
+    (performance_approve, "_payroll"),
+    (performance_cutover, "_payroll"),
+    (performance_smoke, "_payroll"),
+    (performance_review, "_payroll"),
+)
+
+EVIDENCE_WRITERS = (
+    (review_export, "_write_json"),
+    (performance_preflight, "_write_json"),
+)
+
+FINGERPRINT_MODULES = (
+    review_export,
+    performance_apply,
+    performance_approve,
+    performance_cutover,
+    performance_smoke,
+    performance_preflight,
+    performance_review,
+    performance_replica,
+)
+
+
 @pytest.fixture
 def source_database(tmp_path):
     path = tmp_path / "source.db"
@@ -73,6 +118,105 @@ def source_database(tmp_path):
 
 def _parser_stub():
     return SimpleNamespace(parse_args=lambda argv: SimpleNamespace())
+
+
+@pytest.mark.parametrize("module,helper_name", READ_ONLY_MODULES)
+def test_read_only_helpers_delegate_to_shared_primitive(
+    monkeypatch, module, helper_name
+):
+    sentinel = object()
+    calls = []
+
+    def fake_open(path):
+        calls.append(path)
+        return sentinel
+
+    monkeypatch.setattr(production_operations, "open_read_only_sqlite", fake_open)
+
+    assert getattr(module, helper_name)("source.db") is sentinel
+    assert calls == ["source.db"]
+
+
+@pytest.mark.parametrize("module,helper_name", BACKUP_MODULES)
+def test_backup_helpers_delegate_to_shared_primitive(
+    monkeypatch, module, helper_name
+):
+    calls = []
+
+    def fake_backup(source, target):
+        calls.append((source, target))
+        return {"status": "passed"}
+
+    monkeypatch.setattr(production_operations, "online_database_backup", fake_backup)
+
+    assert getattr(module, helper_name)("source.db", "backup.db") is None
+    assert calls == [("source.db", "backup.db")]
+
+
+@pytest.mark.parametrize("module,helper_name", PAYROLL_MODULES)
+def test_payroll_helpers_delegate_with_frozen_table_order(
+    monkeypatch, module, helper_name
+):
+    sentinel = object()
+    calls = []
+
+    def fake_fingerprint(db, tables):
+        calls.append((db, tuple(tables)))
+        return {"payroll_batches": 4}
+
+    monkeypatch.setattr(
+        production_operations, "table_count_fingerprint", fake_fingerprint
+    )
+
+    assert getattr(module, helper_name)(sentinel) == {"payroll_batches": 4}
+    assert calls == [(sentinel, PAYROLL_TABLES)]
+
+
+@pytest.mark.parametrize("module,helper_name", EVIDENCE_WRITERS)
+def test_evidence_writer_helpers_delegate_to_shared_primitive(
+    monkeypatch, module, helper_name
+):
+    calls = []
+
+    def fake_write(path, payload, *, overwrite=False):
+        calls.append((path, payload, overwrite))
+
+    monkeypatch.setattr(production_operations, "write_evidence_json", fake_write)
+    payload = {"status": "passed"}
+
+    assert getattr(module, helper_name)("evidence.json", payload) is None
+    assert calls == [("evidence.json", payload, False)]
+
+
+@pytest.mark.parametrize("module", FINGERPRINT_MODULES)
+def test_sha256_helpers_delegate_to_shared_file_fingerprint(monkeypatch, module):
+    calls = []
+
+    def fake_fingerprint(path):
+        calls.append(path)
+        return {"sha256": "frozen-digest"}
+
+    monkeypatch.setattr(production_operations, "file_fingerprint", fake_fingerprint)
+
+    assert module._sha256("artifact.json") == "frozen-digest"
+    assert calls == ["artifact.json"]
+
+
+@pytest.mark.parametrize("module,failure_indent", CLI_MODULES)
+def test_performance_cli_entrypoints_delegate_to_shared_runner(
+    monkeypatch, module, failure_indent
+):
+    calls = []
+
+    def fake_run_json_cli(parser_factory, operation, argv, *, failure_indent=None):
+        calls.append((parser_factory, operation, argv, failure_indent))
+        return 17
+
+    monkeypatch.setattr(production_operations, "run_json_cli", fake_run_json_cli)
+    argv = ["--contract-check"]
+
+    assert module.main(argv) == 17
+    assert calls == [(module._parser, module.run, argv, failure_indent)]
 
 
 @pytest.mark.parametrize("open_ro", READ_ONLY_OPENERS)
