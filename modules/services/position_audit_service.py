@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from modules.audit_policy import sanitize_audit_detail
+from modules.domain.actor_context import ActorContextParseError, parse_actor_context
 from modules.domain.errors import ValidationError
 from modules.domain.position_versioning import canonical_json, position_diff
 from modules.repositories.audit_log_repository import AuditLogRepository
@@ -12,18 +13,10 @@ from modules.repositories.audit_log_repository import AuditLogRepository
 class PositionAuditService:
     @staticmethod
     def _actor(actor):
-        source = actor or {}
         try:
-            actor_id = int(source.get("id"))
-        except (TypeError, ValueError) as exc:
+            return parse_actor_context(actor).to_legacy_mapping()
+        except ActorContextParseError as exc:
             raise ValidationError("操作人不能为空") from exc
-        if actor_id <= 0:
-            raise ValidationError("操作人不能为空")
-        return {
-            "id": actor_id,
-            "name": str(source.get("name") or source.get("username") or "").strip(),
-            "role": str(source.get("role") or "").strip(),
-        }
 
     @staticmethod
     def _event_id(action, idempotency_key):

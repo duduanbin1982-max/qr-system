@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from modules.domain.actor_context import ActorContextParseError, parse_actor_context
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.domain.price_versioning import (
     ActiveReleaseBatchConflictError,
@@ -40,18 +41,10 @@ class RouteVersionService:
 
     @staticmethod
     def _actor(actor):
-        actor = actor or {}
         try:
-            actor_id = int(actor.get("id"))
-        except (TypeError, ValueError) as exc:
+            return parse_actor_context(actor).to_legacy_mapping()
+        except ActorContextParseError as exc:
             raise ValidationError("操作人不能为空") from exc
-        if actor_id <= 0:
-            raise ValidationError("操作人不能为空")
-        return {
-            "id": actor_id,
-            "name": str(actor.get("name") or actor.get("username") or "").strip(),
-            "role": str(actor.get("role") or "").strip(),
-        }
 
     @staticmethod
     def _text(data, field, label):
