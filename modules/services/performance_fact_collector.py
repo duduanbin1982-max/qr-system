@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.performance_assignment_repository import (
@@ -56,17 +57,11 @@ class PerformanceFactCollector:
 
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @classmethod
     def _digest(cls, value):
-        return hashlib.sha256(cls._canonical(value).encode("utf-8")).hexdigest()
+        return evidence_protocol.sha256_digest_v1(value)
 
     @staticmethod
     def _json_object(value):

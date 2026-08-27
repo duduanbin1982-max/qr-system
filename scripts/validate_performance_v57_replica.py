@@ -25,6 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-replica-validation-only")
 
 from modules.access_policy import collect_permission_codes  # noqa: E402
+from modules.domain import evidence_protocol  # noqa: E402
 from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
 from modules.repositories.access_policy_repository import (  # noqa: E402
     AccessPolicyRepository,
@@ -136,13 +137,7 @@ def _parser():
 
 
 def _canonical(value):
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
+    return evidence_protocol.canonical_json_v1(value)
 
 
 def _sha256(path):

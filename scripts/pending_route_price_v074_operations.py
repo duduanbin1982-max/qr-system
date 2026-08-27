@@ -15,6 +15,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from modules.domain import evidence_protocol  # noqa: E402
+
 
 SOURCE_VERSION = 73
 # V075 repairs the legacy empty process/route content digests required by the
@@ -58,14 +60,7 @@ def database_sha256(path: str | Path) -> str:
 
 
 def canonical_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return evidence_protocol.sha256_digest_v1(value)
 
 
 def _open_read_only(path: str | Path) -> sqlite3.Connection:
