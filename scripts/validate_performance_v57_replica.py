@@ -51,6 +51,7 @@ from modules.services.performance_improvement_service import (  # noqa: E402
 from modules.services.performance_ledger_service import (  # noqa: E402
     PerformanceLedgerService,
 )
+from scripts import production_operations  # noqa: E402
 
 
 EXPECTED_COUNTS = {
@@ -141,11 +142,7 @@ def _canonical(value):
 
 
 def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return production_operations.file_fingerprint(path)["sha256"]
 
 
 def _rows(db, sql, params=()):
@@ -216,15 +213,7 @@ def _validate_source_actors(db):
 
 
 def _online_backup(source_path, replica_path):
-    source_uri = "file:" + source_path.as_posix() + "?mode=ro"
-    source = sqlite3.connect(source_uri, uri=True)
-    target = sqlite3.connect(str(replica_path))
-    try:
-        source.backup(target)
-        target.commit()
-    finally:
-        target.close()
-        source.close()
+    production_operations.online_database_backup(source_path, replica_path)
 
 
 def _ensure_department(db, name):
@@ -863,30 +852,16 @@ def run(args):
         db.close()
 
     result["replica_sha256_after_validation"] = _sha256(replica_path)
-    evidence_path.write_text(
-        json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    production_operations.write_evidence_json(evidence_path, result)
     result["evidence_file"] = str(evidence_path)
     result["evidence_sha256"] = _sha256(evidence_path)
     return result
 
 
 def main(argv=None):
-    args = _parser().parse_args(argv)
-    try:
-        result = run(args)
-    except Exception as exc:
-        print(
-            json.dumps(
-                {"status": "failed", "error": str(exc)},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            file=sys.stderr,
-        )
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return production_operations.run_json_cli(
+        _parser, run, argv, failure_indent=2
+    )
 
 
 if __name__ == "__main__":
