@@ -46,6 +46,8 @@ EXPECTED_CANONICAL = (
 )
 EXPECTED_SHA256 = "b684ca625660639998b74c8d97a06487a7c62f3755a93e590de9b8153a20f1cf"
 
+# Characterization seam: these private delegates are intentionally centralized here
+# to protect the shared Evidence Protocol while business tests use public workflows.
 SERVICE_SERIALIZERS = (
     PerformanceConfigurationService._canonical,
     PerformanceFactCollector._canonical,
