@@ -1,8 +1,8 @@
 # Task 4 Production Operations Foundation Evidence
 
-**Date:** 2026-08-27  
-**Branch:** `codex/task-4-production-operations`  
-**Base commit:** `cd459683de7bab1a32c1545ae7cdccc6532e0aa2`  
+**Date:** 2026-08-27
+**Branch:** `codex/task-4-production-operations`
+**Base commit:** `cd459683de7bab1a32c1545ae7cdccc6532e0aa2`
 **Database schema:** unchanged at `user_version=75`
 
 ## Scope
@@ -35,7 +35,7 @@ Task 5 so that each script group can prove external behavior equivalence indepen
 ```text
 python -m pytest -q tests/test_production_operations.py \
   tests/test_production_operations_characterization.py
-41 passed
+42 passed in 1.51s
 
 python -m pytest -q tests/test_process_v2_operations_scripts.py \
   tests/test_pending_route_price_v074_operations.py \
@@ -46,7 +46,7 @@ python -m pytest -q tests/test_architecture_imports.py tests/test_migrations.py
 47 passed in 11.73s
 
 python -m pytest -q
-1222 passed in 225.33s
+1223 passed in 255.88s
 
 npm run check:architecture
 API facade check passed: 34 namespaces, 408 unique domain methods

@@ -22,6 +22,32 @@ class ProductionOperationError(RuntimeError):
         self.category = str(category)
 
 
+def _reserve_output(path: Path, category: str, label: str) -> tuple[int, int]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise ProductionOperationError(
+            category, f"{label} already exists: {path}"
+        ) from exc
+    except OSError as exc:
+        raise ProductionOperationError(category, str(exc)) from exc
+    try:
+        reserved = os.fstat(descriptor)
+        return reserved.st_dev, reserved.st_ino
+    finally:
+        os.close(descriptor)
+
+
+def _remove_reservation(path: Path, identity: tuple[int, int]) -> None:
+    try:
+        observed = path.stat()
+    except FileNotFoundError:
+        return
+    if (observed.st_dev, observed.st_ino) == identity:
+        path.unlink(missing_ok=True)
+
+
 def open_read_only_sqlite(path: str | Path) -> sqlite3.Connection:
     """Open a transactionally stable, fail-closed SQLite read connection."""
 
@@ -84,26 +110,14 @@ def write_evidence_json(
     path: str | Path, payload: Any, *, overwrite: bool = False
 ) -> Path:
     target = Path(path).expanduser().resolve()
-    reserved = False
+    reservation = None
     if not overwrite:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            descriptor = os.open(
-                target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
-            )
-        except FileExistsError as exc:
-            raise ProductionOperationError(
-                "argument", f"evidence destination already exists: {target}"
-            ) from exc
-        except OSError as exc:
-            raise ProductionOperationError("argument", str(exc)) from exc
-        os.close(descriptor)
-        reserved = True
+        reservation = _reserve_output(target, "argument", "evidence destination")
     try:
         deployment_manifest.atomic_write_json(target, payload)
     except Exception:
-        if reserved:
-            target.unlink(missing_ok=True)
+        if reservation is not None:
+            _remove_reservation(target, reservation)
         raise
     return target
 
@@ -113,21 +127,14 @@ def online_database_backup(source: str | Path, target: str | Path) -> dict[str, 
 
     source_path = Path(source).expanduser().resolve()
     target_path = Path(target).expanduser().resolve()
-    target_path.parent.mkdir(parents=True, exist_ok=True)
     source_connection = open_read_only_sqlite(source_path)
     try:
-        descriptor = os.open(
-            target_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+        reservation = _reserve_output(
+            target_path, "backup", "database backup"
         )
-    except FileExistsError as exc:
+    except Exception:
         source_connection.close()
-        raise ProductionOperationError(
-            "backup", f"database backup already exists: {target_path}"
-        ) from exc
-    except OSError as exc:
-        source_connection.close()
-        raise ProductionOperationError("backup", str(exc)) from exc
-    os.close(descriptor)
+        raise
     target_connection = None
     try:
         target_connection = sqlite3.connect(str(target_path))
@@ -136,7 +143,7 @@ def online_database_backup(source: str | Path, target: str | Path) -> dict[str, 
         target_connection = None
         return database_fingerprint(target_path)
     except Exception:
-        target_path.unlink(missing_ok=True)
+        _remove_reservation(target_path, reservation)
         raise
     finally:
         if target_connection is not None:
@@ -160,10 +167,7 @@ def run_authoritative_backup(
             "argument", f"authoritative backup script does not exist: {script}"
         )
     metadata = Path(metadata_file).expanduser().resolve()
-    if metadata.exists():
-        raise ProductionOperationError(
-            "argument", f"backup metadata already exists: {metadata}"
-        )
+    reservation = _reserve_output(metadata, "argument", "backup metadata")
     environment = os.environ.copy()
     environment.update(
         {
@@ -183,8 +187,10 @@ def run_authoritative_backup(
             check=False,
         )
     except OSError as exc:
+        _remove_reservation(metadata, reservation)
         raise ProductionOperationError("backup", str(exc)) from exc
     if completed.returncode != 0:
+        _remove_reservation(metadata, reservation)
         detail = (completed.stderr or completed.stdout or "backup command failed").strip()
         raise ProductionOperationError("backup", detail)
     try:

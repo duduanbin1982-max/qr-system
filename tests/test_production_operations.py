@@ -149,6 +149,7 @@ def test_run_authoritative_backup_invokes_script_and_verifies_metadata(
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
+        metadata.write_text("{}", encoding="utf-8")
         return SimpleNamespace(returncode=0, stdout="BACKUP OK\n", stderr="")
 
     expected = {"schema": "qr-system-backup-evidence/v1"}
@@ -176,6 +177,28 @@ def test_run_authoritative_backup_invokes_script_and_verifies_metadata(
     assert kwargs["env"]["BACKUP_METADATA_FILE"] == str(metadata.resolve())
 
 
+def test_run_authoritative_backup_refuses_concurrent_metadata_owner(tmp_path):
+    root = tmp_path / "system"
+    script = root / "scripts" / "backup-db.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    metadata = tmp_path / "evidence.json"
+    metadata.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(
+        production_operations.ProductionOperationError,
+        match="backup metadata already exists",
+    ):
+        production_operations.run_authoritative_backup(
+            project_root=root,
+            database=tmp_path / "source.db",
+            backup_dir=tmp_path / "backups",
+            metadata_file=metadata,
+        )
+
+    assert metadata.read_text(encoding="utf-8") == "existing"
+
+
 def test_run_authoritative_backup_classifies_command_and_integrity_failures(
     monkeypatch, tmp_path
 ):
@@ -201,11 +224,14 @@ def test_run_authoritative_backup_classifies_command_and_integrity_failures(
         )
     assert error.value.category == "backup"
     assert str(error.value) == "受控备份失败"
+    assert not metadata.exists()
+
+    def generate_invalid_metadata(*args, **kwargs):
+        metadata.write_text("generated evidence", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(
-        production_operations.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+        production_operations.subprocess, "run", generate_invalid_metadata
     )
     monkeypatch.setattr(
         production_operations.deployment_manifest,
@@ -221,6 +247,7 @@ def test_run_authoritative_backup_classifies_command_and_integrity_failures(
         )
     assert error.value.category == "integrity"
     assert str(error.value) == "校验失败"
+    assert metadata.read_text(encoding="utf-8") == "generated evidence"
 
 
 @pytest.mark.parametrize("failure_indent", (None, 2))
