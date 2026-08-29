@@ -1,12 +1,21 @@
 // Service Worker cache revision is independent from the application version.
-const CACHE_REVISION = "20260801.1";
+const CACHE_REVISION = "20260829.2";
 const CACHE_NAME = "qr-system-cache-" + CACHE_REVISION;
 // Pre-cache only immutable/large assets (NOT HTML)
 const ASSETS = [
   "/offline.html",
   "/jsQR.js",
   "/style.css",
-  "/css/mobile.css?v=18",
+  "/css/mobile.css?v=19",
+  "/css/inspection.css?v=3",
+  "/js/mobile/mobile-api.js?v=9",
+  "/js/mobile/mobile-utils.js?v=31",
+  "/js/mobile/mobile-auth.js?v=31",
+  "/js/mobile/mobile-scan.js?v=27",
+  "/js/mobile/mobile-order.js?v=43",
+  "/js/mobile/mobile-quality-evaluation.js?v=8",
+  "/js/mobile/mobile-init.js?v=36",
+  "/js/mobile/inspection.js?v=9",
   "/manifest.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -42,7 +51,12 @@ self.addEventListener("fetch", function(event) {
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(event.request).catch(function() {
-        return new Response(JSON.stringify({error: "offline", offline: true}), {
+        return new Response(JSON.stringify({
+          error: "当前离线，业务提交未保存，请恢复网络后重新提交",
+          code: "offline",
+          action: "retry_online",
+          offline: true
+        }), {
           status: 503,
           headers: {"Content-Type": "application/json"}
         });

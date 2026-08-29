@@ -59,7 +59,33 @@ async function apiRequest(method, url, data) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(data);
   }
-  var response = await fetch(API + url, opts);
+  if (method !== "GET" && typeof navigator !== "undefined" && navigator.onLine === false) {
+    var offlineError = new Error("当前离线，业务提交未保存，请恢复网络后重新提交");
+    offlineError.code = 0;
+    offlineError.status = 0;
+    offlineError.domainCode = "offline";
+    offlineError.action = "retry_online";
+    offlineError.offline = true;
+    offlineError.payload = { offline: true };
+    throw offlineError;
+  }
+  var response;
+  try {
+    response = await fetch(API + url, opts);
+  } catch (networkError) {
+    var transportError = new Error(
+      typeof navigator !== "undefined" && navigator.onLine === false
+        ? "当前离线，业务提交未保存，请恢复网络后重新提交"
+        : "网络异常，业务提交未确认，请重试"
+    );
+    transportError.code = 0;
+    transportError.status = 0;
+    transportError.domainCode = "offline";
+    transportError.action = "retry_online";
+    transportError.offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    transportError.payload = { offline: transportError.offline };
+    throw transportError;
+  }
   return parseApiResponse(response);
 }
 

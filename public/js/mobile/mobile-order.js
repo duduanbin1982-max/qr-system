@@ -101,14 +101,8 @@ function doScan(code) {
 //  订单展示 & 报工
 // ═══════════════════════════════════════════
 
-function renderOrder(o, requestedProcessId, requestedBackfillMode) {
-  curOrder = o; curProcId = null; curSerial = '';
-  serialBackfillMode = !!requestedBackfillMode;
-  var b = $('order-body'), cp = o.current_process, qty = o.quantity || 0;
-  var processes = o.processes || [];
-  var selected = null;
+function buildOrderHeader(o, qty) {
   var h = '';
-
   h += '<div class="order-header"><div class="no">' + esc(o.order_no || '') + '</div>';
   h += '<div class="row"><span>产品</span><span>' + esc(o.product_name || '') + '</span></div>';
   h += '<div class="row"><span>客户</span><span>' + esc(o.customer || '') + '</span></div>';
@@ -148,14 +142,19 @@ function renderOrder(o, requestedProcessId, requestedBackfillMode) {
   }
 
   if (o.item) {
-    curSerial = o.item.serial_no;
     h += '<div class="serial-card"><div class="label">序列号</div><div class="val">' + esc(o.item.serial_no) + '</div></div>';
   }
+  return h;
+}
 
+function resolveOrderProcessSelection(o, processes, requestedProcessId, requestedBackfillMode) {
+  var cp = o.current_process;
+  var selected = null;
+  var useBackfill = !!requestedBackfillMode;
   if (requestedProcessId) {
     selected = processes.find(function(p) {
       return String(p.process_id) === String(requestedProcessId) &&
-        (serialBackfillMode ? p.serial_backfill_reportable : isNormalReportProcessSelectable(p));
+        (useBackfill ? p.serial_backfill_reportable : isNormalReportProcessSelectable(p));
     });
   }
   if (!selected && cp) {
@@ -165,27 +164,34 @@ function renderOrder(o, requestedProcessId, requestedBackfillMode) {
   }
   if (!selected) {
     selected = processes.find(isNormalReportProcessSelectable);
-    serialBackfillMode = false;
+    useBackfill = false;
   }
   if (!selected && o.serial_backfill_selection_source === 'position_auto') {
     selected = processes.find(function(p) { return !!p.serial_backfill_reportable; });
-    serialBackfillMode = !!selected;
+    useBackfill = !!selected;
   }
 
-  var backfillCandidates = processes.filter(function(p) {
-    return !!p.serial_backfill_reportable;
-  });
+  return {
+    selected: selected,
+    serialBackfillMode: useBackfill,
+    backfillCandidates: processes.filter(function(p) { return !!p.serial_backfill_reportable; })
+  };
+}
 
+function buildOrderProcessSection(o, qty, processes, selection) {
+  var selected = selection.selected;
+  var backfillCandidates = selection.backfillCandidates;
+  var useBackfill = selection.serialBackfillMode;
+  var h = '';
   if (!selected && backfillCandidates.length) {
     h += '<div class="process-guidance" role="status">' + esc(getUnavailableReportMessage(o)) + '</div>';
   }
 
   if (selected) {
     var dn = selected.completed || 0;
-    var rm = serialBackfillMode ? 1 : (selected.max_report_quantity || 0);
-    curProcId = selected.process_id;
-    h += '<div class="cur-proc' + (serialBackfillMode ? ' backfill' : '') + '"><span class="badge">' +
-      (serialBackfillMode ? '跨工序补报' : '报工工序') + '</span>';
+    var rm = useBackfill ? 1 : (selected.max_report_quantity || 0);
+    h += '<div class="cur-proc' + (useBackfill ? ' backfill' : '') + '"><span class="badge">' +
+      (useBackfill ? '跨工序补报' : '报工工序') + '</span>';
     h += '<div class="name">' + esc(selected.process_name || '') + '</div>';
     h += '<div class="sub">已完成 ' + dn + '/' + qty + ' · 本次最多 ' + rm + ' 件</div></div>';
   }
@@ -200,7 +206,7 @@ function renderOrder(o, requestedProcessId, requestedBackfillMode) {
     else if (serialState === 'pending') s = 'pending approval-pending';
     else if (!curSerial && d >= qty) s = 'done';
     else if (String(p.process_id) === String(curProcId)) {
-      s = serialBackfillMode ? 'active selected backfill-selectable' : 'active selected';
+      s = useBackfill ? 'active selected backfill-selectable' : 'active selected';
     }
     else if (p.serial_backfill_reportable) s = 'pending selectable backfill-selectable';
     else if (selectable) s = 'pending selectable';
@@ -214,7 +220,7 @@ function renderOrder(o, requestedProcessId, requestedBackfillMode) {
       : p.process_authorized === false ? '无权限' : '待前序';
     var actionable = selectable && s !== 'done' && serialState !== 'pending' && s.indexOf('selected') < 0;
     var actionLabel = actionable ? '选择工序' + (p.process_name || '') + '，' + reportState : '';
-    h += '<button type="button" class="proc-item ' + s + '" data-process-id="' + (p.process_id || '') + '"' +
+    h += '<button type="button" class="proc-item ' + s + '" data-process-id="' + esc(p.process_id || '') + '"' +
       (p.serial_backfill_reportable && actionable ? ' data-backfill-candidate="true"' : '') +
       (actionable ? ' aria-label="' + esc(actionLabel) + '"' : ' disabled') + '><div class="pi-icon">' + (index + 1) + '</div>';
     h += '<div class="pi-info"><div class="pi-name">' + esc(p.process_name) + '</div>';
@@ -222,17 +228,37 @@ function renderOrder(o, requestedProcessId, requestedBackfillMode) {
     h += '<div class="pi-st">' + (s === 'done' ? (curSerial ? '已报工' : '已完成') : reportState) + '</div></button>';
   });
   h += '</div>';
-  b.innerHTML = h;
-  var positionSelect = b.querySelector('#order-active-position-select');
+  return h;
+}
+
+function bindOrderInteractions(container) {
+  var positionSelect = container.querySelector('#order-active-position-select');
   if (positionSelect) {
     positionSelect.addEventListener('change', function() {
       changeOrderActivePosition(positionSelect);
     });
   }
-  Array.prototype.forEach.call(b.querySelectorAll('.proc-item.selectable'), function(element) {
+  Array.prototype.forEach.call(container.querySelectorAll('.proc-item.selectable'), function(element) {
     element.addEventListener('click', function() {
       selectReportProcess(element.getAttribute('data-process-id'));
     });
+  });
+}
+
+function renderOrder(o, requestedProcessId, requestedBackfillMode) {
+  curOrder = o; curProcId = null; curSerial = '';
+  serialBackfillMode = !!requestedBackfillMode;
+  var b = $('order-body');
+  var qty = o.quantity || 0;
+  var processes = o.processes || [];
+  if (o.item) curSerial = o.item.serial_no;
+  var selection = resolveOrderProcessSelection(o, processes, requestedProcessId, requestedBackfillMode);
+  serialBackfillMode = selection.serialBackfillMode;
+  if (selection.selected) curProcId = selection.selected.process_id;
+  b.innerHTML = buildOrderHeader(o, qty) + buildOrderProcessSection(o, qty, processes, selection);
+  bindOrderInteractions(b);
+  Array.prototype.forEach.call(b.querySelectorAll('.proc-item.selectable'), function(element) {
+    element.setAttribute('aria-pressed', String(element.getAttribute('data-process-id') === String(curProcId)));
   });
   updateBackfillFields();
 }

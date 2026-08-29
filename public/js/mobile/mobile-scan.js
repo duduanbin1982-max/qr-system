@@ -3,8 +3,43 @@
 //  双引擎扫码模块
 // ═══════════════════════════════════════════
 
+// 每次开启/关闭摄像头都递增，避免 getUserMedia 迟到的 Promise 重新占用页面。
+var cameraRequestToken = 0;
+var photoRequestToken = 0;
+var photoObjectUrl = null;
+
+function stopCameraStream(stream) {
+  if (!stream || typeof stream.getTracks !== 'function') return;
+  stream.getTracks().forEach(function(track) { track.stop(); });
+}
+
+function releaseCamResources() {
+  cameraRequestToken += 1;
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (camStream) {
+    stopCameraStream(camStream);
+    camStream = null;
+  }
+  var video = $('cam-video');
+  if (video) video.srcObject = null;
+  releasePhotoResources();
+}
+
+function revokePhotoObjectUrl() {
+  if (photoObjectUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(photoObjectUrl);
+  }
+  photoObjectUrl = null;
+}
+
+function releasePhotoResources() {
+  photoRequestToken += 1;
+  revokePhotoObjectUrl();
+}
+
 // ── 打开摄像头 ──────────────────────────────
 function openCam() {
+  releaseCamResources();
   show('scan');
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -16,17 +51,28 @@ function openCam() {
   $('scan-engine').textContent = '引擎: jsQR (通用软件解码)';
 
   const video = $('cam-video');
+  var requestToken = cameraRequestToken;
   navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
   })
   .then(function(stream) {
+    if (requestToken !== cameraRequestToken) {
+      stopCameraStream(stream);
+      return null;
+    }
     camStream = stream;
     video.srcObject = stream;
-    video.play().then(function() {
+    return video.play().then(function() {
+      if (requestToken !== cameraRequestToken || camStream !== stream) {
+        stopCameraStream(stream);
+        return;
+      }
       startJsQR(video);
     });
   })
   .catch(function(err) {
+    if (requestToken !== cameraRequestToken) return;
+    releaseCamResources();
     var msg;
     if (err.name === 'NotAllowedError')
       msg = '摄像头权限被拒绝。请在浏览器设置中允许摄像头，或使用拍照解码';
@@ -74,6 +120,7 @@ function stopScanner() {
 }
 function onScan(text) {
   stopScanner();
+  releaseCamResources();
   var f = document.createElement('div'); f.className = 'scan-flash';
   document.body.appendChild(f);
   setTimeout(function(){ f.style.opacity='0'; setTimeout(function(){ f.remove(); },400); },50);
@@ -82,16 +129,12 @@ function onScan(text) {
 
 // ── 关闭摄像头 ───────────────────────────────
 function closeCam() {
-  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
-  if (camStream) {
-    camStream.getTracks().forEach(function(t) { t.stop(); });
-    camStream = null;
-  }
-  const v = $('cam-video');
-  if (v) v.srcObject = null;
+  releaseCamResources();
   flashOn = false;
-  $('flash-btn').classList.add('off');
-  $('scan-engine').textContent = '';
+  var flashButton = $('flash-btn');
+  if (flashButton) flashButton.classList.add('off');
+  var engine = $('scan-engine');
+  if (engine) engine.textContent = '';
   show('main');
 }
 
@@ -106,10 +149,14 @@ function openPhoto() {
 function handlePhoto(e) {
   const file = e.target.files[0];
   if (!file) return;
+  var requestToken = photoRequestToken + 1;
+  photoRequestToken = requestToken;
+  revokePhotoObjectUrl();
   toast('解码中...');
 
   const img = new Image();
   img.onload = function() {
+    if (requestToken !== photoRequestToken) return;
     // 限制最大分辨率以加速解码
     const maxW = 1200;
     let w = img.width, h = img.height;
@@ -125,6 +172,7 @@ function handlePhoto(e) {
       var imgData = ctx.getImageData(0, 0, w, h);
       const result = jsQR(imgData.data, w, h);
       if (result && result.data) {
+        revokePhotoObjectUrl();
         processCode(result.data);
       } else {
         // 全图失败 → 尝试中心裁剪
@@ -135,19 +183,25 @@ function handlePhoto(e) {
         const cropData = ctx.getImageData(cx, cy, cw2, ch2);
         const result2 = jsQR(cropData.data, cw2, ch2);
         if (result2 && result2.data) {
+          revokePhotoObjectUrl();
           processCode(result2.data);
         } else {
+          revokePhotoObjectUrl();
           toast('未识别到二维码');
           show('main');
         }
       }
     } catch(err) {
+      revokePhotoObjectUrl();
       toast('解码异常: ' + (err.message || '图片处理失败'));
       show('main');
     }
   };
-  img.src = URL.createObjectURL(file);
+  photoObjectUrl = URL.createObjectURL(file);
+  img.src = photoObjectUrl;
   img.onerror = function() {
+    if (requestToken !== photoRequestToken) return;
+    revokePhotoObjectUrl();
     toast('图片加载失败，请重试');
     show('main');
   };

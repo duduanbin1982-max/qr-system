@@ -3,6 +3,18 @@
 var qualityRules = { low_score_threshold: 60, critical_score_threshold: 40, issue_tags: [], critical_issue_tags: [] };
 var qualityViewMode = 'tasks';
 var qualityNavigation = { returnTo: 'main', reportDraft: null, resumeNotice: '' };
+var QUALITY_PAGE_SIZE = 50;
+var qualityRequestSeq = 0;
+var qualityTaskState = { page: 0, perPage: QUALITY_PAGE_SIZE, total: 0, pendingRequiredCount: 0, tasks: [], loading: false };
+var qualityMineState = { recordPage: 0, recordPerPage: QUALITY_PAGE_SIZE, recordTotal: 0, records: [], appealPage: 0, appealPerPage: QUALITY_PAGE_SIZE, appealTotal: 0, appeals: [], loading: false };
+
+function qualityHasMore(page, total, perPage) {
+  return page > 0 && page * perPage < total;
+}
+
+function isCurrentQualityRequest(requestId, mode) {
+  return requestId === qualityRequestSeq && qualityViewMode === mode;
+}
 
 function updateQualityEvaluationIndicator(result) {
   var badge = $('quality-pending-badge');
@@ -97,6 +109,9 @@ function recoverStaleQualityTask(error) {
 }
 
 function switchQualityView(mode) {
+  qualityRequestSeq += 1;
+  qualityTaskState.loading = false;
+  qualityMineState.loading = false;
   qualityViewMode = mode === 'mine' ? 'mine' : 'tasks';
   updateQualityViewButtons();
   if (qualityViewMode === 'mine') loadMyQualityEvaluations();
@@ -110,51 +125,82 @@ function updateQualityViewButtons() {
 }
 
 function loadQualityEvaluationTasks() {
+  var append = arguments[0] && arguments[0].append === true;
   var list = $('quality-task-list');
   if (!list) return;
-  list.innerHTML = '<div class="quality-empty">正在加载评价任务...</div>';
-  Promise.all([
-    api.qualityEvaluationTasks({ status: 'pending', per_page: 200 }),
-    api.qualityEvaluationRules()
-  ]).then(function(results) {
-    qualityRules = results[1] || qualityRules;
-    var tasks = results[0].items || [];
-    renderQualityEvaluationTasks(tasks);
-    updateQualityEvaluationIndicator(results[0]);
-    resumeBlockedReportWhenReady(tasks);
+  if (append && (qualityTaskState.loading || !qualityHasMore(qualityTaskState.page, qualityTaskState.total, qualityTaskState.perPage))) return;
+  var requestId = ++qualityRequestSeq;
+  var page = append ? qualityTaskState.page + 1 : 1;
+  qualityTaskState.loading = true;
+  if (!append) {
+    qualityTaskState = { page: 0, perPage: QUALITY_PAGE_SIZE, total: 0, pendingRequiredCount: 0, tasks: [], loading: true };
+    list.innerHTML = '<div class="quality-empty">正在加载评价任务...</div>';
+  }
+  var requests = [api.qualityEvaluationTasks({ status: 'pending', page: page, per_page: QUALITY_PAGE_SIZE })];
+  if (!append) requests.push(api.qualityEvaluationRules());
+  Promise.all(requests).then(function(results) {
+    if (!isCurrentQualityRequest(requestId, 'tasks')) return;
+    var pageResult = results[0] || {};
+    if (!append) qualityRules = results[1] || qualityRules;
+    var items = pageResult.items || [];
+    qualityTaskState.tasks = append ? qualityTaskState.tasks.concat(items) : items;
+    qualityTaskState.page = Number(pageResult.page) || page;
+    qualityTaskState.perPage = Number(pageResult.per_page) || QUALITY_PAGE_SIZE;
+    qualityTaskState.total = Number(pageResult.total) || qualityTaskState.tasks.length;
+    qualityTaskState.pendingRequiredCount = pageResult.pending_required_count == null ? 0 : Number(pageResult.pending_required_count);
+    qualityTaskState.loading = false;
+    renderQualityEvaluationTasks(qualityTaskState.tasks);
+    updateQualityEvaluationIndicator(pageResult);
+    var allLoaded = !qualityHasMore(qualityTaskState.page, qualityTaskState.total, qualityTaskState.perPage);
+    if (pageResult.pending_required_count == null || qualityTaskState.pendingRequiredCount === 0 || allLoaded) {
+      resumeBlockedReportWhenReady(qualityTaskState.tasks);
+    }
   }).catch(function(error) {
+    if (!isCurrentQualityRequest(requestId, 'tasks')) return;
+    qualityTaskState.loading = false;
     list.innerHTML = '<div class="quality-empty error">' + esc(error.message || '评价任务加载失败') + '</div>';
   });
 }
 
 function loadMyQualityEvaluations() {
+  var append = arguments[0] && arguments[0].append === true;
   var list = $('quality-task-list');
-  list.innerHTML = '<div class="quality-empty">正在加载我的评价...</div>';
-  var pageSize = 100;
-  Promise.all([
-    api.myQualityEvaluations({ page: 1, per_page: pageSize }),
-    api.myQualityEvaluationAppeals({ scope: 'mine', page: 1, per_page: pageSize })
-  ]).then(function(results) {
-    var recordPage = results[0] || {};
-    var appealPage = results[1] || {};
-    var recordPages = Math.max(1, Math.ceil((Number(recordPage.total) || 0) / pageSize));
-    var appealPages = Math.max(1, Math.ceil((Number(appealPage.total) || 0) / pageSize));
-    var requests = [];
-    for (var page = 2; page <= recordPages; page += 1) {
-      requests.push(api.myQualityEvaluations({ page: page, per_page: pageSize }));
-    }
-    for (var appealPageNumber = 2; appealPageNumber <= appealPages; appealPageNumber += 1) {
-      requests.push(api.myQualityEvaluationAppeals({ scope: 'mine', page: appealPageNumber, per_page: pageSize }));
-    }
-    return Promise.all(requests).then(function(extra) {
-      var records = (recordPage.items || []).slice();
-      var appeals = (appealPage.items || []).slice();
-      var recordExtraCount = recordPages - 1;
-      extra.slice(0, recordExtraCount).forEach(function(pageResult) { records = records.concat(pageResult.items || []); });
-      extra.slice(recordExtraCount).forEach(function(pageResult) { appeals = appeals.concat(pageResult.items || []); });
-      renderMyQualityEvaluations(records, appeals);
+  if (!list) return;
+  var recordsHaveMore = qualityHasMore(qualityMineState.recordPage, qualityMineState.recordTotal, qualityMineState.recordPerPage);
+  var appealsHaveMore = qualityHasMore(qualityMineState.appealPage, qualityMineState.appealTotal, qualityMineState.appealPerPage);
+  if (append && (qualityMineState.loading || (!recordsHaveMore && !appealsHaveMore))) return;
+  var requestId = ++qualityRequestSeq;
+  qualityMineState.loading = true;
+  if (!append) {
+    qualityMineState = { recordPage: 0, recordPerPage: QUALITY_PAGE_SIZE, recordTotal: 0, records: [], appealPage: 0, appealPerPage: QUALITY_PAGE_SIZE, appealTotal: 0, appeals: [], loading: true };
+    list.innerHTML = '<div class="quality-empty">正在加载我的评价...</div>';
+  }
+  var specs = [];
+  var recordPage = qualityMineState.recordPage + 1;
+  var appealPage = qualityMineState.appealPage + 1;
+  if (!append || recordsHaveMore) specs.push({ kind: 'records', promise: api.myQualityEvaluations({ page: recordPage, per_page: QUALITY_PAGE_SIZE }) });
+  if (!append || appealsHaveMore) specs.push({ kind: 'appeals', promise: api.myQualityEvaluationAppeals({ scope: 'mine', page: appealPage, per_page: QUALITY_PAGE_SIZE }) });
+  Promise.all(specs.map(function(spec) { return spec.promise; })).then(function(results) {
+    if (!isCurrentQualityRequest(requestId, 'mine')) return;
+    specs.forEach(function(spec, index) {
+      var pageResult = results[index] || {};
+      if (spec.kind === 'records') {
+        qualityMineState.records = append ? qualityMineState.records.concat(pageResult.items || []) : (pageResult.items || []);
+        qualityMineState.recordPage = Number(pageResult.page) || recordPage;
+        qualityMineState.recordPerPage = Number(pageResult.per_page) || QUALITY_PAGE_SIZE;
+        qualityMineState.recordTotal = Number(pageResult.total) || qualityMineState.records.length;
+      } else {
+        qualityMineState.appeals = append ? qualityMineState.appeals.concat(pageResult.items || []) : (pageResult.items || []);
+        qualityMineState.appealPage = Number(pageResult.page) || appealPage;
+        qualityMineState.appealPerPage = Number(pageResult.per_page) || QUALITY_PAGE_SIZE;
+        qualityMineState.appealTotal = Number(pageResult.total) || qualityMineState.appeals.length;
+      }
     });
+    qualityMineState.loading = false;
+    renderMyQualityEvaluations(qualityMineState.records, qualityMineState.appeals);
   }).catch(function(error) {
+    if (!isCurrentQualityRequest(requestId, 'mine')) return;
+    qualityMineState.loading = false;
     list.innerHTML = '<div class="quality-empty error">' + esc(error.message || '我的评价加载失败') + '</div>';
   });
 }
@@ -206,6 +252,12 @@ function renderQualityEvaluationTasks(tasks) {
       '<div>' + esc(first.serial_no || '订单模式') + '</div></div>' +
       rows.map(renderQualityTaskCard).join('') + '</section>';
   }).join('');
+  renderQualityPager(list, qualityHasMore(qualityTaskState.page, qualityTaskState.total, qualityTaskState.perPage), 'load-more-quality-tasks', '加载更多待评价任务');
+}
+
+function renderQualityPager(list, hasMore, action, label) {
+  if (!hasMore) return;
+  list.insertAdjacentHTML('beforeend', '<button type="button" class="quality-load-more" data-action="' + action + '">' + label + '</button>');
 }
 
 function taskTemplate(task) {
@@ -282,6 +334,8 @@ function handleQualityTaskClick(event) {
   if (view) { switchQualityView(view); return; }
   var action = event.target.getAttribute('data-action');
   if (!action) return;
+  if (action === 'load-more-quality-tasks') { loadQualityEvaluationTasks({ append: true }); return; }
+  if (action === 'load-more-quality-mine') { loadMyQualityEvaluations({ append: true }); return; }
   var card = event.target.closest('.quality-task, .quality-received-card');
   if (!card) return;
   if (action === 'perfect') {
@@ -358,6 +412,9 @@ function renderMyQualityEvaluations(records, appeals) {
   });
   if (!records.length) {
     list.innerHTML = '<div class="quality-empty"><strong>暂无收到的评价</strong><span>明确归属到个人的工序评价会显示在这里。</span></div>';
+    renderQualityPager(list,
+      qualityHasMore(qualityMineState.recordPage, qualityMineState.recordTotal, qualityMineState.recordPerPage) || qualityHasMore(qualityMineState.appealPage, qualityMineState.appealTotal, qualityMineState.appealPerPage),
+      'load-more-quality-mine', '加载更多评价记录');
     return;
   }
   list.innerHTML = records.map(function(row) {
@@ -373,6 +430,9 @@ function renderMyQualityEvaluations(records, appeals) {
       ((!appeal && row.status === 'confirmed') ? '<div class="quality-actions"><button data-action="appeal" class="quality-secondary">提出申诉</button></div>' : '') +
       '</article>';
   }).join('');
+  renderQualityPager(list,
+    qualityHasMore(qualityMineState.recordPage, qualityMineState.recordTotal, qualityMineState.recordPerPage) || qualityHasMore(qualityMineState.appealPage, qualityMineState.appealTotal, qualityMineState.appealPerPage),
+    'load-more-quality-mine', '加载更多评价记录');
 }
 
 function submitQualityAppeal(card, button) {

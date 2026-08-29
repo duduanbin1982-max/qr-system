@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════
 
 var _loginBusy = false;
+var _logoutBusy = false;
 
 function persistMobileUser(serverUser) {
   var previous = user() || {};
@@ -39,6 +40,7 @@ function clearMobileSessionState() {
 }
 
 window.handleAuthExpired = function() {
+  if (typeof releaseCamResources === 'function') releaseCamResources();
   clearMobileSessionState();
   show('login');
 };
@@ -130,11 +132,41 @@ function doLogin() {
 }
 
 function doLogout() {
-  api.logout().catch(function() {});
-  clearMobileSessionState();
-  show('login');
+  if (_logoutBusy) return;
+  _logoutBusy = true;
+  if (typeof releaseCamResources === 'function') releaseCamResources();
+  if (typeof releasePhotoResources === 'function') releasePhotoResources();
+  var link = document.querySelector('.bottom-link');
+  if (link) {
+    link.setAttribute('aria-busy', 'true');
+    link.textContent = '退出中...';
+  }
+  var settled = api.logout()
+    .then(function() { return { ok: true }; })
+    .catch(function(error) { return { ok: false, error: error }; });
+  var timeoutId;
+  var timeout = new Promise(function(resolve) {
+    timeoutId = setTimeout(function() { resolve({ ok: false, timeout: true }); }, 5000);
+  });
+  Promise.race([settled, timeout]).then(function(result) {
+    clearTimeout(timeoutId);
+    clearMobileSessionState();
+    _logoutBusy = false;
+    if (link) {
+      link.removeAttribute('aria-busy');
+      link.textContent = '退出登录';
+    }
+    show('login');
+    if (!result.ok) {
+      toast(result.timeout
+        ? '服务端注销超时，本地已退出，请稍后重试'
+        : '服务端注销未确认，本地已退出，请检查网络');
+    }
+  });
 }
 function goMain() {
+  if (typeof releaseCamResources === 'function') releaseCamResources();
+  if (typeof releasePhotoResources === 'function') releasePhotoResources();
   $('inp-code').value = '';
   curOrder = null; curProcId = null; curSerial = '';
   reportMode = 'auto'; reportType = 'normal';
@@ -150,7 +182,11 @@ function goMain() {
   loadQualityEvaluationCount();
 }
 
-function goBack() { curOrder = null; reportMode = 'auto'; reportType = 'normal'; show('main'); loadStats(); loadRecent(); }
+function goBack() {
+  if (typeof releaseCamResources === 'function') releaseCamResources();
+  if (typeof releasePhotoResources === 'function') releasePhotoResources();
+  curOrder = null; reportMode = 'auto'; reportType = 'normal'; show('main'); loadStats(); loadRecent();
+}
 
 function toggleManual() {
   var row = $('manual-row');
