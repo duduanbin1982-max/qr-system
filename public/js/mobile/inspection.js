@@ -3,6 +3,7 @@
   var orderData = null;
   var selectedProcess = null;
   var selectedProcessId = null;
+  var submissionState = 'idle';
   var scanMode = 'order'; // 'serial' or 'order'
   var scanSerialNo = '';
   var SCORE_ITEMS = [
@@ -34,6 +35,11 @@
     document.getElementById('btn-pass').disabled = !enable;
     document.getElementById('btn-rework').disabled = !enable;
     document.getElementById('btn-scrap').disabled = !enable;
+  }
+
+  function processIdOf(process) {
+    var id = process && (process.process_id != null ? process.process_id : process.id);
+    return id == null || id === '' ? '' : String(id);
   }
 
   function resultLabel(result) {
@@ -95,12 +101,18 @@
     el.classList.add('selected');
     selectedProcess = el.getAttribute('data-process');
     selectedProcessId = el.getAttribute('data-process-id');
+    if (!selectedProcessId) {
+      enableButtons(false);
+      showMsg('工序缺少稳定标识，请刷新后重试', 'error');
+      return;
+    }
     document.getElementById('selectedProcess').textContent = selectedProcess;
     enableButtons(true);
     clearMsg();
   }
 
   function submitResult(result) {
+    if (submissionState === 'submitting') return;
     if (!orderData) { showMsg('订单信息缺失', 'error'); return; }
 
     if (!selectedProcess) {
@@ -108,11 +120,15 @@
       if (procs.length === 1) {
         selectedProcess = procs[0].process_name || procs[0].name || "" || '';
         document.getElementById('selectedProcess').textContent = selectedProcess;
-        selectedProcessId = procs[0].process_id || procs[0].id || '';
+        selectedProcessId = processIdOf(procs[0]);
       } else {
         showMsg('请先选择上方工序', 'error');
         return;
       }
+    }
+    if (!selectedProcessId) {
+      showMsg('工序缺少稳定标识，请刷新后重试', 'error');
+      return;
     }
 
     var scoring;
@@ -136,16 +152,17 @@
     };
     Object.keys(scoring).forEach(function(key) { data[key] = scoring[key]; });
 
+    submissionState = 'submitting';
     enableButtons(false);
 
     api.submitInspection(data)
     .then(function(d) {
       var label = result === 'pass' ? '合格' : result === 'rework' ? '返修' : '报废';
       showMsg('已提交: ' + label, 'success');
-      enableButtons(true);
       setTimeout(function() { window.location.href = '/mobile.html'; }, 1500);
     })
     .catch(function(e) {
+      submissionState = 'idle';
       showMsg(e.message || '提交失败，请重试', 'error');
       enableButtons(true);
     });
@@ -233,9 +250,11 @@
     var html = '';
     processes.forEach(function(p) {
       var pname = p.process_name || p.name || '';
+      var processId = processIdOf(p);
       var completed = p.completed || 0;
-      var isCurrent = orderData && orderData.current_process && orderData.current_process.process_name === pname;
-      html += '<div class="proc-item' + (isCurrent ? ' selected' : '') + '" data-process="' + esc(pname) + '" data-process-id="' + (p.process_id || p.id || '') + '">' +
+      var currentProcessId = processIdOf(orderData && orderData.current_process);
+      var isCurrent = !!processId && !!currentProcessId && currentProcessId === processId;
+      html += '<div class="proc-item' + (isCurrent ? ' selected' : '') + '" data-process="' + esc(pname) + '" data-process-id="' + esc(processId) + '">' +
         '<div class="dot"></div>' +
         '<span class="pname">' + esc(pname) + '</span>' +
         '<span class="pstat">' + (isCurrent ? '当前工序 · ' : '') + '已完成 ' + completed + '</span>' +
@@ -250,10 +269,10 @@
     });
 
     // Auto-select current process for serial mode
-    if (scanMode === 'serial' && orderData.current_process && orderData.current_process.process_name) {
-      var cpName = orderData.current_process.process_name;
+    var currentProcessId = processIdOf(orderData && orderData.current_process);
+    if (scanMode === 'serial' && currentProcessId) {
       items.forEach(function(item) {
-        if (item.getAttribute('data-process') === cpName) {
+        if (item.getAttribute('data-process-id') === currentProcessId) {
           selectProcess(item);
         }
       });

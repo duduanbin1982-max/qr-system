@@ -105,10 +105,12 @@
   _el = document.getElementById('cp-new2');
   if (_el) _el.addEventListener('keyup', function(e) { if (e.key === 'Enter') doChangePassword(); });
 
-  window.addEventListener('beforeunload', function() {
-    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
-    if (camStream) { camStream.getTracks().forEach(function(t) { t.stop(); }); camStream = null; }
-  });
+  function releaseCameraBeforeLeave() {
+    if (typeof releaseCamResources === 'function') releaseCamResources();
+    if (typeof releasePhotoResources === 'function') releasePhotoResources();
+  }
+  window.addEventListener('pagehide', releaseCameraBeforeLeave);
+  window.addEventListener('beforeunload', releaseCameraBeforeLeave);
   // Responsive viewport height (Honor/Huawei virtual nav bar fix)
   function setVH() { document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px'); }
   window.addEventListener('resize', setVH);
@@ -134,19 +136,23 @@
       });
     }).catch(function(e) { console.log("SW failed:", e); });
 
-    window.addEventListener("online", function() {
-      var bar = document.getElementById("offline-bar");
-      if (bar) bar.remove();
-    });
-    window.addEventListener("offline", function() {
-      var bar = document.createElement("div");
+  }
+
+  // 客户端没有离线 outbox；离线时明确告知业务提交不会被保存。
+  function showOfflineNotice() {
+    var bar = document.getElementById("offline-bar");
+    if (!bar) {
+      bar = document.createElement("div");
       bar.id = "offline-bar";
       bar.style.cssText = "position:fixed;top:0;left:0;right:0;background:#F59E0B;color:#fff;text-align:center;padding:6px;z-index:9999;font-size:14px";
-      bar.textContent = "当前离线 - 数据将在恢复网络后同步";
       document.body.appendChild(bar);
-    });
-    if (!navigator.onLine) {
-      window.dispatchEvent(new Event("offline"));
     }
+    bar.textContent = "当前离线 - 业务提交不会保存，请恢复网络后重新提交";
   }
+  window.addEventListener("online", function() {
+    var bar = document.getElementById("offline-bar");
+    if (bar) bar.remove();
+  });
+  window.addEventListener("offline", showOfflineNotice);
+  if (!navigator.onLine) showOfflineNotice();
 })();

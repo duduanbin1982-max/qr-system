@@ -97,20 +97,34 @@ def test_mobile_quality_evaluation_assets_are_cache_busted_and_network_first():
     ).read_text(encoding="utf-8")
     sw_content = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
-    assert _asset_version(mobile_html, "mobile.css") >= 18
-    assert _asset_version(mobile_html, "mobile-api.js") >= 8
+    assert _asset_version(mobile_html, "mobile.css") >= 19
+    assert _asset_version(mobile_html, "mobile-api.js") >= 9
     assert _asset_version(mobile_html, "mobile-utils.js") >= 31
     assert _asset_version(mobile_html, "mobile-auth.js") >= 30
     assert _asset_version(mobile_html, "mobile-order.js") >= 43
     assert _asset_version(mobile_html, "mobile-init.js") >= 35
-    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 7
-    assert _asset_version(inspection_html, "mobile-api.js") >= 4
-    assert _asset_version(inspection_html, "inspection.js") >= 8
+    assert _asset_version(mobile_html, "mobile-quality-evaluation.js") >= 8
+    assert _asset_version(inspection_html, "mobile-api.js") >= 9
+    assert _asset_version(inspection_html, "inspection.js") >= 9
+    assert _asset_version(mobile_html, "mobile-api.js") == _asset_version(inspection_html, "mobile-api.js")
     cache_match = re.search(r'CACHE_REVISION = "(\d{8}\.\d+)"', sw_content)
     assert cache_match
     assert 'CACHE_NAME = "qr-system-cache-" + CACHE_REVISION' in sw_content
     assert 'url.pathname.startsWith("/js/mobile/")' in sw_content
     assert "Mobile business JS: network-first" in sw_content
+    for asset in (
+        "/css/mobile.css?v=19",
+        "/css/inspection.css?v=3",
+        "/js/mobile/mobile-api.js?v=9",
+        "/js/mobile/mobile-utils.js?v=31",
+        "/js/mobile/mobile-auth.js?v=31",
+        "/js/mobile/mobile-scan.js?v=27",
+        "/js/mobile/mobile-order.js?v=43",
+        "/js/mobile/mobile-quality-evaluation.js?v=8",
+        "/js/mobile/mobile-init.js?v=36",
+        "/js/mobile/inspection.js?v=9",
+    ):
+        assert '"' + asset + '"' in sw_content
 
 
 def test_mobile_uses_independent_quality_evaluation_center():
@@ -130,6 +144,53 @@ def test_mobile_process_order_selection_is_wired():
     assert "normal_reportable" in order_script
     assert "max_report_quantity" in order_script
     assert "selectReportProcess" in order_script
+
+
+def test_mobile_camera_lifecycle_invalidates_pending_requests_and_releases_on_leave():
+    scan_script = (MOBILE_DIR / "mobile-scan.js").read_text(encoding="utf-8")
+    init_script = (MOBILE_DIR / "mobile-init.js").read_text(encoding="utf-8")
+    auth_script = (MOBILE_DIR / "mobile-auth.js").read_text(encoding="utf-8")
+
+    assert "cameraRequestToken" in scan_script
+    assert "releaseCamResources" in scan_script
+    assert "stopCameraStream(stream)" in scan_script
+    assert "requestToken !== cameraRequestToken" in scan_script
+    assert "window.addEventListener('pagehide'" in init_script
+    assert "releaseCamResources();" in auth_script
+
+
+def test_mobile_photo_decode_releases_blob_urls_and_ignores_stale_images():
+    scan_script = (MOBILE_DIR / "mobile-scan.js").read_text(encoding="utf-8")
+
+    assert "photoRequestToken" in scan_script
+    assert "photoObjectUrl" in scan_script
+    assert "URL.revokeObjectURL(photoObjectUrl)" in scan_script
+    assert "requestToken !== photoRequestToken" in scan_script
+    assert "function releasePhotoResources()" in scan_script
+
+
+def test_mobile_inspection_selects_and_submits_by_stable_process_id_without_duplicate_submit():
+    inspection_script = (MOBILE_DIR / "inspection.js").read_text(encoding="utf-8")
+
+    assert "function processIdOf(process)" in inspection_script
+    assert "currentProcessId === processId" in inspection_script
+    assert "getAttribute('data-process-id') === currentProcessId" in inspection_script
+    assert "if (submissionState === 'submitting') return;" in inspection_script
+    assert "submissionState = 'submitting';" in inspection_script
+    assert "工序缺少稳定标识" in inspection_script
+
+
+def test_mobile_offline_copy_and_write_protocol_do_not_promise_background_sync():
+    init_script = (MOBILE_DIR / "mobile-init.js").read_text(encoding="utf-8")
+    api_script = (MOBILE_DIR / "mobile-api.js").read_text(encoding="utf-8")
+    sw_content = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
+
+    assert "数据将在恢复网络后同步" not in init_script
+    assert "业务提交不会保存，请恢复网络后重新提交" in init_script
+    assert "业务提交未保存，请恢复网络后重新提交" in api_script
+    assert 'domainCode = "offline"' in api_script
+    assert 'code: "offline"' in sw_content
+    assert 'action: "retry_online"' in sw_content
 
 
 def test_mobile_controlled_serial_backfill_is_wired():
@@ -183,6 +244,38 @@ def test_mobile_active_position_selection_is_wired():
     assert "process_selection_source" in order_script
     assert "changeOrderActivePosition" in order_script
     assert "serial_backfill_selection_source" in order_script
+
+
+def test_mobile_quality_center_paginates_and_ignores_stale_responses():
+    quality_script = (MOBILE_DIR / "mobile-quality-evaluation.js").read_text(encoding="utf-8")
+    auth_script = (MOBILE_DIR / "mobile-auth.js").read_text(encoding="utf-8")
+
+    assert "QUALITY_PAGE_SIZE = 50" in quality_script
+    assert "qualityRequestSeq" in quality_script
+    assert "isCurrentQualityRequest" in quality_script
+    assert "load-more-quality-tasks" in quality_script
+    assert "load-more-quality-mine" in quality_script
+    assert "recordPages" not in quality_script
+    assert "appealPages" not in quality_script
+    assert "var _logoutBusy = false" in auth_script
+    assert "服务端注销未确认，本地已退出，请检查网络" in auth_script
+    assert "Promise.race([settled, timeout])" in auth_script
+
+
+def test_mobile_order_rendering_is_split_into_state_selection_markup_and_binding_steps():
+    order_script = (MOBILE_DIR / "mobile-order.js").read_text(encoding="utf-8")
+
+    for helper in (
+        "buildOrderHeader",
+        "resolveOrderProcessSelection",
+        "buildOrderProcessSection",
+        "bindOrderInteractions",
+    ):
+        assert "function " + helper in order_script
+    assert "b.innerHTML = buildOrderHeader(o, qty) + buildOrderProcessSection(o, qty, processes, selection);" in order_script
+    assert "bindOrderInteractions(b);" in order_script
+    render_body = order_script.split("function renderOrder(", 1)[1].split("function changeOrderActivePosition", 1)[0]
+    assert render_body.count("function ") == 0
 
 
 def test_mobile_quality_evaluation_b_workflow_is_wired():
