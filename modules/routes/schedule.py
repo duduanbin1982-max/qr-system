@@ -80,24 +80,37 @@ def schedule_batch_shift():
 @check_auth
 @check_permission("schedule:view")
 def schedule_capacity_lines():
-    process_id = request.args.get("process_id", type=int)
-    return jsonify(ScheduleCapacityService.list_lines(process_id))
+    try:
+        process_id = request.args.get("process_id", type=int)
+        return jsonify(ScheduleCapacityService.list_lines(
+            process_id, request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/schedule/capacity-orders", methods=["GET"])
 @check_auth
 @check_permission("schedule:view")
 def schedule_capacity_orders():
-    return jsonify(ScheduleCapacityService.list_schedulable_orders(
-        request.args.get("limit", 500, type=int)
-    ))
+    try:
+        return jsonify(ScheduleCapacityService.list_schedulable_orders(
+            request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/schedule/order/<int:order_id>/operations", methods=["GET"])
 @check_auth
 @check_permission("schedule:view")
 def schedule_order_operations(order_id):
-    return jsonify(ScheduleCapacityService.list_order_schedule(order_id))
+    try:
+        return jsonify(ScheduleCapacityService.list_order_schedule(
+            order_id, request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/schedule/order/<int:order_id>/generate", methods=["POST"])
@@ -119,7 +132,12 @@ def schedule_generate_operations(order_id):
 @check_auth
 @check_permission("schedule:view")
 def schedule_operations():
-    return jsonify(ScheduleCapacityService.list_schedules(request.args.get("limit", 500, type=int)))
+    try:
+        return jsonify(ScheduleCapacityService.list_schedules(
+            request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 # ========== Production Lines (via ProductionLineService) ==========

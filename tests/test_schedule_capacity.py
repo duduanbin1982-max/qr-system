@@ -6,6 +6,7 @@ from factories import ensure_process, create_process_route
 from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.process_service import ProcessService
+from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
 
 
 def _seed_capacity_order(db, process_ids, quantity=10, route_id=None, plan_start="2026-09-01"):
@@ -27,10 +28,18 @@ def _seed_capacity_order(db, process_ids, quantity=10, route_id=None, plan_start
 
 
 def _seed_standard(db, route_id, process_id, *, unit=10, setup=20, factor=1):
+    route_version = db.execute(
+        "SELECT current_effective_version_id FROM process_routes WHERE id=?", (route_id,)
+    ).fetchone()[0]
+    process_version = db.execute(
+        "SELECT process_version_id FROM process_route_version_items "
+        "WHERE route_version_id=? AND process_id=?", (route_version, process_id)
+    ).fetchone()[0]
     db.execute(
-        "INSERT INTO work_time_standards (route_id, process_id, standard_minutes_per_unit, setup_minutes, difficulty_factor, status) "
-        "VALUES (?, ?, ?, ?, ?, 'active')",
-        (route_id, process_id, unit, setup, factor),
+        "INSERT INTO work_time_standards (route_id, route_version_id, process_id, process_version_id, "
+        "standard_minutes_per_unit, setup_minutes, difficulty_factor, status, version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1)",
+        (route_id, route_version, process_id, process_version, unit, setup, factor),
     )
     db.commit()
 
@@ -124,6 +133,9 @@ def test_schedule_blocks_following_operations_when_a_line_is_unavailable(client)
         last = db.execute("SELECT id FROM processes WHERE name='焊接'").fetchone()["id"]
         route_id = create_process_route(db, [first, missing, last], name="Capacity Blocked")
         order_id, _ = _seed_capacity_order(db, [first, missing, last], route_id=route_id)
+        _seed_standard(db, route_id, first, unit=10)
+        _seed_standard(db, route_id, missing, unit=10)
+        _seed_standard(db, route_id, last, unit=10)
         result = ScheduleCapacityService.generate_order_schedule(order_id, schedule_run_key="capacity-blocked-v1")
         assert [row["status"] for row in result["operations"]] == ["planned", "blocked", "blocked"]
         assert result["operations"][1]["reason"] == "工序未配置可用产线"
@@ -143,3 +155,114 @@ def test_schedule_idempotency_replays_same_key_and_rejects_cross_order_reuse(cli
         assert replay["operations"][0]["schedule_run_key"] == first["schedule_run_key"]
         with pytest.raises(ValueError, match="已被其他订单使用"):
             ScheduleCapacityService.generate_order_schedule(order_two, schedule_run_key="capacity-idem-v1")
+
+
+def test_missing_standard_blocks_without_fabricated_duration(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Missing Standard")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10)
+        result = ScheduleCapacityService.generate_order_schedule(order_id, schedule_run_key="capacity-missing-v1")
+        row = result["operations"][0]
+        assert row["status"] == "blocked"
+        assert row["blocked_reason"] == "未配置标准工时"
+        assert row["planned_minutes"] == 0
+
+
+def test_schedule_fact_contains_exact_versions_and_standard_snapshot(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Version Snapshot")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process, unit=12, setup=3, factor=1.5)
+        result = ScheduleCapacityService.generate_order_schedule(order_id, schedule_run_key="capacity-snapshot-v1")
+        row = result["operations"][0]
+        assert row["route_version_id"]
+        assert row["process_version_id"]
+        assert row["standard_id"]
+        assert row["standard_version"] == 1
+        assert row["process_name_snapshot"]
+        assert row["route_name_snapshot"] == "Capacity Version Snapshot"
+        stored = db.execute(
+            "SELECT route_version_id,process_version_id,standard_id,process_name_snapshot,"
+            "route_name_snapshot,schedule_run_id FROM order_process_schedules WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        assert dict(stored)["schedule_run_id"]
+
+
+def test_schedule_run_replays_after_detail_rows_are_removed(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Run Ledger")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process)
+        first = ScheduleCapacityService.generate_order_schedule(order_id, schedule_run_key="capacity-ledger-v1")
+        db.execute("DELETE FROM order_process_schedules WHERE order_id=?", (order_id,))
+        db.commit()
+        replay = ScheduleCapacityService.generate_order_schedule(order_id, schedule_run_key="capacity-ledger-v1")
+        assert replay["idempotent_replay"] is True
+        assert replay["operations"] == first["operations"]
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1001, "bad", ""])
+def test_schedule_queries_reject_invalid_limits(client, limit):
+    with client.application.app_context():
+        with pytest.raises(ValueError, match="limit"):
+            ScheduleCapacityService.list_schedules(limit)
+        with pytest.raises(ValueError, match="limit"):
+            ScheduleCapacityService.list_schedulable_orders(limit)
+
+
+def test_version_binding_mismatch_is_rejected_on_schedule_fact_write(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Binding Guard")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        order = ScheduleCapacityRepository.ensure_order_version_bindings(order_id, db)
+        op = db.execute("SELECT id,process_id,process_version_id FROM order_processes WHERE order_id=?", (order_id,)).fetchone()
+        with pytest.raises(ValueError, match="版本绑定不一致"):
+            ScheduleCapacityRepository.insert_operation_schedule(
+                {
+                    "order_id": order_id,
+                    "order_process_id": op["id"],
+                    "process_id": op["process_id"],
+                    "route_version_id": order["route_version_id"] + 999,
+                    "process_version_id": op["process_version_id"],
+                    "plan_start": "2026-09-01",
+                    "plan_end": "2026-09-01",
+                    "status": "blocked",
+                    "blocked_reason": "test",
+                    "schedule_run_key": "capacity-binding-v1",
+                    "schedule_run_id": None,
+                },
+                db,
+            )
+
+
+def test_soft_deleted_order_does_not_occupy_a_process_line(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Deleted Occupancy")
+        order_one, _ = _seed_capacity_order(db, [process], route_id=route_id, plan_start="2026-09-01")
+        order_two, _ = _seed_capacity_order(db, [process], route_id=route_id, plan_start="2026-09-01")
+        _seed_standard(db, route_id, process, unit=480)
+        first = ScheduleCapacityService.generate_order_schedule(order_one, schedule_run_key="capacity-delete-v1")
+        db.execute(
+            "UPDATE orders SET deleted_at=datetime('now','localtime'),deleted_by=1 WHERE id=?",
+            (order_one,),
+        )
+        db.commit()
+        second = ScheduleCapacityService.generate_order_schedule(order_two, schedule_run_key="capacity-delete-v2")
+        assert second["operations"][0]["plan_start"] == first["operations"][0]["plan_start"]
+
+
+def test_capacity_query_endpoint_rejects_malformed_limit(client, auth_headers):
+    response = client.get("/api/schedule/capacity-orders?limit=not-a-number", headers=auth_headers)
+    assert response.status_code == 400
+    assert "limit" in (response.get_json() or {}).get("error", "")

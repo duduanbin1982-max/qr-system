@@ -197,10 +197,10 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_product_integrity_is_database_version_65():
+def test_product_integrity_is_database_version_66():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 65
+    assert migrations.LATEST_VERSION == 66
 
 
 def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
