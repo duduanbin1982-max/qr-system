@@ -192,14 +192,37 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_user_management",
             "modules.migration_process_versioning",
             "modules.migration_product_integrity",
+            "modules.migration_schedule_capacity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
-def test_product_integrity_is_database_version_64():
+def test_product_integrity_is_database_version_65():
     from modules import migrations
 
-    assert migrations.LATEST_VERSION == 64
+    assert migrations.LATEST_VERSION == 65
+
+
+def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
+    from modules import migrations
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        migrations.run_migrations(db)
+        process_counts = {
+            row["name"]: row["count"]
+            for row in db.execute(
+                "SELECT p.name, COUNT(pl.id) AS count "
+                "FROM processes p LEFT JOIN process_production_lines pl ON pl.process_id=p.id "
+                "WHERE p.name IN ('下料','焊接','打磨','喷漆') GROUP BY p.id"
+            ).fetchall()
+        }
+        assert process_counts == {'下料': 1, '焊接': 10, '打磨': 1, '喷漆': 2}
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(order_process_schedules)").fetchall()}
+        assert {"difficulty_factor", "schedule_run_key", "process_line_id"}.issubset(columns)
+    finally:
+        db.close()
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

@@ -42,6 +42,8 @@ def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
     assert '--outDir "$STAGING_DIR"' in publisher
     assert '"$STATIC_DIR/.index.html.new"' in publisher
     assert 'mv -f "$STATIC_DIR/.index.html.new" "$STATIC_DIR/index.html"' in publisher
+    assert 'find "$STATIC_DIR" -type d -exec chmod 0755 {} +' in publisher
+    assert 'find "$STATIC_DIR" -type f -exec chmod 0644 {} +' in publisher
     assert 'mtime "+$RETENTION_DAYS"' in publisher
 
     assert manifest["scripts"]["test:e2e"] == "bash scripts/test-e2e.sh"

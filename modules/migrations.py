@@ -26,8 +26,7 @@ from modules.migration_performance_department import (
 from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
 from modules.migration_process_versioning import MIGRATIONS as PROCESS_VERSIONING_MIGRATIONS
 from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_MIGRATIONS
-
-
+from modules.migration_schedule_capacity import MIGRATIONS as SCHEDULE_CAPACITY_MIGRATIONS
 MIGRATIONS = sorted([
     *BASELINE_MIGRATIONS,
     *CORE_MIGRATIONS,
@@ -51,13 +50,12 @@ MIGRATIONS = sorted([
     *USER_MANAGEMENT_MIGRATIONS,
     *PROCESS_VERSIONING_MIGRATIONS,
     *PRODUCT_INTEGRITY_MIGRATIONS,
+    *SCHEDULE_CAPACITY_MIGRATIONS,
 ], key=lambda migration: migration[0])
-
 _versions = [version for version, _, _ in MIGRATIONS]
 if len(_versions) != len(set(_versions)):
     raise RuntimeError("duplicate database migration versions registered")
 LATEST_VERSION = max(_versions, default=0)
-
 def run_migrations(db=None):
 
     """Run all pending migrations in order."""

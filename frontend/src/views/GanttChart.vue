@@ -13,6 +13,10 @@
       <h3 style="font-size:var(--text-lg);font-weight:700;margin:0">📅 生产排程</h3>
       <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
         <div style="display:flex;gap:4px;background:var(--bg-hover);padding:3px;border-radius:999px">
+          <button type="button" class="btn btn-sm" :style="{padding:'4px 12px',borderRadius:'999px',background:viewMode==='orders'?'var(--primary)':'transparent',color:viewMode==='orders'?'#fff':'var(--text-secondary)',boxShadow:'none'}" @click="setViewMode('orders')">订单甘特</button>
+          <button type="button" class="btn btn-sm" :style="{padding:'4px 12px',borderRadius:'999px',background:viewMode==='operations'?'var(--primary)':'transparent',color:viewMode==='operations'?'#fff':'var(--text-secondary)',boxShadow:'none'}" @click="setViewMode('operations')">工序排程</button>
+        </div>
+        <div style="display:flex;gap:4px;background:var(--bg-hover);padding:3px;border-radius:999px">
           <button
             v-for="tab in [
               { key: 'active', label: '进行中' },
@@ -25,7 +29,7 @@
             :style="{padding:'4px 12px',borderRadius:'999px',background:scheduleScope===tab.key?'var(--primary)':'transparent',color:scheduleScope===tab.key?'#fff':'var(--text-secondary)',boxShadow:'none'}"
             @click="setScheduleScope(tab.key)">{{ tab.label }}</button>
         </div>
-        <select v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
+        <select v-if="viewMode==='orders'" v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
           <option value="">全部产线</option>
           <option v-for="pl in productionLines" :key="pl.id" :value="String(pl.id)">{{ pl.name }}</option>
         </select>
@@ -36,7 +40,7 @@
       </div>
     </div>
 
-    <div v-if="selectedOrderIds.length" style="padding:8px 20px;background:var(--primary-light);border-bottom:1px solid var(--border-light);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div v-if="viewMode==='orders' && selectedOrderIds.length" style="padding:8px 20px;background:var(--primary-light);border-bottom:1px solid var(--border-light);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <span style="font-size:var(--text-xs);font-weight:600">已选 {{ selectedOrderIds.length }} 个订单</span>
       <input v-model.number="batchDays" type="number" min="1" class="form-input" style="width:60px;padding:2px 6px;font-size:var(--text-xs)">
       <span style="font-size:var(--text-xs)">天</span>
@@ -45,18 +49,61 @@
       <span style="font-size:10px;color:var(--text-placeholder);margin-left:8px">提示: ← → 微调1天, Shift+← → 微调7天</span>
     </div>
 
-    <div v-if="dailyLoad.length" style="padding:6px 20px;background:var(--danger-light);border-bottom:1px solid var(--danger);font-size:var(--text-xs);color:var(--danger);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <div v-if="viewMode==='orders' && dailyLoad.length" style="padding:6px 20px;background:var(--danger-light);border-bottom:1px solid var(--danger);font-size:var(--text-xs);color:var(--danger);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
       <span>⚠️ 产能超载:</span>
       <span v-for="v in dailyLoad.slice(0,5)" :key="v.date+v.line" style="white-space:nowrap">{{ v.date }} {{ v.line }}: {{ v.count }}/{{ v.capacity }}</span>
       <span v-if="dailyLoad.length > 5" style="color:var(--text-placeholder)">...共 {{ dailyLoad.length }} 处</span>
     </div>
 
-    <div v-if="loading" style="text-align:left;padding:60px;color:var(--text-placeholder)">⏳ 加载中...</div>
-    <div v-else-if="!filteredOrders.length" style="text-align:left;padding:60px;color:var(--text-placeholder)">
+    <div v-if="viewMode==='operations'" style="padding:16px 20px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <select v-model="capacityProcessFilter" class="form-input" style="width:150px;padding:6px 10px;font-size:var(--text-sm)">
+          <option value="">全部工序</option>
+          <option v-for="process in processOptions" :key="process.id" :value="String(process.id)">{{ process.name }}</option>
+        </select>
+        <select v-model="capacityLineFilter" class="form-input" style="width:170px;padding:6px 10px;font-size:var(--text-sm)">
+          <option value="">全部工序产线</option>
+          <option v-for="line in capacityLines" :key="line.id" :value="String(line.id)">{{ line.process_name }} · {{ line.line_name }}</option>
+        </select>
+        <span style="font-size:var(--text-xs);color:var(--text-secondary)">共 {{ capacitySummary.total }} 道工序 · 已排 {{ capacitySummary.planned }} · 阻断 {{ capacitySummary.blocked }} · {{ Math.round(capacitySummary.minutes) }} 分钟</span>
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
+          <select v-model="generationOrderId" @change="prepareGeneration(generationOrderId)" class="form-input" style="width:180px;padding:6px 10px;font-size:var(--text-sm)">
+            <option value="">选择订单生成排程</option>
+            <option v-for="order in capacityOrders" :key="order.id" :value="order.id">{{ order.order_no }}</option>
+          </select>
+          <input v-model="generationStartDate" type="date" class="form-input" style="width:145px;padding:6px 10px;font-size:var(--text-sm)">
+          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--primary);color:#fff" @click="generateSchedule">生成工序排程</button>
+          <button type="button" class="btn-default btn-sm" @click="loadCapacity">刷新</button>
+        </div>
+      </div>
+      <div v-if="capacityLoading" style="padding:36px;text-align:center;color:var(--text-placeholder)">⏳ 加载工序排程中...</div>
+      <div v-else-if="!filteredOperations.length" style="padding:36px;text-align:center;color:var(--text-placeholder)">暂无工序排程数据，请选择订单生成排程</div>
+      <div v-else style="overflow:auto;border:1px solid var(--border-light)">
+        <table style="width:100%;border-collapse:collapse;min-width:980px;font-size:var(--text-sm)">
+          <thead><tr style="background:var(--bg-hover);text-align:left">
+            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">计划日期</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">计划分钟</th><th style="padding:9px 10px">状态</th>
+          </tr></thead>
+          <tbody><tr v-for="row in filteredOperations" :key="row.id || `${row.order_id}-${row.order_process_id}`" style="border-top:1px solid var(--bg-hover)">
+            <td style="padding:8px 10px;font-weight:600;color:var(--primary)">{{ row.order_no || row.order_id }}</td>
+            <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
+            <td style="padding:8px 10px">{{ lineLabel(row) }}</td>
+            <td style="padding:8px 10px;white-space:nowrap">{{ row.plan_start || '-' }} ~ {{ row.plan_end || '-' }}</td>
+            <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
+            <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
+            <td style="padding:8px 10px">{{ row.difficulty_factor || 1 }}</td>
+            <td style="padding:8px 10px">{{ Math.round(row.planned_minutes || 0) }}</td>
+            <td style="padding:8px 10px"><span :style="{color:(row.schedule_status==='blocked'||row.status==='blocked')?'var(--danger)':'var(--success)',fontWeight:600}">{{ (row.schedule_status==='blocked'||row.status==='blocked') ? `阻断：${row.blocked_reason || row.reason || '前置条件不满足'}` : '已排程' }}</span></td>
+          </tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div v-if="viewMode==='orders' && loading" style="text-align:left;padding:60px;color:var(--text-placeholder)">⏳ 加载中...</div>
+    <div v-else-if="viewMode==='orders' && !filteredOrders.length" style="text-align:left;padding:60px;color:var(--text-placeholder)">
       <p style="font-size:48px;margin:0">📅</p><p style="margin-top:12px">暂无排程数据</p>
     </div>
 
-    <div v-else class="gantt-scroll" style="position:relative;overflow-x:auto;padding-bottom:16px" @keydown.left.prevent="shiftDays(-1,false)" @keydown.right.prevent="shiftDays(1,false)" @keydown.shift.left.prevent="shiftDays(-1,true)" @keydown.shift.right.prevent="shiftDays(1,true)" tabindex="0">
+    <div v-else-if="viewMode==='orders'" class="gantt-scroll" style="position:relative;overflow-x:auto;padding-bottom:16px" @keydown.left.prevent="shiftDays(-1,false)" @keydown.right.prevent="shiftDays(1,false)" @keydown.shift.left.prevent="shiftDays(-1,true)" @keydown.shift.right.prevent="shiftDays(1,true)" tabindex="0">
       <div :style="{width: Math.max(ganttData.totalDays * dayWidth + 360, 100) + 'px', minWidth:'100%'}">
         <!-- Date Header -->
         <div style="display:flex;border-bottom:2px solid var(--border-light);position:sticky;top:0;background:var(--bg-surface);z-index:2">

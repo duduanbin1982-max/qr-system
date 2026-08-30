@@ -9,4 +9,9 @@ export const productionApi = {
   createProductionLine:(data)  => request('POST', '/api/production-lines', data),
   updateProductionLine:(id,data)=>request('PUT', '/api/production-lines/' + id, data),
   deleteProductionLine:(id)    => request('DELETE', '/api/production-lines/' + id),
+  listProcessCapacityLines:(params={}) => request('GET', '/api/schedule/capacity-lines' + buildQuery(params)),
+  listCapacityOrders:(params={}) => request('GET', '/api/schedule/capacity-orders' + buildQuery(params)),
+  getOrderOperationSchedule:(id) => request('GET', '/api/schedule/order/' + id + '/operations'),
+  generateOrderOperationSchedule:(id,data={}) => request('POST', '/api/schedule/order/' + id + '/generate', data),
+  listOperationSchedules:(params={}) => request('GET', '/api/schedule/operations' + buildQuery(params)),
 }

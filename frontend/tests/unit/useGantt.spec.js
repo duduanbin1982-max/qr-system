@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
   batchShiftSchedule: vi.fn(),
   createProductionLine: vi.fn(),
   deleteProductionLine: vi.fn(),
+  listProcessCapacityLines: vi.fn(),
+  listOperationSchedules: vi.fn(),
+  listCapacityOrders: vi.fn(),
+  generateOrderOperationSchedule: vi.fn(),
   can: vi.fn(),
 }))
 
@@ -25,6 +29,10 @@ vi.mock('@/lib/api.js', () => ({
         batchShiftSchedule: mocks.batchShiftSchedule,
         createProductionLine: mocks.createProductionLine,
         deleteProductionLine: mocks.deleteProductionLine,
+        listProcessCapacityLines: mocks.listProcessCapacityLines,
+        listOperationSchedules: mocks.listOperationSchedules,
+        listCapacityOrders: mocks.listCapacityOrders,
+        generateOrderOperationSchedule: mocks.generateOrderOperationSchedule,
       },
     },
   },
@@ -67,6 +75,9 @@ describe('useGantt', () => {
     mocks.can.mockImplementation(permission => permission !== 'settings:edit')
     mocks.getScheduleGantt.mockResolvedValue(response([]))
     mocks.listProductionLines.mockResolvedValue({ lines: [] })
+    mocks.listProcessCapacityLines.mockResolvedValue({ lines: [] })
+    mocks.listOperationSchedules.mockResolvedValue({ operations: [] })
+    mocks.listCapacityOrders.mockResolvedValue({ orders: [] })
     mocks.updateScheduleOrder.mockResolvedValue({ ok: true })
   })
 
@@ -127,5 +138,28 @@ describe('useGantt', () => {
     expect(mocks.getScheduleGantt).toHaveBeenCalledTimes(2)
     expect(mocks.listProductionLines).toHaveBeenCalledTimes(2)
     second.wrapper.unmount()
+  })
+
+  it('loads operation schedules lazily and exposes process/line filters', async () => {
+    mocks.listProcessCapacityLines.mockResolvedValue({
+      lines: [{ id: 41, process_id: 7, process_name: '焊接', line_name: '焊接01线' }],
+    })
+    mocks.listOperationSchedules.mockResolvedValue({
+      operations: [{ id: 9, process_id: 7, process_name: '焊接', process_line_id: 41, schedule_status: 'planned', planned_minutes: 90 }],
+    })
+    mocks.listCapacityOrders.mockResolvedValue({ orders: [{ id: 2, order_no: 'CAP-2', plan_start: '2026-07-01' }] })
+    const harness = mountHarness()
+    await flushPromises()
+
+    await harness.gantt.setViewMode('operations')
+    await flushPromises()
+
+    expect(mocks.listProcessCapacityLines).toHaveBeenCalledTimes(1)
+    expect(harness.gantt.processOptions.value).toEqual([{ id: 7, name: '焊接' }])
+    expect(harness.gantt.filteredOperations.value).toHaveLength(1)
+    expect(harness.gantt.capacitySummary.value).toEqual({ total: 1, planned: 1, blocked: 0, minutes: 90 })
+    harness.gantt.capacityProcessFilter.value = '999'
+    expect(harness.gantt.filteredOperations.value).toHaveLength(0)
+    harness.wrapper.unmount()
   })
 })

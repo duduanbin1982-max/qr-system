@@ -288,15 +288,17 @@ def test_v064_preflight_blocks_duplicate_null_process_rows():
 
 
 def test_product_v64_read_only_preflight_passes_current_schema(client):
+    from modules.migrations import LATEST_VERSION
+
     with client.application.app_context():
         report = inspect_product_integrity(get_db())
     assert report["status"] == "passed"
-    assert report["schema_version"] == 64
+    assert report["schema_version"] == LATEST_VERSION
     assert report["blocking"] == {}
 
 
 def test_product_v64_copy_rehearsal_migrates_without_touching_source(tmp_path):
-    from modules.migrations import MIGRATIONS
+    from modules.migrations import LATEST_VERSION, MIGRATIONS
 
     source = tmp_path / "source-v63.db"
     replica = tmp_path / "replica-v64.db"
@@ -317,7 +319,7 @@ def test_product_v64_copy_rehearsal_migrates_without_touching_source(tmp_path):
     replica_db = sqlite3.connect(replica)
     try:
         assert source_db.execute("PRAGMA user_version").fetchone()[0] == 63
-        assert replica_db.execute("PRAGMA user_version").fetchone()[0] == 64
+        assert replica_db.execute("PRAGMA user_version").fetchone()[0] == LATEST_VERSION
         assert {
             row[1] for row in replica_db.execute("PRAGMA table_info(products)")
         } >= {"process_route_id"}
