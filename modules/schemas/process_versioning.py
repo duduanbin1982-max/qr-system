@@ -278,6 +278,41 @@ master_data_release_approve = _object(
 
 master_data_release_reject = version_reject
 
+release_member_type = {
+    "type": "string",
+    "enum": ["process_version", "route_version", "price_version"],
+}
+
+master_data_release_member_remove = _object(
+    ["member_type", "member_id", "row_version", "reason", "idempotency_key"],
+    {
+        "member_type": release_member_type,
+        "member_id": _positive_id,
+        "row_version": _row_version,
+        "reason": _reason,
+        "idempotency_key": _idempotency_key,
+    },
+)
+
+master_data_release_member_replace = _object(
+    [
+        "member_type",
+        "member_id",
+        "replacement_member_id",
+        "row_version",
+        "reason",
+        "idempotency_key",
+    ],
+    {
+        "member_type": release_member_type,
+        "member_id": _positive_id,
+        "replacement_member_id": _positive_id,
+        "row_version": _row_version,
+        "reason": _reason,
+        "idempotency_key": _idempotency_key,
+    },
+)
+
 process_versioning_schemas = {
     "process_version_create": process_version_create,
     "process_revision_create": process_revision_create,
@@ -294,4 +329,6 @@ process_versioning_schemas = {
     "master_data_release_submit": master_data_release_submit,
     "master_data_release_approve": master_data_release_approve,
     "master_data_release_reject": master_data_release_reject,
+    "master_data_release_member_remove": master_data_release_member_remove,
+    "master_data_release_member_replace": master_data_release_member_replace,
 }

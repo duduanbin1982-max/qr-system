@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { normalizeRolePermissions } from '@/lib/permissions.js'
+import { auth, can } from '@/lib/auth.js'
 
 export function useRoleManage() {
   const roles = ref([])
@@ -26,6 +27,12 @@ export function useRoleManage() {
   ]
   const roleSearch = ref('')
   const roleAddGroup = ref(null)
+  const isBuiltinAdmin = computed(() =>
+    !!roleForm.is_builtin && roleForm.code === 'admin'
+  )
+  const canCreate = computed(() => can('roles:create'))
+  const canEdit = computed(() => can('roles:edit'))
+  const canDelete = computed(() => can('roles:delete'))
 
   const filteredRoles = computed(() => {
     let list = roles.value
@@ -79,9 +86,15 @@ export function useRoleManage() {
     }
     catch { return permsStr ? [permsStr] : [] }
   }
+  function aliasCodes(role) {
+    try {
+      const aliases = JSON.parse(role?.alias_codes || '[]')
+      return Array.isArray(aliases) ? aliases.filter(Boolean) : []
+    } catch { return [] }
+  }
   function openAddRole() {
     roleModalEdit.value = false
-    Object.assign(roleForm, { name:'', code:'', description:'', group_id:roleAddGroup.value, parent_id:null, level:1, permissions:'[]', status:'active' })
+    Object.assign(roleForm, { name:'', code:'', description:'', group_id:roleAddGroup.value, parent_id:null, level:1, permissions:'[]', status:'active', is_builtin:0 })
     selectedPerms.value = []
     wildcardSelected.value = false
     showRoleModal.value = true
@@ -97,17 +110,21 @@ export function useRoleManage() {
   }
   function openEditRole(role) {
     roleModalEdit.value = true
-    Object.assign(roleForm, { name:role.name, code:role.code, description:role.description||'', group_id:role.group_id, parent_id:role.parent_id, level:role.level||1, permissions:role.permissions||'[]', status:role.status||'active' })
+    Object.assign(roleForm, { name:role.name, code:role.code, description:role.description||'', group_id:role.group_id, parent_id:role.parent_id, level:role.level||1, permissions:role.permissions||'[]', status:role.status||'active', is_builtin:role.is_builtin||0 })
     roleForm._id = role.id
     try { selectedPerms.value = expandStarPerms(JSON.parse(role.permissions || '[]')) }
     catch { selectedPerms.value = [] }
     showRoleModal.value = true
   }
   async function saveRole() {
+    if (auth.user && (roleModalEdit.value ? !canEdit.value : !canCreate.value)) {
+      showToast('无权保存角色','error')
+      return
+    }
     if (!roleForm.name) { showToast('角色名称不能为空','error'); return }
     roleForm.permissions = JSON.stringify(wildcardSelected.value ? ['*'] : normalizeRolePermissions(selectedPerms.value))
     try {
-      const body = { ...roleForm }; delete body._id
+      const body = { ...roleForm }; delete body._id; delete body.is_builtin
       if (roleModalEdit.value) await api.domains.roles.updateRole(roleForm._id, body)
       else await api.domains.roles.createRole(body)
       showToast(roleModalEdit.value?'更新成功':'创建成功')
@@ -116,6 +133,7 @@ export function useRoleManage() {
     } catch(e) { showToast(e.message,'error') }
   }
   async function deleteRole(rid) {
+    if (auth.user && !canDelete.value) { showToast('无权删除角色','error'); return }
     if (!confirm('确定删除该角色？')) return
     try { await api.domains.roles.deleteRole(rid); showToast('删除成功'); loadRoles() }
     catch(e) { showToast(e.message,'error') }
@@ -336,7 +354,9 @@ export function useRoleManage() {
     roles, groups, roleLoading, showRoleModal, roleModalEdit, roleForm, allPermissions, selectedPerms,
     permissionTree, filteredPermissionTree, permissionCodes, permissionSearch, permissionExpanded,
     wildcardSelected, selectedPermCount, permActionLabels, roleSearch, roleAddGroup, filteredRoles,
-    loadRoles, loadGroups, loadPermissions, getGroupName, groupMap, formatPerms,
+    isBuiltinAdmin,
+    canCreate, canEdit, canDelete,
+    loadRoles, loadGroups, loadPermissions, getGroupName, groupMap, formatPerms, aliasCodes,
     openAddRole, openEditRole, saveRole, deleteRole,
     collectNodeCodes, isPermissionExpanded, togglePermissionExpand, expandPermissionTree,
     collapsePermissionTree, isNodeChecked, isNodePartial, togglePermissionNode,

@@ -6,6 +6,8 @@ from modules.repositories.scan_repository import ScanRepository
 from modules.setting_reader import get_setting
 from modules.services.process_order_service import ProcessOrderService
 from modules.services.inventory_posting_service import InventoryPostingService
+from modules.repositories.process_config_repository import ProcessConfigRepository
+from modules.services.approval_policy_service import ApprovalPolicyService
 
 
 class ScanHelperService:
@@ -141,10 +143,26 @@ class ScanHelperService:
         )
 
     @staticmethod
-    def check_approval_required(process_id, db=None):
-        if get_setting("approval_enabled", "1") != "1":
+    def check_approval_required(process_id, order_id=None, db=None):
+        transaction_db = ScanHelperService._db(db)
+        if order_id is not None:
+            order_process = ScanRepository.get_order_process(order_id, process_id, db=transaction_db)
+            if order_process is not None and order_process["required_audit"]:
+                revision_id = (
+                    order_process["approval_policy_revision_id"]
+                    if "approval_policy_revision_id" in order_process.keys() else None
+                )
+                return {"id": revision_id, "source": "order_required_audit"}
+        active_process_config = ProcessConfigRepository.get_active(db=transaction_db)
+        if active_process_config is not None and not active_process_config["approval_enabled"]:
             return None
-        return ScanRepository.find_approval_config(process_id, db=ScanHelperService._db(db))
+        snapshot, revision_id = ApprovalPolicyService.effective_snapshot(process_id, db=transaction_db)
+        if snapshot.get("require_approval"):
+            return {"id": revision_id, "policy_snapshot": snapshot}
+        # Compatibility fallback for databases that have not completed V071.
+        if active_process_config is None and get_setting("approval_enabled", "1") != "1":
+            return None
+        return ScanRepository.find_approval_config(process_id, db=transaction_db)
 
     # ======================== 报工写入操作（全部接受 db 参数，不自行 commit） ========================
 
@@ -163,6 +181,7 @@ class ScanHelperService:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        submit_position_version_id=None,
         db=None,
     ):
         transaction_db = ScanHelperService._db(db)
@@ -171,6 +190,15 @@ class ScanHelperService:
         )
         if binding is None or binding["process_version_id"] is None:
             raise ValueError("订单工序缺少版本绑定，禁止报工")
+        binding = dict(binding)
+        if binding.get("approval_policy_revision_id") is None:
+            _, policy_revision_id = ApprovalPolicyService.effective_snapshot(
+                process_id, db=transaction_db
+            )
+            binding["approval_policy_revision_id"] = policy_revision_id
+            binding["approval_policy_source"] = (
+                "versioned" if policy_revision_id is not None else "legacy_snapshot"
+            )
         return ScanRepository.insert_report_work_record(
             order_id,
             process_id,
@@ -185,6 +213,7 @@ class ScanHelperService:
             backfill_reason,
             submit_position_id,
             submit_position_name,
+            submit_position_version_id,
             fact_binding=binding,
             db=transaction_db,
         )

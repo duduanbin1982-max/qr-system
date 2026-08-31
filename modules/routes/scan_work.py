@@ -71,7 +71,9 @@ def scan_order():
             return jsonify({"error": "此订单为序列号模式，请扫描工件二维码"}), 400
 
     o = dict(order)
-    if not ScanHelperService.check_order_scope(o["id"], get_user_process_ids(g.current_user)):
+    if not ScanHelperService.check_order_scope(
+        o["id"], get_user_process_ids(g.current_user, order_id=o["id"])
+    ):
         return jsonify({"error": "您无权查看此订单"}), 403
 
     try:
@@ -81,7 +83,7 @@ def scan_order():
 
     procs = ScanHelperService.get_order_processes(o["id"])
     all_procs = [dict(p) for p in procs]
-    user_pids = get_user_process_ids(g.current_user)
+    user_pids = get_user_process_ids(g.current_user, order_id=o["id"])
     o["processes"] = all_procs
     ProcessOrderService.attach_context(
         o,
@@ -202,7 +204,7 @@ def mobile_report():
             return jsonify(err), code
 
         # Approval check
-        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id, order_id)
 
         # Execute report write
         command = ScanReportService.build_command(
@@ -276,7 +278,7 @@ def work_report():
             return jsonify(err), code
 
         # Approval check
-        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id)
+        need_approval = serial_backfill or ScanReportService.check_approval_required(process_id, order_id)
 
         # Execute report write
         command = ScanReportService.build_command(

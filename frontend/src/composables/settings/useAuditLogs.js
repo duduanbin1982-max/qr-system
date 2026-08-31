@@ -1,7 +1,8 @@
 // useAuditLogs.js
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { auth, can } from '@/lib/auth.js'
 
 export function useAuditLogs() {
   const logs = ref([])
@@ -14,7 +15,10 @@ export function useAuditLogs() {
   const logFilterDateFrom = ref('')
   const logFilterDateTo = ref('')
   const logFilterCategory = ref('')
+  const logCategories = ref([])
   const expandedLogId = ref(null)
+  const cleanupRequests = ref([])
+  const canClearLogs = computed(() => can('logs:delete') && can('users:admin'))
 
   async function loadLogs() {
     logsLoading.value = true
@@ -44,24 +48,88 @@ export function useAuditLogs() {
   }
 
   async function clearLogs(beforeDays) {
-    const days = beforeDays || 90
-    if (!confirm('确定清除 ' + days + ' 天前的日志？')) return
+    const days = beforeDays || 1095
+    if (!confirm('将提交清理 ' + days + ' 天前日志的申请，审批通过后才会执行。继续？')) return
+    const reason = window.prompt('请输入清理理由（至少4个字符）', '')
+    if (!reason || reason.trim().length < 4) {
+      showToast('清理理由至少需要4个字符', 'error')
+      return
+    }
     try {
-      const r = await api.domains.logs.deleteLogs({ before_days: days })
-      showToast('已清除 ' + (r.deleted || r.cleared || 0) + ' 条日志')
+      const r = await api.domains.logs.deleteLogs({ before_days: days, reason: reason.trim() })
+      showToast('清理申请已提交，预计影响 ' + (r.affected_count || 0) + ' 条日志')
     } catch(e) { showToast(e.message,'error') }
+    loadCleanupRequests()
     loadLogs()
+  }
+
+  async function loadCleanupRequests() {
+    if (!canClearLogs.value) return
+    try {
+      const result = await api.domains.logs.listCleanupRequests({ limit: 100 })
+      cleanupRequests.value = result.items || []
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }
+
+  async function loadCategories() {
+    try {
+      const result = await api.domains.logs.listCategories()
+      logCategories.value = result.items || []
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }
+
+  function canReviewCleanup(item) {
+    return item.status === 'pending' && Number(item.requested_by) !== Number(auth.user?.id)
+  }
+
+  async function approveCleanup(item) {
+    const reason = window.prompt('请输入批准意见（至少4个字符）', '')
+    if (!reason || reason.trim().length < 4) return
+    if (!confirm('批准后将先归档，再删除符合范围的日志。继续？')) return
+    try {
+      const result = await api.domains.logs.approveCleanupRequest(item.id, { reason: reason.trim() })
+      showToast('已归档 ' + (result.archived || 0) + ' 条并清理 ' + (result.deleted || 0) + ' 条日志')
+      await Promise.all([loadCleanupRequests(), loadLogs()])
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }
+
+  async function rejectCleanup(item) {
+    const reason = window.prompt('请输入驳回理由（至少4个字符）', '')
+    if (!reason || reason.trim().length < 4) return
+    try {
+      await api.domains.logs.rejectCleanupRequest(item.id, { reason: reason.trim() })
+      showToast('清理申请已驳回')
+      await loadCleanupRequests()
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }
+
+  function cleanupStatusText(status) {
+    return ({ pending: '待复核', executed: '已执行', rejected: '已驳回', cancelled: '已取消' })[status] || status
   }
 
   function logsPrevPage() { if (logsPage.value > 1) { logsPage.value--; loadLogs() } }
   function logsNextPage() { if (logsPage.value * logsLimit.value < logsTotal.value) { logsPage.value++; loadLogs() } }
 
-  onMounted(() => { loadLogs() })
+  onMounted(() => {
+    loadLogs()
+    loadCategories()
+    loadCleanupRequests()
+  })
 
   return {
     logs, logsTotal, logsPage, logsLoading, logsLimit,
-    logFilterAction, logFilterKeyword, logFilterDateFrom, logFilterDateTo, logFilterCategory,
-    expandedLogId,
-    loadLogs, doSearch, resetFilters, clearLogs, logsPrevPage, logsNextPage,
+    logFilterAction, logFilterKeyword, logFilterDateFrom, logFilterDateTo, logFilterCategory, logCategories,
+    expandedLogId, canClearLogs, cleanupRequests,
+    loadLogs, doSearch, resetFilters, clearLogs, loadCleanupRequests, loadCategories,
+    canReviewCleanup, approveCleanup, rejectCleanup, cleanupStatusText,
+    logsPrevPage, logsNextPage,
   }
 }

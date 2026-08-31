@@ -3,6 +3,7 @@ __pycache__/
 production.db
 .env
 data/backups/
+data/deployments/
 .vscode/
 .idea/
 *.bak

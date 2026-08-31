@@ -1,5 +1,5 @@
 """Approval workflow HTTP routes."""
-from flask import g, jsonify
+from flask import g, jsonify, request
 
 from modules.route_decorators import (
     app,
@@ -11,6 +11,7 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.approval_service import ApprovalService
+from modules.services.approval_policy_service import ApprovalPolicyService
 
 
 @app.route('/api/approvals/pending', methods=['GET'])
@@ -33,7 +34,7 @@ def get_approval_history():
 
 @app.route('/api/approvals/<int:record_id>/<action>', methods=['POST'])
 @check_auth
-@check_permission('approvals:edit')
+@check_permission('approvals:decision')
 @validate_json('approval_action')
 def handle_approval(record_id, action):
     data = get_json_body()
@@ -56,15 +57,67 @@ def handle_approval(record_id, action):
 
 @app.route('/api/approvals/config', methods=['GET'])
 @check_auth
-@check_permission('approvals:edit')
+@check_permission('approval_policies:view')
 def get_approval_config():
     """Return all approval_config rows with process names."""
     return jsonify(ApprovalService.list_configs())
 
 
+@app.route('/api/approval-policies', methods=['GET'])
+@check_auth
+@check_permission('approval_policies:view')
+def list_approval_policies():
+    return jsonify(ApprovalPolicyService.list(include_history=request.args.get('history') == '1'))
+
+
+@app.route('/api/approval-policies/revisions', methods=['POST'])
+@check_auth
+@check_permission('approval_policies:create')
+@validate_json('approval_policy_revision_payload')
+def create_approval_policy_revision():
+    row = ApprovalPolicyService.create_revision(
+        get_json_body(), {'id': g.current_user['id'], 'name': g.current_user['name']}
+    )
+    return jsonify({'revision': row}), 201
+
+
+@app.route('/api/approval-policies/<int:policy_id>/history', methods=['GET'])
+@check_auth
+@check_permission('approval_policies:history')
+def approval_policy_history(policy_id):
+    return jsonify(ApprovalPolicyService.history(policy_id))
+
+
+def _transition_policy_revision(revision_id, target, permission):
+    return ApprovalPolicyService.transition(
+        revision_id, target, {'id': g.current_user['id'], 'name': g.current_user['name']}
+    )
+
+
+@app.route('/api/approval-policies/revisions/<int:revision_id>/submit', methods=['POST'])
+@check_auth
+@check_permission('approval_policies:submit')
+def submit_approval_policy_revision(revision_id):
+    return jsonify({'revision': _transition_policy_revision(revision_id, 'pending_approval', 'approval_policies:submit')})
+
+
+@app.route('/api/approval-policies/revisions/<int:revision_id>/approve', methods=['POST'])
+@check_auth
+@check_permission('approval_policies:approve')
+def approve_approval_policy_revision(revision_id):
+    return jsonify({'revision': _transition_policy_revision(revision_id, 'published', 'approval_policies:approve')})
+
+
+@app.route('/api/approval-policies/revisions/<int:revision_id>/reject', methods=['POST'])
+@check_auth
+@check_permission('approval_policies:reject')
+def reject_approval_policy_revision(revision_id):
+    return jsonify({'revision': _transition_policy_revision(revision_id, 'rejected', 'approval_policies:reject')})
+
+
 @app.route('/api/approvals/config', methods=['POST'])
 @check_auth
-@check_permission('approvals:edit')
+@check_permission('approval_policies:create')
 @validate_json('approval_config_payload')
 def save_approval_config():
     """Save approval_config: {process_id: int, require_approval: 1|0, approver_role: str, approval_level: int}
@@ -78,7 +131,7 @@ def save_approval_config():
 
 @app.route('/api/approvals/batch', methods=['POST'])
 @check_auth
-@check_permission('approvals:edit')
+@check_permission('approvals:decision')
 @validate_json('approval_batch_payload')
 def batch_approval():
     """Batch approve/reject: {"ids": [1,2,3], "action": "approve|reject"}"""

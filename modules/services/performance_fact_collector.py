@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import ConflictError, NotFoundError
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.performance_assignment_repository import (
@@ -11,6 +12,7 @@ from modules.repositories.performance_assignment_repository import (
 )
 from modules.repositories.performance_fact_repository import PerformanceFactRepository
 from modules.services import BaseService
+from modules.services.position_snapshot_service import PositionSnapshotService
 
 
 class PerformanceFactCollector:
@@ -32,6 +34,7 @@ class PerformanceFactCollector:
         "department_id_snapshot",
         "department_name_snapshot",
         "position_id_snapshot",
+        "position_version_id",
         "position_name_snapshot",
         "order_id",
         "order_no_snapshot",
@@ -54,17 +57,11 @@ class PerformanceFactCollector:
 
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @classmethod
     def _digest(cls, value):
-        return hashlib.sha256(cls._canonical(value).encode("utf-8")).hexdigest()
+        return evidence_protocol.sha256_digest_v1(value)
 
     @staticmethod
     def _json_object(value):
@@ -404,6 +401,20 @@ class PerformanceFactCollector:
             "current_process_name"
         ) or ""
         payload_json = cls._canonical(payload)
+        position_id = assignment.get("position_id")
+        position_version_id = None
+        position_name = assignment.get("position_name_snapshot", "")
+        if fact_type == "work" and context.get("submit_position_id") is not None:
+            position_id = context.get("submit_position_id")
+            position_version_id = context.get("submit_position_version_id")
+            position_name = context.get("submit_position_name") or position_name
+        elif position_id is not None:
+            position_version = PositionSnapshotService.version_at(
+                position_id, business_at, db=db
+            )
+            if position_version:
+                position_version_id = position_version["id"]
+                position_name = position_version["name"]
         fact = {
             **identity,
             "canonical_event_id": canonical_event_id,
@@ -421,8 +432,9 @@ class PerformanceFactCollector:
             "department_name_snapshot": assignment.get(
                 "department_name_snapshot", ""
             ),
-            "position_id_snapshot": assignment.get("position_id"),
-            "position_name_snapshot": assignment.get("position_name_snapshot", ""),
+            "position_id_snapshot": position_id,
+            "position_version_id": position_version_id,
+            "position_name_snapshot": position_name,
             "order_id": context.get("order_id"),
             "order_no_snapshot": context.get("order_no")
             or context.get("current_order_no")

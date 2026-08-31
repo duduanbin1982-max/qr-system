@@ -7,7 +7,7 @@ from modules.schedule_capacity_config import (
 )
 
 
-def m065_schedule_capacity(db):
+def m076_schedule_capacity(db):
     db.execute("""
         CREATE TABLE IF NOT EXISTS process_production_lines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +124,7 @@ def _schedule_snapshot(row, db):
     }
 
 
-def m066_harden_schedule_capacity(db):
+def m077_harden_schedule_capacity(db):
     """Version scheduling facts and retain an independent run/idempotency ledger."""
     db.execute(
         """
@@ -269,6 +269,6 @@ def m066_harden_schedule_capacity(db):
 
 
 MIGRATIONS = [
-    (65, "Add process-level multi-line scheduling capacity", m065_schedule_capacity),
-    (66, "Version scheduling facts and retain run ledger", m066_harden_schedule_capacity),
+    (76, "Add process-level multi-line scheduling capacity", m076_schedule_capacity),
+    (77, "Version scheduling facts and retain run ledger", m077_harden_schedule_capacity),
 ]

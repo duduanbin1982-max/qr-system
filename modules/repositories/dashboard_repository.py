@@ -103,13 +103,6 @@ class DashboardRepository:
         return rows
 
     @staticmethod
-    def get_company_name(db=None):
-        db = resolve_db(db)
-        return db.execute(
-            "SELECT value FROM system_settings WHERE key='company_name'"
-        ).fetchone()
-
-    @staticmethod
     def get_delivery_warning_setting(db=None):
         db = resolve_db(db)
         return db.execute(

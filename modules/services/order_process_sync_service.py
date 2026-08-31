@@ -4,6 +4,7 @@ from modules.domain.errors import ConflictError
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.process_version_repository import ProcessVersionRepository
 from modules.repositories.route_version_repository import RouteVersionRepository
+from modules.repositories.approval_policy_repository import ApprovalPolicyRepository
 
 
 class OrderProcessSyncService:
@@ -37,6 +38,8 @@ class OrderProcessSyncService:
             "process_category_snapshot": item.get("process_category") or "",
             "seq_order": int(item.get("seq_order") or 0),
             "required_audit": int(item.get("required_audit") or 0),
+            "approval_policy_revision_id": item.get("approval_policy_revision_id"),
+            "approval_policy_source": item.get("approval_policy_source") or "route_version",
         }
 
     @staticmethod
@@ -191,6 +194,14 @@ class OrderProcessSyncService:
 
     @staticmethod
     def _insert_binding(db, order_id, binding):
+        revision_id = binding.get("approval_policy_revision_id")
+        if revision_id is None:
+            try:
+                revision = ApprovalPolicyRepository.find_published_revision(binding["process_id"], db=db)
+                revision_id = revision["id"] if revision else None
+            except Exception as exc:
+                if "no such table" not in str(exc).lower():
+                    raise
         OrderRepository.insert_order_process(
             order_id,
             binding["process_id"],
@@ -200,6 +211,8 @@ class OrderProcessSyncService:
             process_code_snapshot=binding["process_code_snapshot"],
             process_name_snapshot=binding["process_name_snapshot"],
             process_category_snapshot=binding["process_category_snapshot"],
+            approval_policy_revision_id=revision_id,
+            approval_policy_source=binding.get("approval_policy_source") or "order_assignment",
             db=db,
         )
 

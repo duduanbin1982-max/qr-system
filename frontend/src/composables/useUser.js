@@ -1,4 +1,4 @@
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, getCurrentInstance } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
@@ -297,7 +297,7 @@ export function useUser() {
     }
   }
 
-  onMounted(() => load())
+  if (getCurrentInstance()) onMounted(() => load())
 
   return {
     users, positions, loading, searchKeyword,

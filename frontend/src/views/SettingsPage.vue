@@ -6,14 +6,14 @@
     <div style="display:flex;gap:var(--space-1);margin-bottom:var(--space-5);border-bottom:2px solid var(--border-light);padding-bottom:0;overflow-x:auto">
       <button v-for="t in tabs" :key="t.key"
         class="tab-btn" :class="{active: activeTab===t.key}"
-        @click="activeTab=t.key">
+        @click="changeTab(t.key)">
         {{ t.label }}
       </button>
     </div>
 
     <!-- Dynamic tab content -->
     <div v-if="!tabs.length" class="card"><div class="card-body">当前角色没有系统设置子页面权限。</div></div>
-    <component v-else :is="currentComponent" />
+    <component v-else ref="activeComponent" :is="currentComponent" />
   </div>
 </template>
 
@@ -48,6 +48,16 @@ export default {
 
     const STORAGE_KEY = 'settingsTab'
     const activeTab = ref(localStorage.getItem(STORAGE_KEY) || 'company-info')
+    const activeComponent = ref(null)
+
+    function changeTab(nextTab) {
+      if (nextTab === activeTab.value) return
+      if (
+        activeComponent.value?.hasUnsavedChanges?.()
+        && !window.confirm(`${tabs.value.find(t => t.key === activeTab.value)?.label || '当前页面'}有未保存的改动，确定离开吗？`)
+      ) return
+      activeTab.value = nextTab
+    }
 
     watchEffect(() => {
       if (!tabs.value.length) {
@@ -65,7 +75,7 @@ export default {
       return t ? t.component : 'CompanyInfo'
     })
 
-    return { tabs, activeTab, currentComponent }
+    return { tabs, activeTab, activeComponent, currentComponent, changeTab }
   }
 }
 </script>

@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import math
 
+from modules.domain import evidence_protocol
 from modules.domain.errors import NotFoundError
 from modules.domain.performance_policy import (
     PerformanceConflictError,
@@ -12,6 +13,9 @@ from modules.domain.performance_policy import (
 )
 from modules.repositories.performance_configuration_repository import (
     PerformanceConfigurationRepository,
+)
+from modules.repositories.position_version_repository import (
+    PositionVersionRepository,
 )
 from modules.services import BaseService
 from modules.services.performance_authorization_service import (
@@ -36,13 +40,7 @@ class PerformanceConfigurationService:
 
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @staticmethod
     def _finite_number(value, field):
@@ -195,9 +193,23 @@ class PerformanceConfigurationService:
         effective_from, effective_to = PerformanceConfigurationService._month_range(
             data, require_from=require_effective_from
         )
+        if position.get("lifecycle_status") == "retired":
+            raise ValueError("退休岗位不能创建新的绩效目标")
+        position_version = PositionVersionRepository.current_version(
+            position_id, db=db
+        )
+        if position.get("current_effective_version_id") and (
+            not position_version or position_version.get("status") != "published"
+        ):
+            raise ValueError("岗位当前版本不是已发布版本")
         return {
             "position_id": position_id,
-            "position_name_snapshot": position["name"],
+            "position_version_id_snapshot": (
+                position_version["id"] if position_version else None
+            ),
+            "position_name_snapshot": (
+                position_version["name"] if position_version else position["name"]
+            ),
             "target_output_qty": target_output,
             "minimum_effective_work_days": minimum_days,
             "effective_from_month": effective_from,

@@ -314,6 +314,15 @@ export default {
         if (requested.settingsTab) {
           localStorage.setItem('settingsTab', requested.settingsTab)
         }
+        if (requested.wageTab) {
+          localStorage.setItem('wageActiveTab', requested.wageTab)
+          router.params = {
+            ...router.params,
+            wage_tab: requested.wageTab,
+            route_version_id: requested.routeVersionId,
+            process_version_id: requested.processVersionId,
+          }
+        }
         const saved = localStorage.getItem('currentPage')
         if (requested.page && pageAccess.canOpen(auth.user, requested.page)) {
           router.page = requested.page

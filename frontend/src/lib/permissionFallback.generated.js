@@ -390,12 +390,14 @@ export const ACTION_PAGE_MAP = {
     "page:settings",
     "page:settings.audit-logs"
   ],
+  "company_info": [
+    "page:settings",
+    "page:settings.company-info"
+  ],
   "settings": [
     "page:settings",
-    "page:settings.company-info",
     "page:settings.admin-users",
     "page:settings.audit-logs",
-    "page:settings.process-config",
     "page:settings.role-groups",
     "page:settings.role-manage",
     "page:settings.positions",
@@ -403,6 +405,66 @@ export const ACTION_PAGE_MAP = {
   ]
 }
 export const IMPLIED_PERMISSIONS = {
+  "roles:create": [
+    "roles:view"
+  ],
+  "roles:edit": [
+    "roles:view"
+  ],
+  "roles:delete": [
+    "roles:view"
+  ],
+  "role_groups:create": [
+    "role_groups:view"
+  ],
+  "role_groups:edit": [
+    "role_groups:view"
+  ],
+  "role_groups:delete": [
+    "role_groups:view"
+  ],
+  "company_info:edit": [
+    "company_info:view"
+  ],
+  "company_info:audit_history": [
+    "company_info:view"
+  ],
+  "process_config:create": [
+    "process_config:view"
+  ],
+  "process_config:submit": [
+    "process_config:view"
+  ],
+  "process_config:approve": [
+    "process_config:view"
+  ],
+  "process_config:reject": [
+    "process_config:view"
+  ],
+  "process_config:history": [
+    "process_config:view"
+  ],
+  "approval_policies:create": [
+    "approval_policies:view"
+  ],
+  "approval_policies:submit": [
+    "approval_policies:view"
+  ],
+  "approval_policies:approve": [
+    "approval_policies:view"
+  ],
+  "approval_policies:reject": [
+    "approval_policies:view"
+  ],
+  "approval_policies:history": [
+    "approval_policies:view"
+  ],
+  "approval_policies:impact": [
+    "approval_policies:view"
+  ],
+  "approvals:decision": [
+    "approvals:view"
+  ],
   "processes:view": [
     "process_versions:view"
   ],
@@ -461,9 +523,7 @@ export const IMPLIED_PERMISSIONS = {
     "suppliers:edit",
     "suppliers:delete"
   ],
-  "materials:view": [
-    "suppliers:view"
-  ],
+  "materials:view": [],
   "materials:create": [
     "materials:view",
     "suppliers:view"

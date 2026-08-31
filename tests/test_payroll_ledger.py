@@ -29,7 +29,9 @@ def _exact_binding(db, route_id, process_id):
     return db.execute(
         "SELECT route_version.id AS route_version_id,"
         "item.process_version_id,route_version.name AS route_name,"
-        "process_version.name AS process_name "
+        "route_version.content_digest AS route_content_digest,"
+        "process_version.name AS process_name,"
+        "process_version.content_digest AS process_content_digest "
         "FROM process_routes route "
         "JOIN process_route_versions route_version "
         "ON route_version.id=route.current_effective_version_id "
@@ -83,9 +85,15 @@ def _seed_price_and_work(
             "route_version_id": binding["route_version_id"],
             "process_id": process_id,
             "process_version_id": binding["process_version_id"],
+            "expected_route_content_digest": binding["route_content_digest"],
+            "expected_process_content_digest": binding["process_content_digest"],
             "normal_unit_price": "1.25",
             "valid_from": "2026-07-01",
             "rework_rate_percent": 50 if work_type == "rework" and configure_rework_rate else None,
+            "idempotency_key": (
+                f"payroll-price-{binding['route_version_id']}-"
+                f"{binding['process_version_id']}"
+            ),
         }, admin)
         # Approve with a different identity to exercise the two-person rule.
         PriceVersionService.approve(version["id"], {"id": 2, "name": "工价审批员"}, version["row_version"])

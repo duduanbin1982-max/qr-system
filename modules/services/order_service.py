@@ -422,6 +422,19 @@ class OrderService:
                 process_sync_service.clear_processes(txn, oid)
 
     @staticmethod
+    def _validate_quantity_against_serial_items(oid, current_order, data, txn):
+        if 'quantity' not in data or data['quantity'] == current_order['quantity']:
+            return
+        active_items = OrderService._repository().count_active_product_items(
+            oid, db=txn
+        )
+        if active_items and int(data['quantity']) != active_items:
+            raise ValidationError(
+                f'该订单已有 {active_items} 个有效序列件，订单数量必须与其一致；'
+                '请先通过受控流程作废或补建序列件'
+            )
+
+    @staticmethod
     def _update_order_transaction(oid, data, user_id, user_name, txn):
         repository = OrderService._repository()
         current_order = repository.find_by_id(oid, db=txn)
@@ -432,6 +445,9 @@ class OrderService:
             current_order,
             data,
             txn,
+        )
+        OrderService._validate_quantity_against_serial_items(
+            oid, current_order, data, txn
         )
 
         route_changed, process_ids_changed = OrderService._process_sync_service().prepare_update(

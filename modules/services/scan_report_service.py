@@ -51,8 +51,8 @@ class ScanReportService:
         return True
 
     @staticmethod
-    def check_approval_required(process_id):
-        return ScanHelperService.check_approval_required(process_id) is not None
+    def check_approval_required(process_id, order_id=None):
+        return ScanHelperService.check_approval_required(process_id, order_id=order_id) is not None
 
     @staticmethod
     def execute_report_write(command):

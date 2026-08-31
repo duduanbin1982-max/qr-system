@@ -98,16 +98,51 @@
             <RouteVersionEditor v-model="editorForm" :readonly="selectedVersion.status !== 'draft'" :process-options="processOptions" />
 
             <section class="coverage-section">
-              <div class="section-heading"><div><h4>工价覆盖</h4><span>按路线版本和工序版本精确匹配</span></div><span>{{ coveredNodeCount }} / {{ coverageRows.length }} 已覆盖</span></div>
+              <div class="section-heading">
+                <div>
+                  <h4>工价覆盖</h4>
+                  <span v-if="selectedVersion.status === 'draft'">提交审批后即可在本页填写精确工价</span>
+                  <span v-else>按路线版本和工序版本精确匹配</span>
+                </div>
+                <div class="coverage-heading-actions">
+                  <span>{{ coveredNodeCount }} / {{ coverageRows.length }} 已覆盖</span>
+                  <button
+                    v-if="selectedVersion.status === 'pending_approval' && canPreparePrice && missingCoverageRows.length"
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    data-testid="create-missing-route-prices"
+                    @click="openPriceVersion(missingCoverageRows[0])"
+                  >建立缺失工价</button>
+                </div>
+              </div>
               <div class="table-wrap">
                 <table class="data-table coverage-table">
-                  <thead><tr><th>节点</th><th>绑定版本</th><th>覆盖状态</th><th>可用工价版本</th></tr></thead>
+                  <thead><tr><th>节点</th><th>绑定版本</th><th>覆盖状态</th><th>参考旧工价</th><th>精确新工价</th><th>操作</th></tr></thead>
                   <tbody>
                     <tr v-for="row in coverageRows" :key="row.process_version_id">
                       <td>{{ row.process_name_snapshot || row.process_id }}</td>
                       <td>V{{ row.process_version || row.process_version_id }}</td>
-                      <td><span :class="exactApprovedPrice(row) ? 'text-success' : 'text-warning'">{{ exactApprovedPrice(row) ? '已批准覆盖' : row.price_versions.length ? '有草稿待处理' : '缺少精确工价' }}</span></td>
-                      <td><span v-if="row.price_versions.length">{{ row.price_versions.map(price => `#${price.id} ${priceStatus(price.status)}`).join('、') }}</span><span v-else>-</span></td>
+                      <td><span :class="coverageStatusClass(row.coverage_status)">{{ coverageStatusLabel(row.coverage_status, selectedVersion.status) }}</span></td>
+                      <td><span v-if="row.reference_price">{{ money(row.reference_price.normal_unit_price_micros) }}</span><span v-else>-</span><small v-if="row.reference_price">仅供参考</small></td>
+                      <td><span v-if="row.price_versions.length">{{ row.price_versions.map(price => `#${price.id} ${priceStatus(price.status)} ${money(price.normal_unit_price_micros)}`).join('、') }}</span><span v-else>-</span></td>
+                      <td>
+                        <button
+                          v-if="selectedVersion.status === 'draft' && canSubmit && canPreparePrice"
+                          type="button"
+                          class="btn btn-primary btn-sm"
+                          :data-testid="`submit-and-create-exact-price-${row.process_version_id}`"
+                          :disabled="busy"
+                          @click="submitAndOpenPrice(row)"
+                        >提交审批并填写工价</button>
+                        <button
+                          v-else
+                          type="button"
+                          class="btn btn-default btn-sm"
+                          :data-testid="`create-exact-price-${row.process_version_id}`"
+                          :disabled="selectedVersion.status !== 'pending_approval' || !canPreparePrice"
+                          @click="openPriceVersion(row)"
+                        >{{ selectedVersion.status === 'pending_approval' ? '填写工价' : '提交审批后可定价' }}</button>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -178,6 +213,7 @@ import {
 } from '@/composables/useRouteVersions.js'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
+import { navigate } from '@/lib/router.js'
 import { showToast } from '@/lib/store.js'
 
 const state = useRouteVersions()
@@ -214,9 +250,11 @@ const canReject = computed(() => can('route_versions:reject'))
 const canRetire = computed(() => can('process_routes:retire'))
 const canReactivate = computed(() => can('process_routes:reactivate'))
 const canViewReleases = computed(() => can('master_data_releases:view'))
+const canPreparePrice = computed(() => can('wages:prepare'))
 const activeCategory = computed(() => categoryFilter.value || 'all')
 const historicalSelection = computed(() => historicalVersions.value.some(version => version.id === selectedVersion.value?.id) ? selectedVersion.value.id : '')
 const coveredNodeCount = computed(() => coverageRows.value.filter(exactApprovedPrice).length)
+const missingCoverageRows = computed(() => coverageRows.value.filter(row => row.coverage_status !== 'approved'))
 const commandTitle = computed(() => ({ revision: '创建路线修订版', reject: '驳回路线版本', retire: '申请路线退休', reactivate: '申请重新启用' }[commandType.value] || '路线操作'))
 const commandLabel = computed(() => commandType.value === 'revision' ? '修订原因' : commandType.value === 'reject' ? '驳回原因' : '申请原因')
 
@@ -228,6 +266,32 @@ function emptyRoute(withReason = false) {
 }
 function priceStatus(status) { return ({ draft: '草稿', approved: '已批准', retired: '已结束' }[status] || status || '-') }
 function exactApprovedPrice(row) { return row.price_versions?.find(price => price.status === 'approved') || null }
+function money(micros) { return Number.isFinite(Number(micros)) ? `¥${(Number(micros) / 10000).toFixed(4)}` : '-' }
+function coverageStatusLabel(status, routeStatus) {
+  if (routeStatus === 'draft') return '提交审批后可定价'
+  return ({ approved: '已批准覆盖', draft: '工价草稿', voided: '工价已作废', missing: '缺少工价' }[status] || status)
+}
+function coverageStatusClass(status) { return status === 'approved' ? 'text-success' : status === 'voided' ? 'text-danger' : 'text-warning' }
+function openPriceVersion(row) {
+  if (selectedVersion.value?.status !== 'pending_approval' || !canPreparePrice.value) return
+  navigate('wages', {
+    wage_tab: 'priceversions',
+    route_version_id: Number(selectedVersion.value.id),
+    process_version_id: Number(row.process_version_id),
+    create_price: true,
+  })
+}
+
+async function submitAndOpenPrice(row) {
+  if (selectedVersion.value?.status !== 'draft' || !canSubmit.value || !canPreparePrice.value) return
+  try {
+    await state.transition('submit')
+    showToast('路线已提交审批，请填写精确工价')
+    openPriceVersion(row)
+  } catch (error) {
+    showToast(error.message || '提交审批失败，暂不能填写工价', 'error')
+  }
+}
 
 async function load() {
   loading.value = true

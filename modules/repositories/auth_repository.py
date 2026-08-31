@@ -139,7 +139,7 @@ class AuthRepository:
         db = resolve_db(db)
         row = db.execute(
             "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id = r.id "
-            "WHERE ur.user_id = ? "
+            "WHERE ur.user_id = ? AND r.status = 'active' "
             "ORDER BY CASE WHEN r.code = 'admin' THEN 0 WHEN r.code <> 'worker' THEN 1 ELSE 2 END, r.level, r.id "
             "LIMIT 1",
             (user_id,)
@@ -147,10 +147,26 @@ class AuthRepository:
         if row:
             return row['code']
         fallback = db.execute(
-            "SELECT role FROM users WHERE id = ? LIMIT 1",
+            "SELECT u.role FROM users u JOIN roles r ON r.code = u.role "
+            "WHERE u.id = ? AND r.status = 'active' LIMIT 1",
             (user_id,)
         ).fetchone()
         return fallback['role'] if fallback else 'worker'
+
+    @staticmethod
+    def get_user_role_codes(user_id, db=None):
+        """Return every active role code assigned to a user."""
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT r.code FROM user_roles ur JOIN roles r ON ur.role_id=r.id "
+            "WHERE ur.user_id=? AND r.status='active' ORDER BY r.level,r.id",
+            (user_id,),
+        ).fetchall()
+        codes = [row["code"] for row in rows if row["code"]]
+        if codes:
+            return codes
+        fallback = db.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        return [fallback["role"]] if fallback and fallback["role"] else ["worker"]
 
     @staticmethod
     def logout_update_user(user_id, db=None):

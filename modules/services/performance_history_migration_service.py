@@ -1,9 +1,9 @@
 """Preflight and controlled generation of historical performance V2 revisions."""
 
 from collections import Counter
-import hashlib
 import json
 
+from modules.domain import evidence_protocol
 from modules.domain.performance_policy import validate_production_month
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.performance_history_migration_repository import (
@@ -48,17 +48,11 @@ BASELINE_FIELDS = (
 class PerformanceHistoryMigrationService:
     @staticmethod
     def _canonical(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @classmethod
     def _digest(cls, value):
-        return hashlib.sha256(cls._canonical(value).encode("utf-8")).hexdigest()
+        return evidence_protocol.sha256_digest_v1(value)
 
     @staticmethod
     def _json_object(value):

@@ -1,82 +1,44 @@
-"""Database migration registry and runner."""
+"""Database migration runner backed by a validated dependency catalog."""
 
 import sqlite3
-from modules.config import DB_PATH
-from modules.migration_auth import MIGRATIONS as AUTH_MIGRATIONS
-from modules.migration_baseline import MIGRATIONS as BASELINE_MIGRATIONS
-from modules.migration_core import MIGRATIONS as CORE_MIGRATIONS
-from modules.migration_performance import MIGRATIONS as PERFORMANCE_MIGRATIONS
-from modules.migration_work_time import MIGRATIONS as WORK_TIME_MIGRATIONS
-from modules.migration_order_completion import MIGRATIONS as ORDER_COMPLETION_MIGRATIONS
-from modules.migration_process_quality import MIGRATIONS as PROCESS_QUALITY_MIGRATIONS
-from modules.migration_quality_management import MIGRATIONS as QUALITY_MANAGEMENT_MIGRATIONS
-from modules.migration_materials import MIGRATIONS as MATERIAL_MIGRATIONS
-from modules.migration_approval_workflow import MIGRATIONS as APPROVAL_WORKFLOW_MIGRATIONS
-from modules.migration_order_qr_print import MIGRATIONS as ORDER_QR_PRINT_MIGRATIONS
-from modules.migration_serial_backfill import MIGRATIONS as SERIAL_BACKFILL_MIGRATIONS
-from modules.migration_process_management import MIGRATIONS as PROCESS_MANAGEMENT_MIGRATIONS
-from modules.migration_product_identity import MIGRATIONS as PRODUCT_IDENTITY_MIGRATIONS
-from modules.migration_inventory_ledger import MIGRATIONS as INVENTORY_LEDGER_MIGRATIONS
-from modules.migration_shipment_lifecycle import MIGRATIONS as SHIPMENT_LIFECYCLE_MIGRATIONS
-from modules.migration_reporting import MIGRATIONS as REPORTING_MIGRATIONS
-from modules.migration_payroll_ledger import MIGRATIONS as PAYROLL_LEDGER_MIGRATIONS
-from modules.migration_performance_department import (
-    MIGRATIONS as PERFORMANCE_DEPARTMENT_MIGRATIONS,
-)
-from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
-from modules.migration_process_versioning import MIGRATIONS as PROCESS_VERSIONING_MIGRATIONS
-from modules.migration_product_integrity import MIGRATIONS as PRODUCT_INTEGRITY_MIGRATIONS
-from modules.migration_schedule_capacity import MIGRATIONS as SCHEDULE_CAPACITY_MIGRATIONS
-MIGRATIONS = sorted([
-    *BASELINE_MIGRATIONS,
-    *CORE_MIGRATIONS,
-    *PERFORMANCE_MIGRATIONS,
-    *WORK_TIME_MIGRATIONS,
-    *AUTH_MIGRATIONS,
-    *ORDER_COMPLETION_MIGRATIONS,
-    *PROCESS_QUALITY_MIGRATIONS,
-    *QUALITY_MANAGEMENT_MIGRATIONS,
-    *MATERIAL_MIGRATIONS,
-    *APPROVAL_WORKFLOW_MIGRATIONS,
-    *ORDER_QR_PRINT_MIGRATIONS,
-    *SERIAL_BACKFILL_MIGRATIONS,
-    *PROCESS_MANAGEMENT_MIGRATIONS,
-    *PRODUCT_IDENTITY_MIGRATIONS,
-    *INVENTORY_LEDGER_MIGRATIONS,
-    *SHIPMENT_LIFECYCLE_MIGRATIONS,
-    *REPORTING_MIGRATIONS,
-    *PAYROLL_LEDGER_MIGRATIONS,
-    *PERFORMANCE_DEPARTMENT_MIGRATIONS,
-    *USER_MANAGEMENT_MIGRATIONS,
-    *PROCESS_VERSIONING_MIGRATIONS,
-    *PRODUCT_INTEGRITY_MIGRATIONS,
-    *SCHEDULE_CAPACITY_MIGRATIONS,
-], key=lambda migration: migration[0])
-_versions = [version for version, _, _ in MIGRATIONS]
-if len(_versions) != len(set(_versions)):
-    raise RuntimeError("duplicate database migration versions registered")
-LATEST_VERSION = max(_versions, default=0)
-def run_migrations(db=None):
 
-    """Run all pending migrations in order."""
+from modules.config import DB_PATH
+from modules.migration_catalog import MIGRATION_DEPENDENCIES, MIGRATIONS
+from modules.migration_planning import linear_dependencies, plan_migrations, validate_registry
+
+
+validate_registry(MIGRATIONS, MIGRATION_DEPENDENCIES)
+LATEST_VERSION = max((version for version, _, _ in MIGRATIONS), default=0)
+
+
+def _active_dependencies():
+    """Preserve test/plugin compatibility when MIGRATIONS is replaced at runtime."""
+    registered = {version for version, _, _ in MIGRATIONS}
+    if registered == set(MIGRATION_DEPENDENCIES):
+        return MIGRATION_DEPENDENCIES
+    return linear_dependencies(MIGRATIONS)
+
+
+def pending_migrations(current_version):
+    """Return the validated migration plan without changing a database."""
+    return plan_migrations(current_version, MIGRATIONS, _active_dependencies())
+def run_migrations(db=None):
+    """Run all pending migrations in dependency order."""
     own_db = db is None
     if own_db:
         db = sqlite3.connect(DB_PATH)
         db.row_factory = sqlite3.Row
     try:
-        current = db.execute("PRAGMA user_version").fetchone()[0]
-        sorted_migs = sorted(MIGRATIONS, key=lambda m: m[0])
+        current = int(db.execute("PRAGMA user_version").fetchone()[0])
         executed = 0
-        for ver, desc, fn in sorted_migs:
-            if ver <= current:
-                continue
+        for version, description, migration_fn in pending_migrations(current):
             try:
-                fn(db)
-                db.execute(f"PRAGMA user_version = {ver}")
+                migration_fn(db)
+                db.execute(f"PRAGMA user_version = {version}")
                 db.commit()
                 executed += 1
-            except Exception as e:
-                print(f"[Migration v{ver}] {desc} - FAILED: {e}")
+            except Exception as exc:
+                print(f"[Migration v{version}] {description} - FAILED: {exc}")
                 db.rollback()
                 raise
         if executed:
@@ -88,10 +50,5 @@ def run_migrations(db=None):
 
 
 def init_db():
-    """Thin wrapper - runs pending migrations."""
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    try:
-        run_migrations(db)
-    finally:
-        db.close()
+    """Thin compatibility wrapper that runs pending migrations."""
+    run_migrations()

@@ -10,11 +10,10 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
     validate_json,
 )
+from modules.config import EMPLOYEE_DOCUMENT_DIR, LEGACY_EMPLOYEE_DOCUMENT_DIR
 from modules.services.setting_service import SettingsService
-import os
 from modules.services.user_service import UserService
 
 
@@ -42,7 +41,6 @@ def create_user():
     # P1-2: Pass caller for admin-creation permission check
     data['_caller_user_id'] = g.current_user.get('id') if hasattr(g, 'current_user') else None
     uid, password = UserService.create_user(data)
-    safe_audit_log('create_user', 'user', uid, f'{data.get("username")}/{data.get("name")}')
     return jsonify({'message': '添加成功', 'id': uid, 'password': password if password else ''})
 
 
@@ -53,13 +51,6 @@ def create_user():
 def update_user(uid):
     data = get_json_body()
     UserService.update_user(uid, data, g.current_user.get("id"))
-    # Log update without password (but note if password was changed)
-    audit_data = dict(data)
-    has_pwd = bool(audit_data.get('password'))
-    audit_data.pop('password', None)
-    if has_pwd:
-        audit_data['password_changed'] = True
-    safe_audit_log('update_user', 'user', uid, str(audit_data))
     return jsonify({'message': '更新成功'})
 
 # P0-1: Soft-delete restore + permanent delete
@@ -68,10 +59,9 @@ def update_user(uid):
 @check_permission('users:delete')
 def user_restore_api(uid):
     try:
-        UserService.restore_user(uid)
+        UserService.restore_user(uid, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('restore_user', 'user', uid)
     return jsonify({'message': 'user restored'})
 
 @app.route('/api/users/<int:uid>/permanent', methods=['DELETE'])
@@ -98,7 +88,6 @@ def delete_user(uid):
         UserService.delete_user(uid, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('delete_user', 'user', uid)
     return jsonify({'message': '删除成功'})
 
 
@@ -108,10 +97,11 @@ def delete_user(uid):
 def reset_password(uid):
     data = get_json_body()
     try:
-        new_pw = UserService.reset_password(uid, data.get('password'))
+        new_pw = UserService.reset_password(
+            uid, data.get('password'), g.current_user.get('id')
+        )
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    safe_audit_log('reset_password', 'user', uid)
     return jsonify({'message': '密码已重置'})
 
 
@@ -120,10 +110,9 @@ def reset_password(uid):
 @check_permission('users:admin')
 def unlock_user(uid):
     try:
-        UserService.unlock_user(uid)
+        UserService.unlock_user(uid, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
-    safe_audit_log('unlock_user', 'user', uid)
     return jsonify({'message': '账户已解锁'})
 
 @app.route('/api/users/batch-delete', methods=['POST'])
@@ -139,7 +128,6 @@ def batch_delete_users():
         deleted = UserService.batch_delete_users(ids, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('batch_delete_users', 'user', 0, f'deleted {deleted} users: {ids[:10]}')
     return jsonify({'message': f'成功删除 {deleted} 个用户', 'deleted': deleted})
 
 
@@ -168,7 +156,6 @@ def import_users():
     finally:
         if _os.path.exists(tmp.name):
             _os.unlink(tmp.name)
-    safe_audit_log('import_users', 'user', 0, f'imported {result.get("success",0)} users')
     return jsonify(result)
 
 @app.route('/api/users/export', methods=['GET'])
@@ -206,7 +193,6 @@ def batch_update_status():
         count = UserService.batch_update_status(ids, status, g.current_user.get('id'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('batch_update_status', 'user', 0, f'updated {count} users to {status}')
     return jsonify({'message': f'updated {count} users', 'updated': count})
 
 
@@ -214,8 +200,6 @@ def batch_update_status():
 # ============================================================
 # P3-13: Employee Document Attachments
 # ============================================================
-
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "employee_docs")
 
 @app.route("/api/users/<int:uid>/documents", methods=["GET"])
 @check_auth
@@ -236,11 +220,14 @@ def upload_user_document(uid):
         return jsonify({"error": "No file selected"}), 400
     try:
         result = UserService.upload_user_document(
-            uid, file, request.form.get("doc_type", ""), g.current_user.get("id"), UPLOAD_DIR
+            uid,
+            file,
+            request.form.get("doc_type", ""),
+            g.current_user.get("id"),
+            EMPLOYEE_DOCUMENT_DIR,
         )
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
-    safe_audit_log("upload_document", "user", uid, f"Uploaded: {result['filename']}")
     return jsonify({"message": "Upload success", "filename": result["filename"], "size": result["size"]})
 
 @app.route("/api/users/<int:uid>/documents/<int:doc_id>", methods=["GET"])
@@ -249,7 +236,12 @@ def upload_user_document(uid):
 def download_user_document(uid, doc_id):
     """Download a document"""
     try:
-        doc, filepath = UserService.get_user_document_file(uid, doc_id, UPLOAD_DIR)
+        doc, filepath = UserService.get_user_document_file(
+            uid,
+            doc_id,
+            EMPLOYEE_DOCUMENT_DIR,
+            LEGACY_EMPLOYEE_DOCUMENT_DIR,
+        )
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
     except FileNotFoundError as e:
@@ -262,8 +254,13 @@ def download_user_document(uid, doc_id):
 def delete_user_document(uid, doc_id):
     """Delete a document"""
     try:
-        doc = UserService.delete_user_document(uid, doc_id, UPLOAD_DIR)
+        doc = UserService.delete_user_document(
+            uid,
+            doc_id,
+            EMPLOYEE_DOCUMENT_DIR,
+            g.current_user.get("id"),
+            LEGACY_EMPLOYEE_DOCUMENT_DIR,
+        )
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
-    safe_audit_log("delete_document", "user", uid, f"Deleted: {doc['doc_name']}")
     return jsonify({"message": "Document deleted"})

@@ -7,6 +7,10 @@ Flask + SQLite，内网部署。路由通过模块化装饰器注册。
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from modules.bootstrap import load_environment
+
+load_environment()
+
 from flask import abort, g, make_response, redirect, render_template
 from modules.app import app
 from modules.config import PUBLIC_DIR

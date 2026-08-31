@@ -11,7 +11,7 @@
               <option :value="null">全部角色</option>
               <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </select>
-            <button class="btn btn-primary btn-sm" @click="openAddRole()">+ 添加角色</button>
+            <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAddRole()">+ 添加角色</button>
           </div>
         </div>
         <div class="card-body">
@@ -35,7 +35,12 @@
                 <tr v-for="(r, idx) in filteredRoles" :key="r.id">
                   <td style="text-align:center">{{ idx+1 }}</td>
                   <td style="font-weight:500">{{ r.name }}</td>
-                  <td><code style="font-size:var(--text-xs)">{{ r.code }}</code></td>
+                  <td>
+                    <code style="font-size:var(--text-xs)">{{ r.code }}</code>
+                    <div v-if="aliasCodes(r).length > 1" style="font-size:var(--text-2xs);color:var(--text-placeholder)">
+                      历史编码：{{ aliasCodes(r).filter(code => code !== r.code).join('、') }}
+                    </div>
+                  </td>
                   <td style="color:var(--text-placeholder);font-size:var(--text-sm)">{{ getGroupName(r.group_id) }}</td>
                   <td>{{ r.level }}</td>
                   <td style="white-space:nowrap"><span class="badge" :class="r.status==='active'?'completed':'pending'">{{ r.status==='active'?'启用':'停用' }}</span></td>
@@ -46,8 +51,8 @@
                     </span>
                   </td>
                   <td style="text-align:center;white-space:nowrap">
-                    <button class="o-abtn edit" @click="openEditRole(r)">✏️</button>
-                    <button v-if="!r.is_builtin" class="o-abtn del" @click="deleteRole(r.id)" title="删除">🗑️</button>
+                    <button v-if="canEdit" class="o-abtn edit" @click="openEditRole(r)">✏️</button>
+                    <button v-if="canDelete && !r.is_builtin" class="o-abtn del" @click="deleteRole(r.id)" title="删除">🗑️</button>
                   </td>
                 </tr>
               </tbody>
@@ -63,15 +68,15 @@
         <div class="modal-header"><span>{{ roleModalEdit ? '编辑角色' : '新增角色' }}</span><span class="modal-close" @click="showRoleModal=false">&times;</span></div>
         <div class="modal-body">
           <div class="form-group"><label>名称 *</label><input class="form-input" v-model="roleForm.name"></div>
-          <div class="form-group"><label>编码</label><span style="color:var(--text-muted);font-size:var(--text-xs)">（留空自动生成）</span><input class="form-input" v-model="roleForm.code"></div>
+          <div class="form-group"><label>编码</label><span style="color:var(--text-muted);font-size:var(--text-xs)">（留空自动生成）</span><input class="form-input" v-model="roleForm.code" :disabled="!!roleForm.is_builtin"></div>
           <div class="form-group"><label>描述</label><input class="form-input" v-model="roleForm.description"></div>
           <div class="form-group"><label>所属角色组</label>
-            <select class="form-input" v-model.number="roleForm.group_id">
+            <select class="form-input" v-model.number="roleForm.group_id" :disabled="isBuiltinAdmin">
               <option :value="null">无</option>
               <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </select>
           </div>
-          <div class="form-group"><label>级别</label><input class="form-input" v-model.number="roleForm.level" type="number"></div>
+          <div class="form-group"><label>级别</label><input class="form-input" v-model.number="roleForm.level" type="number" :disabled="isBuiltinAdmin"></div>
           <div class="form-group">
             <label>权限配置</label>
             <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2);flex-wrap:wrap">
@@ -81,10 +86,10 @@
               <button type="button" class="btn btn-sm" @click="selectAllPermissions">全选</button>
               <button type="button" class="btn btn-sm" @click="clearPermissions">清空</button>
             </div>
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-2);padding:8px 10px;border:1px solid var(--warning);border-radius:var(--radius-md);background:var(--warning-light);cursor:pointer">
-              <input type="checkbox" v-model="wildcardSelected" @change="toggleWildcardPermission" style="accent-color:var(--warning)">
+            <label v-if="isBuiltinAdmin" style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-2);padding:8px 10px;border:1px solid var(--warning);border-radius:var(--radius-md);background:var(--warning-light)">
+              <input type="checkbox" v-model="wildcardSelected" disabled style="accent-color:var(--warning)">
               <span style="font-weight:600;color:var(--warning-dark)">全部权限（*，超级管理员专用）</span>
-              <span style="font-size:var(--text-xs);color:var(--text-secondary)">勾选后保存为通配权限，未来新增权限也自动拥有。</span>
+              <span style="font-size:var(--text-xs);color:var(--text-secondary)">该权限由系统固定，不能在线修改。</span>
             </label>
             <div style="max-height:460px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2);background:white">
               <div v-if="!filteredPermissionTree.length" style="padding:24px;text-align:center;color:var(--text-placeholder)">无匹配权限</div>
@@ -156,7 +161,7 @@
               <span style="margin-left:8px">勾选业务操作会自动勾选对应页面；取消页面显示会清空该页面下方操作。</span>
             </div>
           </div>
-          <div class="form-group"><label>状态</label><select class="form-input" v-model="roleForm.status"><option value="active">启用</option><option value="inactive">停用</option></select></div>
+          <div class="form-group"><label>状态</label><select class="form-input" v-model="roleForm.status" :disabled="!!roleForm.is_builtin"><option value="active">启用</option><option value="inactive">停用</option></select></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="showRoleModal=false">取消</button>

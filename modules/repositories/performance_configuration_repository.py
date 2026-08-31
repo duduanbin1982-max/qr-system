@@ -219,7 +219,9 @@ class PerformanceConfigurationRepository:
     def position(position_id, db=None):
         db = resolve_db(db)
         row = db.execute(
-            "SELECT id,name,status FROM positions WHERE id=?", (position_id,)
+            "SELECT id,name,status,lifecycle_status,current_effective_version_id "
+            "FROM positions WHERE id=?",
+            (position_id,),
         ).fetchone()
         return dict(row) if row else None
 
@@ -228,13 +230,14 @@ class PerformanceConfigurationRepository:
         cursor = db.execute(
             """
             INSERT INTO performance_position_target_versions (
-                position_id,position_name_snapshot,target_output_qty,
+                position_id,position_version_id_snapshot,position_name_snapshot,target_output_qty,
                 minimum_effective_work_days,effective_from_month,effective_to_month,
                 created_by,created_by_name,status
-            ) VALUES (?,?,?,?,?,?,?,?, 'draft')
+            ) VALUES (?,?,?,?,?,?,?,?,?, 'draft')
             """,
             (
                 payload["position_id"],
+                payload.get("position_version_id_snapshot"),
                 payload.get("position_name_snapshot", ""),
                 payload["target_output_qty"],
                 payload["minimum_effective_work_days"],
@@ -250,6 +253,7 @@ class PerformanceConfigurationRepository:
     def update_target_draft(target_id, expected_row_version, fields, db):
         allowed = (
             "position_id",
+            "position_version_id_snapshot",
             "position_name_snapshot",
             "target_output_qty",
             "minimum_effective_work_days",

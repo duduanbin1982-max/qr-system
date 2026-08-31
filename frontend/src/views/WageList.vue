@@ -10,7 +10,12 @@
 
     <PayrollLedgerTab v-if="activeTab==='ledger'" />
     <PayrollExceptionsTab v-if="activeTab==='exceptions'" />
-    <PriceVersionTab v-if="activeTab==='priceversions'" />
+    <PriceVersionTab
+      v-if="activeTab==='priceversions'"
+      :route-version-id="priceIntent.route_version_id"
+      :process-version-id="priceIntent.process_version_id"
+      :create-intent="priceIntent.create_price"
+    />
     <MyPayrollTab v-if="activeTab==='my'" />
     <PieceworkTab v-if="activeTab==='piece'" />
     <MonthlyTab v-if="activeTab==='monthly'" />
@@ -37,11 +42,22 @@ import PayrollLedgerTab from '@/views/wage/PayrollLedgerTab.vue'
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PriceVersionTab from '@/views/wage/PriceVersionTab.vue'
 import MyPayrollTab from '@/views/wage/MyPayrollTab.vue'
+import { router } from '@/lib/router.js'
 
 export default {
   components: { PayrollLedgerTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
   setup() {
-    return { ...useWage() }
+    const wage = useWage()
+    const params = router.params || {}
+    if (params.wage_tab === 'priceversions') wage.switchTab('priceversions')
+    return {
+      ...wage,
+      priceIntent: {
+        route_version_id: Number(params.route_version_id) || null,
+        process_version_id: Number(params.process_version_id) || null,
+        create_price: Boolean(params.create_price),
+      },
+    }
   }
 }
 </script>

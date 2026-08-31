@@ -330,6 +330,24 @@ def _expected_counts():
     }
 
 
+def _manifest_projection(plan):
+    month = plan["months"][0]
+    return {
+        "manifest_sha256": plan["manifest_sha256"],
+        "month_manifest_sha256": month["manifest_sha256"],
+        "record_count": len(month["records"]),
+        "stable_keys": [record["stable_key"] for record in month["records"]],
+        "classifications": {
+            record["stable_key"]: record["classification"]
+            for record in month["records"]
+        },
+        "cross_month_work_user_ids": month["cross_month_work_user_ids"],
+        "cross_month_quality_user_ids": month["cross_month_quality_user_ids"],
+        "multi_source_quality_user_ids": month["multi_source_quality_user_ids"],
+        "missing_target_user_ids": month["missing_target_user_ids"],
+    }
+
+
 def _payroll_counts(db):
     return {
         table: db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
@@ -370,6 +388,55 @@ def test_preflight_reports_stable_sorted_manifest_and_all_audit_classes(client):
         stable_keys = [record["stable_key"] for record in month["records"]]
         assert stable_keys == sorted(stable_keys)
         assert len(month["manifest_sha256"]) == 64
+
+
+def test_history_manifest_matches_exact_pre_refactor_characterization(client):
+    with client.application.app_context():
+        db = get_db()
+        seeded = _seed_history(db)
+        actual = _manifest_projection(
+            PerformanceHistoryMigrationService.analyze(db, MONTH, MONTH)
+        )
+
+        assert actual == {
+            "manifest_sha256": "5978dbcd4cecfd76272d60da9ef0557a5fff8503720de8a67e20906119a5c368",
+            "month_manifest_sha256": "308b9601d94c8685aa1b873d162b958b486bd3f9a42cc00e06302aff2c6ab9c5",
+            "record_count": 13,
+            "stable_keys": [
+                "assignment_history:00000000000000000006",
+                "assignment_history:00000000000000000007",
+                "legacy_manifest:00000000000000000001",
+                "legacy_score:00000000000000001001",
+                "legacy_score:00000000000000001002",
+                "legacy_score:00000000000000001003",
+                "position_target:00000000000000000001",
+                "process_quality_evaluation:00000000000000000001",
+                "quality_ambiguity_historical_quality:00000000000000000902",
+                "rule_version:00000000000000000001",
+                "work_record:00000000000000000001",
+                "work_record:00000000000000000002",
+                "work_record:00000000000000000003",
+            ],
+            "classifications": {
+                "assignment_history:00000000000000000006": "historical_assignment_snapshot",
+                "assignment_history:00000000000000000007": "historical_assignment_snapshot",
+                "legacy_manifest:00000000000000000001": "legacy_v1_manifest",
+                "legacy_score:00000000000000001001": "prior_revisions_unavailable",
+                "legacy_score:00000000000000001002": "missing_position_snapshot",
+                "legacy_score:00000000000000001003": "missing_position_target",
+                "position_target:00000000000000000001": "approved_position_target",
+                "process_quality_evaluation:00000000000000000001": "production_month_boundary",
+                "quality_ambiguity_historical_quality:00000000000000000902": "quality_source_confirmation_required",
+                "rule_version:00000000000000000001": "published_rule",
+                "work_record:00000000000000000001": "production_month_boundary",
+                "work_record:00000000000000000002": "production_month_work",
+                "work_record:00000000000000000003": "production_month_work",
+            },
+            "cross_month_work_user_ids": [seeded["confirmed_user"]],
+            "cross_month_quality_user_ids": [seeded["confirmed_user"]],
+            "multi_source_quality_user_ids": [],
+            "missing_target_user_ids": [seeded["no_target_user"]],
+        }
 
 
 def test_apply_generates_only_reviewable_v2_and_is_idempotent(client):
