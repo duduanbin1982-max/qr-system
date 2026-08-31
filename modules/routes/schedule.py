@@ -15,6 +15,7 @@ from modules.services.schedule_service import (
     ScheduleService,
 )
 from modules.services.production_line_service import ProductionLineService
+from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
 @app.route("/api/schedule/gantt", methods=["GET"])
@@ -73,6 +74,70 @@ def schedule_batch_shift():
         return jsonify({"ok": True, "count": count, "message": f"已调整 {count} 个订单，共 {days} 天"})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/schedule/capacity-lines", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_capacity_lines():
+    try:
+        process_id = request.args.get("process_id", type=int)
+        return jsonify(ScheduleCapacityService.list_lines(
+            process_id, request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/capacity-orders", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_capacity_orders():
+    try:
+        return jsonify(ScheduleCapacityService.list_schedulable_orders(
+            request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/order/<int:order_id>/operations", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_order_operations(order_id):
+    try:
+        return jsonify(ScheduleCapacityService.list_order_schedule(
+            order_id, request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/order/<int:order_id>/generate", methods=["POST"])
+@check_auth
+@check_permission("schedule:edit")
+def schedule_generate_operations(order_id):
+    try:
+        data = get_json_body()
+        return jsonify(ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            start_date=data.get("start_date"),
+            schedule_run_key=data.get("schedule_run_key", ""),
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/operations", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_operations():
+    try:
+        return jsonify(ScheduleCapacityService.list_schedules(
+            request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 # ========== Production Lines (via ProductionLineService) ==========

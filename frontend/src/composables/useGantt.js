@@ -6,6 +6,7 @@ import { useGanttData, isCompletedOrder } from '@/composables/gantt/useGanttData
 import { useGanttEditor } from '@/composables/gantt/useGanttEditor.js'
 import { useGanttExport } from '@/composables/gantt/useGanttExport.js'
 import { useProductionLines } from '@/composables/gantt/useProductionLines.js'
+import { useGanttCapacity } from '@/composables/gantt/useGanttCapacity.js'
 
 
 export function useGantt() {
@@ -13,6 +14,7 @@ export function useGantt() {
   const canManageLines = computed(() => can('settings:edit'))
   const lines = useProductionLines({ canManageLines })
   const data = useGanttData({ productionLines: lines.productionLines })
+  const capacity = useGanttCapacity({ orders: data.orders })
 
   function canAdjustOrder(order) {
     return canEdit.value && !isCompletedOrder(order)
@@ -59,6 +61,7 @@ export function useGantt() {
     ...data,
     ...editor,
     ...lines,
+    ...capacity,
     ...batch,
     ...imageExport,
     setScheduleScope,

@@ -448,7 +448,7 @@ def _failed_replica_report(
 def validate_replica(
     source_path: str | Path, replica_path: str | Path
 ) -> dict[str, Any]:
-    from modules.migrations import run_migrations
+    from modules.migrations import MIGRATIONS, pending_migrations
 
     source_path = Path(source_path).resolve()
     replica_path = Path(replica_path).resolve()
@@ -483,7 +483,15 @@ def validate_replica(
     replica_db.row_factory = sqlite3.Row
     replica_db.execute("PRAGMA foreign_keys=ON")
     try:
-        executed = int(run_migrations(replica_db))
+        current_version = int(replica_db.execute("PRAGMA user_version").fetchone()[0])
+        executed = 0
+        for version, _description, migration in pending_migrations(current_version):
+            if version > TARGET_VERSION:
+                break
+            migration(replica_db)
+            replica_db.execute(f"PRAGMA user_version={version}")
+            replica_db.commit()
+            executed += 1
         target_version = int(replica_db.execute("PRAGMA user_version").fetchone()[0])
     finally:
         replica_db.close()

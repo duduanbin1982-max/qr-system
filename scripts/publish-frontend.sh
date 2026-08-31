@@ -32,6 +32,12 @@ done
 install -m 0644 "$STAGING_DIR/index.html" "$STATIC_DIR/.index.html.new"
 mv -f "$STATIC_DIR/.index.html.new" "$STATIC_DIR/index.html"
 
+# Nginx serves this tree as www-data.  A rollback or a previous manual copy
+# can leave restrictive 0700/0600 modes behind; normalize the complete tree so
+# every published asset remains readable and traversable by the web server.
+find "$STATIC_DIR" -type d -exec chmod 0755 {} +
+find "$STATIC_DIR" -type f -exec chmod 0644 {} +
+
 # Nginx caches hashed assets for one day. Seven days covers stale clients safely.
 if [[ -d "$STATIC_DIR/assets" ]]; then
     find "$STATIC_DIR/assets" -type f -mtime "+$RETENTION_DAYS" -delete

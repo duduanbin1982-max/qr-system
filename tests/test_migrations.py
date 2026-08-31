@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 75
-    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75]
+    assert report["target_version"] == 77
+    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77]
     assert database.read_bytes() == before
 
 
@@ -248,17 +248,38 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_product_integrity",
             "modules.migration_company_profile",
             "modules.migration_audit",
-        "modules.migration_process_config",
+            "modules.migration_process_config",
             "modules.migration_role_group_permissions",
             "modules.migration_role_management",
             "modules.migration_position_versioning",
             "modules.migration_approval_policy",
             "modules.migration_pending_route_price_v074",
             "modules.migration_process_content_digest_v075",
+            "modules.migration_schedule_capacity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
 
+def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
+    from modules import migrations
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        migrations.run_migrations(db)
+        process_counts = {
+            row["name"]: row["count"]
+            for row in db.execute(
+                "SELECT p.name, COUNT(pl.id) AS count "
+                "FROM processes p LEFT JOIN process_production_lines pl ON pl.process_id=p.id "
+                "WHERE p.name IN ('下料','焊接','打磨','喷漆') GROUP BY p.id"
+            ).fetchall()
+        }
+        assert process_counts == {'下料': 1, '焊接': 10, '打磨': 1, '喷漆': 2}
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(order_process_schedules)").fetchall()}
+        assert {"difficulty_factor", "schedule_run_key", "process_line_id"}.issubset(columns)
+    finally:
+        db.close()
 def test_audit_event_and_process_config_migration_versions_are_stable():
     from modules import migrations
 
@@ -276,7 +297,9 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[73] == "modules.migration_approval_policy"
     assert by_version[74] == "modules.migration_pending_route_price_v074"
     assert by_version[75] == "modules.migration_process_content_digest_v075"
-    assert migrations.LATEST_VERSION == 75
+    assert by_version[76] == "modules.migration_schedule_capacity"
+    assert by_version[77] == "modules.migration_schedule_capacity"
+    assert migrations.LATEST_VERSION == 77
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

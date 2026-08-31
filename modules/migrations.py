@@ -22,8 +22,6 @@ def _active_dependencies():
 def pending_migrations(current_version):
     """Return the validated migration plan without changing a database."""
     return plan_migrations(current_version, MIGRATIONS, _active_dependencies())
-
-
 def run_migrations(db=None):
     """Run all pending migrations in dependency order."""
     own_db = db is None

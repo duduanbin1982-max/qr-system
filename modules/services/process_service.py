@@ -7,6 +7,7 @@ from modules.services.master_data_impact_service import MasterDataImpactService
 from modules.services.legacy_process_compatibility_service import (
     LegacyProcessCompatibilityService,
 )
+from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
 
 
 class ProcessService:
@@ -98,10 +99,12 @@ class ProcessService:
             seq_order = ProcessRepository.get_max_seq(category) + 1
 
         with BaseService.transaction() as txn:
-            return ProcessRepository.insert_txn(
+            process_id = ProcessRepository.insert_txn(
                 name, data.get("description", ""), category,
                 seq_order, status, db=txn
             )
+            ScheduleCapacityRepository.ensure_default_lines(process_id, name, txn)
+            return process_id
 
     @staticmethod
     def update_process(pid, data):
@@ -147,6 +150,9 @@ class ProcessService:
 
         with BaseService.transaction() as txn:
             ProcessRepository.update_txn(", ".join(sets), params, pid, db=txn)
+            ScheduleCapacityRepository.ensure_default_lines(
+                pid, data.get("name", existing["name"]), txn
+            )
 
     @staticmethod
     def check_impact(pid):

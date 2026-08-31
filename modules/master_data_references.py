@@ -148,6 +148,27 @@ PROCESS_REFERENCES = (
     ),
     _process("order_materials", ("process_id",), key="order_materials", label="订单用料"),
     _process(
+        "order_process_schedules",
+        ("order_process_id", "process_id"),
+        version_columns=("route_version_id", "process_version_id"),
+        key="order_process_schedules",
+        label="订单工序排程",
+    ),
+    _process(
+        "process_capacity_profiles",
+        ("process_id",),
+        key="process_capacity_profiles",
+        label="工序产能配置档案",
+        impact_level=IMPACT_INTERNAL,
+        action="保留稳定工序根配置",
+    ),
+    _process(
+        "process_production_lines",
+        ("process_id",),
+        key="process_production_lines",
+        label="工序产线池",
+    ),
+    _process(
         "order_processes",
         ("process_id",),
         version_columns=("process_version_id",),

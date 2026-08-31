@@ -31,6 +31,7 @@ from modules.migration_quality_management import MIGRATIONS as QUALITY_MANAGEMEN
 from modules.migration_reporting import MIGRATIONS as REPORTING_MIGRATIONS
 from modules.migration_role_group_permissions import MIGRATIONS as ROLE_GROUP_PERMISSION_MIGRATIONS
 from modules.migration_role_management import MIGRATIONS as ROLE_MANAGEMENT_MIGRATIONS
+from modules.migration_schedule_capacity import MIGRATIONS as SCHEDULE_CAPACITY_MIGRATIONS
 from modules.migration_serial_backfill import MIGRATIONS as SERIAL_BACKFILL_MIGRATIONS
 from modules.migration_shipment_lifecycle import MIGRATIONS as SHIPMENT_LIFECYCLE_MIGRATIONS
 from modules.migration_user_management import MIGRATIONS as USER_MANAGEMENT_MIGRATIONS
@@ -55,13 +56,14 @@ MIGRATIONS = sorted(
         *APPROVAL_POLICY_MIGRATIONS,
         *PENDING_ROUTE_PRICE_MIGRATIONS,
         *PROCESS_CONTENT_DIGEST_MIGRATIONS,
+        *SCHEDULE_CAPACITY_MIGRATIONS,
     ],
     key=lambda migration: migration[0],
 )
 
 # SQLite user_version represents one linear schema state. Keeping the chain separate
 # from function registration makes missing versions and accidental reordering explicit.
-MIGRATION_VERSION_CHAIN = (1, *range(13, 76))
+MIGRATION_VERSION_CHAIN = (1, *range(13, 78))
 MIGRATION_DEPENDENCIES = {
     version: (() if index == 0 else (MIGRATION_VERSION_CHAIN[index - 1],))
     for index, version in enumerate(MIGRATION_VERSION_CHAIN)
