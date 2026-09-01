@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sqlite3
 
 from modules.repositories.context import resolve_db
 from modules.schedule_capacity_config import (
@@ -100,7 +101,7 @@ class ScheduleCapacityRepository:
             (route_version_id, route_name, order_id),
         )
         return db.execute(
-            "SELECT id,quantity,plan_start,product_code,product_name,route_id,route_version_id,route_name_snapshot "
+            "SELECT id,quantity,plan_start,product_id,product_code,product_name,route_id,route_version_id,route_name_snapshot "
             "FROM orders WHERE id=? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
@@ -129,6 +130,8 @@ class ScheduleCapacityRepository:
             )
             return 0
         used_codes = {row["line_code"] for row in existing}
+        default_calendar = ScheduleCapacityRepository.get_calendar(db=db)
+        calendar_id = default_calendar["id"] if default_calendar else None
         inserted = 0
         for index in range(1, count + 1):
             code = f"{process_name}-{index:02d}"
@@ -136,8 +139,9 @@ class ScheduleCapacityRepository:
                 continue
             cursor = db.execute(
                 "INSERT OR IGNORE INTO process_production_lines "
-                "(process_id,line_code,line_name,daily_minutes,remark) VALUES (?,?,?,?,?)",
-                (process_id, code, f"{process_name}{index}线", DEFAULT_DAILY_MINUTES, "系统默认产线"),
+                "(process_id,line_code,line_name,daily_minutes,remark,calendar_id) VALUES (?,?,?,?,?,?)",
+                (process_id, code, f"{process_name}{index}线", DEFAULT_DAILY_MINUTES,
+                 "系统默认产线", calendar_id),
             )
             inserted += cursor.rowcount
         db.execute(
@@ -150,7 +154,7 @@ class ScheduleCapacityRepository:
     def list_schedulable_orders(limit=500, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT id, order_no, quantity, product_code, product_name, plan_start, plan_end, "
+            "SELECT id, order_no, quantity, product_id, product_code, product_name, plan_start, plan_end, "
             "deadline, status FROM orders WHERE deleted_at IS NULL "
             "AND status != 'completed' ORDER BY CASE WHEN deadline='' THEN 1 ELSE 0 END, "
             "deadline, plan_start, id LIMIT ?",
@@ -159,7 +163,7 @@ class ScheduleCapacityRepository:
     @staticmethod
     def find_order(order_id, db):
         return db.execute(
-            "SELECT id, quantity, plan_start, product_code, product_name, route_id, "
+            "SELECT id, quantity, plan_start, product_id, product_code, product_name, route_id, "
             "route_version_id, route_name_snapshot FROM orders "
             "WHERE id=? AND deleted_at IS NULL",
             (order_id,),
@@ -167,40 +171,75 @@ class ScheduleCapacityRepository:
 
     @staticmethod
     def find_active_standard(
-        route_id, route_version_id, process_id, process_version_id, product_code, db
+        route_id, route_version_id, process_id, process_version_id,
+        product_id, product_code, as_of_date, db
     ):
-        """Resolve a valid standard, preferring exact route/process revisions."""
+        """Resolve a standard without ever borrowing another product's value.
+
+        The precedence is exact route/process revision, route-level, then
+        process-generic. Within each level, an exact product row wins over a
+        genuinely generic row. Product-specific rows for any other product are
+        deliberately ignored instead of being treated as a fallback.
+        """
+        effective_date = (as_of_date or "").strip() or None
         base = (
             "SELECT id,version,setup_minutes,standard_minutes_per_unit,difficulty_factor,"
-            "route_id,route_version_id,process_id,process_version_id "
-            "FROM work_time_standards WHERE process_id=? AND status='active' "
+            "route_id,route_version_id,process_id,process_version_id,product_id,product_code,"
+            "{scope} AS match_scope FROM work_time_standards WHERE process_id=? AND status='active' "
             "AND standard_minutes_per_unit>0 "
-            "AND (effective_from='' OR effective_from IS NULL OR effective_from<=date('now')) "
-            "AND (effective_to='' OR effective_to IS NULL OR effective_to>=date('now')) "
+            "AND (effective_from='' OR effective_from IS NULL OR (? IS NULL OR effective_from<=?)) "
+            "AND (effective_to='' OR effective_to IS NULL OR (? IS NULL OR effective_to>=?)) "
         )
-        params = (process_id,)
+        params = (process_id, effective_date, effective_date, effective_date, effective_date)
+
+        if product_id is not None:
+            product_condition = "product_id=?"
+            product_params = (product_id,)
+        elif product_code:
+            product_condition = "product_id IS NULL AND product_code=?"
+            product_params = (product_code,)
+        else:
+            product_condition = "0=1"
+            product_params = ()
+        generic_condition = "COALESCE(product_id,0)=0 AND COALESCE(product_code,'')=''"
+
+        scopes = []
         if route_version_id and process_version_id:
-            row = db.execute(
-                base + "AND route_version_id=? AND process_version_id=? "
-                "ORDER BY CASE WHEN product_code=? THEN 0 ELSE 1 END,id DESC LIMIT 1",
-                params + (route_version_id, process_version_id, product_code or ""),
-            ).fetchone()
-            if row:
-                return row
+            scopes.append((
+                "route_version",
+                "AND route_version_id=? AND process_version_id=?",
+                (route_version_id, process_version_id),
+            ))
         if route_id:
-            row = db.execute(
-                base + "AND route_id=? AND (route_version_id IS NULL OR route_version_id=?) "
-                "ORDER BY CASE WHEN product_code=? THEN 0 ELSE 1 END,id DESC LIMIT 1",
-                params + (route_id, route_version_id, product_code or ""),
-            ).fetchone()
-            if row:
-                return row
-        return db.execute(
-            base + "AND route_id IS NULL AND route_version_id IS NULL "
-            "AND (process_version_id IS NULL OR process_version_id=?) "
-            "ORDER BY CASE WHEN product_code=? THEN 0 ELSE 1 END,id DESC LIMIT 1",
-            params + (process_version_id, product_code or ""),
-        ).fetchone()
+            scopes.append((
+                "route",
+                "AND route_id=? AND (route_version_id IS NULL OR route_version_id=?)",
+                (route_id, route_version_id),
+            ))
+        scopes.append((
+            "process",
+            "AND route_id IS NULL AND route_version_id IS NULL "
+            "AND (process_version_id IS NULL OR process_version_id=?)",
+            (process_version_id,),
+        ))
+
+        # Product-specific standards always win over generic standards, even
+        # when the generic row is scoped to a more specific route revision.
+        # This makes the business rule deterministic: exact product first,
+        # then generic; scope specificity only breaks ties within a class.
+        for match_kind, condition, condition_params in (
+            ("product", product_condition, product_params),
+            ("generic", generic_condition, ()),
+        ):
+            for level, relation, relation_params in scopes:
+                candidate = db.execute(
+                    base.format(scope=f"'{level}:{match_kind}'") + relation + " AND " + condition +
+                    " ORDER BY version DESC,id DESC LIMIT 1",
+                    params + relation_params + condition_params,
+                ).fetchone()
+                if candidate:
+                    return candidate
+        return None
 
     @staticmethod
     def update_order_summary(order_id, start_date, end_date, db):
@@ -246,6 +285,8 @@ class ScheduleCapacityRepository:
             "s.standard_id, s.standard_version, s.process_name_snapshot AS scheduled_process_name_snapshot, "
             "s.route_name_snapshot AS scheduled_route_name_snapshot, s.standard_minutes_per_unit, "
             "s.setup_minutes, s.difficulty_factor, s.planned_minutes, s.plan_start, s.plan_end, "
+            "s.planned_start_at, s.planned_end_at, s.occupied_minutes, s.capacity_snapshot_json, "
+            "s.standard_match_scope, s.calendar_id, s.shift_snapshot_json, s.line_name_snapshot, "
             "s.status AS schedule_status, s.blocked_reason, s.schedule_run_key, s.schedule_run_id, pl.line_name "
             "FROM order_processes op JOIN orders o ON o.id=op.order_id JOIN processes p ON p.id=op.process_id "
             "LEFT JOIN order_process_schedules s ON s.order_process_id=op.id "
@@ -301,6 +342,183 @@ class ScheduleCapacityRepository:
         ).fetchall()
 
     @staticmethod
+    def list_line_occupancy(exclude_order_id, db):
+        """Return timestamp segments occupying lines for other live orders.
+
+        Legacy date-only facts are returned as a fallback; the precision
+        scheduler expands them to the configured working slots before use.
+        """
+        return db.execute(
+            """
+            SELECT ss.process_line_id, ss.segment_start_at AS start_at,
+                   ss.segment_end_at AS end_at, ss.schedule_id
+            FROM order_process_schedule_segments ss
+            JOIN order_process_schedules s ON s.id=ss.schedule_id
+            JOIN orders o ON o.id=s.order_id
+            WHERE s.order_id != ? AND o.deleted_at IS NULL
+              AND s.status != 'blocked' AND s.process_line_id IS NOT NULL
+            UNION ALL
+            SELECT s.process_line_id,
+                   CASE WHEN COALESCE(s.planned_start_at,'')<>''
+                        THEN s.planned_start_at ELSE s.plan_start || ' 00:00' END,
+                   CASE WHEN COALESCE(s.planned_end_at,'')<>''
+                        THEN s.planned_end_at ELSE s.plan_end || ' 23:59' END,
+                   s.id
+            FROM order_process_schedules s
+            JOIN orders o ON o.id=s.order_id
+            WHERE s.order_id != ? AND o.deleted_at IS NULL
+              AND s.status != 'blocked' AND s.process_line_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM order_process_schedule_segments ss
+                  WHERE ss.schedule_id=s.id
+              )
+            """,
+            (exclude_order_id, exclude_order_id),
+        ).fetchall()
+
+    @staticmethod
+    def get_calendar(calendar_id=None, db=None):
+        db = resolve_db(db)
+        try:
+            if calendar_id is None:
+                return db.execute(
+                    "SELECT * FROM schedule_calendars WHERE calendar_code='DEFAULT' AND status='active'"
+                ).fetchone()
+            return db.execute(
+                "SELECT * FROM schedule_calendars WHERE id=? AND status='active'",
+                (calendar_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+
+    @staticmethod
+    def list_calendar_shifts(calendar_id, db=None):
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                "SELECT * FROM schedule_shifts WHERE calendar_id=? AND status='active' "
+                "ORDER BY start_minute,id",
+                (calendar_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
+    def get_calendar_exception(calendar_id, work_date, db=None):
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                "SELECT * FROM schedule_calendar_exceptions WHERE calendar_id=? AND work_date=?",
+                (calendar_id, work_date),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+
+    @staticmethod
+    def list_calendars(db=None):
+        db = resolve_db(db)
+        try:
+            calendars = db.execute(
+                "SELECT * FROM schedule_calendars WHERE status='active' ORDER BY calendar_code"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        result = []
+        for calendar in calendars:
+            result.append({
+                **dict(calendar),
+                "shifts": [dict(row) for row in ScheduleCapacityRepository.list_calendar_shifts(calendar["id"], db=db)],
+            })
+        return result
+
+    @staticmethod
+    def list_schedule_conflicts(db=None):
+        """Find overlapping precision segments on the same production line."""
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                """
+                SELECT a.process_line_id, a.schedule_id AS first_schedule_id,
+                       b.schedule_id AS second_schedule_id,
+                       a.segment_start_at AS first_start_at,
+                       a.segment_end_at AS first_end_at,
+                       b.segment_start_at AS second_start_at,
+                       b.segment_end_at AS second_end_at
+                FROM order_process_schedule_segments a
+                JOIN order_process_schedule_segments b
+                  ON a.process_line_id=b.process_line_id
+                 AND a.id < b.id
+                 AND a.segment_start_at < b.segment_end_at
+                 AND b.segment_start_at < a.segment_end_at
+                JOIN order_process_schedules sa ON sa.id=a.schedule_id
+                JOIN order_process_schedules sb ON sb.id=b.schedule_id
+                JOIN orders oa ON oa.id=sa.order_id AND oa.deleted_at IS NULL
+                JOIN orders ob ON ob.id=sb.order_id AND ob.deleted_at IS NULL
+                WHERE sa.status != 'blocked' AND sb.status != 'blocked'
+                ORDER BY a.process_line_id,a.segment_start_at
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
+    def list_line_loads(db=None):
+        """Summarize persisted load facts for every configured process line."""
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                """
+                SELECT pl.id AS process_line_id, pl.line_code, pl.line_name,
+                       pl.process_id, p.name AS process_name,
+                       (
+                         SELECT COUNT(*) FROM order_process_schedules s
+                         JOIN orders o ON o.id=s.order_id
+                         WHERE s.process_line_id=pl.id
+                           AND s.status != 'blocked' AND o.deleted_at IS NULL
+                       ) AS scheduled_operations,
+                       (
+                         SELECT COALESCE(SUM(ss.occupied_minutes),0)
+                         FROM order_process_schedule_segments ss
+                         JOIN order_process_schedules s ON s.id=ss.schedule_id
+                         JOIN orders o ON o.id=s.order_id
+                         WHERE ss.process_line_id=pl.id
+                           AND s.status != 'blocked' AND o.deleted_at IS NULL
+                       ) + (
+                         SELECT COALESCE(SUM(s.occupied_minutes),0)
+                         FROM order_process_schedules s
+                         JOIN orders o ON o.id=s.order_id
+                         WHERE s.process_line_id=pl.id
+                           AND s.status != 'blocked' AND o.deleted_at IS NULL
+                           AND NOT EXISTS (
+                             SELECT 1 FROM order_process_schedule_segments ss
+                             WHERE ss.schedule_id=s.id
+                           )
+                       ) AS occupied_minutes,
+                       (
+                         SELECT MIN(CASE WHEN COALESCE(s.planned_start_at,'')<>''
+                                         THEN s.planned_start_at ELSE s.plan_start || ' 00:00' END)
+                         FROM order_process_schedules s
+                         JOIN orders o ON o.id=s.order_id
+                         WHERE s.process_line_id=pl.id
+                           AND s.status != 'blocked' AND o.deleted_at IS NULL
+                       ) AS first_start_at,
+                       (
+                         SELECT MAX(CASE WHEN COALESCE(s.planned_end_at,'')<>''
+                                         THEN s.planned_end_at ELSE s.plan_end || ' 23:59' END)
+                         FROM order_process_schedules s
+                         JOIN orders o ON o.id=s.order_id
+                         WHERE s.process_line_id=pl.id
+                           AND s.status != 'blocked' AND o.deleted_at IS NULL
+                       ) AS last_end_at
+                FROM process_production_lines pl
+                JOIN processes p ON p.id=pl.process_id
+                ORDER BY p.seq_order, p.id, pl.line_code
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
     def insert_operation_schedule(data, db):
         binding = db.execute(
             "SELECT o.route_id,o.route_version_id,op.process_id,op.process_version_id "
@@ -316,14 +534,27 @@ class ScheduleCapacityRepository:
             "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,"
             "seq_order,quantity,standard_minutes_per_unit,setup_minutes,difficulty_factor,planned_minutes,plan_start,plan_end,"
             "status,blocked_reason,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
-            "process_name_snapshot,route_name_snapshot,schedule_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "process_name_snapshot,route_name_snapshot,schedule_run_id,planned_start_at,planned_end_at,occupied_minutes,"
+            "capacity_snapshot_json,standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["order_process_id"], data["process_id"], data.get("process_line_id"),
              data.get("seq_order", 0), data.get("quantity", 0), data.get("standard_minutes_per_unit", 0),
              data.get("setup_minutes", 0), data.get("difficulty_factor", 1), data.get("planned_minutes", 0), data["plan_start"], data["plan_end"],
              data.get("status", "planned"), data.get("blocked_reason", ""), data.get("schedule_run_key", ""),
              data.get("route_version_id"), data.get("process_version_id"), data.get("standard_id"), data.get("standard_version"),
-             data.get("process_name_snapshot", ""), data.get("route_name_snapshot", ""), data.get("schedule_run_id")),
+             data.get("process_name_snapshot", ""), data.get("route_name_snapshot", ""), data.get("schedule_run_id"),
+             data.get("planned_start_at", ""), data.get("planned_end_at", ""), data.get("occupied_minutes", 0),
+             data.get("capacity_snapshot_json", "{}"), data.get("standard_match_scope", ""), data.get("calendar_id"),
+             data.get("shift_snapshot_json", "[]"), data.get("line_name_snapshot", "")),
         )
+        for segment in data.get("segments", ()):
+            db.execute(
+                "INSERT INTO order_process_schedule_segments "
+                "(schedule_id,process_line_id,segment_start_at,segment_end_at,occupied_minutes,shift_id) "
+                "VALUES (?,?,?,?,?,?)",
+                (cur.lastrowid, data["process_line_id"], segment["start_at"], segment["end_at"],
+                 segment["occupied_minutes"], segment.get("shift_id")),
+            )
         return cur.lastrowid
 
     @staticmethod

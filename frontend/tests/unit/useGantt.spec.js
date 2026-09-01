@@ -158,6 +158,8 @@ describe('useGantt', () => {
     expect(harness.gantt.processOptions.value).toEqual([{ id: 7, name: '焊接' }])
     expect(harness.gantt.filteredOperations.value).toHaveLength(1)
     expect(harness.gantt.capacitySummary.value).toEqual({ total: 1, planned: 1, blocked: 0, minutes: 90 })
+    expect(harness.gantt.standardScopeLabel('route_version:product')).toBe('路线版本 · 产品专用')
+    expect(harness.gantt.standardScopeLabel('unknown:scope')).toBe('unknown:scope')
     harness.gantt.capacityProcessFilter.value = '999'
     expect(harness.gantt.filteredOperations.value).toHaveLength(0)
     harness.wrapper.unmount()

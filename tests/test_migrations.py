@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 77
-    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77]
+    assert report["target_version"] == 78
+    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77, 78]
     assert database.read_bytes() == before
 
 
@@ -278,6 +278,18 @@ def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
         assert process_counts == {'下料': 1, '焊接': 10, '打磨': 1, '喷漆': 2}
         columns = {row["name"] for row in db.execute("PRAGMA table_info(order_process_schedules)").fetchall()}
         assert {"difficulty_factor", "schedule_run_key", "process_line_id"}.issubset(columns)
+        precision_columns = {row["name"] for row in db.execute("PRAGMA table_info(order_process_schedules)").fetchall()}
+        assert {
+            "planned_start_at", "planned_end_at", "occupied_minutes",
+            "capacity_snapshot_json", "standard_match_scope", "calendar_id",
+        }.issubset(precision_columns)
+        table_names = {
+            row["name"] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {"schedule_calendars", "schedule_shifts", "schedule_calendar_exceptions",
+                "order_process_schedule_segments"}.issubset(table_names)
     finally:
         db.close()
 def test_audit_event_and_process_config_migration_versions_are_stable():
@@ -299,7 +311,8 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[75] == "modules.migration_process_content_digest_v075"
     assert by_version[76] == "modules.migration_schedule_capacity"
     assert by_version[77] == "modules.migration_schedule_capacity"
-    assert migrations.LATEST_VERSION == 77
+    assert by_version[78] == "modules.migration_schedule_capacity"
+    assert migrations.LATEST_VERSION == 78
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():
