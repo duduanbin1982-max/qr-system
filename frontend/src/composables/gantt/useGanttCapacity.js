@@ -3,6 +3,15 @@ import { computed, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
+const STANDARD_SCOPE_LABELS = Object.freeze({
+  'route_version:product': '路线版本 · 产品专用',
+  'route:product': '路线 · 产品专用',
+  'process:product': '工序 · 产品专用',
+  'route_version:generic': '路线版本 · 通用',
+  'route:generic': '路线 · 通用',
+  'process:generic': '工序 · 通用',
+})
+
 
 export function useGanttCapacity({ orders }) {
   const viewMode = ref('orders')
@@ -39,7 +48,7 @@ export function useGanttCapacity({ orders }) {
       total: rows.length,
       planned: rows.filter(row => row.schedule_status === 'planned' || row.status === 'planned').length,
       blocked: rows.filter(row => row.schedule_status === 'blocked' || row.status === 'blocked').length,
-      minutes: rows.reduce((sum, row) => sum + Number(row.planned_minutes || 0), 0),
+      minutes: rows.reduce((sum, row) => sum + Number(row.occupied_minutes ?? row.planned_minutes ?? 0), 0),
     }
   })
 
@@ -103,6 +112,11 @@ export function useGanttCapacity({ orders }) {
     return row.line_name || (row.process_line_id ? `产线 #${row.process_line_id}` : '未分配')
   }
 
+  function standardScopeLabel(scope) {
+    const value = String(scope || '').trim()
+    return STANDARD_SCOPE_LABELS[value] || value || '-'
+  }
+
   return {
     viewMode,
     capacityLines,
@@ -123,5 +137,6 @@ export function useGanttCapacity({ orders }) {
     prepareGeneration,
     generateSchedule,
     lineLabel,
+    standardScopeLabel,
   }
 }

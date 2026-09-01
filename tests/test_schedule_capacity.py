@@ -1,3 +1,5 @@
+import json
+import sqlite3
 import uuid
 
 import pytest
@@ -7,6 +9,8 @@ from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.process_service import ProcessService
 from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.migrations import run_migrations
+from scripts.preflight_schedule_precision import run_preflight
 
 
 def _seed_capacity_order(db, process_ids, quantity=10, route_id=None, plan_start="2026-09-01"):
@@ -118,7 +122,8 @@ def test_schedule_uses_work_time_factor_and_preserves_precedence(client):
         assert rows[0]["planned_minutes"] == pytest.approx(610)
         assert rows[0]["difficulty_factor"] == pytest.approx(2)
         assert rows[0]["plan_start"] == "2026-09-01"
-        assert rows[1]["plan_start"] > rows[0]["plan_end"]
+        assert rows[1]["planned_start_at"] >= rows[0]["planned_end_at"]
+        assert rows[1]["plan_start"] == rows[0]["plan_end"]
         order = db.execute("SELECT plan_start, plan_end, schedule_version FROM orders WHERE id=?", (order_id,)).fetchone()
         assert order["plan_start"] == rows[0]["plan_start"]
         assert order["plan_end"] == rows[-1]["plan_end"]
@@ -266,3 +271,224 @@ def test_capacity_query_endpoint_rejects_malformed_limit(client, auth_headers):
     response = client.get("/api/schedule/capacity-orders?limit=not-a-number", headers=auth_headers)
     assert response.status_code == 400
     assert "limit" in (response.get_json() or {}).get("error", "")
+
+
+def test_product_specific_standard_never_falls_back_to_another_product(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Strict Product")
+        product_one = db.execute(
+            "INSERT INTO products (product_name,product_code) VALUES ('产品一','STRICT-P1')"
+        ).lastrowid
+        product_two = db.execute(
+            "INSERT INTO products (product_name,product_code) VALUES ('产品二','STRICT-P2')"
+        ).lastrowid
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        db.execute(
+            "UPDATE orders SET product_id=?,product_code=? WHERE id=?",
+            (product_one, "STRICT-P1", order_id),
+        )
+        route_version = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?", (route_id,)
+        ).fetchone()[0]
+        process_version = db.execute(
+            "SELECT process_version_id FROM process_route_version_items WHERE route_version_id=? AND process_id=?",
+            (route_version, process),
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO work_time_standards (product_id,route_id,route_version_id,process_id,process_version_id,"
+            "standard_minutes_per_unit,status,version) VALUES (?,?,?,?,?,?,?,?)",
+            (product_two, route_id, route_version, process, process_version, 99, "active", 1),
+        )
+        db.commit()
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-strict-product-v1"
+        )
+        assert result["operations"][0]["status"] == "blocked"
+        assert result["operations"][0]["blocked_reason"] == "未配置标准工时"
+
+
+def test_product_specific_standard_precedes_more_specific_generic_standard(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Product Priority")
+        product_id = db.execute(
+            "INSERT INTO products (product_name,product_code) VALUES ('产品优先','PRIORITY-P1')"
+        ).lastrowid
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10)
+        db.execute(
+            "UPDATE orders SET product_id=?,product_code=? WHERE id=?",
+            (product_id, "PRIORITY-P1", order_id),
+        )
+        route_version = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?", (route_id,)
+        ).fetchone()[0]
+        process_version = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?", (route_version, process)
+        ).fetchone()[0]
+        # A route-revision generic standard must not override an exact product
+        # standard that is scoped to the process.
+        _seed_standard(db, route_id, process, unit=20)
+        db.execute(
+            "INSERT INTO work_time_standards "
+            "(product_id,process_id,process_version_id,standard_minutes_per_unit,status,version) "
+            "VALUES (?,?,?,?,?,?)",
+            (product_id, process, process_version, 7, "active", 1),
+        )
+        db.commit()
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-product-priority-v1"
+        )
+        row = result["operations"][0]
+        assert row["status"] == "planned"
+        assert row["planned_minutes"] == pytest.approx(70)
+        assert row["standard_match_scope"] == "process:product"
+
+
+def test_legacy_schedule_snapshot_never_backfills_another_products_standard(client):
+    from modules.migration_schedule_capacity import _schedule_snapshot
+
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Legacy Snapshot")
+        product_one = db.execute(
+            "INSERT INTO products (product_name,product_code) VALUES ('历史产品一','LEGACY-P1')"
+        ).lastrowid
+        product_two = db.execute(
+            "INSERT INTO products (product_name,product_code) VALUES ('历史产品二','LEGACY-P2')"
+        ).lastrowid
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        db.execute(
+            "UPDATE orders SET product_id=?,product_code=? WHERE id=?",
+            (product_one, "LEGACY-P1", order_id),
+        )
+        route_version = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?", (route_id,)
+        ).fetchone()[0]
+        process_version = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?", (route_version, process)
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO work_time_standards "
+            "(product_id,route_id,route_version_id,process_id,process_version_id,"
+            "standard_minutes_per_unit,status,version) VALUES (?,?,?,?,?,?,?,?)",
+            (product_two, route_id, route_version, process, process_version, 99, "active", 1),
+        )
+        db.commit()
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-legacy-snapshot-v1"
+        )
+        assert result["operations"][0]["status"] == "blocked"
+        schedule = db.execute(
+            "SELECT * FROM order_process_schedules WHERE order_id=?", (order_id,)
+        ).fetchone()
+        snapshot = _schedule_snapshot(schedule, db)
+        assert snapshot["standard_id"] is None
+        assert snapshot["standard_version"] is None
+
+
+def test_capacity_audit_exposes_breakdowns_and_line_loads(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Audit Breakdown")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=2)
+        _seed_standard(db, route_id, process, unit=5)
+        ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-audit-breakdown-v1"
+        )
+        audit = ScheduleCapacityService.audit_schedule_capacity()
+        assert audit["occupied_minutes"] == pytest.approx(30)
+        assert audit["match_scope_counts"]["route_version:generic"] == 1
+        assert audit["blocked_reason_counts"] == {}
+        line = next(item for item in audit["line_loads"] if item["process_id"] == process)
+        assert line["scheduled_operations"] == 1
+        assert line["occupied_minutes"] == pytest.approx(30)
+        assert line["conflict_count"] == 0
+
+
+def test_precision_preflight_returns_structured_breakdowns_without_source_mutation(tmp_path):
+    source = tmp_path / "schedule-preflight.db"
+    db = sqlite3.connect(source)
+    try:
+        run_migrations(db)
+        before = db.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        db.close()
+
+    report = run_preflight(source, limit=10)
+    assert report["database_user_version"] == before == 78
+    assert report["operations"] == 0
+    assert report["coverage_percent"] == 100.0
+    assert report["process_statistics"] == []
+    assert report["product_statistics"] == []
+    assert report["line_loads"]
+
+    check = sqlite3.connect(source)
+    try:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == before
+    finally:
+        check.close()
+
+
+def test_precision_schedule_spans_shifts_and_preserves_snapshot(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Precision Time")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10, plan_start="2026-09-01")
+        _seed_standard(db, route_id, process, unit=60, setup=0)
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-precision-time-v1"
+        )
+        row = result["operations"][0]
+        assert row["planned_start_at"] == "2026-09-01 08:00"
+        assert row["planned_end_at"] == "2026-09-02 10:00"
+        assert row["occupied_minutes"] == pytest.approx(600)
+        assert row["standard_match_scope"].endswith(":generic")
+        snapshot = json.loads(row["capacity_snapshot_json"])
+        assert snapshot["daily_minutes"] == pytest.approx(480)
+        assert len(row["segments"]) == 3
+        stored_segments = db.execute(
+            "SELECT COUNT(*) FROM order_process_schedule_segments WHERE schedule_id=?",
+            (row["id"],),
+        ).fetchone()[0]
+        assert stored_segments == 3
+
+
+def test_weekend_is_skipped_by_default_calendar(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Calendar Weekend")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10, plan_start="2026-09-04")
+        _seed_standard(db, route_id, process, unit=60)
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-calendar-weekend-v1"
+        )
+        row = result["operations"][0]
+        assert row["planned_start_at"] == "2026-09-04 08:00"
+        assert row["planned_end_at"] == "2026-09-07 10:20"
+
+
+def test_parallel_lines_are_selected_by_earliest_minute_completion(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='焊接'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Parallel Minute")
+        first_order, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10)
+        second_order, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=10)
+        _seed_standard(db, route_id, process, unit=30)
+        first = ScheduleCapacityService.generate_order_schedule(
+            first_order, schedule_run_key="capacity-parallel-minute-1"
+        )
+        second = ScheduleCapacityService.generate_order_schedule(
+            second_order, schedule_run_key="capacity-parallel-minute-2"
+        )
+        assert first["operations"][0]["process_line_id"] != second["operations"][0]["process_line_id"]
+        assert second["operations"][0]["planned_start_at"] == first["operations"][0]["planned_start_at"]

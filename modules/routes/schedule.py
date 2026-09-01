@@ -89,6 +89,13 @@ def schedule_capacity_lines():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/schedule/calendars", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_calendars():
+    return jsonify(ScheduleCapacityService.list_calendars())
+
+
 @app.route("/api/schedule/capacity-orders", methods=["GET"])
 @check_auth
 @check_permission("schedule:view")
@@ -135,6 +142,18 @@ def schedule_operations():
     try:
         return jsonify(ScheduleCapacityService.list_schedules(
             request.args.get("limit", 500)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/capacity-audit", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_capacity_audit():
+    try:
+        return jsonify(ScheduleCapacityService.audit_schedule_capacity(
+            request.args.get("limit", 1000)
         ))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

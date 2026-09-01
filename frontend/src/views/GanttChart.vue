@@ -79,19 +79,20 @@
       <div v-if="capacityLoading" style="padding:36px;text-align:center;color:var(--text-placeholder)">⏳ 加载工序排程中...</div>
       <div v-else-if="!filteredOperations.length" style="padding:36px;text-align:center;color:var(--text-placeholder)">暂无工序排程数据，请选择订单生成排程</div>
       <div v-else style="overflow:auto;border:1px solid var(--border-light)">
-        <table style="width:100%;border-collapse:collapse;min-width:980px;font-size:var(--text-sm)">
+        <table style="width:100%;border-collapse:collapse;min-width:1200px;font-size:var(--text-sm)">
           <thead><tr style="background:var(--bg-hover);text-align:left">
-            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">计划日期</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">计划分钟</th><th style="padding:9px 10px">状态</th>
+            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">预计时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">状态</th>
           </tr></thead>
           <tbody><tr v-for="row in filteredOperations" :key="row.id || `${row.order_id}-${row.order_process_id}`" style="border-top:1px solid var(--bg-hover)">
             <td style="padding:8px 10px;font-weight:600;color:var(--primary)">{{ row.order_no || row.order_id }}</td>
             <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
             <td style="padding:8px 10px">{{ lineLabel(row) }}</td>
-            <td style="padding:8px 10px;white-space:nowrap">{{ row.plan_start || '-' }} ~ {{ row.plan_end || '-' }}</td>
+            <td style="padding:8px 10px;white-space:nowrap">{{ row.planned_start_at || row.plan_start || '-' }}<span v-if="row.planned_end_at"> ~ {{ row.planned_end_at }}</span><span v-else-if="row.plan_end"> ~ {{ row.plan_end }}</span></td>
             <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
             <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
+            <td style="padding:8px 10px;white-space:nowrap">{{ standardScopeLabel(row.standard_match_scope) }}</td>
             <td style="padding:8px 10px">{{ row.difficulty_factor || 1 }}</td>
-            <td style="padding:8px 10px">{{ Math.round(row.planned_minutes || 0) }}</td>
+            <td style="padding:8px 10px">{{ Math.round(row.occupied_minutes || row.planned_minutes || 0) }}</td>
             <td style="padding:8px 10px"><span :style="{color:(row.schedule_status==='blocked'||row.status==='blocked')?'var(--danger)':'var(--success)',fontWeight:600}">{{ (row.schedule_status==='blocked'||row.status==='blocked') ? `阻断：${row.blocked_reason || row.reason || '前置条件不满足'}` : '已排程' }}</span></td>
           </tr></tbody>
         </table>
