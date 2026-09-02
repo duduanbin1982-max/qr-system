@@ -3,16 +3,22 @@
 
 import argparse
 from datetime import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
 import socket
-import sqlite3
 import ssl
 import subprocess
 import sys
 import urllib.request
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from modules.domain import evidence_protocol  # noqa: E402
+from scripts import production_operations  # noqa: E402
 
 
 EXPECTED_PAYROLL = {
@@ -57,15 +63,11 @@ def _parser():
 
 
 def _canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return evidence_protocol.canonical_json_v1(value)
 
 
 def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return production_operations.file_fingerprint(path)["sha256"]
 
 
 def _rows(db, sql, params=()):
@@ -77,14 +79,7 @@ def _scalar(db, sql, params=()):
 
 
 def _open_ro(path):
-    uri = "file:" + Path(path).resolve().as_posix() + "?mode=ro"
-    db = sqlite3.connect(uri, uri=True)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=10000")
-    db.execute("PRAGMA query_only=ON")
-    db.execute("BEGIN")
-    return db
+    return production_operations.open_read_only_sqlite(path)
 
 
 def _checks(db):
@@ -106,7 +101,7 @@ def _payroll(db):
         "payroll_events",
         "payroll_migration_manifests",
     )
-    return {table: int(_scalar(db, "SELECT COUNT(*) FROM " + table)) for table in tables}
+    return production_operations.table_count_fingerprint(db, tables)
 
 
 def _batch_fingerprint(db):
@@ -316,19 +311,14 @@ def run(args):
         "read_only": True,
     }
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    evidence_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    production_operations.write_evidence_json(evidence_path, result)
     return {"status": "passed", "evidence": {"path": str(evidence_path), "sha256": _sha256(evidence_path)}, "v2_results": v2_results, "legacy_fallback_results": legacy_fallback_results, "outside_scope_denied": outside_scope}
 
 
 def main(argv=None):
-    args = _parser().parse_args(argv)
-    try:
-        result = run(args)
-    except Exception as exc:
-        print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return production_operations.run_json_cli(
+        _parser, run, argv, failure_indent=None
+    )
 
 
 if __name__ == "__main__":

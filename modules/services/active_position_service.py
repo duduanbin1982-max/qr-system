@@ -1,9 +1,10 @@
 """Session-level production position context for mobile reporting."""
 
 from modules.repositories.auth_repository import AuthRepository
-from modules.repositories.position_repository import PositionRepository
+from modules.repositories.position_version_repository import PositionVersionRepository
 from modules.services import BaseService
 from modules.services.access_policy_service import get_user_process_ids
+from modules.services.position_access_service import PositionAccessService
 
 
 class ActivePositionService:
@@ -17,31 +18,38 @@ class ActivePositionService:
         }
 
     @classmethod
-    def get_context(cls, user):
-        authorized_process_ids = get_user_process_ids(user)
+    def get_context(cls, user, order_id=None):
+        authorized_process_ids = get_user_process_ids(user, order_id=order_id)
         authorized_set = (
             None if authorized_process_ids is None else set(authorized_process_ids)
         )
         primary_position_id = user.get("position_id")
-        rows = list(
-            PositionRepository.find_active_positions_for_process_ids(
-                authorized_process_ids
-            )
-        )
-        rows_by_id = {row["id"]: row for row in rows}
-
-        if primary_position_id and primary_position_id not in rows_by_id:
-            primary_row = PositionRepository.find_position_by_id(primary_position_id)
-            if primary_row and primary_row["status"] == "active":
-                rows.append(primary_row)
-                rows_by_id[primary_position_id] = primary_row
-
-        position_ids = [row["id"] for row in rows]
-        process_map = {position_id: [] for position_id in position_ids}
-        for process in PositionRepository.find_position_processes(position_ids):
-            process_id = process["process_id"]
-            if authorized_set is None or process_id in authorized_set:
-                process_map[process["position_id"]].append(process_id)
+        rows = PositionVersionRepository.roots()
+        available = []
+        process_map = {}
+        for row in rows:
+            if order_id is None:
+                process_ids = PositionAccessService.new_business_process_ids(row["id"])
+                root_available = (
+                    row.get("status") == "active"
+                    and row.get("lifecycle_status") == "active"
+                )
+            else:
+                process_ids = PositionAccessService.historical_wip_process_ids(
+                    row["id"], order_id
+                )
+                root_available = bool(process_ids)
+            scoped_process_ids = [
+                process_id
+                for process_id in process_ids
+                if authorized_set is None or process_id in authorized_set
+            ]
+            if scoped_process_ids or (
+                root_available and row["id"] == primary_position_id
+            ):
+                available.append(row)
+                process_map[row["id"]] = scoped_process_ids
+        rows = available
 
         positions = [
             cls._position_payload(

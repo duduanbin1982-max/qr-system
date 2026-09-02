@@ -672,29 +672,49 @@ def test_process_template_drives_dynamic_weighted_dimensions(client, auth_header
     assert submitted.get_json()["items"][0]["total_score"] == 80
 
 
-def test_optional_template_dimension_can_be_omitted():
-    scores, _, total_score = ProcessQualityEvaluationService._evaluate_dimensions(
-        {"dimension_scores": {"required_quality": 4}},
-        {
+def test_optional_template_dimension_can_be_omitted_via_api(
+    client, auth_headers, worker_auth_headers
+):
+    flow = _seed_serial_flow(client)
+    created_template = client.post(
+        "/api/process-quality-evaluations/templates",
+        headers=auth_headers,
+        json={
+            "name": "可选外观评价",
+            "process_id": flow["process_ids"][1],
             "dimensions": [
-                {
-                    "key": "required_quality",
-                    "label": "必评质量",
-                    "weight": 1,
-                    "required": True,
-                },
-                {
-                    "key": "optional_appearance",
-                    "label": "选评外观",
-                    "weight": 1,
-                    "required": False,
-                },
-            ]
+                {"key": "required_quality", "label": "必评质量", "weight": 1, "required": True},
+                {"key": "optional_appearance", "label": "选评外观", "weight": 1, "required": False},
+            ],
+            "issue_tags": [],
+            "critical_issue_tags": [],
+            "low_score_threshold": 60,
+            "critical_score_threshold": 40,
+            "status": "active",
         },
     )
+    assert created_template.status_code == 200, created_template.get_json()
+    _complete_serial_report(client, worker_auth_headers, flow)
+    task = next(
+        item for item in client.get(
+            "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+        ).get_json()["items"]
+        if item["target_process_id"] == flow["process_ids"][1]
+    )
+    assert task["template_snapshot"]["dimensions"][1]["required"] is False
 
-    assert scores == {"required_quality": 4}
-    assert total_score == 80
+    submitted = client.post(
+        "/api/process-quality-evaluations",
+        headers=worker_auth_headers,
+        json={
+            "task_id": task["id"],
+            "dimension_scores": {"required_quality": 4},
+            "issue_tags": [],
+            "comment": "",
+        },
+    )
+    assert submitted.status_code == 200, submitted.get_json()
+    assert submitted.get_json()["items"][0]["total_score"] == 80
 
 
 def test_saving_active_template_deactivates_previous_template_in_same_scope(

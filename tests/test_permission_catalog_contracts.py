@@ -3,6 +3,7 @@ from pathlib import Path
 from modules.permission_catalog import (
     ACTION_LABELS,
     ACTION_PERMISSION_DEFS,
+    ALL_PERMISSION_CODES,
     PAGE_OPERATION_BINDINGS,
     PAGE_PERMISSION_CODES,
     SIDEBAR_ITEMS,
@@ -44,6 +45,48 @@ def test_page_operation_bindings_reference_known_pages_and_resources():
 def test_business_permissions_infer_page_permissions():
     assert infer_page_permissions(["performance:view_self"]) == ["page:performance"]
     assert "page:settings.admin-users" in infer_page_permissions(["users:admin"])
+    assert infer_page_permissions(["company_info:view"]) == [
+        "page:settings",
+        "page:settings.company-info",
+    ]
+
+
+def test_company_profile_permissions_are_independent_and_view_only_by_default():
+    assert ACTION_PERMISSION_DEFS["company_info"][1] == [
+        "view",
+        "edit",
+        "audit_history",
+    ]
+    assert PAGE_OPERATION_BINDINGS["page:settings.company-info"] == ["company_info"]
+    assert has_permission_code(["company_info:edit"], "company_info:view")
+    assert has_permission_code(
+        ["company_info:audit_history"], "company_info:view"
+    )
+    assert not has_permission_code(["settings:edit"], "company_info:edit")
+    production_manager = default_role_permission_additions("production_manager")
+    assert "company_info:view" in production_manager
+    assert "company_info:edit" not in production_manager
+    assert "company_info:audit_history" not in production_manager
+
+
+def test_process_config_permissions_are_scoped_and_actions_imply_view():
+    assert ACTION_PERMISSION_DEFS["process_config"][1] == [
+        "view",
+        "create",
+        "submit",
+        "approve",
+        "reject",
+        "history",
+    ]
+    assert PAGE_OPERATION_BINDINGS["page:settings.process-config"] == [
+        "process_config"
+    ]
+    assert "process_config" not in PAGE_OPERATION_BINDINGS.get("page:settings", [])
+    for action in ("create", "submit", "approve", "reject", "history"):
+        assert has_permission_code(
+            [f"process_config:{action}"], "process_config:view"
+        )
+    assert not has_permission_code(["settings:manage"], "process_config:approve")
 
 
 def test_performance_permissions_are_granular_and_labels_are_resource_neutral():
@@ -180,3 +223,36 @@ def test_legacy_process_permissions_only_imply_version_read_access():
             not has_permission_code([legacy_permission], permission)
             for permission in forbidden_migrations
         )
+
+
+def test_position_version_permissions_are_granular():
+    assert ACTION_PERMISSION_DEFS["positions"][1] == [
+        "view",
+        "create",
+        "edit",
+        "delete",
+        "submit",
+        "approve",
+        "reject",
+        "history",
+        "impact",
+        "retire",
+        "reactivate",
+    ]
+    assert {
+        "positions:submit",
+        "positions:approve",
+        "positions:reject",
+        "positions:history",
+        "positions:impact",
+        "positions:retire",
+        "positions:reactivate",
+    }.issubset(ALL_PERMISSION_CODES)
+    assert all(
+        not has_permission_code(["positions:edit"], permission)
+        for permission in (
+            "positions:approve",
+            "positions:retire",
+            "positions:reactivate",
+        )
+    )

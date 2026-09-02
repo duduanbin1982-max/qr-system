@@ -1,6 +1,7 @@
 """SQL access for performance authorization scopes and scoped results."""
 
 from modules.repositories.context import resolve_db
+from modules.audit_writer import insert_audit_log
 
 
 class PerformanceAuthorizationRepository:
@@ -60,10 +61,13 @@ class PerformanceAuthorizationRepository:
 
     @staticmethod
     def insert_scope_audit(user_id, target_user_id, detail, db):
-        db.execute(
-            "INSERT INTO audit_logs (user_id,action,target_type,target_id,detail) "
-            "VALUES (?,'replace_performance_department_scopes','user',?,?)",
-            (user_id, target_user_id, detail),
+        insert_audit_log(
+            db,
+            user_id,
+            "replace_performance_department_scopes",
+            "user",
+            target_user_id,
+            detail,
         )
 
     @staticmethod

@@ -2,12 +2,24 @@
 
 from datetime import datetime
 
-from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.actor_context import ActorContextParseError, parse_actor_context
+from modules.domain.errors import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from modules.domain.price_versioning import (
+    PriceBindingMismatchError,
+    PriceVersionVoidedError,
+    assert_price_snapshot_current,
+)
 from modules.domain.process_versioning import (
     assert_separation_of_duties,
     canonical_version_payload,
     payload_sha256,
     require_row_version,
+    summarize_release_batch,
     validate_release_batch_dependencies,
 )
 from modules.repositories.master_data_release_repository import MasterDataReleaseRepository
@@ -21,14 +33,10 @@ from modules.services.master_data_impact_service import MasterDataImpactService
 class MasterDataReleaseService:
     @staticmethod
     def _actor(actor):
-        actor = actor or {}
         try:
-            actor_id = int(actor.get("id"))
-        except (TypeError, ValueError) as exc:
+            return parse_actor_context(actor).to_legacy_mapping()
+        except ActorContextParseError as exc:
             raise ValidationError("操作人不能为空") from exc
-        if actor_id <= 0:
-            raise ValidationError("操作人不能为空")
-        return {"id": actor_id, "name": str(actor.get("name") or actor.get("username") or "").strip(), "role": str(actor.get("role") or "").strip()}
 
     @staticmethod
     def _text(data, field, label):
@@ -91,6 +99,182 @@ class MasterDataReleaseService:
     def _summary_digest(batch_input):
         summary = validate_release_batch_dependencies(batch_input)
         return payload_sha256(summary), summary
+
+    @staticmethod
+    def _draft_digest(batch_input):
+        return payload_sha256(
+            summarize_release_batch(
+                process_versions=batch_input.get("process_versions"),
+                route_versions=batch_input.get("route_versions"),
+                price_versions=batch_input.get("price_versions"),
+                approved_exceptions=batch_input.get("approved_exceptions"),
+            )
+        )
+
+    @staticmethod
+    def _validate_price_members(batch, db):
+        route_nodes = {
+            (int(route["id"]), int(item["process_version_id"]))
+            for route in batch.get("route_versions") or []
+            for item in route.get("items") or []
+        }
+        for price in batch.get("price_versions") or []:
+            if price["status"] not in {"draft", "approved"}:
+                if price["status"] == "voided":
+                    raise PriceVersionVoidedError(
+                        details={"price_version_id": price["id"]}
+                    )
+                raise PriceBindingMismatchError(
+                    details={
+                        "price_version_id": price["id"],
+                        "status": price["status"],
+                    }
+                )
+            binding = PayrollRepository.exact_price_binding(
+                price["route_version_id"], price["process_version_id"], db
+            )
+            assert_price_snapshot_current(price, binding)
+            price_binding = (
+                int(price["route_version_id"]),
+                int(price["process_version_id"]),
+            )
+            if price_binding not in route_nodes:
+                raise PriceBindingMismatchError(
+                    "工价版本未匹配发布批次中的路线节点",
+                    details={"price_version_id": price["id"]},
+                )
+
+    @staticmethod
+    def _assert_approval_separation(batch, actor):
+        members = [
+            batch,
+            *(batch.get("process_versions") or []),
+            *(batch.get("route_versions") or []),
+            *(batch.get("price_versions") or []),
+        ]
+        for member in members:
+            assert_separation_of_duties(member.get("created_by"), actor["id"])
+
+    @staticmethod
+    def _member_replay(batch_id, action, command, actor, db):
+        key = MasterDataReleaseService._key(command)
+        replay = (
+            MasterDataReleaseRepository.release_member_event_by_idempotency_key(
+                key, db=db
+            )
+        )
+        if replay is None:
+            return None
+        expected = {
+            "batch_id": int(batch_id),
+            "action": action,
+            "member_type": str(command.get("member_type") or ""),
+            "member_id": int(command.get("member_id") or 0),
+            "replacement_member_id": (
+                int(command["replacement_member_id"])
+                if command.get("replacement_member_id") is not None
+                else None
+            ),
+            "actor_id": actor["id"],
+            "reason": str(command.get("reason") or "").strip(),
+        }
+        if any(replay.get(field) != value for field, value in expected.items()):
+            raise ConflictError("幂等键已用于不同的发布批次成员操作")
+        return MasterDataReleaseRepository.batch(batch_id, db=db)
+
+    @staticmethod
+    def _mutate_member(batch_id, command, actor_user, action):
+        actor = MasterDataReleaseService._actor(actor_user)
+        key = MasterDataReleaseService._key(command)
+        reason = MasterDataReleaseService._text(command, "reason", "变更原因")
+        member_type = str(command.get("member_type") or "").strip()
+        if member_type not in MasterDataReleaseRepository.MEMBER_TABLES:
+            raise ValidationError("发布批次成员类型无效")
+        try:
+            member_id = int(command.get("member_id"))
+            replacement_member_id = (
+                int(command.get("replacement_member_id"))
+                if action == "replaced"
+                else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("发布批次成员 ID 无效") from exc
+        if member_id <= 0 or (
+            replacement_member_id is not None and replacement_member_id <= 0
+        ):
+            raise ValidationError("发布批次成员 ID 无效")
+        if replacement_member_id == member_id:
+            raise ValidationError("替换成员必须不同于原成员")
+
+        with BaseService.transaction() as db:
+            replay = MasterDataReleaseService._member_replay(
+                batch_id, action, command, actor, db
+            )
+            if replay is not None:
+                return replay
+            batch = MasterDataReleaseRepository.batch(batch_id, db=db)
+            if batch is None:
+                raise NotFoundError("主数据发布批次不存在")
+            if batch["status"] != "draft":
+                raise ConflictError("只有草稿发布批次可以修改成员")
+            if int(batch["created_by"] or 0) != actor["id"]:
+                raise AuthorizationError("仅发布批次制单人可以修改草稿成员")
+            expected_row_version = require_row_version(command.get("row_version"))
+            if expected_row_version != int(batch["row_version"]):
+                raise ConflictError(
+                    "主数据发布批次状态已变化，请刷新后重试",
+                    details={
+                        "expected": expected_row_version,
+                        "actual": batch["row_version"],
+                    },
+                )
+            MasterDataReleaseRepository.insert_release_member_event(
+                {
+                    "batch_id": batch_id,
+                    "action": action,
+                    "member_type": member_type,
+                    "member_id": member_id,
+                    "replacement_member_id": replacement_member_id,
+                    "actor_id": actor["id"],
+                    "actor_name": actor["name"],
+                    "reason": reason,
+                    "idempotency_key": key,
+                },
+                db,
+            )
+            if action == "removed":
+                MasterDataReleaseRepository.remove_member(
+                    batch_id, member_type, member_id, db
+                )
+            else:
+                MasterDataReleaseRepository.replace_member(
+                    batch_id,
+                    member_type,
+                    member_id,
+                    replacement_member_id,
+                    db,
+                )
+            changed = MasterDataReleaseRepository.batch(batch_id, db=db)
+            impact_digest = MasterDataReleaseService._draft_digest(
+                MasterDataReleaseService._batch_input(
+                    changed, changed.get("approved_exceptions")
+                )
+            )
+            return MasterDataReleaseRepository.update_draft_after_member_change(
+                batch_id, expected_row_version, impact_digest, db
+            )
+
+    @staticmethod
+    def remove_member(batch_id, command, actor_user):
+        return MasterDataReleaseService._mutate_member(
+            batch_id, command, actor_user, "removed"
+        )
+
+    @staticmethod
+    def replace_member(batch_id, command, actor_user):
+        return MasterDataReleaseService._mutate_member(
+            batch_id, command, actor_user, "replaced"
+        )
 
     @staticmethod
     def _present_batches(batches):
@@ -225,12 +409,51 @@ class MasterDataReleaseService:
             for version_id in command.get("process_version_ids") or []:
                 if int(version_id) not in existing_process:
                     MasterDataReleaseRepository.add_process_version(batch["id"], int(version_id), db)
+                    MasterDataReleaseRepository.insert_release_member_event(
+                        {
+                            "batch_id": batch["id"],
+                            "action": "added",
+                            "member_type": "process_version",
+                            "member_id": int(version_id),
+                            "actor_id": actor["id"],
+                            "actor_name": actor["name"],
+                            "reason": reason,
+                            "idempotency_key": f"{key}:member:process_version:{int(version_id)}:added",
+                        },
+                        db,
+                    )
             for version_id in command.get("route_version_ids") or []:
                 if int(version_id) not in existing_route:
                     MasterDataReleaseRepository.add_route_version(batch["id"], int(version_id), db)
+                    MasterDataReleaseRepository.insert_release_member_event(
+                        {
+                            "batch_id": batch["id"],
+                            "action": "added",
+                            "member_type": "route_version",
+                            "member_id": int(version_id),
+                            "actor_id": actor["id"],
+                            "actor_name": actor["name"],
+                            "reason": reason,
+                            "idempotency_key": f"{key}:member:route_version:{int(version_id)}:added",
+                        },
+                        db,
+                    )
             for version_id in command.get("price_version_ids") or []:
                 if int(version_id) not in existing_price:
                     MasterDataReleaseRepository.add_price_version(batch["id"], int(version_id), db)
+                    MasterDataReleaseRepository.insert_release_member_event(
+                        {
+                            "batch_id": batch["id"],
+                            "action": "added",
+                            "member_type": "price_version",
+                            "member_id": int(version_id),
+                            "actor_id": actor["id"],
+                            "actor_name": actor["name"],
+                            "reason": reason,
+                            "idempotency_key": f"{key}:member:price_version:{int(version_id)}:added",
+                        },
+                        db,
+                    )
             return MasterDataReleaseRepository.batch(batch["id"], db=db)
 
     @staticmethod
@@ -254,6 +477,7 @@ class MasterDataReleaseService:
                     batch_id, normalized, db
                 )
             batch = MasterDataReleaseRepository.batch(batch_id, db=db)
+            MasterDataReleaseService._validate_price_members(batch, db)
             digest, _ = MasterDataReleaseService._summary_digest(
                 MasterDataReleaseService._batch_input(batch, batch.get("approved_exceptions"))
             )
@@ -278,7 +502,11 @@ class MasterDataReleaseService:
                 return batch
             if batch["status"] != "pending_approval":
                 raise ConflictError("只有待审批发布批次可以批准")
-            assert_separation_of_duties(batch["created_by"], actor["id"])
+            expected_row_version = require_row_version(command.get("row_version"))
+            if expected_row_version != int(batch["row_version"]):
+                raise ConflictError("主数据发布批次状态已变化，请刷新后重试")
+            MasterDataReleaseService._validate_price_members(batch, db)
+            MasterDataReleaseService._assert_approval_separation(batch, actor)
             digest, _ = MasterDataReleaseService._summary_digest(
                 MasterDataReleaseService._batch_input(batch, batch.get("approved_exceptions"))
             )
@@ -363,7 +591,7 @@ class MasterDataReleaseService:
             return MasterDataReleaseRepository.transition_batch(
                 batch_id,
                 "pending_approval",
-                int(command.get("row_version", batch["row_version"])),
+                expected_row_version,
                 "published",
                 {
                     "approved_by": actor["id"],

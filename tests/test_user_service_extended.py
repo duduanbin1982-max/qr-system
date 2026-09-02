@@ -7,7 +7,8 @@ from werkzeug.datastructures import FileStorage
 
 from factories import ensure_process
 from modules.db import get_db
-from modules.domain.errors import ConflictError
+from modules.domain.errors import AuthorizationError, ConflictError
+from modules.repositories.user_repository import UserRepository
 from modules.services.user_service import UserService
 
 
@@ -50,7 +51,7 @@ def test_create_worker_assigns_processes_and_worker_list_excludes_admin(client):
 def test_create_admin_requires_existing_administrator(client):
     with client.application.app_context():
         db = get_db()
-        with pytest.raises(ValueError, match="Only administrators"):
+        with pytest.raises(AuthorizationError, match="创建特权账号"):
             UserService.create_user({
                 "username": "blockedadmin",
                 "name": "无权限管理员",
@@ -88,13 +89,72 @@ def test_update_user_syncs_processes_and_protects_role_changes(client):
         detail = UserService.get_user_detail(user_id)
         assert detail["name"] == "已更新员工"
         assert [item["id"] for item in detail["assigned_processes"]] == [second_process]
+        assert db.execute(
+            "SELECT COUNT(*) FROM audit_logs WHERE action='update_user' AND target_id=?",
+            (user_id,),
+        ).fetchone()[0] == 1
 
         with pytest.raises(ValueError, match="Only administrators"):
             UserService.update_user(user_id, {"role": "admin"})
+        with pytest.raises(ValueError, match="active.*inactive"):
+            UserService.update_user(user_id, {"status": "deleted"}, _admin_id(db))
         with pytest.raises(ValueError, match="own role"):
             UserService.update_user(
                 _admin_id(db), {"role": "worker"}, current_user_id=_admin_id(db)
             )
+
+
+def test_admin_accounts_require_actual_admin_for_every_mutation(client):
+    with client.application.app_context():
+        db = get_db()
+        admin_id = _admin_id(db)
+        worker_id, _ = UserService.create_user({
+            "username": "adminmutationworker",
+            "name": "管理员变更越权员工",
+            "password": "Worker123",
+        })
+        custom_role_id = db.execute(
+            "INSERT INTO roles (name,code,permissions,status,level,is_builtin) "
+            "VALUES ('特权测试角色','privileged_test','[]','active',5,0)"
+        ).lastrowid
+        db.commit()
+
+        with pytest.raises(AuthorizationError, match="创建特权账号"):
+            UserService.create_user({
+                "username": "unauthorizedprivileged",
+                "name": "未授权特权账号",
+                "password": "Worker123",
+                "role_id": custom_role_id,
+                "_caller_user_id": worker_id,
+            })
+
+        second_admin_id, _ = UserService.create_user({
+            "username": "secondmutationadmin",
+            "name": "第二管理员",
+            "password": "Admin123",
+            "role": "admin",
+            "_caller_user_id": admin_id,
+        })
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
+            UserService.update_user(
+                second_admin_id, {"name": "越权改名"}, worker_id
+            )
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
+            UserService.batch_update_status(
+                [second_admin_id], "inactive", worker_id
+            )
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
+            UserService.batch_delete_users([second_admin_id], worker_id)
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
+            UserService.delete_user(second_admin_id, worker_id)
+
+        UserService.delete_user(second_admin_id, admin_id)
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
+            UserService.restore_user(second_admin_id, worker_id)
+        assert UserService.restore_user(second_admin_id, admin_id) is True
+
+        with pytest.raises(ConflictError, match="own status"):
+            UserService.update_user(admin_id, {"status": "inactive"}, admin_id)
 
 
 def test_batch_status_soft_delete_restore_and_permanent_delete(client):
@@ -218,7 +278,7 @@ def test_role_changes_require_admin_and_batch_is_atomic(client):
                 "WHERE r.code = 'admin' AND u.status = 'active'"
             ).fetchall()
         ]
-        with pytest.raises(ConflictError, match="deactivate all administrators"):
+        with pytest.raises(AuthorizationError, match="修改管理员账号"):
             UserService.batch_update_status(active_admin_ids, "inactive")
         with pytest.raises(ValueError, match="User not found"):
             UserService.batch_set_user_roles(
@@ -302,8 +362,10 @@ def test_reset_password_validates_strength_and_unlocks_account(client):
         db.commit()
 
         with pytest.raises(ValueError, match="at least 8"):
-            UserService.reset_password(user_id, "A1short")
-        new_password = UserService.reset_password(user_id, "NewPass123")
+            UserService.reset_password(user_id, "A1short", _admin_id(db))
+        new_password = UserService.reset_password(
+            user_id, "NewPass123", _admin_id(db)
+        )
         assert new_password == "NewPass123"
         row = db.execute(
             "SELECT password, failed_login_count, locked_until FROM users WHERE id = ?",
@@ -312,7 +374,7 @@ def test_reset_password_validates_strength_and_unlocks_account(client):
         assert bcrypt.checkpw(new_password.encode(), row["password"].encode())
         assert row["failed_login_count"] == 0
         assert row["locked_until"] is None
-        assert UserService.unlock_user(user_id) == "passworduser"
+        assert UserService.unlock_user(user_id, _admin_id(db)) == "passworduser"
 
 
 def test_import_export_and_document_lifecycle(client, tmp_path):
@@ -343,18 +405,154 @@ def test_import_export_and_document_lifecycle(client, tmp_path):
         assert UserService.export_users(role_filter="worker").getbuffer().nbytes > 0
 
         upload_dir = tmp_path / "documents"
-        storage = FileStorage(stream=io.BytesIO(b"certificate"), filename="certificate.txt")
+        storage = FileStorage(
+            stream=io.BytesIO(b"%PDF-1.4\ncertificate"), filename="certificate.pdf"
+        )
         uploaded = UserService.upload_user_document(
             user_id, storage, "certificate", _admin_id(db), str(upload_dir)
         )
-        assert uploaded["size"] == len(b"certificate")
+        assert uploaded["size"] == len(b"%PDF-1.4\ncertificate")
         document = UserService.list_user_documents(user_id)[0]
         metadata, filepath = UserService.get_user_document_file(
             user_id, document["id"], str(upload_dir)
         )
-        assert metadata["doc_name"] == "certificate.txt"
+        assert metadata["doc_name"] == "certificate.pdf"
         assert os.path.exists(filepath)
 
-        UserService.delete_user_document(user_id, document["id"], str(upload_dir))
-        assert not os.path.exists(filepath)
+        legacy_dir = tmp_path / "legacy-documents"
+        legacy_dir.mkdir()
+        legacy_filepath = legacy_dir / os.path.basename(filepath)
+        os.replace(filepath, legacy_filepath)
+        _, fallback_filepath = UserService.get_user_document_file(
+            user_id, document["id"], str(upload_dir), str(legacy_dir)
+        )
+        assert fallback_filepath == str(legacy_filepath)
+
+        UserService.delete_user_document(
+            user_id,
+            document["id"],
+            str(upload_dir),
+            _admin_id(db),
+            str(legacy_dir),
+        )
+        assert not os.path.exists(legacy_filepath)
         assert UserService.list_user_documents(user_id) == []
+        assert db.execute(
+            "SELECT COUNT(*) FROM audit_logs WHERE action IN ('upload_document','delete_document') "
+            "AND target_id=?",
+            (user_id,),
+        ).fetchone()[0] == 2
+
+
+def test_employee_document_rejects_invalid_content_and_size(client, tmp_path, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        user_id, _ = UserService.create_user({
+            "username": "documentguard",
+            "name": "附件边界员工",
+            "password": "Worker123",
+        })
+        upload_dir = tmp_path / "documents"
+
+        with pytest.raises(ValueError, match="内容与扩展名不一致"):
+            UserService.upload_user_document(
+                user_id,
+                FileStorage(stream=io.BytesIO(b"not a pdf"), filename="bad.pdf"),
+                "certificate",
+                _admin_id(db),
+                str(upload_dir),
+            )
+
+        monkeypatch.setattr(
+            "modules.services.user_service.EMPLOYEE_DOCUMENT_MAX_BYTES", 8
+        )
+        with pytest.raises(ValueError, match="最大允许 20MB"):
+            UserService.upload_user_document(
+                user_id,
+                FileStorage(stream=io.BytesIO(b"%PDF-1.4 too large"), filename="large.pdf"),
+                "certificate",
+                _admin_id(db),
+                str(upload_dir),
+            )
+        assert UserService.list_user_documents(user_id) == []
+        assert not [path for path in upload_dir.iterdir() if path.is_file()]
+
+
+def test_employee_document_upload_rolls_back_file_when_audit_fails(
+    client, tmp_path, monkeypatch
+):
+    with client.application.app_context():
+        db = get_db()
+        user_id, _ = UserService.create_user({
+            "username": "documentuploadaudit",
+            "name": "附件上传审计员工",
+            "password": "Worker123",
+        })
+        upload_dir = tmp_path / "documents"
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+
+        monkeypatch.setattr(
+            UserRepository, "insert_audit_log_txn", fail_audit
+        )
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            UserService.upload_user_document(
+                user_id,
+                FileStorage(
+                    stream=io.BytesIO(b"%PDF-1.4\ncertificate"),
+                    filename="certificate.pdf",
+                ),
+                "certificate",
+                _admin_id(db),
+                str(upload_dir),
+            )
+
+        assert UserService.list_user_documents(user_id) == []
+        assert not [path for path in upload_dir.iterdir() if path.is_file()]
+
+
+def test_employee_document_delete_restores_file_when_audit_fails(
+    client, tmp_path, monkeypatch
+):
+    with client.application.app_context():
+        db = get_db()
+        user_id, _ = UserService.create_user({
+            "username": "documentdeleteaudit",
+            "name": "附件删除审计员工",
+            "password": "Worker123",
+        })
+        upload_dir = tmp_path / "documents"
+        UserService.upload_user_document(
+            user_id,
+            FileStorage(
+                stream=io.BytesIO(b"%PDF-1.4\ncertificate"),
+                filename="certificate.pdf",
+            ),
+            "certificate",
+            _admin_id(db),
+            str(upload_dir),
+        )
+        document = UserService.list_user_documents(user_id)[0]
+        _, filepath = UserService.get_user_document_file(
+            user_id, document["id"], str(upload_dir)
+        )
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+
+        monkeypatch.setattr(
+            UserRepository, "insert_audit_log_txn", fail_audit
+        )
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            UserService.delete_user_document(
+                user_id,
+                document["id"],
+                str(upload_dir),
+                _admin_id(db),
+            )
+
+        assert os.path.exists(filepath)
+        assert len(UserService.list_user_documents(user_id)) == 1
+        quarantine_dir = upload_dir / ".quarantine"
+        assert not list(quarantine_dir.iterdir())

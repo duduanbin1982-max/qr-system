@@ -48,6 +48,36 @@ def create_master_data_release_batch():
     return jsonify(result), 201
 
 
+@app.route(
+    "/api/master-data-release-batches/<int:batch_id>/members/remove",
+    methods=["POST"],
+)
+@check_auth
+@check_permission("master_data_releases:create")
+@require_versioned_master_data_write
+@validate_json("master_data_release_member_remove")
+def remove_master_data_release_member(batch_id):
+    command = get_json_body()
+    result = MasterDataReleaseService.remove_member(batch_id, command, _actor())
+    _audit("master_data_release_member_remove", batch_id, command["reason"])
+    return jsonify(result)
+
+
+@app.route(
+    "/api/master-data-release-batches/<int:batch_id>/members/replace",
+    methods=["POST"],
+)
+@check_auth
+@check_permission("master_data_releases:create")
+@require_versioned_master_data_write
+@validate_json("master_data_release_member_replace")
+def replace_master_data_release_member(batch_id):
+    command = get_json_body()
+    result = MasterDataReleaseService.replace_member(batch_id, command, _actor())
+    _audit("master_data_release_member_replace", batch_id, command["reason"])
+    return jsonify(result)
+
+
 @app.route("/api/master-data-release-batches/<int:batch_id>/submit", methods=["POST"])
 @check_auth
 @check_permission("master_data_releases:submit")

@@ -9,6 +9,11 @@ from modules.process_fact_projection import (
     compatible_process_projection,
     warn_legacy_fact_rows,
 )
+from modules.approval_policy_projection import effective_snapshot as project_effective_snapshot
+
+
+def _has_column(db, table, column):
+    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
 
 
 class ScanRepository:
@@ -100,15 +105,36 @@ class ScanRepository:
     def get_work_fact_binding(order_id, process_id, db=None):
         """Return the exact order binding inherited by a new work fact."""
         db = resolve_db(db)
+        policy_fields = (
+            ",op.approval_policy_revision_id,op.approval_policy_source "
+            if _has_column(db, "order_processes", "approval_policy_revision_id")
+            else ",NULL AS approval_policy_revision_id,'legacy_unbound' AS approval_policy_source "
+        )
         return db.execute(
             "SELECT op.process_id,op.process_version_id,op.process_code_snapshot,"
             "op.process_name_snapshot,op.process_category_snapshot,"
             "order_row.route_id,order_row.route_version_id,"
             "order_row.route_name_snapshot "
+            + policy_fields +
             "FROM order_processes op JOIN orders order_row ON order_row.id=op.order_id "
             "WHERE op.order_id=? AND op.process_id=?",
             (order_id, process_id),
         ).fetchone()
+
+    @staticmethod
+    def get_user_position(user_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT user.position_id,COALESCE(position.name,'') AS position_name "
+            "FROM users user LEFT JOIN positions position "
+            "ON position.id=user.position_id WHERE user.id=?",
+            (user_id,),
+        ).fetchone()
+
+    @staticmethod
+    def database_now(db=None):
+        db = resolve_db(db)
+        return db.execute("SELECT datetime('now','localtime')").fetchone()[0]
 
     @staticmethod
     def find_order_process_id(order_id, process_id, db=None):
@@ -267,19 +293,42 @@ class ScanRepository:
         backfill_reason="",
         submit_position_id=None,
         submit_position_name="",
+        submit_position_version_id=None,
         fact_binding=None,
         db=None,
     ):
         db = resolve_db(db)
         binding = dict(fact_binding or {})
+        if not _has_column(db, "work_records", "approval_policy_revision_id"):
+            binding.pop("approval_policy_revision_id", None)
+            binding.pop("approval_policy_source", None)
+            cur = db.execute(
+                "INSERT INTO work_records "
+                "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
+                "report_source, actual_completed_at, backfill_reason, submit_position_id, "
+                "submit_position_name, submit_position_version_id, process_version_id, "
+                "process_code_snapshot, process_name_snapshot, process_category_snapshot, "
+                "route_id, route_version_id, route_name_snapshot, version_binding_source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (order_id, process_id, user_id, report_type, quantity, remark, work_status,
+                 serial_no, report_source, actual_completed_at, backfill_reason,
+                 submit_position_id, submit_position_name, submit_position_version_id,
+                 binding.get("process_version_id"), binding.get("process_code_snapshot", ""),
+                 binding.get("process_name_snapshot", ""), binding.get("process_category_snapshot", ""),
+                 binding.get("route_id"), binding.get("route_version_id"), binding.get("route_name_snapshot", ""),
+                 binding.get("version_binding_source", "captured" if binding.get("process_version_id") else "")),
+            )
+            return cur.lastrowid
         cur = db.execute(
             "INSERT INTO work_records "
             "(order_id, process_id, user_id, type, quantity, remark, status, serial_no, "
             "report_source, actual_completed_at, backfill_reason, "
-            "submit_position_id, submit_position_name, process_version_id, "
+            "submit_position_id, submit_position_name, submit_position_version_id, "
+            "process_version_id, "
             "process_code_snapshot, process_name_snapshot, process_category_snapshot, "
-            "route_id, route_version_id, route_name_snapshot, version_binding_source) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "route_id, route_version_id, route_name_snapshot, version_binding_source, "
+            "approval_policy_revision_id, approval_policy_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 order_id,
                 process_id,
@@ -294,6 +343,7 @@ class ScanRepository:
                 backfill_reason,
                 submit_position_id,
                 submit_position_name,
+                submit_position_version_id,
                 binding.get("process_version_id"),
                 binding.get("process_code_snapshot", ""),
                 binding.get("process_name_snapshot", ""),
@@ -305,6 +355,8 @@ class ScanRepository:
                     "version_binding_source",
                     "captured" if binding.get("process_version_id") else "",
                 ),
+                binding.get("approval_policy_revision_id"),
+                binding.get("approval_policy_source", "legacy_snapshot"),
             ),
         )
         return cur.lastrowid
@@ -326,6 +378,7 @@ class ScanRepository:
             "SELECT wr.id, wr.order_id, wr.process_id, wr.user_id, wr.serial_no, "
             "wr.quantity, wr.report_source, wr.actual_completed_at, wr.backfill_reason, "
             "wr.submit_position_id, wr.submit_position_name, "
+            "wr.submit_position_version_id, "
             "COALESCE(u.name, u.username, '') AS user_name "
             "FROM work_records wr LEFT JOIN users u ON u.id = wr.user_id "
             "LEFT JOIN order_processes op ON op.order_id = wr.order_id "
@@ -374,9 +427,36 @@ class ScanRepository:
         ).fetchone()
         if existing:
             return existing["id"]
+        if not _has_column(db, "approval_records", "approval_policy_revision_id"):
+            cur = db.execute(
+                "INSERT INTO approval_records (work_record_id,status) VALUES (?, 'pending')",
+                (work_record_id,),
+            )
+            return cur.lastrowid
+        work_record = db.execute(
+            "SELECT process_id,approval_policy_revision_id FROM work_records WHERE id=?", (work_record_id,)
+        ).fetchone()
+        revision_id = work_record["approval_policy_revision_id"] if work_record else None
+        if revision_id:
+            snapshot = {"require_approval": True, "approval_level": 1, "roles": [], "source": "bound_revision"}
+            if _has_column(db, "approval_policy_revisions", "id"):
+                revision = db.execute(
+                    "SELECT require_approval,approval_level FROM approval_policy_revisions WHERE id=?",
+                    (revision_id,),
+                ).fetchone()
+                if revision:
+                    snapshot.update({"require_approval": bool(revision[0]), "approval_level": revision[1]})
+        else:
+            snapshot, revision_id = project_effective_snapshot(
+                work_record["process_id"] if work_record else None, db=db
+            )
+        import json
         cur = db.execute(
-            "INSERT INTO approval_records (work_record_id, status) VALUES (?, 'pending')",
-            (work_record_id,),
+            "INSERT INTO approval_records "
+            "(work_record_id,status,approval_policy_revision_id,policy_source,policy_snapshot_json) "
+            "VALUES (?, 'pending', ?, ?, ?)",
+            (work_record_id, revision_id, snapshot.get("source", "default"),
+             json.dumps(snapshot, ensure_ascii=False, sort_keys=True)),
         )
         return cur.lastrowid
 

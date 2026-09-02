@@ -31,6 +31,11 @@ class ConflictError(DomainError):
     status_code = 409
 
 
+class AuthorizationError(DomainError):
+    code = "forbidden"
+    status_code = 403
+
+
 class LegacyLedgerReadOnlyError(ConflictError):
     code = "LEGACY_LEDGER_READ_ONLY"
 

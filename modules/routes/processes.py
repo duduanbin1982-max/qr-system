@@ -81,7 +81,9 @@ def create_process():
         pid = ProcessService.create_process(data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('create_process', 'process', pid, data.get('name', ''))
+    safe_audit_log(
+        'create_process', 'process', pid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '添加成功', 'id': pid})
 
 
@@ -104,7 +106,9 @@ def update_process(pid):
     """
     data = get_json_body()
     ProcessService.update_process(pid, data)
-    safe_audit_log('update_process', 'process', pid, str(data))
+    safe_audit_log(
+        'update_process', 'process', pid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '更新成功'})
 
 

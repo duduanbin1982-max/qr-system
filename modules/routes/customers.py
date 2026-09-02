@@ -100,7 +100,9 @@ def create_customer():
     """
     data = get_json_body()
     cid = CustomerService.create_customer(data)
-    safe_audit_log('create_customer', 'customer', cid, data.get('name', ''))
+    safe_audit_log(
+        'create_customer', 'customer', cid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '创建成功', 'id': cid})
 
 
@@ -149,7 +151,9 @@ def update_customer(cid):
     """
     data = get_json_body()
     CustomerService.update_customer(cid, data)
-    safe_audit_log('update_customer', 'customer', cid, str(data))
+    safe_audit_log(
+        'update_customer', 'customer', cid, {'changed_fields': sorted(data)}
+    )
     return jsonify({'message': '更新成功'})
 
 

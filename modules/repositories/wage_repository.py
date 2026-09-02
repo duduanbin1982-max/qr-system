@@ -75,7 +75,7 @@ class WageRepository:
             "AND u.id IN ("
             "SELECT ur.user_id FROM user_roles ur "
             "JOIN roles r ON ur.role_id = r.id "
-            "WHERE r.code = ?)"
+            "WHERE r.code = ? AND r.status = 'active')"
         )
         user_params = [cls.get_worker_role_code(db)]
         if employee_id:

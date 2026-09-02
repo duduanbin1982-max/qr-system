@@ -2,11 +2,13 @@
 import logging
 from datetime import datetime
 
-from modules.services.material_service import MaterialService
+from modules.repositories.position_version_repository import PositionVersionRepository
 from modules.repositories.scan_repository import ScanRepository
 from modules.services import BaseService
 from modules.services.inventory_auto_inbound_service import InventoryAutoInboundService
+from modules.services.material_service import MaterialService
 from modules.services.order_completion_service import OrderCompletionService
+from modules.services.position_snapshot_service import PositionSnapshotService
 
 
 _logger = logging.getLogger(__name__)
@@ -213,6 +215,9 @@ class WorkReportWriter:
     @staticmethod
     def _write_normal_report(helper, command, db):
         work_status = "pending" if command.need_approval else "approved"
+        position_id, position_name, position_version_id = (
+            WorkReportWriter._position_binding(command, db)
+        )
         wr_id = helper.insert_work_record(
             command.order_id,
             command.process_id,
@@ -225,8 +230,9 @@ class WorkReportWriter:
             command.report_source,
             command.actual_completed_at,
             command.backfill_reason,
-            command.submit_position_id,
-            command.submit_position_name,
+            position_id,
+            position_name,
+            position_version_id,
             db=db,
         )
 
@@ -240,6 +246,37 @@ class WorkReportWriter:
                     wr_id,
                     validate_policy=False,
                 )
+
+    @staticmethod
+    def _position_binding(command, db):
+        position_id = command.submit_position_id
+        fallback_name = command.submit_position_name
+        if position_id is None:
+            row = WorkReportWriter._scan_repository().get_user_position(
+                command.user_id, db=db
+            )
+            if row:
+                position_id = row["position_id"]
+                fallback_name = row["position_name"] or fallback_name
+        if position_id is None:
+            return None, fallback_name, None
+
+        root = PositionVersionRepository.root(position_id, db=db)
+        if root:
+            fallback_name = root.get("name") or fallback_name
+        occurred_at = command.actual_completed_at or (
+            WorkReportWriter._scan_repository().database_now(db=db)
+        )
+        version = PositionSnapshotService.version_at(
+            position_id, occurred_at, db=db
+        )
+        if version is None:
+            current = PositionVersionRepository.current_version(position_id, db=db)
+            if current and current.get("status") == "retired":
+                version = current
+        if version:
+            return int(position_id), version["name"], int(version["id"])
+        return int(position_id), fallback_name, None
 
     @staticmethod
     def apply_approved_normal_report(command, db, work_record_id=None, validate_policy=True):

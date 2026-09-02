@@ -249,6 +249,102 @@ class TestScanWorkFlow:
             True,
         ]
 
+    def test_retired_position_can_finish_its_version_bound_open_order(
+        self, client, worker_auth_headers
+    ):
+        order_id, order_no, process_ids = _seed_order_mode_two_step_order(client)
+        process_id = process_ids[0]
+        with client.application.app_context():
+            db = get_db()
+            worker = db.execute(
+                "SELECT id FROM users WHERE username='testworker'"
+            ).fetchone()
+            position_id = db.execute(
+                "INSERT INTO positions(name,description,status) VALUES (?, '', 'inactive')",
+                (f"Retired WIP Position {uuid.uuid4().hex[:6]}",),
+            ).lastrowid
+            root = db.execute(
+                "SELECT position_code FROM positions WHERE id=?", (position_id,)
+            ).fetchone()
+            version_id = db.execute(
+                "INSERT INTO position_versions("
+                "position_id,version,position_code_snapshot,name,status,content_digest) "
+                "VALUES (?,1,?,?,'draft',?)",
+                (
+                    position_id,
+                    root["position_code"],
+                    "Retired WIP Position",
+                    f"retired-wip-{position_id}",
+                ),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO position_version_processes("
+                "position_version_id,process_id,seq_order) VALUES (?,?,1)",
+                (version_id, process_id),
+            )
+            db.execute(
+                "INSERT INTO position_processes(position_id,process_id) VALUES (?,?)",
+                (position_id, process_id),
+            )
+            db.execute(
+                "UPDATE position_versions SET status='published' WHERE id=?",
+                (version_id,),
+            )
+            db.execute(
+                "UPDATE positions SET status='active',lifecycle_status='active',"
+                "current_effective_version_id=? WHERE id=?",
+                (version_id, position_id),
+            )
+            process_version_id = db.execute(
+                "SELECT current_effective_version_id FROM processes WHERE id=?",
+                (process_id,),
+            ).fetchone()["current_effective_version_id"]
+            db.execute(
+                "UPDATE process_versions SET status='retired' WHERE id=?",
+                (process_version_id,),
+            )
+            db.execute(
+                "UPDATE processes SET status='inactive',lifecycle_status='retired' "
+                "WHERE id=?",
+                (process_id,),
+            )
+            db.execute(
+                "UPDATE position_versions SET status='retired' WHERE id=?",
+                (version_id,),
+            )
+            db.execute(
+                "UPDATE positions SET status='inactive',lifecycle_status='retired' "
+                "WHERE id=?",
+                (position_id,),
+            )
+            db.execute(
+                "UPDATE users SET position_id=? WHERE id=?",
+                (position_id, worker["id"]),
+            )
+            db.commit()
+
+        scan = client.post(
+            "/api/mobile/scan", headers=worker_auth_headers, json={"code": order_no}
+        )
+
+        assert scan.status_code == 200, scan.get_json()
+        assert scan.get_json()["order"]["active_position"]["id"] == position_id
+        assert scan.get_json()["order"]["current_process"]["process_id"] == process_id
+
+        report = client.post(
+            "/api/mobile/report",
+            headers=worker_auth_headers,
+            json={
+                "order_id": order_id,
+                "process_id": process_id,
+                "quantity": 1,
+                "report_type": "normal",
+                "submit_position_id": position_id,
+                "submit_position_name": "Retired WIP Position",
+            },
+        )
+        assert report.status_code == 200, report.get_json()
+
     def test_sequential_mobile_report_rejects_skipped_process(self, client, worker_auth_headers):
         order_id, _, process_ids = _seed_order_mode_two_step_order(client)
         _set_process_order_config(client, "sequential", previous_limit="1")

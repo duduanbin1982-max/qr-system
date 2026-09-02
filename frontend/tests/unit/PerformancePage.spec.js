@@ -248,9 +248,9 @@ describe('PerformancePage versioned ledger', () => {
       row_version: 4,
       idempotency_key: expect.stringMatching(/^performance-ui:submit-supervisor-review:/),
     }))
-    expect(mocks.listPerformanceBatches).toHaveBeenCalledTimes(2)
-    expect(mocks.performanceBatchDetail).toHaveBeenCalledTimes(2)
     expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('冲突'), 'error')
+    expect(wrapper.get('[data-testid="batch-action-submit-review"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('草稿')
   })
 
   it('never offers a direct close action for improvement plans', async () => {

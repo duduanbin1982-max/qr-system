@@ -139,6 +139,20 @@ class ProcessVersionRepository:
         return dict(row) if row else None
 
     @staticmethod
+    def pending_routes_for_process_version(process_version_id, db=None):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT DISTINCT route_version.* FROM process_route_versions route_version "
+            "JOIN process_route_version_items item "
+            "ON item.route_version_id=route_version.id "
+            "WHERE item.process_version_id=? "
+            "AND route_version.status='pending_approval' "
+            "ORDER BY route_version.process_route_id,route_version.version,route_version.id",
+            (process_version_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
     def list_versions(process_id, db=None):
         db = resolve_db(db)
         rows = db.execute(

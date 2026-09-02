@@ -5,7 +5,7 @@
       <div class="card">
         <div class="card-header">
           <h3>👔 角色组管理</h3>
-          <button class="btn btn-primary btn-sm" @click="openAddGroup">+ 新增角色组</button>
+          <button v-if="canCreate" class="btn btn-primary btn-sm" @click="openAddGroup">+ 新增角色组</button>
         </div>
         <div class="card-body">
           <div v-if="groupLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
@@ -21,7 +21,7 @@
                       <td style="color:var(--text-placeholder)">{{ g.description || '-' }}</td>
                       <td><span class="badge" :class="g.status==='active'?'completed':'pending'">{{ g.status==='active'?'启用':'停用' }}</span></td>
                       <td style="text-align:center" @click.stop>
-                        <button class="o-abtn edit" @click="openEditGroup(g)">✏️</button>
+                        <button v-if="canEdit" class="o-abtn edit" @click="openEditGroup(g)" title="编辑">✏️</button>
                         <button v-if="canDeleteGroup(g.id)" class="o-abtn del" @click="deleteGroup(g.id)" title="删除">🗑️</button>
                       </td>
                     </tr>
@@ -83,7 +83,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="showGroupModal=false">取消</button>
-          <button class="btn btn-primary" @click="saveGroup">💾 保存</button>
+          <button v-if="groupModalEdit ? canEdit : canCreate" class="btn btn-primary" @click="saveGroup">💾 保存</button>
         </div>
       </div>
     </div>

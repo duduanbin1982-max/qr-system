@@ -21,6 +21,62 @@ test('administrator can open all previously blank critical pages', async ({ page
   expect(failures).toEqual([])
 })
 
+test('administrator management separates system and service accounts', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+  await openSidebarPage(page, '系统设置', '系统设置')
+
+  const main = page.locator('.main-content')
+  await main.locator('.tab-btn').filter({ hasText: '管理员管理' }).click()
+  await expect(main.locator('.account-mode-tabs')).toBeVisible()
+  await expect(main.locator('.card-header h3').filter({ hasText: '系统管理员' })).toBeVisible()
+
+  const administratorRow = main.locator('.data-table tbody tr').filter({ hasText: 'e2eadmin' })
+  await expect(administratorRow).toContainText('系统管理员')
+
+  await main.getByRole('button', { name: '业务专用账号', exact: true }).click()
+  await expect(main.locator('.card-header h3').filter({ hasText: '业务专用账号' })).toBeVisible()
+  await expect(main).not.toContainText('e2eadmin')
+
+  await main.locator('.tab-btn').filter({ hasText: '角色管理' }).click()
+  await expect(main).toContainText('角色管理')
+  expect(failures).toEqual([])
+})
+
+test('company profile creates a versioned revision with audit history access', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+  await openSidebarPage(page, '系统设置', '系统设置')
+
+  const main = page.locator('.main-content')
+  await main.locator('.tab-btn').filter({ hasText: '公司资料' }).click()
+  await expect(main.locator('.company-info-page')).toBeVisible()
+  await expect(main).toContainText('完整历史')
+
+  const saveButton = main.getByRole('button', { name: '保存资料', exact: true })
+  await expect(saveButton).toBeDisabled()
+  await main.getByLabel('公司名称').fill('E2E 版本化公司资料')
+  await expect(saveButton).toBeEnabled()
+  await saveButton.click()
+
+  await expect(main).toContainText('V2')
+  const latestRevision = main.locator('.history-table tbody tr').first()
+  await expect(latestRevision).toContainText('E2E 版本化公司资料')
+  await expect(latestRevision).toContainText('公司名称')
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const shell = main.locator('.company-info-page')
+    const box = await shell.boundingBox()
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+  }
+  expect(failures).toEqual([])
+})
+
 test('quality management loads every workflow tab without runtime failures', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginAdmin(page)

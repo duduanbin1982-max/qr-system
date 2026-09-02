@@ -89,6 +89,57 @@ def test_latest_version_matches_highest_registered_migration():
     assert migrations.LATEST_VERSION == max(version for version, _, _ in migrations.MIGRATIONS)
 
 
+def test_migration_catalog_declares_and_validates_the_linear_dependency_chain():
+    from modules import migrations
+    from modules.migration_catalog import (
+        MIGRATION_DEPENDENCIES,
+        MIGRATION_VERSION_CHAIN,
+    )
+    from modules.migration_planning import validate_registry
+
+    versions = tuple(version for version, _, _ in migrations.MIGRATIONS)
+    assert versions == MIGRATION_VERSION_CHAIN
+    assert MIGRATION_DEPENDENCIES[1] == ()
+    assert MIGRATION_DEPENDENCIES[13] == (1,)
+    assert MIGRATION_DEPENDENCIES[73] == (72,)
+    assert MIGRATION_DEPENDENCIES[74] == (73,)
+    assert validate_registry(migrations.MIGRATIONS, MIGRATION_DEPENDENCIES) == migrations.MIGRATIONS
+
+
+def test_migration_registry_rejects_unknown_and_forward_dependencies():
+    from modules.migration_planning import validate_registry
+
+    migration = lambda db: None
+    registry = [(1, "first", migration), (2, "second", migration)]
+    with pytest.raises(RuntimeError, match="unknown dependencies"):
+        validate_registry(registry, {1: (), 2: (99,)})
+    with pytest.raises(RuntimeError, match="non-predecessors"):
+        validate_registry(registry, {1: (2,), 2: ()})
+
+
+def test_read_only_migration_plan_does_not_modify_database(tmp_path):
+    from scripts.plan_migrations import inspect_plan
+
+    database = tmp_path / "production.db"
+    db = sqlite3.connect(database)
+    try:
+        db.execute("CREATE TABLE marker (id INTEGER PRIMARY KEY, value TEXT)")
+        db.execute("INSERT INTO marker (value) VALUES ('unchanged')")
+        db.execute("PRAGMA user_version=70")
+        db.commit()
+    finally:
+        db.close()
+    before = database.read_bytes()
+
+    report = inspect_plan(database)
+
+    assert report["connection_mode"] == "read-only"
+    assert report["current_version"] == 70
+    assert report["target_version"] == 77
+    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77]
+    assert database.read_bytes() == before
+
+
 def test_user_management_migration_blocks_normalized_employee_number_duplicates():
     from modules.migration_user_management import (
         m059_harden_user_identity_and_retention,
@@ -190,17 +241,23 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_payroll_ledger",
             "modules.migration_performance_department",
             "modules.migration_user_management",
-            "modules.migration_process_versioning",
+            "modules.migration_process_versioning_v060",
+            "modules.migration_process_versioning_v061",
+            "modules.migration_process_versioning_v062",
+            "modules.migration_process_versioning_v063",
             "modules.migration_product_integrity",
+            "modules.migration_company_profile",
+            "modules.migration_audit",
+            "modules.migration_process_config",
+            "modules.migration_role_group_permissions",
+            "modules.migration_role_management",
+            "modules.migration_position_versioning",
+            "modules.migration_approval_policy",
+            "modules.migration_pending_route_price_v074",
+            "modules.migration_process_content_digest_v075",
             "modules.migration_schedule_capacity",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
-
-
-def test_product_integrity_is_database_version_66():
-    from modules import migrations
-
-    assert migrations.LATEST_VERSION == 66
 
 
 def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
@@ -223,6 +280,26 @@ def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
         assert {"difficulty_factor", "schedule_run_key", "process_line_id"}.issubset(columns)
     finally:
         db.close()
+def test_audit_event_and_process_config_migration_versions_are_stable():
+    from modules import migrations
+
+    by_version = {
+        version: migration_fn.__module__
+        for version, _, migration_fn in migrations.MIGRATIONS
+    }
+    assert by_version[66] == "modules.migration_audit"
+    assert by_version[67] == "modules.migration_process_config"
+    assert by_version[68] == "modules.migration_role_group_permissions"
+    assert by_version[69] == "modules.migration_role_management"
+    assert by_version[70] == "modules.migration_position_versioning"
+    assert by_version[71] == "modules.migration_approval_policy"
+    assert by_version[72] == "modules.migration_approval_policy"
+    assert by_version[73] == "modules.migration_approval_policy"
+    assert by_version[74] == "modules.migration_pending_route_price_v074"
+    assert by_version[75] == "modules.migration_process_content_digest_v075"
+    assert by_version[76] == "modules.migration_schedule_capacity"
+    assert by_version[77] == "modules.migration_schedule_capacity"
+    assert migrations.LATEST_VERSION == 77
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

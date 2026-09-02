@@ -1,3 +1,5 @@
+import { defineComponent, h } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useInventory } from '@/composables/useInventory.js'
@@ -38,6 +40,17 @@ vi.mock('@/lib/api.js', () => ({
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
 vi.mock('@/lib/auth.js', () => ({ can: () => true }))
 
+function mountHarness() {
+  let state
+  const harness = defineComponent({
+    setup() {
+      state = useInventory()
+      return () => h('div')
+    },
+  })
+  return { wrapper: mount(harness), get state() { return state } }
+}
+
 
 describe('inventory composable contracts', () => {
   beforeEach(() => {
@@ -57,17 +70,22 @@ describe('inventory composable contracts', () => {
     mocks.listLocations.mockResolvedValue({
       locations: [{ location: 'A-01', item_count: 2 }, { location: 'B-02', item_count: 1 }],
     })
-    const inventory = useInventory()
+    const harness = mountHarness()
+    await flushPromises()
+    const inventory = harness.state
 
     await inventory.loadTurnover()
     await inventory.loadLocations()
 
     expect(inventory.turnoverData.value).toEqual([{ id: 1, turnover_rate: 2 }])
     expect(inventory.locations.value).toEqual(['A-01', 'B-02'])
+    harness.wrapper.unmount()
   })
 
   it('normalizes an empty order id on create and strips audited fields on edit', async () => {
-    const inventory = useInventory()
+    const harness = mountHarness()
+    await flushPromises()
+    const inventory = harness.state
     inventory.openAdd()
     Object.assign(inventory.form.value, { product_model: 'MODEL-1', quantity: 3, order_id: '' })
     await inventory.save()
@@ -81,6 +99,7 @@ describe('inventory composable contracts', () => {
     const updatePayload = mocks.updateInventory.mock.calls[0][1]
     expect(updatePayload).not.toHaveProperty('quantity')
     expect(updatePayload).not.toHaveProperty('order_id')
+    harness.wrapper.unmount()
   })
 
   it('opens, records, and approves a persistent count task', async () => {
@@ -98,7 +117,9 @@ describe('inventory composable contracts', () => {
     mocks.approveCountTask.mockResolvedValue({
       task: { ...counting.task, status: 'posted' }, items: [],
     })
-    const inventory = useInventory()
+    const harness = mountHarness()
+    await flushPromises()
+    const inventory = harness.state
 
     await inventory.doCount()
     inventory.countItems.value[0].actual_qty = 4
@@ -110,5 +131,6 @@ describe('inventory composable contracts', () => {
     })
     expect(mocks.approveCountTask).toHaveBeenCalledWith(4)
     expect(inventory.countTask.value.status).toBe('posted')
+    harness.wrapper.unmount()
   })
 })

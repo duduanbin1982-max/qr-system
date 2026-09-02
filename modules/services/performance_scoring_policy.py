@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 
+from modules.domain import evidence_protocol
 from modules.domain.performance_policy import (
     ELIGIBILITY_ELIGIBLE,
     ELIGIBILITY_INSUFFICIENT_DATA,
@@ -217,13 +218,7 @@ class PerformanceScoringPolicy:
 
     @staticmethod
     def canonical_json(value):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return evidence_protocol.canonical_json_v1(value)
 
     @classmethod
     def _number(cls, value, field_name, default=None):

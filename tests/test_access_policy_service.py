@@ -2,7 +2,9 @@ import logging
 
 from modules.access_policy import collect_permission_codes, has_permission_code, resolve_process_scope
 import modules.services.access_policy_service as access_policy_module
+import modules.services.position_access_service as position_access_module
 from modules.services.access_policy_service import AccessPolicyService
+from modules.services.position_access_service import PositionAccessService
 
 
 class FakeAccessPolicyRepository:
@@ -14,7 +16,7 @@ class FakeAccessPolicyRepository:
     requested_user_id = None
 
     @staticmethod
-    def get_permission_rows(user_id):
+    def get_permission_rows(user_id, db=None):
         return FakeAccessPolicyRepository.permission_rows
 
     @staticmethod
@@ -27,12 +29,19 @@ class FakeAccessPolicyRepository:
         return FakeAccessPolicyRepository.existing_rows
 
     @staticmethod
-    def list_user_process_ids(user_id):
+    def list_user_process_ids(user_id, db=None):
         FakeAccessPolicyRepository.requested_user_id = user_id
         return FakeAccessPolicyRepository.user_process_rows
 
+    @staticmethod
+    def list_active_existing_process_ids(process_ids, db=None):
+        FakeAccessPolicyRepository.requested_process_ids = process_ids
+        allowed = {row["id"] for row in FakeAccessPolicyRepository.existing_rows}
+        allowed.update(row["id"] for row in FakeAccessPolicyRepository.user_process_rows)
+        return [{"id": value} for value in process_ids if value in allowed]
 
-def test_collect_permission_codes_merges_role_and_group_permissions(caplog):
+
+def test_collect_permission_codes_ignores_legacy_group_permissions(caplog):
     caplog.set_level(logging.WARNING)
     rows = [
         {"role_perms": '["orders:view", "orders:edit"]', "group_perms": '["page:production"]'},
@@ -41,8 +50,24 @@ def test_collect_permission_codes_merges_role_and_group_permissions(caplog):
 
     permissions = collect_permission_codes(rows, user_id=7)
 
-    assert permissions == ["orders:edit", "orders:view", "page:production"]
+    assert permissions == [
+        "orders:edit",
+        "orders:view",
+        "page:production",
+        "page:production.orders",
+    ]
     assert "invalid role_perms JSON for user 7" in caplog.text
+
+
+def test_collect_permission_codes_materializes_implied_page_chain():
+    permissions = collect_permission_codes(
+        [{"role_perms": '["roles:edit"]', "group_perms": "[]"}],
+        user_id=8,
+    )
+    assert "roles:edit" in permissions
+    assert "roles:view" in permissions
+    assert "page:settings" in permissions
+    assert "page:settings.role-manage" in permissions
 
 
 def test_has_permission_code_supports_wildcard():
@@ -78,10 +103,14 @@ def test_access_policy_service_uses_repository_only_in_service_layer(monkeypatch
     FakeAccessPolicyRepository.requested_process_ids = None
     FakeAccessPolicyRepository.requested_user_id = None
     monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
+    monkeypatch.setattr(position_access_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
 
     user = {"id": 9, "process_ids": "12,99"}
 
-    assert AccessPolicyService.get_user_permissions(user) == ["page:quality", "quality:view"]
+    assert AccessPolicyService.get_user_permissions(user) == [
+        "page:quality-management",
+        "quality:view",
+    ]
     assert AccessPolicyService.has_permission(user, "quality:view") is True
     assert AccessPolicyService.get_user_process_ids(user) == [12]
     assert FakeAccessPolicyRepository.requested_process_ids == [12, 99]
@@ -95,6 +124,12 @@ def test_access_policy_service_merges_user_processes_junction(monkeypatch):
     FakeAccessPolicyRepository.user_process_rows = [{"id": 12}]
     FakeAccessPolicyRepository.requested_user_id = None
     monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
+    monkeypatch.setattr(position_access_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
+    monkeypatch.setattr(
+        PositionAccessService,
+        "new_business_process_ids",
+        staticmethod(lambda position_id, db=None: [3]),
+    )
 
     user = {"id": 9, "process_ids": "", "position_id": 2}
 
@@ -108,6 +143,7 @@ def test_access_policy_service_returns_global_scope_for_global_permission(monkey
     FakeAccessPolicyRepository.existing_rows = []
     FakeAccessPolicyRepository.user_process_rows = []
     monkeypatch.setattr(access_policy_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
+    monkeypatch.setattr(position_access_module, "AccessPolicyRepository", FakeAccessPolicyRepository)
     monkeypatch.setattr(access_policy_module, "GLOBAL_DATA_SCOPE_PERMS", {"reports:view"})
 
     assert AccessPolicyService.get_user_process_ids({"id": 10}) is None

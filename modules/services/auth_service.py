@@ -4,6 +4,7 @@ CRITICAL FIX: 所有写操作接受可选 db 参数，仅独立调用时自行 c
 import bcrypt, secrets, hashlib
 from modules.services import BaseService
 from modules.repositories.auth_repository import AuthRepository
+from modules.audit_writer import insert_audit_log
 
 
 class AuthService:
@@ -117,7 +118,24 @@ class AuthService:
 
     @staticmethod
     def change_password(user_id, new_hash, db=None):
-        d = AuthService._db(db)
-        AuthRepository.change_password(user_id, new_hash, db=d)
-        if db is None:
-            d.commit()
+        if db is not None:
+            AuthRepository.change_password(user_id, new_hash, db=db)
+            insert_audit_log(
+                db,
+                user_id,
+                "change_password",
+                "user",
+                user_id,
+                {"password_changed": True},
+            )
+            return
+        with BaseService.transaction() as transaction:
+            AuthRepository.change_password(user_id, new_hash, db=transaction)
+            insert_audit_log(
+                transaction,
+                user_id,
+                "change_password",
+                "user",
+                user_id,
+                {"password_changed": True},
+            )

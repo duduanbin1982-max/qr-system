@@ -2,6 +2,7 @@
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.dashboard_repository import DashboardRepository
+from modules.services.company_profile_service import CompanyProfileService
 
 
 class DashboardService:
@@ -88,13 +89,11 @@ class DashboardService:
         db = BaseService.db()
         today = datetime.now().strftime("%Y-%m-%d")
 
-        company = DashboardRepository.get_company_name(db=db)
-
         return {
             "stats": DashboardService._get_dashboard_stats(db, today),
             "security": DashboardService._get_dashboard_security(db, today),
             "recent_records": DashboardService._get_dashboard_recent(db),
-            "company_name": company["value"] if company else "",
+            "company_name": CompanyProfileService.get_public_profile()["company_name"],
             "delivery_warnings": DashboardService._get_dashboard_warnings(db, today),
             "quick_actions": DashboardService._get_quick_actions(user),
         }

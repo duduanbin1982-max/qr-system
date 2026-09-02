@@ -3,16 +3,17 @@ qr-system — 系统设置
 
 注：Swagger docstring 仅供文档参考。
 """
-from flask import request, jsonify
+from flask import g, request, jsonify
 
+from modules.domain.errors import DomainError
 from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
     get_json_body,
-    safe_audit_log,
 )
-from modules.services.setting_service import SettingsService, ALLOWED_KEYS
+from modules.services.company_profile_service import CompanyProfileService
+from modules.services.setting_service import SettingsService
 
 @app.route('/api/settings/public', methods=['GET'])
 def get_public_settings():
@@ -29,7 +30,7 @@ def get_public_settings():
       - Bearer: []
     """
     return jsonify({
-        'company_name': SettingsService.get_value('company_name', ''),
+        **CompanyProfileService.get_public_profile(),
     })
 
 
@@ -50,16 +51,21 @@ def get_settings():
 @check_auth
 @check_permission('settings:manage')
 def save_settings():
-    data = get_json_body()
+    raw_data = request.get_json(force=True, silent=True)
+    if not isinstance(raw_data, dict):
+        return jsonify({'error': '提交数据必须是对象'}), 400
+    data = dict(raw_data)
     if not data:
         return jsonify({'error': '提交数据为空'}), 400
 
     deleted_keys = data.pop('_deleted_keys', [])
     if not isinstance(deleted_keys, list):
-        deleted_keys = []
+        return jsonify({'error': '_deleted_keys 必须是数组'}), 400
 
     try:
-        SettingsService.save(data, deleted_keys)
+        SettingsService.save(data, deleted_keys, actor=g.current_user)
+    except DomainError:
+        raise
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -68,37 +74,40 @@ def save_settings():
     except Exception:
         pass
 
-    parts = [f'{k}={str(v)[:80]}' for k, v in data.items()]
-    if deleted_keys:
-        parts.append(f'_deleted={",".join(deleted_keys[:20])}')
-    safe_audit_log('save_settings', detail=', '.join(parts)[:1900])
     return jsonify({'message': '保存成功'})
 
 
-@app.route('/api/settings/company-info', methods=['POST'])
+@app.route('/api/settings/company-info', methods=['GET'])
 @check_auth
-@check_permission('settings:manage')
+@check_permission('company_info:view')
+def get_company_info():
+    return jsonify({'profile': CompanyProfileService.get_profile()})
+
+
+@app.route('/api/settings/company-info/history', methods=['GET'])
+@check_auth
+@check_permission('company_info:view')
+def get_company_info_history():
+    from modules.route_decorators import has_permission
+
+    return jsonify(CompanyProfileService.list_revisions(
+        allow_sensitive_history=has_permission(
+            g.current_user, 'company_info:audit_history'
+        ),
+        limit=request.args.get('limit', 100),
+    ))
+
+
+@app.route('/api/settings/company-info', methods=['PUT', 'POST'])
+@check_auth
+@check_permission('company_info:edit')
 def save_company_info():
-    """Save only company info fields (scoped)."""
+    """Update scoped company fields with optimistic concurrency control."""
     data = get_json_body()
     if not data:
         return jsonify({'error': '提交数据为空'}), 400
-
-    COMPANY_KEYS = {'company_name', 'contact', 'phone', 'address', 'description'}
-    filtered = {k: v for k, v in data.items() if k in COMPANY_KEYS}
-
-    try:
-        SettingsService.save(filtered, [])
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-
-    try:
-        SettingsService.clear_cache()
-    except Exception:
-        pass
-
-    parts = [f'{k}={str(v)[:80]}' for k, v in filtered.items()]
-    safe_audit_log('save_company_info', detail=', '.join(parts)[:1900])
-    return jsonify({'message': '保存成功'})
+    version = data.pop('version', None)
+    result = CompanyProfileService.update_profile(data, version, g.current_user)
+    return jsonify({**result, 'message': '保存成功'})
 
 # ============================================================

@@ -59,7 +59,6 @@ def _route(**overrides):
         ("draft", "pending_approval"),
         ("draft", "cancelled"),
         ("pending_approval", "published"),
-        ("pending_approval", "rejected"),
         ("published", "superseded"),
         ("published", "retired"),
     ],
@@ -72,6 +71,19 @@ def test_process_and_route_version_state_transitions_allow_only_workflow_edges(c
 
     assert validate_process_version_transition(current, target) == target
     assert validate_route_version_transition(current, target) == target
+
+
+def test_process_rejection_is_terminal_but_route_rejection_returns_to_draft():
+    from modules.domain.process_versioning import (
+        RouteVersionImmutableError,
+        validate_process_version_transition,
+        validate_route_version_transition,
+    )
+
+    assert validate_process_version_transition("pending_approval", "rejected") == "rejected"
+    assert validate_route_version_transition("pending_approval", "draft") == "draft"
+    with pytest.raises(RouteVersionImmutableError):
+        validate_route_version_transition("pending_approval", "rejected")
 
 
 @pytest.mark.parametrize("target", ["draft", "pending_approval"])

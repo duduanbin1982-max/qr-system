@@ -8,7 +8,7 @@ from modules.route_decorators import (
     safe_audit_log,
 )
 from modules.permission_catalog import build_permission_payload
-from modules.services.audit_log_service import AuditLogService
+from modules.services.menu_permission_service import MenuPermissionService
 
 
 # ============================================================
@@ -27,7 +27,7 @@ def list_permissions():
 @check_auth
 @check_permission("settings:manage")
 def list_menu_permissions():
-    return jsonify({"items": AuditLogService.list_menu_permissions()})
+    return jsonify({"items": MenuPermissionService.list_items()})
 
 
 @app.route("/api/menu-permissions", methods=["POST"])
@@ -36,7 +36,7 @@ def list_menu_permissions():
 def create_menu_permission():
     data = get_json_body()
     try:
-        AuditLogService.create_menu_permission(data)
+        MenuPermissionService.create(data)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     safe_audit_log("create_menu_permission", "menu", 0, data.get("page", ""))
@@ -48,7 +48,7 @@ def create_menu_permission():
 @check_permission("settings:manage")
 def update_menu_permission(page):
     data = get_json_body()
-    AuditLogService.update_menu_permission(page, data)
+    MenuPermissionService.update(page, data)
     safe_audit_log("update_menu_permission", "menu", 0, f"{page} updated")
     return jsonify({"message": "updated"})
 
@@ -58,7 +58,7 @@ def update_menu_permission(page):
 @check_permission("settings:manage")
 def delete_menu_permission(page):
     try:
-        AuditLogService.delete_menu_permission(page)
+        MenuPermissionService.delete(page)
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     safe_audit_log("delete_menu_permission", "menu", 0, page)
@@ -73,6 +73,6 @@ def batch_update_menu_permissions():
     items = data.get("items", [])
     if not isinstance(items, list):
         return jsonify({"error": "items must be array"}), 400
-    AuditLogService.batch_update_menu_permissions(items)
+    MenuPermissionService.batch_update(items)
     safe_audit_log("batch_update_menu_permissions", "menu", 0, f"{len(items)} items")
     return jsonify({"message": f"已保存 {len(items)} 条菜单配置"})

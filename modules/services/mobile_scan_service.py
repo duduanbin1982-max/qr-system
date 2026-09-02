@@ -59,10 +59,12 @@ class MobileScanService:
         if order_data.get("status") == "completed":
             return {"error": "订单已完成并归档，如需继续报工请先重新打开订单"}, 400
 
-        user_process_ids = get_user_process_ids(user)
+        user_process_ids = get_user_process_ids(user, order_id=order_data["id"])
         if not ScanHelperService.check_order_scope(order_data["id"], user_process_ids):
             return {"error": "您无权查看此订单"}, 403
-        position_context = ActivePositionService.get_context(user)
+        position_context = ActivePositionService.get_context(
+            user, order_id=order_data["id"]
+        )
         active_position = position_context.get("active_position")
         preferred_process_ids = (
             active_position.get("process_ids") if active_position else None

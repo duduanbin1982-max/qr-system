@@ -57,7 +57,7 @@ def register_error_handlers(app):
 
     @app.errorhandler(413)
     def too_large(e):
-        return jsonify({'error': '请求体过大，最大允许 16MB'}), 413
+        return jsonify({'error': '员工附件最大允许 20MB'}), 413
 
     @app.errorhandler(429)
     def rate_limited(e):

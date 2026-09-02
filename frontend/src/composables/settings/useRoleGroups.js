@@ -1,6 +1,7 @@
 // useRoleGroups.js
 import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '@/lib/api.js'
+import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
 
 export function useRoleGroups() {
@@ -9,8 +10,11 @@ export function useRoleGroups() {
   const groupLoading = ref(false)
   const showGroupModal = ref(false)
   const groupModalEdit = ref(false)
-  const groupForm = reactive({ name:'', description:'', parent_id:null, status:'active', permissions:'' })
+  const groupForm = reactive({ name:'', description:'', parent_id:null, status:'active' })
   const expandedGroup = ref(null)
+  const canCreate = computed(() => can('role_groups:create'))
+  const canEdit = computed(() => can('role_groups:edit'))
+  const canDelete = computed(() => can('role_groups:delete'))
 
   const groupRoles = computed(() =>
     expandedGroup.value
@@ -33,7 +37,7 @@ export function useRoleGroups() {
   })
 
   const canDeleteGroup = (gid) => {
-    return (roleCountByGroup.value[gid]||0) === 0 && (childrenCountByGroup.value[gid]||0) === 0
+    return canDelete.value && (roleCountByGroup.value[gid]||0) === 0 && (childrenCountByGroup.value[gid]||0) === 0
   }
 
   async function loadGroups() {
@@ -51,19 +55,22 @@ export function useRoleGroups() {
   function toggleGroup(gid) { expandedGroup.value = expandedGroup.value === gid ? null : gid }
 
   function openAddGroup() {
+    if (!canCreate.value) { showToast('无权新增角色组','error'); return }
     groupModalEdit.value = false
-    Object.assign(groupForm, { name:'', description:'', parent_id:null, status:'active', permissions:'' })
+    Object.assign(groupForm, { name:'', description:'', parent_id:null, status:'active' })
     showGroupModal.value = true
   }
 
   function openEditGroup(group) {
+    if (!canEdit.value) { showToast('无权编辑角色组','error'); return }
     groupModalEdit.value = true
-    Object.assign(groupForm, { name:group.name, description:group.description||'', parent_id:group.parent_id, status:group.status||'active', permissions:group.permissions||'' })
+    Object.assign(groupForm, { name:group.name, description:group.description||'', parent_id:group.parent_id, status:group.status||'active' })
     groupForm._id = group.id
     showGroupModal.value = true
   }
 
   async function saveGroup() {
+    if (groupModalEdit.value ? !canEdit.value : !canCreate.value) { showToast('无权保存角色组','error'); return }
     if (!groupForm.name) { showToast('角色组名称不能为空','error'); return }
     try {
       const body = { name:groupForm.name, description:groupForm.description, parent_id:groupForm.parent_id, status:groupForm.status }
@@ -76,6 +83,7 @@ export function useRoleGroups() {
   }
 
   async function deleteGroup(gid) {
+    if (!canDelete.value) { showToast('无权删除角色组','error'); return }
     if (!confirm('确定删除该角色组？')) return
     try { await api.domains.roles.deleteRoleGroup(gid); showToast('删除成功'); loadGroups() }
     catch(e) { showToast(e.message,'error') }
@@ -85,7 +93,7 @@ export function useRoleGroups() {
 
   return {
     groups, roles, groupLoading, showGroupModal, groupModalEdit, groupForm,
-    expandedGroup, groupRoles, roleCountByGroup,
+    expandedGroup, groupRoles, roleCountByGroup, canCreate, canEdit, canDelete,
     loadGroups, loadRoles, toggleGroup, openAddGroup, openEditGroup, saveGroup, deleteGroup, canDeleteGroup, childrenCountByGroup,
 
   }

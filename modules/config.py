@@ -6,6 +6,11 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.permission_catalog import ACTION_PERMISSION_DEFS, ALL_PERMISSION_CODES
+from modules.versioning_flags import (
+    environment_flag as _environment_flag,
+    get_versioning_flags,
+    validate_versioning_flags,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -30,41 +35,22 @@ PROCESS_VERSIONING_FLAG_NAMES = (
 )
 
 
-def _environment_flag(name, environ=None):
-    source = os.environ if environ is None else environ
-    return str(source.get(name, "false")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def get_process_versioning_flags(environ=None):
-    return {
-        name: _environment_flag(name, environ=environ)
-        for name in PROCESS_VERSIONING_FLAG_NAMES
-    }
+    return get_versioning_flags(PROCESS_VERSIONING_FLAG_NAMES, environ=environ)
 
 
 def validate_process_versioning_flags(flags=None):
-    values = dict(flags or {
+    values = flags or {
         name: globals().get(name, False) for name in PROCESS_VERSIONING_FLAG_NAMES
-    })
-    query_enabled = bool(values.get("PROCESS_VERSIONED_QUERY_ENABLED"))
-    audit_enabled = bool(values.get("PROCESS_VERSION_COMPAT_AUDIT_ENABLED"))
-    write_enabled = bool(values.get("PROCESS_VERSIONED_WRITE_ENABLED"))
-    legacy_blocked = bool(values.get("PROCESS_LEGACY_WRITE_BLOCKED"))
-    violations = []
-    if audit_enabled and not query_enabled:
-        violations.append("兼容双读审计要求先开启版本化查询")
-    if write_enabled and not query_enabled:
-        violations.append("版本化写入要求先开启版本化查询")
-    if legacy_blocked and not write_enabled:
-        violations.append("阻断 Legacy 写入要求先开启版本化写入")
-    if violations:
-        raise RuntimeError("工序版本化功能开关组合无效：" + "；".join(violations))
-    return values
+    }
+    return validate_versioning_flags(
+        values,
+        label="工序版本化",
+        query_key="PROCESS_VERSIONED_QUERY_ENABLED",
+        audit_key="PROCESS_VERSION_COMPAT_AUDIT_ENABLED",
+        write_key="PROCESS_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="PROCESS_LEGACY_WRITE_BLOCKED",
+    )
 
 
 _PROCESS_VERSIONING_FLAGS = get_process_versioning_flags()
@@ -82,6 +68,127 @@ PROCESS_LEGACY_WRITE_BLOCKED = _PROCESS_VERSIONING_FLAGS[
 ]
 validate_process_versioning_flags(_PROCESS_VERSIONING_FLAGS)
 
+
+POSITION_VERSIONING_FLAG_NAMES = (
+    "POSITION_VERSIONED_QUERY_ENABLED",
+    "POSITION_COMPAT_AUDIT_ENABLED",
+    "POSITION_VERSIONED_WRITE_ENABLED",
+    "POSITION_LEGACY_WRITE_BLOCKED",
+)
+
+
+def get_position_versioning_flags(environ=None):
+    return get_versioning_flags(POSITION_VERSIONING_FLAG_NAMES, environ=environ)
+
+
+def validate_position_versioning_flags(flags=None):
+    values = flags or {
+        name: globals().get(name, False) for name in POSITION_VERSIONING_FLAG_NAMES
+    }
+    return validate_versioning_flags(
+        values,
+        label="岗位版本化",
+        query_key="POSITION_VERSIONED_QUERY_ENABLED",
+        audit_key="POSITION_COMPAT_AUDIT_ENABLED",
+        write_key="POSITION_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="POSITION_LEGACY_WRITE_BLOCKED",
+    )
+
+
+_POSITION_VERSIONING_FLAGS = get_position_versioning_flags()
+POSITION_VERSIONED_QUERY_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_VERSIONED_QUERY_ENABLED"
+]
+POSITION_COMPAT_AUDIT_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_COMPAT_AUDIT_ENABLED"
+]
+POSITION_VERSIONED_WRITE_ENABLED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_VERSIONED_WRITE_ENABLED"
+]
+POSITION_LEGACY_WRITE_BLOCKED = _POSITION_VERSIONING_FLAGS[
+    "POSITION_LEGACY_WRITE_BLOCKED"
+]
+validate_position_versioning_flags(_POSITION_VERSIONING_FLAGS)
+
+
+APPROVAL_POLICY_FLAG_NAMES = (
+    "APPROVAL_POLICY_VERSIONED_QUERY_ENABLED",
+    "APPROVAL_POLICY_COMPAT_AUDIT_ENABLED",
+    "APPROVAL_POLICY_VERSIONED_WRITE_ENABLED",
+    "APPROVAL_POLICY_LEGACY_WRITE_BLOCKED",
+)
+
+
+def get_approval_policy_flags(environ=None):
+    return get_versioning_flags(APPROVAL_POLICY_FLAG_NAMES, environ=environ)
+
+
+def validate_approval_policy_flags(flags=None):
+    values = flags or {
+        name: globals().get(name, False) for name in APPROVAL_POLICY_FLAG_NAMES
+    }
+    return validate_versioning_flags(
+        values,
+        label="审批策略",
+        query_key="APPROVAL_POLICY_VERSIONED_QUERY_ENABLED",
+        audit_key="APPROVAL_POLICY_COMPAT_AUDIT_ENABLED",
+        write_key="APPROVAL_POLICY_VERSIONED_WRITE_ENABLED",
+        legacy_blocked_key="APPROVAL_POLICY_LEGACY_WRITE_BLOCKED",
+    )
+
+
+_APPROVAL_POLICY_FLAGS = get_approval_policy_flags()
+APPROVAL_POLICY_VERSIONED_QUERY_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_VERSIONED_QUERY_ENABLED"]
+APPROVAL_POLICY_COMPAT_AUDIT_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_COMPAT_AUDIT_ENABLED"]
+APPROVAL_POLICY_VERSIONED_WRITE_ENABLED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_VERSIONED_WRITE_ENABLED"]
+APPROVAL_POLICY_LEGACY_WRITE_BLOCKED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_LEGACY_WRITE_BLOCKED"]
+validate_approval_policy_flags(_APPROVAL_POLICY_FLAGS)
+
+
+PENDING_ROUTE_PRICE_FLAG_NAMES = (
+    "ROUTE_PRICE_PENDING_REFERENCE_ENABLED",
+    "ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED",
+    "ROUTE_PRICE_PENDING_WRITE_ENABLED",
+)
+
+
+def get_pending_route_price_flags(environ=None):
+    return get_versioning_flags(PENDING_ROUTE_PRICE_FLAG_NAMES, environ=environ)
+
+
+def validate_pending_route_price_flags(flags=None):
+    values = flags or {
+        name: globals().get(name, False) for name in PENDING_ROUTE_PRICE_FLAG_NAMES
+    }
+    if (
+        values["ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"]
+        and not values["ROUTE_PRICE_PENDING_REFERENCE_ENABLED"]
+    ):
+        raise RuntimeError(
+            "待发布路线工价功能开关组合无效：兼容审计要求先开启引用查询"
+        )
+    if values["ROUTE_PRICE_PENDING_WRITE_ENABLED"] and not (
+        values["ROUTE_PRICE_PENDING_REFERENCE_ENABLED"]
+        and values["ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"]
+    ):
+        raise RuntimeError(
+            "待发布路线工价功能开关组合无效：写入要求先完成引用兼容审计"
+        )
+    return values
+
+
+_PENDING_ROUTE_PRICE_FLAGS = get_pending_route_price_flags()
+ROUTE_PRICE_PENDING_REFERENCE_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_REFERENCE_ENABLED"
+]
+ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED"
+]
+ROUTE_PRICE_PENDING_WRITE_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
+    "ROUTE_PRICE_PENDING_WRITE_ENABLED"
+]
+validate_pending_route_price_flags(_PENDING_ROUTE_PRICE_FLAGS)
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents
@@ -92,6 +199,12 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     ".zip", ".rar", ".7z",
     # CAD/Drawings
     ".dwg", ".dxf", ".step", ".stp", ".igs", ".iges",
+}
+EMPLOYEE_DOCUMENT_DIR = os.path.join(DATA_DIR, "attachments", "employee_docs")
+LEGACY_EMPLOYEE_DOCUMENT_DIR = os.path.join(BASE_DIR, "uploads", "employee_docs")
+EMPLOYEE_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024
+EMPLOYEE_DOCUMENT_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png",
 }
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
@@ -126,6 +239,7 @@ PREDEFINED_ROLES = {
         'description': '管理生产订单、工艺和工价',
         'group_id': 2, 'level': 2,
         'permissions': [
+            'page:settings', 'page:settings.company-info', 'company_info:view',
             'page:production', 'page:production.orders', 'page:production.customers',
             'page:production.materials', 'page:production.trace', 'page:production.approvals',
             'page:quality-management', 'page:production.rework',
@@ -138,6 +252,8 @@ PREDEFINED_ROLES = {
             'scan:view', 'scan:report', 'scan:serial_backfill', 'scan:serial_backfill_approve',
             'stats:view', 'trace:view', 'reports:view', 'board:view',
             'approvals:view', 'approvals:edit','inventory:view','materials:view','quality:view','rework:view','rework:create','rework:edit',
+            'approvals:decision', 'approval_policies:view', 'approval_policies:create',
+            'approval_policies:submit', 'approval_policies:history', 'approval_policies:impact',
             'work_time:view','work_time:create','work_time:edit','work_time:audit','work_time:export',
         ]
     },

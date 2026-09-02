@@ -203,5 +203,4 @@ def change_password():
 
     if isinstance(g.current_user, dict):
         g.current_user["must_change_password"] = 0
-    safe_audit_log("change_password", "user", g.current_user["id"])
     return jsonify({"message": "密码修改成功"})

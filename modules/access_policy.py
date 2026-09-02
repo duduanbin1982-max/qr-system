@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Iterable, List, Optional, Sequence, Set
 
-from modules.permission_catalog import PERMISSION_IMPLICATIONS
+from modules.permission_catalog import PERMISSION_IMPLICATIONS, infer_page_permissions
 
 
 def _row_value(row, key):
@@ -19,22 +19,35 @@ def collect_permission_codes(permission_rows: Iterable, user_id=None, logger=Non
     logger = logger or logging.getLogger("qr")
     permissions: Set[str] = set()
     for row in permission_rows or []:
-        for column in ("role_perms", "group_perms"):
-            raw_value = _row_value(row, column)
-            if not raw_value:
+        raw_value = _row_value(row, "role_perms")
+        if not raw_value:
+            continue
+        try:
+            parsed = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "access_policy: invalid role_perms JSON for user %s: %s",
+                user_id,
+                exc,
+            )
+            continue
+        if isinstance(parsed, list):
+            permissions.update(str(item) for item in parsed if item)
+    if "*" in permissions:
+        return ["*"]
+    # Materialize the same transitive permission closure used by middleware
+    # and the browser so API consumers cannot observe a weaker policy.
+    changed = True
+    while changed:
+        changed = False
+        for granted, implied in PERMISSION_IMPLICATIONS.items():
+            if granted not in permissions:
                 continue
-            try:
-                parsed = json.loads(raw_value)
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning(
-                    "access_policy: invalid %s JSON for user %s: %s",
-                    column,
-                    user_id,
-                    exc,
-                )
-                continue
-            if isinstance(parsed, list):
-                permissions.update(str(item) for item in parsed if item)
+            for code in implied:
+                if code not in permissions:
+                    permissions.add(code)
+                    changed = True
+    permissions.update(infer_page_permissions(permissions))
     return sorted(permissions)
 
 
@@ -46,6 +59,19 @@ def has_permission_code(permissions: Sequence[str], perm: str) -> bool:
         perm in implied
         for granted, implied in PERMISSION_IMPLICATIONS.items()
         if granted in permission_set
+    )
+
+
+def has_global_data_scope(
+    permissions: Sequence[str], global_data_scope_permissions: Set[str]
+) -> bool:
+    permission_set = set(permissions or [])
+    return bool(
+        permission_set
+        and (
+            "*" in permission_set
+            or permission_set & set(global_data_scope_permissions)
+        )
     )
 
 
