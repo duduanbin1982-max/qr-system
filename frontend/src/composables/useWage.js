@@ -5,6 +5,22 @@ import { can } from '@/lib/auth.js'
 
 const PROCESS_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1']
 
+export function buildPieceworkCsvRows(wages, fmtDate, fmtMoney) {
+  const rows = [["姓名","岗位","工号","日期","订单号","产品","产品编码","工序","数量","单价","工资"]]
+  let totalQuantity = 0
+  let totalWage = 0
+  for (const w of (wages || [])) {
+    for (const d of (w.details || [])) {
+      rows.push([w.employee_name, w.position_name || "", w.employee_no, fmtDate(d.date), d.order_no, d.product_name, d.product_code || "", d.process_name, d.quantity, fmtMoney(d.unit_price), fmtMoney(d.wage)])
+    }
+    rows.push([w.employee_name, w.position_name || "", w.employee_no, "", "", "", "", "小计", w.total_quantity, "", fmtMoney(w.total_wage)])
+    totalQuantity += Number(w.total_quantity || 0)
+    totalWage += Number(w.total_wage || 0)
+  }
+  rows.push(["", "", "", "", "", "", "", "合计", totalQuantity, "", fmtMoney(totalWage)])
+  return rows
+}
+
 let _instance = null
 
 export function useWage() {
@@ -92,14 +108,7 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
     })
 
     function exportCSV() {
-      const rows = [["姓名","岗位","工号","日期","订单号","产品","工序","数量","单价","工资"]]
-      for (const w of filteredWages.value) {
-        for (const d of (w.details||[])) {
-          rows.push([w.employee_name, w.position_name||"", w.employee_no, fmtDate(d.date), d.order_no, d.product_name, d.process_name, d.quantity, fmtMoney(d.unit_price), fmtMoney(d.wage)])
-        }
-        rows.push([w.employee_name, w.position_name||"", w.employee_no, "", "", "", "小计", w.total_quantity, "", fmtMoney(w.total_wage)])
-      }
-      rows.push(["","","","","","","合计",grandQty(),"",fmtMoney(grandTotal())])
+      const rows = buildPieceworkCsvRows(filteredWages.value, fmtDate, fmtMoney)
       const csv = "\uFEFF"+rows.map(r=>r.map(c=>{const s=String(c==null?"":c);return /[",\n]/.test(s)?'"'+s.replace(/"/g,"\"\"")+'"':s}).join(",")).join("\n")
       const blob=new Blob([csv],{type:"text/csv;charset=utf-8"})
       const url=URL.createObjectURL(blob)
