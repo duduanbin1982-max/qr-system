@@ -1746,6 +1746,17 @@ textarea:focus-visible {
 .progress-risk-card.risk-medium { background: var(--warning-lighter); border-color: var(--warning-light); }
 .progress-risk-card.risk-high,
 .progress-risk-card.risk-overdue { background: var(--danger-lighter, #fff0f0); border-color: var(--danger-light, #fecaca); }
+
+.gantt-risk-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+}
 .progress-advice { padding: 10px 12px; border-radius: var(--radius-md); background: var(--primary-lighter); margin-bottom: var(--space-3); font-size: var(--text-sm); }
 .progress-advice-item { color: var(--text-secondary); line-height: 1.6; }
 .progress-advice-item::before { content: "• "; color: var(--primary); font-weight: 700; }

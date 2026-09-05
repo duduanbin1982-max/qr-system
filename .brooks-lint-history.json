@@ -460,5 +460,82 @@
       "suggestion": 1
     },
     "scope": "当前工作树 codex/task-2-evidence-protocol @ 53d97c2；全部后端 tests、frontend/tests/unit、frontend/tests/e2e，后端 1204 tests（pytest 81%，modules 78%，scripts+server 47%），前端 149 unit、19 E2E，API facade/build/import 门禁"
+  },
+  {
+    "date": "2026-08-09T16:35:00+08:00",
+    "mode": "PR Review",
+    "score": 38,
+    "findings": {
+      "critical": 2,
+      "warning": 6,
+      "suggestion": 2
+    },
+    "scope": "local HEAD 8392aa9; employee management routes, service, repository, schemas, permissions, Vue view/composable/API, document lifecycle, related tests, and frontend API/import checks"
+  },
+  {
+    "date": "2026-08-09T18:17:38+08:00",
+    "mode": "PR Review",
+    "score": 44,
+    "findings": {
+      "critical": 2,
+      "warning": 5,
+      "suggestion": 1
+    },
+    "scope": "192.168.1.8:/home/dubin/qr-system deployed HEAD e169a68a; process master data, process routes, order synchronization, reference guards, schemas, Vue management pages, production v59 reference inventory, and 38 focused tests"
+  },
+  {
+    "date": "2026-08-15T00:00:00+08:00",
+    "mode": "PR Review",
+    "score": 43,
+    "findings": {
+      "critical": 2,
+      "warning": 5,
+      "suggestion": 2
+    },
+    "scope": "产品管理模块：产品路由/服务/仓储/Schema、产品身份与编码别名、BOM、两套导入路径、附件、Vue 页面/API/composable、生产 v63 只读数据及相关测试"
+  },
+  {
+    "date": "2026-08-27T23:56:22+08:00",
+    "mode": "Full Sweep",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "local qr-system branch codex/product-management-repair; 778 tracked files including 448 Python files, 197 frontend source files, 93 Python test files and 32 frontend test/E2E files; R1-R6, T1-T6, debt and architecture scans"
+  },
+  {
+    "date": "2026-08-28T17:18:25+08:00",
+    "mode": "PR Review",
+    "score": 45,
+    "findings": {
+      "critical": 2,
+      "warning": 5,
+      "suggestion": 0
+    },
+    "scope": "移动扫码模块：modules/routes/scan_work.py、modules/routes/scan_qr.py、modules/services/mobile_scan_service.py、modules/services/mobile_scan_resolver.py、modules/services/scan_validation_service.py、modules/services/scan_report_service.py、modules/services/work_report_writer.py、modules/services/scan_helper_service.py、modules/repositories/scan_repository.py、modules/repositories/scan_qr_repository.py、modules/config.py、modules/migration_baseline.py、public/mobile.html、public/js/mobile/mobile-*.js 及相关扫码测试"
+  },
+  {
+    "date": "2026-08-28T19:00:00+08:00",
+    "mode": "PR Review",
+    "score": 67,
+    "findings": {
+      "critical": 0,
+      "warning": 6,
+      "suggestion": 3
+    },
+    "scope": "仅现有移动端客户端：public/mobile.html、public/mobile_inspection.html、public/js/mobile/*.js、public/css/mobile.css、public/sw.js 及移动端静态契约、单元和 E2E 测试；不含后端/数据库"
+  },
+  {
+    "date": "2026-08-30T19:55:00+08:00",
+    "mode": "PR Review",
+    "score": 43,
+    "findings": {
+      "critical": 2,
+      "warning": 5,
+      "suggestion": 2
+    },
+    "scope": "PR #32 codex/product-management-repair vs github/master；重点抽样审查工序级多产线排程迁移、仓储、服务、API、甘特图、相关测试和发布脚本"
   }
 ]

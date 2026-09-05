@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 78
-    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77, 78]
+    assert report["target_version"] == 82
+    assert [item["version"] for item in report["pending"]] == [71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82]
     assert database.read_bytes() == before
 
 
@@ -289,7 +289,28 @@ def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
             ).fetchall()
         }
         assert {"schedule_calendars", "schedule_shifts", "schedule_calendar_exceptions",
-                "order_process_schedule_segments"}.issubset(table_names)
+                "order_process_schedule_segments", "schedule_revisions",
+                "schedule_revision_items"}.issubset(table_names)
+        revision_columns = {
+            row["name"] for row in db.execute(
+                "PRAGMA table_info(schedule_revisions)"
+            ).fetchall()
+        }
+        assert {
+            "order_id", "revision_no", "status", "source_run_key", "result_digest",
+            "published_by", "superseded_by", "deadline_snapshot",
+            "projected_completion_at_snapshot", "risk_level", "delay_minutes",
+            "risk_reason", "risk_assessed_at",
+        }.issubset(revision_columns)
+        revision_item_columns = {
+            row["name"] for row in db.execute(
+                "PRAGMA table_info(schedule_revision_items)"
+            ).fetchall()
+        }
+        assert {
+            "revision_id", "source_schedule_id", "order_process_id", "process_id",
+            "payload_json", "payload_digest",
+        }.issubset(revision_item_columns)
     finally:
         db.close()
 def test_audit_event_and_process_config_migration_versions_are_stable():
@@ -312,7 +333,10 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[76] == "modules.migration_schedule_capacity"
     assert by_version[77] == "modules.migration_schedule_capacity"
     assert by_version[78] == "modules.migration_schedule_capacity"
-    assert migrations.LATEST_VERSION == 78
+    assert by_version[79] == "modules.migration_schedule_capacity"
+    assert by_version[80] == "modules.migration_schedule_capacity"
+    assert by_version[81] == "modules.migration_schedule_capacity"
+    assert migrations.LATEST_VERSION == 82
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

@@ -14,7 +14,7 @@ export function useGantt() {
   const canManageLines = computed(() => can('settings:edit'))
   const lines = useProductionLines({ canManageLines })
   const data = useGanttData({ productionLines: lines.productionLines })
-  const capacity = useGanttCapacity({ orders: data.orders })
+  const capacity = useGanttCapacity({ orders: data.orders, riskLevel: data.riskLevel })
 
   function canAdjustOrder(order) {
     return canEdit.value && !isCompletedOrder(order)

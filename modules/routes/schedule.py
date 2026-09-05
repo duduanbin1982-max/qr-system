@@ -1,12 +1,13 @@
 """
 qr-system - production schedule routes (Refactored: SQL -> Service/Repository)
 """
-from flask import jsonify, request
+from flask import g, jsonify, request
 from modules.route_decorators import (
     app,
     check_auth,
     check_permission,
     get_json_body,
+    has_permission,
     safe_audit_log,
 )
 from modules.services.schedule_service import (
@@ -120,6 +121,42 @@ def schedule_order_operations(order_id):
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/schedule/order/<int:order_id>/revisions", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_order_revisions(order_id):
+    try:
+        return jsonify(ScheduleCapacityService.list_order_revisions(
+            order_id, request.args.get("limit", 100)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/revisions/<int:revision_id>", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_revision_detail(revision_id):
+    try:
+        return jsonify(ScheduleCapacityService.get_revision(
+            revision_id, request.args.get("limit", 1000)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/revisions/<int:revision_id>/publish", methods=["POST"])
+@check_auth
+@check_permission("schedule:edit")
+def schedule_revision_publish(revision_id):
+    try:
+        return jsonify(ScheduleCapacityService.publish_revision(
+            revision_id, published_by=g.current_user.get("id")
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/schedule/order/<int:order_id>/generate", methods=["POST"])
 @check_auth
 @check_permission("schedule:edit")
@@ -131,6 +168,67 @@ def schedule_generate_operations(order_id):
             start_date=data.get("start_date"),
             schedule_run_key=data.get("schedule_run_key", ""),
         ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/order/<int:order_id>/dynamic-replan", methods=["POST"])
+@check_auth
+@check_permission("schedule:edit")
+def schedule_dynamic_replan(order_id):
+    """Replan unfinished work from approved reports, rework and downtime facts."""
+    try:
+        data = get_json_body()
+        result = ScheduleCapacityService.dynamic_replan_order(
+            order_id,
+            start_at=data.get("start_at"),
+            schedule_run_key=data.get("schedule_run_key", ""),
+            reason=data.get("reason", ""),
+            actor_id=g.current_user.get("id") if g.current_user else None,
+        )
+        safe_audit_log("dynamic_replan_schedule", "order", order_id,
+                       f"run={data.get('schedule_run_key', '')}; reason={data.get('reason', '')}")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/downtime", methods=["GET", "POST"])
+@check_auth
+def schedule_downtime():
+    if request.method == "GET":
+        try:
+            return jsonify(ScheduleCapacityService.list_downtime_events(
+                process_line_id=request.args.get("process_line_id", type=int),
+                start_at=request.args.get("start_at", ""),
+                end_at=request.args.get("end_at", ""),
+                limit=request.args.get("limit", 1000, type=int),
+            ))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    if not has_permission(g.current_user, "schedule:edit"):
+        return jsonify({"error": "无权限"}), 403
+    try:
+        data = get_json_body()
+        result = ScheduleCapacityService.create_downtime_event(
+            data.get("process_line_id"), data.get("start_at"), data.get("end_at"),
+            data.get("reason", ""), created_by=g.current_user.get("id") if g.current_user else None,
+        )
+        safe_audit_log("create_schedule_downtime", "schedule_downtime", result["event"]["id"],
+                       f"line={data.get('process_line_id')}; {data.get('start_at')}~{data.get('end_at')}")
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/downtime/<int:event_id>", methods=["DELETE"])
+@check_auth
+@check_permission("schedule:edit")
+def schedule_downtime_cancel(event_id):
+    try:
+        result = ScheduleCapacityService.cancel_downtime_event(event_id)
+        safe_audit_log("cancel_schedule_downtime", "schedule_downtime", event_id, "status=cancelled")
+        return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

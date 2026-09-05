@@ -39,7 +39,45 @@ class ScheduleRepository:
                    CASE WHEN {completed_expr} THEN 1 ELSE 0 END as is_completed,
                    COALESCE(c.name, o.customer) as customer_name,
                    COALESCE(pl.name, '') as production_line,
-                   COALESCE(pl.capacity_per_day, 10) as line_capacity
+                   COALESCE(pl.capacity_per_day, 10) as line_capacity,
+                   COALESCE((
+                       SELECT MAX(NULLIF(s.planned_end_at,''))
+                       FROM order_process_schedules s
+                       WHERE s.order_id=o.id AND s.status != 'blocked'
+                   ), '') AS projected_completion_at,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM order_process_schedules s
+                       WHERE s.order_id=o.id AND s.status='blocked'
+                   ), 0) AS schedule_blocked_count,
+                   COALESCE((
+                       SELECT GROUP_CONCAT(NULLIF(s.blocked_reason,''), '；')
+                       FROM order_process_schedules s
+                       WHERE s.order_id=o.id AND s.status='blocked'
+                   ), '') AS schedule_blocked_reasons,
+                   COALESCE((
+                       SELECT COUNT(DISTINCT CASE
+                           WHEN first_schedule.order_id=o.id THEN first_schedule.id
+                           ELSE second_schedule.id
+                       END)
+                       FROM order_process_schedule_segments first_segment
+                       JOIN order_process_schedule_segments second_segment
+                         ON first_segment.process_line_id=second_segment.process_line_id
+                        AND first_segment.id < second_segment.id
+                        AND first_segment.segment_start_at < second_segment.segment_end_at
+                        AND second_segment.segment_start_at < first_segment.segment_end_at
+                       JOIN order_process_schedules first_schedule
+                         ON first_schedule.id=first_segment.schedule_id
+                       JOIN order_process_schedules second_schedule
+                         ON second_schedule.id=second_segment.schedule_id
+                       JOIN orders first_order ON first_order.id=first_schedule.order_id
+                       JOIN orders second_order ON second_order.id=second_schedule.order_id
+                       WHERE first_schedule.status != 'blocked'
+                         AND second_schedule.status != 'blocked'
+                         AND first_order.deleted_at IS NULL
+                         AND second_order.deleted_at IS NULL
+                         AND (first_schedule.order_id=o.id OR second_schedule.order_id=o.id)
+                   ), 0) AS schedule_conflict_count
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN production_lines pl ON o.production_line_id = pl.id

@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import uuid
+from datetime import datetime
 
 import pytest
 
@@ -412,6 +413,30 @@ def test_capacity_audit_exposes_breakdowns_and_line_loads(client):
         assert line["conflict_count"] == 0
 
 
+def test_capacity_audit_exposes_delivery_risk_breakdown(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Audit Risk")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id, quantity=2)
+        db.execute("UPDATE orders SET deadline='2026-09-01' WHERE id=?", (order_id,))
+        _seed_standard(db, route_id, process, unit=60, setup=0)
+        ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-audit-risk-v1"
+        )
+
+        audit = ScheduleCapacityService.audit_schedule_capacity(
+            now=datetime(2026, 9, 4, 10, 0)
+        )
+
+        assert audit["risk_counts"]["overdue"] >= 1
+        assert audit["risk_order_count"] >= 1
+        assert audit["delayed_order_count"] >= 1
+        assert audit["total_delay_minutes"] > 0
+        assert audit["max_delay_minutes"] > 0
+        assert any(item["order_id"] == order_id for item in audit["risk_orders"])
+
+
 def test_precision_preflight_returns_structured_breakdowns_without_source_mutation(tmp_path):
     source = tmp_path / "schedule-preflight.db"
     db = sqlite3.connect(source)
@@ -422,7 +447,7 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
         db.close()
 
     report = run_preflight(source, limit=10)
-    assert report["database_user_version"] == before == 78
+    assert report["database_user_version"] == before == 82
     assert report["operations"] == 0
     assert report["coverage_percent"] == 100.0
     assert report["process_statistics"] == []
@@ -490,5 +515,240 @@ def test_parallel_lines_are_selected_by_earliest_minute_completion(client):
         second = ScheduleCapacityService.generate_order_schedule(
             second_order, schedule_run_key="capacity-parallel-minute-2"
         )
-        assert first["operations"][0]["process_line_id"] != second["operations"][0]["process_line_id"]
-        assert second["operations"][0]["planned_start_at"] == first["operations"][0]["planned_start_at"]
+        first_row = first["operations"][0]
+        second_row = second["operations"][0]
+        first_snapshot = json.loads(first_row["capacity_snapshot_json"])
+        second_snapshot = json.loads(second_row["capacity_snapshot_json"])
+        assert first_snapshot["line_count"] > 1
+        assert sum(int(line["quantity"]) for line in first_snapshot["lines"]) == 10
+        assert sum(int(segment.get("quantity") or 0) for segment in first_row["segments"]) == 10
+        assert second_row["planned_start_at"] >= first_row["planned_end_at"]
+        assert second_snapshot["line_count"] > 1
+        assert sum(int(segment.get("quantity") or 0) for segment in second_row["segments"]) == 10
+
+
+def test_generation_creates_draft_revision_and_immutable_items(client):
+    with client.application.app_context():
+        db = get_db()
+        first = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        second = db.execute("SELECT id FROM processes WHERE name='焊接'").fetchone()["id"]
+        route_id = create_process_route(db, [first, second], name="Revision Draft")
+        order_id, _ = _seed_capacity_order(db, [first, second], route_id=route_id)
+        _seed_standard(db, route_id, first, unit=5)
+        _seed_standard(db, route_id, second, unit=7)
+
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-draft-v1"
+        )
+        revision_id = result["schedule_revision_id"]
+        revision = db.execute(
+            "SELECT * FROM schedule_revisions WHERE id=?", (revision_id,)
+        ).fetchone()
+        items = db.execute(
+            "SELECT * FROM schedule_revision_items WHERE revision_id=? ORDER BY seq_order",
+            (revision_id,),
+        ).fetchall()
+
+        assert revision["status"] == "draft"
+        assert revision["result_digest"]
+        assert len(items) == 2
+        assert {item["order_process_id"] for item in items} == {
+            row["id"] for row in db.execute(
+                "SELECT id FROM order_processes WHERE order_id=?", (order_id,)
+            ).fetchall()
+        }
+        assert all(item["payload_digest"] for item in items)
+        # A generated revision is a draft until explicitly published; the
+        # order's current published pointer must therefore remain unset.
+        assert db.execute(
+            "SELECT current_schedule_revision_id FROM orders WHERE id=?", (order_id,)
+        ).fetchone()[0] is None
+
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE schedule_revision_items SET quantity=quantity+1 WHERE revision_id=?",
+                (revision_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "DELETE FROM schedule_revision_items WHERE revision_id=?", (revision_id,)
+            )
+
+
+def test_generation_freezes_delivery_risk_snapshot_on_revision(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Revision Risk Snapshot")
+        order_id, _ = _seed_capacity_order(
+            db, [process], route_id=route_id, quantity=10, plan_start="2026-09-01"
+        )
+        db.execute("UPDATE orders SET deadline='2026-09-01' WHERE id=?", (order_id,))
+        _seed_standard(db, route_id, process, unit=60, setup=0)
+
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-risk-v1"
+        )
+        revision = db.execute(
+            "SELECT deadline_snapshot,projected_completion_at_snapshot,risk_level,"
+            "delay_minutes,risk_reason,risk_assessed_at FROM schedule_revisions WHERE id=?",
+            (result["schedule_revision_id"],),
+        ).fetchone()
+
+        assert revision["deadline_snapshot"] == "2026-09-01"
+        assert revision["projected_completion_at_snapshot"]
+        assert revision["risk_level"] == "overdue"
+        assert revision["delay_minutes"] > 0
+        assert "交期" in revision["risk_reason"]
+        assert revision["risk_assessed_at"]
+        with pytest.raises(sqlite3.IntegrityError, match="risk snapshot is immutable"):
+            db.execute(
+                "UPDATE schedule_revisions SET risk_reason='tampered' WHERE id=?",
+                (result["schedule_revision_id"],),
+            )
+
+
+def test_failed_generation_retains_cancelled_revision(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        process = ensure_process(db, "无排程资源", seq_order=1)
+        route_id = create_process_route(db, [process], name="Revision Cancelled")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process, unit=10)
+
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-cancelled-v1"
+        )
+        assert result["status"] == "completed"
+        # Force a persistence failure after the revision has been created;
+        # the run must remain auditable as a cancelled revision.
+        def fail_insert(*args, **kwargs):
+            raise RuntimeError("schedule persistence failed")
+
+        monkeypatch.setattr(
+            ScheduleCapacityRepository, "insert_operation_schedule", fail_insert
+        )
+        with pytest.raises(ValueError, match="schedule persistence failed"):
+            ScheduleCapacityService.generate_order_schedule(
+                order_id, schedule_run_key="capacity-revision-cancelled-v2"
+            )
+        revision = db.execute(
+            "SELECT status,source_run_key FROM schedule_revisions "
+            "WHERE order_id=? ORDER BY revision_no DESC LIMIT 1", (order_id,)
+        ).fetchone()
+        assert revision["status"] == "cancelled"
+        assert revision["source_run_key"] == "capacity-revision-cancelled-v2"
+
+
+def test_regeneration_keeps_history_and_publish_supersedes_previous_revision(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Revision History")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process, unit=5)
+
+        first = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-history-v1"
+        )
+        first_id = first["schedule_revision_id"]
+        ScheduleCapacityService.publish_revision(first_id, published_by=1000)
+        first_published_at = db.execute(
+            "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
+        ).fetchone()[0]
+        # Publishing the same revision again is a no-op, including timestamps.
+        ScheduleCapacityService.publish_revision(first_id, published_by=1000)
+        assert db.execute(
+            "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
+        ).fetchone()[0] == first_published_at
+
+        second = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-history-v2"
+        )
+        second_id = second["schedule_revision_id"]
+        ScheduleCapacityService.publish_revision(second_id, published_by=1000)
+        rows = db.execute(
+            "SELECT id,status,superseded_by FROM schedule_revisions "
+            "WHERE order_id=? ORDER BY revision_no", (order_id,)
+        ).fetchall()
+        assert [row["id"] for row in rows] == [first_id, second_id]
+        assert rows[0]["status"] == "superseded"
+        assert rows[0]["superseded_by"] == second_id
+        assert rows[1]["status"] == "published"
+
+
+def test_revision_publish_requires_exact_operation_set(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Revision Completeness")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        other_order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process, unit=5)
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-completeness-v1"
+        )
+        revision_id = result["schedule_revision_id"]
+        other_op_id = db.execute(
+            "SELECT id FROM order_processes WHERE order_id=?", (other_order_id,)
+        ).fetchone()[0]
+        op = db.execute(
+            "SELECT id FROM order_processes WHERE order_id=?", (order_id,)
+        ).fetchone()[0]
+        assert op != other_op_id
+        malformed = ScheduleCapacityRepository.create_revision(
+            order_id, None, "capacity-revision-completeness-malformed", db
+        )
+        db.execute(
+            "INSERT INTO schedule_revision_items "
+            "(revision_id,order_process_id,process_id,seq_order) VALUES (?,?,?,?)",
+            (malformed, other_op_id, process, 1),
+        )
+        db.commit()
+        with pytest.raises(ValueError, match="条目不完整"):
+            ScheduleCapacityService.publish_revision(malformed, published_by=1000)
+
+
+def test_revision_api_contracts_and_permissions(client, auth_headers, worker_auth_headers):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Revision API")
+        order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
+        _seed_standard(db, route_id, process, unit=5)
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id, schedule_run_key="capacity-revision-api-v1"
+        )
+        revision_id = result["schedule_revision_id"]
+
+    revisions = client.get(
+        f"/api/schedule/order/{order_id}/revisions?limit=1", headers=auth_headers
+    )
+    assert revisions.status_code == 200
+    assert revisions.get_json()["revisions"][0]["id"] == revision_id
+
+    detail = client.get(f"/api/schedule/revisions/{revision_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.get_json()["revision"]["id"] == revision_id
+    assert detail.get_json()["items"]
+
+    invalid = client.get("/api/schedule/revisions/999999", headers=auth_headers)
+    assert invalid.status_code == 400
+    assert "不存在" in invalid.get_json()["error"]
+
+    malformed_limit = client.get(
+        f"/api/schedule/revisions/{revision_id}?limit=bad", headers=auth_headers
+    )
+    assert malformed_limit.status_code == 400
+    assert "limit" in malformed_limit.get_json()["error"]
+
+    publish = client.post(
+        f"/api/schedule/revisions/{revision_id}/publish", headers=auth_headers
+    )
+    assert publish.status_code == 200
+    assert publish.get_json()["revision"]["status"] == "published"
+
+    forbidden = client.post(
+        f"/api/schedule/revisions/{revision_id}/publish", headers=worker_auth_headers
+    )
+    assert forbidden.status_code == 403

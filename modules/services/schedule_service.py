@@ -3,6 +3,7 @@ qr-system - ScheduleService (Refactored: SQL -> ScheduleRepository)
 """
 from datetime import datetime, timedelta
 from modules.services import BaseService
+from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.repositories.production_line_repository import ProductionLineRepository
 from modules.repositories.schedule_repository import ScheduleRepository
 
@@ -100,8 +101,6 @@ class ScheduleService:
 
         orders = []
         now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
-        two_days_later = (now + timedelta(days=2)).strftime("%Y-%m-%d")
         for r in rows:
             start = r["plan_start"]
             end = r["plan_end"]
@@ -109,15 +108,26 @@ class ScheduleService:
             quantity = r["quantity"] or 0
             progress = min(round(completed / quantity * 100), 100) if quantity else 0
 
-            # Deadline risk assessment
-            deadline = r["deadline"] if r["deadline"] else None
-            risk = "normal"
-            if end and end < today_str and progress < 100:
-                risk = "overdue"
-            elif end and end <= two_days_later and progress < 60:
-                risk = "warning"
-
             is_completed = bool(r["is_completed"])
+            blocked_reasons = tuple(
+                reason.strip()
+                for reason in str(r["schedule_blocked_reasons"] or "").split("；")
+                if reason.strip()
+            )
+            deadline_risk = ScheduleDeadlineRiskPolicy.evaluate(
+                deadline_text=r["deadline"] or "",
+                projected_completion_at=r["projected_completion_at"] or "",
+                plan_end=end or "",
+                now=now,
+                completed=is_completed,
+                blocked_count=r["schedule_blocked_count"] or 0,
+                blocked_reasons=blocked_reasons,
+                conflict_count=r["schedule_conflict_count"] or 0,
+            )
+            risk_level = deadline_risk["level"]
+            risk = "overdue" if risk_level == "overdue" else (
+                "warning" if risk_level in ("low", "medium", "high") else "normal"
+            )
 
             orders.append({
                 "id": r["id"], "order_no": r["order_no"],
@@ -133,6 +143,14 @@ class ScheduleService:
                 "is_completed": is_completed,
                 "progress": progress,
                 "risk": risk,
+                "risk_level": risk_level,
+                "risk_reason": deadline_risk["reason"],
+                "delay_minutes": deadline_risk["delay_minutes"],
+                "slack_minutes": deadline_risk["slack_minutes"],
+                "deadline_at": deadline_risk["deadline_at"],
+                "projected_completion_at": deadline_risk["projected_completion_at"],
+                "schedule_blocked_count": deadline_risk["blocked_count"],
+                "schedule_conflict_count": deadline_risk["conflict_count"],
                 "production_line": r["production_line"],
                 "production_line_id": r["production_line_id"],
                 "line_capacity": r["line_capacity"],
