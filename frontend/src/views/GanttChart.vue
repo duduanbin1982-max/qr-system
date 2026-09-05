@@ -6,6 +6,9 @@
     <div class="summary-item"><span class="s-icon">⚙️</span><div><div class="s-val text-info">{{ stats.producing }}</div><div class="s-label">生产中</div></div></div>
     <div class="summary-item"><span class="s-icon">⏳</span><div><div class="s-val">{{ stats.pending }}</div><div class="s-label">待生产</div></div></div>
     <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ stats.completed }}</div><div class="s-label">已完成</div></div></div>
+    <div class="summary-item" :style="{borderColor:riskSummary.overdue?'var(--danger)':'var(--border-light)'}"><span class="s-icon">⛔</span><div><div class="s-val" :style="{color:riskSummary.overdue?'var(--danger)':'var(--text-primary)'}">{{ riskSummary.overdue }}</div><div class="s-label">已逾期</div></div></div>
+    <div class="summary-item" :style="{borderColor:riskSummary.high?'#f97316':'var(--border-light)'}"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color:riskSummary.high?'#f97316':'var(--text-primary)'}">{{ riskSummary.high + riskSummary.medium }}</div><div class="s-label">高/中风险</div></div></div>
+    <div v-if="riskSummary.delayed" class="summary-item"><span class="s-icon">🕒</span><div><div class="s-val" style="color:var(--danger)">{{ formatRiskMinutes(riskSummary.totalDelayMinutes) }}</div><div class="s-label">预计延期总量</div></div></div>
   </div>
 
   <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">
@@ -55,6 +58,14 @@
       <span v-if="dailyLoad.length > 5" style="color:var(--text-placeholder)">...共 {{ dailyLoad.length }} 处</span>
     </div>
 
+    <div v-if="viewMode==='orders' && (riskSummary.overdue || riskSummary.high || riskSummary.medium)" style="padding:7px 20px;background:linear-gradient(90deg,#fff7ed,#fff1f2);border-bottom:1px solid #fed7aa;font-size:var(--text-xs);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <span style="font-weight:700;color:#c2410c">⚠️ 交期预警</span>
+      <span v-if="riskSummary.overdue" style="color:var(--danger)">已逾期 {{ riskSummary.overdue }} 单</span>
+      <span v-if="riskSummary.high" style="color:#c2410c">高风险 {{ riskSummary.high }} 单</span>
+      <span v-if="riskSummary.medium" style="color:#a16207">中风险 {{ riskSummary.medium }} 单</span>
+      <span v-if="riskSummary.delayed" style="color:var(--text-secondary)">预计延期 {{ formatRiskMinutes(riskSummary.totalDelayMinutes) }}</span>
+    </div>
+
     <div v-if="viewMode==='operations'" style="padding:16px 20px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <select v-model="capacityProcessFilter" class="form-input" style="width:150px;padding:6px 10px;font-size:var(--text-sm)">
@@ -73,25 +84,65 @@
           </select>
           <input v-model="generationStartDate" type="date" class="form-input" style="width:145px;padding:6px 10px;font-size:var(--text-sm)">
           <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--primary);color:#fff" @click="generateSchedule">生成工序排程</button>
+          <select v-model="replanOrderId" @change="prepareDynamicReplan(replanOrderId)" class="form-input" style="width:180px;padding:6px 10px;font-size:var(--text-sm)" title="依据已报工、返工和停机事实重排未完成工作">
+            <option value="">选择订单动态重排</option>
+            <option v-for="order in capacityOrders" :key="`replan-${order.id}`" :value="order.id">{{ order.order_no }}</option>
+          </select>
+          <input v-model="replanStartAt" type="datetime-local" class="form-input" style="width:175px;padding:6px 10px;font-size:var(--text-sm)" title="重排起点">
+          <input v-model="replanReason" type="text" class="form-input" style="width:220px;padding:6px 10px;font-size:var(--text-sm)" placeholder="动态重排原因">
+          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--warning);color:#fff" @click="dynamicReplanSchedule">按实际进度重排</button>
           <button type="button" class="btn-default btn-sm" @click="loadCapacity">刷新</button>
         </div>
+      </div>
+      <div class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid var(--border-light);background:var(--bg-surface)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <strong style="font-size:var(--text-sm)">🛑 产线停机管理</strong>
+          <span style="font-size:var(--text-xs);color:var(--text-secondary)">停机事实会参与动态重排；取消仅标记为已取消并保留审计记录</span>
+          <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="loadDowntime">刷新停机记录</button>
+        </div>
+        <form v-if="canEdit" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="createDowntime">
+          <select v-model="downtimeForm.process_line_id" class="form-input" style="width:190px;padding:6px 10px;font-size:var(--text-sm)" aria-label="停机产线">
+            <option value="">选择产线</option>
+            <option v-for="line in capacityLines" :key="`downtime-line-${line.id}`" :value="line.id">{{ line.process_name }} · {{ line.line_name }}</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">开始
+            <input v-model="downtimeForm.start_at" type="datetime-local" class="form-input" style="width:175px;padding:6px 8px;font-size:var(--text-sm)" required>
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">结束
+            <input v-model="downtimeForm.end_at" type="datetime-local" class="form-input" style="width:175px;padding:6px 8px;font-size:var(--text-sm)" required>
+          </label>
+          <input v-model="downtimeForm.reason" type="text" maxlength="512" class="form-input" style="width:220px;padding:6px 10px;font-size:var(--text-sm)" placeholder="停机原因（如设备检修）">
+          <button type="submit" class="btn btn-sm" style="background:var(--danger);color:#fff">保存停机</button>
+        </form>
+        <div v-if="downtimeLoading" style="padding:12px 0 2px;font-size:var(--text-xs);color:var(--text-placeholder)">⏳ 加载停机记录中...</div>
+        <div v-else-if="downtimeEvents.length" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:190px;overflow-y:auto">
+          <div v-for="event in downtimeEvents" :key="`downtime-${event.id}`" style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--bg-hover);border-radius:var(--radius-sm);font-size:var(--text-xs)">
+            <span style="font-weight:600;min-width:150px">{{ event.process_name || '-' }} · {{ event.line_name || `产线 #${event.process_line_id}` }}</span>
+            <span style="white-space:nowrap">{{ event.start_at }} ~ {{ event.end_at }}</span>
+            <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" :title="event.reason || ''">{{ event.reason || '未填写原因' }}</span>
+            <button v-if="canEdit" type="button" class="btn-default btn-sm" style="padding:2px 8px;color:var(--danger);font-size:var(--text-xs)" @click="cancelDowntime(event)">取消</button>
+          </div>
+        </div>
+        <div v-else style="padding:10px 0 2px;font-size:var(--text-xs);color:var(--text-placeholder)">暂无有效停机记录</div>
       </div>
       <div v-if="capacityLoading" style="padding:36px;text-align:center;color:var(--text-placeholder)">⏳ 加载工序排程中...</div>
       <div v-else-if="!filteredOperations.length" style="padding:36px;text-align:center;color:var(--text-placeholder)">暂无工序排程数据，请选择订单生成排程</div>
       <div v-else style="overflow:auto;border:1px solid var(--border-light)">
-        <table style="width:100%;border-collapse:collapse;min-width:980px;font-size:var(--text-sm)">
+        <table style="width:100%;border-collapse:collapse;min-width:1200px;font-size:var(--text-sm)">
           <thead><tr style="background:var(--bg-hover);text-align:left">
-            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">计划日期</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">计划分钟</th><th style="padding:9px 10px">状态</th>
+            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">预计时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">交期风险</th><th style="padding:9px 10px">状态</th>
           </tr></thead>
           <tbody><tr v-for="row in filteredOperations" :key="row.id || `${row.order_id}-${row.order_process_id}`" style="border-top:1px solid var(--bg-hover)">
             <td style="padding:8px 10px;font-weight:600;color:var(--primary)">{{ row.order_no || row.order_id }}</td>
             <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
             <td style="padding:8px 10px">{{ lineLabel(row) }}</td>
-            <td style="padding:8px 10px;white-space:nowrap">{{ row.plan_start || '-' }} ~ {{ row.plan_end || '-' }}</td>
+            <td style="padding:8px 10px;white-space:nowrap">{{ row.planned_start_at || row.plan_start || '-' }}<span v-if="row.planned_end_at"> ~ {{ row.planned_end_at }}</span><span v-else-if="row.plan_end"> ~ {{ row.plan_end }}</span></td>
             <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
             <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
+            <td style="padding:8px 10px;white-space:nowrap">{{ standardScopeLabel(row.standard_match_scope) }}</td>
             <td style="padding:8px 10px">{{ row.difficulty_factor || 1 }}</td>
-            <td style="padding:8px 10px">{{ Math.round(row.planned_minutes || 0) }}</td>
+            <td style="padding:8px 10px">{{ Math.round(row.occupied_minutes || row.planned_minutes || 0) }}</td>
+            <td style="padding:8px 10px;white-space:nowrap"><span :style="{color:riskColor(operationRiskLevel(row)),fontWeight:700}" :title="operationRisk(row).risk_reason || ''">{{ riskIcon(operationRiskLevel(row)) }} {{ riskLabel(operationRiskLevel(row)) }}</span><span v-if="Number(operationRisk(row).delay_minutes)>0" style="display:block;font-size:10px;color:var(--danger)">+{{ formatRiskMinutes(operationRisk(row).delay_minutes) }}</span></td>
             <td style="padding:8px 10px"><span :style="{color:(row.schedule_status==='blocked'||row.status==='blocked')?'var(--danger)':'var(--success)',fontWeight:600}">{{ (row.schedule_status==='blocked'||row.status==='blocked') ? `阻断：${row.blocked_reason || row.reason || '前置条件不满足'}` : '已排程' }}</span></td>
           </tr></tbody>
         </table>
@@ -127,7 +178,8 @@
                 <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:85px;text-align:left" :title="order.order_no">{{ order.order_no }}</span>
                 <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80px;text-align:left" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
                 <span :style="{flexShrink:0,fontSize:'12px',padding:'1px 6px',borderRadius:'3px',textAlign:'left',minWidth:'56px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
-                <span v-if="order.risk!=='normal'" style="width:16px;flex-shrink:0;font-size:10px;text-align:left" :title="order.risk==='overdue'?'已过期':'即将到期'">{{ order.risk==='overdue'?'🔴':'🟡' }}</span>
+                <span :style="{flexShrink:0,fontSize:'10px',textAlign:'left',color:riskColor(order)}" :title="riskTooltip(order)">{{ riskIcon(order) }}</span>
+                <span v-if="riskLevel(order)!=='none'" class="gantt-risk-badge" :style="{color:riskColor(order)}" :title="riskTooltip(order)">{{ riskLabel(order) }}</span>
                 <span style="flex-shrink:0;font-size:9px;color:var(--text-placeholder);width:50px;text-align:left" :title="order.deadline||''">{{ order.deadline ? order.deadline.slice(5) : '-' }}</span>
               </div>
               <!-- 第二行：产品编码 + 进度条 -->
@@ -156,13 +208,13 @@
                   cursor: canAdjustOrder(order) ? 'col-resize' : 'default',
                   display:'flex',alignItems:'center',justifyContent:'center',
                   color:'#fff',fontSize:'10px',fontWeight:600,
-                  boxShadow: isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? '0 0 0 2px var(--danger), 0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.15)',zIndex:1,
+                  boxShadow: riskBarShadow(order, isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id)),zIndex:1,
                   transition: dragTarget===order ? 'none' : 'box-shadow 0.15s',
                   userSelect:'none'
                 }"
                 @mousedown="onBarMouseDown($event, order)"
                 @dblclick="editOrderDates(order)"
-                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
+                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (riskTooltip(order) ? ' | ' + riskTooltip(order) : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
                 <span v-if="order.quantity" style="margin-right:4px">{{ order.completed_qty||0 }}/{{ order.quantity }}</span>
                 {{ order.production_line || statusLabel(order.status) }}
               </div>

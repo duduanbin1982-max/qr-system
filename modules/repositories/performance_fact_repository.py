@@ -196,10 +196,12 @@ class PerformanceFactRepository:
         source_cutoff_clause = ""
         source_params = [period_start, period_end]
         if source_cutoff_at:
-            source_cutoff_clause = (
-                " AND event.created_at<=? AND source.created_at<=?"
-            )
-            source_params.extend([source_cutoff_at, source_cutoff_at])
+            # The canonical event is the cutoff boundary.  Source mappings are
+            # immutable children of that event, and legacy rows may have a
+            # migration-time created_at later than the historical event; using
+            # the mapping timestamp here would silently erase valid evidence.
+            source_cutoff_clause = " AND event.created_at<=?"
+            source_params.append(source_cutoff_at)
         source_rows = db.execute(
             "SELECT source.quality_event_id,source.source_type,source.source_id "
             "FROM performance_quality_event_sources source "

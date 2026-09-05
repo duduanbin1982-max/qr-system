@@ -68,4 +68,81 @@ describe('API facade transport contracts', () => {
       },
     )
   })
+
+  it('exposes immutable schedule revision queries and publish commands', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(200, { ok: true, revision: { id: 8 }, items: [] }),
+    )
+
+    await expect(
+      api.domains.production.listOrderScheduleRevisions(42, { limit: 10 }),
+    ).resolves.toEqual({ ok: true, revision: { id: 8 }, items: [] })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/schedule/order/42/revisions?limit=10',
+      { method: 'GET', headers: {}, credentials: 'same-origin' },
+    )
+
+    await expect(
+      api.domains.production.publishScheduleRevision(8, { published_by: 1000 }),
+    ).resolves.toEqual({ ok: true, revision: { id: 8 }, items: [] })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/schedule/revisions/8/publish',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ published_by: 1000 }),
+      },
+    )
+  })
+
+  it('serializes schedule downtime list, create, and cancellation commands', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(200, { ok: true, events: [{ id: 7 }] }),
+    )
+
+    await expect(api.domains.production.listScheduleDowntime({ limit: 500 })).resolves.toEqual({
+      ok: true,
+      events: [{ id: 7 }],
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/schedule/downtime?limit=500',
+      { method: 'GET', headers: {}, credentials: 'same-origin' },
+    )
+
+    await expect(api.domains.production.createScheduleDowntime({
+      process_line_id: 41,
+      start_at: '2026-09-01T08:00',
+      end_at: '2026-09-01T09:30',
+      reason: '设备检修',
+    })).resolves.toEqual({ ok: true, events: [{ id: 7 }] })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/schedule/downtime',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          process_line_id: 41,
+          start_at: '2026-09-01T08:00',
+          end_at: '2026-09-01T09:30',
+          reason: '设备检修',
+        }),
+      },
+    )
+
+    await expect(api.domains.production.cancelScheduleDowntime(7)).resolves.toEqual({
+      ok: true,
+      events: [{ id: 7 }],
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/schedule/downtime/7',
+      { method: 'DELETE', headers: {}, credentials: 'same-origin' },
+    )
+  })
 })

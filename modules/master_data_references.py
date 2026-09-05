@@ -155,6 +155,14 @@ PROCESS_REFERENCES = (
         label="订单工序排程",
     ),
     _process(
+        "schedule_revision_items",
+        ("order_process_id", "process_id"),
+        key="schedule_revision_items",
+        label="排程版本条目",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变排程版本事实",
+    ),
+    _process(
         "process_capacity_profiles",
         ("process_id",),
         key="process_capacity_profiles",
@@ -167,6 +175,14 @@ PROCESS_REFERENCES = (
         ("process_id",),
         key="process_production_lines",
         label="工序产线池",
+    ),
+    _process(
+        "schedule_downtime_events",
+        ("process_line_id",),
+        key="schedule_downtime_events",
+        label="产线停机事实",
+        impact_level=IMPACT_INTERNAL,
+        action="保留停机区间，作为动态重排的不可用容量证据",
     ),
     _process(
         "order_processes",

@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   listOperationSchedules: vi.fn(),
   listCapacityOrders: vi.fn(),
   generateOrderOperationSchedule: vi.fn(),
+  listScheduleDowntime: vi.fn(),
+  createScheduleDowntime: vi.fn(),
+  cancelScheduleDowntime: vi.fn(),
   can: vi.fn(),
 }))
 
@@ -33,6 +36,9 @@ vi.mock('@/lib/api.js', () => ({
         listOperationSchedules: mocks.listOperationSchedules,
         listCapacityOrders: mocks.listCapacityOrders,
         generateOrderOperationSchedule: mocks.generateOrderOperationSchedule,
+        listScheduleDowntime: mocks.listScheduleDowntime,
+        createScheduleDowntime: mocks.createScheduleDowntime,
+        cancelScheduleDowntime: mocks.cancelScheduleDowntime,
       },
     },
   },
@@ -78,6 +84,9 @@ describe('useGantt', () => {
     mocks.listProcessCapacityLines.mockResolvedValue({ lines: [] })
     mocks.listOperationSchedules.mockResolvedValue({ operations: [] })
     mocks.listCapacityOrders.mockResolvedValue({ orders: [] })
+    mocks.listScheduleDowntime.mockResolvedValue({ events: [] })
+    mocks.createScheduleDowntime.mockResolvedValue({ ok: true, event: { id: 1 } })
+    mocks.cancelScheduleDowntime.mockResolvedValue({ ok: true, status: 'cancelled' })
     mocks.updateScheduleOrder.mockResolvedValue({ ok: true })
   })
 
@@ -158,8 +167,123 @@ describe('useGantt', () => {
     expect(harness.gantt.processOptions.value).toEqual([{ id: 7, name: '焊接' }])
     expect(harness.gantt.filteredOperations.value).toHaveLength(1)
     expect(harness.gantt.capacitySummary.value).toEqual({ total: 1, planned: 1, blocked: 0, minutes: 90 })
+    expect(harness.gantt.standardScopeLabel('route_version:product')).toBe('路线版本 · 产品专用')
+    expect(harness.gantt.standardScopeLabel('unknown:scope')).toBe('unknown:scope')
     harness.gantt.capacityProcessFilter.value = '999'
     expect(harness.gantt.filteredOperations.value).toHaveLength(0)
+    harness.wrapper.unmount()
+  })
+
+  it('normalizes deadline risk levels and exposes delay summaries for the gantt', async () => {
+    mocks.getScheduleGantt.mockResolvedValue(response([
+      {
+        id: 11,
+        status: 'producing',
+        plan_start: '2026-09-01',
+        plan_end: '2026-09-02',
+        risk_level: 'high',
+        risk_reason: '预计完成时间晚于交期',
+        delay_minutes: 150,
+        deadline_at: '2026-09-01 23:59:59',
+        projected_completion_at: '2026-09-02 02:30',
+      },
+      {
+        id: 12,
+        status: 'pending',
+        plan_start: '2026-09-03',
+        plan_end: '2026-09-03',
+        risk: 'overdue',
+        delay_minutes: 60,
+      },
+      {
+        id: 13,
+        status: 'completed',
+        plan_start: '2026-09-04',
+        plan_end: '2026-09-04',
+        risk_level: 'none',
+        delay_minutes: 0,
+      },
+    ]))
+    const harness = mountHarness()
+    await flushPromises()
+
+    expect(harness.gantt.riskLevel(harness.gantt.orders.value[0])).toBe('high')
+    expect(harness.gantt.riskLabel(harness.gantt.orders.value[1])).toBe('已逾期')
+    expect(harness.gantt.riskSummary.value).toMatchObject({
+      high: 1,
+      overdue: 1,
+      none: 1,
+      delayed: 2,
+      totalDelayMinutes: 210,
+    })
+    expect(harness.gantt.formatRiskMinutes(150)).toBe('2 小时 30 分钟')
+    expect(harness.gantt.riskTooltip(harness.gantt.orders.value[0])).toContain('预计延期：2 小时 30 分钟')
+    harness.wrapper.unmount()
+  })
+
+  it('loads active downtime records when opening operation scheduling', async () => {
+    mocks.listProcessCapacityLines.mockResolvedValue({
+      lines: [{ id: 41, process_id: 7, process_name: '焊接', line_name: '焊接01线' }],
+    })
+    mocks.listScheduleDowntime.mockResolvedValue({
+      events: [{ id: 12, process_line_id: 41, process_name: '焊接', line_name: '焊接01线', start_at: '2026-09-01 08:00', end_at: '2026-09-01 09:30', reason: '换刀' }],
+    })
+    const harness = mountHarness()
+    await flushPromises()
+
+    await harness.gantt.setViewMode('operations')
+    await flushPromises()
+
+    expect(mocks.listScheduleDowntime).toHaveBeenCalledWith({ limit: 500 })
+    expect(harness.gantt.downtimeEvents.value).toEqual([
+      expect.objectContaining({ id: 12, reason: '换刀' }),
+    ])
+    expect(harness.gantt.downtimeForm.value.process_line_id).toBe(41)
+    harness.wrapper.unmount()
+  })
+
+  it('creates and cancels downtime through the schedule facade', async () => {
+    mocks.listProcessCapacityLines.mockResolvedValue({
+      lines: [{ id: 41, process_id: 7, process_name: '焊接', line_name: '焊接01线' }],
+    })
+    const harness = mountHarness()
+    await flushPromises()
+    await harness.gantt.setViewMode('operations')
+    await flushPromises()
+
+    harness.gantt.downtimeForm.value = {
+      process_line_id: 41,
+      start_at: '2026-09-01T08:00',
+      end_at: '2026-09-01T09:30',
+      reason: '设备检修',
+    }
+    await harness.gantt.createDowntime()
+    await flushPromises()
+
+    expect(mocks.createScheduleDowntime).toHaveBeenCalledWith({
+      process_line_id: 41,
+      start_at: '2026-09-01T08:00',
+      end_at: '2026-09-01T09:30',
+      reason: '设备检修',
+    })
+    expect(mocks.listScheduleDowntime).toHaveBeenCalledTimes(2)
+
+    await harness.gantt.cancelDowntime({ id: 12 })
+    expect(mocks.cancelScheduleDowntime).toHaveBeenCalledWith(12)
+    harness.wrapper.unmount()
+  })
+
+  it('rejects an invalid downtime interval before sending a request', async () => {
+    const harness = mountHarness()
+    await flushPromises()
+    harness.gantt.downtimeForm.value = {
+      process_line_id: 41,
+      start_at: '2026-09-01T10:00',
+      end_at: '2026-09-01T09:00',
+      reason: '时间错误',
+    }
+    await harness.gantt.createDowntime()
+    expect(mocks.createScheduleDowntime).not.toHaveBeenCalled()
     harness.wrapper.unmount()
   })
 })
