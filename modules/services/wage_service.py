@@ -41,7 +41,19 @@ class WageService:
                     wages[emp_id] = {'employee_id': emp_id, 'employee_name': row['employee_name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': '', 'total_quantity': 0, 'total_wage': 0, 'details': []}
                 wages[emp_id]['total_quantity'] += qty
                 wages[emp_id]['total_wage'] += wage
-                wages[emp_id]['details'].append({'date': row['created_at'], 'order_no': row['order_no'] or '', 'product_name': row['product_name'] or '', 'product_code': row['order_product_code'] or '', 'process_name': row['process_name'], 'quantity': qty, 'unit_price': up, 'wage': wage})
+                wages[emp_id]['details'].append({
+                    'date': row['created_at'],
+                    'order_no': row['order_no'] or '',
+                    'product_name': row['product_name'] or '',
+                    'product_code': row['order_product_code'] or '',
+                    'process_name': row['process_name'],
+                    'quantity': qty,
+                    'unit_price': up,
+                    'wage': wage,
+                    'price_version_id': row['price_version_id'],
+                    'price_source': row['price_source'] or 'missing',
+                    'price_match_reason': row['price_match_reason'] or '未匹配到工价',
+                })
         if hide_zero:
             wages = {uid: w for uid, w in wages.items() if w['total_quantity'] > 0}
             total = len(wages)
