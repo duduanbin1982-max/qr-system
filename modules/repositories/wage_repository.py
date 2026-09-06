@@ -13,16 +13,115 @@ from modules.process_fact_projection import (
 class WageRepository:
     """工资核算数据访问 — 集中管理报工记录、工序汇总、工资计算相关查询。"""
 
-    _PRICE_JOIN = (
-        "LEFT JOIN route_prices rp ON o.route_id = rp.route_id "
-        "AND wr.process_id = rp.process_id AND rp.status = 'active' "
-        "AND rp.effective_date <= DATE(wr.created_at)"
-    )
-    _PRICE_SELECT = "COALESCE(rp.unit_price, 0) as unit_price"
+    @staticmethod
+    def _has_versioned_prices(db):
+        return db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='route_price_versions'"
+        ).fetchone() is not None
 
     @classmethod
-    def _unit_price_expr(cls):
-        return cls._PRICE_SELECT.replace("as unit_price", "")
+    def _price_projection(cls, db, work_alias="wr", order_alias="o"):
+        """Build the canonical live-price projection used by wage estimates.
+
+        Versioned work records must resolve against the exact route/process
+        revision captured on the fact.  Only legacy, unbound facts may use a
+        root route/process lookup.  The old ``route_prices`` table is kept as
+        a compatibility path only when the versioned price table is absent.
+        """
+        route_expr = f"COALESCE({work_alias}.route_id,{order_alias}.route_id)"
+        exact_bound = (
+            f"{work_alias}.route_version_id IS NOT NULL AND "
+            f"{work_alias}.process_version_id IS NOT NULL"
+        )
+
+        if cls._has_versioned_prices(db):
+            exact_where = (
+                "p.route_version_id={work}.route_version_id "
+                "AND p.process_version_id={work}.process_version_id "
+                "AND p.status='approved' "
+                "AND p.valid_from<={work}.created_at "
+                "AND (COALESCE(p.valid_to,'')='' OR p.valid_to>{work}.created_at)"
+            ).format(work=work_alias)
+            root_where = (
+                "p.route_id={route} AND p.process_id={work}.process_id "
+                "AND p.status='approved' "
+                "AND p.valid_from<={work}.created_at "
+                "AND (COALESCE(p.valid_to,'')='' OR p.valid_to>{work}.created_at)"
+            ).format(route=route_expr, work=work_alias)
+
+            exact_exists = f"EXISTS (SELECT 1 FROM route_price_versions p WHERE {exact_where})"
+            root_exists = f"EXISTS (SELECT 1 FROM route_price_versions p WHERE {root_where})"
+            exact_value = (
+                f"(SELECT p.normal_unit_price_micros / 10000.0 "
+                f"FROM route_price_versions p WHERE {exact_where} "
+                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
+            )
+            root_value = (
+                f"(SELECT p.normal_unit_price_micros / 10000.0 "
+                f"FROM route_price_versions p WHERE {root_where} "
+                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
+            )
+            exact_id = (
+                f"(SELECT p.id FROM route_price_versions p WHERE {exact_where} "
+                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
+            )
+            root_id = (
+                f"(SELECT p.id FROM route_price_versions p WHERE {root_where} "
+                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
+            )
+            unit_price = (
+                f"CASE WHEN {exact_bound} THEN COALESCE({exact_value},0) "
+                f"ELSE COALESCE({root_value},0) END"
+            )
+            price_version_id = (
+                f"CASE WHEN {exact_bound} THEN {exact_id} ELSE {root_id} END"
+            )
+            price_source = (
+                f"CASE WHEN {exact_bound} AND {exact_exists} THEN 'versioned_exact' "
+                f"WHEN {exact_bound} THEN 'missing_exact' "
+                f"WHEN {root_exists} THEN 'versioned_root_fallback' "
+                "ELSE 'missing' END"
+            )
+            price_match_reason = (
+                f"CASE WHEN {exact_bound} AND {exact_exists} AND {exact_value}=0 "
+                "THEN '工价为0' "
+                f"WHEN {exact_bound} AND {exact_exists} THEN '按路线版本和工序版本精确匹配' "
+                f"WHEN {exact_bound} THEN '未找到对应路线版本和工序版本工价' "
+                f"WHEN {root_exists} AND {root_value}=0 THEN '工价为0' "
+                f"WHEN {root_exists} THEN '按旧报工的路线和工序兼容匹配' "
+                "ELSE '未匹配到已批准工价' END"
+            )
+            return {
+                "unit_price": unit_price,
+                "price_version_id": price_version_id,
+                "price_source": price_source,
+                "price_match_reason": price_match_reason,
+            }
+
+        legacy_where = (
+            f"rp.route_id={route_expr} AND rp.process_id={work_alias}.process_id "
+            f"AND rp.status='active' AND rp.effective_date<=DATE({work_alias}.created_at)"
+        )
+        legacy_exists = f"EXISTS (SELECT 1 FROM route_prices rp WHERE {legacy_where})"
+        legacy_value = (
+            f"(SELECT rp.unit_price FROM route_prices rp WHERE {legacy_where} "
+            "ORDER BY rp.effective_date DESC,rp.id DESC LIMIT 1)"
+        )
+        return {
+            "unit_price": f"COALESCE({legacy_value},0)",
+            "price_version_id": "NULL",
+            "price_source": f"CASE WHEN {legacy_exists} THEN 'legacy' ELSE 'missing' END",
+            "price_match_reason": (
+                f"CASE WHEN {legacy_exists} AND {legacy_value}=0 THEN '工价为0' "
+                f"WHEN {legacy_exists} THEN '按旧工价表匹配' ELSE '未匹配到工价' END"
+            ),
+        }
+
+    @classmethod
+    def _unit_price_expr(cls, db=None, work_alias="wr", order_alias="o"):
+        db = resolve_db(db)
+        return cls._price_projection(db, work_alias, order_alias)["unit_price"]
 
     @staticmethod
     def get_worker_role_code(db=None):
@@ -89,6 +188,7 @@ class WageRepository:
         if not user_ids:
             return []
         placeholders = ",".join(["?" for _ in user_ids])
+        price = cls._price_projection(db)
         process_name = process_value_sql("wr", "process_version", "p")
         query = (
             """SELECT u.id as user_id, u.name as employee_name, u.employee_no,
@@ -98,7 +198,14 @@ class WageRepository:
             + """ as process_name,
                    o.order_no, o.product_name, o.product_code as order_product_code,
                    """
-            + cls._PRICE_SELECT
+            + price["unit_price"]
+            + " as unit_price, "
+            + price["price_version_id"]
+            + " as price_version_id, "
+            + price["price_source"]
+            + " as price_source, "
+            + price["price_match_reason"]
+            + " as price_match_reason"
             + """
             FROM users u
             LEFT JOIN work_records wr ON u.id = wr.user_id AND """
@@ -110,7 +217,6 @@ class WageRepository:
             + """
             LEFT JOIN orders o ON wr.order_id = o.id
             """
-            + cls._PRICE_JOIN
             + """
             WHERE u.id IN ("""
             + placeholders
@@ -125,6 +231,7 @@ class WageRepository:
     def get_daily_report_rows(cls, date, db=None):
         db = resolve_db(db)
         period_start, period_end = reporting_day_bounds(date)
+        price = cls._price_projection(db)
         process_name = process_value_sql("wr", "process_version", "p")
         query = (
             """
@@ -132,7 +239,14 @@ class WageRepository:
             + process_name
             + """ as process_name,
                    """
-            + cls._PRICE_SELECT
+            + price["unit_price"]
+            + " as unit_price, "
+            + price["price_version_id"]
+            + " as price_version_id, "
+            + price["price_source"]
+            + " as price_source, "
+            + price["price_match_reason"]
+            + " as price_match_reason"
             + """
             FROM work_records wr
             LEFT JOIN users u ON wr.user_id = u.id
@@ -142,7 +256,6 @@ class WageRepository:
             + """
             LEFT JOIN orders o ON wr.order_id = o.id
             """
-            + cls._PRICE_JOIN
             + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
             AND wr.created_at >= ? AND wr.created_at < ?
@@ -204,7 +317,7 @@ class WageRepository:
     def get_monthly_summary(cls, year_month, page=1, limit=100, db=None):
         db = resolve_db(db)
         month_start = year_month + "-01"
-        unit_price = cls._unit_price_expr()
+        unit_price = cls._unit_price_expr(db)
         rows = db.execute(
             """
             SELECT wr.user_id, u.name as employee_name, u.employee_no,
@@ -215,9 +328,6 @@ class WageRepository:
             FROM work_records wr
             JOIN users u ON wr.user_id = u.id
             LEFT JOIN orders o ON wr.order_id = o.id
-            """
-            + cls._PRICE_JOIN
-            + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
             GROUP BY wr.user_id
@@ -242,9 +352,6 @@ class WageRepository:
             + """),0) as total_wage
             FROM work_records wr
             LEFT JOIN orders o ON wr.order_id = o.id
-            """
-            + cls._PRICE_JOIN
-            + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
             """,
@@ -256,6 +363,7 @@ class WageRepository:
     def get_process_wage_summary(cls, year_month, db=None):
         db = resolve_db(db)
         month_start = year_month + "-01"
+        unit_price = cls._unit_price_expr(db)
         process_name = process_value_sql("wr", "process_version", "p")
         process_category = process_value_sql(
             "wr", "process_version", "p", field="category"
@@ -269,7 +377,7 @@ class WageRepository:
             + """ as category,
                    SUM(wr.quantity) as total_quantity,
                    SUM(wr.quantity * """
-            + cls._unit_price_expr()
+            + unit_price
             + """) as total_wage,
                    COUNT(DISTINCT wr.user_id) as worker_count
             FROM work_records wr
@@ -278,9 +386,6 @@ class WageRepository:
             + process_version_join("wr", "process_version")
             + """
             LEFT JOIN orders o ON wr.order_id = o.id
-            """
-            + cls._PRICE_JOIN
-            + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
               AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
             GROUP BY wr.process_id,wr.process_version_id,"""
@@ -413,14 +518,14 @@ class WageRepository:
     @classmethod
     def get_live_wage_trends(cls, months=12, db=None):
         db = resolve_db(db)
+        unit_price = cls._unit_price_expr(db)
         return db.execute(
             "SELECT strftime('%Y-%m', wr.created_at) as year_month, "
             "COALESCE(SUM(wr.quantity),0) as total_quantity, "
-            "COALESCE(SUM(wr.quantity * " + cls._unit_price_expr() + "),0) as total_wage, "
+            "COALESCE(SUM(wr.quantity * " + unit_price + "),0) as total_wage, "
             "COUNT(DISTINCT wr.user_id) as employee_count "
             "FROM work_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
-            + cls._PRICE_JOIN
             + " "
             "WHERE wr.status = 'approved' AND wr.type = 'normal' "
             "AND wr.created_at >= date('now','-" + str(months) + " months') "
@@ -433,15 +538,15 @@ class WageRepository:
     def get_position_summary(cls, year_month, db=None):
         db = resolve_db(db)
         month_start = year_month + "-01"
+        unit_price = cls._unit_price_expr(db)
         return db.execute(
             "SELECT COALESCE(pos.name, '未分配') as position_name, COUNT(DISTINCT wr.user_id) as employee_count, "
             "SUM(wr.quantity) as total_quantity, SUM(wr.quantity * "
-            + cls._unit_price_expr()
+            + unit_price
             + ") as total_wage FROM work_records wr "
             "JOIN users u ON wr.user_id = u.id "
             "LEFT JOIN positions pos ON u.position_id = pos.id "
             "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
-            + cls._PRICE_JOIN
             + " WHERE wr.status = 'approved' AND wr.type = 'normal' "
             "AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month') "
             "GROUP BY pos.name ORDER BY total_wage DESC",

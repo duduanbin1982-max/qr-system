@@ -71,7 +71,10 @@
                       <td style="padding:var(--space-2) 8px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">{{ d.product_name }}<span v-if="d.product_code" style="color:var(--text-placeholder);font-size:var(--text-xs-alt);margin-left:4px">({{ d.product_code }})</span></td>
                       <td style="padding:var(--space-2) 8px;color:var(--primary-accent);white-space:nowrap">{{ d.process_name }}</td>
                       <td style="padding:var(--space-2) 8px;text-align:center;font-weight:500;white-space:nowrap">{{ d.quantity }}</td>
-                      <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">¥{{ fmtMoney(d.unit_price) }}</td>
+                      <td style="padding:var(--space-2) 12px;text-align:right;color:var(--text-placeholder)">
+                        <span>¥{{ fmtMoney(d.unit_price) }}</span>
+                        <span v-if="!Number(d.unit_price)" :title="d.price_match_reason || '未匹配到工价'" style="display:block;color:var(--danger);font-size:var(--text-xs-alt);white-space:nowrap">{{ d.price_match_reason || '未匹配到工价' }}</span>
+                      </td>
                       <td style="padding:var(--space-2) 12px;text-align:right;font-weight:600;color:var(--success)">¥{{ fmtMoney(d.wage) }}</td>
                     </tr>
                   </tbody>

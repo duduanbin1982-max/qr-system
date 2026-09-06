@@ -14,6 +14,7 @@ from modules.db import get_db
 from modules.domain.payroll_policy import PayrollConflictError, work_amount_cents
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
+from modules.services.wage_service import WageService
 
 
 def _actors(db):
@@ -105,6 +106,37 @@ def test_fixed_point_rounding_and_reporting_boundary():
     assert work_amount_cents(1, 1) == 0
     with pytest.raises(ValueError):
         work_amount_cents(1, 10000, 10001)
+
+
+def test_live_wage_estimate_uses_exact_approved_price_version(client):
+    with client.application.app_context():
+        db = get_db()
+        worker_id, route_id, process_id, _ = _seed_price_and_work(db)
+        binding = _exact_binding(db, route_id, process_id)
+
+        # The legacy route_prices table is intentionally empty.  The estimate
+        # must still resolve the approved route/process price version captured
+        # on the work record.
+        assert db.execute(
+            "SELECT COUNT(*) FROM route_prices WHERE route_id=? AND process_id=?",
+            (route_id, process_id),
+        ).fetchone()[0] == 0
+
+        result = WageService.calculate_wages(
+            employee_id=str(worker_id),
+            date_from="2026-07-01",
+            date_to="2026-07-01",
+            page=1,
+            limit=50,
+        )
+        wage = result["wages"][0]
+        detail = wage["details"][0]
+        assert wage["total_quantity"] == 3
+        assert wage["total_wage"] == pytest.approx(3.75)
+        assert detail["unit_price"] == pytest.approx(1.25)
+        assert detail["price_version_id"] is not None
+        assert detail["price_source"] == "versioned_exact"
+        assert detail["price_match_reason"] == "按路线版本和工序版本精确匹配"
 
 
 def test_payroll_batch_is_idempotent_and_confirms_with_two_actors(client):
