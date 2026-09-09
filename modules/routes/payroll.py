@@ -10,6 +10,7 @@ from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
+from modules.services.historical_price_binding_service import HistoricalPriceBindingService
 from modules.domain.payroll_policy import PayrollConflictError
 from modules.domain.errors import DomainError
 
@@ -348,5 +349,74 @@ def route_price_version_approve(version_id):
         return jsonify(PriceVersionService.approve(
             version_id, _actor(), (request.get_json() or {}).get("row_version")
         ))
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/historical-price-binding-repairs/manual-reviews", methods=["GET"])
+@check_auth
+def historical_price_manual_reviews():
+    """List readable historical price confirmations without leaking internal keys."""
+    if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
+        return _deny()
+    try:
+        return jsonify(HistoricalPriceBindingService.list_manual_reviews())
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route(
+    "/api/historical-price-binding-repairs/manual-reviews/<int:review_id>/drafts",
+    methods=["POST"],
+)
+@check_auth
+@validate_json("historical_price_manual_draft_create")
+def historical_price_manual_draft_create(review_id):
+    if not _allowed("wages:prepare"):
+        return _deny()
+    try:
+        return jsonify(
+            HistoricalPriceBindingService.create_draft(
+                review_id, request.get_json() or {}, _actor()
+            )
+        )
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route(
+    "/api/historical-price-binding-repair-drafts/<int:draft_id>/void",
+    methods=["POST"],
+)
+@check_auth
+@validate_json("historical_price_manual_draft_void")
+def historical_price_manual_draft_void(draft_id):
+    if not _allowed("wages:prepare"):
+        return _deny()
+    try:
+        return jsonify(
+            HistoricalPriceBindingService.void_draft(
+                draft_id, request.get_json() or {}, _actor()
+            )
+        )
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route(
+    "/api/historical-price-binding-repair-drafts/<int:draft_id>/approve",
+    methods=["POST"],
+)
+@check_auth
+@validate_json("historical_price_manual_draft_approve")
+def historical_price_manual_draft_approve(draft_id):
+    if not _allowed("wages:approve"):
+        return _deny()
+    try:
+        return jsonify(
+            HistoricalPriceBindingService.approve_draft(
+                draft_id, request.get_json() or {}, _actor()
+            )
+        )
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)

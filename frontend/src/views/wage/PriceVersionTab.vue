@@ -28,6 +28,15 @@
       <div><span>已作废记录</span><strong>{{ voidedPrices.length }}</strong></div>
     </div>
 
+    <HistoricalPriceConfirmationPanel
+      v-if="viewMode === 'published' && (manualLoading || manualReviews.length)"
+      :reviews="manualReviews"
+      :can-prepare="canPrepare"
+      :can-approve="canApprove"
+      :loading="manualLoading"
+      @refresh="refreshManualReviews"
+    />
+
     <nav class="view-switch" role="tablist" aria-label="工价版本视图">
       <button
         v-for="option in viewOptions"
@@ -170,6 +179,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import PriceVersionEditor from '@/components/wage/PriceVersionEditor.vue'
+import HistoricalPriceConfirmationPanel from '@/components/wage/HistoricalPriceConfirmationPanel.vue'
 import {
   priceReferenceKey,
   useRoutePriceVersions,
@@ -199,6 +209,8 @@ const editorOpen = ref(false)
 const selectedRow = ref(null)
 const approving = ref(false)
 const intentHandled = ref(false)
+const manualReviews = ref([])
+const manualLoading = ref(false)
 
 const canPrepare = computed(() => can('wages:prepare'))
 const canApprove = computed(() => can('wages:approve'))
@@ -303,9 +315,28 @@ function closeEditor() {
 async function refresh() {
   try {
     await load()
+    await refreshManualReviews()
     restoreExactIntent()
   } catch (error) {
     showToast(error.message || '工价版本加载失败', 'error')
+  }
+}
+
+async function refreshManualReviews() {
+  if (!canPrepare.value && !canApprove.value) {
+    manualReviews.value = []
+    return
+  }
+  manualLoading.value = true
+  try {
+    const result = await api.domains.wages.listHistoricalPriceManualReviews()
+    manualReviews.value = result.items || []
+  } catch (error) {
+    // Older databases may not have V083 yet; keep the normal price screen usable.
+    if (error.status !== 404) showToast(error.message || '历史人工确认清单加载失败', 'error')
+    manualReviews.value = []
+  } finally {
+    manualLoading.value = false
   }
 }
 

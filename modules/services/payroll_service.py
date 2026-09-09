@@ -391,7 +391,7 @@ class PayrollWorkflowService:
             old_id = batch.get("supersedes_batch_id")
             if old_id:
                 old = PayrollRepository.get_batch(old_id, db)
-                if old and old.get("status") == "confirmed":
+                if old and old.get("status") != "voided":
                     PayrollRepository.mark_superseded(old_id, batch_id, db)
             PayrollRepository.transition_batch(
                 batch_id, expected_row_version, "confirmed",

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createVersion: vi.fn(),
   approveVersion: vi.fn(),
   voidVersion: vi.fn(),
+  listHistoricalReviews: vi.fn(),
   showToast: vi.fn(),
 }))
 
@@ -23,6 +24,7 @@ vi.mock('@/lib/api.js', () => ({
         createRoutePriceVersion: mocks.createVersion,
         approveRoutePriceVersion: mocks.approveVersion,
         voidRoutePriceVersion: mocks.voidVersion,
+        listHistoricalPriceManualReviews: mocks.listHistoricalReviews,
       },
     },
   },
@@ -90,6 +92,7 @@ describe('PriceVersionTab exact-version workflow', () => {
     mocks.createVersion.mockReset().mockResolvedValue({ id: 301, status: 'draft' })
     mocks.approveVersion.mockReset().mockResolvedValue({ id: 102, status: 'approved' })
     mocks.voidVersion.mockReset().mockResolvedValue({ id: 102, status: 'voided' })
+    mocks.listHistoricalReviews.mockReset().mockResolvedValue({ items: [] })
     mocks.showToast.mockReset()
   })
 
@@ -107,6 +110,35 @@ describe('PriceVersionTab exact-version workflow', () => {
     expect(wrapper.text()).toContain('标准机加工路线 · 待发布 V2')
     expect(wrapper.text()).toContain('只能随路线成组发布')
     expect(wrapper.find('[data-testid="approve-price-102"]').exists()).toBe(false)
+  })
+
+  it('shows historical confirmations by order, product, route and process, not internal keys', async () => {
+    mocks.listHistoricalReviews.mockResolvedValue({
+      items: [{
+        review_id: 41,
+        route: { name: '正坤 SB121 静音外壳路线', version: 3 },
+        process: { name: '四片焊接', version: 2 },
+        affected_orders: [{
+          order_id: 101,
+          order_no: '26072701',
+          product_code: 'SB121-JY-WK',
+          product_name: '正坤 SB121 静音外壳',
+          work_record_count: 9,
+          quantity: 18,
+        }],
+        evidence: { work_record_count: 9, quantity: 18 },
+        candidate_prices: [],
+        drafts: [],
+      }],
+    })
+    const wrapper = mount(PriceVersionTab)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('26072701')
+    expect(wrapper.text()).toContain('SB121-JY-WK')
+    expect(wrapper.text()).toContain('正坤 SB121 静音外壳路线')
+    expect(wrapper.text()).toContain('四片焊接')
+    expect(wrapper.text()).not.toContain('manual:')
   })
 
   it('creates a pending price with locked version IDs and digest snapshots', async () => {

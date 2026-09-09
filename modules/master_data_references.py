@@ -424,6 +424,15 @@ PROCESS_REFERENCES = (
         impact_level=IMPACT_INTERNAL,
         action="保留不可变迁移审计证据",
     ),
+    _process(
+        "historical_price_binding_repair_items",
+        ("target_process_id",),
+        version_columns=("target_process_version_id",),
+        key="historical_price_binding_repair_items_process",
+        label="历史工价修复目标工序",
+        impact_level=IMPACT_INTERNAL,
+        action="由受控历史工价绑定修复清单维护",
+    ),
 )
 
 
@@ -658,6 +667,15 @@ ROUTE_REFERENCES = (
         label="历史工价绑定迁移事件",
         impact_level=IMPACT_INTERNAL,
         action="保留不可变迁移审计证据",
+    ),
+    _route(
+        "historical_price_binding_repair_items",
+        ("target_route_id",),
+        version_columns=("target_route_version_id",),
+        key="historical_price_binding_repair_items_route",
+        label="历史工价修复目标路线",
+        impact_level=IMPACT_INTERNAL,
+        action="由受控历史工价绑定修复清单维护",
     ),
 )
 
