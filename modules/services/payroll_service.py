@@ -3,9 +3,6 @@
 from datetime import datetime
 import hashlib
 import json
-import logging
-
-from modules import config
 from modules.domain.payroll_policy import (
     PayrollConflictError,
     cents_to_yuan,
@@ -17,9 +14,6 @@ from modules.domain.payroll_policy import (
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.services import BaseService
-
-
-logger = logging.getLogger("qr-system.payroll")
 
 
 def _actor(user):
@@ -96,6 +90,8 @@ class PayrollCalculationService:
             row.get("route_version_id") is not None
             and row.get("process_version_id") is not None
         )
+        if PayrollRepository.has_versioned_prices(db) and not has_exact_binding:
+            return None, None, "missing_price"
         candidates = PayrollRepository.price_candidates(
             row["route_id"],
             row["process_id"],
@@ -108,13 +104,6 @@ class PayrollCalculationService:
                 row["process_version_id"] if has_exact_binding else None
             ),
         )
-        if not has_exact_binding and config.PROCESS_VERSION_COMPAT_AUDIT_ENABLED:
-            logger.warning(
-                "payroll_price_legacy_fallback work_record_id=%s route_id=%s process_id=%s",
-                row.get("work_record_id"),
-                row.get("route_id"),
-                row.get("process_id"),
-            )
         if len(candidates) > 1:
             return None, None, "overlapping_price"
         if not candidates:
@@ -132,8 +121,6 @@ class PayrollCalculationService:
             "resolution_method": "versioned_price",
             "resolution_reason": (
                 "Matched exact route and process versions at work-report time"
-                if has_exact_binding
-                else "Legacy root-ID price fallback for unversioned work record"
             ),
             "resolved_by": None,
             "resolved_by_name": "",

@@ -139,6 +139,57 @@ def test_live_wage_estimate_uses_exact_approved_price_version(client):
         assert detail["price_match_reason"] == "按路线版本和工序版本精确匹配"
 
 
+def test_live_wage_estimate_blocks_unbound_work_when_versioned_prices_exist(client):
+    with client.application.app_context():
+        db = get_db()
+        worker_id, route_id, process_id, _ = _seed_price_and_work(db)
+        db.execute(
+            "UPDATE work_records SET route_version_id=NULL, process_version_id=NULL "
+            "WHERE user_id=? AND route_id=? AND process_id=?",
+            (worker_id, route_id, process_id),
+        )
+        db.commit()
+
+        result = WageService.calculate_wages(
+            employee_id=str(worker_id),
+            date_from="2026-07-01",
+            date_to="2026-07-01",
+            page=1,
+            limit=50,
+        )
+        detail = result["wages"][0]["details"][0]
+        assert result["wages"][0]["total_wage"] == 0
+        assert detail["unit_price"] == 0
+        assert detail["price_version_id"] is None
+        assert detail["price_source"] == "missing_exact"
+        assert detail["price_match_reason"] == "报工缺少路线版本和工序版本，无法精确匹配"
+
+
+def test_payroll_batch_blocks_unbound_work_without_root_price_fallback(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, _approver = _actors(db)
+        worker_id, route_id, process_id, _ = _seed_price_and_work(db)
+        db.execute(
+            "UPDATE work_records SET route_version_id=NULL, process_version_id=NULL "
+            "WHERE user_id=? AND route_id=? AND process_id=?",
+            (worker_id, route_id, process_id),
+        )
+        db.commit()
+
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "payroll-unbound-version-1"
+        )
+        assert batch["status"] == "exceptions_pending"
+        assert batch["priced_record_count"] == 0
+        assert batch["payable_wage_cents"] == 0
+        exception = db.execute(
+            "SELECT exception_type FROM payroll_exceptions WHERE batch_id=?",
+            (batch["id"],),
+        ).fetchone()
+        assert exception["exception_type"] == "missing_price"
+
+
 def test_payroll_batch_is_idempotent_and_confirms_with_two_actors(client):
     with client.application.app_context():
         db = get_db()

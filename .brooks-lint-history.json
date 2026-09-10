@@ -537,5 +537,16 @@
       "suggestion": 2
     },
     "scope": "PR #32 codex/product-management-repair vs github/master；重点抽样审查工序级多产线排程迁移、仓储、服务、API、甘特图、相关测试和发布脚本"
+  },
+  {
+    "date": "2026-09-09T18:10:00+08:00",
+    "mode": "PR Review",
+    "score": 55,
+    "findings": {
+      "critical": 2,
+      "warning": 3,
+      "suggestion": 0
+    },
+    "scope": "PR #37 codex/historical-price-binding-repair vs github/master；抽样审查 V083 历史工价人工确认、工资精确匹配、迁移触发器、HTTP/UI 和测试"
   }
 ]

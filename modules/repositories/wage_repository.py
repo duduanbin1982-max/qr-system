@@ -25,9 +25,10 @@ class WageRepository:
         """Build the canonical live-price projection used by wage estimates.
 
         Versioned work records must resolve against the exact route/process
-        revision captured on the fact.  Only legacy, unbound facts may use a
-        root route/process lookup.  The old ``route_prices`` table is kept as
-        a compatibility path only when the versioned price table is absent.
+        revision captured on the fact.  Once the versioned price table exists,
+        unbound facts are blocked instead of falling back to root IDs.  The old
+        ``route_prices`` table remains a compatibility path only when the
+        versioned price table is absent.
         """
         route_expr = f"COALESCE({work_alias}.route_id,{order_alias}.route_id)"
         exact_bound = (
@@ -43,54 +44,31 @@ class WageRepository:
                 "AND p.valid_from<={work}.created_at "
                 "AND (COALESCE(p.valid_to,'')='' OR p.valid_to>{work}.created_at)"
             ).format(work=work_alias)
-            root_where = (
-                "p.route_id={route} AND p.process_id={work}.process_id "
-                "AND p.status='approved' "
-                "AND p.valid_from<={work}.created_at "
-                "AND (COALESCE(p.valid_to,'')='' OR p.valid_to>{work}.created_at)"
-            ).format(route=route_expr, work=work_alias)
-
             exact_exists = f"EXISTS (SELECT 1 FROM route_price_versions p WHERE {exact_where})"
-            root_exists = f"EXISTS (SELECT 1 FROM route_price_versions p WHERE {root_where})"
             exact_value = (
                 f"(SELECT p.normal_unit_price_micros / 10000.0 "
                 f"FROM route_price_versions p WHERE {exact_where} "
-                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
-            )
-            root_value = (
-                f"(SELECT p.normal_unit_price_micros / 10000.0 "
-                f"FROM route_price_versions p WHERE {root_where} "
                 "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
             )
             exact_id = (
                 f"(SELECT p.id FROM route_price_versions p WHERE {exact_where} "
                 "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
             )
-            root_id = (
-                f"(SELECT p.id FROM route_price_versions p WHERE {root_where} "
-                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
-            )
             unit_price = (
-                f"CASE WHEN {exact_bound} THEN COALESCE({exact_value},0) "
-                f"ELSE COALESCE({root_value},0) END"
+                f"CASE WHEN {exact_bound} THEN COALESCE({exact_value},0) ELSE 0 END"
             )
-            price_version_id = (
-                f"CASE WHEN {exact_bound} THEN {exact_id} ELSE {root_id} END"
-            )
+            price_version_id = f"CASE WHEN {exact_bound} THEN {exact_id} ELSE NULL END"
             price_source = (
                 f"CASE WHEN {exact_bound} AND {exact_exists} THEN 'versioned_exact' "
                 f"WHEN {exact_bound} THEN 'missing_exact' "
-                f"WHEN {root_exists} THEN 'versioned_root_fallback' "
-                "ELSE 'missing' END"
+                "ELSE 'missing_exact' END"
             )
             price_match_reason = (
                 f"CASE WHEN {exact_bound} AND {exact_exists} AND {exact_value}=0 "
                 "THEN '工价为0' "
                 f"WHEN {exact_bound} AND {exact_exists} THEN '按路线版本和工序版本精确匹配' "
                 f"WHEN {exact_bound} THEN '未找到对应路线版本和工序版本工价' "
-                f"WHEN {root_exists} AND {root_value}=0 THEN '工价为0' "
-                f"WHEN {root_exists} THEN '按旧报工的路线和工序兼容匹配' "
-                "ELSE '未匹配到已批准工价' END"
+                "ELSE '报工缺少路线版本和工序版本，无法精确匹配' END"
             )
             return {
                 "unit_price": unit_price,
