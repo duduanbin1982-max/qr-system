@@ -66,7 +66,53 @@ route_price_version_void = {
     },
 }
 
+historical_price_manual_draft_create = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "normal_unit_price", "valid_from", "confirmation_reason", "idempotency_key",
+    ],
+    "properties": {
+        "normal_unit_price": {
+            "oneOf": [
+                {"type": "number", "exclusiveMinimum": 0},
+                {"type": "string", "minLength": 1, "maxLength": 32, "pattern": r"^\d+(\.\d+)?$"},
+            ]
+        },
+        "rework_rate_configured": {"type": "boolean"},
+        "rework_rate_percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "valid_from": {"type": "string", "minLength": 10, "maxLength": 32},
+        "valid_to": {"type": ["string", "null"], "minLength": 10, "maxLength": 32},
+        "confirmation_reason": {"type": "string", "minLength": 2, "maxLength": 512, "pattern": r"\S"},
+        "idempotency_key": _idempotency_key,
+    },
+}
+
+historical_price_manual_draft_void = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["row_version", "reason", "idempotency_key"],
+    "properties": {
+        "row_version": {"type": "integer", "minimum": 0},
+        "reason": {"type": "string", "minLength": 2, "maxLength": 512, "pattern": r"\S"},
+        "idempotency_key": _idempotency_key,
+    },
+}
+
+historical_price_manual_draft_approve = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["row_version", "idempotency_key"],
+    "properties": {
+        "row_version": {"type": "integer", "minimum": 0},
+        "idempotency_key": _idempotency_key,
+    },
+}
+
 payroll_schemas = {
     "route_price_version_create": route_price_version_create,
     "route_price_version_void": route_price_version_void,
+    "historical_price_manual_draft_create": historical_price_manual_draft_create,
+    "historical_price_manual_draft_void": historical_price_manual_draft_void,
+    "historical_price_manual_draft_approve": historical_price_manual_draft_approve,
 }

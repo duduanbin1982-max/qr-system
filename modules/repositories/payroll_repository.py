@@ -21,6 +21,14 @@ class DuplicatePriceVersionIdempotencyKeyError(Exception):
 
 class PayrollRepository:
     @staticmethod
+    def has_versioned_prices(db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='route_price_versions'"
+        ).fetchone() is not None
+
+    @staticmethod
     def get_batch(batch_id, db=None):
         db = resolve_db(db)
         row = db.execute("SELECT * FROM payroll_batches WHERE id=?", (batch_id,)).fetchone()
