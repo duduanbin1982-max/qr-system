@@ -7,6 +7,11 @@ from modules import db as db_module
 from modules.domain.errors import ConflictError
 from modules.migrations import run_migrations
 from modules.services.historical_price_binding_service import HistoricalPriceBindingService
+from modules.repositories.historical_price_binding_repository import (
+    HistoricalPriceBindingRepository,
+)
+from modules.repositories.payroll_repository import PayrollRepository
+from modules.services.payroll_service import PayrollCalculationService
 from scripts.historical_price_binding_operations import (
     ProductionOperationError,
     _manifest_digest,
@@ -271,6 +276,150 @@ def test_v083_rejects_unknown_or_mismatched_approval_identity_before_write(tmp_p
         assert db.execute(
             "SELECT count(*) FROM historical_price_binding_repair_runs"
         ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_v0831_no_settlement_keeps_fact_without_price_and_is_idempotent(tmp_path):
+    path, db, _, _, operator_id, approver_id = _seed_database(tmp_path)
+    try:
+        report = build_preflight(db)
+        apply_manifest(
+            path,
+            _approved_manifest(report, "v0831-clone-before-no-settlement", report["items"], operator_id, approver_id),
+        )
+        pending = build_preflight(db)
+        manual = next(item for item in pending["items"] if item["action"] == "manual")
+        decision = dict(
+            manual,
+            settlement_decision="no_settlement",
+            manual_decision_reason="试运行历史报工不进入应付工资结算",
+            manual_decision_by=operator_id,
+            manual_decision_by_name="杜斌",
+            manual_decision_at="2026-09-07 10:10:00",
+        )
+        decision["item_digest"] = __import__(
+            "scripts.historical_price_binding_operations", fromlist=["_digest"]
+        )._digest(decision)
+        manifest = _approved_manifest(
+            pending, "v0831-no-settlement", [decision], operator_id, approver_id
+        )
+        result = apply_manifest(path, manifest)
+        assert result["created_price_version_ids"] == [
+            {"decision": "no_settlement", "item_key": manual["item_key"]}
+        ]
+        assert result["after"]["missing_work_record_count"] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM route_price_versions "
+            "WHERE route_version_id=? AND process_version_id=?",
+            (manual["target_route_version_id"], manual["target_process_version_id"]),
+        ).fetchone()[0] == 0
+        settlement = db.execute(
+            "SELECT decision,price_version_id,reason FROM historical_price_binding_settlements "
+            "WHERE repair_item_id=(SELECT id FROM historical_price_binding_repair_items WHERE item_key=?)",
+            (manual["item_key"],),
+        ).fetchone()
+        assert settlement["decision"] == "no_settlement"
+        assert settlement["price_version_id"] is None
+        assert "不进入应付工资" in settlement["reason"]
+        assert db.execute(
+            "SELECT COUNT(*) FROM historical_price_binding_settlement_facts"
+        ).fetchone()[0] == 1
+        assert HistoricalPriceBindingRepository.list_manual_items(db) == []
+
+        replay = apply_manifest(path, manifest)
+        assert replay["replayed"] is True
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE historical_price_binding_settlements SET reason='篡改'"
+            )
+        db.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="cannot be deleted"):
+            db.execute("DELETE FROM historical_price_binding_settlement_facts")
+        db.rollback()
+
+        work_id = db.execute(
+            "SELECT work_record_id FROM historical_price_binding_settlement_facts LIMIT 1"
+        ).fetchone()[0]
+        row = next(
+            row for row in PayrollRepository.source_work_records(
+                "2026-07-01 07:00:00", "2026-08-01 07:00:00", "2026-09-08 00:00:00", db
+            ) if row["work_record_id"] == work_id
+        )
+        price, exception, error = PayrollCalculationService._resolve(
+            row, {"id": 901}, db
+        )
+        assert exception is None and error is None
+        assert price["normal_unit_price_micros"] == 0
+        assert price["price_version_id"] is None
+        assert price["resolution_method"] == "historical_no_settlement"
+    finally:
+        db.close()
+
+
+def test_v0831_zero_price_creates_exact_zero_price_and_payroll_resolution(tmp_path):
+    path, db, _, _, operator_id, approver_id = _seed_database(tmp_path)
+    try:
+        report = build_preflight(db)
+        apply_manifest(
+            path,
+            _approved_manifest(report, "v0831-clone-before-zero-price", report["items"], operator_id, approver_id),
+        )
+        pending = build_preflight(db)
+        parent = next(item for item in pending["items"] if item["action"] == "manual")
+        zero = dict(
+            parent,
+            item_key=parent["item_key"] + ":zero-price",
+            manual_parent_item_key=parent["item_key"],
+            settlement_decision="zero_price",
+            normal_unit_price_micros=0,
+            rework_rate_basis_points=0,
+            rework_rate_configured=0,
+            valid_from="2026-01-01 07:00:00",
+            valid_to=None,
+            manual_decision_reason="试运行期间纳入台账但按零工价处理",
+            manual_decision_by=operator_id,
+            manual_decision_by_name="杜斌",
+            manual_decision_at="2026-09-07 10:15:00",
+            price_idempotency_key="historical-price:v0831-zero-price",
+        )
+        from scripts.historical_price_binding_operations import _digest
+        zero["item_digest"] = _digest(zero)
+        result = apply_manifest(
+            path,
+            _approved_manifest(pending, "v0831-zero-price", [zero], operator_id, approver_id),
+        )
+        assert len(result["created_price_version_ids"]) == 1
+        price = db.execute(
+            "SELECT id,normal_unit_price_micros,status FROM route_price_versions "
+            "WHERE historical_price_repair_item_id IS NOT NULL AND normal_unit_price_micros=0"
+        ).fetchone()
+        assert price["normal_unit_price_micros"] == 0
+        assert price["status"] == "approved"
+        settlement = db.execute(
+            "SELECT decision,price_version_id FROM historical_price_binding_settlements "
+            "WHERE price_version_id=?",
+            (price["id"],),
+        ).fetchone()
+        assert settlement["decision"] == "zero_price"
+        assert settlement["price_version_id"] == price["id"]
+        assert build_preflight(db)["summary"]["missing_work_record_count"] == 0
+
+        work_id = db.execute(
+            "SELECT work_record_id FROM historical_price_binding_settlement_facts LIMIT 1"
+        ).fetchone()[0]
+        row = next(
+            row for row in PayrollRepository.source_work_records(
+                "2026-07-01 07:00:00", "2026-08-01 07:00:00", "2026-09-08 00:00:00", db
+            ) if row["work_record_id"] == work_id
+        )
+        resolved, exception, error = PayrollCalculationService._resolve(
+            row, {"id": 902}, db
+        )
+        assert exception is None and error is None
+        assert resolved["normal_unit_price_micros"] == 0
+        assert resolved["price_version_id"] == price["id"]
+        assert resolved["resolution_method"] == "historical_zero_price"
     finally:
         db.close()
 

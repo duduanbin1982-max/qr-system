@@ -117,6 +117,101 @@ def _create_repair_tables(db):
         "ON historical_price_binding_repair_items("
         "target_route_version_id,target_process_version_id,valid_from,valid_to)"
     )
+    # V083.1: keep the business meaning of a zero-price decision separate from
+    # an explicit no-settlement decision.  The original V083 repair-item
+    # constraints intentionally remain unchanged; this additive column lets
+    # an approved parent item be resolved without fabricating a price row.
+    add_column_if_missing(
+        db,
+        "historical_price_binding_repair_items",
+        "settlement_decision",
+        "TEXT NOT NULL DEFAULT 'settle'",
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS historical_price_binding_settlements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repair_item_id INTEGER NOT NULL UNIQUE,
+            decision TEXT NOT NULL CHECK(decision IN ('zero_price','no_settlement')),
+            price_version_id INTEGER UNIQUE,
+            reason TEXT NOT NULL,
+            decided_by INTEGER NOT NULL,
+            decided_by_name TEXT NOT NULL,
+            decided_at TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            evidence_digest TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY(repair_item_id) REFERENCES historical_price_binding_repair_items(id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(price_version_id) REFERENCES route_price_versions(id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(decided_by) REFERENCES users(id) ON DELETE RESTRICT,
+            CHECK(length(trim(reason)) >= 2),
+            CHECK(length(trim(decided_by_name)) > 0),
+            CHECK(length(trim(decided_at)) > 0),
+            CHECK(length(trim(idempotency_key)) > 0),
+            CHECK(length(trim(evidence_digest)) > 0),
+            CHECK((decision='no_settlement' AND price_version_id IS NULL)
+                  OR (decision='zero_price' AND price_version_id IS NOT NULL))
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS historical_price_binding_settlement_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            settlement_id INTEGER NOT NULL,
+            work_record_id INTEGER NOT NULL UNIQUE,
+            quantity INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY(settlement_id) REFERENCES historical_price_binding_settlements(id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(work_record_id) REFERENCES work_records(id) ON DELETE RESTRICT,
+            CHECK(quantity > 0),
+            CHECK(length(trim(created_at)) > 0)
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_historical_price_settlement_fact_settlement "
+        "ON historical_price_binding_settlement_facts(settlement_id,work_record_id)"
+    )
+    for name in (
+        "protect_historical_price_binding_settlement",
+        "protect_historical_price_binding_settlement_delete",
+        "protect_historical_price_binding_settlement_fact",
+        "protect_historical_price_binding_settlement_fact_delete",
+    ):
+        db.execute(f"DROP TRIGGER IF EXISTS {name}")
+    db.execute(
+        """
+        CREATE TRIGGER protect_historical_price_binding_settlement
+        BEFORE UPDATE ON historical_price_binding_settlements
+        BEGIN SELECT RAISE(ABORT,'historical settlement decision is immutable'); END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER protect_historical_price_binding_settlement_delete
+        BEFORE DELETE ON historical_price_binding_settlements
+        BEGIN SELECT RAISE(ABORT,'historical settlement decision cannot be deleted'); END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER protect_historical_price_binding_settlement_fact
+        BEFORE UPDATE ON historical_price_binding_settlement_facts
+        BEGIN SELECT RAISE(ABORT,'historical settlement fact is immutable'); END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER protect_historical_price_binding_settlement_fact_delete
+        BEFORE DELETE ON historical_price_binding_settlement_facts
+        BEGIN SELECT RAISE(ABORT,'historical settlement fact cannot be deleted'); END
+        """
+    )
     # A manual item is an evidence record, not an operator-facing identifier.
     # Keep the editable proposal in its own append-only workflow table so a
     # price preparer can use a readable business screen without mutating the
