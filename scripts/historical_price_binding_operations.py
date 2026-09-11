@@ -22,6 +22,7 @@ from scripts.production_operations import (
 
 SCHEMA = "qr-system-historical-price-binding-repair/v1"
 INFINITY = "9999-12-31 23:59:59"
+SETTLEMENT_DECISIONS = {"settle", "zero_price", "no_settlement"}
 
 
 def _json(value: Any) -> str:
@@ -34,6 +35,14 @@ def _digest(value: Any) -> str:
 
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def _table_exists(db: sqlite3.Connection, table: str) -> bool:
+    return bool(
+        db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+    )
 
 
 def _required_schema(db: sqlite3.Connection) -> None:
@@ -64,6 +73,18 @@ def _required_schema(db: sqlite3.Connection) -> None:
 
 
 def _missing_facts(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    settlement_exclusion = ""
+    if _table_exists(db, "historical_price_binding_settlement_facts"):
+        settlement_exclusion = """
+          AND NOT EXISTS (
+            SELECT 1
+            FROM historical_price_binding_settlement_facts settlement_fact
+            JOIN historical_price_binding_settlements settlement
+              ON settlement.id=settlement_fact.settlement_id
+            WHERE settlement_fact.work_record_id=wr.id
+              AND settlement.decision='no_settlement'
+          )
+        """
     rows = db.execute(
         """
         SELECT wr.id AS work_record_id,o.id AS order_id,o.order_no,
@@ -89,6 +110,7 @@ def _missing_facts(db: sqlite3.Connection) -> list[dict[str, Any]]:
               AND price.valid_from<=wr.created_at
               AND (COALESCE(price.valid_to,'')='' OR price.valid_to>wr.created_at)
           )
+        """ + settlement_exclusion + """
         ORDER BY wr.id
         """
     ).fetchall()
@@ -378,6 +400,19 @@ def _manifest_digest(manifest: dict[str, Any]) -> str:
     return _digest(payload)
 
 
+def _settlement_decision(item: dict[str, Any]) -> str:
+    explicit = str(item.get("settlement_decision") or "").strip()
+    if explicit:
+        return explicit
+    if item.get("action") == "clone":
+        return "settle"
+    required = (
+        "normal_unit_price_micros", "rework_rate_basis_points",
+        "rework_rate_configured", "valid_from",
+    )
+    return "settle" if all(item.get(key) is not None for key in required) else ""
+
+
 def _validate_approval(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest.get("status") != "approved":
         raise ProductionOperationError("authorization", "manifest status must be approved")
@@ -395,6 +430,15 @@ def _validate_approval(manifest: dict[str, Any]) -> dict[str, Any]:
     for item in manifest["items"]:
         if item.get("action") not in ("clone", "manual"):
             raise ProductionOperationError("argument", f"unsupported repair action: {item.get('item_key')}")
+        decision = _settlement_decision(item)
+        if decision not in SETTLEMENT_DECISIONS and decision != "":
+            raise ProductionOperationError(
+                "authorization", f"unsupported settlement decision: {item.get('item_key')}"
+            )
+        if item.get("action") == "clone" and decision != "settle":
+            raise ProductionOperationError(
+                "authorization", f"clone item cannot use {decision}: {item.get('item_key')}"
+            )
         required_price = (
             "normal_unit_price_micros", "rework_rate_basis_points",
             "rework_rate_configured", "valid_from",
@@ -404,6 +448,28 @@ def _validate_approval(manifest: dict[str, Any]) -> dict[str, Any]:
                 "authorization", f"clone price data incomplete: {item.get('item_key')}"
             )
         if item.get("action") == "manual":
+            if decision == "no_settlement":
+                if any(item.get(key) is not None for key in required_price):
+                    raise ProductionOperationError(
+                        "authorization", f"no-settlement item must not carry price data: {item.get('item_key')}"
+                    )
+                if not str(item.get("manual_decision_reason") or "").strip():
+                    raise ProductionOperationError(
+                        "authorization", f"no-settlement reason is required: {item.get('item_key')}"
+                    )
+                if item.get("manual_decision_by") in (None, ""):
+                    raise ProductionOperationError(
+                        "authorization", f"no-settlement decision actor is required: {item.get('item_key')}"
+                    )
+                if not str(item.get("manual_decision_by_name") or "").strip():
+                    raise ProductionOperationError(
+                        "authorization", f"no-settlement decision actor name is required: {item.get('item_key')}"
+                    )
+                if not str(item.get("manual_decision_at") or "").strip():
+                    raise ProductionOperationError(
+                        "authorization", f"no-settlement decision time is required: {item.get('item_key')}"
+                    )
+                continue
             supplied = [item.get(key) is not None for key in required_price]
             if any(supplied) and not all(supplied):
                 raise ProductionOperationError(
@@ -421,6 +487,17 @@ def _validate_approval(manifest: dict[str, Any]) -> dict[str, Any]:
                 if not str(item.get("manual_parent_item_key") or "").strip():
                     raise ProductionOperationError(
                         "authorization", f"manual parent item key is required: {item.get('item_key')}"
+                    )
+                if decision == "settle" and int(item.get("normal_unit_price_micros") or 0) <= 0:
+                    raise ProductionOperationError(
+                        "authorization", f"settle item price must be positive: {item.get('item_key')}"
+                    )
+                if decision == "zero_price" and (
+                    item.get("normal_unit_price_micros") is None
+                    or int(item["normal_unit_price_micros"]) != 0
+                ):
+                    raise ProductionOperationError(
+                        "authorization", f"zero-price item must use zero unit price: {item.get('item_key')}"
                     )
     return approval
 
@@ -519,17 +596,17 @@ def _validate_item(db: sqlite3.Connection, item: dict[str, Any]) -> list[dict[st
     evidence = _fact_evidence(rows)
     if evidence["work_record_digest"] != item["work_record_digest"]:
         raise ProductionOperationError("integrity", f"work evidence changed: {item['item_key']}")
-    if item.get("valid_from"):
-        for row in rows:
-            if (
-                int(row["route_id"] or 0) != int(item["target_route_id"])
-                or int(row["route_version_id"] or 0) != int(item["target_route_version_id"])
-                or int(row["process_id"] or 0) != int(item["target_process_id"])
-                or int(row["process_version_id"] or 0) != int(item["target_process_version_id"])
-            ):
-                raise ProductionOperationError(
-                    "integrity", f"work fact exact binding changed: {item['item_key']}"
-                )
+    for row in rows:
+        if (
+            int(row["route_id"] or 0) != int(item["target_route_id"])
+            or int(row["route_version_id"] or 0) != int(item["target_route_version_id"])
+            or int(row["process_id"] or 0) != int(item["target_process_id"])
+            or int(row["process_version_id"] or 0) != int(item["target_process_version_id"])
+        ):
+            raise ProductionOperationError(
+                "integrity", f"work fact exact binding changed: {item['item_key']}"
+            )
+        if item.get("valid_from"):
             if not (item["valid_from"] <= row["created_at"] < (item.get("valid_to") or INFINITY)):
                 raise ProductionOperationError("integrity", f"repair interval misses work: {item['item_key']}")
     return rows
@@ -576,8 +653,9 @@ def _insert_repair_item(
             normal_unit_price_micros,rework_rate_basis_points,rework_rate_configured,
             valid_from,valid_to,target_route_content_digest,target_process_content_digest,
             affected_work_record_count,affected_quantity,affected_work_record_digest,
-            manual_decision_reason,manual_decision_by,manual_decision_at,manual_parent_item_key
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            manual_decision_reason,manual_decision_by,manual_decision_at,manual_parent_item_key,
+            settlement_decision
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             run_id,item["item_key"],item["action"],item.get("source_price_version_id"),
@@ -589,9 +667,74 @@ def _insert_repair_item(
             item["work_record_count"],item["quantity"],item["work_record_digest"],
             item.get("manual_decision_reason", ""),item.get("manual_decision_by"),
             item.get("manual_decision_at", ""),item.get("manual_parent_item_key", ""),
+            _settlement_decision(item) or "settle",
         ),
     )
     return int(cursor.lastrowid)
+
+
+def _insert_settlement_decision(
+    db: sqlite3.Connection,
+    repair_item_id: int,
+    item: dict[str, Any],
+    approval: dict[str, Any],
+    price_version_id: int | None = None,
+) -> int:
+    """Persist a V083.1 zero-price or no-settlement decision and its facts."""
+    decision = _settlement_decision(item)
+    if decision not in {"zero_price", "no_settlement"}:
+        return 0
+    facts = _work_rows(db, [int(value) for value in item["work_record_ids"]])
+    if not facts:
+        raise ProductionOperationError(
+            "integrity", f"settlement has no current work facts: {item['item_key']}"
+        )
+    evidence = _fact_evidence(facts)
+    actor_id = int(item.get("manual_decision_by") or approval["operator_id"])
+    actor_name = str(
+        item.get("manual_decision_by_name")
+        or item.get("manual_decision_name")
+        or approval["operator_name"]
+    )
+    _validate_actor_identity(db, actor_id, actor_name, "settlement decision")
+    decided_at = str(item.get("manual_decision_at") or approval["approved_at"])
+    reason = str(item.get("manual_decision_reason") or approval["reason"]).strip()
+    key = str(
+        item.get("settlement_idempotency_key")
+        or f"historical-price-settlement:{approval['idempotency_key']}:{item['item_key']}"
+    )
+    existing = db.execute(
+        "SELECT id FROM historical_price_binding_settlements WHERE idempotency_key=?",
+        (key,),
+    ).fetchone()
+    if existing:
+        return int(existing[0])
+    cursor = db.execute(
+        """
+        INSERT INTO historical_price_binding_settlements (
+            repair_item_id,decision,price_version_id,reason,decided_by,decided_by_name,
+            decided_at,idempotency_key,evidence_digest
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            repair_item_id, decision, price_version_id, reason, actor_id, actor_name,
+            decided_at, key, evidence["work_record_digest"],
+        ),
+    )
+    settlement_id = int(cursor.lastrowid)
+    for row in facts:
+        db.execute(
+            """
+            INSERT INTO historical_price_binding_settlement_facts (
+                settlement_id,work_record_id,quantity,created_at,snapshot_json
+            ) VALUES (?,?,?,?,?)
+            """,
+            (
+                settlement_id, int(row["work_record_id"]), int(row["quantity"] or 0),
+                row["created_at"], _json(row),
+            ),
+        )
+    return settlement_id
 
 
 def _insert_price(
@@ -634,7 +777,40 @@ def _insert_price(
         "SET target_price_version_id=?,applied_at=datetime('now','localtime') WHERE id=?",
         (price_id, repair_item_id),
     )
+    _insert_settlement_decision(db, repair_item_id, item, approval, price_id)
     return price_id
+
+
+def _insert_no_settlement(
+    db: sqlite3.Connection,
+    run_id: int,
+    item: dict[str, Any],
+    approval: dict[str, Any],
+) -> int:
+    """Resolve a manual item without inventing a route-price row."""
+    # A confirmation manifest may carry the original preflight item key, or
+    # an explicit child item linked through manual_parent_item_key.  Reuse the
+    # original pending evidence when present; never duplicate its unique key.
+    existing = db.execute(
+        "SELECT id,action,target_price_version_id FROM "
+        "historical_price_binding_repair_items WHERE item_key=?",
+        (item["item_key"],),
+    ).fetchone()
+    if existing:
+        if existing["action"] != "manual" or existing["target_price_version_id"] is not None:
+            raise ProductionOperationError(
+                "integrity", f"no-settlement item is already resolved: {item['item_key']}"
+            )
+        repair_item_id = int(existing["id"])
+        db.execute(
+            "UPDATE historical_price_binding_repair_items "
+            "SET settlement_decision='no_settlement' WHERE id=?",
+            (repair_item_id,),
+        )
+    else:
+        repair_item_id = _insert_repair_item(db, run_id, item)
+    _insert_settlement_decision(db, repair_item_id, item, approval, None)
+    return repair_item_id
 
 
 def apply_manifest(database: str | Path, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -689,6 +865,11 @@ def apply_manifest(database: str | Path, manifest: dict[str, Any]) -> dict[str, 
         deferred_manual = []
         for item in manifest["items"]:
             _validate_item(db, item)
+            decision = _settlement_decision(item)
+            if item.get("action") == "manual" and decision == "no_settlement":
+                _insert_no_settlement(db, run_id, item, approval)
+                created.append({"decision": decision, "item_key": item["item_key"]})
+                continue
             complete_manual = item.get("action") == "manual" and all(
                 item.get(key) is not None
                 for key in ("normal_unit_price_micros", "rework_rate_basis_points", "rework_rate_configured", "valid_from")
@@ -703,6 +884,7 @@ def apply_manifest(database: str | Path, manifest: dict[str, Any]) -> dict[str, 
             int(work_id)
             for item in manifest["items"]
             if item.get("action") == "clone"
+            or _settlement_decision(item) == "no_settlement"
             or all(
                 item.get(key) is not None
                 for key in (

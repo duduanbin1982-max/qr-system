@@ -178,6 +178,57 @@ class PayrollRepository:
         return dict(row) if row else None
 
     @staticmethod
+    def historical_settlement(work_record_id, db=None):
+        """Return a V083.1 settlement decision covering a work record.
+
+        The settlement fact is deliberately separate from route-price
+        resolution: ``no_settlement`` must not fabricate a zero-price row,
+        while ``zero_price`` must remain distinguishable from an accidental
+        missing/zero legacy price.
+        """
+        db = resolve_db(db)
+        tables = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "('historical_price_binding_settlements',"
+            "'historical_price_binding_settlement_facts')"
+        ).fetchall()
+        if len(tables) != 2:
+            return None
+        row = db.execute(
+            "SELECT settlement.*,fact.quantity AS fact_quantity,"
+            "fact.created_at AS fact_created_at,"
+            "price.normal_unit_price_micros,"
+            "price.rework_rate_basis_points,"
+            "price.rework_rate_configured "
+            "FROM historical_price_binding_settlement_facts fact "
+            "JOIN historical_price_binding_settlements settlement "
+            "ON settlement.id=fact.settlement_id "
+            "LEFT JOIN route_price_versions price "
+            "ON price.id=settlement.price_version_id "
+            "WHERE fact.work_record_id=? ORDER BY settlement.id DESC LIMIT 1",
+            (int(work_record_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def historical_settlement_for_price(price_version_id, db=None):
+        """Return the V083.1 zero-price decision attached to a price row."""
+        db = resolve_db(db)
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            ("historical_price_binding_settlements",),
+        ).fetchone()
+        if not exists:
+            return None
+        row = db.execute(
+            "SELECT * FROM historical_price_binding_settlements "
+            "WHERE price_version_id=? AND decision='zero_price' "
+            "ORDER BY id DESC LIMIT 1",
+            (int(price_version_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def insert_price_resolution(payload, db):
         cursor = db.execute(
             """

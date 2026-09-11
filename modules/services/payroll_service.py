@@ -66,6 +66,40 @@ class PayrollCalculationService:
 
     @staticmethod
     def _resolve(row, batch, db):
+        historical_settlement = PayrollRepository.historical_settlement(
+            row["work_record_id"], db
+        )
+        if historical_settlement:
+            decision = historical_settlement["decision"]
+            if decision == "no_settlement":
+                return {
+                    "price_version_id": None,
+                    "normal_unit_price_micros": 0,
+                    "rework_rate_basis_points": 0,
+                    "rework_rate_configured": 0,
+                    "resolution_method": "historical_no_settlement",
+                    "resolution_reason": historical_settlement["reason"],
+                    "resolved_by": historical_settlement.get("decided_by"),
+                    "resolved_by_name": historical_settlement.get("decided_by_name") or "",
+                    "resolved_at": historical_settlement.get("decided_at") or "",
+                }, None, None
+            if decision == "zero_price":
+                # V083.1 requires a zero-price decision to point at the exact
+                # approved price row.  Treat a broken reference as an
+                # exception instead of silently calculating an unbound value.
+                if not historical_settlement.get("price_version_id"):
+                    return None, None, "missing_price"
+                return {
+                    "price_version_id": historical_settlement["price_version_id"],
+                    "normal_unit_price_micros": 0,
+                    "rework_rate_basis_points": historical_settlement.get("rework_rate_basis_points") or 0,
+                    "rework_rate_configured": historical_settlement.get("rework_rate_configured") or 0,
+                    "resolution_method": "historical_zero_price",
+                    "resolution_reason": historical_settlement["reason"],
+                    "resolved_by": historical_settlement.get("decided_by"),
+                    "resolved_by_name": historical_settlement.get("decided_by_name") or "",
+                    "resolved_at": historical_settlement.get("decided_at") or "",
+                }, None, None
         resolution = PayrollRepository.price_resolution(row["work_record_id"], db)
         if resolution:
             if int(resolution.get("normal_unit_price_micros") or 0) <= 0:

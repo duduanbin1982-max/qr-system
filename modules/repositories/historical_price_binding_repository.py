@@ -7,6 +7,14 @@ class HistoricalPriceBindingRepository:
     """Database access for the V083 historical-price repair workflow."""
 
     @staticmethod
+    def _table_exists(db, table):
+        return bool(
+            db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+        )
+
+    @staticmethod
     def parent_item(review_id, db=None, *, include_resolved=False):
         db = resolve_db(db)
         conditions = [
@@ -16,6 +24,14 @@ class HistoricalPriceBindingRepository:
         ]
         if not include_resolved:
             conditions.append("item.target_price_version_id IS NULL")
+            if HistoricalPriceBindingRepository._table_exists(
+                db, "historical_price_binding_settlements"
+            ):
+                conditions.append(
+                    "NOT EXISTS ("
+                    "SELECT 1 FROM historical_price_binding_settlements settlement "
+                    "WHERE settlement.repair_item_id=item.id)"
+                )
         row = db.execute(
             "SELECT item.*,run.id AS source_run_id,run.status AS source_run_status,"
             "run.manifest_json AS source_manifest_json "
@@ -29,6 +45,17 @@ class HistoricalPriceBindingRepository:
     @staticmethod
     def current_fact_rows(item, db=None):
         db = resolve_db(db)
+        settlement_exclusion = ""
+        if HistoricalPriceBindingRepository._table_exists(
+            db, "historical_price_binding_settlement_facts"
+        ):
+            settlement_exclusion = """
+              AND NOT EXISTS (
+                SELECT 1
+                FROM historical_price_binding_settlement_facts settlement_fact
+                WHERE settlement_fact.work_record_id=wr.id
+              )
+            """
         rows = db.execute(
             """
             SELECT wr.id AS work_record_id,o.id AS order_id,o.order_no,
@@ -42,6 +69,7 @@ class HistoricalPriceBindingRepository:
               AND COALESCE(wr.route_id,o.route_id)=?
               AND wr.route_version_id=?
               AND wr.process_id=? AND wr.process_version_id=?
+            """ + settlement_exclusion + """
               AND NOT EXISTS (
                 SELECT 1 FROM route_price_versions price
                 WHERE price.route_version_id=wr.route_version_id
@@ -58,6 +86,46 @@ class HistoricalPriceBindingRepository:
             ),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def historical_settlement(work_record_id, db=None):
+        """Return the immutable V083.1 decision covering one work record."""
+        db = resolve_db(db)
+        if not HistoricalPriceBindingRepository._table_exists(
+            db, "historical_price_binding_settlement_facts"
+        ):
+            return None
+        row = db.execute(
+            """
+            SELECT settlement.*,fact.work_record_id,fact.quantity AS fact_quantity,
+                   fact.created_at AS fact_created_at,fact.snapshot_json AS fact_snapshot_json
+            FROM historical_price_binding_settlement_facts fact
+            JOIN historical_price_binding_settlements settlement
+              ON settlement.id=fact.settlement_id
+            WHERE fact.work_record_id=?
+            ORDER BY settlement.id DESC LIMIT 1
+            """,
+            (int(work_record_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def settlement_for_price(price_version_id, db=None):
+        """Return a zero-price historical decision attached to a price version."""
+        db = resolve_db(db)
+        if not HistoricalPriceBindingRepository._table_exists(
+            db, "historical_price_binding_settlements"
+        ):
+            return None
+        row = db.execute(
+            """
+            SELECT * FROM historical_price_binding_settlements
+            WHERE price_version_id=? AND decision='zero_price'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(price_version_id),),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def candidates(item, db=None):
@@ -120,6 +188,16 @@ class HistoricalPriceBindingRepository:
     @staticmethod
     def list_manual_items(db=None):
         db = resolve_db(db)
+        settlement_exclusion = ""
+        if HistoricalPriceBindingRepository._table_exists(
+            db, "historical_price_binding_settlements"
+        ):
+            settlement_exclusion = """
+              AND NOT EXISTS (
+                SELECT 1 FROM historical_price_binding_settlements settlement
+                WHERE settlement.repair_item_id=item.id
+              )
+            """
         rows = db.execute(
             """
             SELECT item.*,run.status AS source_run_status,run.manifest_json AS source_manifest_json
@@ -129,6 +207,7 @@ class HistoricalPriceBindingRepository:
               AND COALESCE(item.manual_parent_item_key,'')=''
               AND item.target_price_version_id IS NULL
               AND run.status IN ('partially_applied','applied')
+            """ + settlement_exclusion + """
             ORDER BY item.id
             """
         ).fetchall()
