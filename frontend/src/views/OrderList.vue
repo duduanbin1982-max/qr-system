@@ -51,6 +51,7 @@
                 <th class="td-progress">进度</th>
                 <th class="td-qty">数量</th>
                 <th class="td-status">状态</th>
+                <th>优先级</th>
                 <th class="td-deadline">交期</th>
                 <th class="td-actions">操作</th>
               </tr>
@@ -80,6 +81,12 @@
                   </td>
                   <td class="td-qty">{{ o.quantity }}</td>
                   <td style="text-align:center;white-space:nowrap"><span class="badge" :class="statusMap[o.status]?.cls||'badge-info'" style="font-size:var(--text-xs-alt)">{{ statusMap[o.status]?.label||o.status }}</span></td>
+                  <td style="text-align:center;white-space:nowrap">
+                    <span class="badge" :class="priorityMap[o.priority_level || 3]?.cls || 'badge-info'" style="font-size:var(--text-xs-alt)">
+                      {{ priorityMap[o.priority_level || 3]?.label || 'P3 普通' }}
+                    </span>
+                    <span v-if="o.is_expedited" style="margin-left:3px;color:var(--danger);font-size:var(--text-xs-alt)" title="加急">⚡</span>
+                  </td>
                   <td style="font-size:var(--text-xs);white-space:nowrap">{{ o.deadline || '-' }}</td>
                   <td style="text-align:center">
                     <div class="o-actions" style="justify-content:center" @click.stop>
@@ -96,7 +103,7 @@
                 </tr>
                 <!-- 展开详情 -->
                 <tr v-if="expandedId === o.id" style="background:var(--bg-table-header)">
-                  <td colspan="9" style="padding:var(--space-3) 16px">
+                  <td colspan="10" style="padding:var(--space-3) 16px">
                     <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center">
                       <span v-if="o.processes && o.processes.length" style="font-size:var(--text-sm);color:var(--text-placeholder)">工序:</span>
                       <span v-for="p in (o.processes||[])" :key="p.id" class="badge" style="font-size:var(--text-xs-alt)"
@@ -107,6 +114,9 @@
                       <span v-if="!o.processes || !o.processes.length" style="font-size:var(--text-sm);color:var(--text-placeholder)">暂无工序</span>
                     </div>
                     <div v-if="o.route_name" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:4px">路线：{{ o.route_name }}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:4px">
+                      排程：{{ priorityMap[o.priority_level || 3]?.label || 'P3 普通' }}{{ o.is_expedited ? ' · 加急' : '' }} · 策略 {{ o.schedule_policy || 'auto' }} · 版本 v{{ o.priority_version || 1 }}
+                    </div>
                     <div v-if="o.remark" style="font-size:var(--text-xs);color:var(--text-placeholder);margin-top:2px">备注：{{ o.remark }}</div>
                     
                     <!-- 附件区 -->
@@ -260,6 +270,35 @@
                 </div>
               </div>
             </div></div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>订单优先级</label>
+              <select class="form-input" v-model.number="form.priority_level">
+                <option :value="1">P1 特急</option>
+                <option :value="2">P2 加急</option>
+                <option :value="3">P3 普通</option>
+                <option :value="4">P4 低优先</option>
+                <option :value="5">P5 暂缓</option>
+              </select>
+            </div></div>
+            <div class="form-col"><div class="form-group"><label>排程策略</label>
+              <select class="form-input" v-model="form.schedule_policy">
+                <option value="auto">自动分配</option>
+                <option value="no_split">不拆分</option>
+                <option value="allow_split">允许拆分</option>
+                <option value="allow_cross_day">允许跨天</option>
+              </select>
+            </div></div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><div class="form-group"><label>优先级生效时间</label><input class="form-input" v-model="form.priority_effective_at" type="datetime-local"></div></div>
+            <div class="form-col" style="display:flex;align-items:center;padding-top:18px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input v-model="form.is_expedited" type="checkbox"> ⚡ 标记为加急订单</label></div>
+          </div>
+          <div v-if="modalEdit" class="form-group"><label>本次调整原因<span style="color:var(--danger)"> *</span></label>
+            <textarea class="form-input" v-model="form.schedule_change_reason" rows="2" placeholder="修改优先级、加急、交期或排程策略时必填"></textarea>
+          </div>
+          <div v-else class="form-group"><label>优先级说明</label>
+            <textarea class="form-input" v-model="form.priority_reason" rows="2" placeholder="如：客户急单、交期调整、等待物料等"></textarea>
           </div>
           <div class="form-row">
             <div class="form-col"><div class="form-group"><label>产线</label>

@@ -39,6 +39,7 @@ function orderState(permissionOverrides = {}) {
     page: 1,
     limit: 20,
     statusMap: { pending: { label: '待生产', cls: 'badge-pending' } },
+    priorityMap: { 3: { label: 'P3 普通', cls: 'badge-info' } },
     canCreate: false,
     canEdit: false,
     canDelete: false,

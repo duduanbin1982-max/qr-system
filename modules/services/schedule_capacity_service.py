@@ -39,9 +39,132 @@ class ScheduleCapacityService:
         return {"ok": True, "calendars": ScheduleCapacityRepository.list_calendars()}
 
     @staticmethod
-    def list_schedulable_orders(limit=500):
+    def list_schedulable_orders(limit=500, now=None):
         limit = ScheduleCapacityService._limit(limit)
-        return {"ok": True, "orders": [dict(row) for row in ScheduleCapacityRepository.list_schedulable_orders(limit)]}
+        return {
+            "ok": True,
+            "orders": ScheduleCapacityRepository.list_schedulable_orders(limit, now=now),
+        }
+
+    @staticmethod
+    def auto_plan_orders(
+        start_date=None, auto_plan_key="", limit=100, actor_id=None, db=None,
+    ):
+        """Generate schedules for the immutable priority queue as one ledgered run.
+
+        The queue snapshot is hashed before any schedule is generated.  Reusing
+        a key with the same input replays the stored result; reusing it with a
+        different queue or start date is rejected so an audit record can never
+        be silently overwritten.
+        """
+        run_key = str(auto_plan_key or "").strip()
+        if not run_key:
+            raise ValueError("自动排程幂等键不能为空")
+        bounded_limit = ScheduleCapacityService._limit(limit, default=100)
+        if start_date in (None, ""):
+            effective_start = datetime.now().strftime("%Y-%m-%d")
+        else:
+            effective_start = ScheduleCapacityService._date(start_date, "计划开始日期").strftime("%Y-%m-%d")
+
+        response = None
+        failure = None
+        with ScheduleCapacityService._transaction(db) as txn:
+            planning_now = datetime.now()
+            queue = ScheduleCapacityRepository.list_schedulable_orders(
+                bounded_limit, db=txn, now=planning_now,
+            )
+            input_snapshot = {
+                "start_date": effective_start,
+                "limit": bounded_limit,
+                "orders": [
+                    {
+                        "order_id": int(order["id"]),
+                        "effective_priority_level": int(order.get("effective_priority_level") or 3),
+                        "effective_is_expedited": int(order.get("effective_is_expedited") or 0),
+                        "priority_version": int(order.get("priority_version") or 1),
+                        "schedule_policy": order.get("schedule_policy") or "auto",
+                    }
+                    for order in queue
+                ],
+            }
+            input_json = json.dumps(
+                input_snapshot, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            )
+            input_digest = hashlib.sha256(input_json.encode("utf-8")).hexdigest()
+            prior_run = ScheduleCapacityRepository.find_auto_plan_run(run_key, db=txn)
+            if prior_run:
+                if prior_run["input_digest"] != input_digest:
+                    raise ValueError("自动排程幂等键已被不同输入使用")
+                stored = ScheduleCapacityRepository.auto_plan_result(prior_run)
+                return {
+                    **stored,
+                    "ok": prior_run["status"] == "completed",
+                    "auto_plan_key": run_key,
+                    "status": prior_run["status"],
+                    "idempotent_replay": True,
+                    "input_digest": input_digest,
+                    "error": prior_run["error_message"] or "",
+                }
+
+            run_id = ScheduleCapacityRepository.create_auto_plan_run(
+                run_key, effective_start, input_digest, input_json,
+                created_by=actor_id, db=txn,
+            )
+            results = []
+            errors = []
+            for order in queue:
+                order_id = int(order["id"])
+                order_run_key = f"{run_key}:{order_id}"
+                try:
+                    generated = ScheduleCapacityService.generate_order_schedule(
+                        order_id,
+                        start_date=effective_start,
+                        schedule_run_key=order_run_key,
+                        db=txn,
+                    )
+                    results.append({
+                        "order_id": order_id,
+                        "order_no": order.get("order_no") or "",
+                        "status": generated.get("status", "completed"),
+                        "ok": bool(generated.get("ok")),
+                        "schedule_run_key": generated.get("schedule_run_key", order_run_key),
+                        "schedule_revision_id": generated.get("schedule_revision_id"),
+                        "revision_status": generated.get("revision_status"),
+                        "operations": generated.get("operations", []),
+                    })
+                except Exception as exc:
+                    message = str(exc) or "自动排程失败"
+                    errors.append({"order_id": order_id, "order_no": order.get("order_no") or "", "error": message})
+                    results.append({
+                        "order_id": order_id,
+                        "order_no": order.get("order_no") or "",
+                        "status": "failed",
+                        "ok": False,
+                        "schedule_run_key": order_run_key,
+                        "error": message,
+                        "operations": [],
+                    })
+
+            overall_status = "failed" if errors else "completed"
+            result = {
+                "ok": not errors,
+                "auto_plan_key": run_key,
+                "status": overall_status,
+                "idempotent_replay": False,
+                "input_digest": input_digest,
+                "queue_count": len(queue),
+                "failed_count": len(errors),
+                "orders": results,
+            }
+            error_message = "; ".join(item["error"] for item in errors)
+            ScheduleCapacityRepository.complete_auto_plan_run(
+                run_id, overall_status, result, error_message=error_message, db=txn,
+            )
+            response = result
+        if failure:
+            raise ValueError(failure)
+        return response
 
     @staticmethod
     def _date(value, label):
@@ -564,6 +687,8 @@ class ScheduleCapacityService:
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         txn,
                     )
+                if not blocked:
+                    ScheduleCapacityRepository.clear_schedule_replan_flag(order_id, txn)
                 ScheduleCapacityRepository.complete_run(run_id, "completed", result, db=txn)
                 txn.execute("RELEASE SAVEPOINT schedule_generation")
                 response = {"ok": True, "order_id": order_id, "schedule_run_key": run_key,
@@ -850,6 +975,8 @@ class ScheduleCapacityService:
                 ScheduleCapacityRepository.set_revision_digest(
                     revision_id, hashlib.sha256(result_json.encode("utf-8")).hexdigest(), txn
                 )
+                if not blocked:
+                    ScheduleCapacityRepository.clear_schedule_replan_flag(order_id, txn)
                 ScheduleCapacityRepository.complete_run(run_id, "completed", result, db=txn)
                 txn.execute("RELEASE SAVEPOINT dynamic_schedule_replan")
                 response = {

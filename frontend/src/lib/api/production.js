@@ -23,4 +23,5 @@ export const productionApi = {
   cancelScheduleDowntime:(id) => request('DELETE', '/api/schedule/downtime/' + id),
   listOperationSchedules:(params={}) => request('GET', '/api/schedule/operations' + buildQuery(params)),
   auditScheduleCapacity:(params={}) => request('GET', '/api/schedule/capacity-audit' + buildQuery(params)),
+  autoPlanSchedule:(data={}) => request('POST', '/api/schedule/auto-plan', data),
 }

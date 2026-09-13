@@ -820,8 +820,12 @@ def apply_manifest(database: str | Path, manifest: dict[str, Any]) -> dict[str, 
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     try:
-        if int(db.execute("PRAGMA user_version").fetchone()[0]) != 83:
-            raise ProductionOperationError("schema", "historical price repair requires database v83")
+        database_user_version = int(db.execute("PRAGMA user_version").fetchone()[0])
+        if database_user_version < 83:
+            raise ProductionOperationError(
+                "schema",
+                "historical price repair requires database v83 or newer",
+            )
         _validate_actor_identity(
             db, approval["operator_id"], approval["operator_name"], "operator"
         )
@@ -857,7 +861,7 @@ def apply_manifest(database: str | Path, manifest: dict[str, Any]) -> dict[str, 
                 approval["idempotency_key"],digest,approval["operator_id"],
                 approval["operator_name"],approval["approver_id"],approval["approver_name"],
                 approval["approved_at"],approval["reason"],
-                manifest["database_user_version"],83,_json(before),_json(manifest),
+                manifest["database_user_version"],database_user_version,_json(before),_json(manifest),
             ),
         )
         run_id = int(cursor.lastrowid)

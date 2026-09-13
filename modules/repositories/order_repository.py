@@ -206,6 +206,46 @@ class OrderRepository:
         return db.execute('SELECT remark FROM orders WHERE id = ?', (order_id,)).fetchone()
 
     @staticmethod
+    def list_priority_history(order_id, db=None, limit=100):
+        """Return immutable scheduling-priority history, newest first."""
+        db = resolve_db(db)
+        bounded_limit = min(max(int(limit or 100), 1), 200)
+        return db.execute(
+            "SELECT * FROM order_priority_history "
+            "WHERE order_id = ? ORDER BY id DESC LIMIT ?",
+            (order_id, bounded_limit),
+        ).fetchall()
+
+    @staticmethod
+    def insert_priority_history(payload, db=None):
+        """Append one immutable scheduling-priority event."""
+        db = resolve_db(db)
+        cursor = db.execute(
+            """
+            INSERT INTO order_priority_history (
+                order_id,order_no_snapshot,event_type,
+                old_priority_level,new_priority_level,old_is_expedited,new_is_expedited,
+                old_deadline,new_deadline,old_priority_effective_at,new_priority_effective_at,
+                old_schedule_policy,new_schedule_policy,old_priority_reason,new_priority_reason,
+                change_reason,changed_by,changed_by_name,changed_at,priority_version,snapshot_digest
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                payload["order_id"], payload["order_no_snapshot"], payload["event_type"],
+                payload.get("old_priority_level"), payload["new_priority_level"],
+                payload.get("old_is_expedited"), payload["new_is_expedited"],
+                payload.get("old_deadline", ""), payload.get("new_deadline", ""),
+                payload.get("old_priority_effective_at", ""), payload.get("new_priority_effective_at", ""),
+                payload.get("old_schedule_policy", "auto"), payload.get("new_schedule_policy", "auto"),
+                payload.get("old_priority_reason", ""), payload.get("new_priority_reason", ""),
+                payload.get("change_reason", ""), payload.get("changed_by"),
+                payload.get("changed_by_name", ""), payload["changed_at"],
+                payload["priority_version"], payload["snapshot_digest"],
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
     def count_active_product_items(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -230,6 +270,10 @@ class OrderRepository:
             "order_no", "customer", "customer_id", "product_name", "product_code", "product_id",
             "quantity", "plan_start", "plan_end", "deadline", "remark", "status",
             "route_id", "route_version_id", "route_name_snapshot", "production_line_id",
+            "priority_level", "is_expedited", "priority_reason", "priority_changed_by",
+            "priority_changed_by_name", "priority_changed_at", "priority_effective_at",
+            "previous_priority_level", "previous_is_expedited", "schedule_policy", "priority_version",
+            "schedule_replan_required", "schedule_replan_reason",
         )
         fields = [field for field in allowed if field in changes]
         if not fields:
@@ -310,15 +354,27 @@ class OrderRepository:
         cur = db.execute("""
             INSERT INTO orders (order_no, customer, customer_id, product_name, product_id, quantity,
                 plan_start, plan_end, deadline, extra_fields, remark, route_id,
-                route_version_id, route_name_snapshot, status, product_code, production_line_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?)
+                route_version_id, route_name_snapshot, status, product_code, production_line_id,
+                priority_level, is_expedited, priority_reason, priority_changed_by,
+                priority_changed_by_name, priority_changed_at, priority_effective_at,
+                previous_priority_level, previous_is_expedited, schedule_policy, priority_version,
+                schedule_replan_required, schedule_replan_reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["order_no"], data.get("customer", ""), data.get("customer_id"),
             data.get("product_name", ""), data.get("product_id"), data.get("quantity", 0),
             data.get("plan_start", ""), data.get("plan_end", ""), data.get("deadline", ""),
             data.get("extra_fields", "{}"), data.get("remark", ""), data.get("route_id"),
             data.get("route_version_id"), data.get("route_name_snapshot", ""),
-            data.get("product_code", ""), data.get("production_line_id")
+            data.get("product_code", ""), data.get("production_line_id"),
+            data.get("priority_level", 3), data.get("is_expedited", 0),
+            data.get("priority_reason", ""), data.get("priority_changed_by"),
+            data.get("priority_changed_by_name", ""), data.get("priority_changed_at", ""),
+            data.get("priority_effective_at", ""),
+            data.get("previous_priority_level", data.get("priority_level", 3)),
+            data.get("previous_is_expedited", data.get("is_expedited", 0)),
+            data.get("schedule_policy", "auto"), data.get("priority_version", 1),
+            data.get("schedule_replan_required", 0), data.get("schedule_replan_reason", ""),
         ))
         return cur.lastrowid
 

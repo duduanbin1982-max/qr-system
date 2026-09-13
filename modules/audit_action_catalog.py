@@ -77,6 +77,10 @@ _DESTRUCTIVE_ACTIONS = {
     "clear_logs",
 }
 
+_BUSINESS_ACTIONS = {
+    "auto_plan_schedule",
+}
+
 
 def describe_action(action: str) -> AuditAction:
     """Return stable metadata for an action without requiring callers to know it."""
@@ -90,6 +94,8 @@ def describe_action(action: str) -> AuditAction:
         return AuditAction("system", "warning", True)
     if name in _DESTRUCTIVE_ACTIONS:
         return AuditAction("business", "warning", True)
+    if name in _BUSINESS_ACTIONS:
+        return AuditAction("business", "info", True)
     if name.startswith(("payroll_", "wage_")):
         return AuditAction("payroll", "info", True)
     if name.startswith(("stock_", "inventory_", "material_", "consume")):

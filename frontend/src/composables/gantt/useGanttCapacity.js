@@ -28,6 +28,12 @@ export function useGanttCapacity({ orders, riskLevel }) {
   const replanStartAt = ref('')
   const replanReason = ref('根据实际报工、返工和停机动态重排')
   const replanRunKey = ref('')
+  const autoPlanVisible = ref(false)
+  const autoPlanStartDate = ref(new Date().toISOString().slice(0, 10))
+  const autoPlanLimit = ref(100)
+  const autoPlanKey = ref('')
+  const autoPlanLoading = ref(false)
+  const autoPlanResult = ref(null)
   const downtimeEvents = ref([])
   const downtimeLoading = ref(false)
   const downtimeForm = ref({
@@ -210,6 +216,55 @@ export function useGanttCapacity({ orders, riskLevel }) {
     }
   }
 
+  function prepareAutoPlan() {
+    autoPlanVisible.value = true
+    autoPlanStartDate.value = new Date().toISOString().slice(0, 10)
+    autoPlanLimit.value = 100
+    autoPlanKey.value = `auto-plan-${Date.now()}`
+    autoPlanResult.value = null
+  }
+
+  async function runAutoPlan() {
+    const startDate = String(autoPlanStartDate.value || '').trim()
+    const runKey = String(autoPlanKey.value || '').trim()
+    const limit = Number(autoPlanLimit.value)
+    if (!startDate) {
+      showToast('请填写自动排程开始日期', 'error')
+      return null
+    }
+    if (!runKey) {
+      showToast('请填写自动排程幂等键', 'error')
+      return null
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      showToast('自动排程订单数必须在1到1000之间', 'error')
+      return null
+    }
+    autoPlanLoading.value = true
+    try {
+      const result = await api.domains.production.autoPlanSchedule({
+        start_date: startDate,
+        auto_plan_key: runKey,
+        limit,
+      })
+      autoPlanResult.value = result
+      if (result?.status === 'completed') {
+        showToast(`自动排程完成：${result.queue_count || 0} 个订单`)
+      } else if (result?.status === 'failed') {
+        showToast(`自动排程完成但有失败订单：${result.failed_count || 0} 个`, 'error')
+      } else {
+        showToast('自动排程已返回结果')
+      }
+      await loadCapacity()
+      return result
+    } catch (error) {
+      showToast(error.message || '自动排程失败', 'error')
+      return null
+    } finally {
+      autoPlanLoading.value = false
+    }
+  }
+
   function lineLabel(row) {
     return row.line_name || (row.process_line_id ? `产线 #${row.process_line_id}` : '未分配')
   }
@@ -256,6 +311,14 @@ export function useGanttCapacity({ orders, riskLevel }) {
     startDynamicReplan,
     prepareDynamicReplan,
     dynamicReplanSchedule,
+    autoPlanVisible,
+    autoPlanStartDate,
+    autoPlanLimit,
+    autoPlanKey,
+    autoPlanLoading,
+    autoPlanResult,
+    prepareAutoPlan,
+    runAutoPlan,
     downtimeEvents,
     downtimeLoading,
     downtimeForm,

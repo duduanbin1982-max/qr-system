@@ -9,6 +9,7 @@ from modules.schedule_capacity_config import (
     DEFAULT_DAILY_MINUTES,
     DEFAULT_PROCESS_LINE_COUNTS,
 )
+from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 
 
 class ScheduleCapacityRepository:
@@ -152,15 +153,29 @@ class ScheduleCapacityRepository:
         )
         return inserted
     @staticmethod
-    def list_schedulable_orders(limit=500, db=None):
+    def list_schedulable_orders(limit=500, db=None, now=None):
         db = resolve_db(db)
-        return db.execute(
+        bounded_limit = min(max(int(limit or 500), 1), 1000)
+        rows = db.execute(
             "SELECT id, order_no, quantity, product_id, product_code, product_name, plan_start, plan_end, "
-            "deadline, status FROM orders WHERE deleted_at IS NULL "
-            "AND status != 'completed' ORDER BY CASE WHEN deadline='' THEN 1 ELSE 0 END, "
-            "deadline, plan_start, id LIMIT ?",
-            (min(max(int(limit or 500), 1), 1000),),
+            "deadline, status, priority_level, is_expedited, previous_priority_level, "
+            "previous_is_expedited, priority_effective_at, priority_version, schedule_policy, "
+            "schedule_replan_required, schedule_replan_reason "
+            "FROM orders WHERE deleted_at IS NULL AND status IN ('pending','producing')"
         ).fetchall()
+        queue = []
+        for raw in rows:
+            row = dict(raw)
+            if not ScheduleOrderPriorityPolicy.is_schedulable(row, now=now):
+                continue
+            intent = ScheduleOrderPriorityPolicy.effective_intent(row, now=now)
+            row.update({
+                "effective_priority_level": intent["priority_level"],
+                "effective_is_expedited": int(intent["is_expedited"]),
+                "pending_effective_change": intent["pending_effective_change"],
+            })
+            queue.append(row)
+        return ScheduleOrderPriorityPolicy.order_queue(queue, now=now)[:bounded_limit]
     @staticmethod
     def find_order(order_id, db):
         return db.execute(
@@ -252,6 +267,15 @@ class ScheduleCapacityRepository:
         )
 
     @staticmethod
+    def clear_schedule_replan_flag(order_id, db):
+        """Clear the pending replan marker only after a successful plan."""
+        db.execute(
+            "UPDATE orders SET schedule_replan_required=0,schedule_replan_reason='',"
+            "updated_at=datetime('now','localtime') WHERE id=? AND deleted_at IS NULL",
+            (order_id,),
+        )
+
+    @staticmethod
     def list_process_lines(process_id=None, db=None, limit=1000):
         db = resolve_db(db)
         limit = min(max(int(limit or 1000), 1), 1000)
@@ -312,12 +336,25 @@ class ScheduleCapacityRepository:
             (order_id,),
         ).fetchone()
         revision_no = int(row["next_revision"] if row else 1)
+        order = db.execute(
+            "SELECT priority_level,is_expedited,previous_priority_level,"
+            "previous_is_expedited,priority_effective_at,priority_version,schedule_policy "
+            "FROM orders WHERE id=? AND deleted_at IS NULL",
+            (order_id,),
+        ).fetchone()
+        if order is None:
+            raise ValueError("订单不存在")
+        intent = ScheduleOrderPriorityPolicy.effective_intent(dict(order))
         cur = db.execute(
             "INSERT INTO schedule_revisions "
-            "(order_id,schedule_run_id,revision_no,status,source_run_key,created_by,replan_reason,replan_source_digest,replanned_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(order_id,schedule_run_id,revision_no,status,source_run_key,created_by,replan_reason,replan_source_digest,replanned_at,"
+            "priority_level_snapshot,is_expedited_snapshot,priority_version_snapshot,priority_effective_at_snapshot,schedule_policy_snapshot) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (order_id, schedule_run_id, revision_no, "draft", source_run_key or "", created_by,
-             replan_reason or "", replan_source_digest or "", replanned_at or ""),
+             replan_reason or "", replan_source_digest or "", replanned_at or "",
+             intent["priority_level"], int(intent["is_expedited"]),
+             int(order["priority_version"] or 1), order["priority_effective_at"] or "",
+             order["schedule_policy"] or "auto"),
         )
         return cur.lastrowid
 
@@ -408,6 +445,77 @@ class ScheduleCapacityRepository:
     def find_run(schedule_run_key, db=None):
         db = resolve_db(db)
         return db.execute("SELECT * FROM schedule_runs WHERE schedule_run_key=?", (schedule_run_key,)).fetchone()
+
+    @staticmethod
+    def find_auto_plan_run(auto_plan_key, db=None):
+        """Return the immutable automatic-plan attempt for an idempotency key."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM schedule_auto_plan_runs WHERE auto_plan_key=?",
+            (str(auto_plan_key or "").strip(),),
+        ).fetchone()
+
+    @staticmethod
+    def create_auto_plan_run(
+        auto_plan_key, requested_start_date, input_digest, input_json,
+        created_by=None, db=None,
+    ):
+        """Create an automatic-plan ledger row without overwriting history."""
+        db = resolve_db(db)
+        if isinstance(input_json, str):
+            encoded_input = input_json
+        else:
+            encoded_input = json.dumps(
+                input_json or {}, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            )
+        cur = db.execute(
+            "INSERT INTO schedule_auto_plan_runs "
+            "(auto_plan_key,requested_start_date,status,input_digest,input_json,created_by) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                str(auto_plan_key or "").strip(),
+                str(requested_start_date or ""),
+                "started",
+                str(input_digest or ""),
+                encoded_input,
+                created_by,
+            ),
+        )
+        return cur.lastrowid
+
+    @staticmethod
+    def complete_auto_plan_run(
+        run_id, status, result, error_message="", db=None,
+    ):
+        """Freeze the result of an automatic-plan attempt with a digest."""
+        db = resolve_db(db)
+        if isinstance(result, str):
+            encoded_result = result
+        else:
+            encoded_result = json.dumps(
+                result if result is not None else {}, ensure_ascii=False,
+                sort_keys=True, separators=(",", ":"),
+            )
+        digest = hashlib.sha256(encoded_result.encode("utf-8")).hexdigest()
+        db.execute(
+            "UPDATE schedule_auto_plan_runs SET status=?,result_json=?,"
+            "result_digest=?,error_message=?,completed_at=datetime('now','localtime') "
+            "WHERE id=?",
+            (status, encoded_result, digest, error_message or "", run_id),
+        )
+        return digest
+
+    @staticmethod
+    def auto_plan_result(run):
+        """Decode a stored automatic-plan result without trusting its shape."""
+        if run is None:
+            return {}
+        try:
+            result = json.loads(run["result_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return result if isinstance(result, dict) else {}
 
     @staticmethod
     def create_run(order_id, schedule_run_key, start_date, db, *, run_type="generate",
