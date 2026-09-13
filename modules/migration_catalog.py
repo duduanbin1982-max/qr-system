@@ -39,6 +39,7 @@ from modules.migration_work_time import MIGRATIONS as WORK_TIME_MIGRATIONS
 from modules.migration_historical_price_binding_v083 import (
     MIGRATIONS as HISTORICAL_PRICE_BINDING_REPAIR_MIGRATIONS,
 )
+from modules.migration_order_priority import MIGRATIONS as ORDER_PRIORITY_MIGRATIONS
 
 
 MIGRATIONS = sorted(
@@ -61,13 +62,14 @@ MIGRATIONS = sorted(
         *PROCESS_CONTENT_DIGEST_MIGRATIONS,
         *SCHEDULE_CAPACITY_MIGRATIONS,
         *HISTORICAL_PRICE_BINDING_REPAIR_MIGRATIONS,
+        *ORDER_PRIORITY_MIGRATIONS,
     ],
     key=lambda migration: migration[0],
 )
 
 # SQLite user_version represents one linear schema state. Keeping the chain separate
 # from function registration makes missing versions and accidental reordering explicit.
-MIGRATION_VERSION_CHAIN = (1, *range(13, 84))
+MIGRATION_VERSION_CHAIN = (1, *range(13, 85))
 MIGRATION_DEPENDENCIES = {
     version: (() if index == 0 else (MIGRATION_VERSION_CHAIN[index - 1],))
     for index, version in enumerate(MIGRATION_VERSION_CHAIN)

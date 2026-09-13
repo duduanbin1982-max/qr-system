@@ -109,6 +109,30 @@ def schedule_capacity_orders():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/schedule/auto-plan", methods=["POST"])
+@check_auth
+@check_permission("schedule:edit")
+def schedule_auto_plan():
+    """Generate a priority-ordered plan with an auditable idempotency key."""
+    try:
+        data = get_json_body()
+        result = ScheduleCapacityService.auto_plan_orders(
+            start_date=data.get("start_date"),
+            auto_plan_key=data.get("auto_plan_key", ""),
+            limit=data.get("limit", 100),
+            actor_id=g.current_user.get("id") if g.current_user else None,
+        )
+        safe_audit_log(
+            "auto_plan_schedule", "schedule_auto_plan",
+            0,
+            f"key={result.get('auto_plan_key', '')}; "
+            f"status={result.get('status')}; queue={result.get('queue_count', 0)}",
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/schedule/order/<int:order_id>/operations", methods=["GET"])
 @check_auth
 @check_permission("schedule:view")

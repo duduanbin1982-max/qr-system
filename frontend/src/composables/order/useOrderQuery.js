@@ -32,6 +32,14 @@ export function useOrderQuery() {
     paused: { label: '已暂停', cls: 'badge-secondary' },
   }
 
+  const priorityMap = {
+    1: { label: 'P1 特急', cls: 'badge-danger' },
+    2: { label: 'P2 加急', cls: 'badge-warning' },
+    3: { label: 'P3 普通', cls: 'badge-info' },
+    4: { label: 'P4 低优先', cls: 'badge-secondary' },
+    5: { label: 'P5 暂缓', cls: 'badge-secondary' },
+  }
+
   const canCreate = computed(() => can('orders:create'))
   const canEdit = computed(() => can('orders:edit'))
   const canDelete = computed(() => can('orders:delete'))
@@ -149,7 +157,7 @@ export function useOrderQuery() {
   return {
     orders, loading, total, page, limit, filterStatus, archiveFilter, searchKeyword, filterCustomer,
     customers, products, processRoutes, productionLines, expandedId,
-    pendingCount, producingCount, completedCount, statusMap,
+    pendingCount, producingCount, completedCount, statusMap, priorityMap,
     canCreate, canEdit, canDelete, canView, canScanView, canReport,
     pct, scrapPct, riskLabel, formatHours, isOverdue,
     load, loadDropdownData, searchAndLoad, archiveChange, statusChange, customerChange,

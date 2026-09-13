@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   listOperationSchedules: vi.fn(),
   listCapacityOrders: vi.fn(),
   generateOrderOperationSchedule: vi.fn(),
+  autoPlanSchedule: vi.fn(),
   listScheduleDowntime: vi.fn(),
   createScheduleDowntime: vi.fn(),
   cancelScheduleDowntime: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/lib/api.js', () => ({
         listOperationSchedules: mocks.listOperationSchedules,
         listCapacityOrders: mocks.listCapacityOrders,
         generateOrderOperationSchedule: mocks.generateOrderOperationSchedule,
+        autoPlanSchedule: mocks.autoPlanSchedule,
         listScheduleDowntime: mocks.listScheduleDowntime,
         createScheduleDowntime: mocks.createScheduleDowntime,
         cancelScheduleDowntime: mocks.cancelScheduleDowntime,
@@ -88,6 +90,7 @@ describe('useGantt', () => {
     mocks.createScheduleDowntime.mockResolvedValue({ ok: true, event: { id: 1 } })
     mocks.cancelScheduleDowntime.mockResolvedValue({ ok: true, status: 'cancelled' })
     mocks.updateScheduleOrder.mockResolvedValue({ ok: true })
+    mocks.autoPlanSchedule.mockResolvedValue({ ok: true, status: 'completed', queue_count: 2, failed_count: 0, orders: [] })
   })
 
   it('filters orders by production line id and detects configured overloads', async () => {
@@ -284,6 +287,37 @@ describe('useGantt', () => {
     }
     await harness.gantt.createDowntime()
     expect(mocks.createScheduleDowntime).not.toHaveBeenCalled()
+    harness.wrapper.unmount()
+  })
+
+  it('runs the priority queue automatic plan through the production facade', async () => {
+    const harness = mountHarness()
+    await flushPromises()
+
+    harness.gantt.prepareAutoPlan()
+    harness.gantt.autoPlanStartDate.value = '2026-09-14'
+    harness.gantt.autoPlanLimit.value = 25
+    harness.gantt.autoPlanKey.value = 'auto-plan-ui-test-001'
+    const result = await harness.gantt.runAutoPlan()
+
+    expect(mocks.autoPlanSchedule).toHaveBeenCalledWith({
+      start_date: '2026-09-14',
+      auto_plan_key: 'auto-plan-ui-test-001',
+      limit: 25,
+    })
+    expect(result).toMatchObject({ status: 'completed', queue_count: 2 })
+    expect(harness.gantt.autoPlanResult.value).toMatchObject({ status: 'completed' })
+    expect(mocks.listOperationSchedules).toHaveBeenCalledTimes(1)
+    harness.wrapper.unmount()
+  })
+
+  it('rejects an invalid automatic plan limit before sending a request', async () => {
+    const harness = mountHarness()
+    await flushPromises()
+    harness.gantt.prepareAutoPlan()
+    harness.gantt.autoPlanLimit.value = 1001
+    await harness.gantt.runAutoPlan()
+    expect(mocks.autoPlanSchedule).not.toHaveBeenCalled()
     harness.wrapper.unmount()
   })
 })

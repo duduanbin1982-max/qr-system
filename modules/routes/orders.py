@@ -75,9 +75,27 @@ def record_order_qr_print(oid):
 def create_order():
     data = get_json_body()
     try:
-        order_id, order_no = OrderService.create_order(data)
+        uname = g.current_user.get('name', g.current_user.get('username', ''))
+        order_id, order_no = OrderService.create_order(
+            data,
+            user_id=g.current_user.get('id'),
+            user_name=uname,
+        )
         safe_audit_log('create_order', 'order', order_id, f'order_no={order_no}')
         return jsonify({'message': '创建成功', 'id': order_id})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/orders/<int:oid>/priority-history', methods=['GET'])
+@check_auth
+@check_permission('orders:view')
+def order_priority_history(oid):
+    if not _check_order_data_scope(oid):
+        return jsonify({'error': '无权限访问此订单'}), 403
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 200)
+    try:
+        return jsonify(OrderService.list_priority_history(oid, limit=limit))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 

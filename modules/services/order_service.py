@@ -5,6 +5,7 @@ qr-system — 订单管理 Service 层
 从 routes/orders.py 提取全部业务逻辑。
 """
 import json
+import hashlib
 import logging
 from datetime import datetime, timedelta
 from modules.services import BaseService
@@ -15,6 +16,7 @@ from modules.domain.order_lifecycle import (
     VALID_TRANSITIONS,
     OrderLifecycle,
 )
+from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
@@ -144,9 +146,101 @@ class OrderService:
         core_fields = {
             'order_no', 'customer', 'customer_id', 'product_name', 'quantity',
             'plan_start', 'plan_end', 'deadline', 'remark', 'process_ids',
-            'route_id', 'production_line_id', 'status', 'product_id'
+            'route_id', 'production_line_id', 'status', 'product_id',
+            'priority_level', 'is_expedited', 'priority_reason',
+            'priority_effective_at', 'schedule_policy', 'schedule_change_reason',
         }
         return {key: value for key, value in data.items() if key not in core_fields}
+
+    @staticmethod
+    def _normalize_priority_data(data, *, create=False):
+        """Normalize scheduling intent without silently changing omitted update fields."""
+        normalized = dict(data)
+        if create or 'priority_level' in normalized:
+            try:
+                normalized['priority_level'] = int(normalized.get('priority_level', 3))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError('优先级必须是 1 到 5 的整数') from exc
+            if normalized['priority_level'] not in range(1, 6):
+                raise ValidationError('优先级必须是 1 到 5')
+        if create or 'is_expedited' in normalized:
+            value = normalized.get('is_expedited', False)
+            if isinstance(value, bool):
+                normalized['is_expedited'] = int(value)
+            else:
+                try:
+                    value = int(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError('加急标志必须是布尔值') from exc
+                if value not in (0, 1):
+                    raise ValidationError('加急标志必须是布尔值')
+                normalized['is_expedited'] = value
+        if create or 'priority_reason' in normalized:
+            normalized['priority_reason'] = (normalized.get('priority_reason') or '').strip()
+        if create or 'priority_effective_at' in normalized:
+            normalized['priority_effective_at'] = (
+                normalized.get('priority_effective_at') or ''
+            ).strip()
+        if create or 'schedule_policy' in normalized:
+            normalized['schedule_policy'] = (
+                normalized.get('schedule_policy') or 'auto'
+            ).strip().lower()
+            if normalized['schedule_policy'] not in {
+                'auto', 'no_split', 'allow_split', 'allow_cross_day'
+            }:
+                raise ValidationError('排程策略不在允许范围内')
+        if 'schedule_change_reason' in normalized:
+            normalized['schedule_change_reason'] = (
+                normalized.get('schedule_change_reason') or ''
+            ).strip()
+        return normalized
+
+    @staticmethod
+    def _priority_value(row, key, default=None):
+        try:
+            value = row[key]
+        except (KeyError, IndexError, TypeError):
+            value = default
+        return default if value is None else value
+
+    @staticmethod
+    def _priority_history_payload(order_id, order_no, old_order, new_values,
+                                  event_type, changed_by, changed_by_name,
+                                  changed_at, change_reason):
+        def value(row, key, default):
+            return OrderService._priority_value(row, key, default) if row is not None else default
+
+        old_priority = value(old_order, 'priority_level', None)
+        old_expedited = value(old_order, 'is_expedited', None)
+        old_deadline = value(old_order, 'deadline', '') or ''
+        old_effective = value(old_order, 'priority_effective_at', '') or ''
+        old_policy = value(old_order, 'schedule_policy', 'auto') or 'auto'
+        old_reason = value(old_order, 'priority_reason', '') or ''
+        new_priority = int(new_values.get('priority_level', value(old_order, 'priority_level', 3)) or 3)
+        new_expedited = int(new_values.get('is_expedited', value(old_order, 'is_expedited', 0)) or 0)
+        new_deadline = new_values.get('deadline', value(old_order, 'deadline', '')) or ''
+        new_effective = new_values.get(
+            'priority_effective_at', value(old_order, 'priority_effective_at', '')
+        ) or ''
+        new_policy = new_values.get('schedule_policy', value(old_order, 'schedule_policy', 'auto')) or 'auto'
+        new_reason = new_values.get('priority_reason', value(old_order, 'priority_reason', '')) or ''
+        version = int(new_values.get('priority_version', value(old_order, 'priority_version', 1)) or 1)
+        snapshot = {
+            'order_id': order_id, 'order_no': order_no or '', 'event_type': event_type,
+            'old_priority_level': old_priority, 'new_priority_level': new_priority,
+            'old_is_expedited': old_expedited, 'new_is_expedited': new_expedited,
+            'old_deadline': old_deadline, 'new_deadline': new_deadline,
+            'old_priority_effective_at': old_effective, 'new_priority_effective_at': new_effective,
+            'old_schedule_policy': old_policy, 'new_schedule_policy': new_policy,
+            'old_priority_reason': old_reason, 'new_priority_reason': new_reason,
+            'change_reason': change_reason or '', 'changed_by': changed_by,
+            'changed_by_name': changed_by_name or '', 'changed_at': changed_at,
+            'priority_version': version,
+        }
+        digest_input = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        snapshot['snapshot_digest'] = hashlib.sha256(digest_input.encode('utf-8')).hexdigest()
+        snapshot.update({'order_id': order_id, 'order_no_snapshot': order_no or '', 'event_type': event_type})
+        return snapshot
 
     @staticmethod
     def _build_create_payload(data, order_no, customer, customer_id, route_id, extra):
@@ -165,6 +259,16 @@ class OrderService:
             "route_id": route_id if route_id else None,
             "product_code": data.get('product_code', ''),
             "production_line_id": data.get('production_line_id'),
+            "priority_level": data.get('priority_level', 3),
+            "is_expedited": data.get('is_expedited', 0),
+            "priority_reason": data.get('priority_reason', ''),
+            "priority_effective_at": data.get('priority_effective_at', ''),
+            "previous_priority_level": data.get('previous_priority_level', data.get('priority_level', 3)),
+            "previous_is_expedited": data.get('previous_is_expedited', data.get('is_expedited', 0)),
+            "schedule_policy": data.get('schedule_policy', 'auto'),
+            "priority_version": data.get('priority_version', 1),
+            "schedule_replan_required": data.get('schedule_replan_required', 0),
+            "schedule_replan_reason": data.get('schedule_replan_reason', ''),
         }
 
     @classmethod
@@ -197,6 +301,8 @@ class OrderService:
         customer,
         process_ids,
         repository,
+        user_id=None,
+        user_name='',
     ):
         """Persist the order aggregate and snapshots atomically."""
         route_id = normalized_data.get('route_id')
@@ -207,6 +313,12 @@ class OrderService:
         payload = cls._build_create_payload(
             normalized_data, order_no, customer, customer_id, route_id, extra
         )
+        if user_id is not None:
+            payload.update({
+                'priority_changed_by': user_id,
+                'priority_changed_by_name': user_name or '',
+                'priority_changed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            })
         payload.update(
             {
                 "route_version_id": assignment["route_version_id"],
@@ -225,6 +337,17 @@ class OrderService:
             order_id,
             normalized_data.get('product_id'),
             txn,
+        )
+        created = repository.find_by_id(order_id, db=txn)
+        changed_at = cls._priority_value(created, 'priority_changed_at', '') or (
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        )
+        repository.insert_priority_history(
+            cls._priority_history_payload(
+                order_id, created['order_no'], None, dict(created), 'created',
+                user_id, user_name or '', changed_at, '订单创建时建立排程优先级基线',
+            ),
+            db=txn,
         )
         return order_id
 
@@ -273,6 +396,23 @@ class OrderService:
             'producing': counts.get('producing', 0),
             'completed': counts.get('completed', 0),
             'archive': archive
+        }
+
+    @staticmethod
+    def list_priority_history(order_id, limit=100):
+        """List immutable scheduling-priority history for one order."""
+        order = OrderService._repository().find_by_id(order_id)
+        if not order:
+            raise NotFoundError('订单不存在')
+        return {
+            'order_id': order_id,
+            'order_no': order['order_no'],
+            'history': [
+                dict(row)
+                for row in OrderService._repository().list_priority_history(
+                    order_id, limit=limit
+                )
+            ],
         }
 
     # ============================================================
@@ -334,7 +474,7 @@ class OrderService:
     # ============================================================
 
     @staticmethod
-    def create_order(data):
+    def create_order(data, user_id=None, user_name=None):
         """
         创建订单。
 
@@ -355,6 +495,7 @@ class OrderService:
                 data,
                 txn,
             )
+            normalized_data = OrderService._normalize_priority_data(normalized_data, create=True)
             order_no = OrderService._allocate_create_order_no(
                 order_no,
                 txn,
@@ -368,6 +509,8 @@ class OrderService:
                 customer,
                 process_ids,
                 repository,
+                user_id=user_id,
+                user_name=user_name or '',
             )
 
         return order_id, order_no
@@ -446,6 +589,7 @@ class OrderService:
             data,
             txn,
         )
+        data = OrderService._normalize_priority_data(data)
         OrderService._validate_quantity_against_serial_items(
             oid, current_order, data, txn
         )
@@ -457,6 +601,62 @@ class OrderService:
         quantity_changed = (
             'quantity' in data and data['quantity'] != current_order['quantity']
         )
+        tracked_priority_fields = (
+            'priority_level', 'is_expedited', 'deadline', 'priority_effective_at',
+            'schedule_policy',
+        )
+        priority_changed = any(
+            field in data and data[field] != OrderService._priority_value(
+                current_order,
+                field,
+                0 if field == 'is_expedited' else (3 if field == 'priority_level' else ('auto' if field == 'schedule_policy' else '')),
+            )
+            for field in tracked_priority_fields
+        )
+        schedule_replan = priority_changed or structure_changed or quantity_changed
+        if priority_changed:
+            change_reason = (
+                data.get('schedule_change_reason') or data.get('priority_reason') or ''
+            ).strip()
+            if not change_reason:
+                raise ValidationError('调整优先级、加急、交期或排程策略时必须填写变更原因')
+            next_version = int(OrderService._priority_value(current_order, 'priority_version', 1) or 1) + 1
+            changed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            data.update({
+                'priority_changed_by': user_id,
+                'priority_changed_by_name': user_name or '',
+                'priority_changed_at': changed_at,
+                'priority_version': next_version,
+            })
+            # Keep the old effective intent when a change is future-dated.  If
+            # it takes effect immediately, the previous intent is simply the
+            # new one; this makes repeated future edits deterministic.
+            effective_at = ScheduleOrderPriorityPolicy._parse_effective_at(
+                data.get('priority_effective_at', '')
+            )
+            if effective_at is not None and effective_at > datetime.now():
+                old_intent = ScheduleOrderPriorityPolicy.effective_intent(
+                    dict(current_order), now=datetime.now()
+                )
+                data['previous_priority_level'] = old_intent['priority_level']
+                data['previous_is_expedited'] = int(old_intent['is_expedited'])
+            else:
+                data['previous_priority_level'] = data.get(
+                    'priority_level', OrderService._priority_value(current_order, 'priority_level', 3)
+                )
+                data['previous_is_expedited'] = data.get(
+                    'is_expedited', OrderService._priority_value(current_order, 'is_expedited', 0)
+                )
+        else:
+            change_reason = ''
+            changed_at = ''
+        if schedule_replan:
+            data['schedule_replan_required'] = 1
+            data['schedule_replan_reason'] = (
+                change_reason
+                or ('订单结构或数量发生变化' if structure_changed or quantity_changed else '')
+                or '排程优先级发生变化'
+            )
         OrderService._record_update_remark(oid, data, user_id, user_name, txn)
         repository.update_form_fields(oid, data, db=txn)
         actual_order_no = repository.find_by_id(oid, db=txn)['order_no']
@@ -468,6 +668,22 @@ class OrderService:
                 oid,
                 trigger='order_structure_updated',
                 actor_id=user_id,
+                db=txn,
+            )
+        if priority_changed:
+            updated_order = repository.find_by_id(oid, db=txn)
+            repository.insert_priority_history(
+                OrderService._priority_history_payload(
+                    oid,
+                    updated_order['order_no'],
+                    current_order,
+                    dict(updated_order),
+                    'updated',
+                    user_id,
+                    user_name or '',
+                    changed_at,
+                    change_reason,
+                ),
                 db=txn,
             )
         return actual_order_no

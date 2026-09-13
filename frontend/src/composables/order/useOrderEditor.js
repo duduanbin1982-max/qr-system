@@ -10,6 +10,8 @@ const emptyForm = () => ({
   model: '', spec: '', style: '', upper_opening: '', plate_thickness: '', category: '',
   quantity: 1, plan_start: '', plan_end: '', deadline: '', route_id: '',
   production_line_id: null, remark: '', status: 'pending',
+  priority_level: 3, is_expedited: false, priority_reason: '',
+  priority_effective_at: '', schedule_policy: 'auto', schedule_change_reason: '',
 })
 
 
@@ -18,6 +20,7 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
   const modalEdit = ref(false)
   const modalId = ref(null)
   const form = ref(emptyForm())
+  const originalScheduleState = ref(null)
   const search = useOrderFormSearch({ form, products, processRoutes })
 
   function isCompletedOrder(order) {
@@ -40,6 +43,7 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
 
   async function openAdd() {
     form.value = emptyForm()
+    originalScheduleState.value = null
     search.resetSearch()
     modalEdit.value = false
     modalId.value = null
@@ -74,6 +78,19 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
       production_line_id: order.production_line_id || null,
       remark: order.remark || '',
       status: order.status || 'pending',
+      priority_level: Number(order.priority_level || 3),
+      is_expedited: Boolean(Number(order.is_expedited || 0)),
+      priority_reason: order.priority_reason || '',
+      priority_effective_at: order.priority_effective_at || '',
+      schedule_policy: order.schedule_policy || 'auto',
+      schedule_change_reason: '',
+    }
+    originalScheduleState.value = {
+      priority_level: Number(order.priority_level || 3),
+      is_expedited: Boolean(Number(order.is_expedited || 0)),
+      deadline: order.deadline || '',
+      priority_effective_at: order.priority_effective_at || '',
+      schedule_policy: order.schedule_policy || 'auto',
     }
     search.productSearch.value = order.product_code || ''
     search.routeSearch.value = order.route_name || ''
@@ -97,6 +114,26 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
       if (data.customer_id) data.customer_id = parseInt(data.customer_id)
       if (data.production_line_id) data.production_line_id = parseInt(data.production_line_id) || null
       else data.production_line_id = null
+      data.priority_level = parseInt(data.priority_level, 10) || 3
+      data.is_expedited = Boolean(data.is_expedited)
+      data.priority_effective_at = data.priority_effective_at || ''
+      data.schedule_policy = data.schedule_policy || 'auto'
+
+      if (modalEdit.value && originalScheduleState.value) {
+        const changed = [
+          data.priority_level !== originalScheduleState.value.priority_level,
+          data.is_expedited !== originalScheduleState.value.is_expedited,
+          (data.deadline || '') !== originalScheduleState.value.deadline,
+          (data.priority_effective_at || '') !== originalScheduleState.value.priority_effective_at,
+          data.schedule_policy !== originalScheduleState.value.schedule_policy,
+        ].some(Boolean)
+        if (changed && !(data.schedule_change_reason || '').trim()) {
+          showToast('调整优先级、加急、交期或排程策略时必须填写本次调整原因', 'error')
+          return
+        }
+      } else {
+        delete data.schedule_change_reason
+      }
 
       if (modalEdit.value) {
         await api.domains.orders.updateOrder(modalId.value, data)

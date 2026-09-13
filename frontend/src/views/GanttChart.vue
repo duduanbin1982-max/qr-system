@@ -91,7 +91,31 @@
           <input v-model="replanStartAt" type="datetime-local" class="form-input" style="width:175px;padding:6px 10px;font-size:var(--text-sm)" title="重排起点">
           <input v-model="replanReason" type="text" class="form-input" style="width:220px;padding:6px 10px;font-size:var(--text-sm)" placeholder="动态重排原因">
           <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--warning);color:#fff" @click="dynamicReplanSchedule">按实际进度重排</button>
+          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="prepareAutoPlan">⚡ 自动排程</button>
           <button type="button" class="btn-default btn-sm" @click="loadCapacity">刷新</button>
+        </div>
+      </div>
+      <div v-if="autoPlanVisible" class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid var(--teal);background:var(--bg-surface)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <strong style="font-size:var(--text-sm)">⚡ 按优先级自动排程</strong>
+          <span style="font-size:var(--text-xs);color:var(--text-secondary)">按 P1→P5、加急、交期和订单号排序；每次运行使用独立幂等键并保留运行台账</span>
+          <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="autoPlanVisible=false">收起</button>
+        </div>
+        <form v-if="canEdit" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="runAutoPlan">
+          <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">开始日期
+            <input v-model="autoPlanStartDate" type="date" class="form-input" style="width:145px;padding:6px 8px;font-size:var(--text-sm)" required>
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">订单数
+            <input v-model.number="autoPlanLimit" type="number" min="1" max="1000" class="form-input" style="width:90px;padding:6px 8px;font-size:var(--text-sm)" required>
+          </label>
+          <input v-model="autoPlanKey" type="text" maxlength="128" class="form-input" style="width:260px;padding:6px 10px;font-size:var(--text-sm)" placeholder="自动排程幂等键" required>
+          <button type="submit" class="btn btn-sm" style="background:var(--teal);color:#fff" :disabled="autoPlanLoading">{{ autoPlanLoading ? '排程中…' : '运行自动排程' }}</button>
+        </form>
+        <div v-if="autoPlanResult" style="margin-top:10px;padding:8px 10px;background:var(--bg-hover);border-radius:var(--radius-sm);font-size:var(--text-xs)">
+          <span>运行状态：<b>{{ autoPlanResult.status }}</b></span>
+          <span style="margin-left:12px">队列 {{ autoPlanResult.queue_count || 0 }} 单</span>
+          <span style="margin-left:12px">失败 {{ autoPlanResult.failed_count || 0 }} 单</span>
+          <span v-if="autoPlanResult.idempotent_replay" style="margin-left:12px;color:var(--primary)">幂等重放</span>
         </div>
       </div>
       <div class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid var(--border-light);background:var(--bg-surface)">
