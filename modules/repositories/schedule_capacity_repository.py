@@ -302,7 +302,7 @@ class ScheduleCapacityRepository:
         limit = min(max(int(limit or 1000), 1), 1000)
         return db.execute(
             "SELECT op.id AS order_process_id, op.order_id, op.process_id, op.seq_order, "
-            "op.status, op.completed, op.scrapped, op.process_version_id, "
+            "op.status, op.completed, op.scrapped, op.rework, op.process_version_id, "
             "op.process_code_snapshot, op.process_name_snapshot, op.process_category_snapshot, "
             "o.route_id, o.route_version_id, o.route_name_snapshot, p.name AS process_name, "
             "s.id AS schedule_id, s.process_line_id, s.quantity AS scheduled_quantity, "

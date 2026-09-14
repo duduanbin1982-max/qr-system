@@ -473,6 +473,10 @@ class ScheduleCapacityService:
             if not operations:
                 raise ValueError("订单没有工序，无法生成排程")
             cursor = ScheduleCapacityService._date(start_date or order["plan_start"], "计划开始日期")
+            # A regenerated/in-progress order may retain a historical plan start.
+            # Standards are effective for the planning run, not retroactively for
+            # that old date; use the later of requested start and run date.
+            standard_as_of = max(cursor.date(), datetime.now().date()).strftime("%Y-%m-%d")
             run_key = (schedule_run_key or datetime.now().strftime("schedule-%Y%m%d%H%M%S")).strip()
             if not run_key:
                 raise ValueError("排程幂等键不能为空")
@@ -512,9 +516,15 @@ class ScheduleCapacityService:
                     process_version_id = operation["process_version_id"]
                     process_snapshot = operation["process_name_snapshot"] or operation["process_name"] or ""
                     route_snapshot = operation["route_name_snapshot"] or order["route_name_snapshot"] or ""
+                    completed = max(int(operation["completed"] or 0), 0)
+                    rework = max(int(operation["rework"] or 0), 0)
+                    remaining = max(int(order["quantity"] or 0) - completed, 0) + rework
                     common = {"order_id": order_id, "order_process_id": operation["order_process_id"],
                               "process_id": operation["process_id"], "seq_order": operation["seq_order"],
-                              "quantity": order["quantity"], "route_version_id": route_version_id,
+                              "quantity": remaining, "route_version_id": route_version_id,
+                              "completed_quantity_snapshot": completed,
+                              "rework_quantity_snapshot": rework,
+                              "remaining_quantity_snapshot": remaining,
                               "process_version_id": process_version_id, "process_name_snapshot": process_snapshot,
                               "route_name_snapshot": route_snapshot, "schedule_run_key": run_key,
                               "schedule_run_id": run_id, "schedule_revision_id": revision_id}
@@ -532,7 +542,7 @@ class ScheduleCapacityService:
                     standard = ScheduleCapacityService._find_standard(
                         txn, order["route_id"], route_version_id, operation["process_id"],
                         process_version_id, order["product_id"], order["product_code"],
-                        cursor.strftime("%Y-%m-%d"),
+                        standard_as_of,
                     )
                     lines = [line for line in ScheduleCapacityRepository.list_process_lines(operation["process_id"], db=txn)
                              if line["status"] == "active"]
@@ -742,6 +752,7 @@ class ScheduleCapacityService:
         against free line minutes and active downtime intervals.
         """
         start = ScheduleCapacityService._replan_start(start_at)
+        standard_as_of = start.strftime("%Y-%m-%d")
         reason = str(reason or "").strip()
         if len(reason) > 512:
             raise ValueError("重排原因不能超过 512 个字符")
@@ -849,6 +860,8 @@ class ScheduleCapacityService:
                                        "reason": "已完成，无需重排"})
                         continue
                     if blocked:
+                        # Preserve the dependency block while recording that
+                        # this operation was not independently evaluated.
                         payload = {
                             **common, "process_line_id": None, "standard_id": None, "standard_version": None,
                             "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
@@ -865,7 +878,7 @@ class ScheduleCapacityService:
                     standard = ScheduleCapacityService._find_standard(
                         txn, order.get("route_id"), operation.get("route_version_id") or order.get("route_version_id"),
                         operation["process_id"], operation.get("process_version_id"), order.get("product_id"),
-                        order.get("product_code"), cursor.strftime("%Y-%m-%d"),
+                        order.get("product_code"), standard_as_of,
                     )
                     lines = [line for line in ScheduleCapacityRepository.list_process_lines(operation["process_id"], db=txn)
                              if line["status"] == "active"]
