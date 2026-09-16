@@ -447,7 +447,7 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
         db.close()
 
     report = run_preflight(source, limit=10)
-    assert report["database_user_version"] == before == 84
+    assert report["database_user_version"] == before == 85
     assert report["operations"] == 0
     assert report["coverage_percent"] == 100.0
     assert report["process_statistics"] == []
@@ -473,11 +473,11 @@ def test_precision_schedule_spans_shifts_and_preserves_snapshot(client):
         )
         row = result["operations"][0]
         assert row["planned_start_at"] == "2026-09-01 08:00"
-        assert row["planned_end_at"] == "2026-09-02 10:00"
+        assert row["planned_end_at"] == "2026-09-02 09:00"
         assert row["occupied_minutes"] == pytest.approx(600)
         assert row["standard_match_scope"].endswith(":generic")
         snapshot = json.loads(row["capacity_snapshot_json"])
-        assert snapshot["daily_minutes"] == pytest.approx(480)
+        assert snapshot["daily_minutes"] == pytest.approx(540)
         assert len(row["segments"]) == 3
         stored_segments = db.execute(
             "SELECT COUNT(*) FROM order_process_schedule_segments WHERE schedule_id=?",
@@ -498,7 +498,7 @@ def test_weekend_is_skipped_by_default_calendar(client):
         )
         row = result["operations"][0]
         assert row["planned_start_at"] == "2026-09-04 08:00"
-        assert row["planned_end_at"] == "2026-09-07 10:20"
+        assert row["planned_end_at"] == "2026-09-07 09:20"
 
 
 def test_parallel_lines_are_selected_by_earliest_minute_completion(client):

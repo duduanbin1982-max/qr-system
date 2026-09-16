@@ -67,6 +67,8 @@ class WorkTimeService:
         route_id = WorkTimeService._to_int(data.get("route_id"))
         process_id = WorkTimeService._to_int(data.get("process_id"))
         standard_id = WorkTimeService._to_int(data.get("id"))
+        route_version_id = WorkTimeService._to_int(data.get("route_version_id"))
+        process_version_id = WorkTimeService._to_int(data.get("process_version_id"))
         if not route_id:
             raise ValueError("请选择工序路线")
         if not process_id:
@@ -76,6 +78,12 @@ class WorkTimeService:
         route_process = WorkTimeRepository.find_route_process(route_id, process_id, db=db)
         if not route_process:
             raise ValueError("所选工序不属于该工序路线")
+        if (route_version_id is None) != (process_version_id is None):
+            raise ValueError("路线版本和工序版本必须同时指定")
+        if route_version_id is not None:
+            WorkTimeRepository.validate_version_binding(
+                route_id, process_id, route_version_id, process_version_id, db=db,
+            )
 
         standard_minutes = WorkTimeService._to_float(data.get("standard_minutes_per_unit"), 0)
         setup_minutes = WorkTimeService._to_float(data.get("setup_minutes"), 0)
@@ -90,7 +98,12 @@ class WorkTimeService:
         status = (data.get("status") or "active").strip()
         if status not in STANDARD_STATUSES:
             raise ValueError("标准工时状态不正确")
-        if status == "active" and WorkTimeRepository.find_active_standard_for_route_process(route_id, process_id, exclude_id=standard_id, db=db):
+        if status == "active" and WorkTimeRepository.find_active_standard_for_route_process(
+            route_id, process_id, exclude_id=standard_id,
+            route_version_id=route_version_id,
+            process_version_id=process_version_id,
+            db=db,
+        ):
             raise ConflictError("该工序路线的这道工序已存在启用标准工时")
 
         return {
@@ -99,6 +112,8 @@ class WorkTimeService:
             "product_name": "",
             "route_id": route_id,
             "process_id": process_id,
+            "route_version_id": route_version_id,
+            "process_version_id": process_version_id,
             "standard_minutes_per_unit": round(standard_minutes, 2),
             "setup_minutes": round(setup_minutes, 2),
             "difficulty_factor": round(difficulty_factor, 3),
@@ -118,7 +133,7 @@ class WorkTimeService:
             return WorkTimeRepository.insert_standard(normalized, txn)
 
     @staticmethod
-    def save_route_standards(route_id, items, user_id, effective_from=""):
+    def save_route_standards(route_id, items, user_id, effective_from="", route_version_id=None):
         route_id = WorkTimeService._to_int(route_id)
         if not route_id:
             raise ValueError("请选择工序路线")
@@ -176,11 +191,30 @@ class WorkTimeService:
                         deactivated += 1
                     continue
 
+                effective_route_version_id = WorkTimeService._to_int(
+                    raw.get("route_version_id", route_version_id)
+                )
+                effective_process_version_id = WorkTimeService._to_int(
+                    raw.get("process_version_id")
+                )
+                if standard_id and existing and "route_version_id" not in raw and route_version_id is None:
+                    effective_route_version_id = existing["route_version_id"]
+                    effective_process_version_id = existing["process_version_id"]
+                if effective_route_version_id and not effective_process_version_id:
+                    item = WorkTimeRepository.route_process_version(
+                        effective_route_version_id, process_id, db=txn,
+                    )
+                    if not item:
+                        raise ValueError("路线版本未包含所选工序版本")
+                    effective_process_version_id = item["process_version_id"]
+
                 payload = {
                     **raw,
                     "id": standard_id,
                     "route_id": route_id,
                     "process_id": process_id,
+                    "route_version_id": effective_route_version_id,
+                    "process_version_id": effective_process_version_id,
                     "status": "active",
                     "effective_from": raw.get("effective_from") or effective_from or datetime.now().strftime("%Y-%m-%d"),
                 }
@@ -206,9 +240,20 @@ class WorkTimeService:
 
     @staticmethod
     def update_standard(standard_id, data, user_id):
-        if not WorkTimeRepository.find_standard(standard_id):
+        existing = WorkTimeRepository.find_standard(standard_id)
+        if not existing:
             raise NotFoundError("标准工时不存在")
-        data = {**(data or {}), "id": standard_id}
+        # Editing a historical standard must never silently rebind it to the
+        # current route revision.  Omitted version fields preserve the stored
+        # immutable binding; explicit fields are validated by the repository.
+        data = {
+            **(data or {}),
+            "id": standard_id,
+            "route_id": (data or {}).get("route_id", existing["route_id"]),
+            "process_id": (data or {}).get("process_id", existing["process_id"]),
+            "route_version_id": (data or {}).get("route_version_id", existing["route_version_id"]),
+            "process_version_id": (data or {}).get("process_version_id", existing["process_version_id"]),
+        }
         normalized = WorkTimeService.normalize_standard(data, user_id)
         with BaseService.transaction() as txn:
             WorkTimeRepository.update_standard(standard_id, normalized, txn)

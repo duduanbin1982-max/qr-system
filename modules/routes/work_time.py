@@ -37,6 +37,8 @@ def work_time_list_standards():
         "product_id": request.args.get("product_id", type=int),
         "process_id": request.args.get("process_id", type=int),
         "route_id": request.args.get("route_id", type=int),
+        "route_version_id": request.args.get("route_version_id", type=int),
+        "process_version_id": request.args.get("process_version_id", type=int),
     }
     return jsonify(WorkTimeService.list_standards(filters, _page_arg(), _limit_arg()))
 
@@ -50,6 +52,8 @@ def work_time_list_standard_routes():
         "status": request.args.get("status", ""),
         "process_id": request.args.get("process_id", type=int),
         "route_id": request.args.get("route_id", type=int),
+        "route_version_id": request.args.get("route_version_id", type=int),
+        "process_version_id": request.args.get("process_version_id", type=int),
     }
     return jsonify(WorkTimeService.list_standard_routes(filters, _page_arg(), _limit_arg()))
 
@@ -65,6 +69,7 @@ def work_time_save_route_standards():
             data.get("items", []),
             g.current_user.get("id"),
             data.get("effective_from", ""),
+            data.get("route_version_id"),
         )
         safe_audit_log(
             "work_time_route_standards_save",

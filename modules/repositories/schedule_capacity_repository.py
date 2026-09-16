@@ -258,6 +258,20 @@ class ScheduleCapacityRepository:
         return None
 
     @staticmethod
+    def find_execution_policy(route_version_id, process_version_id, db):
+        if not route_version_id or not process_version_id:
+            return None
+        try:
+            return db.execute(
+                "SELECT * FROM route_process_execution_policies "
+                "WHERE route_version_id=? AND process_version_id=? AND status='active'",
+                (route_version_id, process_version_id),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # Read-only pre-v085 clones remain compatible with the scheduler.
+            return None
+
+    @staticmethod
     def update_order_summary(order_id, start_date, end_date, db):
         db.execute(
             "UPDATE orders SET plan_start=?, plan_end=?, "
@@ -312,6 +326,7 @@ class ScheduleCapacityRepository:
             "s.setup_minutes, s.difficulty_factor, s.planned_minutes, s.plan_start, s.plan_end, "
             "s.planned_start_at, s.planned_end_at, s.occupied_minutes, s.capacity_snapshot_json, "
             "s.standard_match_scope, s.calendar_id, s.shift_snapshot_json, s.line_name_snapshot, "
+            "s.execution_mode, "
             "s.status AS schedule_status, s.blocked_reason, s.schedule_run_key, s.schedule_run_id, pl.line_name "
             "FROM order_processes op JOIN orders o ON o.id=op.order_id JOIN processes p ON p.id=op.process_id "
             "LEFT JOIN order_process_schedules s ON s.order_process_id=op.id "
@@ -1004,9 +1019,9 @@ class ScheduleCapacityRepository:
             "seq_order,quantity,standard_minutes_per_unit,setup_minutes,difficulty_factor,planned_minutes,plan_start,plan_end,"
             "status,blocked_reason,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
             "process_name_snapshot,route_name_snapshot,schedule_run_id,schedule_revision_id,planned_start_at,planned_end_at,occupied_minutes,"
-            "capacity_snapshot_json,standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot,"
+            "capacity_snapshot_json,standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot,execution_mode,"
             "completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["order_process_id"], data["process_id"], data.get("process_line_id"),
              data.get("seq_order", 0), data.get("quantity", 0), data.get("standard_minutes_per_unit", 0),
              data.get("setup_minutes", 0), data.get("difficulty_factor", 1), data.get("planned_minutes", 0), data["plan_start"], data["plan_end"],
@@ -1017,6 +1032,7 @@ class ScheduleCapacityRepository:
             data.get("planned_start_at", ""), data.get("planned_end_at", ""), data.get("occupied_minutes", 0),
              data.get("capacity_snapshot_json", "{}"), data.get("standard_match_scope", ""), data.get("calendar_id"),
              data.get("shift_snapshot_json", "[]"), data.get("line_name_snapshot", ""),
+             data.get("execution_mode", "internal"),
              data.get("completed_quantity_snapshot", 0), data.get("rework_quantity_snapshot", 0),
              data.get("remaining_quantity_snapshot", data.get("quantity", 0)),
              data.get("source_fact_digest", "")),
@@ -1056,11 +1072,12 @@ class ScheduleCapacityRepository:
             "INSERT OR IGNORE INTO schedule_revision_items "
             "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,seq_order,quantity,status,"
             "planned_start_at,planned_end_at,occupied_minutes,payload_json,payload_digest,"
-            "completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "execution_mode,completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (revision_id, schedule_id, row["order_process_id"], row["process_id"], row["process_line_id"],
              row["seq_order"], row["quantity"], row["status"], row["planned_start_at"],
              row["planned_end_at"], row["occupied_minutes"], encoded, digest,
+             row["execution_mode"] if "execution_mode" in keys else "internal",
              int(row["completed_quantity_snapshot"] or 0) if "completed_quantity_snapshot" in keys else 0,
              int(row["rework_quantity_snapshot"] or 0) if "rework_quantity_snapshot" in keys else 0,
              int(row["remaining_quantity_snapshot"] or row["quantity"] or 0) if "remaining_quantity_snapshot" in keys else int(row["quantity"] or 0),

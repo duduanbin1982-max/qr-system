@@ -6,7 +6,7 @@ defaults provision that process-scoped pool and are intentionally kept in one
 module so migrations and runtime code cannot drift apart.
 """
 
-DEFAULT_DAILY_MINUTES = 480
+DEFAULT_DAILY_MINUTES = 540
 
 DEFAULT_PROCESS_LINE_COUNTS = {
     "下料": 1,

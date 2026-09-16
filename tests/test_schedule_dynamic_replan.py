@@ -94,7 +94,7 @@ def test_dynamic_replan_treats_downtime_as_line_occupancy_and_is_idempotent(clie
         first = ScheduleCapacityService.dynamic_replan_order(
             order_id, start_at="2026-09-01 08:00", schedule_run_key="dynamic-downtime-v1", actor_id=user_id
         )
-        assert first["operations"][0]["planned_start_at"].startswith("2026-09-02")
+        assert first["operations"][0]["planned_start_at"] == "2026-09-01 17:00"
         replay = ScheduleCapacityService.dynamic_replan_order(
             order_id, start_at="2026-09-01 08:00", schedule_run_key="dynamic-downtime-v1", actor_id=user_id
         )

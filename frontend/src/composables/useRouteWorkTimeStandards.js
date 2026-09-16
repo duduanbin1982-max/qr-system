@@ -61,6 +61,8 @@ export function useRouteWorkTimeStandards(processRoutesRef) {
         process_id: proc.id,
         process_name: proc.name,
         seq: proc.seq,
+        route_version_id: existing.route_version_id || '',
+        process_version_id: existing.process_version_id || '',
         enabled: existing.id ? existing.status !== 'inactive' : true,
         standard_minutes_per_unit: existing.standard_minutes_per_unit ?? '',
         setup_minutes: existing.setup_minutes ?? 0,
@@ -87,6 +89,8 @@ export function useRouteWorkTimeStandards(processRoutesRef) {
       items: standardRows.value.map(row => ({
         id: row.id || undefined,
         process_id: row.process_id,
+        route_version_id: row.route_version_id || undefined,
+        process_version_id: row.process_version_id || undefined,
         enabled: row.enabled,
         status: row.enabled ? 'active' : 'inactive',
         standard_minutes_per_unit: positiveNumber(row.standard_minutes_per_unit),
