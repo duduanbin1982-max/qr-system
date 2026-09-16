@@ -63,7 +63,7 @@
           <div v-show="!isGroupCollapsed(group)" class="table-wrap route-standard-table-wrap">
             <table class="data-table route-standard-table" style="min-width:1040px">
               <thead><tr>
-                <th class="sequence-col">序号</th><th>顺序</th><th>工序</th><th>单件标准</th><th>准备工时</th><th>难度系数</th><th>生效日期</th><th>状态</th><th>备注</th><th class="operation-col">操作</th>
+                <th class="sequence-col">序号</th><th>顺序</th><th>工序路线版本</th><th>工序 / 版本</th><th>单件标准</th><th>准备工时</th><th>难度系数</th><th>生效日期</th><th>状态</th><th>备注</th><th class="operation-col">操作</th>
               </tr></thead>
               <tbody>
                 <tr
@@ -74,7 +74,8 @@
                 >
                   <td class="sequence-cell">{{ rowIndex + 1 }}</td>
                   <td>{{ routeSeqLabel(row.route_seq_order) }}</td>
-                  <td><b>{{ row.process_name || '-' }}</b></td>
+                  <td>V{{ row.route_version || '-' }}<small class="version-status">{{ row.route_version_status || '未绑定' }}</small></td>
+                  <td><b>{{ row.process_name || '-' }}</b><small class="version-status">工序 V{{ row.process_version || '-' }}</small></td>
                   <td>{{ row.id ? `${row.standard_minutes_per_unit || 0} 分/件` : '-' }}</td>
                   <td>{{ row.id ? `${row.setup_minutes || 0} 分` : '-' }}</td>
                   <td>{{ row.id ? (row.difficulty_factor || 1) : '-' }}</td>
@@ -110,6 +111,16 @@
                 <option value="">请选择工序路线</option>
                 <option v-for="route in processRoutes" :key="route.id" :value="route.id">{{ route.name }}</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label>路线版本（精确绑定）</label>
+              <select class="form-input" v-model="standardForm.route_version_id" @change="onStandardRouteVersionChange" :disabled="!routeVersionOptions.length">
+                <option value="">请选择路线版本</option>
+                <option v-for="version in routeVersionOptions" :key="version.route_version_id" :value="version.route_version_id">
+                  V{{ version.route_version }} · {{ version.route_version_status }}{{ version.is_current_version ? ' · 当前' : '' }}
+                </option>
+              </select>
+              <small class="form-help">未选择版本时仅允许查看；选择具体版本后才会写入精确路线/工序版本。</small>
             </div>
             <div class="form-group">
               <label>统一生效日期</label>
@@ -197,6 +208,7 @@ const isSaving = ref(false)
 const showStandardModal = ref(false)
 const standardFilters = ref({ scope: 'all', route_id: '', process_id: '' })
 const standardForm = ref({ route_id: '', effective_from: today() })
+const routeVersionOptions = ref([])
 const batchDefaults = ref({ standard_minutes_per_unit: 5, setup_minutes: 0, difficulty_factor: 1 })
 
 const filterRouteProcesses = computed(() =>
@@ -277,7 +289,7 @@ function clearStandardFilters() {
 }
 
 function standardGroupKey(group) {
-  return String(group.route_id || group.route_name || 'no-route')
+  return String(group.route_version_id || `${group.route_id || 'no-route'}:${group.route_version || ''}`)
 }
 
 function isGroupCollapsed(group) {
@@ -338,15 +350,31 @@ function onFilterRouteChange() {
 }
 
 async function onStandardRouteChange() {
-  await buildStandardRows(standardForm.value.route_id)
+  const result = await api.domains.workTime.listWorkTimeStandardRoutes({ route_id: standardForm.value.route_id, limit: 200 })
+  routeVersionOptions.value = result.route_groups || []
+  const current = routeVersionOptions.value.find(item => item.is_current_version) || routeVersionOptions.value[0]
+  standardForm.value.route_version_id = current?.route_version_id || ''
+  await onStandardRouteVersionChange()
+}
+
+async function onStandardRouteVersionChange() {
+  const group = routeVersionOptions.value.find(item => String(item.route_version_id) === String(standardForm.value.route_version_id))
+  await buildStandardRows(standardForm.value.route_id, group?.items || [])
 }
 
 async function openStandardGroup(group) {
   const routeId = group?.route_id || standardFilters.value.route_id || ''
-  standardForm.value = { route_id: routeId, effective_from: today() }
+  standardForm.value = { route_id: routeId, route_version_id: group?.route_version_id || '', effective_from: today() }
+  routeVersionOptions.value = []
   standardRows.value = []
   showStandardModal.value = true
-  if (routeId) await buildStandardRows(routeId, groupAllItems(group))
+  if (routeId) {
+    await onStandardRouteChange()
+    if (group?.route_version_id) {
+      standardForm.value.route_version_id = group.route_version_id
+      await onStandardRouteVersionChange()
+    }
+  }
 }
 
 function isEmptyValue(value) {
@@ -401,7 +429,13 @@ async function saveStandard() {
       return
     }
     isSaving.value = true
-    await api.domains.workTime.saveRouteWorkTimeStandards(buildSavePayload(routeId, standardForm.value.effective_from || today()))
+    const payload = buildSavePayload(routeId, standardForm.value.effective_from || today())
+    payload.route_version_id = standardForm.value.route_version_id || undefined
+    if (!payload.route_version_id) {
+      showToast('必须选择具体路线版本后才能保存工时', 'error')
+      return
+    }
+    await api.domains.workTime.saveRouteWorkTimeStandards(payload)
     showToast('路线标准工时已保存')
     showStandardModal.value = false
     await load()

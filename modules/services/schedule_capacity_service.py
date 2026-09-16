@@ -14,7 +14,7 @@ from modules.repositories.schedule_capacity_repository import ScheduleCapacityRe
 
 
 class ScheduleCapacityService:
-    DEFAULT_DAILY_MINUTES = 480
+    DEFAULT_DAILY_MINUTES = 540
 
     @staticmethod
     def _limit(value, default=500):
@@ -539,6 +539,48 @@ class ScheduleCapacityService:
                                        "reason": payload["blocked_reason"]})
                         continue
 
+                    execution_policy = ScheduleCapacityRepository.find_execution_policy(
+                        route_version_id, process_version_id, txn,
+                    )
+                    if execution_policy and execution_policy["execution_mode"] in {
+                        "outsourced", "non_scheduled",
+                    }:
+                        lead_minutes = max(float(execution_policy["external_lead_minutes"] or 0), 0)
+                        begin = cursor
+                        end = begin + timedelta(minutes=lead_minutes)
+                        payload = {
+                            **common,
+                            "process_line_id": None,
+                            "execution_mode": execution_policy["execution_mode"],
+                            "standard_id": None,
+                            "standard_version": None,
+                            "standard_minutes_per_unit": 0,
+                            "setup_minutes": 0,
+                            "difficulty_factor": 1,
+                            "planned_minutes": lead_minutes,
+                            "occupied_minutes": 0,
+                            "plan_start": begin.strftime("%Y-%m-%d"),
+                            "plan_end": end.strftime("%Y-%m-%d"),
+                            "planned_start_at": ScheduleCapacityService._format_timestamp(begin),
+                            "planned_end_at": ScheduleCapacityService._format_timestamp(end),
+                            "status": "planned",
+                            "blocked_reason": "",
+                            "standard_match_scope": "execution_policy",
+                            "capacity_snapshot_json": json.dumps({
+                                "execution_mode": execution_policy["execution_mode"],
+                                "external_lead_minutes": lead_minutes,
+                                "route_version_id": route_version_id,
+                                "process_version_id": process_version_id,
+                            }, ensure_ascii=False, sort_keys=True),
+                            "segments": [],
+                            "line_name_snapshot": "",
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                        cursor = end
+                        result.append({**payload, "line_name": None, "process_name": process_snapshot,
+                                       "reason": "外协/非排程工序，不占用内部产能"})
+                        continue
+
                     standard = ScheduleCapacityService._find_standard(
                         txn, order["route_id"], route_version_id, operation["process_id"],
                         process_version_id, order["product_id"], order["product_code"],
@@ -873,6 +915,48 @@ class ScheduleCapacityService:
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
+                        continue
+
+                    execution_policy = ScheduleCapacityRepository.find_execution_policy(
+                        common.get("route_version_id"), common.get("process_version_id"), txn,
+                    )
+                    if execution_policy and execution_policy["execution_mode"] in {
+                        "outsourced", "non_scheduled",
+                    }:
+                        lead_minutes = max(float(execution_policy["external_lead_minutes"] or 0), 0)
+                        begin = cursor
+                        end = begin + timedelta(minutes=lead_minutes)
+                        payload = {
+                            **common,
+                            "process_line_id": None,
+                            "execution_mode": execution_policy["execution_mode"],
+                            "standard_id": None,
+                            "standard_version": None,
+                            "standard_minutes_per_unit": 0,
+                            "setup_minutes": 0,
+                            "difficulty_factor": 1,
+                            "planned_minutes": lead_minutes,
+                            "occupied_minutes": 0,
+                            "plan_start": begin.strftime("%Y-%m-%d"),
+                            "plan_end": end.strftime("%Y-%m-%d"),
+                            "planned_start_at": ScheduleCapacityService._format_timestamp(begin),
+                            "planned_end_at": ScheduleCapacityService._format_timestamp(end),
+                            "status": "planned",
+                            "blocked_reason": "",
+                            "standard_match_scope": "execution_policy",
+                            "capacity_snapshot_json": json.dumps({
+                                "execution_mode": execution_policy["execution_mode"],
+                                "external_lead_minutes": lead_minutes,
+                                "route_version_id": common.get("route_version_id"),
+                                "process_version_id": common.get("process_version_id"),
+                            }, ensure_ascii=False, sort_keys=True),
+                            "segments": [],
+                            "line_name_snapshot": "",
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                        cursor = end
+                        result.append({**payload, "line_name": None, "process_name": process_snapshot,
+                                       "reason": "外协/非排程工序，不占用内部产能"})
                         continue
 
                     standard = ScheduleCapacityService._find_standard(

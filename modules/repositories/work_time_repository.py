@@ -45,6 +45,53 @@ class WorkTimeRepository:
         ).fetchone()
 
     @staticmethod
+    def find_route_version(route_version_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, process_route_id, version, name, status FROM process_route_versions WHERE id = ?",
+            (route_version_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_process_version(process_version_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT id, process_id, version, name, status, process_code_snapshot, category "
+            "FROM process_versions WHERE id = ?",
+            (process_version_id,),
+        ).fetchone()
+
+    @staticmethod
+    def validate_version_binding(route_id, process_id, route_version_id, process_version_id, db=None):
+        """Validate an exact route/process revision pair without fallback."""
+        db = resolve_db(db)
+        if not route_version_id or not process_version_id:
+            raise ValueError("必须同时指定路线版本和工序版本")
+        route_version = WorkTimeRepository.find_route_version(route_version_id, db=db)
+        if not route_version or route_version["process_route_id"] != route_id:
+            raise ValueError("路线版本不属于所选工序路线")
+        process_version = WorkTimeRepository.find_process_version(process_version_id, db=db)
+        if not process_version or process_version["process_id"] != process_id:
+            raise ValueError("工序版本不属于所选工序")
+        item = db.execute(
+            "SELECT 1 FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=? AND process_version_id=?",
+            (route_version_id, process_id, process_version_id),
+        ).fetchone()
+        if item is None:
+            raise ValueError("路线版本未包含所选工序版本")
+        return route_version, process_version
+
+    @staticmethod
+    def route_process_version(route_version_id, process_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (route_version_id, process_id),
+        ).fetchone()
+
+    @staticmethod
     def find_route_process(route_id, process_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -68,10 +115,19 @@ class WorkTimeRepository:
         ).fetchall()
 
     @staticmethod
-    def find_active_standard_for_route_process(route_id, process_id, exclude_id=None, db=None):
+    def find_active_standard_for_route_process(
+        route_id, process_id, exclude_id=None, route_version_id=None,
+        process_version_id=None, db=None,
+    ):
         db = resolve_db(db)
         params = [route_id, process_id]
         where = "route_id = ? AND process_id = ? AND status = 'active'"
+        if route_version_id is not None:
+            where += " AND route_version_id = ?"
+            params.append(route_version_id)
+        if process_version_id is not None:
+            where += " AND process_version_id = ?"
+            params.append(process_version_id)
         if exclude_id:
             where += " AND id != ?"
             params.append(exclude_id)
@@ -173,6 +229,12 @@ class WorkTimeRepository:
         if filters.get("route_id"):
             where.append("w.route_id = ?")
             params.append(filters["route_id"])
+        if filters.get("route_version_id"):
+            where.append("w.route_version_id = ?")
+            params.append(filters["route_version_id"])
+        if filters.get("process_version_id"):
+            where.append("w.process_version_id = ?")
+            params.append(filters["process_version_id"])
         where_clause = (" WHERE " + " AND ".join(where)) if where else ""
         total = db.execute(
             "SELECT COUNT(*) FROM work_time_standards w "
@@ -187,6 +249,8 @@ class WorkTimeRepository:
         rows = db.execute(
             "SELECT w.*, "
             + process_name + " AS process_name," + route_name + " AS route_name,"
+            "rv.version AS route_version,rv.status AS route_version_status,"
+            "pv.version AS process_version,pv.status AS process_version_status,"
             + "COALESCE(version_item.seq_order,pri.seq_order) AS route_seq_order, "
             "creator.name AS created_by_name, updater.name AS updated_by_name "
             "FROM work_time_standards w "
@@ -194,6 +258,8 @@ class WorkTimeRepository:
             + process_version_join("w", "process_version")
             + "LEFT JOIN process_routes r ON w.route_id = r.id "
             + route_version_join("w", "route_version")
+            + "LEFT JOIN process_route_versions rv ON rv.id = w.route_version_id "
+            + "LEFT JOIN process_versions pv ON pv.id = w.process_version_id "
             + "LEFT JOIN process_route_version_items version_item "
             "ON version_item.route_version_id=w.route_version_id "
             "AND version_item.process_version_id=w.process_version_id "
@@ -212,99 +278,117 @@ class WorkTimeRepository:
         db = resolve_db(db)
         page, per_page, offset = WorkTimeRepository._pagination(page, per_page)
         route_where = [
-            "EXISTS (SELECT 1 FROM process_route_items pri_exists WHERE pri_exists.route_id = r.id)"
+            "EXISTS (SELECT 1 FROM process_route_version_items i WHERE i.route_version_id=rv.id)"
         ]
         route_params = []
         keyword = (filters.get("keyword") or "").strip()
         if keyword:
             like = f"%{keyword}%"
             route_where.append(
-                "(r.name LIKE ? OR EXISTS ("
-                "SELECT 1 FROM process_route_items pri_kw "
-                "JOIN processes p_kw ON p_kw.id = pri_kw.process_id "
-                "WHERE pri_kw.route_id = r.id AND p_kw.name LIKE ?"
+                "(rv.name LIKE ? OR r.name LIKE ? OR EXISTS ("
+                "SELECT 1 FROM process_route_version_items i_kw "
+                "JOIN process_versions p_kw ON p_kw.id=i_kw.process_version_id "
+                "WHERE i_kw.route_version_id=rv.id AND p_kw.name LIKE ?"
                 "))"
             )
-            route_params.extend([like, like])
+            route_params.extend([like, like, like])
         if filters.get("route_id"):
             route_where.append("r.id = ?")
             route_params.append(filters["route_id"])
+        if filters.get("route_version_id"):
+            route_where.append("rv.id = ?")
+            route_params.append(filters["route_version_id"])
         if filters.get("process_id"):
             route_where.append(
-                "EXISTS (SELECT 1 FROM process_route_items pri_proc "
-                "WHERE pri_proc.route_id = r.id AND pri_proc.process_id = ?)"
+                "EXISTS (SELECT 1 FROM process_route_version_items i_proc "
+                "WHERE i_proc.route_version_id=rv.id AND i_proc.process_id=?)"
             )
             route_params.append(filters["process_id"])
         if filters.get("status"):
             route_where.append(
                 "EXISTS (SELECT 1 FROM work_time_standards w_status "
-                "WHERE w_status.route_id = r.id AND w_status.status = ?)"
+                "WHERE w_status.route_version_id=rv.id AND w_status.status=?)"
             )
             route_params.append(filters["status"])
         route_clause = " WHERE " + " AND ".join(route_where)
         total = db.execute(
-            "SELECT COUNT(*) FROM process_routes r" + route_clause,
+            "SELECT COUNT(*) FROM process_route_versions rv "
+            "JOIN process_routes r ON r.id=rv.process_route_id" + route_clause,
             route_params,
         ).fetchone()[0]
         routes = db.execute(
-            "SELECT r.id, r.name, r.category, r.description "
-            "FROM process_routes r" + route_clause + " "
-            "ORDER BY r.name COLLATE NOCASE ASC, r.id ASC LIMIT ? OFFSET ?",
+            "SELECT r.id, r.name, r.category, r.description,"
+            "rv.id AS route_version_id,rv.version AS route_version,"
+            "rv.name AS route_version_name,rv.status AS route_version_status,"
+            "CASE WHEN r.current_effective_version_id=rv.id THEN 1 ELSE 0 END AS is_current_version "
+            "FROM process_route_versions rv JOIN process_routes r ON r.id=rv.process_route_id"
+            + route_clause + " "
+            "ORDER BY r.name COLLATE NOCASE ASC,is_current_version DESC,rv.version DESC,rv.id DESC "
+            "LIMIT ? OFFSET ?",
             route_params + [per_page, offset],
         ).fetchall()
-        route_ids = [row["id"] for row in routes]
-        if not route_ids:
+        route_version_ids = [row["route_version_id"] for row in routes]
+        if not route_version_ids:
             return {"route_groups": [], "items": [], "total": total, "page": page, "per_page": per_page}
 
-        placeholders = ",".join("?" for _ in route_ids)
+        placeholders = ",".join("?" for _ in route_version_ids)
         status = (filters.get("status") or "").strip()
         sub_status_clause = ""
         params = []
         if status:
             sub_status_clause = " AND w2.status = ?"
             params.append(status)
-        params.extend(route_ids)
-        item_where = [f"pri.route_id IN ({placeholders})"]
+        params.extend(route_version_ids)
+        item_where = [f"item.route_version_id IN ({placeholders})"]
         if filters.get("process_id"):
-            item_where.append("pri.process_id = ?")
+            item_where.append("item.process_id = ?")
             params.append(filters["process_id"])
         if status:
             item_where.append("w.id IS NOT NULL")
         item_clause = " WHERE " + " AND ".join(item_where)
         rows = db.execute(
-            "SELECT pri.route_id, r.name AS route_name, pri.process_id, "
-            "pri.seq_order AS route_seq_order, p.name AS process_name, "
+            "SELECT r.id AS route_id,rv.name AS route_name,rv.id AS route_version_id,"
+            "rv.version AS route_version,rv.status AS route_version_status,"
+            "CASE WHEN r.current_effective_version_id=rv.id THEN 1 ELSE 0 END AS is_current_version,"
+            "item.process_id,item.process_version_id,pv.version AS process_version,"
+            "pv.status AS process_version_status,item.seq_order AS route_seq_order,pv.name AS process_name,"
             "w.id, w.product_id, w.product_code, w.product_name, "
             "w.standard_minutes_per_unit, w.setup_minutes, w.difficulty_factor, "
             "w.effective_from, w.effective_to, w.status, w.version, w.remark, "
             "w.created_by, w.updated_by, w.created_at, w.updated_at, "
             "creator.name AS created_by_name, updater.name AS updated_by_name "
-            "FROM process_route_items pri "
-            "JOIN process_routes r ON r.id = pri.route_id "
-            "JOIN processes p ON p.id = pri.process_id "
+            "FROM process_route_version_items item "
+            "JOIN process_route_versions rv ON rv.id=item.route_version_id "
+            "JOIN process_routes r ON r.id=rv.process_route_id "
+            "JOIN process_versions pv ON pv.id=item.process_version_id "
             "LEFT JOIN work_time_standards w ON w.id = ("
             "SELECT w2.id FROM work_time_standards w2 "
-            "WHERE w2.route_id = pri.route_id AND w2.process_id = pri.process_id"
+            "WHERE w2.route_version_id=item.route_version_id "
+            "AND w2.process_version_id=item.process_version_id"
             + sub_status_clause +
-            " ORDER BY CASE WHEN w2.status = 'active' THEN 0 ELSE 1 END, "
+            " ORDER BY CASE WHEN COALESCE(w2.product_id,0)=0 AND COALESCE(w2.product_code,'')='' THEN 0 ELSE 1 END,"
+            "CASE WHEN w2.status = 'active' THEN 0 ELSE 1 END, "
             "w2.updated_at DESC, w2.id DESC LIMIT 1) "
             "LEFT JOIN users creator ON w.created_by = creator.id "
             "LEFT JOIN users updater ON w.updated_by = updater.id "
             + item_clause + " "
-            "ORDER BY r.name COLLATE NOCASE ASC, r.id ASC, pri.seq_order ASC, pri.id ASC",
+            "ORDER BY r.name COLLATE NOCASE ASC,is_current_version DESC,rv.version DESC,item.seq_order ASC,item.id ASC",
             params,
         ).fetchall()
-        route_lookup = {row["id"]: dict(row) for row in routes}
         item_rows = [dict(row) for row in rows]
         items_by_route = {}
         for item in item_rows:
-            items_by_route.setdefault(item["route_id"], []).append(item)
+            items_by_route.setdefault(item["route_version_id"], []).append(item)
         groups = []
         for route in routes:
-            route_items = items_by_route.get(route["id"], [])
+            route_items = items_by_route.get(route["route_version_id"], [])
             groups.append({
                 "route_id": route["id"],
-                "route_name": route["name"],
+                "route_name": route["route_version_name"] or route["name"],
+                "route_version_id": route["route_version_id"],
+                "route_version": route["route_version"],
+                "route_version_status": route["route_version_status"],
+                "is_current_version": bool(route["is_current_version"]),
                 "category": route["category"],
                 "description": route["description"],
                 "items": route_items,
@@ -316,11 +400,29 @@ class WorkTimeRepository:
 
     @staticmethod
     def insert_standard(data, db):
-        binding = capture_process_fact_binding(
-            db,
-            process_id=data["process_id"],
-            route_id=data.get("route_id"),
-        )
+        if data.get("route_version_id") or data.get("process_version_id"):
+            route_version, process_version = WorkTimeRepository.validate_version_binding(
+                data.get("route_id"), data["process_id"], data.get("route_version_id"),
+                data.get("process_version_id"), db=db,
+            )
+            binding = {
+                "process_version_id": process_version["id"],
+                "process_code_snapshot": process_version["process_code_snapshot"] or "",
+                "process_name_snapshot": process_version["name"] or "",
+                "process_category_snapshot": process_version["category"] or "",
+                "route_version_id": route_version["id"],
+                "route_name_snapshot": route_version["name"] or "",
+                # Keep the existing column's historical CHECK contract.  The
+                # exact explicit provenance lives in the route/process IDs;
+                # controlled copies additionally have a V085 evidence event.
+                "version_binding_source": "captured",
+            }
+        else:
+            binding = capture_process_fact_binding(
+                db,
+                process_id=data["process_id"],
+                route_id=data.get("route_id"),
+            )
         cur = db.execute(
             "INSERT INTO work_time_standards ("
             "product_id, product_code, product_name, route_id, process_id, "
@@ -346,11 +448,26 @@ class WorkTimeRepository:
 
     @staticmethod
     def update_standard(standard_id, data, db):
-        binding = capture_process_fact_binding(
-            db,
-            process_id=data["process_id"],
-            route_id=data.get("route_id"),
-        )
+        if data.get("route_version_id") or data.get("process_version_id"):
+            route_version, process_version = WorkTimeRepository.validate_version_binding(
+                data.get("route_id"), data["process_id"], data.get("route_version_id"),
+                data.get("process_version_id"), db=db,
+            )
+            binding = {
+                "process_version_id": process_version["id"],
+                "process_code_snapshot": process_version["process_code_snapshot"] or "",
+                "process_name_snapshot": process_version["name"] or "",
+                "process_category_snapshot": process_version["category"] or "",
+                "route_version_id": route_version["id"],
+                "route_name_snapshot": route_version["name"] or "",
+                "version_binding_source": "captured",
+            }
+        else:
+            binding = capture_process_fact_binding(
+                db,
+                process_id=data["process_id"],
+                route_id=data.get("route_id"),
+            )
         db.execute(
             "UPDATE work_time_standards SET "
             "product_id=?, product_code=?, product_name=?, route_id=?, process_id=?, "

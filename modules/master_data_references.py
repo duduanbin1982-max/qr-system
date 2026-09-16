@@ -356,6 +356,23 @@ PROCESS_REFERENCES = (
         key="work_time_standards",
         label="标准工时",
     ),
+    _process(
+        "route_process_execution_policies",
+        ("process_id",),
+        version_columns=("process_version_id",),
+        key="route_process_execution_policies",
+        label="路线工序执行策略",
+        impact_level=IMPACT_INTERNAL,
+        action="由路线工序执行策略服务维护",
+    ),
+    _process(
+        "work_time_standard_binding_events",
+        version_columns=("source_process_version_id", "target_process_version_id"),
+        key="work_time_standard_binding_events_process",
+        label="标准工时绑定工序版本证据",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变标准工时绑定证据",
+    ),
     # Version ownership and workflow references are deletion guards, not user-facing impact.
     _process(
         "processes",
@@ -592,6 +609,25 @@ ROUTE_REFERENCES = (
         version_columns=("route_version_id",),
         key="work_time_standards",
         label="标准工时",
+    ),
+    _route(
+        "route_process_execution_policies",
+        version_columns=("route_version_id",),
+        key="route_process_execution_policies",
+        label="路线工序执行策略",
+        impact_level=IMPACT_INTERNAL,
+        action="由路线工序执行策略服务维护",
+    ),
+    _route(
+        "work_time_standard_binding_events",
+        version_columns=(
+            "source_route_version_id",
+            "target_route_version_id",
+        ),
+        key="work_time_standard_binding_events",
+        label="标准工时绑定审计",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变标准工时绑定证据",
     ),
     # Owned nodes protect direct SQL deletion but do not lock normal route editing.
     _route(
