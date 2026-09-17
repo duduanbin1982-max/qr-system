@@ -133,7 +133,9 @@ def seed_legacy_line_schedule(client):
         "order_id": order_id,
         "operation_id": operation_id,
         "process_id": process_id,
+        "process_version_id": process_version_id,
         "line_id": line_id,
+        "run_id": run_id,
         "schedule_id": schedule_id,
         "segment_id": segment_id,
         "revision_id": revision_id,
@@ -163,7 +165,14 @@ def test_legacy_schedule_fact_fingerprint_remains_stable(client):
             "order_process_schedules": dict(
                 db.execute(
                     "SELECT id,order_id,order_process_id,process_id,process_line_id,seq_order,"
-                    "quantity,plan_start,plan_end,status,schedule_run_key,schedule_revision_id "
+                    "quantity,standard_minutes_per_unit,setup_minutes,difficulty_factor,"
+                    "planned_minutes,plan_start,plan_end,planned_start_at,planned_end_at,"
+                    "occupied_minutes,status,blocked_reason,route_version_id,process_version_id,"
+                    "standard_id,standard_version,process_name_snapshot,route_name_snapshot,"
+                    "schedule_run_key,schedule_run_id,schedule_revision_id,capacity_snapshot_json,"
+                    "standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot,"
+                    "execution_mode,completed_quantity_snapshot,rework_quantity_snapshot,"
+                    "remaining_quantity_snapshot,source_fact_digest "
                     "FROM order_process_schedules WHERE id=?",
                     (seeded["schedule_id"],),
                 ).fetchone()
@@ -201,11 +210,36 @@ def test_legacy_schedule_fact_fingerprint_remains_stable(client):
                 "process_line_id": seeded["line_id"],
                 "seq_order": 1,
                 "quantity": 12,
+                "standard_minutes_per_unit": 15.0,
+                "setup_minutes": 30.0,
+                "difficulty_factor": 1.0,
+                "planned_minutes": 210.0,
                 "plan_start": "2026-09-14",
                 "plan_end": "2026-09-14",
+                "planned_start_at": "2026-09-14 08:00",
+                "planned_end_at": "2026-09-14 11:30",
+                "occupied_minutes": 210.0,
                 "status": "planned",
+                "blocked_reason": "",
+                "route_version_id": None,
+                "process_version_id": seeded["process_version_id"],
+                "standard_id": None,
+                "standard_version": None,
+                "process_name_snapshot": "兼容性焊接",
+                "route_name_snapshot": "",
                 "schedule_run_key": "legacy-node-contract-v1",
+                "schedule_run_id": seeded["run_id"],
                 "schedule_revision_id": seeded["revision_id"],
+                "capacity_snapshot_json": '{"daily_minutes":540}',
+                "standard_match_scope": "legacy:generic",
+                "calendar_id": None,
+                "shift_snapshot_json": "[]",
+                "line_name_snapshot": "焊接1线",
+                "execution_mode": "internal",
+                "completed_quantity_snapshot": 0,
+                "rework_quantity_snapshot": 0,
+                "remaining_quantity_snapshot": 0,
+                "source_fact_digest": "",
             },
             "order_process_schedule_segments": {
                 "id": seeded["segment_id"],
