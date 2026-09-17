@@ -358,6 +358,14 @@ CREATE TABLE IF NOT EXISTS production_node_migration_differences (
 
 Backfill only with exact joins on `production_nodes.legacy_process_line_id`. Copy node code, name, capacity mode, and calendar into schedule facts; do not update dates, minutes, quantities, statuses, standard references, or payload digests belonging to prior immutable revision items.
 
+Before backfilling additive node columns on `schedule_revision_items`, drop the
+existing `protect_schedule_revision_items_update` trigger inside the migration
+transaction. Recreate it immediately after the exact backfill with the full
+old and new immutable column set. This is the only permitted mutation of
+historical revision items, and the migration fingerprint test must prove that
+all pre-existing business columns and payload digests remain byte-for-byte
+unchanged.
+
 - [ ] **Step 4: Protect historical revision node snapshots**
 
 Extend the immutable trigger to reject changes to:
@@ -401,6 +409,7 @@ git commit -m "feat: add production node schedule facts"
 ### Task 4: Add Staged Flags and Immutable Compatibility Auditing
 
 **Files:**
+- Create: `modules/repositories/production_node_repository.py`
 - Create: `modules/services/production_node_compatibility_service.py`
 - Create: `tests/test_production_node_compatibility.py`
 - Modify: `modules/config.py`
@@ -477,6 +486,11 @@ CREATE TABLE IF NOT EXISTS production_node_compatibility_observations (
 
 - [ ] **Step 5: Implement dual-read comparison**
 
+Create the initial read-only `ProductionNodeRepository` in this task with
+`list_legacy_resources()`, `list_nodes()`, `record_compatibility_observation()`,
+and payload-digest helpers. Task 6 extends this same repository with command
+methods; it must not create a second persistence abstraction.
+
 Create:
 
 ```python
@@ -511,7 +525,7 @@ Expected: PASS; audit-disabled reads write no evidence, audit-enabled reads appe
 - [ ] **Step 7: Commit**
 
 ```bash
-git add modules/config.py modules/migration_production_nodes.py modules/services/production_node_compatibility_service.py tests/test_production_node_compatibility.py tests/test_bootstrap_and_versioning_flags.py
+git add modules/config.py modules/migration_production_nodes.py modules/repositories/production_node_repository.py modules/services/production_node_compatibility_service.py tests/test_production_node_compatibility.py tests/test_bootstrap_and_versioning_flags.py
 git commit -m "feat: add production node compatibility flags"
 ```
 
@@ -614,7 +628,7 @@ git commit -m "feat: define production node scheduling policy"
 ### Task 6: Build Node Repository, Service, Schemas, Permissions, and API
 
 **Files:**
-- Create: `modules/repositories/production_node_repository.py`
+- Modify: `modules/repositories/production_node_repository.py`
 - Create: `modules/services/production_node_service.py`
 - Create: `modules/schemas/production_nodes.py`
 - Create: `modules/routes/production_nodes.py`
@@ -952,7 +966,7 @@ git commit -m "feat: add batch and serial safe node allocation"
 
 ---
 
-### Task 9: Implement Locks, Manual Adjustment, and Two-Person Publication
+### Task 9: Implement Locks, Revision-Based Adjustment, and Two-Person Publication
 
 **Files:**
 - Create: `tests/test_production_node_schedule_workflow.py`
@@ -992,9 +1006,41 @@ python -m pytest -q tests/test_production_node_schedule_workflow.py
 
 Expected: FAIL because workflow endpoints and states do not exist.
 
-- [ ] **Step 3: Extend revision lifecycle and event ledger**
+- [ ] **Step 3: Add an independent approval state and lock/event ledgers**
 
-Add `pending_approval` and `rejected` to new revision lifecycle enforcement without rewriting historical rows. Add `schedule_node_workflow_events`:
+Keep the existing schedule lifecycle `status` values (`draft`, `published`,
+`superseded`, `cancelled`) unchanged. Add an independent
+`approval_status` column with `draft`, `submitted`, `approved`, and `rejected`,
+plus `submitted_by`, `submitted_at`, `approved_by`, `approved_at`,
+`rejected_by`, and `rejected_at`. Existing historical revisions remain
+`approval_status='approved'` only when already published; existing drafts use
+`approval_status='draft'`.
+
+Do not update immutable `schedule_revision_items` when a user locks, unlocks,
+or manually adjusts work. Add an active lock table and an immutable event
+ledger:
+
+```sql
+CREATE TABLE IF NOT EXISTS schedule_node_task_locks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    revision_item_id INTEGER NOT NULL,
+    production_node_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','released')),
+    reason TEXT NOT NULL,
+    locked_by INTEGER NOT NULL,
+    released_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    released_at TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(revision_item_id) REFERENCES schedule_revision_items(id) ON DELETE RESTRICT,
+    FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT,
+    FOREIGN KEY(locked_by) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY(released_by) REFERENCES users(id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_node_task_lock
+ON schedule_node_task_locks(revision_item_id) WHERE status='active';
+```
+
+Add `schedule_node_workflow_events`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS schedule_node_workflow_events (
@@ -1025,7 +1071,15 @@ approve_revision(revision_id, reason, idempotency_key, actor_id)
 reject_revision(revision_id, reason, idempotency_key, actor_id)
 ```
 
-All commands run inside `ScheduleCapacityService._transaction()`, revalidate occupancy/capability/calendar/version facts, append exactly one event, and return the original event on idempotent replay.
+All commands run inside `ScheduleCapacityService._transaction()`, revalidate
+occupancy/capability/calendar/version facts, append exactly one event, and
+return the original event on idempotent replay. Lock and unlock commands only
+change `schedule_node_task_locks`. `adjust_schedule_item` clones the complete
+source revision into a new draft revision, changes the requested item in the
+new revision, and leaves the source revision item untouched. Submission and
+approval update only the mutable revision header and workflow ledger. Publish
+requires `approval_status='approved'`, and the approver must differ from
+`created_by`.
 
 - [ ] **Step 5: Add routes and granular permission checks**
 
@@ -1142,8 +1196,13 @@ git commit -m "feat: replan production work by node"
 - Create: `frontend/tests/unit/useProductionNodes.spec.js`
 - Modify: `frontend/src/lib/api/production.js`
 - Modify: `frontend/src/composables/gantt/useGanttCapacity.js`
+- Modify: `frontend/src/composables/gantt/useGanttData.js`
+- Modify: `frontend/src/composables/gantt/useGanttEditor.js`
+- Delete: `frontend/src/composables/gantt/useProductionLines.js`
 - Modify: `frontend/src/composables/useGantt.js`
+- Modify: `frontend/src/composables/order/useOrderEditor.js`
 - Modify: `frontend/src/views/GanttChart.vue`
+- Modify: `frontend/src/views/OrderList.vue`
 - Modify: `frontend/tests/unit/useGantt.spec.js`
 - Modify: `frontend/tests/unit/api-transport-contract.spec.js`
 
@@ -1203,11 +1262,19 @@ const nodesByProcess = computed(() => Object.values(nodes.value.reduce((groups, 
 }, {})))
 ```
 
-Do not import or call `/api/production-lines` from this composable.
+Do not import or call `/api/production-lines` from this composable. Remove
+`useProductionLines` from the active Gantt composition rather than leaving a
+hidden legacy manager mounted.
 
 - [ ] **Step 5: Update capacity and Gantt UI**
 
-Rename state to `capacityNodes` and `capacityNodeFilter`. Use `production_node_id`, `node_name`, and `node_code` for new scheduling controls. Display old IDs only inside an audit detail section gated by audit permission.
+Rename state to `capacityNodes` and `capacityNodeFilter`. Use
+`production_node_id`, `node_name`, and `node_code` for new scheduling controls.
+Remove order-level `production_line_id` selection and drag/edit controls from
+`OrderList.vue`, `useOrderEditor.js`, `useGanttData.js`, and
+`useGanttEditor.js`; physical-node assignment belongs to order operations, not
+the order header. Display old IDs only inside an audit detail section gated by
+audit permission.
 
 Map blocked codes to exact messages:
 
@@ -1242,7 +1309,7 @@ Expected: all Vitest tests pass; architecture/import checks and Vite build pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/src/lib/api/production.js frontend/src/composables/gantt/useProductionNodes.js frontend/src/composables/gantt/useGanttCapacity.js frontend/src/composables/useGantt.js frontend/src/views/GanttChart.vue frontend/tests/unit/useProductionNodes.spec.js frontend/tests/unit/useGantt.spec.js frontend/tests/unit/api-transport-contract.spec.js
+git add frontend/src/lib/api/production.js frontend/src/composables/gantt/useProductionNodes.js frontend/src/composables/gantt/useGanttCapacity.js frontend/src/composables/gantt/useGanttData.js frontend/src/composables/gantt/useGanttEditor.js frontend/src/composables/gantt/useProductionLines.js frontend/src/composables/useGantt.js frontend/src/composables/order/useOrderEditor.js frontend/src/views/GanttChart.vue frontend/src/views/OrderList.vue frontend/tests/unit/useProductionNodes.spec.js frontend/tests/unit/useGantt.spec.js frontend/tests/unit/api-transport-contract.spec.js
 git commit -m "feat: replace scheduling lines with production nodes"
 ```
 
