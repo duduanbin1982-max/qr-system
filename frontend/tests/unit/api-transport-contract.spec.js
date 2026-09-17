@@ -113,6 +113,12 @@ describe('API facade transport contracts', () => {
       { method: 'GET', headers: {}, credentials: 'same-origin' },
     )
 
+    await api.domains.production.listScheduleDowntime({ process_line_id: 41, limit: 10 })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/schedule/downtime?process_line_id=41&limit=10',
+      expect.any(Object),
+    )
+
     await expect(api.domains.production.createScheduleDowntime({
       process_line_id: 41,
       start_at: '2026-09-01T08:00',
@@ -120,7 +126,7 @@ describe('API facade transport contracts', () => {
       reason: '设备检修',
     })).resolves.toEqual({ ok: true, events: [{ id: 7 }] })
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/schedule/downtime',
       {
         method: 'POST',
@@ -140,7 +146,7 @@ describe('API facade transport contracts', () => {
       events: [{ id: 7 }],
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       '/api/schedule/downtime/7',
       { method: 'DELETE', headers: {}, credentials: 'same-origin' },
     )

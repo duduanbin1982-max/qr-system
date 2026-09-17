@@ -64,6 +64,30 @@ def test_default_capacity_pool_matches_parallel_line_requirements(client):
         assert {row["name"]: row["count"] for row in rows} == expected
 
 
+def test_capacity_lines_api_preserves_legacy_line_identifiers(client, auth_headers):
+    with client.application.app_context():
+        db = get_db()
+        expected = db.execute(
+            "SELECT pl.id,pl.process_id,pl.line_code,pl.line_name "
+            "FROM process_production_lines pl JOIN processes p ON p.id=pl.process_id "
+            "WHERE p.name='\u710a\u63a5' ORDER BY pl.id LIMIT 1"
+        ).fetchone()
+
+    response = client.get(
+        f"/api/schedule/capacity-lines?process_id={expected['process_id']}&limit=10",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    line = response.get_json()["lines"][0]
+    assert {
+        "id": line["id"],
+        "process_id": line["process_id"],
+        "line_code": line["line_code"],
+        "line_name": line["line_name"],
+    } == dict(expected)
+    assert line.get("production_node_id") is None
+
+
 @pytest.mark.parametrize("process_name,expected_count", [("铆接", 4), ("抛丸", 1), ("镗孔", 2)])
 def test_new_known_process_provisions_its_default_line_pool(client, process_name, expected_count):
     with client.application.app_context():
