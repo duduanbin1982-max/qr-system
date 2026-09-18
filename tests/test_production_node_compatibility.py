@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -635,6 +637,66 @@ def test_explicit_db_keeps_caller_transaction_open_and_uncommitted(
         assert db.execute(
             "SELECT COUNT(*) FROM production_node_compatibility_observations"
         ).fetchone()[0] == 0
+
+
+def test_owned_wal_snapshot_reserves_writer_until_observation_is_committed(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    legacy_read_complete = threading.Event()
+    allow_audit_to_continue = threading.Event()
+    worker_errors = []
+    original_list_legacy = ProductionNodeRepository.list_legacy_resources
+
+    def pause_after_legacy_snapshot(*args, **kwargs):
+        rows = original_list_legacy(*args, **kwargs)
+        legacy_read_complete.set()
+        if not allow_audit_to_continue.wait(timeout=5):
+            raise TimeoutError("compatibility audit concurrency test timed out")
+        return rows
+
+    monkeypatch.setattr(
+        ProductionNodeRepository,
+        "list_legacy_resources",
+        staticmethod(pause_after_legacy_snapshot),
+    )
+
+    def run_owned_audit():
+        try:
+            with client.application.app_context():
+                ProductionNodeCompatibilityService.list_resources(limit=1)
+        except Exception as exc:  # pragma: no cover - asserted via worker_errors
+            worker_errors.append(exc)
+
+    worker = threading.Thread(target=run_owned_audit, daemon=True)
+    worker.start()
+    assert legacy_read_complete.wait(timeout=5)
+
+    competing = sqlite3.connect(config.DB_PATH, timeout=0.25)
+    try:
+        competing.execute("PRAGMA journal_mode=WAL")
+        competing.execute("PRAGMA busy_timeout=250")
+        started_at = time.monotonic()
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            competing.execute("BEGIN IMMEDIATE")
+        assert time.monotonic() - started_at < 2
+        assert competing.in_transaction is False
+    finally:
+        competing.close()
+        allow_audit_to_continue.set()
+
+    worker.join(timeout=5)
+    assert worker.is_alive() is False
+    assert worker_errors == []
+
+    persisted = sqlite3.connect(config.DB_PATH)
+    try:
+        assert persisted.execute(
+            "SELECT COUNT(*) FROM production_node_compatibility_observations"
+        ).fetchone()[0] == 1
+    finally:
+        persisted.close()
 
 
 def test_audit_records_operational_mismatch_as_new_immutable_observation(

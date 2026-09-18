@@ -124,7 +124,15 @@ class ProductionNodeCompatibilityService:
         audit_enabled = bool(config.PRODUCTION_NODE_COMPAT_AUDIT_ENABLED)
         owns_transaction = False
         if audit_enabled and not connection.in_transaction:
-            connection.execute("BEGIN")
+            # Compatibility evidence must describe the same SQLite snapshot as
+            # both reads.  In WAL mode a deferred BEGIN may let another writer
+            # commit after the first read and then fail when this transaction
+            # upgrades to insert its observation (SQLITE_BUSY_SNAPSHOT).
+            # BEGIN IMMEDIATE reserves the single writer slot before either
+            # read.  The connection busy_timeout keeps lock acquisition
+            # bounded, and this transaction contains only the two reads plus
+            # one idempotent observation insert.
+            connection.execute("BEGIN IMMEDIATE")
             owns_transaction = db is None
         try:
             if audit_enabled:
