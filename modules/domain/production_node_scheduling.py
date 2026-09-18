@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 class NodeSchedulingError(ValueError):
@@ -107,11 +108,17 @@ class ProductionNodePolicy:
     @classmethod
     def _capability_matches(cls, capability, operation, order):
         for field in cls.CAPABILITY_FIELDS:
-            expected = capability.get(field)
+            raw_expected = capability.get(field)
             if field.endswith("_id"):
-                expected = cls._id_value(expected)
+                if raw_expected is None or (
+                    isinstance(raw_expected, str) and not raw_expected.strip()
+                ):
+                    continue
+                expected = cls._id_value(raw_expected)
+                if expected is None:
+                    return False
             else:
-                expected = cls._text_value(expected)
+                expected = cls._text_value(raw_expected)
             if expected is None:
                 continue
             if expected != cls._fact_value(operation, order, field):
@@ -188,7 +195,10 @@ class ProductionNodePolicy:
             except (TypeError, ValueError):
                 return None
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
+            try:
+                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            except (ZoneInfoNotFoundError, ValueError, OverflowError):
+                return None
         return parsed.astimezone(timezone.utc)
 
     @classmethod
@@ -373,15 +383,39 @@ class ProductionNodePolicy:
             return
         node_id = cls._id_value(node.get("id"))
         overlaps = []
-        for item in occupancy or ():
+        for index, item in enumerate(occupancy or ()):
+            if not isinstance(item, dict):
+                raise NodeSchedulingError(
+                    "NODE_CALENDAR_UNAVAILABLE",
+                    "生产节点占用事实无效",
+                    {
+                        "production_node_id": node_id,
+                        "reason": "invalid_occupancy_fact",
+                        "occupancy_id": None,
+                        "fact_index": index,
+                    },
+                )
             item_node_id = cls._id_value(item.get("production_node_id"))
-            if item_node_id is not None and item_node_id != node_id:
-                continue
             item_start, item_end = cls._interval(item)
             if (
-                item_start is not None
-                and item_end is not None
-                and cls._overlaps(start, end, item_start, item_end)
+                item_start is None
+                or item_end is None
+                or item_start >= item_end
+            ):
+                raise NodeSchedulingError(
+                    "NODE_CALENDAR_UNAVAILABLE",
+                    "生产节点占用事实无效",
+                    {
+                        "production_node_id": node_id,
+                        "reason": "invalid_occupancy_fact",
+                        "occupancy_id": item.get("id"),
+                        "fact_index": index,
+                    },
+                )
+            if item_node_id is not None and item_node_id != node_id:
+                continue
+            if (
+                cls._overlaps(start, end, item_start, item_end)
             ):
                 overlaps.append(dict(item))
         locked = [
@@ -578,6 +612,15 @@ class ProductionNodePolicy:
         cls._validate_work_time_standard(operation, standard)
 
         node_id = cls._id_value(node.get("id"))
+        if node_id is None:
+            raise NodeSchedulingError(
+                "NO_COMPATIBLE_NODE",
+                "生产节点标识无效",
+                {
+                    "reason": "invalid_node_id",
+                    "actual": cls._display_value(node.get("id")),
+                },
+            )
         status = cls._text_value(node.get("status")) or "inactive"
         if status != "active":
             raise NodeSchedulingError(
@@ -598,6 +641,24 @@ class ProductionNodePolicy:
             )
         node_process_id = cls._id_value(node.get("process_id"))
         operation_process_id = cls._id_value(operation.get("process_id"))
+        if node_process_id is None:
+            raise NodeSchedulingError(
+                "NO_COMPATIBLE_NODE",
+                "生产节点工序标识无效",
+                {
+                    "reason": "invalid_node_process_id",
+                    "actual": cls._display_value(node.get("process_id")),
+                },
+            )
+        if operation_process_id is None:
+            raise NodeSchedulingError(
+                "NO_COMPATIBLE_NODE",
+                "订单工序标识无效",
+                {
+                    "reason": "invalid_operation_process_id",
+                    "actual": cls._display_value(operation.get("process_id")),
+                },
+            )
         if node_process_id != operation_process_id:
             raise NodeSchedulingError(
                 "NO_COMPATIBLE_NODE",

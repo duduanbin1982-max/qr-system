@@ -133,6 +133,28 @@ def test_node_process_must_match_operation_process():
     }
 
 
+@pytest.mark.parametrize(
+    ("node_override", "operation_override", "reason", "actual"),
+    [
+        ({"id": None}, {}, "invalid_node_id", None),
+        ({"id": 0}, {}, "invalid_node_id", 0),
+        ({"process_id": None}, {}, "invalid_node_process_id", None),
+        ({"process_id": "bad"}, {}, "invalid_node_process_id", "bad"),
+        ({}, {"process_id": None}, "invalid_operation_process_id", None),
+        ({}, {"process_id": -1}, "invalid_operation_process_id", -1),
+    ],
+)
+def test_node_and_operation_identity_ids_must_be_positive(
+    node_override, operation_override, reason, actual
+):
+    error = _assert_error(
+        "NO_COMPATIBLE_NODE",
+        node=_node(**node_override),
+        operation=_operation(**operation_override),
+    )
+    assert error.details == {"reason": reason, "actual": actual}
+
+
 def test_version_binding_errors_take_precedence_over_node_and_capability_errors():
     error = _assert_error(
         "VERSION_BINDING_MISMATCH",
@@ -178,6 +200,37 @@ def test_each_capability_dimension_must_match(
         order=_order(**order_override),
     )
     assert error.details["production_node_id"] == 10
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("product_id", "bad"),
+        ("product_id", 0),
+        ("route_version_id", "bad"),
+        ("route_version_id", -1),
+        ("process_version_id", "bad"),
+        ("process_version_id", 0),
+    ],
+)
+def test_invalid_nonempty_capability_ids_do_not_become_wildcards(
+    field, invalid_value
+):
+    error = _assert_error(
+        "NO_COMPATIBLE_NODE",
+        capabilities=[_capability(**{field: invalid_value})],
+    )
+    assert error.details == {"production_node_id": 10}
+
+
+def test_damaged_capability_row_does_not_expand_access_in_or_selection():
+    selected = _validate(
+        capabilities=[
+            _capability(id=39, product_id="damaged"),
+            _capability(id=40, product_id=20),
+        ]
+    )
+    assert selected["id"] == 40
 
 
 @pytest.mark.parametrize(
@@ -376,6 +429,20 @@ def test_calendar_normalizes_aware_and_naive_timestamps_to_utc():
     assert selected["id"] == 40
 
 
+def test_naive_business_time_is_asia_shanghai_not_utc():
+    selected = _validate(
+        requested_start_at="2026-09-18 08:00:00",
+        requested_end_at="2026-09-18 09:00:00",
+        calendar_intervals=[
+            {
+                "start_at": "2026-09-18T00:00:00Z",
+                "end_at": "2026-09-18T01:00:00Z",
+            }
+        ],
+    )
+    assert selected["id"] == 40
+
+
 def test_invalid_calendar_interval_fails_closed_without_native_datetime_error():
     _assert_error(
         "NODE_CALENDAR_UNAVAILABLE",
@@ -417,6 +484,44 @@ def test_exclusive_overlap_makes_node_unavailable():
     assert error.details == {
         "production_node_id": 10,
         "conflicting_occupancy_ids": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("occupancy", "occupancy_id", "fact_index"),
+    [
+        ("not-a-dict", None, 0),
+        ({"id": 93, "start_at": "bad", "end_at": "2026-09-18 09:00"}, 93, 0),
+        (
+            {
+                "id": 94,
+                "start_at": "2026-09-18 09:00",
+                "end_at": "2026-09-18 08:00",
+            },
+            94,
+            0,
+        ),
+        (
+            {
+                "id": 95,
+                "start_at": "bad",
+                "end_at": "also-bad",
+                "locked": 1,
+            },
+            95,
+            0,
+        ),
+    ],
+)
+def test_invalid_occupancy_facts_fail_closed(occupancy, occupancy_id, fact_index):
+    error = _assert_error(
+        "NODE_CALENDAR_UNAVAILABLE", occupancy=[occupancy]
+    )
+    assert error.details == {
+        "production_node_id": 10,
+        "reason": "invalid_occupancy_fact",
+        "occupancy_id": occupancy_id,
+        "fact_index": fact_index,
     }
 
 
