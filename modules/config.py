@@ -177,6 +177,11 @@ def validate_production_node_flags(flags=None):
         and values["PRODUCTION_NODE_WRITE_ENABLED"]
     ):
         violations.append("节点排程引擎要求先开启查询、兼容审计和节点写入")
+    if values["PRODUCTION_NODE_WRITE_ENABLED"] and not (
+        values["PRODUCTION_NODE_QUERY_ENABLED"]
+        and values["PRODUCTION_NODE_COMPAT_AUDIT_ENABLED"]
+    ):
+        violations.append("生产节点写入要求先开启查询和兼容审计")
     if (
         values["LEGACY_PROCESS_LINE_WRITE_BLOCKED"]
         and not values["PRODUCTION_NODE_ENGINE_ENABLED"]

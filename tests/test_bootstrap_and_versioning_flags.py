@@ -77,6 +77,13 @@ def test_production_node_flags_default_to_disabled():
         (
             {
                 "PRODUCTION_NODE_QUERY_ENABLED": True,
+                "PRODUCTION_NODE_WRITE_ENABLED": True,
+            },
+            "生产节点写入要求先开启查询和兼容审计",
+        ),
+        (
+            {
+                "PRODUCTION_NODE_QUERY_ENABLED": True,
                 "PRODUCTION_NODE_ENGINE_ENABLED": True,
             },
             "节点排程引擎要求先开启查询、兼容审计和节点写入",
@@ -148,6 +155,42 @@ def test_invalid_production_node_environment_fails_during_startup():
 
     assert result.returncode == 7
     assert b"PRODUCTION_NODE_FLAGS_REJECTED" in result.stdout
+
+
+def test_production_node_write_without_audit_fails_during_startup():
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "SECRET_KEY": "startup-validation-test",
+            "PRODUCTION_NODE_QUERY_ENABLED": "true",
+            "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED": "false",
+            "PRODUCTION_NODE_WRITE_ENABLED": "true",
+            "PRODUCTION_NODE_ENGINE_ENABLED": "false",
+            "LEGACY_PROCESS_LINE_WRITE_BLOCKED": "false",
+        }
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "try:\n"
+                " import modules.config\n"
+                "except RuntimeError as exc:\n"
+                " assert '\\u751f\\u4ea7\\u8282\\u70b9\\u5199\\u5165\\u8981\\u6c42\\u5148\\u5f00\\u542f\\u67e5\\u8be2\\u548c\\u517c\\u5bb9\\u5ba1\\u8ba1' in str(exc)\n"
+                " print('PRODUCTION_NODE_WRITE_WITHOUT_AUDIT_REJECTED')\n"
+                " sys.exit(7)\n"
+            ),
+        ],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=environment,
+        capture_output=True,
+    )
+
+    assert result.returncode == 7
+    assert b"PRODUCTION_NODE_WRITE_WITHOUT_AUDIT_REJECTED" in result.stdout
 
 
 def test_verify_schema_is_read_only_and_rejects_stale_database(tmp_path, monkeypatch):

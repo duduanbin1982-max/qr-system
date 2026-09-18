@@ -266,6 +266,75 @@ def test_repository_fact_projection_filters_non_capacity_facts_and_uses_segment_
         assert legacy["downtime_digest"] == node["downtime_digest"]
 
 
+def test_conflicts_use_segment_first_fallback_facts_and_exclude_non_capacity_rows(
+    client,
+):
+    with client.application.app_context():
+        db = get_db()
+        resource = _mapped_resources(db)[0]
+        _seed_schedule_fact(
+            db,
+            suffix="conflict-segment",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 08:00:00",
+            end_at="2026-09-18 09:00:00",
+            with_segment=True,
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="conflict-fallback-a",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 08:30:00",
+            end_at="2026-09-18 09:30:00",
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="conflict-fallback-b",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 09:00:00",
+            end_at="2026-09-18 10:00:00",
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="conflict-blocked",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 08:15:00",
+            end_at="2026-09-18 09:15:00",
+            status="blocked",
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="conflict-deleted",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 08:20:00",
+            end_at="2026-09-18 09:20:00",
+            with_segment=True,
+            soft_deleted=True,
+        )
+
+        legacy = _resource_row(
+            ProductionNodeRepository.list_legacy_resources(
+                process_id=resource["process_id"], db=db
+            ),
+            resource["line_id"],
+        )
+        node = _resource_row(
+            ProductionNodeRepository.list_nodes(
+                process_id=resource["process_id"], db=db
+            ),
+            resource["node_id"],
+        )
+
+        # segment/fallback-a and fallback-a/fallback-b overlap.  The exact
+        # boundary between segment and fallback-b is not a conflict.
+        assert legacy["conflict_count"] == node["conflict_count"] == 2
+
+
 def test_equal_occupancy_totals_with_different_fact_identity_record_mismatch(
     client, monkeypatch
 ):
@@ -444,7 +513,128 @@ def test_audit_is_idempotent_and_query_flag_switches_to_nodes(client, monkeypatc
         ).fetchall()
         assert len(observations) == 1
         assert observations[0]["mismatch"] == 0
-        assert json.loads(observations[0]["difference_json"])["changes"] == []
+        difference = json.loads(observations[0]["difference_json"])
+        assert difference["changes"] == []
+        assert difference["coverage"] == {
+            "legacy_count": 21,
+            "node_count": 21,
+            "truncated": False,
+        }
+
+
+def test_audit_uses_complete_scope_even_when_response_limit_is_one(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    with client.application.app_context():
+        db = get_db()
+        mapped = _mapped_resources(db)[0]
+        calendar_id = db.execute(
+            "SELECT calendar_id FROM production_nodes WHERE id=?",
+            (mapped["node_id"],),
+        ).fetchone()[0]
+        unmapped_node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id) "
+            "VALUES (?,?,?,'exclusive','active',?)",
+            (
+                mapped["process_id"],
+                "AUDIT-UNMAPPED-LIMIT",
+                "审计全量未映射节点",
+                calendar_id,
+            ),
+        ).lastrowid
+
+        response = ProductionNodeCompatibilityService.list_resources(
+            process_id=mapped["process_id"], limit=1, db=db
+        )
+        observation = db.execute(
+            "SELECT mismatch,difference_json FROM "
+            "production_node_compatibility_observations ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        difference = json.loads(observation["difference_json"])
+
+        assert len(response) == 1
+        assert observation["mismatch"] == 1
+        assert difference["missing_from_legacy"] == [
+            f"unmapped-node:{unmapped_node_id}"
+        ]
+        assert difference["coverage"] == {
+            "legacy_count": 1,
+            "node_count": 2,
+            "truncated": False,
+        }
+
+
+def test_db_none_commits_observation_before_app_context_closes(client, monkeypatch):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+
+    with client.application.app_context():
+        ProductionNodeCompatibilityService.list_resources(limit=1)
+        assert get_db().in_transaction is False
+
+    with client.application.app_context():
+        observation = get_db().execute(
+            "SELECT mismatch,difference_json FROM "
+            "production_node_compatibility_observations"
+        ).fetchone()
+        assert observation is not None
+        assert observation["mismatch"] == 0
+        assert json.loads(observation["difference_json"])["coverage"][
+            "truncated"
+        ] is False
+
+
+def test_db_none_rolls_back_owned_observation_transaction_on_error(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+
+    def insert_then_fail(*, db, **_kwargs):
+        db.execute(
+            "INSERT INTO production_node_compatibility_observations "
+            "(observation_key,scope,legacy_digest,node_digest,mismatch,difference_json) "
+            "VALUES ('forced-rollback','resource_list','a','b',1,'{}')"
+        )
+        raise RuntimeError("forced compatibility audit failure")
+
+    monkeypatch.setattr(
+        ProductionNodeRepository,
+        "record_compatibility_observation",
+        staticmethod(insert_then_fail),
+    )
+    with client.application.app_context():
+        db = get_db()
+        with pytest.raises(RuntimeError, match="forced compatibility audit failure"):
+            ProductionNodeCompatibilityService.list_resources(limit=1)
+        assert db.in_transaction is False
+        assert db.execute(
+            "SELECT COUNT(*) FROM production_node_compatibility_observations"
+        ).fetchone()[0] == 0
+
+
+def test_explicit_db_keeps_caller_transaction_open_and_uncommitted(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    with client.application.app_context():
+        db = get_db()
+        db.execute("BEGIN")
+
+        ProductionNodeCompatibilityService.list_resources(limit=1, db=db)
+
+        assert db.in_transaction is True
+        assert db.execute(
+            "SELECT COUNT(*) FROM production_node_compatibility_observations"
+        ).fetchone()[0] == 1
+        db.rollback()
+        assert db.execute(
+            "SELECT COUNT(*) FROM production_node_compatibility_observations"
+        ).fetchone()[0] == 0
 
 
 def test_audit_records_operational_mismatch_as_new_immutable_observation(

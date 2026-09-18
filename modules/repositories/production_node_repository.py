@@ -26,7 +26,7 @@ class ProductionNodeRepository:
         return [dict(row) for row in cursor.fetchall()]
 
     @staticmethod
-    def _resource_fact_digests(db, *, resource_column, resource_id):
+    def _resource_fact_summary(db, *, resource_column, resource_id):
         if resource_column not in {"process_line_id", "production_node_id"}:
             raise ValueError("unsupported production resource column")
         occupancy = ProductionNodeRepository._dict_rows(
@@ -71,16 +71,24 @@ class ProductionNodeRepository:
                 (resource_id,),
             )
         )
+        conflict_count = sum(
+            1
+            for index, first in enumerate(occupancy)
+            for second in occupancy[index + 1 :]
+            if first["start_at"] < second["end_at"]
+            and second["start_at"] < first["end_at"]
+        )
         return (
             ProductionNodeRepository.payload_digest(occupancy),
             ProductionNodeRepository.payload_digest(downtime),
+            conflict_count,
         )
 
     @staticmethod
     def _attach_fact_digests(db, rows, *, resource_column):
         for row in rows:
-            occupancy_digest, downtime_digest = (
-                ProductionNodeRepository._resource_fact_digests(
+            occupancy_digest, downtime_digest, conflict_count = (
+                ProductionNodeRepository._resource_fact_summary(
                     db,
                     resource_column=resource_column,
                     resource_id=row["id"],
@@ -88,10 +96,11 @@ class ProductionNodeRepository:
             )
             row["occupancy_digest"] = occupancy_digest
             row["downtime_digest"] = downtime_digest
+            row["conflict_count"] = conflict_count
         return rows
 
     @staticmethod
-    def list_legacy_resources(process_id=None, limit=500, db=None):
+    def list_legacy_resources(process_id=None, limit=500, db=None, *, full=False):
         db = resolve_db(db)
         bounded_limit = ProductionNodeRepository._bounded_limit(limit)
         where = ""
@@ -130,29 +139,14 @@ class ProductionNodeRepository:
                    COALESCE((
                        SELECT COUNT(*) FROM schedule_downtime_events d
                        WHERE d.process_line_id=pl.id AND d.status='active'
-                   ),0) AS downtime_count,
-                   COALESCE((
-                       SELECT COUNT(*)
-                       FROM order_process_schedule_segments a
-                       JOIN order_process_schedule_segments b
-                         ON a.process_line_id=b.process_line_id
-                        AND a.id<b.id
-                        AND a.segment_start_at<b.segment_end_at
-                        AND b.segment_start_at<a.segment_end_at
-                       JOIN order_process_schedules sa ON sa.id=a.schedule_id
-                       JOIN order_process_schedules sb ON sb.id=b.schedule_id
-                       JOIN orders oa ON oa.id=sa.order_id
-                       JOIN orders ob ON ob.id=sb.order_id
-                       WHERE a.process_line_id=pl.id
-                         AND sa.status<>'blocked' AND sb.status<>'blocked'
-                         AND oa.deleted_at IS NULL AND ob.deleted_at IS NULL
-                   ),0) AS conflict_count
+                   ),0) AS downtime_count
             FROM process_production_lines pl
             JOIN processes p ON p.id=pl.process_id
             """
             + where
-            + " ORDER BY p.seq_order,p.id,pl.line_code,pl.id LIMIT ?",
-            params + [bounded_limit],
+            + " ORDER BY p.seq_order,p.id,pl.line_code,pl.id"
+            + ("" if full else " LIMIT ?"),
+            params + ([] if full else [bounded_limit]),
         )
         return ProductionNodeRepository._attach_fact_digests(
             db,
@@ -161,7 +155,7 @@ class ProductionNodeRepository:
         )
 
     @staticmethod
-    def list_nodes(process_id=None, limit=500, db=None):
+    def list_nodes(process_id=None, limit=500, db=None, *, full=False):
         db = resolve_db(db)
         bounded_limit = ProductionNodeRepository._bounded_limit(limit)
         where = ""
@@ -207,29 +201,14 @@ class ProductionNodeRepository:
                    COALESCE((
                        SELECT COUNT(*) FROM schedule_downtime_events d
                        WHERE d.production_node_id=n.id AND d.status='active'
-                   ),0) AS downtime_count,
-                   COALESCE((
-                       SELECT COUNT(*)
-                       FROM order_process_schedule_segments a
-                       JOIN order_process_schedule_segments b
-                         ON a.production_node_id=b.production_node_id
-                        AND a.id<b.id
-                        AND a.segment_start_at<b.segment_end_at
-                        AND b.segment_start_at<a.segment_end_at
-                       JOIN order_process_schedules sa ON sa.id=a.schedule_id
-                       JOIN order_process_schedules sb ON sb.id=b.schedule_id
-                       JOIN orders oa ON oa.id=sa.order_id
-                       JOIN orders ob ON ob.id=sb.order_id
-                       WHERE a.production_node_id=n.id
-                         AND sa.status<>'blocked' AND sb.status<>'blocked'
-                         AND oa.deleted_at IS NULL AND ob.deleted_at IS NULL
-                   ),0) AS conflict_count
+                   ),0) AS downtime_count
             FROM production_nodes n
             JOIN processes p ON p.id=n.process_id
             """
             + where
-            + " ORDER BY p.seq_order,p.id,n.node_code,n.id LIMIT ?",
-            params + [bounded_limit],
+            + " ORDER BY p.seq_order,p.id,n.node_code,n.id"
+            + ("" if full else " LIMIT ?"),
+            params + ([] if full else [bounded_limit]),
         )
         return ProductionNodeRepository._attach_fact_digests(
             db,
