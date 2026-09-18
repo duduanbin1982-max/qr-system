@@ -319,7 +319,9 @@ class ScheduleCapacityRepository:
             "op.status, op.completed, op.scrapped, op.rework, op.process_version_id, "
             "op.process_code_snapshot, op.process_name_snapshot, op.process_category_snapshot, "
             "o.route_id, o.route_version_id, o.route_name_snapshot, p.name AS process_name, "
-            "s.id AS schedule_id, s.process_line_id, s.quantity AS scheduled_quantity, "
+            "s.id AS schedule_id, s.process_line_id, s.production_node_id, "
+            "s.node_code_snapshot, s.node_name_snapshot, s.capacity_mode_snapshot, "
+            "s.quantity AS scheduled_quantity, "
             "s.route_version_id AS scheduled_route_version_id, s.process_version_id AS scheduled_process_version_id, "
             "s.standard_id, s.standard_version, s.process_name_snapshot AS scheduled_process_name_snapshot, "
             "s.route_name_snapshot AS scheduled_route_name_snapshot, s.standard_minutes_per_unit, "
@@ -327,7 +329,7 @@ class ScheduleCapacityRepository:
             "s.planned_start_at, s.planned_end_at, s.occupied_minutes, s.capacity_snapshot_json, "
             "s.standard_match_scope, s.calendar_id, s.shift_snapshot_json, s.line_name_snapshot, "
             "s.execution_mode, "
-            "s.status AS schedule_status, s.blocked_reason, s.schedule_run_key, s.schedule_run_id, pl.line_name "
+            "s.status AS schedule_status, s.blocked_reason, s.blocked_code, s.schedule_run_key, s.schedule_run_id, pl.line_name "
             "FROM order_processes op JOIN orders o ON o.id=op.order_id JOIN processes p ON p.id=op.process_id "
             "LEFT JOIN order_process_schedules s ON s.order_process_id=op.id "
             "LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
@@ -1015,17 +1017,20 @@ class ScheduleCapacityRepository:
         if data.get("route_version_id") != binding["route_version_id"] or data.get("process_version_id") != binding["process_version_id"]:
             raise ValueError("订单—路线—工序版本绑定不一致")
         cur = db.execute(
-            "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,"
+            "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,production_node_id,"
+            "node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,"
             "seq_order,quantity,standard_minutes_per_unit,setup_minutes,difficulty_factor,planned_minutes,plan_start,plan_end,"
-            "status,blocked_reason,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
+            "status,blocked_reason,blocked_code,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
             "process_name_snapshot,route_name_snapshot,schedule_run_id,schedule_revision_id,planned_start_at,planned_end_at,occupied_minutes,"
             "capacity_snapshot_json,standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot,execution_mode,"
             "completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["order_process_id"], data["process_id"], data.get("process_line_id"),
+             data.get("production_node_id"), data.get("node_code_snapshot", ""),
+             data.get("node_name_snapshot", ""), data.get("capacity_mode_snapshot", ""),
              data.get("seq_order", 0), data.get("quantity", 0), data.get("standard_minutes_per_unit", 0),
              data.get("setup_minutes", 0), data.get("difficulty_factor", 1), data.get("planned_minutes", 0), data["plan_start"], data["plan_end"],
-             data.get("status", "planned"), data.get("blocked_reason", ""), data.get("schedule_run_key", ""),
+             data.get("status", "planned"), data.get("blocked_reason", ""), data.get("blocked_code", ""), data.get("schedule_run_key", ""),
              data.get("route_version_id"), data.get("process_version_id"), data.get("standard_id"), data.get("standard_version"),
             data.get("process_name_snapshot", ""), data.get("route_name_snapshot", ""), data.get("schedule_run_id"),
             data.get("schedule_revision_id"),
@@ -1040,9 +1045,10 @@ class ScheduleCapacityRepository:
         for segment in data.get("segments", ()):
             db.execute(
                 "INSERT INTO order_process_schedule_segments "
-                "(schedule_id,process_line_id,segment_start_at,segment_end_at,occupied_minutes,shift_id,quantity) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (cur.lastrowid, segment.get("process_line_id", data["process_line_id"]),
+                "(schedule_id,process_line_id,production_node_id,segment_start_at,segment_end_at,occupied_minutes,shift_id,quantity) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (cur.lastrowid, segment.get("process_line_id", data.get("process_line_id")),
+                 segment.get("production_node_id", data.get("production_node_id")),
                  segment["start_at"], segment["end_at"], segment["occupied_minutes"],
                  segment.get("shift_id"), segment.get("quantity", data.get("quantity", 0))),
             )
@@ -1070,11 +1076,16 @@ class ScheduleCapacityRepository:
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         db.execute(
             "INSERT OR IGNORE INTO schedule_revision_items "
-            "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,seq_order,quantity,status,"
+            "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,production_node_id,"
+            "node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,seq_order,quantity,status,"
             "planned_start_at,planned_end_at,occupied_minutes,payload_json,payload_digest,"
             "execution_mode,completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (revision_id, schedule_id, row["order_process_id"], row["process_id"], row["process_line_id"],
+             row["production_node_id"] if "production_node_id" in keys else None,
+             row["node_code_snapshot"] if "node_code_snapshot" in keys else "",
+             row["node_name_snapshot"] if "node_name_snapshot" in keys else "",
+             row["capacity_mode_snapshot"] if "capacity_mode_snapshot" in keys else "",
              row["seq_order"], row["quantity"], row["status"], row["planned_start_at"],
              row["planned_end_at"], row["occupied_minutes"], encoded, digest,
              row["execution_mode"] if "execution_mode" in keys else "internal",

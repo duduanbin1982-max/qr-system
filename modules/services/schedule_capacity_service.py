@@ -8,9 +8,12 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from modules.services import BaseService
+from modules import config
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
+from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
 from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.production_node_repository import ProductionNodeRepository
 
 
 class ScheduleCapacityService:
@@ -462,6 +465,106 @@ class ScheduleCapacityService:
             ))
 
     @staticmethod
+    def _add_segments_to_node_occupancy(occupancy, production_node_id, segments):
+        """Add node-native intervals while keeping the old line helper intact."""
+        bucket = occupancy.setdefault(production_node_id, [])
+        for segment in segments:
+            bucket.append((
+                ScheduleCapacityService._parse_timestamp(segment["start_at"]),
+                ScheduleCapacityService._parse_timestamp(segment["end_at"]),
+            ))
+
+    @staticmethod
+    def _allocate_on_node(db, node, earliest, duration, occupancy):
+        """Allocate one operation on one physical node."""
+        calendar = ScheduleCapacityRepository.get_calendar(node.get("calendar_id"), db=db)
+        shifts = (
+            ScheduleCapacityRepository.list_calendar_shifts(calendar["id"], db=db)
+            if calendar else []
+        )
+        if not calendar or not shifts:
+            raise NodeSchedulingError(
+                "NODE_CALENDAR_UNAVAILABLE", "生产节点日历没有可用时间",
+                {"production_node_id": node.get("id")},
+            )
+        daily_minutes = sum(
+            max(int(shift["end_minute"]) - int(shift["start_minute"]), 0)
+            for shift in shifts
+        )
+        # Calendar overrides (maintenance/unavailable) are modeled as busy
+        # intervals on the node.  Keep the caller's occupancy list immutable so
+        # an unsuccessful candidate does not poison the next node candidate.
+        busy = list(occupancy.get(node["id"], []))
+        for override in ProductionNodeRepository.list_node_calendar_overrides(
+            node["id"], db=db
+        ):
+            override = dict(override)
+            start = ScheduleCapacityService._parse_timestamp(override.get("start_at"))
+            end = ScheduleCapacityService._parse_timestamp(override.get("end_at"))
+            if start and end and end > start:
+                busy.append((start, end))
+        segments = ScheduleCapacityService._allocate_on_line(
+            db, calendar, shifts, daily_minutes, earliest, duration,
+            busy,
+        )
+        for segment in segments:
+            segment["production_node_id"] = node["id"]
+            segment["process_line_id"] = node.get("legacy_process_line_id")
+        return segments
+
+    @staticmethod
+    def _allocate_split_on_nodes(db, nodes, earliest, quantity, standard, occupancy):
+        """Split quantity across compatible physical nodes using deterministic finish order."""
+        remaining_quantity = max(int(quantity or 0), 0)
+        if remaining_quantity <= 0:
+            return []
+        state = {
+            node["id"]: {"node": node, "segments": [], "quantity": 0}
+            for node in nodes
+        }
+        if not state:
+            raise NodeSchedulingError(
+                "NO_COMPATIBLE_NODE", "没有满足能力要求的生产节点", {}
+            )
+        epsilon = 1e-7
+        while remaining_quantity > 0:
+            available = []
+            chunk = max(1, int(math.ceil(remaining_quantity / len(state))))
+            for node_id, item in state.items():
+                include_setup = item["quantity"] == 0
+                effective_standard = standard if include_setup else {
+                    **dict(standard), "setup_minutes": 0,
+                }
+                duration = ScheduleCapacityService._duration_minutes(
+                    chunk, effective_standard
+                )
+                try:
+                    candidate = ScheduleCapacityService._allocate_on_node(
+                        db, item["node"], earliest, duration, occupancy,
+                    )
+                except (ValueError, NodeSchedulingError):
+                    continue
+                end = ScheduleCapacityService._parse_timestamp(candidate[-1]["end_at"])
+                available.append((end, node_id, candidate, chunk, duration))
+            if not available:
+                raise NodeSchedulingError(
+                    "NODE_CALENDAR_UNAVAILABLE",
+                    "工作日历在可搜索范围内没有足够产能", {},
+                )
+            _, node_id, candidate, allocated, _ = min(
+                available, key=lambda item: (item[0], item[1])
+            )
+            for index, segment in enumerate(candidate):
+                segment["quantity"] = allocated if index == 0 else 0
+                state[node_id]["segments"].append(segment)
+            state[node_id]["quantity"] += allocated
+            ScheduleCapacityService._add_segments_to_node_occupancy(
+                occupancy, node_id, candidate
+            )
+            remaining_quantity -= allocated
+        return [segment for item in state.values() for segment in item["segments"]]
+
+    @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None):
         failure = None
         response = None
@@ -503,12 +606,20 @@ class ScheduleCapacityService:
                 # Keep the run ledger even if scheduling fails halfway through.
                 txn.execute("SAVEPOINT schedule_generation")
                 ScheduleCapacityRepository.clear_order_schedules(order_id, txn)
+                use_node_engine = bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
                 occupancy = {}
-                for row in ScheduleCapacityRepository.list_line_occupancy(order_id, txn):
+                occupancy_rows = (
+                    ProductionNodeRepository.list_node_occupancy(order_id, db=txn)
+                    if use_node_engine
+                    else ScheduleCapacityRepository.list_line_occupancy(order_id, txn)
+                )
+                occupancy_key = "production_node_id" if use_node_engine else "process_line_id"
+                for row in occupancy_rows:
                     start_at = ScheduleCapacityService._parse_timestamp(row["start_at"])
                     end_at = ScheduleCapacityService._parse_timestamp(row["end_at"])
-                    if start_at and end_at and end_at > start_at:
-                        occupancy.setdefault(row["process_line_id"], []).append((start_at, end_at))
+                    resource_id = row[occupancy_key]
+                    if resource_id is not None and start_at and end_at and end_at > start_at:
+                        occupancy.setdefault(int(resource_id), []).append((start_at, end_at))
                 result = []
                 blocked = False
                 for operation in operations:
@@ -533,7 +644,8 @@ class ScheduleCapacityService:
                                    "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
                                    "planned_minutes": 0, "plan_start": cursor.strftime("%Y-%m-%d"),
                                    "plan_end": cursor.strftime("%Y-%m-%d"), "status": "blocked",
-                                   "blocked_reason": "前序工序无法排程"}
+                                   "blocked_reason": "前序工序无法排程",
+                                   "blocked_code": "UPSTREAM_BLOCKED"}
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
@@ -586,37 +698,69 @@ class ScheduleCapacityService:
                         process_version_id, order["product_id"], order["product_code"],
                         standard_as_of,
                     )
-                    lines = [line for line in ScheduleCapacityRepository.list_process_lines(operation["process_id"], db=txn)
-                             if line["status"] == "active"]
                     if not standard:
                         blocked = True
                         payload = {**common, "process_line_id": None, "standard_id": None, "standard_version": None,
                                    "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
                                    "planned_minutes": 0, "plan_start": cursor.strftime("%Y-%m-%d"),
                                    "plan_end": cursor.strftime("%Y-%m-%d"), "status": "blocked",
-                                   "blocked_reason": "未配置标准工时"}
+                                   "blocked_reason": "未配置标准工时",
+                                   "blocked_code": "MISSING_WORK_TIME_STANDARD"}
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
                         continue
-                    if not lines:
+                    if use_node_engine:
+                        resources = ProductionNodeRepository.list_compatible_nodes(
+                            operation, order, at_time=cursor, db=txn,
+                        )
+                        no_resource_code = "NO_COMPATIBLE_NODE"
+                        no_resource_reason = "没有满足能力要求的生产节点"
+                    else:
+                        resources = [line for line in ScheduleCapacityRepository.list_process_lines(
+                            operation["process_id"], db=txn
+                        ) if line["status"] == "active"]
+                        no_resource_code = "NO_COMPATIBLE_NODE"
+                        no_resource_reason = "工序未配置可用产线"
+                    if not resources:
                         blocked = True
-                        payload = {**common, "process_line_id": None, "standard_id": standard["id"],
+                        payload = {**common, "process_line_id": None, "production_node_id": None,
+                                   "standard_id": standard["id"],
                                    "standard_version": standard["version"],
                                    "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
                                    "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
                                    "planned_minutes": 0, "plan_start": cursor.strftime("%Y-%m-%d"),
                                    "plan_end": cursor.strftime("%Y-%m-%d"), "status": "blocked",
-                                   "blocked_reason": "工序未配置可用产线"}
+                                   "blocked_reason": no_resource_reason,
+                                   "blocked_code": no_resource_code}
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
                         continue
 
                     try:
-                        segments = ScheduleCapacityService._allocate_split_on_lines(
-                            txn, lines, cursor, order["quantity"], standard, occupancy,
-                        )
+                        if use_node_engine:
+                            segments = ScheduleCapacityService._allocate_split_on_nodes(
+                                txn, resources, cursor, remaining, standard, occupancy,
+                            )
+                        else:
+                            segments = ScheduleCapacityService._allocate_split_on_lines(
+                                txn, resources, cursor, remaining, standard, occupancy,
+                            )
+                    except NodeSchedulingError as exc:
+                        blocked = True
+                        payload = {**common, "process_line_id": None, "production_node_id": None,
+                                   "standard_id": standard["id"],
+                                   "standard_version": standard["version"],
+                                   "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
+                                   "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
+                                   "planned_minutes": 0, "plan_start": cursor.strftime("%Y-%m-%d"),
+                                   "plan_end": cursor.strftime("%Y-%m-%d"), "status": "blocked",
+                                   "blocked_reason": exc.message, "blocked_code": exc.code}
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                        result.append({**payload, "line_name": None, "process_name": process_snapshot,
+                                       "reason": payload["blocked_reason"]})
+                        continue
                     except ValueError as exc:
                         blocked = True
                         payload = {**common, "process_line_id": None, "standard_id": standard["id"],
@@ -625,7 +769,8 @@ class ScheduleCapacityService:
                                    "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
                                    "planned_minutes": 0, "plan_start": cursor.strftime("%Y-%m-%d"),
                                    "plan_end": cursor.strftime("%Y-%m-%d"), "status": "blocked",
-                                   "blocked_reason": str(exc) or "未配置有效工作日历或班次"}
+                                   "blocked_reason": str(exc) or "未配置有效工作日历或班次",
+                                   "blocked_code": "NODE_CALENDAR_UNAVAILABLE" if use_node_engine else "NODE_CALENDAR_UNAVAILABLE"}
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
@@ -638,45 +783,68 @@ class ScheduleCapacityService:
                         ScheduleCapacityService._parse_timestamp(segment["end_at"])
                         for segment in segments
                     )
-                    line_ids = sorted({segment["process_line_id"] for segment in segments})
-                    line_by_id = {line["id"]: line for line in lines}
-                    primary_line = max(
-                        line_ids,
-                        key=lambda line_id: (
+                    resource_key = "production_node_id" if use_node_engine else "process_line_id"
+                    resource_ids = sorted({segment[resource_key] for segment in segments})
+                    resource_by_id = {
+                        resource["id"]: dict(resource) for resource in resources
+                    }
+                    primary_resource = max(
+                        resource_ids,
+                        key=lambda resource_id: (
                             sum(float(segment["occupied_minutes"]) for segment in segments
-                                if segment["process_line_id"] == line_id),
-                            -line_id,
+                                if segment[resource_key] == resource_id),
+                            -resource_id,
                         ),
                     )
-                    line_snapshots = []
-                    for line_id in line_ids:
-                        line = line_by_id[line_id]
+                    resource_snapshots = []
+                    for resource_id in resource_ids:
+                        resource = resource_by_id[resource_id]
                         calendar = ScheduleCapacityRepository.get_calendar(
-                            line["calendar_id"], db=txn
+                            resource["calendar_id"], db=txn
                         ) or ScheduleCapacityRepository.get_calendar(db=txn)
                         shifts = ScheduleCapacityRepository.list_calendar_shifts(
                             calendar["id"], db=txn
                         ) if calendar else []
                         snapshot = ScheduleCapacityService._calendar_snapshot(calendar, shifts)
                         snapshot.update({
-                            "process_line_id": line_id,
-                            "line_code": line["line_code"],
-                            "line_name": line["line_name"],
-                            "daily_minutes": float(line["daily_minutes"] or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
+                            resource_key: resource_id,
+                            "process_line_id": resource.get("legacy_process_line_id", resource_id),
+                            "line_code": resource.get("line_code", resource.get("node_code", "")),
+                            "line_name": resource.get("line_name", resource.get("node_name", "")),
+                            "daily_minutes": float(resource.get("daily_minutes") or resource.get("capacity_minutes") or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
                             "quantity": sum(
                                 int(segment.get("quantity") or 0)
-                                for segment in segments if segment["process_line_id"] == line_id
+                                for segment in segments if segment[resource_key] == resource_id
                             ),
                         })
-                        line_snapshots.append(snapshot)
-                    primary_snapshot = next(item for item in line_snapshots if item["process_line_id"] == primary_line)
+                        if use_node_engine:
+                            snapshot.update({
+                                "production_node_id": resource_id,
+                                "node_code": resource.get("node_code", ""),
+                                "node_name": resource.get("node_name", ""),
+                                "capacity_mode": resource.get("capacity_mode", "exclusive"),
+                                "capabilities": resource.get("capabilities", []),
+                            })
+                        resource_snapshots.append(snapshot)
+                    primary_snapshot = next(item for item in resource_snapshots if item[resource_key] == primary_resource)
                     total_duration = sum(float(segment["occupied_minutes"]) for segment in segments)
                     capacity_snapshot = {
                         **primary_snapshot,
-                        "line_count": len(line_snapshots),
-                        "lines": line_snapshots,
+                        "line_count": len(resource_snapshots),
+                        "lines": resource_snapshots,
+                        "node_count": len(resource_snapshots) if use_node_engine else 0,
+                        "nodes": resource_snapshots if use_node_engine else [],
                     }
-                    payload = {**common, "process_line_id": primary_line, "standard_id": standard["id"],
+                    primary_resource_row = resource_by_id[primary_resource]
+                    payload = {**common,
+                               "process_line_id": primary_resource_row.get("legacy_process_line_id", primary_resource) if use_node_engine else primary_resource,
+                               "production_node_id": primary_resource if use_node_engine else None,
+                               "node_code_snapshot": primary_resource_row.get("node_code", "") if use_node_engine else "",
+                               "node_name_snapshot": primary_resource_row.get("node_name", "") if use_node_engine else "",
+                               "capacity_mode_snapshot": primary_resource_row.get("capacity_mode", "") if use_node_engine else "",
+                               "node_calendar_snapshot_json": json.dumps(primary_snapshot, ensure_ascii=False, sort_keys=True) if use_node_engine else "{}",
+                               "node_capability_snapshot_json": json.dumps(primary_resource_row.get("capabilities", []), ensure_ascii=False, sort_keys=True) if use_node_engine else "[]",
+                               "standard_id": standard["id"],
                                "standard_version": standard["version"],
                                "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
                                "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
@@ -686,7 +854,7 @@ class ScheduleCapacityService:
                                "planned_end_at": ScheduleCapacityService._format_timestamp(end),
                                "capacity_snapshot_json": json.dumps(capacity_snapshot, ensure_ascii=False, sort_keys=True),
                                "shift_snapshot_json": json.dumps(
-                                   [shift for snapshot in line_snapshots for shift in snapshot["shifts"]],
+                                   [shift for snapshot in resource_snapshots for shift in snapshot["shifts"]],
                                    ensure_ascii=False, sort_keys=True,
                                ),
                                "calendar_id": primary_snapshot["calendar_id"],
@@ -696,9 +864,15 @@ class ScheduleCapacityService:
                     payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                     cursor = end
                     result.append({**payload, "line_name": primary_snapshot["line_name"],
-                                   "line_count": len(line_snapshots), "lines": line_snapshots,
+                                   "line_count": len(resource_snapshots), "lines": resource_snapshots,
+                                   "node_count": len(resource_snapshots) if use_node_engine else 0,
+                                   "nodes": resource_snapshots if use_node_engine else [],
                                    "process_name": process_snapshot})
-                planned = [row for row in result if row.get("status") == "planned" and row.get("process_line_id")]
+                planned = [
+                    row for row in result
+                    if row.get("status") == "planned"
+                    and (row.get("process_line_id") or row.get("production_node_id"))
+                ]
                 if planned:
                     first_start = min(row["plan_start"] for row in planned)
                     last_end = max(row["plan_end"] for row in planned)
@@ -774,13 +948,15 @@ class ScheduleCapacityService:
             raise ValueError("重排开始时间必须使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM 格式") from exc
 
     @staticmethod
-    def _add_downtime_to_occupancy(occupancy, downtime):
+    def _add_downtime_to_occupancy(occupancy, downtime, resource_key="process_line_id"):
         for event in downtime:
+            event = dict(event)
             start = ScheduleCapacityService._parse_timestamp(event.get("start_at"))
             end = ScheduleCapacityService._parse_timestamp(event.get("end_at"))
-            if not start or not end or end <= start:
+            resource_id = event.get(resource_key)
+            if resource_id is None or not start or not end or end <= start:
                 continue
-            occupancy.setdefault(int(event["process_line_id"]), []).append((start, end))
+            occupancy.setdefault(int(resource_id), []).append((start, end))
 
     @staticmethod
     def dynamic_replan_order(order_id, start_at=None, schedule_run_key="", reason="", db=None,
@@ -848,13 +1024,23 @@ class ScheduleCapacityService:
             try:
                 txn.execute("SAVEPOINT dynamic_schedule_replan")
                 ScheduleCapacityRepository.clear_order_schedules(order_id, txn)
+                use_node_engine = bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
                 occupancy = {}
-                for row in ScheduleCapacityRepository.list_line_occupancy(order_id, txn):
+                occupancy_rows = (
+                    ProductionNodeRepository.list_node_occupancy(order_id, db=txn)
+                    if use_node_engine
+                    else ScheduleCapacityRepository.list_line_occupancy(order_id, txn)
+                )
+                occupancy_key = "production_node_id" if use_node_engine else "process_line_id"
+                for row in occupancy_rows:
                     begin = ScheduleCapacityService._parse_timestamp(row["start_at"])
                     end = ScheduleCapacityService._parse_timestamp(row["end_at"])
-                    if begin and end and end > begin:
-                        occupancy.setdefault(int(row["process_line_id"]), []).append((begin, end))
-                ScheduleCapacityService._add_downtime_to_occupancy(occupancy, context["downtime"])
+                    resource_id = row[occupancy_key]
+                    if resource_id is not None and begin and end and end > begin:
+                        occupancy.setdefault(int(resource_id), []).append((begin, end))
+                ScheduleCapacityService._add_downtime_to_occupancy(
+                    occupancy, context["downtime"], resource_key=occupancy_key
+                )
                 prior_by_op = {int(row["order_process_id"]): row for row in context["prior_schedules"]}
                 result = []
                 blocked = False
@@ -905,12 +1091,13 @@ class ScheduleCapacityService:
                         # Preserve the dependency block while recording that
                         # this operation was not independently evaluated.
                         payload = {
-                            **common, "process_line_id": None, "standard_id": None, "standard_version": None,
+                            **common, "process_line_id": None, "production_node_id": None, "standard_id": None, "standard_version": None,
                             "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
                             "planned_minutes": 0, "occupied_minutes": 0,
                             "plan_start": cursor.strftime("%Y-%m-%d"), "plan_end": cursor.strftime("%Y-%m-%d"),
                             "planned_start_at": "", "planned_end_at": "", "status": "blocked",
-                            "blocked_reason": "前序工序无法重排", "line_name_snapshot": "", "segments": [],
+                            "blocked_reason": "前序工序无法重排", "blocked_code": "PREVIOUS_OPERATION_BLOCKED",
+                            "line_name_snapshot": "", "segments": [],
                         }
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
@@ -929,6 +1116,7 @@ class ScheduleCapacityService:
                         payload = {
                             **common,
                             "process_line_id": None,
+                            "production_node_id": None,
                             "execution_mode": execution_policy["execution_mode"],
                             "standard_id": None,
                             "standard_version": None,
@@ -943,6 +1131,7 @@ class ScheduleCapacityService:
                             "planned_end_at": ScheduleCapacityService._format_timestamp(end),
                             "status": "planned",
                             "blocked_reason": "",
+                            "blocked_code": "",
                             "standard_match_scope": "execution_policy",
                             "capacity_snapshot_json": json.dumps({
                                 "execution_mode": execution_policy["execution_mode"],
@@ -964,56 +1153,93 @@ class ScheduleCapacityService:
                         operation["process_id"], operation.get("process_version_id"), order.get("product_id"),
                         order.get("product_code"), standard_as_of,
                     )
-                    lines = [line for line in ScheduleCapacityRepository.list_process_lines(operation["process_id"], db=txn)
-                             if line["status"] == "active"]
                     if not standard:
                         blocked = True
                         block_reason = "未配置标准工时"
                         payload = {
-                            **common, "process_line_id": None, "standard_id": None, "standard_version": None,
+                            **common, "process_line_id": None, "production_node_id": None, "standard_id": None, "standard_version": None,
                             "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
                             "planned_minutes": 0, "occupied_minutes": 0,
                             "plan_start": cursor.strftime("%Y-%m-%d"), "plan_end": cursor.strftime("%Y-%m-%d"),
                             "planned_start_at": "", "planned_end_at": "", "status": "blocked",
-                            "blocked_reason": block_reason, "line_name_snapshot": "", "segments": [],
+                            "blocked_reason": block_reason, "blocked_code": "MISSING_WORK_TIME_STANDARD",
+                            "line_name_snapshot": "", "segments": [],
                         }
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": block_reason})
                         continue
-                    if not lines:
+                    if use_node_engine:
+                        resources = ProductionNodeRepository.list_compatible_nodes(
+                            operation, order, at_time=cursor, db=txn,
+                        )
+                        no_resource_code = "NO_COMPATIBLE_NODE"
+                        no_resource_reason = "没有满足能力要求的生产节点"
+                    else:
+                        resources = [line for line in ScheduleCapacityRepository.list_process_lines(
+                            operation["process_id"], db=txn
+                        ) if line["status"] == "active"]
+                        no_resource_code = "NO_COMPATIBLE_NODE"
+                        no_resource_reason = "工序未配置可用产线"
+                    if not resources:
                         blocked = True
-                        block_reason = "工序未配置可用产线"
+                        block_reason = no_resource_reason
                         payload = {
-                            **common, "process_line_id": None, "standard_id": standard["id"],
+                            **common, "process_line_id": None, "production_node_id": None, "standard_id": standard["id"],
                             "standard_version": standard["version"],
                             "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
                             "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
                             "planned_minutes": 0, "occupied_minutes": 0,
                             "plan_start": cursor.strftime("%Y-%m-%d"), "plan_end": cursor.strftime("%Y-%m-%d"),
                             "planned_start_at": "", "planned_end_at": "", "status": "blocked",
-                            "blocked_reason": block_reason, "line_name_snapshot": "", "segments": [],
+                            "blocked_reason": block_reason, "blocked_code": no_resource_code,
+                            "line_name_snapshot": "", "segments": [],
                         }
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": block_reason})
                         continue
                     try:
-                        segments = ScheduleCapacityService._allocate_split_on_lines(
-                            txn, lines, cursor, baseline["remaining_quantity"], standard, occupancy,
-                        )
-                    except ValueError as exc:
+                        if use_node_engine:
+                            segments = ScheduleCapacityService._allocate_split_on_nodes(
+                                txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
+                            )
+                        else:
+                            segments = ScheduleCapacityService._allocate_split_on_lines(
+                                txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
+                            )
+                    except NodeSchedulingError as exc:
                         blocked = True
-                        block_reason = str(exc) or "工作日历没有足够产能"
+                        block_reason = exc.message
                         payload = {
-                            **common, "process_line_id": None, "standard_id": standard["id"],
+                            **common, "process_line_id": None, "production_node_id": None, "standard_id": standard["id"],
                             "standard_version": standard["version"],
                             "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
                             "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
                             "planned_minutes": 0, "occupied_minutes": 0,
                             "plan_start": cursor.strftime("%Y-%m-%d"), "plan_end": cursor.strftime("%Y-%m-%d"),
                             "planned_start_at": "", "planned_end_at": "", "status": "blocked",
-                            "blocked_reason": block_reason, "line_name_snapshot": "", "segments": [],
+                            "blocked_reason": block_reason, "blocked_code": exc.code,
+                            "line_name_snapshot": "", "segments": [],
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                        result.append({**payload, "line_name": None, "process_name": process_snapshot,
+                                       "reason": block_reason})
+                        continue
+                    except ValueError as exc:
+                        blocked = True
+                        block_reason = str(exc) or "工作日历没有足够产能"
+                        payload = {
+                            **common, "process_line_id": None, "production_node_id": None, "standard_id": standard["id"],
+                            "standard_version": standard["version"],
+                            "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
+                            "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
+                            "planned_minutes": 0, "occupied_minutes": 0,
+                            "plan_start": cursor.strftime("%Y-%m-%d"), "plan_end": cursor.strftime("%Y-%m-%d"),
+                            "planned_start_at": "", "planned_end_at": "", "status": "blocked",
+                            "blocked_reason": block_reason,
+                            "blocked_code": "NODE_CALENDAR_UNAVAILABLE" if use_node_engine else "NODE_CALENDAR_UNAVAILABLE",
+                            "line_name_snapshot": "", "segments": [],
                         }
                         payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
@@ -1021,31 +1247,51 @@ class ScheduleCapacityService:
                         continue
                     begin = min(ScheduleCapacityService._parse_timestamp(item["start_at"]) for item in segments)
                     end = max(ScheduleCapacityService._parse_timestamp(item["end_at"]) for item in segments)
-                    line_ids = sorted({item["process_line_id"] for item in segments})
-                    line_by_id = {line["id"]: line for line in lines}
-                    primary_line = max(
-                        line_ids,
-                        key=lambda line_id: (
-                            sum(float(item["occupied_minutes"]) for item in segments if item["process_line_id"] == line_id),
-                            -line_id,
+                    resource_key = "production_node_id" if use_node_engine else "process_line_id"
+                    resource_ids = sorted({item[resource_key] for item in segments})
+                    resource_by_id = {resource["id"]: dict(resource) for resource in resources}
+                    primary_resource = max(
+                        resource_ids,
+                        key=lambda resource_id: (
+                            sum(float(item["occupied_minutes"]) for item in segments if item[resource_key] == resource_id),
+                            -resource_id,
                         ),
                     )
                     snapshots = []
-                    for line_id in line_ids:
-                        line = line_by_id[line_id]
-                        calendar = ScheduleCapacityRepository.get_calendar(line["calendar_id"], db=txn) or ScheduleCapacityRepository.get_calendar(db=txn)
+                    for resource_id in resource_ids:
+                        resource = resource_by_id[resource_id]
+                        calendar = ScheduleCapacityRepository.get_calendar(resource["calendar_id"], db=txn) or ScheduleCapacityRepository.get_calendar(db=txn)
                         shifts = ScheduleCapacityRepository.list_calendar_shifts(calendar["id"], db=txn) if calendar else []
                         item = ScheduleCapacityService._calendar_snapshot(calendar, shifts)
                         item.update({
-                            "process_line_id": line_id, "line_code": line["line_code"], "line_name": line["line_name"],
-                            "daily_minutes": float(line["daily_minutes"] or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
-                            "quantity": sum(int(segment.get("quantity") or 0) for segment in segments if segment["process_line_id"] == line_id),
+                            resource_key: resource_id,
+                            "process_line_id": resource.get("legacy_process_line_id", resource_id),
+                            "line_code": resource.get("line_code", resource.get("node_code", "")),
+                            "line_name": resource.get("line_name", resource.get("node_name", "")),
+                            "daily_minutes": float(resource.get("daily_minutes") or resource.get("capacity_minutes") or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
+                            "quantity": sum(int(segment.get("quantity") or 0) for segment in segments if segment[resource_key] == resource_id),
                         })
+                        if use_node_engine:
+                            item.update({
+                                "production_node_id": resource_id,
+                                "node_code": resource.get("node_code", ""),
+                                "node_name": resource.get("node_name", ""),
+                                "capacity_mode": resource.get("capacity_mode", "exclusive"),
+                                "capabilities": resource.get("capabilities", []),
+                            })
                         snapshots.append(item)
-                    primary_snapshot = next(item for item in snapshots if item["process_line_id"] == primary_line)
+                    primary_snapshot = next(item for item in snapshots if item[resource_key] == primary_resource)
                     duration = sum(float(item["occupied_minutes"]) for item in segments)
                     payload = {
-                        **common, "process_line_id": primary_line, "standard_id": standard["id"],
+                        **common,
+                        "process_line_id": resource_by_id[primary_resource].get("legacy_process_line_id", primary_resource) if use_node_engine else primary_resource,
+                        "production_node_id": primary_resource if use_node_engine else None,
+                        "node_code_snapshot": resource_by_id[primary_resource].get("node_code", "") if use_node_engine else "",
+                        "node_name_snapshot": resource_by_id[primary_resource].get("node_name", "") if use_node_engine else "",
+                        "capacity_mode_snapshot": resource_by_id[primary_resource].get("capacity_mode", "") if use_node_engine else "",
+                        "node_calendar_snapshot_json": json.dumps(primary_snapshot, ensure_ascii=False, sort_keys=True) if use_node_engine else "{}",
+                        "node_capability_snapshot_json": json.dumps(resource_by_id[primary_resource].get("capabilities", []), ensure_ascii=False, sort_keys=True) if use_node_engine else "[]",
+                        "standard_id": standard["id"],
                         "standard_version": standard["version"],
                         "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
                         "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
@@ -1053,7 +1299,9 @@ class ScheduleCapacityService:
                         "standard_match_scope": standard["match_scope"],
                         "planned_start_at": ScheduleCapacityService._format_timestamp(begin),
                         "planned_end_at": ScheduleCapacityService._format_timestamp(end),
-                        "capacity_snapshot_json": json.dumps({**primary_snapshot, "line_count": len(snapshots), "lines": snapshots}, ensure_ascii=False, sort_keys=True),
+                        "capacity_snapshot_json": json.dumps({**primary_snapshot, "line_count": len(snapshots), "lines": snapshots,
+                                                               "node_count": len(snapshots) if use_node_engine else 0,
+                                                               "nodes": snapshots if use_node_engine else []}, ensure_ascii=False, sort_keys=True),
                         "shift_snapshot_json": json.dumps([shift for item in snapshots for shift in item["shifts"]], ensure_ascii=False, sort_keys=True),
                         "calendar_id": primary_snapshot["calendar_id"], "line_name_snapshot": primary_snapshot["line_name"],
                         "segments": segments, "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d"),
@@ -1063,7 +1311,7 @@ class ScheduleCapacityService:
                     result.append({**payload, "line_name": primary_snapshot["line_name"], "line_count": len(snapshots),
                                    "lines": snapshots, "process_name": process_snapshot})
 
-                planned = [item for item in result if item.get("status") == "planned" and item.get("process_line_id")]
+                planned = [item for item in result if item.get("status") == "planned" and (item.get("process_line_id") or item.get("production_node_id"))]
                 if planned:
                     ScheduleCapacityRepository.update_order_summary(
                         order_id, min(item["plan_start"] for item in planned), max(item["plan_end"] for item in planned), txn

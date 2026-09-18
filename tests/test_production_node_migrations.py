@@ -83,6 +83,7 @@ def _legacy_fact_fingerprint(db, table, row_id):
         "node_capability_snapshot_json",
         "locked",
         "lock_reason",
+        "blocked_code",
     }
     columns = [
         row["name"]

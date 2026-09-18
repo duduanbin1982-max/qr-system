@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from modules.repositories.context import resolve_db
+from modules.domain.production_node_scheduling import ProductionNodePolicy
 
 
 class ProductionNodeRepository:
@@ -219,6 +220,100 @@ class ProductionNodeRepository:
             ProductionNodeRepository._dict_rows(cursor),
             resource_column="production_node_id",
         )
+
+    @staticmethod
+    def list_active_nodes_for_process(process_id, db=None):
+        """Return active node facts in deterministic order for allocation."""
+        db = resolve_db(db)
+        rows = ProductionNodeRepository._dict_rows(
+            db.execute(
+                "SELECT n.*,p.name AS process_name "
+                "FROM production_nodes n JOIN processes p ON p.id=n.process_id "
+                "WHERE n.process_id=? AND n.status='active' "
+                "ORDER BY n.node_code,n.id",
+                (process_id,),
+            )
+        )
+        for row in rows:
+            row["capabilities"] = ProductionNodeRepository.list_capabilities(
+                row["id"], db=db
+            )
+        return rows
+
+    @staticmethod
+    def list_compatible_nodes(operation, order, at_time=None, db=None):
+        """Resolve nodes by exact process and configured capability facts."""
+        del at_time
+        db = resolve_db(db)
+        # Service callers may pass sqlite Row objects while policy evaluation
+        # deliberately uses mapping helpers.  Normalize at this repository
+        # boundary so the scheduler is independent of the storage row type.
+        operation = dict(operation or {})
+        order = dict(order or {})
+        candidates = []
+        for node in ProductionNodeRepository.list_active_nodes_for_process(
+            operation.get("process_id"), db=db
+        ):
+            capabilities = node.pop("capabilities", [])
+            if ProductionNodePolicy.matches_capabilities(
+                node=node,
+                capabilities=capabilities,
+                operation=operation,
+                order=order,
+            ):
+                node["capabilities"] = capabilities
+                candidates.append(node)
+        return candidates
+
+    @staticmethod
+    def list_node_occupancy(exclude_order_id, db=None):
+        """Read node occupancy, ignoring soft-deleted, blocked and regenerated facts."""
+        db = resolve_db(db)
+        return db.execute(
+            """
+            SELECT ss.production_node_id, ss.segment_start_at AS start_at,
+                   ss.segment_end_at AS end_at, ss.schedule_id,
+                   s.id AS occupancy_id, s.locked
+            FROM order_process_schedule_segments ss
+            JOIN order_process_schedules s ON s.id=ss.schedule_id
+            JOIN orders o ON o.id=s.order_id
+            WHERE s.order_id != ? AND o.deleted_at IS NULL
+              AND s.status != 'blocked' AND ss.production_node_id IS NOT NULL
+            UNION ALL
+            SELECT s.production_node_id,
+                   CASE WHEN COALESCE(s.planned_start_at,'')<>''
+                        THEN s.planned_start_at ELSE s.plan_start || ' 00:00' END,
+                   CASE WHEN COALESCE(s.planned_end_at,'')<>''
+                        THEN s.planned_end_at ELSE s.plan_end || ' 23:59' END,
+                   s.id, s.id, s.locked
+            FROM order_process_schedules s
+            JOIN orders o ON o.id=s.order_id
+            WHERE s.order_id != ? AND o.deleted_at IS NULL
+              AND s.status != 'blocked' AND s.production_node_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM order_process_schedule_segments ss
+                  WHERE ss.schedule_id=s.id
+              )
+            ORDER BY start_at,end_at,production_node_id,occupancy_id
+            """,
+            (exclude_order_id, exclude_order_id),
+        ).fetchall()
+
+    @staticmethod
+    def list_node_calendar_overrides(node_id, start_at="", end_at="", db=None):
+        db = resolve_db(db)
+        where = ["production_node_id=?", "status='active'"]
+        params = [node_id]
+        if start_at:
+            where.append("end_at>?" )
+            params.append(start_at)
+        if end_at:
+            where.append("start_at<?")
+            params.append(end_at)
+        return db.execute(
+            "SELECT * FROM production_node_calendar_overrides WHERE "
+            + " AND ".join(where) + " ORDER BY start_at,end_at,id", params
+        ).fetchall()
 
     @staticmethod
     def find_node(node_id, db=None):

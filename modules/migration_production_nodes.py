@@ -207,6 +207,7 @@ NODE_FACT_COLUMNS = {
     "node_capability_snapshot_json": "TEXT NOT NULL DEFAULT '[]'",
     "locked": "INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1))",
     "lock_reason": "TEXT NOT NULL DEFAULT ''",
+    "blocked_code": "TEXT NOT NULL DEFAULT ''",
 }
 
 
