@@ -6,7 +6,9 @@ same immutable input always produces the same result.
 """
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
+import json
 import math
 
 
@@ -51,22 +53,47 @@ class ProductionNodePolicy:
         if not source:
             return None
         value = source.get(key)
-        return None if value in (None, "") else value
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
     @staticmethod
     def _id_value(value):
-        if value in (None, ""):
+        if value in (None, "") or isinstance(value, bool):
             return None
         try:
-            return int(value)
+            number = int(value)
         except (TypeError, ValueError):
-            return value
+            return None
+        try:
+            if float(value) != number:
+                return None
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
 
     @staticmethod
     def _text_value(value):
-        if value in (None, ""):
+        if value is None:
             return None
         return str(value).strip().casefold() or None
+
+    @staticmethod
+    def _display_value(value):
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @staticmethod
+    def _bool_value(value):
+        if value is True or value == 1:
+            return True
+        if isinstance(value, str):
+            return value.strip().casefold() in {"1", "true", "yes", "on"}
+        return False
 
     @classmethod
     def _fact_value(cls, operation, order, key):
@@ -111,7 +138,7 @@ class ProductionNodePolicy:
         active = [
             (index, dict(capability))
             for index, capability in enumerate(capabilities or ())
-            if (capability.get("status") or "active") == "active"
+            if (cls._text_value(capability.get("status")) or "active") == "active"
         ]
         if not active:
             return {}
@@ -147,13 +174,22 @@ class ProductionNodePolicy:
     @staticmethod
     def _parse_datetime(value):
         if isinstance(value, datetime):
-            return value
-        if value in (None, ""):
+            parsed = value
+        elif value in (None, ""):
             return None
-        try:
-            return datetime.fromisoformat(str(value).strip().replace("T", " "))
-        except (TypeError, ValueError):
-            return None
+        else:
+            try:
+                text = str(value).strip()
+                if not text:
+                    return None
+                if text.endswith(("Z", "z")):
+                    text = text[:-1] + "+00:00"
+                parsed = datetime.fromisoformat(text.replace("T", " "))
+            except (TypeError, ValueError):
+                return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @classmethod
     def _interval(cls, item):
@@ -170,35 +206,94 @@ class ProductionNodePolicy:
         return first_start < second_end and second_start < first_end
 
     @classmethod
-    def _validate_version_bindings(cls, operation, order):
-        checks = (
-            (
-                "route_version_id",
-                cls._value(order, "route_version_id"),
-                cls._value(operation, "route_version_id"),
-            ),
-            (
-                "process_version_id",
-                cls._value(operation, "expected_process_version_id"),
-                cls._value(operation, "process_version_id"),
-            ),
+    def _binding_error(cls, binding, expected, actual):
+        raise NodeSchedulingError(
+            "VERSION_BINDING_MISMATCH",
+            "订单、路线和工序版本不一致",
+            {"binding": binding, "expected": expected, "actual": actual},
         )
-        for binding, expected, actual in checks:
-            expected = cls._id_value(expected)
-            actual = cls._id_value(actual)
-            if expected is not None and expected != actual:
-                raise NodeSchedulingError(
-                    "VERSION_BINDING_MISMATCH",
-                    "订单、路线和工序版本不一致",
-                    {"binding": binding, "expected": expected, "actual": actual},
+
+    @classmethod
+    def _required_binding_id(cls, source, key, label):
+        raw = cls._value(source, key)
+        value = cls._id_value(raw)
+        if value is None:
+            cls._binding_error(
+                label, "positive integer", cls._display_value(raw)
+            )
+        return value
+
+    @classmethod
+    def _validate_version_bindings(cls, operation, order, standard):
+        operation_route_id = cls._required_binding_id(
+            operation, "route_version_id", "operation.route_version_id"
+        )
+        operation_process_version_id = cls._required_binding_id(
+            operation, "process_version_id", "operation.process_version_id"
+        )
+        order_route_id = cls._required_binding_id(
+            order, "route_version_id", "order.route_version_id"
+        )
+        order_process_version_id = cls._required_binding_id(
+            order, "process_version_id", "order.process_version_id"
+        )
+        if operation_route_id != order_route_id:
+            cls._binding_error(
+                "route_version_id", order_route_id, operation_route_id
+            )
+        if operation_process_version_id != order_process_version_id:
+            cls._binding_error(
+                "process_version_id",
+                order_process_version_id,
+                operation_process_version_id,
+            )
+
+        expected_bindings = (
+            (operation, "expected_route_version_id", operation_route_id),
+            (operation, "expected_process_version_id", operation_process_version_id),
+            (order, "expected_route_version_id", operation_route_id),
+            (order, "expected_process_version_id", operation_process_version_id),
+        )
+        for source, key, actual in expected_bindings:
+            raw = cls._value(source, key)
+            if raw is None:
+                continue
+            expected = cls._id_value(raw)
+            if expected is None or expected != actual:
+                cls._binding_error(
+                    key.removeprefix("expected_"),
+                    cls._display_value(raw),
+                    actual,
                 )
+
+        if standard is None:
+            return
+        operation_standard_id = cls._id_value(cls._value(operation, "standard_id"))
+        standard_id = cls._required_binding_id(standard, "id", "standard_id")
+        if operation_standard_id is None or standard_id != operation_standard_id:
+            cls._binding_error(
+                "standard_id", operation_standard_id, standard_id
+            )
+        standard_checks = (
+            ("process_id", cls._id_value(operation.get("process_id"))),
+            ("route_version_id", operation_route_id),
+            ("process_version_id", operation_process_version_id),
+        )
+        for key, expected in standard_checks:
+            actual = cls._required_binding_id(
+                standard, key, f"standard.{key}"
+            )
+            if actual != expected:
+                cls._binding_error(f"standard.{key}", expected, actual)
 
     @classmethod
     def _validate_work_time_standard(cls, operation, standard):
         fact = standard if standard is not None else operation
-        standard_id = cls._value(fact, "id") if standard is not None else None
-        if standard_id is None:
-            standard_id = cls._value(fact, "standard_id")
+        standard_id = (
+            cls._id_value(cls._value(standard, "id"))
+            if standard is not None
+            else cls._id_value(cls._value(operation, "standard_id"))
+        )
         minutes = cls._value(fact, "standard_minutes_per_unit")
         try:
             valid_minutes = float(minutes) > 0 and math.isfinite(float(minutes))
@@ -229,20 +324,34 @@ class ProductionNodePolicy:
             )
         start = cls._parse_datetime(requested_start_at)
         end = cls._parse_datetime(requested_end_at)
-        if requested_start_at not in (None, "") or requested_end_at not in (None, ""):
+        has_requested_interval = (
+            cls._display_value(requested_start_at) is not None
+            or cls._display_value(requested_end_at) is not None
+        )
+        if has_requested_interval:
             if start is None or end is None or start >= end:
                 raise NodeSchedulingError(
                     "NODE_CALENDAR_UNAVAILABLE",
                     "生产节点日历没有可用时间",
                     {"production_node_id": node_id},
                 )
-        if calendar_intervals is not None and start is not None:
+        if has_requested_interval:
+            intervals = list(calendar_intervals or ())
+            if not intervals:
+                raise NodeSchedulingError(
+                    "NODE_CALENDAR_UNAVAILABLE",
+                    "生产节点日历没有可用时间",
+                    {"production_node_id": node_id},
+                )
             available = False
-            for interval in calendar_intervals:
+            for interval in intervals:
+                if not isinstance(interval, dict):
+                    continue
                 interval_start, interval_end = cls._interval(interval)
                 if (
                     interval_start is not None
                     and interval_end is not None
+                    and interval_start < interval_end
                     and interval_start <= start
                     and end <= interval_end
                 ):
@@ -278,7 +387,8 @@ class ProductionNodePolicy:
         locked = [
             item
             for item in overlaps
-            if bool(item.get("locked") or item.get("is_locked"))
+            if cls._bool_value(item.get("locked"))
+            or cls._bool_value(item.get("is_locked"))
         ]
         if locked:
             raise NodeSchedulingError(
@@ -394,30 +504,53 @@ class ProductionNodePolicy:
                 "单批数量超过节点批处理上限",
                 {"quantity": requested, "max_batch_quantity": batch_size},
             )
-        orders = list(batch_orders or [order.get("id")])
-        order_ids = sorted(
-            {
-                cls._batch_order_id(item)
-                for item in orders
-                if cls._batch_order_id(item) not in (None, "")
-            },
-            key=str,
-        )
-        allow_mixed = bool(capability.get("allow_mixed_orders"))
+        current_order_id = cls._id_value(order.get("id"))
+        if batch_orders is not None and not isinstance(batch_orders, (list, tuple)):
+            raise NodeSchedulingError(
+                "BATCH_CAPACITY_EXCEEDED",
+                "批处理订单列表不符合要求",
+                {
+                    "reason": "invalid_batch_orders",
+                    "invalid_order_ids": [cls._display_value(batch_orders)],
+                },
+            )
+        orders = [order.get("id")] if batch_orders is None else list(batch_orders)
+        normalized_order_ids = []
+        invalid_order_ids = []
+        for item in orders:
+            raw_order_id = cls._batch_order_id(item)
+            order_id = cls._id_value(raw_order_id)
+            if order_id is None:
+                invalid_order_ids.append(cls._display_value(raw_order_id))
+            else:
+                normalized_order_ids.append(order_id)
+        if not orders or invalid_order_ids or current_order_id is None:
+            raise NodeSchedulingError(
+                "BATCH_CAPACITY_EXCEEDED",
+                "批处理订单列表不符合要求",
+                {
+                    "reason": "invalid_batch_orders",
+                    "invalid_order_ids": sorted(invalid_order_ids, key=str),
+                },
+            )
+        order_ids = sorted(set(normalized_order_ids))
+        if current_order_id not in order_ids:
+            raise NodeSchedulingError(
+                "BATCH_CAPACITY_EXCEEDED",
+                "批处理订单列表未包含当前订单",
+                {"order_id": current_order_id, "order_ids": order_ids},
+            )
+        allow_mixed = cls._bool_value(capability.get("allow_mixed_orders"))
         if len(order_ids) > 1 and not allow_mixed:
             raise NodeSchedulingError(
                 "BATCH_CAPACITY_EXCEEDED",
                 "当前生产节点不允许混合不同订单",
                 {"order_ids": order_ids, "allow_mixed_orders": False},
             )
-        if changeover_required and changeover_minutes < 0:
-            # Kept explicit even though configuration validation catches this;
-            # it documents that changeover facts are part of batch eligibility.
-            raise NodeSchedulingError(
-                "BATCH_CAPACITY_EXCEEDED",
-                "换型时间配置不符合要求",
-                {"changeover_minutes": changeover_minutes},
-            )
+        # Access the validated value when changeover is requested so callers
+        # cannot accidentally bypass configuration validation.
+        if changeover_required:
+            float(changeover_minutes)
 
     @classmethod
     def validate_node(
@@ -439,13 +572,29 @@ class ProductionNodePolicy:
     ):
         """Validate one requested allocation and return its capability snapshot."""
 
+        # Business-fact validation has a stable priority.  A stale or incomplete
+        # version/standard must never be hidden by a bad candidate node.
+        cls._validate_version_bindings(operation, order, standard)
+        cls._validate_work_time_standard(operation, standard)
+
         node_id = cls._id_value(node.get("id"))
-        status = node.get("status") or "inactive"
+        status = cls._text_value(node.get("status")) or "inactive"
         if status != "active":
             raise NodeSchedulingError(
                 "NO_COMPATIBLE_NODE",
                 "生产节点不可用",
                 {"production_node_id": node_id, "status": status},
+            )
+        capacity_mode = cls._text_value(node.get("capacity_mode"))
+        if capacity_mode not in {"exclusive", "batch"}:
+            raise NodeSchedulingError(
+                "NO_COMPATIBLE_NODE",
+                "生产节点容量模式不受支持",
+                {
+                    "production_node_id": node_id,
+                    "reason": "invalid_capacity_mode",
+                    "capacity_mode": cls._display_value(node.get("capacity_mode")),
+                },
             )
         node_process_id = cls._id_value(node.get("process_id"))
         operation_process_id = cls._id_value(operation.get("process_id"))
@@ -459,8 +608,6 @@ class ProductionNodePolicy:
                     "operation_process_id": operation_process_id,
                 },
             )
-        cls._validate_version_bindings(operation, order)
-        cls._validate_work_time_standard(operation, standard)
         capability = cls.matching_capability(
             capabilities=capabilities, operation=operation, order=order
         )
@@ -477,10 +624,12 @@ class ProductionNodePolicy:
             calendar_intervals=calendar_intervals,
             calendar_available=calendar_available,
         )
+        normalized_node = dict(node)
+        normalized_node["capacity_mode"] = capacity_mode
         cls._validate_occupancy(
-            node=node, start=start, end=end, occupancy=occupancy
+            node=normalized_node, start=start, end=end, occupancy=occupancy
         )
-        if (node.get("capacity_mode") or "exclusive") == "batch":
+        if capacity_mode == "batch":
             cls._validate_batch(
                 capability=capability,
                 operation=operation,
@@ -494,7 +643,7 @@ class ProductionNodePolicy:
     @staticmethod
     def _rank_finish(value):
         parsed = ProductionNodePolicy._parse_datetime(value)
-        return (1, datetime.max) if parsed is None else (0, parsed)
+        return (1, math.inf) if parsed is None else (0, parsed.timestamp())
 
     @staticmethod
     def _rank_number(value):
@@ -503,6 +652,27 @@ class ProductionNodePolicy:
         except (TypeError, ValueError):
             return math.inf
         return number if math.isfinite(number) else math.inf
+
+    @staticmethod
+    def _canonical_row_digest(node):
+        encoded = json.dumps(
+            node,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=lambda value: (
+                value.isoformat() if isinstance(value, datetime) else str(value)
+            ),
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _rank_node_id(cls, node):
+        digest = cls._canonical_row_digest(node)
+        node_id = cls._id_value(node.get("id"))
+        if node_id is None:
+            return 1, math.inf, digest
+        return 0, node_id, digest
 
     @classmethod
     def rank_nodes(cls, nodes):
@@ -515,7 +685,7 @@ class ProductionNodePolicy:
                 cls._rank_finish(node.get("finish_at")),
                 cls._rank_number(node.get("risk")),
                 cls._rank_number(node.get("load_minutes")),
-                cls._rank_number(node.get("id")),
+                cls._rank_node_id(node),
             ),
         )
 
@@ -538,9 +708,28 @@ class ProductionNodePolicy:
                 "序列件输入包含重复记录",
                 {"duplicate_input_serial_ids": duplicate_inputs},
             )
+        normalized_allocations = []
+        for index, allocation in enumerate(allocations or ()):
+            if not isinstance(allocation, dict):
+                raise NodeSchedulingError(
+                    "SERIAL_ITEM_SPLIT_FORBIDDEN",
+                    "序列件分配节点无效",
+                    {"allocation_index": index, "production_node_id": None},
+                )
+            raw_node_id = allocation.get("production_node_id")
+            if cls._id_value(raw_node_id) is None:
+                raise NodeSchedulingError(
+                    "SERIAL_ITEM_SPLIT_FORBIDDEN",
+                    "序列件分配节点无效",
+                    {
+                        "allocation_index": index,
+                        "production_node_id": raw_node_id,
+                    },
+                )
+            normalized_allocations.append(allocation)
         assigned = [
             serial_id
-            for allocation in allocations or ()
+            for allocation in normalized_allocations
             for serial_id in list(allocation.get("serial_ids") or ())
         ]
         duplicates = cls._duplicates(assigned)
