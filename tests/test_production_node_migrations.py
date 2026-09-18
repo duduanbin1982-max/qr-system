@@ -1,4 +1,5 @@
 import sqlite3
+from inspect import unwrap
 
 import pytest
 
@@ -14,19 +15,20 @@ APPROVED_NODE_COUNTS = {
 }
 
 
-@pytest.fixture
-def migrated_v085_db():
+def _build_v085_db(*, include_approved_processes):
     from modules.migrations import MIGRATIONS
 
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
-    try:
-        for version, _, migrate in MIGRATIONS:
-            if version > 75:
-                break
-            migrate(db)
+    for version, _, migrate in MIGRATIONS:
+        if version > 75:
+            break
+        if version == 59 and not include_approved_processes:
+            migrate = unwrap(migrate)
+        migrate(db)
 
+    if include_approved_processes:
         for sequence, process_name in enumerate(APPROVED_NODE_COUNTS, start=101):
             db.execute(
                 "INSERT OR IGNORE INTO processes (name,description,seq_order,status) "
@@ -34,11 +36,128 @@ def migrated_v085_db():
                 (process_name, f"{process_name}生产节点", sequence),
             )
 
-        for version, _, migrate in MIGRATIONS:
-            if 76 <= version <= 85:
-                migrate(db)
-        db.commit()
+    for version, _, migrate in MIGRATIONS:
+        if 76 <= version <= 85:
+            migrate(db)
+    db.execute("PRAGMA user_version=85")
+    db.commit()
+    return db
+
+
+def _v086_tables(db):
+    return {
+        row["name"]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name LIKE 'production_node%'"
+        ).fetchall()
+    }
+
+
+@pytest.fixture
+def migrated_v085_db():
+    db = _build_v085_db(include_approved_processes=True)
+    try:
         yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def incomplete_v085_db():
+    db = _build_v085_db(include_approved_processes=False)
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def test_v086_rejects_null_legacy_calendar_before_creating_any_schema(
+    migrated_v085_db,
+):
+    from modules.migration_production_nodes import m086_production_node_master
+
+    legacy_line = migrated_v085_db.execute(
+        "SELECT id FROM process_production_lines ORDER BY id LIMIT 1"
+    ).fetchone()
+    migrated_v085_db.execute(
+        "UPDATE process_production_lines SET calendar_id=NULL WHERE id=?",
+        (legacy_line["id"],),
+    )
+    migrated_v085_db.commit()
+
+    with pytest.raises(RuntimeError, match=r"NULL calendar_id.*legacy ids"):
+        m086_production_node_master(migrated_v085_db)
+
+    assert _v086_tables(migrated_v085_db) == set()
+
+
+def test_v086_rejects_incomplete_14_node_baseline_before_ddl(incomplete_v085_db):
+    from modules.migration_production_nodes import m086_production_node_master
+
+    assert incomplete_v085_db.execute(
+        "SELECT COUNT(*) FROM process_production_lines"
+    ).fetchone()[0] == 14
+
+    with pytest.raises(RuntimeError, match=r"expected total=21.*actual total=14"):
+        m086_production_node_master(incomplete_v085_db)
+
+    assert _v086_tables(incomplete_v085_db) == set()
+
+
+def test_v086_rejects_wrong_21_node_distribution_before_ddl(migrated_v085_db):
+    from modules.migration_production_nodes import m086_production_node_master
+
+    cutting_id = migrated_v085_db.execute(
+        "SELECT id FROM processes WHERE name='下料'"
+    ).fetchone()[0]
+    welding_line_id = migrated_v085_db.execute(
+        "SELECT pl.id FROM process_production_lines pl "
+        "JOIN processes p ON p.id=pl.process_id "
+        "WHERE p.name='焊接' ORDER BY pl.id LIMIT 1"
+    ).fetchone()[0]
+    migrated_v085_db.execute(
+        "UPDATE process_production_lines SET process_id=? WHERE id=?",
+        (cutting_id, welding_line_id),
+    )
+    migrated_v085_db.commit()
+
+    with pytest.raises(RuntimeError, match=r"expected total=21.*actual total=21"):
+        m086_production_node_master(migrated_v085_db)
+
+    assert _v086_tables(migrated_v085_db) == set()
+
+
+def test_v086_catalog_failure_keeps_version_85_and_leaves_no_partial_schema(
+    migrated_v085_db,
+):
+    from modules import migrations
+
+    legacy_line_id = migrated_v085_db.execute(
+        "SELECT id FROM process_production_lines ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    migrated_v085_db.execute(
+        "UPDATE process_production_lines SET calendar_id=NULL WHERE id=?",
+        (legacy_line_id,),
+    )
+    migrated_v085_db.commit()
+
+    with pytest.raises(RuntimeError, match=r"NULL calendar_id"):
+        migrations.run_migrations(migrated_v085_db)
+
+    assert migrated_v085_db.execute("PRAGMA user_version").fetchone()[0] == 85
+    assert _v086_tables(migrated_v085_db) == set()
+
+
+def test_test_template_reaches_v086_with_the_approved_21_node_baseline(tmp_path):
+    from conftest import _create_schema_database
+
+    database = tmp_path / "v086-template.db"
+    _create_schema_database(str(database))
+    db = sqlite3.connect(database)
+    try:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 86
+        assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
     finally:
         db.close()
 
@@ -207,4 +326,3 @@ def test_v086_creates_constrained_additive_node_schema(migrated_v085_db):
             "(production_node_id,start_at,end_at,override_type) VALUES (?,?,?,?)",
             (node["id"], "2026-09-17 12:00", "2026-09-17 11:00", "maintenance"),
         )
-

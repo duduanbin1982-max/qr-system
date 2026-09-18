@@ -1,4 +1,5 @@
 import atexit
+from functools import wraps
 import os
 import shutil
 import sqlite3
@@ -51,6 +52,91 @@ def _remove_sqlite_artifacts(path):
         candidate = path + suffix if suffix else path
         if os.path.exists(candidate):
             os.remove(candidate)
+
+
+from modules import migrations as _test_migration_module
+
+
+def _seed_approved_core_process_baseline(conn):
+    """Model the approved production process master data before V076."""
+    approved_processes = {
+        "下料": ("原材料切割", 1),
+        "铆接": ("铆接组装", 2),
+        "焊接": ("焊接组装", 3),
+        "抛丸": ("表面抛丸", 4),
+        "打磨": ("表面打磨", 5),
+        "镗孔": ("精密镗孔", 6),
+        "喷漆": ("喷涂上色", 7),
+    }
+    for name, (description, seq_order) in approved_processes.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO processes "
+            "(name,description,seq_order,status) VALUES (?,?,?,'active')",
+            (name, description, seq_order),
+        )
+    conn.commit()
+
+
+def _install_approved_process_baseline_adapter():
+    """Make every test-built V059 source carry production's approved master data."""
+    catalog = []
+    for version, description, migrate in _test_migration_module.MIGRATIONS:
+        if version != 59:
+            catalog.append((version, description, migrate))
+            continue
+
+        @wraps(migrate)
+        def migrate_with_approved_processes(db, real_migrate=migrate):
+            real_migrate(db)
+            _seed_approved_core_process_baseline(db)
+
+        catalog.append((version, description, migrate_with_approved_processes))
+    _test_migration_module.MIGRATIONS = catalog
+
+
+_install_approved_process_baseline_adapter()
+_REAL_RUN_MIGRATIONS = _test_migration_module.run_migrations
+
+
+def _run_test_migrations_with_approved_production_baseline(db=None):
+    """Run the real catalog while modeling production's approved V075 data.
+
+    This test-only adapter never inserts process versions or legacy production
+    lines. It stops the real runner at V059, seeds only process master data,
+    then lets the real V060-V086 chain version those processes and build and
+    validate the 21 legacy resources and nodes.
+    """
+    catalog = _test_migration_module.MIGRATIONS
+    versions = {version for version, _, _ in catalog}
+    if db is None:
+        return _REAL_RUN_MIGRATIONS(db)
+    current_version = db.execute("PRAGMA user_version").fetchone()[0]
+    if current_version >= 86:
+        return _REAL_RUN_MIGRATIONS(db)
+    if not {76, 86}.issubset(versions):
+        return _REAL_RUN_MIGRATIONS(db)
+
+    if 60 <= current_version < 76:
+        _seed_approved_core_process_baseline(db)
+        return _REAL_RUN_MIGRATIONS(db)
+
+    if current_version >= 76:
+        return _REAL_RUN_MIGRATIONS(db)
+
+    pre_process_versioning = [migration for migration in catalog if migration[0] < 60]
+    _test_migration_module.MIGRATIONS = pre_process_versioning
+    try:
+        executed = _REAL_RUN_MIGRATIONS(db)
+    finally:
+        _test_migration_module.MIGRATIONS = catalog
+
+    _seed_approved_core_process_baseline(db)
+    return executed + _REAL_RUN_MIGRATIONS(db)
+
+
+# Tests that import run_migrations receive this production-baseline adapter;
+# application code remains unchanged outside the test process.
+_test_migration_module.run_migrations = _run_test_migrations_with_approved_production_baseline
 
 
 def _create_schema_database(dest_path):

@@ -1,8 +1,92 @@
 """V086 stable production-node master data and legacy line mappings."""
 
 
+APPROVED_PRODUCTION_NODE_COUNTS = {
+    "下料": 1,
+    "铆接": 4,
+    "焊接": 10,
+    "抛丸": 1,
+    "打磨": 1,
+    "镗孔": 2,
+    "喷漆": 2,
+}
+
+
+def _format_distribution(distribution):
+    ordered_names = list(APPROVED_PRODUCTION_NODE_COUNTS)
+    ordered_names.extend(
+        sorted(name for name in distribution if name not in APPROVED_PRODUCTION_NODE_COUNTS)
+    )
+    return "{" + ", ".join(
+        f"{name}:{distribution.get(name, 0)}" for name in ordered_names
+    ) + "}"
+
+
+def _validate_legacy_node_baseline(db):
+    """Reject an incomplete V085 source before creating any V086 object."""
+    missing_calendar_rows = db.execute(
+        "SELECT id FROM process_production_lines "
+        "WHERE calendar_id IS NULL ORDER BY id"
+    ).fetchall()
+    if missing_calendar_rows:
+        legacy_ids = ",".join(str(row[0]) for row in missing_calendar_rows)
+        raise RuntimeError(
+            "V086 production-node baseline invalid: NULL calendar_id for "
+            f"legacy ids [{legacy_ids}]; every process_production_lines row must map"
+        )
+
+    total = db.execute(
+        "SELECT COUNT(*) FROM process_production_lines"
+    ).fetchone()[0]
+    distribution = {
+        row[0]: row[1]
+        for row in db.execute(
+            "SELECT COALESCE(p.name,'<missing process_id=' || pl.process_id || '>'),"
+            "COUNT(pl.id) "
+            "FROM process_production_lines pl "
+            "LEFT JOIN processes p ON p.id=pl.process_id "
+            "GROUP BY pl.process_id,p.name ORDER BY p.name,pl.process_id"
+        ).fetchall()
+    }
+    expected_total = sum(APPROVED_PRODUCTION_NODE_COUNTS.values())
+    if total != expected_total or distribution != APPROVED_PRODUCTION_NODE_COUNTS:
+        raise RuntimeError(
+            "V086 production-node baseline invalid: "
+            f"expected total={expected_total} distribution="
+            f"{_format_distribution(APPROVED_PRODUCTION_NODE_COUNTS)}; "
+            f"actual total={total} distribution={_format_distribution(distribution)}"
+        )
+
+
+def _validate_legacy_node_mapping(db):
+    unmapped = [
+        row[0]
+        for row in db.execute(
+            "SELECT pl.id FROM process_production_lines pl "
+            "LEFT JOIN production_nodes n ON n.legacy_process_line_id=pl.id "
+            "WHERE n.id IS NULL ORDER BY pl.id"
+        ).fetchall()
+    ]
+    mismatched = [
+        row[0]
+        for row in db.execute(
+            "SELECT pl.id FROM process_production_lines pl "
+            "JOIN production_nodes n ON n.legacy_process_line_id=pl.id "
+            "WHERE n.process_id<>pl.process_id OR n.node_code<>pl.line_code "
+            "OR n.node_name<>pl.line_name OR n.status<>pl.status "
+            "OR n.calendar_id<>pl.calendar_id ORDER BY pl.id"
+        ).fetchall()
+    ]
+    if unmapped or mismatched:
+        raise RuntimeError(
+            "V086 production-node mapping incomplete: "
+            f"unmapped legacy ids={unmapped}; mismatched legacy ids={mismatched}"
+        )
+
+
 def m086_production_node_master(db):
     """Add stable physical-capacity nodes without changing legacy scheduling."""
+    _validate_legacy_node_baseline(db)
     db.executescript(
         """
         CREATE TABLE IF NOT EXISTS production_nodes (
@@ -88,8 +172,9 @@ def m086_production_node_master(db):
         "INSERT OR IGNORE INTO production_nodes "
         "(process_id,node_code,node_name,capacity_mode,status,calendar_id,legacy_process_line_id) "
         "SELECT process_id,line_code,line_name,'exclusive',status,calendar_id,id "
-        "FROM process_production_lines WHERE calendar_id IS NOT NULL"
+        "FROM process_production_lines"
     )
+    _validate_legacy_node_mapping(db)
 
 
 MIGRATIONS = [

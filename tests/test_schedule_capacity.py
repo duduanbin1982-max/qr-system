@@ -91,23 +91,51 @@ def test_capacity_lines_api_preserves_legacy_line_identifiers(client, auth_heade
 @pytest.mark.parametrize("process_name,expected_count", [("铆接", 4), ("抛丸", 1), ("镗孔", 2)])
 def test_new_known_process_provisions_its_default_line_pool(client, process_name, expected_count):
     with client.application.app_context():
+        db = get_db()
+        approved_process_id = db.execute(
+            "SELECT id FROM processes WHERE name=?", (process_name,)
+        ).fetchone()[0]
+        approved_line_ids = [
+            row["id"]
+            for row in db.execute(
+                "SELECT id FROM process_production_lines "
+                "WHERE process_id=? ORDER BY id",
+                (approved_process_id,),
+            ).fetchall()
+        ]
+        ProcessService.update_process(
+            approved_process_id,
+            {"name": f"{process_name}-模板归档-{approved_process_id}"},
+        )
+
         process_id = ProcessService.create_process({"name": process_name, "category": "结构件"})
-        count = get_db().execute(
+        count = db.execute(
             "SELECT COUNT(*) FROM process_production_lines WHERE process_id=?",
             (process_id,),
         ).fetchone()[0]
         assert count == expected_count
+        assert [
+            row["id"]
+            for row in db.execute(
+                "SELECT id FROM process_production_lines "
+                "WHERE process_id=? ORDER BY id",
+                (approved_process_id,),
+            ).fetchall()
+        ] == approved_line_ids
 
 
 def test_renaming_a_process_does_not_create_a_second_line_pool(client):
     with client.application.app_context():
-        process_id = ProcessService.create_process({"name": "铆接", "category": "结构件"})
-        before = get_db().execute(
+        db = get_db()
+        process_id = db.execute(
+            "SELECT id FROM processes WHERE name='铆接'"
+        ).fetchone()[0]
+        before = db.execute(
             "SELECT id, line_code FROM process_production_lines WHERE process_id=? ORDER BY id",
             (process_id,),
         ).fetchall()
-        ProcessService.update_process(process_id, {"name": "铆接改名"})
-        after = get_db().execute(
+        ProcessService.update_process(process_id, {"name": f"铆接改名-{process_id}"})
+        after = db.execute(
             "SELECT id, line_code FROM process_production_lines WHERE process_id=? ORDER BY id",
             (process_id,),
         ).fetchall()

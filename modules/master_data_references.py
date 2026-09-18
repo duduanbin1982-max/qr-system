@@ -114,6 +114,30 @@ def _position(
     )
 
 
+def _product(
+    table,
+    root_columns=(),
+    *,
+    version_columns=(),
+    key,
+    label,
+    impact_level=IMPACT_BLOCKING,
+    action="保留产品根和历史引用",
+    delete_policy=DELETE_BLOCK,
+):
+    return ReferenceSpec(
+        entity_type="product",
+        table=table,
+        root_columns=tuple(root_columns),
+        version_columns=tuple(version_columns),
+        business_key=key,
+        business_label=label,
+        impact_level=impact_level,
+        suggested_action=action,
+        delete_policy=delete_policy,
+    )
+
+
 PROCESS_REFERENCES = (
     _process("approval_config", ("process_id",), key="approval_config", label="审批配置"),
     _process(
@@ -175,6 +199,22 @@ PROCESS_REFERENCES = (
         ("process_id",),
         key="process_production_lines",
         label="工序产线池",
+    ),
+    _process(
+        "production_nodes",
+        ("process_id",),
+        key="production_nodes",
+        label="稳定生产节点",
+        impact_level=IMPACT_INTERNAL,
+        action="由生产节点主数据迁移与节点服务维护",
+    ),
+    _process(
+        "production_node_capabilities",
+        version_columns=("process_version_id",),
+        key="production_node_capabilities_process",
+        label="生产节点工序版本能力",
+        impact_level=IMPACT_INTERNAL,
+        action="由生产节点能力服务维护",
     ),
     _process(
         "schedule_downtime_events",
@@ -454,6 +494,14 @@ PROCESS_REFERENCES = (
 
 
 ROUTE_REFERENCES = (
+    _route(
+        "production_node_capabilities",
+        version_columns=("route_version_id",),
+        key="production_node_capabilities_route",
+        label="生产节点路线版本能力",
+        impact_level=IMPACT_INTERNAL,
+        action="由生产节点能力服务维护",
+    ),
     _route(
         "material_consumptions",
         ("route_id",),
@@ -846,10 +894,25 @@ POSITION_REFERENCES = (
 )
 
 
-MASTER_DATA_REFERENCES = PROCESS_REFERENCES + ROUTE_REFERENCES + POSITION_REFERENCES
+PRODUCT_REFERENCES = (
+    _product(
+        "production_node_capabilities",
+        ("product_id",),
+        key="production_node_capabilities_product",
+        label="生产节点产品能力",
+        impact_level=IMPACT_INTERNAL,
+        action="由生产节点能力服务维护",
+    ),
+)
+
+
+MASTER_DATA_REFERENCES = (
+    PROCESS_REFERENCES + ROUTE_REFERENCES + POSITION_REFERENCES + PRODUCT_REFERENCES
+)
 PROCESS_REFERENCE_TABLES = frozenset(spec.table for spec in PROCESS_REFERENCES)
 ROUTE_REFERENCE_TABLES = frozenset(spec.table for spec in ROUTE_REFERENCES)
 POSITION_REFERENCE_TABLES = frozenset(spec.table for spec in POSITION_REFERENCES)
+PRODUCT_REFERENCE_TABLES = frozenset(spec.table for spec in PRODUCT_REFERENCES)
 
 
 # Explicit exceptions must stay narrow and documented.  These columns are roots,
@@ -949,6 +1012,8 @@ __all__ = [
     "MASTER_DATA_REFERENCES",
     "POSITION_REFERENCES",
     "POSITION_REFERENCE_TABLES",
+    "PRODUCT_REFERENCES",
+    "PRODUCT_REFERENCE_TABLES",
     "PROCESS_REFERENCES",
     "PROCESS_REFERENCE_TABLES",
     "REFERENCE_COLUMN_EXEMPTIONS",
