@@ -422,6 +422,46 @@ def m087_production_node_schedule_facts(db):
         )
         """
     )
+    # Keep each DDL statement inside the V087 transaction. sqlite3.executescript
+    # commits an open transaction before running, which would make a later
+    # backfill/trigger failure leave a partially migrated schema behind.
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS production_node_compatibility_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observation_key TEXT NOT NULL UNIQUE,
+            scope TEXT NOT NULL,
+            source_id INTEGER,
+            legacy_digest TEXT NOT NULL,
+            node_digest TEXT NOT NULL,
+            mismatch INTEGER NOT NULL CHECK(mismatch IN (0,1)),
+            difference_json TEXT NOT NULL DEFAULT '{}',
+            observed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_node_compat_observations_scope_time "
+        "ON production_node_compatibility_observations(scope,source_id,observed_at,id)"
+    )
+    db.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS protect_node_compat_observations_update
+        BEFORE UPDATE ON production_node_compatibility_observations
+        BEGIN
+            SELECT RAISE(ABORT,'production node compatibility observations are immutable');
+        END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS protect_node_compat_observations_delete
+        BEFORE DELETE ON production_node_compatibility_observations
+        BEGIN
+            SELECT RAISE(ABORT,'production node compatibility observations are immutable');
+        END
+        """
+    )
 
     snapshot_cache = {}
     _backfill_node_snapshots(db, "order_process_schedules", snapshot_cache)

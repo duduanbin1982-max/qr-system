@@ -16,6 +16,14 @@ sys.path.insert(0, PROJECT_ROOT)
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest"
 os.environ["ENABLE_SWAGGER"] = "false"
 os.environ["DB_PATH"] = TEST_DB
+for _production_node_flag in (
+    "PRODUCTION_NODE_QUERY_ENABLED",
+    "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED",
+    "PRODUCTION_NODE_WRITE_ENABLED",
+    "PRODUCTION_NODE_ENGINE_ENABLED",
+    "LEGACY_PROCESS_LINE_WRITE_BLOCKED",
+):
+    os.environ[_production_node_flag] = "false"
 
 UNIT_TEST_FILES = {
     "test_approval_workflow_policy.py",

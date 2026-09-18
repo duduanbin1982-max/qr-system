@@ -301,6 +301,10 @@ def _assert_v087_schema_absent(db):
         "SELECT 1 FROM sqlite_master WHERE type='table' "
         "AND name='production_node_migration_differences'"
     ).fetchone() is None
+    assert db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='production_node_compatibility_observations'"
+    ).fetchone() is None
     index_names = {
         row["name"]
         for row in db.execute(
@@ -988,6 +992,56 @@ def test_v087_adds_node_fact_columns_and_rebuilds_complete_immutable_trigger(
             (ids["revision_item"],),
         )
     assert migrated_v085_db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_v087_creates_immutable_idempotent_compatibility_observation_store(
+    migrated_v085_db,
+):
+    from modules.migration_production_nodes import (
+        m086_production_node_master,
+        m087_production_node_schedule_facts,
+    )
+
+    m086_production_node_master(migrated_v085_db)
+    m087_production_node_schedule_facts(migrated_v085_db)
+    columns = {
+        row["name"]
+        for row in migrated_v085_db.execute(
+            "PRAGMA table_info(production_node_compatibility_observations)"
+        ).fetchall()
+    }
+    assert {
+        "observation_key",
+        "scope",
+        "source_id",
+        "legacy_digest",
+        "node_digest",
+        "mismatch",
+        "difference_json",
+        "observed_at",
+    }.issubset(columns)
+
+    migrated_v085_db.execute(
+        "INSERT INTO production_node_compatibility_observations "
+        "(observation_key,scope,source_id,legacy_digest,node_digest,mismatch,difference_json) "
+        "VALUES ('same-input','resource_list',NULL,'a','a',0,'{}')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        migrated_v085_db.execute(
+            "INSERT INTO production_node_compatibility_observations "
+            "(observation_key,scope,source_id,legacy_digest,node_digest,mismatch,difference_json) "
+            "VALUES ('same-input','resource_list',NULL,'a','a',0,'{}')"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        migrated_v085_db.execute(
+            "UPDATE production_node_compatibility_observations "
+            "SET mismatch=1 WHERE observation_key='same-input'"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        migrated_v085_db.execute(
+            "DELETE FROM production_node_compatibility_observations "
+            "WHERE observation_key='same-input'"
+        )
 
 
 def test_v087_runner_failure_rolls_back_all_schema_facts_and_trigger_changes(

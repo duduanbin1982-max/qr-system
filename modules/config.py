@@ -145,6 +145,67 @@ APPROVAL_POLICY_LEGACY_WRITE_BLOCKED = _APPROVAL_POLICY_FLAGS["APPROVAL_POLICY_L
 validate_approval_policy_flags(_APPROVAL_POLICY_FLAGS)
 
 
+PRODUCTION_NODE_FLAG_NAMES = (
+    "PRODUCTION_NODE_QUERY_ENABLED",
+    "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED",
+    "PRODUCTION_NODE_WRITE_ENABLED",
+    "PRODUCTION_NODE_ENGINE_ENABLED",
+    "LEGACY_PROCESS_LINE_WRITE_BLOCKED",
+)
+
+
+def get_production_node_flags(environ=None):
+    return get_versioning_flags(PRODUCTION_NODE_FLAG_NAMES, environ=environ)
+
+
+def validate_production_node_flags(flags=None):
+    values = flags or {
+        name: globals().get(name, False) for name in PRODUCTION_NODE_FLAG_NAMES
+    }
+    validate_versioning_flags(
+        values,
+        label="生产节点",
+        query_key="PRODUCTION_NODE_QUERY_ENABLED",
+        audit_key="PRODUCTION_NODE_COMPAT_AUDIT_ENABLED",
+        write_key="PRODUCTION_NODE_WRITE_ENABLED",
+        legacy_blocked_key="LEGACY_PROCESS_LINE_WRITE_BLOCKED",
+    )
+    violations = []
+    if values["PRODUCTION_NODE_ENGINE_ENABLED"] and not (
+        values["PRODUCTION_NODE_QUERY_ENABLED"]
+        and values["PRODUCTION_NODE_COMPAT_AUDIT_ENABLED"]
+        and values["PRODUCTION_NODE_WRITE_ENABLED"]
+    ):
+        violations.append("节点排程引擎要求先开启查询、兼容审计和节点写入")
+    if (
+        values["LEGACY_PROCESS_LINE_WRITE_BLOCKED"]
+        and not values["PRODUCTION_NODE_ENGINE_ENABLED"]
+    ):
+        violations.append("阻断 Legacy 产线写入要求先开启节点排程引擎")
+    if violations:
+        raise RuntimeError("生产节点功能开关组合无效：" + "；".join(violations))
+    return values
+
+
+_PRODUCTION_NODE_FLAGS = get_production_node_flags()
+PRODUCTION_NODE_QUERY_ENABLED = _PRODUCTION_NODE_FLAGS[
+    "PRODUCTION_NODE_QUERY_ENABLED"
+]
+PRODUCTION_NODE_COMPAT_AUDIT_ENABLED = _PRODUCTION_NODE_FLAGS[
+    "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED"
+]
+PRODUCTION_NODE_WRITE_ENABLED = _PRODUCTION_NODE_FLAGS[
+    "PRODUCTION_NODE_WRITE_ENABLED"
+]
+PRODUCTION_NODE_ENGINE_ENABLED = _PRODUCTION_NODE_FLAGS[
+    "PRODUCTION_NODE_ENGINE_ENABLED"
+]
+LEGACY_PROCESS_LINE_WRITE_BLOCKED = _PRODUCTION_NODE_FLAGS[
+    "LEGACY_PROCESS_LINE_WRITE_BLOCKED"
+]
+validate_production_node_flags(_PRODUCTION_NODE_FLAGS)
+
+
 PENDING_ROUTE_PRICE_FLAG_NAMES = (
     "ROUTE_PRICE_PENDING_REFERENCE_ENABLED",
     "ROUTE_PRICE_PENDING_COMPAT_AUDIT_ENABLED",
