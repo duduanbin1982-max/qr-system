@@ -57,22 +57,61 @@ def _remove_sqlite_artifacts(path):
 from modules import migrations as _test_migration_module
 
 
+APPROVED_CORE_PROCESSES = {
+    "下料": ("原材料切割", 1),
+    "铆接": ("铆接组装", 2),
+    "焊接": ("焊接组装", 3),
+    "抛丸": ("表面抛丸", 4),
+    "打磨": ("表面打磨", 5),
+    "镗孔": ("精密镗孔", 6),
+    "喷漆": ("喷涂上色", 7),
+}
+
+
 def _seed_approved_core_process_baseline(conn):
     """Model the approved production process master data before V076."""
-    approved_processes = {
-        "下料": ("原材料切割", 1),
-        "铆接": ("铆接组装", 2),
-        "焊接": ("焊接组装", 3),
-        "抛丸": ("表面抛丸", 4),
-        "打磨": ("表面打磨", 5),
-        "镗孔": ("精密镗孔", 6),
-        "喷漆": ("喷涂上色", 7),
-    }
-    for name, (description, seq_order) in approved_processes.items():
-        conn.execute(
-            "INSERT OR IGNORE INTO processes "
-            "(name,description,seq_order,status) VALUES (?,?,?,'active')",
-            (name, description, seq_order),
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(processes)")}
+    for name, (description, seq_order) in APPROVED_CORE_PROCESSES.items():
+        if "process_code" in columns:
+            conn.execute(
+                "INSERT OR IGNORE INTO processes "
+                "(process_code,name,description,seq_order,status) "
+                "VALUES (?,?,?,?, 'active')",
+                (f"TEST-APPROVED-{seq_order:03d}", name, description, seq_order),
+            )
+        else:
+            conn.execute(
+                "INSERT OR IGNORE INTO processes "
+                "(name,description,seq_order,status) VALUES (?,?,?,'active')",
+                (name, description, seq_order),
+            )
+    conn.commit()
+
+
+def _ensure_approved_core_process_versions(conn):
+    """Complete post-V060 test roots with the real V060 baseline backfill."""
+    from modules.migration_process_versioning_v060 import _backfill_legacy_v1
+
+    approved_names = tuple(APPROVED_CORE_PROCESSES)
+    placeholders = ",".join("?" for _ in approved_names)
+    _backfill_legacy_v1(conn)
+
+    rows = conn.execute(
+        "SELECT id FROM processes WHERE name IN (" + placeholders + ") ORDER BY id",
+        approved_names,
+    ).fetchall()
+    incomplete = conn.execute(
+        "SELECT p.name FROM processes p "
+        "LEFT JOIN process_versions v ON v.id=p.current_effective_version_id "
+        "WHERE p.name IN (" + placeholders + ") "
+        "AND (p.current_effective_version_id IS NULL OR v.process_id<>p.id) "
+        "ORDER BY p.name",
+        approved_names,
+    ).fetchall()
+    if len(rows) != len(approved_names) or incomplete:
+        raise AssertionError(
+            "approved test processes require complete effective versions: "
+            + ",".join(row[0] for row in incomplete)
         )
     conn.commit()
 
@@ -118,6 +157,7 @@ def _run_test_migrations_with_approved_production_baseline(db=None):
 
     if 60 <= current_version < 76:
         _seed_approved_core_process_baseline(db)
+        _ensure_approved_core_process_versions(db)
         return _REAL_RUN_MIGRATIONS(db)
 
     if current_version >= 76:

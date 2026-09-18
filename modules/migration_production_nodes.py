@@ -124,7 +124,10 @@ def m086_production_node_master(db):
             allow_mixed_orders INTEGER NOT NULL DEFAULT 0 CHECK(allow_mixed_orders IN (0,1)),
             status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
             created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT
+            FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT,
+            FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT,
+            FOREIGN KEY(route_version_id) REFERENCES process_route_versions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(process_version_id) REFERENCES process_versions(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS production_node_calendar_overrides (
