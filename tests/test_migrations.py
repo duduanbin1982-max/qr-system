@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 86
-    assert [item["version"] for item in report["pending"]] == list(range(71, 87))
+    assert report["target_version"] == 87
+    assert [item["version"] for item in report["pending"]] == list(range(71, 88))
     assert database.read_bytes() == before
 
 
@@ -357,7 +357,8 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[84] == "modules.migration_order_priority"
     assert by_version[85] == "modules.migration_schedule_standard_binding_v085"
     assert by_version[86] == "modules.migration_production_nodes"
-    assert migrations.LATEST_VERSION == 86
+    assert by_version[87] == "modules.migration_production_nodes"
+    assert migrations.LATEST_VERSION == 87
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

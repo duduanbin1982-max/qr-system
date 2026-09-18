@@ -1,4 +1,8 @@
-"""V086 stable production-node master data and legacy line mappings."""
+"""V086-V087 production-node master data and exact legacy fact mappings."""
+
+import json
+
+from modules.migration_helpers import add_column_if_missing
 
 
 APPROVED_PRODUCTION_NODE_COUNTS = {
@@ -180,6 +184,268 @@ def m086_production_node_master(db):
     _validate_legacy_node_mapping(db)
 
 
+NODE_FACT_COLUMNS = {
+    "production_node_id": (
+        "INTEGER REFERENCES production_nodes(id) ON DELETE RESTRICT"
+    ),
+    "node_code_snapshot": "TEXT NOT NULL DEFAULT ''",
+    "node_name_snapshot": "TEXT NOT NULL DEFAULT ''",
+    "capacity_mode_snapshot": "TEXT NOT NULL DEFAULT ''",
+    "node_calendar_snapshot_json": "TEXT NOT NULL DEFAULT '{}'",
+    "node_capability_snapshot_json": "TEXT NOT NULL DEFAULT '[]'",
+    "locked": "INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1))",
+    "lock_reason": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _fetch_dicts(db, sql, params=()):
+    cursor = db.execute(sql, params)
+    columns = [description[0] for description in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _compact_json(value):
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _calendar_snapshot(db, calendar_id):
+    calendars = _fetch_dicts(
+        db,
+        "SELECT id AS calendar_id,calendar_code,calendar_name,timezone,"
+        "weekly_workdays,status FROM schedule_calendars WHERE id=?",
+        (calendar_id,),
+    )
+    if not calendars:
+        raise RuntimeError(
+            f"V087 production-node calendar missing: calendar_id={calendar_id}"
+        )
+    calendar = calendars[0]
+    calendar["shifts"] = _fetch_dicts(
+        db,
+        "SELECT id AS shift_id,shift_code,shift_name,start_minute,end_minute,status "
+        "FROM schedule_shifts WHERE calendar_id=? ORDER BY start_minute,end_minute,id",
+        (calendar_id,),
+    )
+    calendar["exceptions"] = _fetch_dicts(
+        db,
+        "SELECT id AS exception_id,work_date,is_working_day,shift_ids,note "
+        "FROM schedule_calendar_exceptions WHERE calendar_id=? ORDER BY work_date,id",
+        (calendar_id,),
+    )
+    return _compact_json(calendar)
+
+
+def _capability_snapshot(db, production_node_id):
+    capabilities = _fetch_dicts(
+        db,
+        "SELECT id AS capability_id,product_id,product_family,material_code,"
+        "specification,route_version_id,process_version_id,max_batch_quantity,"
+        "batch_minutes,changeover_minutes,allow_mixed_orders,status "
+        "FROM production_node_capabilities WHERE production_node_id=? ORDER BY id",
+        (production_node_id,),
+    )
+    return _compact_json(capabilities)
+
+
+def _node_snapshot(db, production_node_id, cache):
+    if production_node_id not in cache:
+        nodes = _fetch_dicts(
+            db,
+            "SELECT id,node_code,node_name,capacity_mode,calendar_id "
+            "FROM production_nodes WHERE id=?",
+            (production_node_id,),
+        )
+        if not nodes:
+            raise RuntimeError(
+                "V087 production-node mapping disappeared during backfill: "
+                f"node_id={production_node_id}"
+            )
+        node = nodes[0]
+        cache[production_node_id] = (
+            node["id"],
+            node["node_code"],
+            node["node_name"],
+            node["capacity_mode"],
+            _calendar_snapshot(db, node["calendar_id"]),
+            _capability_snapshot(db, node["id"]),
+        )
+    return cache[production_node_id]
+
+
+def _record_mapping_difference(
+    db,
+    *,
+    source_table,
+    source_id,
+    legacy_process_line_id,
+    difference_code,
+):
+    detail_json = _compact_json(
+        {
+            "mapping_key": "production_nodes.legacy_process_line_id",
+            "legacy_process_line_id": legacy_process_line_id,
+            "reason": difference_code,
+        }
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO production_node_migration_differences "
+        "(source_table,source_id,legacy_process_line_id,difference_code,detail_json) "
+        "VALUES (?,?,?,?,?)",
+        (
+            source_table,
+            source_id,
+            legacy_process_line_id,
+            difference_code,
+            detail_json,
+        ),
+    )
+
+
+def _backfill_node_snapshots(db, table, snapshot_cache):
+    rows = _fetch_dicts(
+        db,
+        f"SELECT f.id AS source_id,f.process_line_id AS legacy_process_line_id,"
+        "f.execution_mode,n.id AS production_node_id "
+        f"FROM {table} f LEFT JOIN production_nodes n "
+        "ON n.legacy_process_line_id=f.process_line_id "
+        "WHERE f.production_node_id IS NULL ORDER BY f.id",
+    )
+    for row in rows:
+        if row["production_node_id"] is None:
+            if (
+                row["legacy_process_line_id"] is None
+                and row["execution_mode"] in ("outsourced", "non_scheduled")
+            ):
+                continue
+            _record_mapping_difference(
+                db,
+                source_table=table,
+                source_id=row["source_id"],
+                legacy_process_line_id=row["legacy_process_line_id"],
+                difference_code=(
+                    "missing_legacy_reference"
+                    if row["legacy_process_line_id"] is None
+                    else "missing_mapping"
+                ),
+            )
+            continue
+        snapshot = _node_snapshot(db, row["production_node_id"], snapshot_cache)
+        db.execute(
+            f"UPDATE {table} SET production_node_id=?,node_code_snapshot=?,"
+            "node_name_snapshot=?,capacity_mode_snapshot=?,"
+            "node_calendar_snapshot_json=?,node_capability_snapshot_json=? "
+            "WHERE id=? AND production_node_id IS NULL",
+            (*snapshot, row["source_id"]),
+        )
+
+
+def _backfill_node_references(db, table):
+    rows = _fetch_dicts(
+        db,
+        f"SELECT f.id AS source_id,f.process_line_id AS legacy_process_line_id,"
+        "n.id AS production_node_id "
+        f"FROM {table} f LEFT JOIN production_nodes n "
+        "ON n.legacy_process_line_id=f.process_line_id "
+        "WHERE f.production_node_id IS NULL ORDER BY f.id",
+    )
+    for row in rows:
+        if row["production_node_id"] is None:
+            _record_mapping_difference(
+                db,
+                source_table=table,
+                source_id=row["source_id"],
+                legacy_process_line_id=row["legacy_process_line_id"],
+                difference_code=(
+                    "missing_legacy_reference"
+                    if row["legacy_process_line_id"] is None
+                    else "missing_mapping"
+                ),
+            )
+            continue
+        db.execute(
+            f"UPDATE {table} SET production_node_id=? "
+            "WHERE id=? AND production_node_id IS NULL",
+            (row["production_node_id"], row["source_id"]),
+        )
+
+
+def _create_revision_item_immutability_trigger(db):
+    immutable_columns = [
+        row[1]
+        for row in db.execute("PRAGMA table_info(schedule_revision_items)")
+    ]
+    update_columns = ",".join(f'"{column}"' for column in immutable_columns)
+    db.execute(
+        "CREATE TRIGGER protect_schedule_revision_items_update "
+        f"BEFORE UPDATE OF {update_columns} ON schedule_revision_items "
+        "BEGIN SELECT RAISE(ABORT,'schedule revision items are immutable'); END"
+    )
+
+
+def m087_production_node_schedule_facts(db):
+    """Add node facts and backfill only through the stable V086 legacy key."""
+    for table in ("order_process_schedules", "schedule_revision_items"):
+        for column, definition in NODE_FACT_COLUMNS.items():
+            add_column_if_missing(db, table, column, definition)
+    for table in ("order_process_schedule_segments", "schedule_downtime_events"):
+        add_column_if_missing(
+            db,
+            table,
+            "production_node_id",
+            "INTEGER REFERENCES production_nodes(id) ON DELETE RESTRICT",
+        )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS production_node_migration_differences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_table TEXT NOT NULL,
+            source_id INTEGER NOT NULL,
+            legacy_process_line_id INTEGER,
+            difference_code TEXT NOT NULL,
+            detail_json TEXT NOT NULL DEFAULT '{}',
+            observed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            UNIQUE(source_table,source_id,difference_code)
+        )
+        """
+    )
+
+    snapshot_cache = {}
+    _backfill_node_snapshots(db, "order_process_schedules", snapshot_cache)
+    _backfill_node_references(db, "order_process_schedule_segments")
+
+    db.execute("DROP TRIGGER IF EXISTS protect_schedule_revision_items_update")
+    try:
+        _backfill_node_snapshots(db, "schedule_revision_items", snapshot_cache)
+    finally:
+        _create_revision_item_immutability_trigger(db)
+
+    _backfill_node_references(db, "schedule_downtime_events")
+
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS idx_schedule_facts_node_time "
+        "ON order_process_schedules("
+        "production_node_id,planned_start_at,planned_end_at)",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_segments_node_time "
+        "ON order_process_schedule_segments("
+        "production_node_id,segment_start_at,segment_end_at)",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_revision_items_node "
+        "ON schedule_revision_items(production_node_id,revision_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_downtime_node_time "
+        "ON schedule_downtime_events(production_node_id,start_at,end_at,status)",
+        "CREATE INDEX IF NOT EXISTS idx_node_migration_differences_source "
+        "ON production_node_migration_differences("
+        "source_table,source_id,difference_code)",
+    ):
+        db.execute(statement)
+
+
 MIGRATIONS = [
     (86, "Add stable production-node master data", m086_production_node_master),
+    (87, "Add production-node scheduling facts", m087_production_node_schedule_facts),
 ]

@@ -140,19 +140,19 @@ _REAL_RUN_MIGRATIONS = _test_migration_module.run_migrations
 def _run_test_migrations_with_approved_production_baseline(db=None):
     """Run the real catalog while modeling production's approved V075 data.
 
-    This test-only adapter never inserts process versions or legacy production
-    lines. It stops the real runner at V059, seeds only process master data,
-    then lets the real V060-V086 chain version those processes and build and
-    validate the 21 legacy resources and nodes.
+    This test-only adapter directly seeds only process root master data. It
+    then lets the real V060 legacy backfill create every eligible process
+    version, and lets the real V060-V087 chain build and validate the 21 legacy
+    resources, nodes, and additive node fact schema.
     """
     catalog = _test_migration_module.MIGRATIONS
     versions = {version for version, _, _ in catalog}
     if db is None:
         return _REAL_RUN_MIGRATIONS(db)
     current_version = db.execute("PRAGMA user_version").fetchone()[0]
-    if current_version >= 86:
+    if current_version >= 87:
         return _REAL_RUN_MIGRATIONS(db)
-    if not {76, 86}.issubset(versions):
+    if not {76, 87}.issubset(versions):
         return _REAL_RUN_MIGRATIONS(db)
 
     if 60 <= current_version < 76:
