@@ -300,6 +300,14 @@ export const ACTION_PAGE_MAP = {
     "page:production",
     "page:production.schedule"
   ],
+  "production_nodes": [
+    "page:production",
+    "page:production.schedule"
+  ],
+  "schedules": [
+    "page:production",
+    "page:production.schedule"
+  ],
   "rework": [
     "page:production",
     "page:production.rework"
@@ -470,6 +478,36 @@ export const IMPLIED_PERMISSIONS = {
   ],
   "routes:view": [
     "route_versions:view"
+  ],
+  "production_nodes:manage": [
+    "production_nodes:view"
+  ],
+  "production_nodes:capability_manage": [
+    "production_nodes:view"
+  ],
+  "production_nodes:calendar_manage": [
+    "production_nodes:view"
+  ],
+  "production_nodes:downtime_manage": [
+    "production_nodes:view"
+  ],
+  "schedules:generate": [
+    "schedules:view"
+  ],
+  "schedules:adjust": [
+    "schedules:view"
+  ],
+  "schedules:lock": [
+    "schedules:view"
+  ],
+  "schedules:unlock": [
+    "schedules:view"
+  ],
+  "schedules:submit": [
+    "schedules:view"
+  ],
+  "schedules:approve": [
+    "schedules:view"
   ],
   "wages:view_self": [
     "wages:view"

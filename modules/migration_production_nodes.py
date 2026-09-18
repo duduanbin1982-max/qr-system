@@ -173,6 +173,18 @@ def m086_production_node_master(db):
             ON production_node_calendar_overrides(production_node_id,start_at,end_at,status);
         CREATE INDEX IF NOT EXISTS idx_production_node_audit_node_time
             ON production_node_audit_events(production_node_id,created_at);
+
+        CREATE TRIGGER IF NOT EXISTS trg_production_node_audit_immutable_update
+        BEFORE UPDATE ON production_node_audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'production node audit events are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_production_node_audit_immutable_delete
+        BEFORE DELETE ON production_node_audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'production node audit events are immutable');
+        END;
         """
     )
     db.execute(

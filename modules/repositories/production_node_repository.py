@@ -1,4 +1,4 @@
-"""Read-side persistence for production-node staged compatibility cutover."""
+"""Single persistence seam for production-node reads and administration."""
 
 import hashlib
 import json
@@ -155,14 +155,18 @@ class ProductionNodeRepository:
         )
 
     @staticmethod
-    def list_nodes(process_id=None, limit=500, db=None, *, full=False):
+    def list_nodes(process_id=None, status=None, limit=500, db=None, *, full=False):
         db = resolve_db(db)
         bounded_limit = ProductionNodeRepository._bounded_limit(limit)
-        where = ""
+        filters = []
         params = []
         if process_id not in (None, ""):
-            where = "WHERE n.process_id=?"
+            filters.append("n.process_id=?")
             params.append(int(process_id))
+        if status not in (None, ""):
+            filters.append("n.status=?")
+            params.append(str(status))
+        where = " WHERE " + " AND ".join(filters) if filters else ""
         cursor = db.execute(
             """
             SELECT n.id,n.process_id,n.node_code,n.node_name,n.capacity_mode,
@@ -215,6 +219,296 @@ class ProductionNodeRepository:
             ProductionNodeRepository._dict_rows(cursor),
             resource_column="production_node_id",
         )
+
+    @staticmethod
+    def find_node(node_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT n.*,p.name AS process_name,c.calendar_code,c.calendar_name "
+            "FROM production_nodes n "
+            "JOIN processes p ON p.id=n.process_id "
+            "JOIN schedule_calendars c ON c.id=n.calendar_id WHERE n.id=?",
+            (node_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def actor_exists(actor_id, db=None):
+        db = resolve_db(db)
+        return bool(db.execute("SELECT 1 FROM users WHERE id=?", (actor_id,)).fetchone())
+
+    @staticmethod
+    def process_is_active(process_id, db=None):
+        db = resolve_db(db)
+        return bool(
+            db.execute(
+                "SELECT 1 FROM processes WHERE id=? AND status='active'",
+                (process_id,),
+            ).fetchone()
+        )
+
+    @staticmethod
+    def calendar_is_active(calendar_id, db=None):
+        db = resolve_db(db)
+        return bool(
+            db.execute(
+                "SELECT 1 FROM schedule_calendars WHERE id=? AND status='active'",
+                (calendar_id,),
+            ).fetchone()
+        )
+
+    @staticmethod
+    def node_code_exists(process_id, node_code, exclude_id=None, db=None):
+        db = resolve_db(db)
+        sql = "SELECT 1 FROM production_nodes WHERE process_id=? AND node_code=?"
+        params = [process_id, node_code]
+        if exclude_id is not None:
+            sql += " AND id<>?"
+            params.append(exclude_id)
+        return bool(db.execute(sql, params).fetchone())
+
+    @staticmethod
+    def product_exists(product_id, db=None):
+        db = resolve_db(db)
+        return bool(db.execute("SELECT 1 FROM products WHERE id=?", (product_id,)).fetchone())
+
+    @staticmethod
+    def process_version_process_id(process_version_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT process_id FROM process_versions WHERE id=?",
+            (process_version_id,),
+        ).fetchone()
+        return row["process_id"] if row else None
+
+    @staticmethod
+    def route_version_exists(route_version_id, db=None):
+        db = resolve_db(db)
+        return bool(
+            db.execute(
+                "SELECT 1 FROM process_route_versions WHERE id=?",
+                (route_version_id,),
+            ).fetchone()
+        )
+
+    @staticmethod
+    def route_version_contains_process(
+        route_version_id, process_id, process_version_id=None, db=None
+    ):
+        db = resolve_db(db)
+        sql = (
+            "SELECT 1 FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?"
+        )
+        params = [route_version_id, process_id]
+        if process_version_id is not None:
+            sql += " AND process_version_id=?"
+            params.append(process_version_id)
+        return bool(db.execute(sql + " LIMIT 1", params).fetchone())
+
+    @staticmethod
+    def find_overlapping_active_override(node_id, start_at, end_at, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM production_node_calendar_overrides "
+            "WHERE production_node_id=? AND status='active' "
+            "AND start_at<? AND end_at>? ORDER BY id LIMIT 1",
+            (node_id, end_at, start_at),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def list_capabilities(node_id, db=None):
+        db = resolve_db(db)
+        return ProductionNodeRepository._dict_rows(
+            db.execute(
+                "SELECT * FROM production_node_capabilities "
+                "WHERE production_node_id=? ORDER BY id",
+                (node_id,),
+            )
+        )
+
+    @staticmethod
+    def list_calendar_overrides(
+        node_id, start_at="", end_at="", limit=500, db=None
+    ):
+        db = resolve_db(db)
+        filters = ["production_node_id=?"]
+        params = [node_id]
+        if start_at:
+            filters.append("end_at>?")
+            params.append(start_at)
+        if end_at:
+            filters.append("start_at<?")
+            params.append(end_at)
+        params.append(ProductionNodeRepository._bounded_limit(limit))
+        return ProductionNodeRepository._dict_rows(
+            db.execute(
+                "SELECT * FROM production_node_calendar_overrides WHERE "
+                + " AND ".join(filters)
+                + " ORDER BY start_at,end_at,id LIMIT ?",
+                params,
+            )
+        )
+
+    @staticmethod
+    def find_calendar_override(override_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM production_node_calendar_overrides WHERE id=?",
+            (override_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def find_audit_by_idempotency_key(idempotency_key, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM production_node_audit_events WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["before"] = json.loads(result.pop("before_json") or "{}")
+        result["after"] = json.loads(result.pop("after_json") or "{}")
+        return result
+
+    @staticmethod
+    def list_audit_events(node_id, limit=500, db=None):
+        db = resolve_db(db)
+        rows = ProductionNodeRepository._dict_rows(
+            db.execute(
+                "SELECT * FROM production_node_audit_events "
+                "WHERE production_node_id=? ORDER BY id DESC LIMIT ?",
+                (node_id, ProductionNodeRepository._bounded_limit(limit)),
+            )
+        )
+        for row in rows:
+            row["before"] = json.loads(row.pop("before_json") or "{}")
+            row["after"] = json.loads(row.pop("after_json") or "{}")
+        return rows
+
+    @staticmethod
+    def create_node(data, actor_id, db):
+        cursor = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                data["process_id"],
+                data["node_code"],
+                data["node_name"],
+                data["capacity_mode"],
+                data.get("status", "active"),
+                data["calendar_id"],
+            ),
+        )
+        return ProductionNodeRepository.find_node(cursor.lastrowid, db=db)
+
+    @staticmethod
+    def update_node(node_id, data, actor_id, db):
+        del actor_id
+        cursor = db.execute(
+            "UPDATE production_nodes SET process_id=?,node_code=?,node_name=?,"
+            "capacity_mode=?,status=?,calendar_id=?,row_version=row_version+1,"
+            "updated_at=datetime('now','localtime') WHERE id=? AND row_version=?",
+            (
+                data["process_id"],
+                data["node_code"],
+                data["node_name"],
+                data["capacity_mode"],
+                data.get("status", "active"),
+                data["calendar_id"],
+                node_id,
+                data["row_version"],
+            ),
+        )
+        return ProductionNodeRepository.find_node(node_id, db=db) if cursor.rowcount else None
+
+    @staticmethod
+    def replace_capabilities(
+        node_id, capabilities, actor_id, idempotency_key, reason, db
+    ):
+        del actor_id, idempotency_key, reason
+        db.execute(
+            "DELETE FROM production_node_capabilities WHERE production_node_id=?",
+            (node_id,),
+        )
+        for capability in capabilities:
+            db.execute(
+                "INSERT INTO production_node_capabilities "
+                "(production_node_id,product_id,product_family,material_code,"
+                "specification,route_version_id,process_version_id,max_batch_quantity,"
+                "batch_minutes,changeover_minutes,allow_mixed_orders,status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    node_id,
+                    capability.get("product_id"),
+                    capability.get("product_family", ""),
+                    capability.get("material_code", ""),
+                    capability.get("specification", ""),
+                    capability.get("route_version_id"),
+                    capability.get("process_version_id"),
+                    capability.get("max_batch_quantity"),
+                    capability.get("batch_minutes"),
+                    capability.get("changeover_minutes", 0),
+                    int(bool(capability.get("allow_mixed_orders", False))),
+                    capability.get("status", "active"),
+                ),
+            )
+        return ProductionNodeRepository.list_capabilities(node_id, db=db)
+
+    @staticmethod
+    def create_calendar_override(node_id, data, actor_id, db):
+        cursor = db.execute(
+            "INSERT INTO production_node_calendar_overrides "
+            "(production_node_id,start_at,end_at,override_type,reason,status,created_by) "
+            "VALUES (?,?,?,?,?,'active',?)",
+            (
+                node_id,
+                data["start_at"],
+                data["end_at"],
+                data["override_type"],
+                data["reason"],
+                actor_id,
+            ),
+        )
+        return ProductionNodeRepository.find_calendar_override(cursor.lastrowid, db=db)
+
+    @staticmethod
+    def cancel_calendar_override(
+        override_id, actor_id, reason, idempotency_key, db
+    ):
+        del actor_id, reason, idempotency_key
+        cursor = db.execute(
+            "UPDATE production_node_calendar_overrides SET status='cancelled' "
+            "WHERE id=? AND status='active'",
+            (override_id,),
+        )
+        return (
+            ProductionNodeRepository.find_calendar_override(override_id, db=db)
+            if cursor.rowcount
+            else None
+        )
+
+    @staticmethod
+    def append_audit_event(event, db):
+        cursor = db.execute(
+            "INSERT INTO production_node_audit_events "
+            "(production_node_id,event_type,actor_id,reason,before_json,after_json,"
+            "idempotency_key) VALUES (?,?,?,?,?,?,?)",
+            (
+                event.get("production_node_id"),
+                event["event_type"],
+                event.get("actor_id"),
+                event.get("reason", ""),
+                ProductionNodeRepository.canonical_payload(event.get("before", {})),
+                ProductionNodeRepository.canonical_payload(event.get("after", {})),
+                event["idempotency_key"],
+            ),
+        )
+        return cursor.lastrowid
 
     @staticmethod
     def canonical_payload(payload):
