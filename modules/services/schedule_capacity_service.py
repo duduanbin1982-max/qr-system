@@ -513,31 +513,93 @@ class ScheduleCapacityService:
         return segments
 
     @staticmethod
-    def _allocate_split_on_nodes(db, nodes, earliest, quantity, standard, occupancy):
-        """Split quantity across compatible physical nodes using deterministic finish order."""
+    def _allocate_split_on_nodes(
+        db, nodes, earliest, quantity, standard, occupancy, *,
+        operation=None, order=None, serial_ids=None, allocation_key_prefix="",
+        return_allocations=False,
+    ):
+        """Allocate whole batches and keep serial work on one node."""
         remaining_quantity = max(int(quantity or 0), 0)
         if remaining_quantity <= 0:
-            return []
-        state = {
-            node["id"]: {"node": node, "segments": [], "quantity": 0}
-            for node in nodes
-        }
+            return ([], []) if return_allocations else []
+        state = {node["id"]: {"node": node, "segments": [], "quantity": 0} for node in nodes}
         if not state:
-            raise NodeSchedulingError(
-                "NO_COMPATIBLE_NODE", "没有满足能力要求的生产节点", {}
-            )
-        epsilon = 1e-7
+            raise NodeSchedulingError("NO_COMPATIBLE_NODE", "没有满足能力要求的生产节点", {})
+
+        serial_values = [str(value).strip() for value in (serial_ids or ()) if str(value).strip()]
+        if serial_values:
+            if len(set(serial_values)) != len(serial_values) or len(serial_values) != remaining_quantity:
+                raise NodeSchedulingError(
+                    "SERIAL_ITEM_SPLIT_FORBIDDEN", "序列件输入与排程数量不一致", {
+                        "requested_quantity": remaining_quantity, "serial_count": len(serial_values),
+                    },
+                )
+            candidates = []
+            for node_id, item in state.items():
+                capability = ProductionNodePolicy.matching_capability(
+                    capabilities=item["node"].get("capabilities", []),
+                    operation=operation or {}, order=order or {},
+                ) or {}
+                if item["node"].get("capacity_mode") == "batch":
+                    batch_size, _, _ = ProductionNodePolicy._batch_configuration(capability)
+                    if remaining_quantity > batch_size:
+                        continue
+                    duration = ProductionNodePolicy.batch_duration_minutes(
+                        remaining_quantity, capability, changeover_required=True,
+                    )
+                else:
+                    duration = ScheduleCapacityService._duration_minutes(remaining_quantity, standard)
+                try:
+                    candidate = ScheduleCapacityService._allocate_on_node(
+                        db, item["node"], earliest, duration, occupancy,
+                    )
+                except (ValueError, NodeSchedulingError):
+                    continue
+                candidates.append((ScheduleCapacityService._parse_timestamp(candidate[-1]["end_at"]), node_id, candidate, capability))
+            if not candidates:
+                raise NodeSchedulingError("SERIAL_ITEM_SPLIT_FORBIDDEN", "序列件没有可独占的生产节点", {})
+            _, node_id, candidate, capability = min(candidates, key=lambda item: (item[0], item[1]))
+            for index, segment in enumerate(candidate):
+                segment["quantity"] = remaining_quantity if index == 0 else 0
+                state[node_id]["segments"].append(segment)
+            ScheduleCapacityService._add_segments_to_node_occupancy(occupancy, node_id, candidate)
+            first = candidate[0]
+            batch_key = f"{allocation_key_prefix}:node-{node_id}:batch-1" if allocation_key_prefix else f"node-{node_id}:batch-1"
+            allocations = [
+                {
+                    "production_node_id": node_id, "quantity": 1, "serial_id": serial_id,
+                    "batch_key": batch_key,
+                    "changeover_minutes": float(capability.get("changeover_minutes") or 0),
+                    "segment_start_at": first["start_at"], "segment_end_at": candidate[-1]["end_at"],
+                }
+                for serial_id in serial_values
+            ]
+            ProductionNodePolicy.validate_quantity_conservation(remaining_quantity, allocations)
+            segments = [segment for item in state.values() for segment in item["segments"]]
+            return (segments, allocations) if return_allocations else segments
+
+        allocations = []
+        batch_counters = {}
         while remaining_quantity > 0:
             available = []
-            chunk = max(1, int(math.ceil(remaining_quantity / len(state))))
+            base_chunk = max(1, int(math.ceil(remaining_quantity / len(state))))
             for node_id, item in state.items():
                 include_setup = item["quantity"] == 0
-                effective_standard = standard if include_setup else {
-                    **dict(standard), "setup_minutes": 0,
-                }
-                duration = ScheduleCapacityService._duration_minutes(
-                    chunk, effective_standard
-                )
+                capability = ProductionNodePolicy.matching_capability(
+                    capabilities=item["node"].get("capabilities", []),
+                    operation=operation or {}, order=order or {},
+                ) or {}
+                capacity_mode = item["node"].get("capacity_mode", "exclusive")
+                chunk = base_chunk
+                if capacity_mode == "batch":
+                    batch_size, _, _ = ProductionNodePolicy._batch_configuration(capability)
+                    chunk = min(chunk, batch_size)
+                    duration = ProductionNodePolicy.batch_duration_minutes(
+                        chunk, capability, changeover_required=include_setup,
+                    )
+                else:
+                    effective_standard = standard if include_setup else {**dict(standard), "setup_minutes": 0}
+                    duration = ScheduleCapacityService._duration_minutes(chunk, effective_standard)
                 try:
                     candidate = ScheduleCapacityService._allocate_on_node(
                         db, item["node"], earliest, duration, occupancy,
@@ -545,24 +607,32 @@ class ScheduleCapacityService:
                 except (ValueError, NodeSchedulingError):
                     continue
                 end = ScheduleCapacityService._parse_timestamp(candidate[-1]["end_at"])
-                available.append((end, node_id, candidate, chunk, duration))
+                available.append((end, node_id, candidate, chunk, capability, capacity_mode))
             if not available:
-                raise NodeSchedulingError(
-                    "NODE_CALENDAR_UNAVAILABLE",
-                    "工作日历在可搜索范围内没有足够产能", {},
-                )
-            _, node_id, candidate, allocated, _ = min(
+                raise NodeSchedulingError("NODE_CALENDAR_UNAVAILABLE", "工作日历在可搜索范围内没有足够产能", {})
+            _, node_id, candidate, allocated, capability, capacity_mode = min(
                 available, key=lambda item: (item[0], item[1])
             )
+            item = state[node_id]
+            batch_number = batch_counters.get(node_id, 0) + 1
+            batch_counters[node_id] = batch_number
+            batch_key = f"{allocation_key_prefix}:node-{node_id}:batch-{batch_number}" if allocation_key_prefix else f"node-{node_id}:batch-{batch_number}"
             for index, segment in enumerate(candidate):
                 segment["quantity"] = allocated if index == 0 else 0
                 state[node_id]["segments"].append(segment)
+            first = candidate[0]
+            allocations.append({
+                "production_node_id": node_id, "quantity": allocated, "serial_id": None,
+                "batch_key": batch_key,
+                "changeover_minutes": float(capability.get("changeover_minutes") or 0) if capacity_mode == "batch" and item["quantity"] == 0 else 0,
+                "segment_start_at": first["start_at"], "segment_end_at": candidate[-1]["end_at"],
+            })
             state[node_id]["quantity"] += allocated
-            ScheduleCapacityService._add_segments_to_node_occupancy(
-                occupancy, node_id, candidate
-            )
+            ScheduleCapacityService._add_segments_to_node_occupancy(occupancy, node_id, candidate)
             remaining_quantity -= allocated
-        return [segment for item in state.values() for segment in item["segments"]]
+        segments = [segment for item in state.values() for segment in item["segments"]]
+        ProductionNodePolicy.validate_quantity_conservation(quantity, allocations)
+        return (segments, allocations) if return_allocations else segments
 
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None):
@@ -575,6 +645,7 @@ class ScheduleCapacityService:
             operations = ScheduleCapacityRepository.find_order_operations(order_id, db=txn)
             if not operations:
                 raise ValueError("订单没有工序，无法生成排程")
+            order_serial_ids = ScheduleCapacityRepository.list_order_serial_ids(order_id, db=txn)
             cursor = ScheduleCapacityService._date(start_date or order["plan_start"], "计划开始日期")
             # A regenerated/in-progress order may retain a historical plan start.
             # Standards are effective for the planning run, not retroactively for
@@ -739,14 +810,25 @@ class ScheduleCapacityService:
                         continue
 
                     try:
+                        serial_ids = (
+                            order_serial_ids
+                            if order_serial_ids and len(order_serial_ids) == remaining
+                            and remaining == int(order["quantity"] or 0)
+                            else None
+                        )
                         if use_node_engine:
-                            segments = ScheduleCapacityService._allocate_split_on_nodes(
+                            segments, allocations = ScheduleCapacityService._allocate_split_on_nodes(
                                 txn, resources, cursor, remaining, standard, occupancy,
+                                operation=operation, order=order,
+                                serial_ids=serial_ids,
+                                allocation_key_prefix=f"{order_id}:{operation['order_process_id']}",
+                                return_allocations=True,
                             )
                         else:
                             segments = ScheduleCapacityService._allocate_split_on_lines(
                                 txn, resources, cursor, remaining, standard, occupancy,
                             )
+                            allocations = []
                     except NodeSchedulingError as exc:
                         blocked = True
                         payload = {**common, "process_line_id": None, "production_node_id": None,
@@ -859,7 +941,7 @@ class ScheduleCapacityService:
                                ),
                                "calendar_id": primary_snapshot["calendar_id"],
                                "line_name_snapshot": primary_snapshot["line_name"],
-                               "segments": segments,
+                               "segments": segments, "allocations": allocations,
                                "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d")}
                     payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                     cursor = end
@@ -988,6 +1070,7 @@ class ScheduleCapacityService:
             if not context:
                 raise ValueError("订单不存在")
             order = context["order"]
+            order_serial_ids = ScheduleCapacityRepository.list_order_serial_ids(order_id, db=txn)
             prior_run = ScheduleCapacityRepository.find_run(run_key, txn)
             if prior_run:
                 if prior_run["order_id"] != order_id:
@@ -1200,14 +1283,25 @@ class ScheduleCapacityService:
                                        "reason": block_reason})
                         continue
                     try:
+                        serial_ids = (
+                            order_serial_ids
+                            if order_serial_ids and len(order_serial_ids) == baseline["remaining_quantity"]
+                            and baseline["remaining_quantity"] == int(order["quantity"] or 0)
+                            else None
+                        )
                         if use_node_engine:
-                            segments = ScheduleCapacityService._allocate_split_on_nodes(
+                            segments, allocations = ScheduleCapacityService._allocate_split_on_nodes(
                                 txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
+                                operation=operation, order=order,
+                                serial_ids=serial_ids,
+                                allocation_key_prefix=f"{order_id}:{operation['order_process_id']}",
+                                return_allocations=True,
                             )
                         else:
                             segments = ScheduleCapacityService._allocate_split_on_lines(
                                 txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
                             )
+                            allocations = []
                     except NodeSchedulingError as exc:
                         blocked = True
                         block_reason = exc.message
@@ -1304,7 +1398,8 @@ class ScheduleCapacityService:
                                                                "nodes": snapshots if use_node_engine else []}, ensure_ascii=False, sort_keys=True),
                         "shift_snapshot_json": json.dumps([shift for item in snapshots for shift in item["shifts"]], ensure_ascii=False, sort_keys=True),
                         "calendar_id": primary_snapshot["calendar_id"], "line_name_snapshot": primary_snapshot["line_name"],
-                        "segments": segments, "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d"),
+                        "segments": segments, "allocations": allocations,
+                        "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d"),
                     }
                     payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
                     cursor = end

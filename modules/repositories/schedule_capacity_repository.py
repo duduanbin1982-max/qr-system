@@ -14,6 +14,22 @@ from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 
 class ScheduleCapacityRepository:
     @staticmethod
+    def list_order_serial_ids(order_id, db=None):
+        """Return active serial-item identifiers for a schedulable order."""
+        db = resolve_db(db)
+        try:
+            rows = db.execute(
+                "SELECT serial_no FROM product_items "
+                "WHERE order_id=? AND COALESCE(serial_no,'')<>'' "
+                "AND COALESCE(status,'') NOT IN ('cancelled','void','deleted') "
+                "ORDER BY position_no,id",
+                (order_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [str(row["serial_no"]) for row in rows]
+
+    @staticmethod
     def ensure_order_version_bindings(order_id, db):
         """Materialize exact route/process revisions for a schedulable order.
 
@@ -1042,8 +1058,9 @@ class ScheduleCapacityRepository:
              data.get("remaining_quantity_snapshot", data.get("quantity", 0)),
              data.get("source_fact_digest", "")),
         )
+        segment_ids = []
         for segment in data.get("segments", ()):
-            db.execute(
+            segment_cursor = db.execute(
                 "INSERT INTO order_process_schedule_segments "
                 "(schedule_id,process_line_id,production_node_id,segment_start_at,segment_end_at,occupied_minutes,shift_id,quantity) "
                 "VALUES (?,?,?,?,?,?,?,?)",
@@ -1052,6 +1069,47 @@ class ScheduleCapacityRepository:
                  segment["start_at"], segment["end_at"], segment["occupied_minutes"],
                  segment.get("shift_id"), segment.get("quantity", data.get("quantity", 0))),
             )
+            segment_ids.append(segment_cursor.lastrowid)
+        allocations = data.get("allocations", ())
+        if allocations:
+            try:
+                for allocation in allocations:
+                    node_id = allocation.get("production_node_id")
+                    segment_id = None
+                    for segment_id_candidate in segment_ids:
+                        segment_row = db.execute(
+                            "SELECT production_node_id,segment_start_at,segment_end_at "
+                            "FROM order_process_schedule_segments WHERE id=?",
+                            (segment_id_candidate,),
+                        ).fetchone()
+                        if not segment_row or segment_row["production_node_id"] != node_id:
+                            continue
+                        allocation_start = allocation.get("segment_start_at")
+                        allocation_end = allocation.get("segment_end_at")
+                        if not allocation_start or not allocation_end:
+                            segment_id = segment_id_candidate
+                            break
+                        # One allocation may span multiple calendar segments;
+                        # retain the first overlapping segment as its anchor.
+                        if (
+                            segment_row["segment_start_at"] < allocation_end
+                            and segment_row["segment_end_at"] > allocation_start
+                        ):
+                            segment_id = segment_id_candidate
+                            break
+                    db.execute(
+                        "INSERT INTO production_node_schedule_allocations "
+                        "(schedule_id,segment_id,production_node_id,quantity,serial_id,batch_key,"
+                        "changeover_minutes,allocation_start_at,allocation_end_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (cur.lastrowid, segment_id, node_id, int(allocation.get("quantity") or 0),
+                         allocation.get("serial_id"), allocation.get("batch_key") or "",
+                         float(allocation.get("changeover_minutes") or 0),
+                         allocation.get("segment_start_at") or "", allocation.get("segment_end_at") or ""),
+                    )
+            except sqlite3.OperationalError:
+                # V088 is additive; keep read-only V087 clones compatible.
+                pass
         if data.get("schedule_revision_id"):
             ScheduleCapacityRepository.snapshot_revision_item(cur.lastrowid, data["schedule_revision_id"], db)
         return cur.lastrowid
@@ -1072,6 +1130,15 @@ class ScheduleCapacityRepository:
                 (schedule_id,),
             ).fetchall()
         ]
+        try:
+            payload["allocations"] = [
+                dict(allocation) for allocation in db.execute(
+                    "SELECT * FROM production_node_schedule_allocations "
+                    "WHERE schedule_id=? ORDER BY id", (schedule_id,)
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            payload["allocations"] = []
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         db.execute(

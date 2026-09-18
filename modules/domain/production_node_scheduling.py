@@ -38,6 +38,7 @@ class ProductionNodePolicy:
             "LOCKED_TASK_CONFLICT",
             "SERIAL_ITEM_SPLIT_FORBIDDEN",
             "BATCH_CAPACITY_EXCEEDED",
+            "QUANTITY_CONSERVATION_FAILED",
         }
     )
     CAPABILITY_FIELDS = (
@@ -836,6 +837,46 @@ class ProductionNodePolicy:
         if changeover_required:
             duration += changeover_minutes
         return duration
+
+    @classmethod
+    def validate_quantity_conservation(cls, requested_quantity, allocations):
+        """Require allocation quantities to conserve the requested amount exactly.
+
+        Allocations are intentionally treated as immutable facts at this seam:
+        negative, fractional and non-integer quantities fail closed instead of
+        being silently rounded by the scheduler.
+        """
+        expected = cls._positive_integer(requested_quantity)
+        if expected is None:
+            raise NodeSchedulingError(
+                "QUANTITY_CONSERVATION_FAILED",
+                "待排数量必须为正整数",
+                {"requested_quantity": requested_quantity, "allocated_quantity": 0},
+            )
+        normalized = []
+        for index, allocation in enumerate(allocations or ()):
+            if not isinstance(allocation, dict):
+                raise NodeSchedulingError(
+                    "QUANTITY_CONSERVATION_FAILED",
+                    "分配明细无效",
+                    {"allocation_index": index, "allocated_quantity": 0},
+                )
+            quantity = cls._positive_integer(allocation.get("quantity"))
+            if quantity is None:
+                raise NodeSchedulingError(
+                    "QUANTITY_CONSERVATION_FAILED",
+                    "分配数量必须为正整数",
+                    {"allocation_index": index, "quantity": allocation.get("quantity")},
+                )
+            normalized.append(quantity)
+        actual = sum(normalized)
+        if actual != expected:
+            raise NodeSchedulingError(
+                "QUANTITY_CONSERVATION_FAILED",
+                "排程分配数量未守恒",
+                {"requested_quantity": expected, "allocated_quantity": actual},
+            )
+        return True
 
 
 __all__ = ["NodeSchedulingError", "ProductionNodePolicy"]

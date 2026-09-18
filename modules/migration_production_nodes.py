@@ -503,7 +503,47 @@ def m087_production_node_schedule_facts(db):
         db.execute(statement)
 
 
+def m088_batch_serial_allocations(db):
+    """Persist exact batch and serial allocation facts for node schedules."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS production_node_schedule_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id INTEGER NOT NULL,
+            segment_id INTEGER,
+            production_node_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            serial_id TEXT,
+            batch_key TEXT NOT NULL DEFAULT '',
+            changeover_minutes REAL NOT NULL DEFAULT 0 CHECK(changeover_minutes >= 0),
+            allocation_start_at TEXT,
+            allocation_end_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY(schedule_id) REFERENCES order_process_schedules(id) ON DELETE CASCADE,
+            FOREIGN KEY(segment_id) REFERENCES order_process_schedule_segments(id) ON DELETE CASCADE,
+            FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT
+        )
+        """
+    )
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS uq_node_allocation_serial_operation
+        ON production_node_schedule_allocations(schedule_id, serial_id)
+        WHERE serial_id IS NOT NULL AND serial_id <> ''"""
+    )
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS idx_node_allocations_schedule
+        ON production_node_schedule_allocations(schedule_id, id)"""
+    )
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS idx_node_allocations_node_time
+        ON production_node_schedule_allocations(
+            production_node_id, allocation_start_at, allocation_end_at
+        )"""
+    )
+
+
 MIGRATIONS = [
     (86, "Add stable production-node master data", m086_production_node_master),
     (87, "Add production-node scheduling facts", m087_production_node_schedule_facts),
+    (88, "Add batch and serial node allocations", m088_batch_serial_allocations),
 ]
