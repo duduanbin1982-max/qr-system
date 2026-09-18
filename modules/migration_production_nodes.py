@@ -389,6 +389,14 @@ def _create_revision_item_immutability_trigger(db):
 
 def m087_production_node_schedule_facts(db):
     """Add node facts and backfill only through the stable V086 legacy key."""
+    # Python's sqlite3 legacy transaction control does not start a transaction
+    # for DDL.  Begin before the first ALTER/CREATE so the outer migration
+    # runner can roll every V087 schema and data change back atomically.  When
+    # a caller already owns a transaction, preserve that boundary and never
+    # commit it here.
+    if not db.in_transaction:
+        db.execute("BEGIN")
+
     for table in ("order_process_schedules", "schedule_revision_items"):
         for column, definition in NODE_FACT_COLUMNS.items():
             add_column_if_missing(db, table, column, definition)
@@ -438,9 +446,6 @@ def m087_production_node_schedule_facts(db):
         "ON schedule_revision_items(production_node_id,revision_id,id)",
         "CREATE INDEX IF NOT EXISTS idx_schedule_downtime_node_time "
         "ON schedule_downtime_events(production_node_id,start_at,end_at,status)",
-        "CREATE INDEX IF NOT EXISTS idx_node_migration_differences_source "
-        "ON production_node_migration_differences("
-        "source_table,source_id,difference_code)",
     ):
         db.execute(statement)
 

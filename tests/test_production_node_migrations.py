@@ -274,6 +274,106 @@ def _seed_v087_fact_set(db, *, suffix, process_line_id):
     }
 
 
+def _assert_v087_schema_absent(db):
+    additive_columns = {
+        "production_node_id",
+        "node_code_snapshot",
+        "node_name_snapshot",
+        "capacity_mode_snapshot",
+        "node_calendar_snapshot_json",
+        "node_capability_snapshot_json",
+        "locked",
+        "lock_reason",
+    }
+    for table in ("order_process_schedules", "schedule_revision_items"):
+        columns = {
+            row["name"]
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        assert additive_columns.isdisjoint(columns)
+    for table in ("order_process_schedule_segments", "schedule_downtime_events"):
+        columns = {
+            row["name"]
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        assert "production_node_id" not in columns
+    assert db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='production_node_migration_differences'"
+    ).fetchone() is None
+    index_names = {
+        row["name"]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()
+    }
+    assert {
+        "idx_schedule_facts_node_time",
+        "idx_schedule_segments_node_time",
+        "idx_schedule_revision_items_node",
+        "idx_schedule_downtime_node_time",
+    }.isdisjoint(index_names)
+
+
+def _prepare_v086_failure_fixture(db, *, suffix):
+    from modules.migration_production_nodes import m086_production_node_master
+
+    m086_production_node_master(db)
+    mapped = db.execute(
+        "SELECT legacy_process_line_id FROM production_nodes ORDER BY id LIMIT 1"
+    ).fetchone()
+    ids = _seed_v087_fact_set(
+        db,
+        suffix=suffix,
+        process_line_id=mapped["legacy_process_line_id"],
+    )
+    db.execute("PRAGMA user_version=86")
+    db.commit()
+    source_tables = {
+        "schedule": "order_process_schedules",
+        "segment": "order_process_schedule_segments",
+        "revision_item": "schedule_revision_items",
+        "downtime": "schedule_downtime_events",
+    }
+    fingerprints = {
+        key: _legacy_fact_fingerprint(db, table, ids[key])
+        for key, table in source_tables.items()
+    }
+    trigger_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_schedule_revision_items_update'"
+    ).fetchone()[0]
+    return ids, source_tables, fingerprints, trigger_sql
+
+
+def _assert_v086_restored_after_v087_failure(
+    db,
+    *,
+    ids,
+    source_tables,
+    fingerprints,
+    trigger_sql,
+):
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 86
+    _assert_v087_schema_absent(db)
+    assert {
+        key: _legacy_fact_fingerprint(db, table, ids[key])
+        for key, table in source_tables.items()
+    } == fingerprints
+    restored_trigger = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_schedule_revision_items_update'"
+    ).fetchone()
+    assert restored_trigger is not None
+    assert restored_trigger[0] == trigger_sql
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        db.execute(
+            "UPDATE schedule_revision_items SET payload_digest='mutated' WHERE id=?",
+            (ids["revision_item"],),
+        )
+    db.rollback()
+
+
 def test_v086_rejects_null_legacy_calendar_before_creating_any_schema(
     migrated_v085_db,
 ):
@@ -860,6 +960,10 @@ def test_v087_adds_node_fact_columns_and_rebuilds_complete_immutable_trigger(
                 f"PRAGMA table_info({table})"
             ).fetchall()
         }
+    assert migrated_v085_db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' "
+        "AND name='idx_node_migration_differences_source'"
+    ).fetchone() is None
 
     trigger_sql = migrated_v085_db.execute(
         "SELECT sql FROM sqlite_master WHERE type='trigger' "
@@ -884,3 +988,71 @@ def test_v087_adds_node_fact_columns_and_rebuilds_complete_immutable_trigger(
             (ids["revision_item"],),
         )
     assert migrated_v085_db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_v087_runner_failure_rolls_back_all_schema_facts_and_trigger_changes(
+    migrated_v085_db,
+    monkeypatch,
+):
+    from modules import migration_production_nodes, migrations
+
+    ids, source_tables, fingerprints, trigger_sql = _prepare_v086_failure_fixture(
+        migrated_v085_db,
+        suffix="runner-rollback",
+    )
+
+    def fail_trigger_rebuild(_db):
+        raise RuntimeError("injected V087 trigger rebuild failure")
+
+    monkeypatch.setattr(
+        migration_production_nodes,
+        "_create_revision_item_immutability_trigger",
+        fail_trigger_rebuild,
+    )
+
+    with pytest.raises(RuntimeError, match="injected V087 trigger rebuild failure"):
+        migrations.run_migrations(migrated_v085_db)
+
+    _assert_v086_restored_after_v087_failure(
+        migrated_v085_db,
+        ids=ids,
+        source_tables=source_tables,
+        fingerprints=fingerprints,
+        trigger_sql=trigger_sql,
+    )
+
+
+def test_v087_direct_failure_can_be_fully_restored_by_caller_rollback(
+    migrated_v085_db,
+    monkeypatch,
+):
+    from modules import migration_production_nodes
+
+    ids, source_tables, fingerprints, trigger_sql = _prepare_v086_failure_fixture(
+        migrated_v085_db,
+        suffix="caller-rollback",
+    )
+
+    def fail_trigger_rebuild(_db):
+        raise RuntimeError("injected direct V087 trigger rebuild failure")
+
+    monkeypatch.setattr(
+        migration_production_nodes,
+        "_create_revision_item_immutability_trigger",
+        fail_trigger_rebuild,
+    )
+
+    with pytest.raises(RuntimeError, match="injected direct V087 trigger rebuild failure"):
+        migration_production_nodes.m087_production_node_schedule_facts(
+            migrated_v085_db
+        )
+
+    assert migrated_v085_db.in_transaction is True
+    migrated_v085_db.rollback()
+    _assert_v086_restored_after_v087_failure(
+        migrated_v085_db,
+        ids=ids,
+        source_tables=source_tables,
+        fingerprints=fingerprints,
+        trigger_sql=trigger_sql,
+    )
