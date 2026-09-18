@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from factories import create_order
 from modules import config
 from modules.db import get_db
 from modules.repositories.production_node_repository import ProductionNodeRepository
@@ -11,6 +12,99 @@ from modules.services.production_node_compatibility_service import (
     normalize_legacy_resources,
     normalize_node_resources,
 )
+
+
+def _mapped_resources(db, count=1):
+    rows = db.execute(
+        "SELECT n.id AS node_id,n.legacy_process_line_id AS line_id,n.process_id "
+        "FROM production_nodes n "
+        "WHERE n.process_id=("
+        "  SELECT process_id FROM production_nodes "
+        "  GROUP BY process_id HAVING COUNT(*)>=? ORDER BY process_id LIMIT 1"
+        ") ORDER BY n.id LIMIT ?",
+        (count, count),
+    ).fetchall()
+    assert len(rows) == count
+    return rows
+
+
+def _seed_schedule_fact(
+    db,
+    *,
+    suffix,
+    resource,
+    occupied_minutes,
+    start_at,
+    end_at,
+    status="planned",
+    with_segment=False,
+    soft_deleted=False,
+):
+    order_id = create_order(
+        db,
+        [resource["process_id"]],
+        quantity=1,
+        product_code=f"NODE-COMPAT-{suffix}",
+    )
+    operation = db.execute(
+        "SELECT id,process_version_id FROM order_processes WHERE order_id=?",
+        (order_id,),
+    ).fetchone()
+    run_id = db.execute(
+        "INSERT INTO schedule_runs "
+        "(schedule_run_key,order_id,status,requested_start_date,result_json) "
+        "VALUES (?,?,'completed','2026-09-18','[]')",
+        (f"node-compat-{suffix}", order_id),
+    ).lastrowid
+    schedule_id = db.execute(
+        "INSERT INTO order_process_schedules "
+        "(order_id,order_process_id,process_id,process_line_id,production_node_id,"
+        "seq_order,quantity,plan_start,plan_end,status,planned_start_at,"
+        "planned_end_at,occupied_minutes,process_version_id,schedule_run_id) "
+        "VALUES (?,?,?,?,?,1,1,'2026-09-18','2026-09-18',?,?,?,?,?,?)",
+        (
+            order_id,
+            operation["id"],
+            resource["process_id"],
+            resource["line_id"],
+            resource["node_id"],
+            status,
+            start_at,
+            end_at,
+            occupied_minutes,
+            operation["process_version_id"],
+            run_id,
+        ),
+    ).lastrowid
+    segment_id = None
+    if with_segment:
+        segment_id = db.execute(
+            "INSERT INTO order_process_schedule_segments "
+            "(schedule_id,process_line_id,production_node_id,segment_start_at,"
+            "segment_end_at,occupied_minutes,quantity) VALUES (?,?,?,?,?,?,1)",
+            (
+                schedule_id,
+                resource["line_id"],
+                resource["node_id"],
+                start_at,
+                end_at,
+                occupied_minutes,
+            ),
+        ).lastrowid
+    if soft_deleted:
+        db.execute(
+            "UPDATE orders SET deleted_at='2026-09-18 12:00:00' WHERE id=?",
+            (order_id,),
+        )
+    return {
+        "order_id": order_id,
+        "schedule_id": schedule_id,
+        "segment_id": segment_id,
+    }
+
+
+def _resource_row(rows, resource_id):
+    return next(row for row in rows if row["id"] == resource_id)
 
 
 def test_normalization_compares_operational_resource_facts_not_display_names():
@@ -25,7 +119,9 @@ def test_normalization_compares_operational_resource_facts_not_display_names():
             "daily_minutes": 540,
             "scheduled_operations": 2,
             "occupied_minutes": 125.5,
+            "occupancy_digest": "same-occupancy",
             "downtime_count": 1,
+            "downtime_digest": "same-downtime",
             "conflict_count": 0,
         }
     ]
@@ -42,7 +138,9 @@ def test_normalization_compares_operational_resource_facts_not_display_names():
             "capacity_minutes": 540,
             "scheduled_operations": 2,
             "occupied_minutes": 125.5,
+            "occupancy_digest": "same-occupancy",
             "downtime_count": 1,
+            "downtime_digest": "same-downtime",
             "conflict_count": 0,
         }
     ]
@@ -61,13 +159,240 @@ def test_normalization_compares_operational_resource_facts_not_display_names():
             "capacity_minutes": 540.0,
             "scheduled_operations": 2,
             "occupied_minutes": 125.5,
+            "occupancy_digest": "same-occupancy",
             "downtime_count": 1,
+            "downtime_digest": "same-downtime",
             "conflict_count": 0,
         }
     ]
 
     nodes[0]["conflict_count"] = 1
     assert normalize_legacy_resources(legacy) != normalize_node_resources(nodes)
+
+    nodes[0]["conflict_count"] = 0
+    nodes[0]["downtime_digest"] = "different-window"
+    assert normalize_legacy_resources(legacy) != normalize_node_resources(nodes)
+
+    nodes[0]["downtime_digest"] = "same-downtime"
+    nodes[0]["occupancy_digest"] = "different-fact"
+    assert normalize_legacy_resources(legacy) != normalize_node_resources(nodes)
+
+
+def test_repository_fact_projection_filters_non_capacity_facts_and_uses_segment_fallback(
+    client,
+):
+    with client.application.app_context():
+        db = get_db()
+        resource = _mapped_resources(db)[0]
+        _seed_schedule_fact(
+            db,
+            suffix="segment",
+            resource=resource,
+            occupied_minutes=30,
+            start_at="2026-09-18 08:00:00",
+            end_at="2026-09-18 08:30:00",
+            with_segment=True,
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="fallback",
+            resource=resource,
+            occupied_minutes=40,
+            start_at="2026-09-18 09:00:00",
+            end_at="2026-09-18 09:40:00",
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="blocked",
+            resource=resource,
+            occupied_minutes=50,
+            start_at="2026-09-18 10:00:00",
+            end_at="2026-09-18 10:50:00",
+            status="blocked",
+            with_segment=True,
+        )
+        _seed_schedule_fact(
+            db,
+            suffix="deleted",
+            resource=resource,
+            occupied_minutes=60,
+            start_at="2026-09-18 11:00:00",
+            end_at="2026-09-18 12:00:00",
+            with_segment=True,
+            soft_deleted=True,
+        )
+        db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason,status) "
+            "VALUES (?,?,?,?,?,'active')",
+            (
+                resource["line_id"],
+                resource["node_id"],
+                "2026-09-18 13:00:00",
+                "2026-09-18 13:30:00",
+                "active-window",
+            ),
+        )
+        db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason,status) "
+            "VALUES (?,?,?,?,?,'completed')",
+            (
+                resource["line_id"],
+                resource["node_id"],
+                "2026-09-18 14:00:00",
+                "2026-09-18 14:30:00",
+                "completed-window",
+            ),
+        )
+
+        legacy = _resource_row(
+            ProductionNodeRepository.list_legacy_resources(
+                process_id=resource["process_id"], db=db
+            ),
+            resource["line_id"],
+        )
+        node = _resource_row(
+            ProductionNodeRepository.list_nodes(
+                process_id=resource["process_id"], db=db
+            ),
+            resource["node_id"],
+        )
+
+        assert legacy["scheduled_operations"] == node["scheduled_operations"] == 2
+        assert legacy["occupied_minutes"] == node["occupied_minutes"] == 70
+        assert legacy["downtime_count"] == node["downtime_count"] == 1
+        assert legacy["occupancy_digest"] == node["occupancy_digest"]
+        assert legacy["downtime_digest"] == node["downtime_digest"]
+
+
+def test_equal_occupancy_totals_with_different_fact_identity_record_mismatch(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    with client.application.app_context():
+        db = get_db()
+        first_resource, second_resource = _mapped_resources(db, count=2)
+        first = _seed_schedule_fact(
+            db,
+            suffix="occupancy-a",
+            resource=first_resource,
+            occupied_minutes=30,
+            start_at="2026-09-18 08:00:00",
+            end_at="2026-09-18 08:30:00",
+            with_segment=True,
+        )
+        second = _seed_schedule_fact(
+            db,
+            suffix="occupancy-b",
+            resource=second_resource,
+            occupied_minutes=30,
+            start_at="2026-09-18 09:00:00",
+            end_at="2026-09-18 09:30:00",
+            with_segment=True,
+        )
+        ProductionNodeCompatibilityService.list_resources(
+            process_id=first_resource["process_id"], db=db
+        )
+
+        db.execute(
+            "UPDATE order_process_schedules SET production_node_id=? WHERE id=?",
+            (second_resource["node_id"], first["schedule_id"]),
+        )
+        db.execute(
+            "UPDATE order_process_schedules SET production_node_id=? WHERE id=?",
+            (first_resource["node_id"], second["schedule_id"]),
+        )
+        db.execute(
+            "UPDATE order_process_schedule_segments SET production_node_id=? WHERE id=?",
+            (second_resource["node_id"], first["segment_id"]),
+        )
+        db.execute(
+            "UPDATE order_process_schedule_segments SET production_node_id=? WHERE id=?",
+            (first_resource["node_id"], second["segment_id"]),
+        )
+
+        ProductionNodeCompatibilityService.list_resources(
+            process_id=first_resource["process_id"], db=db
+        )
+        observation = db.execute(
+            "SELECT mismatch,difference_json FROM "
+            "production_node_compatibility_observations ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        difference = json.loads(observation["difference_json"])
+        changed_fields = {change["field"] for change in difference["changes"]}
+
+        assert observation["mismatch"] == 1
+        assert "occupancy_digest" in changed_fields
+        assert "occupied_minutes" not in changed_fields
+        assert "scheduled_operations" not in changed_fields
+
+
+def test_equal_active_downtime_counts_with_different_windows_record_mismatch(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    with client.application.app_context():
+        db = get_db()
+        first_resource, second_resource = _mapped_resources(db, count=2)
+        downtime_ids = []
+        for resource, start_at, end_at, source_id in (
+            (
+                first_resource,
+                "2026-09-18 08:00:00",
+                "2026-09-18 08:30:00",
+                101,
+            ),
+            (
+                second_resource,
+                "2026-09-18 10:00:00",
+                "2026-09-18 10:30:00",
+                202,
+            ),
+        ):
+            downtime_ids.append(
+                db.execute(
+                    "INSERT INTO schedule_downtime_events "
+                    "(process_line_id,production_node_id,start_at,end_at,reason,status,"
+                    "source_type,source_id) VALUES (?,?,?,?,?,'active','manual',?)",
+                    (
+                        resource["line_id"],
+                        resource["node_id"],
+                        start_at,
+                        end_at,
+                        "compat-window",
+                        source_id,
+                    ),
+                ).lastrowid
+            )
+        ProductionNodeCompatibilityService.list_resources(
+            process_id=first_resource["process_id"], db=db
+        )
+
+        db.execute(
+            "UPDATE schedule_downtime_events SET production_node_id=? WHERE id=?",
+            (second_resource["node_id"], downtime_ids[0]),
+        )
+        db.execute(
+            "UPDATE schedule_downtime_events SET production_node_id=? WHERE id=?",
+            (first_resource["node_id"], downtime_ids[1]),
+        )
+
+        ProductionNodeCompatibilityService.list_resources(
+            process_id=first_resource["process_id"], db=db
+        )
+        observation = db.execute(
+            "SELECT mismatch,difference_json FROM "
+            "production_node_compatibility_observations ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        difference = json.loads(observation["difference_json"])
+        changed_fields = {change["field"] for change in difference["changes"]}
+
+        assert observation["mismatch"] == 1
+        assert "downtime_digest" in changed_fields
+        assert "downtime_count" not in changed_fields
 
 
 def test_audit_disabled_preserves_legacy_response_and_writes_no_evidence(
@@ -173,3 +498,9 @@ def test_repository_bounds_limit_and_supports_process_scope(client):
         assert nodes
         assert {row["process_id"] for row in legacy} == {process_id}
         assert {row["process_id"] for row in nodes} == {process_id}
+        assert ProductionNodeRepository._bounded_limit(None) == 500
+        assert ProductionNodeRepository._bounded_limit("") == 500
+        assert ProductionNodeRepository._bounded_limit("invalid") == 500
+        assert ProductionNodeRepository._bounded_limit(0) == 1
+        assert ProductionNodeRepository._bounded_limit(-100) == 1
+        assert ProductionNodeRepository._bounded_limit(100000) == 1000

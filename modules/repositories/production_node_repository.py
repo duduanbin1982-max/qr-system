@@ -13,8 +13,10 @@ class ProductionNodeRepository:
 
     @staticmethod
     def _bounded_limit(limit):
+        if limit in (None, ""):
+            return 500
         try:
-            value = int(limit or 500)
+            value = int(limit)
         except (TypeError, ValueError):
             value = 500
         return min(max(value, 1), ProductionNodeRepository.MAX_RESOURCE_LIMIT)
@@ -22,6 +24,71 @@ class ProductionNodeRepository:
     @staticmethod
     def _dict_rows(cursor):
         return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def _resource_fact_digests(db, *, resource_column, resource_id):
+        if resource_column not in {"process_line_id", "production_node_id"}:
+            raise ValueError("unsupported production resource column")
+        occupancy = ProductionNodeRepository._dict_rows(
+            db.execute(
+                f"""
+                SELECT * FROM (
+                    SELECT 'segment' AS fact_type,ss.id AS fact_id,ss.schedule_id,
+                           ss.segment_start_at AS start_at,
+                           ss.segment_end_at AS end_at,ss.occupied_minutes,ss.quantity
+                    FROM order_process_schedule_segments ss
+                    JOIN order_process_schedules s ON s.id=ss.schedule_id
+                    JOIN orders o ON o.id=s.order_id
+                    WHERE ss.{resource_column}=? AND s.status<>'blocked'
+                      AND o.deleted_at IS NULL
+                    UNION ALL
+                    SELECT 'schedule' AS fact_type,s.id AS fact_id,s.id AS schedule_id,
+                           CASE WHEN COALESCE(s.planned_start_at,'')<>''
+                                THEN s.planned_start_at ELSE s.plan_start || ' 00:00' END,
+                           CASE WHEN COALESCE(s.planned_end_at,'')<>''
+                                THEN s.planned_end_at ELSE s.plan_end || ' 23:59' END,
+                           s.occupied_minutes,s.quantity
+                    FROM order_process_schedules s
+                    JOIN orders o ON o.id=s.order_id
+                    WHERE s.{resource_column}=? AND s.status<>'blocked'
+                      AND o.deleted_at IS NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM order_process_schedule_segments ss
+                          WHERE ss.schedule_id=s.id
+                      )
+                ) facts
+                ORDER BY start_at,end_at,fact_type,fact_id
+                """,
+                (resource_id, resource_id),
+            )
+        )
+        downtime = ProductionNodeRepository._dict_rows(
+            db.execute(
+                f"SELECT id,start_at,end_at,status,source_type,source_id "
+                f"FROM schedule_downtime_events "
+                f"WHERE {resource_column}=? AND status='active' "
+                f"ORDER BY start_at,end_at,id",
+                (resource_id,),
+            )
+        )
+        return (
+            ProductionNodeRepository.payload_digest(occupancy),
+            ProductionNodeRepository.payload_digest(downtime),
+        )
+
+    @staticmethod
+    def _attach_fact_digests(db, rows, *, resource_column):
+        for row in rows:
+            occupancy_digest, downtime_digest = (
+                ProductionNodeRepository._resource_fact_digests(
+                    db,
+                    resource_column=resource_column,
+                    resource_id=row["id"],
+                )
+            )
+            row["occupancy_digest"] = occupancy_digest
+            row["downtime_digest"] = downtime_digest
+        return rows
 
     @staticmethod
     def list_legacy_resources(process_id=None, limit=500, db=None):
@@ -87,7 +154,11 @@ class ProductionNodeRepository:
             + " ORDER BY p.seq_order,p.id,pl.line_code,pl.id LIMIT ?",
             params + [bounded_limit],
         )
-        return ProductionNodeRepository._dict_rows(cursor)
+        return ProductionNodeRepository._attach_fact_digests(
+            db,
+            ProductionNodeRepository._dict_rows(cursor),
+            resource_column="process_line_id",
+        )
 
     @staticmethod
     def list_nodes(process_id=None, limit=500, db=None):
@@ -160,7 +231,11 @@ class ProductionNodeRepository:
             + " ORDER BY p.seq_order,p.id,n.node_code,n.id LIMIT ?",
             params + [bounded_limit],
         )
-        return ProductionNodeRepository._dict_rows(cursor)
+        return ProductionNodeRepository._attach_fact_digests(
+            db,
+            ProductionNodeRepository._dict_rows(cursor),
+            resource_column="production_node_id",
+        )
 
     @staticmethod
     def canonical_payload(payload):

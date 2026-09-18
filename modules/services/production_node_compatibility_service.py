@@ -12,7 +12,9 @@ COMPARE_FIELDS = (
     "capacity_minutes",
     "scheduled_operations",
     "occupied_minutes",
+    "occupancy_digest",
     "downtime_count",
+    "downtime_digest",
     "conflict_count",
 )
 
@@ -37,7 +39,9 @@ def normalize_legacy_resources(resources):
                 "capacity_minutes": _number(row.get("daily_minutes")),
                 "scheduled_operations": _integer(row.get("scheduled_operations")),
                 "occupied_minutes": _number(row.get("occupied_minutes")),
+                "occupancy_digest": str(row.get("occupancy_digest") or ""),
                 "downtime_count": _integer(row.get("downtime_count")),
+                "downtime_digest": str(row.get("downtime_digest") or ""),
                 "conflict_count": _integer(row.get("conflict_count")),
             }
             for row in resources
@@ -58,7 +62,9 @@ def normalize_node_resources(resources):
                 "capacity_minutes": _number(row.get("capacity_minutes")),
                 "scheduled_operations": _integer(row.get("scheduled_operations")),
                 "occupied_minutes": _number(row.get("occupied_minutes")),
+                "occupancy_digest": str(row.get("occupancy_digest") or ""),
                 "downtime_count": _integer(row.get("downtime_count")),
+                "downtime_digest": str(row.get("downtime_digest") or ""),
                 "conflict_count": _integer(row.get("conflict_count")),
             }
             for row in resources
