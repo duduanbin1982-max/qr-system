@@ -529,7 +529,7 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
         db.close()
 
     report = run_preflight(source, limit=10)
-    assert report["database_user_version"] == before == 89
+    assert report["database_user_version"] == before == 90
     assert report["operations"] == 0
     assert report["coverage_percent"] == 100.0
     assert report["process_statistics"] == []

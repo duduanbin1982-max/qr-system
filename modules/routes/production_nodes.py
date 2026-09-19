@@ -7,6 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_production_node_write,
     validate_json,
 )
 from modules.services.production_node_service import ProductionNodeService
@@ -33,6 +34,7 @@ def list_production_nodes():
 @app.route("/api/production-nodes", methods=["POST"])
 @check_auth
 @check_permission("production_nodes:manage")
+@require_production_node_write
 @validate_json("production_node_write")
 def create_production_node():
     data = get_json_body()
@@ -47,6 +49,7 @@ def create_production_node():
 @app.route("/api/production-nodes/<int:node_id>", methods=["PUT"])
 @check_auth
 @check_permission("production_nodes:manage")
+@require_production_node_write
 @validate_json("production_node_write")
 def update_production_node(node_id):
     return jsonify(
@@ -59,6 +62,7 @@ def update_production_node(node_id):
 )
 @check_auth
 @check_permission("production_nodes:capability_manage")
+@require_production_node_write
 @validate_json("production_node_capabilities_replace")
 def replace_production_node_capabilities(node_id):
     return jsonify(
@@ -98,6 +102,7 @@ def list_production_node_calendar_overrides(node_id):
 )
 @check_auth
 @check_permission("production_nodes:calendar_manage")
+@require_production_node_write
 @validate_json("production_node_calendar_override_create")
 def create_production_node_calendar_override(node_id):
     return (
@@ -116,6 +121,7 @@ def create_production_node_calendar_override(node_id):
 )
 @check_auth
 @check_permission("production_nodes:calendar_manage")
+@require_production_node_write
 @validate_json("production_node_calendar_override_cancel")
 def cancel_production_node_calendar_override(override_id):
     return jsonify(

@@ -13,6 +13,7 @@ from modules import config
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
+from modules.domain.errors import NotFoundError, ProductionNodeWriteDisabledError
 from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.services.production_node_service import ProductionNodeService
@@ -20,6 +21,11 @@ from modules.services.production_node_service import ProductionNodeService
 
 class ScheduleCapacityService:
     DEFAULT_DAILY_MINUTES = 540
+
+    @staticmethod
+    def _assert_node_write_enabled():
+        if not getattr(config, "PRODUCTION_NODE_WRITE_ENABLED", False):
+            raise ProductionNodeWriteDisabledError("生产节点写入尚未启用")
 
     @staticmethod
     def _limit(value, default=500):
@@ -687,7 +693,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None,
-                                actor_id=None):
+                                actor_id=None, use_node_engine_override=None):
         failure = None
         response = None
         with ScheduleCapacityService._transaction(db) as txn:
@@ -729,7 +735,11 @@ class ScheduleCapacityService:
                 # Keep the run ledger even if scheduling fails halfway through.
                 txn.execute("SAVEPOINT schedule_generation")
                 ScheduleCapacityRepository.clear_order_schedules(order_id, txn)
-                use_node_engine = bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
+                use_node_engine = (
+                    bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
+                    if use_node_engine_override is None
+                    else bool(use_node_engine_override)
+                )
                 occupancy = {}
                 occupancy_rows = (
                     ProductionNodeRepository.list_node_occupancy(order_id, db=txn)
@@ -1069,6 +1079,235 @@ class ScheduleCapacityService:
         if failure:
             raise ValueError(failure)
         return response
+
+    @staticmethod
+    def _shadow_operation_payload(operation, shadow_run_key):
+        """Remove temporary formal-ledger identifiers from a shadow result."""
+        payload = dict(operation)
+        for key in ("id", "schedule_run_id", "schedule_revision_id"):
+            payload.pop(key, None)
+        payload["schedule_run_key"] = shadow_run_key
+        payload["shadow_only"] = True
+        payload["segments"] = [
+            {
+                key: value
+                for key, value in dict(segment).items()
+                if key not in {"id", "schedule_id"}
+            }
+            for segment in operation.get("segments") or ()
+        ]
+        payload["allocations"] = [
+            {
+                key: value
+                for key, value in dict(allocation).items()
+                if key not in {"id", "schedule_id", "segment_id"}
+            }
+            for allocation in operation.get("allocations") or ()
+        ]
+        return payload
+
+    @staticmethod
+    def _validate_shadow_operations(operations):
+        """Reject quantity loss, serial splitting, and exclusive-node overlap."""
+        intervals = {}
+        for operation in operations:
+            if operation.get("status") != "planned":
+                continue
+            if operation.get("execution_mode", "internal") in {"outsourced", "non_scheduled"}:
+                continue
+            node_id = operation.get("production_node_id")
+            if node_id is None:
+                raise NodeSchedulingError(
+                    "NO_COMPATIBLE_NODE", "影子排程的内部工序未分配生产节点",
+                    {"order_process_id": operation.get("order_process_id")},
+                )
+            allocations = operation.get("allocations") or []
+            if allocations:
+                allocated = sum(int(item.get("quantity") or 0) for item in allocations)
+                expected = int(operation.get("quantity") or 0)
+                if allocated != expected:
+                    raise NodeSchedulingError(
+                        "QUANTITY_CONSERVATION_FAILED", "影子排程分配数量不守恒",
+                        {
+                            "order_process_id": operation.get("order_process_id"),
+                            "expected": expected, "actual": allocated,
+                        },
+                    )
+                serial_nodes = {}
+                for allocation in allocations:
+                    serial_id = str(allocation.get("serial_id") or "").strip()
+                    if not serial_id:
+                        continue
+                    serial_nodes.setdefault(serial_id, set()).add(
+                        int(allocation["production_node_id"])
+                    )
+                split_serials = sorted(
+                    serial_id for serial_id, node_ids in serial_nodes.items()
+                    if len(node_ids) != 1
+                )
+                if split_serials:
+                    raise NodeSchedulingError(
+                        "SERIAL_ITEM_SPLIT_FORBIDDEN", "序列件不能跨生产节点排程",
+                        {"serial_ids": split_serials},
+                    )
+            for segment in operation.get("segments") or ():
+                segment_node_id = segment.get("production_node_id")
+                start = ScheduleCapacityService._parse_timestamp(segment.get("start_at"))
+                end = ScheduleCapacityService._parse_timestamp(segment.get("end_at"))
+                if segment_node_id is None or start is None or end is None or end <= start:
+                    raise NodeSchedulingError(
+                        "NODE_SHADOW_FACT_INVALID", "影子排程分段事实不完整",
+                        {"order_process_id": operation.get("order_process_id")},
+                    )
+                intervals.setdefault(int(segment_node_id), []).append(
+                    (start, end, operation.get("order_process_id"))
+                )
+        for node_id, node_intervals in intervals.items():
+            node_intervals.sort(key=lambda item: (item[0], item[1], item[2] or 0))
+            for previous, current in zip(node_intervals, node_intervals[1:]):
+                if current[0] < previous[1]:
+                    raise NodeSchedulingError(
+                        "NODE_CAPACITY_CONFLICT", "影子排程存在生产节点时间冲突",
+                        {
+                            "production_node_id": node_id,
+                            "first_order_process_id": previous[2],
+                            "second_order_process_id": current[2],
+                        },
+                    )
+
+    @staticmethod
+    def generate_shadow_order_schedule(
+        order_id, shadow_run_key, start_date=None, actor_id=None, db=None,
+    ):
+        """Compute with the node engine while keeping formal schedules unchanged."""
+        ScheduleCapacityService._assert_node_write_enabled()
+        key = str(shadow_run_key or "").strip()
+        if len(key) < 8 or len(key) > 128:
+            raise ValueError("影子排程幂等键长度必须为8到128个字符")
+        try:
+            actor = int(actor_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("影子排程必须记录实际操作人") from exc
+        if actor <= 0:
+            raise ValueError("影子排程必须记录实际操作人")
+
+        with ScheduleCapacityService._transaction(db) as txn:
+            order = ScheduleCapacityRepository.find_order(order_id, txn)
+            if order is None:
+                raise ValueError("订单不存在")
+            effective_start = ScheduleCapacityService._date(
+                start_date or order["plan_start"], "计划开始日期"
+            ).strftime("%Y-%m-%d")
+            formal_digest = ScheduleCapacityRepository.formal_schedule_digest(
+                order_id, db=txn
+            )
+            request_payload = {
+                "algorithm": "production-node-shadow-v1",
+                "order_id": int(order_id),
+                "start_date": effective_start,
+                "formal_schedule_digest": formal_digest,
+            }
+            encoded_request = json.dumps(
+                request_payload, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            )
+            request_digest = hashlib.sha256(encoded_request.encode("utf-8")).hexdigest()
+            prior = ScheduleCapacityRepository.find_shadow_run(key, db=txn)
+            if prior is not None:
+                if prior["request_digest"] != request_digest:
+                    raise NodeSchedulingError(
+                        "IDEMPOTENCY_CONFLICT", "影子排程幂等键已被不同输入使用",
+                        {"shadow_run_key": key},
+                    )
+                stored = ScheduleCapacityRepository.shadow_run_result(prior)
+                return {
+                    **stored,
+                    "shadow_run_id": int(prior["id"]),
+                    "result_digest": prior["result_digest"],
+                    "idempotent_replay": True,
+                }
+
+            txn.execute("SAVEPOINT production_node_shadow_compute")
+            try:
+                generated = ScheduleCapacityService.generate_order_schedule(
+                    order_id,
+                    start_date=effective_start,
+                    schedule_run_key=f"shadow:{key}",
+                    actor_id=actor,
+                    db=txn,
+                    use_node_engine_override=True,
+                )
+                operations = [
+                    ScheduleCapacityService._shadow_operation_payload(operation, key)
+                    for operation in generated.get("operations") or ()
+                ]
+                ScheduleCapacityService._validate_shadow_operations(operations)
+            finally:
+                txn.execute("ROLLBACK TO SAVEPOINT production_node_shadow_compute")
+                txn.execute("RELEASE SAVEPOINT production_node_shadow_compute")
+
+            after_digest = ScheduleCapacityRepository.formal_schedule_digest(
+                order_id, db=txn
+            )
+            if after_digest != formal_digest:
+                raise NodeSchedulingError(
+                    "SHADOW_ISOLATION_FAILED", "影子排程改变了正式排程事实",
+                    {"before": formal_digest, "after": after_digest},
+                )
+            result = {
+                "ok": True,
+                "shadow_only": True,
+                "engine": "production_node",
+                "order_id": int(order_id),
+                "shadow_run_key": key,
+                "requested_start_date": effective_start,
+                "status": "completed",
+                "request_digest": request_digest,
+                "formal_schedule_digest": formal_digest,
+                "idempotent_replay": False,
+                "operations": operations,
+            }
+            run_id, result_digest = ScheduleCapacityRepository.create_shadow_run(
+                key, order_id, effective_start, request_digest, result, operations,
+                actor, db=txn,
+            )
+            result["shadow_run_id"] = run_id
+            result["result_digest"] = result_digest
+            # The stored JSON intentionally excludes database-generated ids;
+            # callers receive them as envelope metadata only.
+            return result
+
+    @staticmethod
+    def list_shadow_runs(order_id, limit=100, db=None):
+        bounded = ScheduleCapacityService._limit(limit, default=100)
+        with ScheduleCapacityService._transaction(db) as txn:
+            if ScheduleCapacityRepository.find_order(order_id, txn) is None:
+                raise ValueError("订单不存在")
+            runs = [
+                dict(row) for row in ScheduleCapacityRepository.list_shadow_runs(
+                    order_id, bounded, db=txn
+                )
+            ]
+            for run in runs:
+                run.pop("result_json", None)
+            return {"ok": True, "order_id": int(order_id), "runs": runs}
+
+    @staticmethod
+    def get_shadow_run(run_id, db=None):
+        with ScheduleCapacityService._transaction(db) as txn:
+            run = ScheduleCapacityRepository.get_shadow_run(run_id, db=txn)
+            if run is None:
+                raise NotFoundError("影子排程运行不存在")
+            result = ScheduleCapacityRepository.shadow_run_result(run)
+            return {
+                **result,
+                "shadow_run_id": int(run["id"]),
+                "result_digest": run["result_digest"],
+                "created_by": run["created_by"],
+                "created_by_name": run["created_by_name"] or "",
+                "created_at": run["created_at"],
+                "completed_at": run["completed_at"],
+            }
 
     @staticmethod
     def _replan_start(value):
@@ -1864,6 +2103,7 @@ class ScheduleCapacityService:
     @staticmethod
     def create_downtime_event(production_node_id, start_at, end_at, reason="", created_by=None,
                               db=None):
+        ScheduleCapacityService._assert_node_write_enabled()
         start = ScheduleCapacityService._parse_timestamp(start_at)
         end = ScheduleCapacityService._parse_timestamp(end_at)
         if not start or not end or end <= start:
@@ -1886,6 +2126,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def cancel_downtime_event(event_id):
+        ScheduleCapacityService._assert_node_write_enabled()
         try:
             event_id = int(event_id)
         except (TypeError, ValueError) as exc:
@@ -1996,6 +2237,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def lock_schedule_item(revision_item_id, reason, idempotency_key, actor_id, db=None):
+        ScheduleCapacityService._assert_node_write_enabled()
         reason, key, actor = ScheduleCapacityService._workflow_input(
             reason, idempotency_key, actor_id
         )
@@ -2028,6 +2270,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def unlock_schedule_item(revision_item_id, reason, idempotency_key, actor_id, db=None):
+        ScheduleCapacityService._assert_node_write_enabled()
         reason, key, actor = ScheduleCapacityService._workflow_input(
             reason, idempotency_key, actor_id
         )
@@ -2059,6 +2302,7 @@ class ScheduleCapacityService:
     @staticmethod
     def adjust_schedule_item(revision_item_id, production_node_id, planned_start_at,
                              reason, row_version, idempotency_key, actor_id, db=None):
+        ScheduleCapacityService._assert_node_write_enabled()
         reason, key, actor = ScheduleCapacityService._workflow_input(
             reason, idempotency_key, actor_id
         )
@@ -2244,6 +2488,10 @@ class ScheduleCapacityService:
             revision = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
             if revision is None:
                 raise ValueError("排程版本不存在")
+            if ScheduleCapacityRepository.revision_uses_production_nodes(
+                revision_id, db=txn
+            ):
+                ScheduleCapacityService._assert_node_write_enabled()
             if revision["status"] != "draft":
                 raise NodeSchedulingError("REVISION_STATE_CONFLICT", "只有草稿排程版本可执行审批流程")
             current = revision["approval_status"]
@@ -2299,6 +2547,10 @@ class ScheduleCapacityService:
             revision = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
             if revision is None:
                 raise ValueError("排程版本不存在")
+            if ScheduleCapacityRepository.revision_uses_production_nodes(
+                revision_id, db=txn
+            ):
+                ScheduleCapacityService._assert_node_write_enabled()
             if revision["status"] not in ("draft", "published"):
                 raise NodeSchedulingError(
                     "REVISION_STATE_CONFLICT",

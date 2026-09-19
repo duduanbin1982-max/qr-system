@@ -19,6 +19,7 @@ from modules.domain.position_versioning import (
     PositionLegacyWriteBlockedError,
     PositionVersionedWriteDisabledError,
 )
+from modules.domain.errors import ProductionNodeWriteDisabledError
 from modules.domain.reporting_day import reporting_range_bounds
 from modules.middleware.audit import required_audit_log, safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
@@ -90,6 +91,16 @@ def require_legacy_position_write(view):
 
     return wrapped
 
+
+def require_production_node_write(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not config.PRODUCTION_NODE_WRITE_ENABLED:
+            raise ProductionNodeWriteDisabledError("生产节点写入尚未启用")
+        return view(*args, **kwargs)
+
+    return wrapped
+
 __all__ = [
     "app",
     "check_auth",
@@ -105,6 +116,7 @@ __all__ = [
     "require_legacy_master_data_write",
     "require_legacy_position_write",
     "require_position_versioned_write",
+    "require_production_node_write",
     "require_versioned_master_data_write",
     "required_audit_log",
     "safe_audit_log",

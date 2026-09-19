@@ -84,7 +84,8 @@ def test_production_node_operations_and_runbook_define_safe_cutover_contract():
     assert "rollback evidence is required" in operations
     assert "PRODUCTION_NODE_ENGINE_ENABLED" in operations
     assert "阶段 5" in runbook
-    assert "V086–V089" in runbook
+    assert "V086–V090" in runbook
+    assert "production_node_shadow_*" in runbook
     assert "Historical mismatch" in runbook or "历史 mismatch" in runbook
 
 

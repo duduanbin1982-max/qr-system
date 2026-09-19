@@ -217,6 +217,15 @@ PROCESS_REFERENCES = (
         action="由生产节点能力服务维护",
     ),
     _process(
+        "production_node_shadow_items",
+        ("order_process_id", "process_id"),
+        version_columns=("process_version_id",),
+        key="production_node_shadow_items_process",
+        label="生产节点影子排程工序事实",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变影子排程证据",
+    ),
+    _process(
         "schedule_downtime_events",
         ("process_line_id",),
         key="schedule_downtime_events",
@@ -501,6 +510,14 @@ ROUTE_REFERENCES = (
         label="生产节点路线版本能力",
         impact_level=IMPACT_INTERNAL,
         action="由生产节点能力服务维护",
+    ),
+    _route(
+        "production_node_shadow_items",
+        version_columns=("route_version_id",),
+        key="production_node_shadow_items_route",
+        label="生产节点影子排程路线版本事实",
+        impact_level=IMPACT_INTERNAL,
+        action="保留不可变影子排程证据",
     ),
     _route(
         "material_consumptions",
