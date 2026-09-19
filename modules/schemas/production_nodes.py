@@ -126,6 +126,19 @@ schedule_revision_item_adjust = {
     "additionalProperties": False,
 }
 
+schedule_shadow_generate = {
+    "type": "object",
+    "required": ["shadow_run_key"],
+    "properties": {
+        "shadow_run_key": _KEY,
+        "start_date": {
+            "type": "string",
+            "pattern": r"^\d{4}-\d{2}-\d{2}$",
+        },
+    },
+    "additionalProperties": False,
+}
+
 production_node_schemas = {
     "production_node_write": production_node_write,
     "production_node_capabilities_replace": production_node_capabilities_replace,
@@ -133,4 +146,5 @@ production_node_schemas = {
     "production_node_calendar_override_cancel": production_node_calendar_override_cancel,
     "schedule_workflow_action": schedule_workflow_action,
     "schedule_revision_item_adjust": schedule_revision_item_adjust,
+    "schedule_shadow_generate": schedule_shadow_generate,
 }

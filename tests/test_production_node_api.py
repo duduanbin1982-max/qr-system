@@ -4,7 +4,15 @@ import uuid
 import pytest
 
 from factories import TEST_HASH
+from modules import config
 from modules.db import get_db
+
+
+@pytest.fixture(autouse=True)
+def enable_production_node_write(monkeypatch):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_WRITE_ENABLED", True)
 
 
 def _login_with_permissions(client, permissions):

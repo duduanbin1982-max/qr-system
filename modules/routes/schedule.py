@@ -7,7 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    has_permission,
+    require_production_node_write,
     safe_audit_log,
     validate_json,
 )
@@ -18,6 +18,7 @@ from modules.services.schedule_service import (
 )
 from modules.services.production_line_service import ProductionLineService
 from modules.services.schedule_capacity_service import ScheduleCapacityService
+from modules.domain.errors import DomainError
 from modules.domain.production_node_scheduling import NodeSchedulingError
 
 
@@ -26,6 +27,8 @@ def _schedule_workflow_response(callback):
         return jsonify(callback())
     except NodeSchedulingError as exc:
         return jsonify(exc.to_payload()), 409
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         message = str(exc)
         status = 404 if "不存在" in message else 400
@@ -194,6 +197,7 @@ def schedule_revision_publish(revision_id):
 @app.route("/api/schedule/revision-items/<int:revision_item_id>/lock", methods=["POST"])
 @check_auth
 @check_permission("schedules:lock")
+@require_production_node_write
 @validate_json("schedule_workflow_action")
 def schedule_revision_item_lock(revision_item_id):
     data = get_json_body()
@@ -205,6 +209,7 @@ def schedule_revision_item_lock(revision_item_id):
 @app.route("/api/schedule/revision-items/<int:revision_item_id>/unlock", methods=["POST"])
 @check_auth
 @check_permission("schedules:unlock")
+@require_production_node_write
 @validate_json("schedule_workflow_action")
 def schedule_revision_item_unlock(revision_item_id):
     data = get_json_body()
@@ -216,6 +221,7 @@ def schedule_revision_item_unlock(revision_item_id):
 @app.route("/api/schedule/revision-items/<int:revision_item_id>/adjust", methods=["POST"])
 @check_auth
 @check_permission("schedules:adjust")
+@require_production_node_write
 @validate_json("schedule_revision_item_adjust")
 def schedule_revision_item_adjust(revision_item_id):
     data = get_json_body()
@@ -276,6 +282,50 @@ def schedule_generate_operations(order_id):
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/schedule/order/<int:order_id>/shadow-plan", methods=["POST"])
+@check_auth
+@check_permission("schedules:generate")
+@require_production_node_write
+@validate_json("schedule_shadow_generate")
+def schedule_generate_shadow_plan(order_id):
+    data = get_json_body()
+    result = ScheduleCapacityService.generate_shadow_order_schedule(
+        order_id,
+        data["shadow_run_key"],
+        start_date=data.get("start_date"),
+        actor_id=g.current_user.get("id") if g.current_user else None,
+    )
+    safe_audit_log(
+        "generate_node_shadow_schedule", "order", order_id,
+        f"shadow_run_key={data['shadow_run_key']}; shadow_run_id={result.get('shadow_run_id')}",
+    )
+    return jsonify(result)
+
+
+@app.route("/api/schedule/order/<int:order_id>/shadow-runs", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_list_shadow_runs(order_id):
+    try:
+        return jsonify(ScheduleCapacityService.list_shadow_runs(
+            order_id, request.args.get("limit", 100)
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/shadow-runs/<int:run_id>", methods=["GET"])
+@check_auth
+@check_permission("schedule:view")
+def schedule_shadow_run_detail(run_id):
+    try:
+        return jsonify(ScheduleCapacityService.get_shadow_run(run_id))
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/schedule/order/<int:order_id>/dynamic-replan", methods=["POST"])
 @check_auth
 @check_permission("schedules:generate")
@@ -299,22 +349,26 @@ def schedule_dynamic_replan(order_id):
         return jsonify({"error": str(exc)}), 400
 
 
-@app.route("/api/schedule/downtime", methods=["GET", "POST"])
+@app.route("/api/schedule/downtime", methods=["GET"])
 @check_auth
 def schedule_downtime():
-    if request.method == "GET":
-        try:
-            return jsonify(ScheduleCapacityService.list_downtime_events(
-                production_node_id=request.args.get("production_node_id", type=int),
-                process_line_id=request.args.get("process_line_id", type=int),
-                start_at=request.args.get("start_at", ""),
-                end_at=request.args.get("end_at", ""),
-                limit=request.args.get("limit", 1000, type=int),
-            ))
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-    if not has_permission(g.current_user, "production_nodes:downtime_manage"):
-        return jsonify({"error": "无权限"}), 403
+    try:
+        return jsonify(ScheduleCapacityService.list_downtime_events(
+            production_node_id=request.args.get("production_node_id", type=int),
+            process_line_id=request.args.get("process_line_id", type=int),
+            start_at=request.args.get("start_at", ""),
+            end_at=request.args.get("end_at", ""),
+            limit=request.args.get("limit", 1000, type=int),
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/schedule/downtime", methods=["POST"])
+@check_auth
+@check_permission("production_nodes:downtime_manage")
+@require_production_node_write
+def schedule_downtime_create():
     try:
         data = get_json_body()
         result = ScheduleCapacityService.create_downtime_event(
@@ -331,6 +385,7 @@ def schedule_downtime():
 @app.route("/api/schedule/downtime/<int:event_id>", methods=["DELETE"])
 @check_auth
 @check_permission("production_nodes:downtime_manage")
+@require_production_node_write
 def schedule_downtime_cancel(event_id):
     try:
         result = ScheduleCapacityService.cancel_downtime_event(event_id)

@@ -184,7 +184,7 @@ def test_v089_adds_workflow_schema_and_backfills_published_revisions(
             "rejected_by",
         }.issubset(revision_columns)
         assert "row_version" in item_columns
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 89
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 90
         assert db.execute(
             "SELECT approval_status FROM schedule_revisions WHERE id=?",
             (revision_id,),

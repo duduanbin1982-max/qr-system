@@ -2,13 +2,24 @@
 
 from datetime import datetime
 
-from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules import config
+from modules.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    ProductionNodeWriteDisabledError,
+    ValidationError,
+)
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.services import BaseService
 
 
 class ProductionNodeService:
     NODE_STATUSES = {"active", "inactive", "maintenance"}
+
+    @staticmethod
+    def _assert_write_enabled():
+        if not config.PRODUCTION_NODE_WRITE_ENABLED:
+            raise ProductionNodeWriteDisabledError("生产节点写入尚未启用")
 
     @staticmethod
     def _positive_int(value, label):
@@ -162,6 +173,7 @@ class ProductionNodeService:
 
     @staticmethod
     def create_node(data, actor_id):
+        ProductionNodeService._assert_write_enabled()
         command = ProductionNodeService._normalize_node_command(data)
         if command["row_version"] != 1:
             raise ValidationError("新建生产节点的row_version必须为1")
@@ -196,6 +208,7 @@ class ProductionNodeService:
 
     @staticmethod
     def update_node(node_id, data, actor_id):
+        ProductionNodeService._assert_write_enabled()
         node_id = ProductionNodeService._positive_int(node_id, "node_id")
         command = ProductionNodeService._normalize_node_command(data)
         if command["capacity_mode"] not in {"exclusive", "batch"}:
@@ -323,6 +336,7 @@ class ProductionNodeService:
 
     @staticmethod
     def replace_capabilities(node_id, data, actor_id):
+        ProductionNodeService._assert_write_enabled()
         node_id = ProductionNodeService._positive_int(node_id, "node_id")
         reason = ProductionNodeService._text(data.get("reason"), "变更原因", 1024)
         key = ProductionNodeService._text(data.get("idempotency_key"), "幂等键", 128)
@@ -368,6 +382,7 @@ class ProductionNodeService:
 
     @staticmethod
     def create_calendar_override(node_id, data, actor_id):
+        ProductionNodeService._assert_write_enabled()
         node_id = ProductionNodeService._positive_int(node_id, "node_id")
         reason = ProductionNodeService._text(data.get("reason"), "变更原因", 1024)
         key = ProductionNodeService._text(data.get("idempotency_key"), "幂等键", 128)
@@ -417,6 +432,7 @@ class ProductionNodeService:
 
     @staticmethod
     def cancel_calendar_override(override_id, data, actor_id):
+        ProductionNodeService._assert_write_enabled()
         override_id = ProductionNodeService._positive_int(override_id, "override_id")
         reason = ProductionNodeService._text(data.get("reason"), "取消原因", 1024)
         key = ProductionNodeService._text(data.get("idempotency_key"), "幂等键", 128)

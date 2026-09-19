@@ -51,3 +51,7 @@ class StaleQualityEvaluationTaskError(ConflictError):
         payload = super().to_payload()
         payload["action"] = "refresh_quality_evaluation"
         return payload
+
+
+class ProductionNodeWriteDisabledError(ConflictError):
+    code = "PRODUCTION_NODE_WRITE_DISABLED"

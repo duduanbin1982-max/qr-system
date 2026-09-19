@@ -354,7 +354,7 @@ def run_preflight(
             }
         )
         version = database["user_version"]
-        report["checks"]["expected_database_version"] = version in range(85, 90)
+        report["checks"]["expected_database_version"] = version in range(85, 91)
         node_count, mapping_missing, legacy_count = _mapping_metrics(connection)
         if node_count is None:
             report["checks"]["core_node_count_21"] = None

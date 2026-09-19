@@ -647,9 +647,108 @@ def m089_schedule_revision_workflow(db):
     )
 
 
+def m090_production_node_shadow_ledger(db):
+    """Add immutable node-shadow facts without touching official schedules."""
+    statements = (
+        """
+        CREATE TABLE IF NOT EXISTS production_node_shadow_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_run_key TEXT NOT NULL UNIQUE,
+            order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+            requested_start_date TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('completed','failed')),
+            request_digest TEXT NOT NULL,
+            result_digest TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            completed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS production_node_shadow_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_run_id INTEGER NOT NULL REFERENCES production_node_shadow_runs(id) ON DELETE RESTRICT,
+            order_process_id INTEGER NOT NULL REFERENCES order_processes(id) ON DELETE RESTRICT,
+            process_id INTEGER NOT NULL REFERENCES processes(id) ON DELETE RESTRICT,
+            route_version_id INTEGER REFERENCES process_route_versions(id) ON DELETE RESTRICT,
+            process_version_id INTEGER REFERENCES process_versions(id) ON DELETE RESTRICT,
+            standard_id INTEGER REFERENCES work_time_standards(id) ON DELETE RESTRICT,
+            production_node_id INTEGER REFERENCES production_nodes(id) ON DELETE RESTRICT,
+            seq_order INTEGER NOT NULL DEFAULT 0,
+            quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),
+            status TEXT NOT NULL,
+            blocked_code TEXT NOT NULL DEFAULT '',
+            blocked_reason TEXT NOT NULL DEFAULT '',
+            planned_start_at TEXT NOT NULL DEFAULT '',
+            planned_end_at TEXT NOT NULL DEFAULT '',
+            occupied_minutes REAL NOT NULL DEFAULT 0 CHECK(occupied_minutes >= 0),
+            payload_json TEXT NOT NULL,
+            payload_digest TEXT NOT NULL,
+            UNIQUE(shadow_run_id,order_process_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS production_node_shadow_segments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_item_id INTEGER NOT NULL REFERENCES production_node_shadow_items(id) ON DELETE RESTRICT,
+            production_node_id INTEGER NOT NULL REFERENCES production_nodes(id) ON DELETE RESTRICT,
+            segment_start_at TEXT NOT NULL,
+            segment_end_at TEXT NOT NULL,
+            occupied_minutes REAL NOT NULL CHECK(occupied_minutes >= 0),
+            quantity INTEGER NOT NULL CHECK(quantity >= 0),
+            shift_id INTEGER REFERENCES schedule_shifts(id) ON DELETE RESTRICT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS production_node_shadow_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_item_id INTEGER NOT NULL REFERENCES production_node_shadow_items(id) ON DELETE RESTRICT,
+            production_node_id INTEGER NOT NULL REFERENCES production_nodes(id) ON DELETE RESTRICT,
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            serial_id TEXT,
+            batch_key TEXT NOT NULL DEFAULT '',
+            changeover_minutes REAL NOT NULL DEFAULT 0 CHECK(changeover_minutes >= 0),
+            allocation_start_at TEXT NOT NULL DEFAULT '',
+            allocation_end_at TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_node_shadow_runs_order_time "
+        "ON production_node_shadow_runs(order_id,created_at,id)",
+        "CREATE INDEX IF NOT EXISTS idx_node_shadow_items_run_sequence "
+        "ON production_node_shadow_items(shadow_run_id,seq_order,id)",
+        "CREATE INDEX IF NOT EXISTS idx_node_shadow_segments_node_time "
+        "ON production_node_shadow_segments(production_node_id,segment_start_at,segment_end_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_node_shadow_serial_operation "
+        "ON production_node_shadow_allocations(shadow_item_id,serial_id) "
+        "WHERE serial_id IS NOT NULL AND serial_id<>''",
+    )
+    for statement in statements:
+        db.execute(statement)
+
+    for table in (
+        "production_node_shadow_runs",
+        "production_node_shadow_items",
+        "production_node_shadow_segments",
+        "production_node_shadow_allocations",
+    ):
+        db.execute(
+            f"CREATE TRIGGER IF NOT EXISTS protect_{table}_update "
+            f"BEFORE UPDATE ON {table} BEGIN "
+            "SELECT RAISE(ABORT,'production node shadow facts are immutable'); END"
+        )
+        db.execute(
+            f"CREATE TRIGGER IF NOT EXISTS protect_{table}_delete "
+            f"BEFORE DELETE ON {table} BEGIN "
+            "SELECT RAISE(ABORT,'production node shadow facts are immutable'); END"
+        )
+
+
 MIGRATIONS = [
     (86, "Add stable production-node master data", m086_production_node_master),
     (87, "Add production-node scheduling facts", m087_production_node_schedule_facts),
     (88, "Add batch and serial node allocations", m088_batch_serial_allocations),
     (89, "Add schedule revision lock and approval workflow", m089_schedule_revision_workflow),
+    (90, "Add isolated production-node shadow ledger", m090_production_node_shadow_ledger),
 ]

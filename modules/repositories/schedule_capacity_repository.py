@@ -14,6 +14,197 @@ from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 
 class ScheduleCapacityRepository:
     @staticmethod
+    def formal_schedule_digest(order_id, db=None):
+        """Hash formal scheduling facts and node inputs, excluding shadow facts.
+
+        The digest is used both as an idempotency input and as the isolation
+        assertion around a shadow calculation.  Include the complete target
+        order projection plus shared node capacity/occupancy inputs because a
+        change to either can legitimately change a shadow result.
+        """
+        db = resolve_db(db)
+
+        def rows(sql, params=()):
+            return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+        snapshot = {
+            "order": rows("SELECT * FROM orders WHERE id=?", (order_id,)),
+            "order_processes": rows(
+                "SELECT * FROM order_processes WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "schedules": rows(
+                "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "segments": rows(
+                "SELECT ss.* FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "WHERE s.order_id=? ORDER BY ss.id",
+                (order_id,),
+            ),
+            "allocations": rows(
+                "SELECT a.* FROM production_node_schedule_allocations a "
+                "JOIN order_process_schedules s ON s.id=a.schedule_id "
+                "WHERE s.order_id=? ORDER BY a.id",
+                (order_id,),
+            ),
+            "runs": rows(
+                "SELECT * FROM schedule_runs WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "revisions": rows(
+                "SELECT * FROM schedule_revisions WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "revision_items": rows(
+                "SELECT i.* FROM schedule_revision_items i "
+                "JOIN schedule_revisions r ON r.id=i.revision_id "
+                "WHERE r.order_id=? ORDER BY i.id",
+                (order_id,),
+            ),
+            "nodes": rows("SELECT * FROM production_nodes ORDER BY id"),
+            "capabilities": rows(
+                "SELECT * FROM production_node_capabilities ORDER BY id"
+            ),
+            "calendar_overrides": rows(
+                "SELECT * FROM production_node_calendar_overrides ORDER BY id"
+            ),
+            "calendars": rows("SELECT * FROM schedule_calendars ORDER BY id"),
+            "shifts": rows("SELECT * FROM schedule_shifts ORDER BY id"),
+            "standards": rows("SELECT * FROM work_time_standards ORDER BY id"),
+            "other_node_occupancy": rows(
+                "SELECT ss.production_node_id,ss.segment_start_at,ss.segment_end_at,"
+                "ss.schedule_id FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "JOIN orders o ON o.id=s.order_id "
+                "WHERE s.order_id<>? AND o.deleted_at IS NULL "
+                "AND s.status<>'blocked' AND ss.production_node_id IS NOT NULL "
+                "ORDER BY ss.production_node_id,ss.segment_start_at,ss.id",
+                (order_id,),
+            ),
+        }
+        encoded = json.dumps(
+            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def find_shadow_run(shadow_run_key, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM production_node_shadow_runs WHERE shadow_run_key=?",
+            (str(shadow_run_key or "").strip(),),
+        ).fetchone()
+
+    @staticmethod
+    def create_shadow_run(
+        shadow_run_key, order_id, requested_start_date, request_digest, result,
+        operations, created_by, db=None, *, status="completed", error_message="",
+    ):
+        """Persist one immutable shadow result and its normalized facts."""
+        db = resolve_db(db)
+        encoded_result = json.dumps(
+            result if result is not None else {}, ensure_ascii=False,
+            sort_keys=True, separators=(",", ":"),
+        )
+        result_digest = hashlib.sha256(encoded_result.encode("utf-8")).hexdigest()
+        cursor = db.execute(
+            "INSERT INTO production_node_shadow_runs "
+            "(shadow_run_key,order_id,requested_start_date,status,request_digest,"
+            "result_digest,result_json,error_message,created_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                str(shadow_run_key or "").strip(), int(order_id),
+                str(requested_start_date or ""), status, request_digest,
+                result_digest, encoded_result, error_message or "", int(created_by),
+            ),
+        )
+        run_id = cursor.lastrowid
+        for operation in operations or ():
+            payload_json = json.dumps(
+                operation, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+            item_cursor = db.execute(
+                "INSERT INTO production_node_shadow_items "
+                "(shadow_run_id,order_process_id,process_id,route_version_id,"
+                "process_version_id,standard_id,production_node_id,seq_order,quantity,"
+                "status,blocked_code,blocked_reason,planned_start_at,planned_end_at,"
+                "occupied_minutes,payload_json,payload_digest) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    run_id, operation["order_process_id"], operation["process_id"],
+                    operation.get("route_version_id"), operation.get("process_version_id"),
+                    operation.get("standard_id"), operation.get("production_node_id"),
+                    int(operation.get("seq_order") or 0), int(operation.get("quantity") or 0),
+                    operation.get("status") or "blocked", operation.get("blocked_code") or "",
+                    operation.get("blocked_reason") or "",
+                    operation.get("planned_start_at") or "",
+                    operation.get("planned_end_at") or "",
+                    float(operation.get("occupied_minutes") or 0), payload_json, payload_digest,
+                ),
+            )
+            item_id = item_cursor.lastrowid
+            for segment in operation.get("segments") or ():
+                db.execute(
+                    "INSERT INTO production_node_shadow_segments "
+                    "(shadow_item_id,production_node_id,segment_start_at,segment_end_at,"
+                    "occupied_minutes,quantity,shift_id) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        item_id, segment["production_node_id"], segment["start_at"],
+                        segment["end_at"], float(segment.get("occupied_minutes") or 0),
+                        int(segment.get("quantity") or 0), segment.get("shift_id"),
+                    ),
+                )
+            for allocation in operation.get("allocations") or ():
+                db.execute(
+                    "INSERT INTO production_node_shadow_allocations "
+                    "(shadow_item_id,production_node_id,quantity,serial_id,batch_key,"
+                    "changeover_minutes,allocation_start_at,allocation_end_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        item_id, allocation["production_node_id"],
+                        int(allocation.get("quantity") or 0), allocation.get("serial_id"),
+                        allocation.get("batch_key") or "",
+                        float(allocation.get("changeover_minutes") or 0),
+                        allocation.get("segment_start_at") or "",
+                        allocation.get("segment_end_at") or "",
+                    ),
+                )
+        return run_id, result_digest
+
+    @staticmethod
+    def get_shadow_run(run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT r.*,u.name AS created_by_name FROM production_node_shadow_runs r "
+            "LEFT JOIN users u ON u.id=r.created_by WHERE r.id=?",
+            (int(run_id),),
+        ).fetchone()
+
+    @staticmethod
+    def list_shadow_runs(order_id, limit=100, db=None):
+        db = resolve_db(db)
+        bounded = min(max(int(limit or 100), 1), 1000)
+        return db.execute(
+            "SELECT r.*,u.name AS created_by_name FROM production_node_shadow_runs r "
+            "LEFT JOIN users u ON u.id=r.created_by WHERE r.order_id=? "
+            "ORDER BY r.id DESC LIMIT ?",
+            (int(order_id), bounded),
+        ).fetchall()
+
+    @staticmethod
+    def shadow_run_result(run):
+        if run is None:
+            return {}
+        try:
+            result = json.loads(run["result_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return result if isinstance(result, dict) else {}
+
+    @staticmethod
     def list_order_serial_ids(order_id, db=None):
         """Return active serial-item identifiers for a schedulable order."""
         db = resolve_db(db)
@@ -699,6 +890,18 @@ class ScheduleCapacityRepository:
             "FROM schedule_revisions r JOIN orders o ON o.id=r.order_id WHERE r.id=?",
             (revision_id,),
         ).fetchone()
+
+    @staticmethod
+    def revision_uses_production_nodes(revision_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT 1 FROM schedule_revision_items i "
+            "LEFT JOIN order_process_schedules s ON s.id=i.source_schedule_id "
+            "WHERE i.revision_id=? AND COALESCE(i.production_node_id,s.production_node_id) IS NOT NULL "
+            "LIMIT 1",
+            (int(revision_id),),
+        ).fetchone()
+        return row is not None
 
     @staticmethod
     def find_revision_by_run(schedule_run_id, db=None):

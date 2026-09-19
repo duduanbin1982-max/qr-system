@@ -3,8 +3,16 @@ import uuid
 import pytest
 
 from factories import create_process_route
+from modules import config
 from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
+
+
+@pytest.fixture(autouse=True)
+def enable_production_node_writes(monkeypatch):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_WRITE_ENABLED", True)
 
 
 def _seed_order(db, process_id, quantity=10):
