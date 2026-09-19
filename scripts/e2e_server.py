@@ -21,10 +21,52 @@ os.environ["SECRET_KEY"] = "e2e-only-secret-key"
 os.environ["ENABLE_SWAGGER"] = "false"
 
 
+E2E_APPROVED_CORE_PROCESSES = {
+    "下料": ("原材料切割", 1),
+    "铆接": ("铆接组装", 2),
+    "焊接": ("焊接组装", 3),
+    "抛丸": ("表面抛丸", 4),
+    "打磨": ("表面打磨", 5),
+    "镗孔": ("精密镗孔", 6),
+    "喷漆": ("喷涂上色", 7),
+}
+
+
 def remove_database():
     for suffix in ("", "-wal", "-shm"):
         candidate = Path(str(E2E_DB) + suffix)
         candidate.unlink(missing_ok=True)
+
+
+def run_e2e_migrations(db):
+    """Build the browser-test schema from the approved production baseline."""
+    from modules import migrations
+
+    catalog = migrations.MIGRATIONS
+    pre_process_versioning = [migration for migration in catalog if migration[0] < 60]
+    migrations.MIGRATIONS = pre_process_versioning
+    try:
+        migrations.run_migrations(db)
+    finally:
+        migrations.MIGRATIONS = catalog
+
+    columns = {row[1] for row in db.execute("PRAGMA table_info(processes)")}
+    for name, (description, sequence) in E2E_APPROVED_CORE_PROCESSES.items():
+        if "process_code" in columns:
+            db.execute(
+                "INSERT OR IGNORE INTO processes "
+                "(process_code,name,description,seq_order,status) "
+                "VALUES (?,?,?,?, 'active')",
+                (f"E2E-APPROVED-{sequence:03d}", name, description, sequence),
+            )
+        else:
+            db.execute(
+                "INSERT OR IGNORE INTO processes "
+                "(name,description,seq_order,status) VALUES (?,?,?,'active')",
+                (name, description, sequence),
+            )
+    db.commit()
+    migrations.run_migrations(db)
 
 
 def insert_published_process(db, name, sequence, created_by):
@@ -231,7 +273,6 @@ def insert_serial(db, order_id, order_no, serial_no, current_process_id, status=
 def prepare_database():
     remove_database()
     from modules.domain.work_report import WorkReportCommand
-    from modules.migrations import run_migrations
     from modules.services.performance_scoring_policy import PerformanceScoringPolicy
     from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
     from factory_auth import TEST_HASH, ensure_user
@@ -239,7 +280,7 @@ def prepare_database():
     db = sqlite3.connect(E2E_DB)
     db.row_factory = sqlite3.Row
     try:
-        run_migrations(db)
+        run_e2e_migrations(db)
         admin_id = ensure_user(
             db, "e2eadmin", TEST_HASH, "E2E Administrator", "admin", "E2E-ADMIN-001"
         )

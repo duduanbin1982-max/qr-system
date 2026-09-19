@@ -268,6 +268,7 @@ def test_rollback_script_records_failures_and_restores_all_release_state():
 def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
     publisher = (PROJECT_ROOT / "scripts" / "publish-frontend.sh").read_text(encoding="utf-8")
     e2e_script = (PROJECT_ROOT / "scripts" / "test-e2e.sh").read_text(encoding="utf-8")
+    e2e_server = (PROJECT_ROOT / "scripts" / "e2e_server.py").read_text(encoding="utf-8")
     app_module = (PROJECT_ROOT / "modules" / "app.py").read_text(encoding="utf-8")
     manifest = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
 
@@ -284,6 +285,10 @@ def test_frontend_release_is_atomic_and_browser_tests_are_isolated():
     assert '--outDir "$E2E_PUBLIC_DIR/static"' in e2e_script
     assert 'export PUBLIC_DIR="$E2E_PUBLIC_DIR"' in e2e_script
     assert "os.environ.get('PUBLIC_DIR')" in app_module
+    assert "run_e2e_migrations(db)" in e2e_server
+    assert "E2E_APPROVED_CORE_PROCESSES" in e2e_server
+    for process_name in ("下料", "铆接", "焊接", "抛丸", "打磨", "镗孔", "喷漆"):
+        assert f'"{process_name}"' in e2e_server
 
 
 def test_playwright_runtime_installer_prepares_browser_and_user_libraries():
