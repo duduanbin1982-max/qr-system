@@ -8,8 +8,14 @@ import json
 import hashlib
 import logging
 from datetime import datetime, timedelta
+from modules import config
 from modules.services import BaseService
-from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.errors import (
+    ConflictError,
+    LegacyProcessLineWriteBlockedError,
+    NotFoundError,
+    ValidationError,
+)
 from modules.domain.order_lifecycle import (
     COMPLETED_READONLY_MESSAGE,
     REOPEN_STATUSES,
@@ -120,6 +126,18 @@ class OrderService:
             repository=cls._repository(),
             setting_reader=cls._setting_reader(),
         )
+
+    @staticmethod
+    def _assert_no_legacy_production_line_write(data):
+        if (
+            config.LEGACY_PROCESS_LINE_WRITE_BLOCKED
+            and isinstance(data, dict)
+            and 'production_line_id' in data
+        ):
+            raise LegacyProcessLineWriteBlockedError(
+                'Legacy 订单产线写入已关闭，请使用生产节点排程接口',
+                details={'fields': ['production_line_id']},
+            )
 
     # ============================================================
     # 辅助 — 根据 route_id 或 process_ids 分配工序
@@ -488,6 +506,7 @@ class OrderService:
             ValueError: 订单号冲突
             RuntimeError: 数据库错误
         """
+        OrderService._assert_no_legacy_production_line_write(data)
         order_no, customer_id, customer, process_ids = OrderService._prepare_create_context(data)
         repository = OrderService._repository()
         with OrderService._unit_of_work().transaction() as txn:
@@ -703,6 +722,7 @@ class OrderService:
             ValueError: 订单不存在 / 状态转换非法
             RuntimeError: 数据库错误
         """
+        OrderService._assert_no_legacy_production_line_write(data)
         existing = OrderService._repository().find_status_by_id(oid)
         if not existing:
             raise ValueError('订单不存在')
@@ -890,6 +910,8 @@ class OrderService:
     @staticmethod
     def batch_create(orders_data):
         """批量创建订单。返回 (created_count, errors_list)。"""
+        for item in orders_data if isinstance(orders_data, list) else ():
+            OrderService._assert_no_legacy_production_line_write(item)
         created = 0
         errors = []
         for item in orders_data:

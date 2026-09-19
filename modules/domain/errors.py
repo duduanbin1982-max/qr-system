@@ -55,3 +55,12 @@ class StaleQualityEvaluationTaskError(ConflictError):
 
 class ProductionNodeWriteDisabledError(ConflictError):
     code = "PRODUCTION_NODE_WRITE_DISABLED"
+
+
+class LegacyProcessLineWriteBlockedError(ConflictError):
+    code = "LEGACY_PROCESS_LINE_WRITE_BLOCKED"
+
+    def to_payload(self):
+        payload = super().to_payload()
+        payload["action"] = "use_production_node_api"
+        return payload

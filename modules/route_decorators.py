@@ -19,7 +19,10 @@ from modules.domain.position_versioning import (
     PositionLegacyWriteBlockedError,
     PositionVersionedWriteDisabledError,
 )
-from modules.domain.errors import ProductionNodeWriteDisabledError
+from modules.domain.errors import (
+    LegacyProcessLineWriteBlockedError,
+    ProductionNodeWriteDisabledError,
+)
 from modules.domain.reporting_day import reporting_range_bounds
 from modules.middleware.audit import required_audit_log, safe_audit_log
 from modules.middleware.auth import check_auth, check_permission, has_permission
@@ -101,6 +104,18 @@ def require_production_node_write(view):
 
     return wrapped
 
+
+def require_legacy_process_line_write(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if config.LEGACY_PROCESS_LINE_WRITE_BLOCKED:
+            raise LegacyProcessLineWriteBlockedError(
+                "Legacy 产线写入已关闭，请使用生产节点接口"
+            )
+        return view(*args, **kwargs)
+
+    return wrapped
+
 __all__ = [
     "app",
     "check_auth",
@@ -114,6 +129,7 @@ __all__ = [
     "parse_pagination",
     "rate_limit",
     "require_legacy_master_data_write",
+    "require_legacy_process_line_write",
     "require_legacy_position_write",
     "require_position_versioned_write",
     "require_production_node_write",

@@ -1,5 +1,6 @@
 """qr-system — 订单管理路由 (Refactored: all SQL → OrderService)"""
 from flask import request, jsonify, g
+from modules.domain.errors import LegacyProcessLineWriteBlockedError
 from modules.route_decorators import (
     app,
     check_auth,
@@ -83,6 +84,8 @@ def create_order():
         )
         safe_audit_log('create_order', 'order', order_id, f'order_no={order_no}')
         return jsonify({'message': '创建成功', 'id': order_id})
+    except LegacyProcessLineWriteBlockedError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -125,6 +128,8 @@ def update_order(oid):
             f'order_no={order_no}; fields={changed_fields}',
         )
         return jsonify({'message': '更新成功'})
+    except LegacyProcessLineWriteBlockedError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -252,6 +257,8 @@ def batch_create_orders():
             'errors': errors,
             'detail': errors[:20] if errors else []
         })
+    except LegacyProcessLineWriteBlockedError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
