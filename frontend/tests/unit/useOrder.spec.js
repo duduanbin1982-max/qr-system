@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   listCustomers: vi.fn(),
   listProducts: vi.fn(),
   listProcessRoutes: vi.fn(),
-  listProductionLines: vi.fn(),
   listOrderMaterials: vi.fn(),
   listMaterials: vi.fn(),
   listProcesses: vi.fn(),
@@ -29,7 +28,6 @@ vi.mock('@/lib/api.js', () => ({
       materials: { listMaterials: mocks.listMaterials },
       processes: { listProcesses: mocks.listProcesses },
       processRoutes: { listProcessRoutes: mocks.listProcessRoutes },
-      production: { listProductionLines: mocks.listProductionLines },
     },
   },
 }))
@@ -51,7 +49,6 @@ describe('useOrder facade', () => {
     mocks.listCustomers.mockResolvedValue({ customers: [] })
     mocks.listProducts.mockResolvedValue({ products: [] })
     mocks.listProcessRoutes.mockResolvedValue({ routes: [] })
-    mocks.listProductionLines.mockResolvedValue({ lines: [] })
 
     let order
     const harness = defineComponent({
@@ -86,7 +83,6 @@ describe('useOrder facade', () => {
       products: [{ id: 5, product_code: 'P-001', weight: 2.5, route_id: 8 }],
     })
     mocks.listProcessRoutes.mockResolvedValue({ routes: [{ id: 8, name: '标准路线' }] })
-    mocks.listProductionLines.mockResolvedValue({ lines: [] })
     mocks.listOrderMaterials.mockResolvedValue({ materials: [{ id: 12 }] })
     mocks.listMaterials.mockResolvedValue({ materials: [{ id: 20 }] })
     mocks.listProcesses.mockResolvedValue({ processes: [{ id: 30, name: '下料' }] })
@@ -126,7 +122,6 @@ describe('useOrder facade', () => {
     mocks.listCustomers.mockResolvedValue({ customers: [] })
     mocks.listProducts.mockResolvedValue({ products: [] })
     mocks.listProcessRoutes.mockResolvedValue({ routes: [{ id: 8, name: '标准路线' }] })
-    mocks.listProductionLines.mockResolvedValue({ lines: [] })
     mocks.listOrderMaterials.mockResolvedValue({ materials: [] })
     mocks.listMaterials.mockResolvedValue({ materials: [] })
     mocks.listProcesses.mockResolvedValue({ processes: [] })
@@ -159,5 +154,6 @@ describe('useOrder facade', () => {
       9,
       expect.objectContaining({ route_id: null }),
     )
+    expect(mocks.updateOrder.mock.calls[0][1]).not.toHaveProperty('production_line_id')
   })
 })

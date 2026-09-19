@@ -1,7 +1,18 @@
 import { request, buildQuery, uploadFile } from './client.js'
 
 export const productionApi = {
-  // ========== 产线 ==========
+  // ========== 生产节点 ==========
+  listProductionNodes:(params={}) => request('GET', '/api/production-nodes' + buildQuery(params)),
+  createProductionNode:(data={}) => request('POST', '/api/production-nodes', data),
+  updateProductionNode:(id,data={}) => request('PUT', `/api/production-nodes/${id}`, data),
+  listProductionNodeCapabilities:(id) => request('GET', `/api/production-nodes/${id}/capabilities`),
+  replaceProductionNodeCapabilities:(id,data={}) => request('PUT', `/api/production-nodes/${id}/capabilities`, data),
+  listProductionNodeOverrides:(id,params={}) => request('GET', `/api/production-nodes/${id}/calendar-overrides` + buildQuery(params)),
+  createProductionNodeOverride:(id,data={}) => request('POST', `/api/production-nodes/${id}/calendar-overrides`, data),
+  cancelProductionNodeOverride:(id,data={}) => request('POST', `/api/production-node-calendar-overrides/${id}/cancel`, data),
+  listProductionNodeAuditEvents:(id,params={}) => request('GET', `/api/production-nodes/${id}/audit-events` + buildQuery(params)),
+
+  // ========== 排程 ==========
   listProductionLines: ()     => request('GET', '/api/production-lines'),
   getScheduleGantt:   (params) => request('GET', '/api/schedule/gantt' + buildQuery(params)),
   updateScheduleOrder:(id,data)=> request('PATCH', '/api/schedule/order/' + id, data),
@@ -16,10 +27,17 @@ export const productionApi = {
   listOrderScheduleRevisions:(id, params={}) => request('GET', '/api/schedule/order/' + id + '/revisions' + buildQuery(params)),
   getScheduleRevision:(id, params={}) => request('GET', '/api/schedule/revisions/' + id + buildQuery(params)),
   publishScheduleRevision:(id, data={}) => request('POST', '/api/schedule/revisions/' + id + '/publish', data),
+  submitScheduleRevision:(id,data={}) => request('POST', `/api/schedule/revisions/${id}/submit`, data),
+  approveScheduleRevision:(id,data={}) => request('POST', `/api/schedule/revisions/${id}/approve`, data),
+  rejectScheduleRevision:(id,data={}) => request('POST', `/api/schedule/revisions/${id}/reject`, data),
+  lockScheduleItem:(id,data={}) => request('POST', `/api/schedule/revision-items/${id}/lock`, data),
+  unlockScheduleItem:(id,data={}) => request('POST', `/api/schedule/revision-items/${id}/unlock`, data),
+  adjustScheduleItem:(id,data={}) => request('POST', `/api/schedule/revision-items/${id}/adjust`, data),
   generateOrderOperationSchedule:(id,data={}) => request('POST', '/api/schedule/order/' + id + '/generate', data),
   dynamicReplanOrderSchedule:(id,data={}) => request('POST', '/api/schedule/order/' + id + '/dynamic-replan', data),
   listScheduleDowntime:(params={}) => request('GET', '/api/schedule/downtime' + buildQuery(params)),
   createScheduleDowntime:(data={}) => request('POST', '/api/schedule/downtime', data),
+  createScheduleNodeDowntime:(data={}) => request('POST', '/api/schedule/downtime', data),
   cancelScheduleDowntime:(id) => request('DELETE', '/api/schedule/downtime/' + id),
   listOperationSchedules:(params={}) => request('GET', '/api/schedule/operations' + buildQuery(params)),
   auditScheduleCapacity:(params={}) => request('GET', '/api/schedule/capacity-audit' + buildQuery(params)),

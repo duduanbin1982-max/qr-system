@@ -5,16 +5,44 @@ import { useGanttBatch } from '@/composables/gantt/useGanttBatch.js'
 import { useGanttData, isCompletedOrder } from '@/composables/gantt/useGanttData.js'
 import { useGanttEditor } from '@/composables/gantt/useGanttEditor.js'
 import { useGanttExport } from '@/composables/gantt/useGanttExport.js'
-import { useProductionLines } from '@/composables/gantt/useProductionLines.js'
+import { useProductionNodes } from '@/composables/gantt/useProductionNodes.js'
 import { useGanttCapacity } from '@/composables/gantt/useGanttCapacity.js'
 
 
 export function useGantt() {
-  const canEdit = computed(() => can('schedule:edit'))
-  const canManageLines = computed(() => can('settings:edit'))
-  const lines = useProductionLines({ canManageLines })
-  const data = useGanttData({ productionLines: lines.productionLines })
-  const capacity = useGanttCapacity({ orders: data.orders, riskLevel: data.riskLevel })
+  const canAdjustSchedules = computed(() => can('schedules:adjust'))
+  const canGenerateSchedules = computed(() => can('schedules:generate'))
+  const canLockSchedules = computed(() => can('schedules:lock'))
+  const canUnlockSchedules = computed(() => can('schedules:unlock'))
+  const canSubmitSchedules = computed(() => can('schedules:submit'))
+  const canApproveSchedules = computed(() => can('schedules:approve'))
+  const canRejectSchedules = computed(() => can('schedules:reject'))
+  const canPublishSchedules = computed(() => can('schedules:approve'))
+  const canManageNodes = computed(() => can('production_nodes:manage'))
+  const canManageCapabilities = computed(() => can('production_nodes:capability_manage'))
+  const canManageCalendars = computed(() => can('production_nodes:calendar_manage'))
+  const canManageDowntime = computed(() => can('production_nodes:downtime_manage'))
+  const canEdit = canAdjustSchedules
+  const nodes = useProductionNodes({
+    canManageNodes,
+    canManageCapabilities,
+    canManageCalendars,
+  })
+  const data = useGanttData()
+  const capacity = useGanttCapacity({
+    orders: data.orders,
+    riskLevel: data.riskLevel,
+    productionNodes: nodes.productionNodes,
+    canGenerateSchedules,
+    canAdjustSchedules,
+    canLockSchedules,
+    canUnlockSchedules,
+    canSubmitSchedules,
+    canApproveSchedules,
+    canRejectSchedules,
+    canPublishSchedules,
+    canManageDowntime,
+  })
 
   function canAdjustOrder(order) {
     return canEdit.value && !isCompletedOrder(order)
@@ -25,7 +53,6 @@ export function useGantt() {
     ganttData: data.ganttData,
     barLeft: data.barLeft,
     canAdjustOrder,
-    productionLines: lines.productionLines,
   })
   const batch = useGanttBatch({
     canEdit,
@@ -48,7 +75,7 @@ export function useGantt() {
 
   onMounted(() => {
     data.load()
-    lines.loadLines()
+    nodes.loadNodes()
     document.addEventListener('keydown', onKeyDown)
   })
 
@@ -60,7 +87,7 @@ export function useGantt() {
   return {
     ...data,
     ...editor,
-    ...lines,
+    ...nodes,
     ...capacity,
     ...batch,
     ...imageExport,
@@ -68,7 +95,18 @@ export function useGantt() {
     isCompleted: isCompletedOrder,
     canAdjustOrder,
     canEdit,
-    canManageLines,
+    canAdjustSchedules,
+    canGenerateSchedules,
+    canLockSchedules,
+    canUnlockSchedules,
+    canSubmitSchedules,
+    canApproveSchedules,
+    canRejectSchedules,
+    canPublishSchedules,
+    canManageNodes,
+    canManageCapabilities,
+    canManageCalendars,
+    canManageDowntime,
     onKeyDown,
   }
 }

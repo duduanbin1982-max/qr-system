@@ -156,6 +156,30 @@ def test_historically_referenced_product_can_only_be_soft_deleted(client, auth_h
     assert "只能保留软删除状态" in purged.get_json()["error"]
 
 
+def test_node_capability_product_reference_blocks_purge_with_clear_error(
+    client, auth_headers
+):
+    product_id = _create_product(client, auth_headers)
+    with client.application.app_context():
+        db = get_db()
+        node_id = db.execute(
+            "SELECT id FROM production_nodes ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO production_node_capabilities (production_node_id,product_id) "
+            "VALUES (?,?)",
+            (node_id, product_id),
+        )
+        db.commit()
+
+    deleted = client.delete(f"/api/products/{product_id}", headers=auth_headers)
+    purged = client.delete(f"/api/products/{product_id}/purge", headers=auth_headers)
+
+    assert deleted.status_code == 200, deleted.get_json()
+    assert purged.status_code == 409
+    assert "只能保留软删除状态" in purged.get_json()["error"]
+
+
 def test_attachment_upload_requires_an_active_product(client, auth_headers):
     response = client.post(
         "/api/products/999999/attachments",

@@ -61,6 +61,49 @@ def test_deploy_script_has_required_release_gates():
     )
 
 
+def test_production_node_operations_and_runbook_define_safe_cutover_contract():
+    operations = (
+        PROJECT_ROOT / "scripts" / "production_node_operations.py"
+    ).read_text(encoding="utf-8")
+    runbook = (
+        PROJECT_ROOT / "docs" / "production-node-scheduling-runbook.md"
+    ).read_text(encoding="utf-8")
+
+    for command in (
+        "preflight",
+        "migrate-replica",
+        "compat-audit",
+        "shadow-run",
+        "set-flags",
+        "acceptance",
+        "rollback-readiness",
+    ):
+        assert f'"{command}"' in operations
+    assert "read_only_preflight" in operations
+    assert "query_only" in operations
+    assert "rollback evidence is required" in operations
+    assert "PRODUCTION_NODE_ENGINE_ENABLED" in operations
+    assert "阶段 5" in runbook
+    assert "V086–V089" in runbook
+    assert "Historical mismatch" in runbook or "历史 mismatch" in runbook
+
+
+def test_task13_validation_evidence_records_release_gate_and_no_production_cutover():
+    evidence = (
+        PROJECT_ROOT
+        / "docs"
+        / "superpowers"
+        / "evidence"
+        / "2026-09-17-production-node-scheduling-validation.md"
+    ).read_text(encoding="utf-8")
+    assert "1546 passed" in evidence
+    assert "39 test files, 167 tests passed" in evidence
+    assert "core_node_count` | 21" in evidence
+    assert "quantity_conservation_rate` | 1.0" in evidence
+    assert "没有执行生产数据库迁移" in evidence
+    assert "Deployment refused: Git worktree is not clean" in evidence
+    assert "不能由 Task 13 验证结果自动开启" in evidence
+
 def test_employee_documents_share_verified_attachment_backup_boundary():
     config = (PROJECT_ROOT / "modules" / "config.py").read_text(encoding="utf-8")
     users_route = (PROJECT_ROOT / "modules" / "routes" / "users.py").read_text(

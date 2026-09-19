@@ -14,6 +14,22 @@ from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 
 class ScheduleCapacityRepository:
     @staticmethod
+    def list_order_serial_ids(order_id, db=None):
+        """Return active serial-item identifiers for a schedulable order."""
+        db = resolve_db(db)
+        try:
+            rows = db.execute(
+                "SELECT serial_no FROM product_items "
+                "WHERE order_id=? AND COALESCE(serial_no,'')<>'' "
+                "AND COALESCE(status,'') NOT IN ('cancelled','void','deleted') "
+                "ORDER BY position_no,id",
+                (order_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [str(row["serial_no"]) for row in rows]
+
+    @staticmethod
     def ensure_order_version_bindings(order_id, db):
         """Materialize exact route/process revisions for a schedulable order.
 
@@ -186,6 +202,22 @@ class ScheduleCapacityRepository:
         ).fetchone()
 
     @staticmethod
+    def find_schedule(schedule_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM order_process_schedules WHERE id=?",
+            (schedule_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_standard(standard_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM work_time_standards WHERE id=?",
+            (standard_id,),
+        ).fetchone()
+
+    @staticmethod
     def find_active_standard(
         route_id, route_version_id, process_id, process_version_id,
         product_id, product_code, as_of_date, db
@@ -319,7 +351,9 @@ class ScheduleCapacityRepository:
             "op.status, op.completed, op.scrapped, op.rework, op.process_version_id, "
             "op.process_code_snapshot, op.process_name_snapshot, op.process_category_snapshot, "
             "o.route_id, o.route_version_id, o.route_name_snapshot, p.name AS process_name, "
-            "s.id AS schedule_id, s.process_line_id, s.quantity AS scheduled_quantity, "
+            "s.id AS schedule_id, s.process_line_id, s.production_node_id, "
+            "s.node_code_snapshot, s.node_name_snapshot, s.capacity_mode_snapshot, "
+            "s.quantity AS scheduled_quantity, "
             "s.route_version_id AS scheduled_route_version_id, s.process_version_id AS scheduled_process_version_id, "
             "s.standard_id, s.standard_version, s.process_name_snapshot AS scheduled_process_name_snapshot, "
             "s.route_name_snapshot AS scheduled_route_name_snapshot, s.standard_minutes_per_unit, "
@@ -327,7 +361,7 @@ class ScheduleCapacityRepository:
             "s.planned_start_at, s.planned_end_at, s.occupied_minutes, s.capacity_snapshot_json, "
             "s.standard_match_scope, s.calendar_id, s.shift_snapshot_json, s.line_name_snapshot, "
             "s.execution_mode, "
-            "s.status AS schedule_status, s.blocked_reason, s.schedule_run_key, s.schedule_run_id, pl.line_name "
+            "s.status AS schedule_status, s.blocked_reason, s.blocked_code, s.schedule_run_key, s.schedule_run_id, pl.line_name "
             "FROM order_processes op JOIN orders o ON o.id=op.order_id JOIN processes p ON p.id=op.process_id "
             "LEFT JOIN order_process_schedules s ON s.order_process_id=op.id "
             "LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
@@ -376,12 +410,14 @@ class ScheduleCapacityRepository:
     @staticmethod
     def publish_revision(revision_id, db, published_by=None):
         revision = db.execute(
-            "SELECT id,order_id,status FROM schedule_revisions WHERE id=?", (revision_id,)
+            "SELECT id,order_id,status,approval_status FROM schedule_revisions WHERE id=?", (revision_id,)
         ).fetchone()
         if revision is None:
             raise ValueError("排程版本不存在")
         if revision["status"] not in ("draft", "published"):
             raise ValueError("排程版本当前状态不可发布")
+        if revision["approval_status"] != "approved":
+            raise ValueError("排程版本必须先经独立审批后才能发布")
         expected_operation_ids = {
             row["id"] for row in db.execute(
                 "SELECT id FROM order_processes WHERE order_id=?",
@@ -420,6 +456,222 @@ class ScheduleCapacityRepository:
             "UPDATE orders SET current_schedule_revision_id=? WHERE id=?",
             (revision_id, revision["order_id"]),
         )
+
+    @staticmethod
+    def find_revision_item(revision_item_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT i.*,r.order_id,r.status AS revision_status,r.approval_status,"
+            "r.created_by,r.revision_no FROM schedule_revision_items i "
+            "JOIN schedule_revisions r ON r.id=i.revision_id WHERE i.id=?",
+            (revision_item_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_active_task_lock(revision_item_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM schedule_node_task_locks WHERE revision_item_id=? AND status='active'",
+            (revision_item_id,),
+        ).fetchone()
+
+    @staticmethod
+    def list_active_order_task_locks(order_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT l.*,i.order_process_id,i.revision_id,i.process_id,i.process_line_id,"
+            "i.production_node_id AS item_production_node_id,i.seq_order,i.quantity,"
+            "i.status AS item_status,i.planned_start_at,i.planned_end_at,"
+            "i.occupied_minutes,i.payload_json,i.payload_digest,r.revision_no "
+            "FROM schedule_node_task_locks l "
+            "JOIN schedule_revision_items i ON i.id=l.revision_item_id "
+            "JOIN schedule_revisions r ON r.id=i.revision_id "
+            "WHERE r.order_id=? AND r.status IN ('draft','published') "
+            "AND l.status='active' ORDER BY r.revision_no DESC,l.id DESC",
+            (order_id,),
+        ).fetchall()
+
+    @staticmethod
+    def find_revision_item_by_source_schedule(revision_id, source_schedule_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM schedule_revision_items "
+            "WHERE revision_id=? AND source_schedule_id=? ORDER BY id DESC LIMIT 1",
+            (revision_id, source_schedule_id),
+        ).fetchone()
+
+    @staticmethod
+    def list_node_occupancy_for_adjustment(production_node_id, exclude_schedule_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT ss.id,ss.production_node_id,ss.segment_start_at AS start_at,"
+            "ss.segment_end_at AS end_at,CASE WHEN s.locked=1 OR EXISTS ("
+            "SELECT 1 FROM schedule_revision_items ri "
+            "JOIN schedule_node_task_locks l ON l.revision_item_id=ri.id AND l.status='active' "
+            "WHERE ri.revision_id=o.current_schedule_revision_id "
+            "AND ri.source_schedule_id=s.id) THEN 1 ELSE 0 END AS locked,"
+            "'schedule' AS fact_type FROM order_process_schedule_segments ss "
+            "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+            "JOIN orders o ON o.id=s.order_id "
+            "WHERE ss.production_node_id=? AND ss.schedule_id<>? AND s.status<>'blocked' "
+            "AND o.deleted_at IS NULL UNION ALL "
+            "SELECT s.id,s.production_node_id,s.planned_start_at,s.planned_end_at,"
+            "CASE WHEN s.locked=1 OR EXISTS ("
+            "SELECT 1 FROM schedule_revision_items ri "
+            "JOIN schedule_node_task_locks l ON l.revision_item_id=ri.id AND l.status='active' "
+            "WHERE ri.revision_id=o.current_schedule_revision_id "
+            "AND ri.source_schedule_id=s.id) THEN 1 ELSE 0 END AS locked,"
+            "'schedule' AS fact_type "
+            "FROM order_process_schedules s JOIN orders o ON o.id=s.order_id "
+            "WHERE s.production_node_id=? AND s.id<>? AND s.status<>'blocked' "
+            "AND o.deleted_at IS NULL AND NOT EXISTS ("
+            "SELECT 1 FROM order_process_schedule_segments ss WHERE ss.schedule_id=s.id) UNION ALL "
+            "SELECT d.id,d.production_node_id,d.start_at,d.end_at,0 AS locked,"
+            "'downtime' AS fact_type FROM schedule_downtime_events d "
+            "WHERE d.production_node_id=? AND d.status='active' "
+            "ORDER BY start_at,end_at,id",
+            (production_node_id, exclude_schedule_id or 0,
+             production_node_id, exclude_schedule_id or 0,
+             production_node_id),
+        ).fetchall()
+
+    @staticmethod
+    def find_workflow_event(idempotency_key, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM schedule_node_workflow_events WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+
+    @staticmethod
+    def create_workflow_event(*, revision_id, revision_item_id=None, event_type, actor_id,
+                              reason, before_json, after_json, input_digest, idempotency_key, db):
+        cursor = db.execute(
+            "INSERT INTO schedule_node_workflow_events "
+            "(revision_id,revision_item_id,event_type,actor_id,reason,before_json,after_json,input_digest,idempotency_key) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (revision_id, revision_item_id, event_type, actor_id, reason or '',
+             before_json, after_json, input_digest, idempotency_key),
+        )
+        return db.execute(
+            "SELECT * FROM schedule_node_workflow_events WHERE id=?", (cursor.lastrowid,)
+        ).fetchone()
+
+    @staticmethod
+    def create_task_lock(revision_item_id, production_node_id, actor_id, reason, db):
+        cursor = db.execute(
+            "INSERT INTO schedule_node_task_locks "
+            "(revision_item_id,production_node_id,locked_by,reason) VALUES (?,?,?,?)",
+            (revision_item_id, production_node_id, actor_id, reason),
+        )
+        return db.execute(
+            "SELECT * FROM schedule_node_task_locks WHERE id=?", (cursor.lastrowid,)
+        ).fetchone()
+
+    @staticmethod
+    def release_task_lock(revision_item_id, actor_id, reason, db):
+        cursor = db.execute(
+            "UPDATE schedule_node_task_locks SET status='released',released_by=?,"
+            "released_at=datetime('now','localtime'),release_reason=? "
+            "WHERE revision_item_id=? AND status='active'",
+            (actor_id, reason, revision_item_id),
+        )
+        return cursor.rowcount
+
+    @staticmethod
+    def transition_revision(revision_id, expected_status, new_status, actor_id, reason, db):
+        field_prefix = {
+            "submitted": "submitted",
+            "approved": "approved",
+            "rejected": "rejected",
+        }[new_status]
+        cursor = db.execute(
+            f"UPDATE schedule_revisions SET approval_status=?,{field_prefix}_by=?,"
+            f"{field_prefix}_at=datetime('now','localtime'),{field_prefix}_reason=? "
+            "WHERE id=? AND approval_status=? AND status='draft'",
+            (new_status, actor_id, reason, revision_id, expected_status),
+        )
+        return cursor.rowcount
+
+    @staticmethod
+    def clone_revision_with_override(revision_id, override_item_id=None, overrides=None,
+                                     created_by=None, reason='', db=None):
+        db = resolve_db(db)
+        source = db.execute(
+            "SELECT * FROM schedule_revisions WHERE id=?", (revision_id,)
+        ).fetchone()
+        if source is None:
+            raise ValueError("排程版本不存在")
+        next_no = db.execute(
+            "SELECT COALESCE(MAX(revision_no),0)+1 FROM schedule_revisions WHERE order_id=?",
+            (source['order_id'],),
+        ).fetchone()[0]
+        rev_columns = [r[1] for r in db.execute("PRAGMA table_info(schedule_revisions)").fetchall()]
+        excluded = {'id','created_at','published_at','superseded_at','submitted_at','approved_at','rejected_at'}
+        values = {c: source[c] for c in rev_columns if c not in excluded}
+        values.update({
+            'revision_no': next_no, 'status': 'draft', 'approval_status': 'draft',
+            'created_by': created_by, 'published_by': None, 'superseded_by': None,
+            'source_run_key': f"manual:{revision_id}:{next_no}",
+            'result_digest': '', 'submitted_by': None, 'submitted_reason': '',
+            'approved_by': None, 'approved_reason': '', 'rejected_by': None,
+            'rejected_reason': '',
+            'replan_reason': (
+                reason or source['replan_reason']
+                if 'replan_reason' in rev_columns else reason or ''
+            ),
+        })
+        for timestamp_column in ('submitted_at', 'approved_at', 'rejected_at'):
+            if timestamp_column in rev_columns:
+                values[timestamp_column] = ''
+        for risk_column, empty_value in {
+            'deadline_snapshot': '',
+            'projected_completion_at_snapshot': '',
+            'risk_level': 'unassessed',
+            'delay_minutes': 0,
+            'risk_reason': '',
+            'risk_assessed_at': '',
+        }.items():
+            if risk_column in rev_columns:
+                values[risk_column] = empty_value
+        cols = list(values)
+        cur = db.execute(
+            f"INSERT INTO schedule_revisions ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+            [values[c] for c in cols],
+        )
+        new_revision_id = cur.lastrowid
+        item_columns = [r[1] for r in db.execute("PRAGMA table_info(schedule_revision_items)").fetchall()]
+        item_id_map = {}
+        source_items = db.execute(
+            "SELECT * FROM schedule_revision_items WHERE revision_id=? ORDER BY seq_order,id",
+            (revision_id,),
+        ).fetchall()
+        for item in source_items:
+            item_values = {c: item[c] for c in item_columns if c not in {'id','revision_id','created_at'}}
+            if 'row_version' in item_values:
+                item_values['row_version'] = 1
+            if item['id'] == override_item_id:
+                item_values.update(overrides or {})
+            item_values['revision_id'] = new_revision_id
+            cols = list(item_values)
+            item_cursor = db.execute(
+                f"INSERT INTO schedule_revision_items ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                [item_values[c] for c in cols],
+            )
+            item_id_map[item['id']] = item_cursor.lastrowid
+        for source_item_id, target_item_id in item_id_map.items():
+            lock = db.execute(
+                "SELECT production_node_id,locked_by,reason FROM schedule_node_task_locks "
+                "WHERE revision_item_id=? AND status='active'",
+                (source_item_id,),
+            ).fetchone()
+            if lock:
+                db.execute(
+                    "INSERT INTO schedule_node_task_locks "
+                    "(revision_item_id,production_node_id,locked_by,reason) VALUES (?,?,?,?)",
+                    (target_item_id, lock['production_node_id'], lock['locked_by'], lock['reason']),
+                )
+        return new_revision_id, item_id_map
 
     @staticmethod
     def list_revisions(order_id, db=None, limit=100):
@@ -553,7 +805,8 @@ class ScheduleCapacityRepository:
         )
 
     @staticmethod
-    def list_downtime_events(process_line_id=None, start_at="", end_at="", db=None, limit=1000):
+    def list_downtime_events(process_line_id=None, production_node_id=None,
+                             start_at="", end_at="", db=None, limit=1000):
         db = resolve_db(db)
         limit = min(max(int(limit or 1000), 1), 5000)
         where = ["d.status='active'"]
@@ -561,6 +814,9 @@ class ScheduleCapacityRepository:
         if process_line_id not in (None, ""):
             where.append("d.process_line_id=?")
             params.append(int(process_line_id))
+        if production_node_id not in (None, ""):
+            where.append("d.production_node_id=?")
+            params.append(int(production_node_id))
         if start_at:
             where.append("d.end_at>?" )
             params.append(start_at)
@@ -568,16 +824,20 @@ class ScheduleCapacityRepository:
             where.append("d.start_at<?")
             params.append(end_at)
         return db.execute(
-            "SELECT d.*,pl.line_code,pl.line_name,p.name AS process_name "
+            "SELECT d.*,pl.line_code,pl.line_name,n.node_code,n.node_name,"
+            "COALESCE(np.name,p.name) AS process_name "
             "FROM schedule_downtime_events d "
             "JOIN process_production_lines pl ON pl.id=d.process_line_id "
             "JOIN processes p ON p.id=pl.process_id "
+            "LEFT JOIN production_nodes n ON n.id=d.production_node_id "
+            "LEFT JOIN processes np ON np.id=n.process_id "
             "WHERE " + " AND ".join(where) + " ORDER BY d.start_at,d.id LIMIT ?",
             params + [limit],
         ).fetchall()
 
     @staticmethod
-    def create_downtime_event(process_line_id, start_at, end_at, reason, created_by=None, db=None):
+    def create_downtime_event(process_line_id, start_at, end_at, reason, created_by=None,
+                              production_node_id=None, db=None):
         db = resolve_db(db)
         line = db.execute(
             "SELECT id,status FROM process_production_lines WHERE id=?", (process_line_id,)
@@ -588,9 +848,10 @@ class ScheduleCapacityRepository:
             raise ValueError("产线已停用")
         cur = db.execute(
             "INSERT INTO schedule_downtime_events "
-            "(process_line_id,start_at,end_at,reason,status,source_type,created_by) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (process_line_id, start_at, end_at, reason or "", "active", "manual", created_by),
+            "(process_line_id,production_node_id,start_at,end_at,reason,status,source_type,created_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (process_line_id, production_node_id, start_at, end_at, reason or "",
+             "active", "manual", created_by),
         )
         return cur.lastrowid
 
@@ -598,10 +859,13 @@ class ScheduleCapacityRepository:
     def find_downtime_event(event_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT d.*,pl.line_code,pl.line_name,p.name AS process_name "
+            "SELECT d.*,pl.line_code,pl.line_name,n.node_code,n.node_name,"
+            "COALESCE(np.name,p.name) AS process_name "
             "FROM schedule_downtime_events d "
             "JOIN process_production_lines pl ON pl.id=d.process_line_id "
-            "JOIN processes p ON p.id=pl.process_id WHERE d.id=?",
+            "JOIN processes p ON p.id=pl.process_id "
+            "LEFT JOIN production_nodes n ON n.id=d.production_node_id "
+            "LEFT JOIN processes np ON np.id=n.process_id WHERE d.id=?",
             (event_id,),
         ).fetchone()
 
@@ -616,7 +880,7 @@ class ScheduleCapacityRepository:
         return cur.rowcount
 
     @staticmethod
-    def dynamic_replan_order_context(order_id, db=None):
+    def dynamic_replan_order_context(order_id, db=None, *, use_nodes=False):
         """Load immutable-bound operations and current execution facts."""
         db = resolve_db(db)
         order = db.execute(
@@ -651,7 +915,27 @@ class ScheduleCapacityRepository:
             enriched.append({**dict(operation),
                              "completed_quantity": max(int(operation["completed_quantity"] or 0), int(approved or 0)),
                              "rework_quantity": int(pending or 0)})
-        occupancy = [dict(row) for row in ScheduleCapacityRepository.list_line_occupancy(order_id, db)]
+        if use_nodes:
+            occupancy = [dict(row) for row in db.execute(
+                "SELECT ss.production_node_id,ss.process_line_id,"
+                "ss.segment_start_at AS start_at,ss.segment_end_at AS end_at,"
+                "ss.schedule_id FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "JOIN orders o ON o.id=s.order_id "
+                "WHERE s.order_id<>? AND o.deleted_at IS NULL "
+                "AND s.status<>'blocked' AND ss.production_node_id IS NOT NULL "
+                "UNION ALL "
+                "SELECT s.production_node_id,s.process_line_id,s.planned_start_at,"
+                "s.planned_end_at,s.id FROM order_process_schedules s "
+                "JOIN orders o ON o.id=s.order_id "
+                "WHERE s.order_id<>? AND o.deleted_at IS NULL "
+                "AND s.status<>'blocked' AND s.production_node_id IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM order_process_schedule_segments ss WHERE ss.schedule_id=s.id) "
+                "ORDER BY start_at,end_at,schedule_id",
+                (order_id, order_id),
+            ).fetchall()]
+        else:
+            occupancy = [dict(row) for row in ScheduleCapacityRepository.list_line_occupancy(order_id, db)]
         downtime = [dict(row) for row in ScheduleCapacityRepository.list_downtime_events(db=db)]
         prior = db.execute(
             "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY seq_order,id", (order_id,)
@@ -1015,17 +1299,20 @@ class ScheduleCapacityRepository:
         if data.get("route_version_id") != binding["route_version_id"] or data.get("process_version_id") != binding["process_version_id"]:
             raise ValueError("订单—路线—工序版本绑定不一致")
         cur = db.execute(
-            "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,"
+            "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,production_node_id,"
+            "node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,"
             "seq_order,quantity,standard_minutes_per_unit,setup_minutes,difficulty_factor,planned_minutes,plan_start,plan_end,"
-            "status,blocked_reason,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
+            "status,blocked_reason,blocked_code,schedule_run_key,route_version_id,process_version_id,standard_id,standard_version,"
             "process_name_snapshot,route_name_snapshot,schedule_run_id,schedule_revision_id,planned_start_at,planned_end_at,occupied_minutes,"
             "capacity_snapshot_json,standard_match_scope,calendar_id,shift_snapshot_json,line_name_snapshot,execution_mode,"
             "completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["order_id"], data["order_process_id"], data["process_id"], data.get("process_line_id"),
+             data.get("production_node_id"), data.get("node_code_snapshot", ""),
+             data.get("node_name_snapshot", ""), data.get("capacity_mode_snapshot", ""),
              data.get("seq_order", 0), data.get("quantity", 0), data.get("standard_minutes_per_unit", 0),
              data.get("setup_minutes", 0), data.get("difficulty_factor", 1), data.get("planned_minutes", 0), data["plan_start"], data["plan_end"],
-             data.get("status", "planned"), data.get("blocked_reason", ""), data.get("schedule_run_key", ""),
+             data.get("status", "planned"), data.get("blocked_reason", ""), data.get("blocked_code", ""), data.get("schedule_run_key", ""),
              data.get("route_version_id"), data.get("process_version_id"), data.get("standard_id"), data.get("standard_version"),
             data.get("process_name_snapshot", ""), data.get("route_name_snapshot", ""), data.get("schedule_run_id"),
             data.get("schedule_revision_id"),
@@ -1037,15 +1324,58 @@ class ScheduleCapacityRepository:
              data.get("remaining_quantity_snapshot", data.get("quantity", 0)),
              data.get("source_fact_digest", "")),
         )
+        segment_ids = []
         for segment in data.get("segments", ()):
-            db.execute(
+            segment_cursor = db.execute(
                 "INSERT INTO order_process_schedule_segments "
-                "(schedule_id,process_line_id,segment_start_at,segment_end_at,occupied_minutes,shift_id,quantity) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (cur.lastrowid, segment.get("process_line_id", data["process_line_id"]),
+                "(schedule_id,process_line_id,production_node_id,segment_start_at,segment_end_at,occupied_minutes,shift_id,quantity) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (cur.lastrowid, segment.get("process_line_id", data.get("process_line_id")),
+                 segment.get("production_node_id", data.get("production_node_id")),
                  segment["start_at"], segment["end_at"], segment["occupied_minutes"],
                  segment.get("shift_id"), segment.get("quantity", data.get("quantity", 0))),
             )
+            segment_ids.append(segment_cursor.lastrowid)
+        allocations = data.get("allocations", ())
+        if allocations:
+            try:
+                for allocation in allocations:
+                    node_id = allocation.get("production_node_id")
+                    segment_id = None
+                    for segment_id_candidate in segment_ids:
+                        segment_row = db.execute(
+                            "SELECT production_node_id,segment_start_at,segment_end_at "
+                            "FROM order_process_schedule_segments WHERE id=?",
+                            (segment_id_candidate,),
+                        ).fetchone()
+                        if not segment_row or segment_row["production_node_id"] != node_id:
+                            continue
+                        allocation_start = allocation.get("segment_start_at")
+                        allocation_end = allocation.get("segment_end_at")
+                        if not allocation_start or not allocation_end:
+                            segment_id = segment_id_candidate
+                            break
+                        # One allocation may span multiple calendar segments;
+                        # retain the first overlapping segment as its anchor.
+                        if (
+                            segment_row["segment_start_at"] < allocation_end
+                            and segment_row["segment_end_at"] > allocation_start
+                        ):
+                            segment_id = segment_id_candidate
+                            break
+                    db.execute(
+                        "INSERT INTO production_node_schedule_allocations "
+                        "(schedule_id,segment_id,production_node_id,quantity,serial_id,batch_key,"
+                        "changeover_minutes,allocation_start_at,allocation_end_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (cur.lastrowid, segment_id, node_id, int(allocation.get("quantity") or 0),
+                         allocation.get("serial_id"), allocation.get("batch_key") or "",
+                         float(allocation.get("changeover_minutes") or 0),
+                         allocation.get("segment_start_at") or "", allocation.get("segment_end_at") or ""),
+                    )
+            except sqlite3.OperationalError:
+                # V088 is additive; keep read-only V087 clones compatible.
+                pass
         if data.get("schedule_revision_id"):
             ScheduleCapacityRepository.snapshot_revision_item(cur.lastrowid, data["schedule_revision_id"], db)
         return cur.lastrowid
@@ -1066,15 +1396,29 @@ class ScheduleCapacityRepository:
                 (schedule_id,),
             ).fetchall()
         ]
+        try:
+            payload["allocations"] = [
+                dict(allocation) for allocation in db.execute(
+                    "SELECT * FROM production_node_schedule_allocations "
+                    "WHERE schedule_id=? ORDER BY id", (schedule_id,)
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            payload["allocations"] = []
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         db.execute(
             "INSERT OR IGNORE INTO schedule_revision_items "
-            "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,seq_order,quantity,status,"
+            "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,production_node_id,"
+            "node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,seq_order,quantity,status,"
             "planned_start_at,planned_end_at,occupied_minutes,payload_json,payload_digest,"
             "execution_mode,completed_quantity_snapshot,rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (revision_id, schedule_id, row["order_process_id"], row["process_id"], row["process_line_id"],
+             row["production_node_id"] if "production_node_id" in keys else None,
+             row["node_code_snapshot"] if "node_code_snapshot" in keys else "",
+             row["node_name_snapshot"] if "node_name_snapshot" in keys else "",
+             row["capacity_mode_snapshot"] if "capacity_mode_snapshot" in keys else "",
              row["seq_order"], row["quantity"], row["status"], row["planned_start_at"],
              row["planned_end_at"], row["occupied_minutes"], encoded, digest,
              row["execution_mode"] if "execution_mode" in keys else "internal",
@@ -1088,9 +1432,73 @@ class ScheduleCapacityRepository:
     def list_scheduled_operations(limit=500, db=None):
         db = resolve_db(db)
         limit = min(max(int(limit or 500), 1), 1000)
-        return db.execute(
-            "SELECT s.*, o.order_no, o.product_name, p.name AS process_name, pl.line_name "
-            "FROM order_process_schedules s JOIN orders o ON o.id=s.order_id "
-            "JOIN processes p ON p.id=s.process_id LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
-            "WHERE o.deleted_at IS NULL ORDER BY s.plan_start, s.seq_order, o.order_no LIMIT ?", (limit,)
-        ).fetchall()
+        try:
+            return db.execute(
+                "SELECT s.*,o.order_no,o.product_name,p.name AS process_name,"
+                "pl.line_name,ri.id AS revision_item_id,"
+                "ri.row_version AS revision_item_row_version,"
+                "r.status AS revision_status,"
+                "r.approval_status AS revision_approval_status,"
+                "CASE WHEN l.id IS NULL THEN 0 ELSE 1 END AS locked,"
+                "l.id AS task_lock_id,"
+                "COALESCE(NULLIF(s.node_code_snapshot,''),n.node_code,'') AS node_code,"
+                "COALESCE(NULLIF(s.node_name_snapshot,''),n.node_name,'') AS node_name "
+                "FROM order_process_schedules s "
+                "JOIN orders o ON o.id=s.order_id "
+                "JOIN processes p ON p.id=s.process_id "
+                "LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
+                "LEFT JOIN schedule_revision_items ri "
+                "ON ri.revision_id=s.schedule_revision_id "
+                "AND ri.source_schedule_id=s.id "
+                "LEFT JOIN schedule_revisions r ON r.id=ri.revision_id "
+                "LEFT JOIN schedule_node_task_locks l "
+                "ON l.revision_item_id=ri.id AND l.status='active' "
+                "LEFT JOIN production_nodes n ON n.id=s.production_node_id "
+                "WHERE o.deleted_at IS NULL "
+                "ORDER BY s.plan_start,s.seq_order,o.order_no LIMIT ?",
+                (limit,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # V089 is additive. Read-only replicas that have not reached the
+            # workflow migration must retain the legacy query contract.
+            return db.execute(
+                "SELECT s.*,o.order_no,o.product_name,p.name AS process_name,"
+                "pl.line_name,NULL AS revision_item_id,NULL AS revision_item_row_version,"
+                "NULL AS revision_status,NULL AS revision_approval_status,0 AS locked,"
+                "NULL AS task_lock_id,'' AS node_code,'' AS node_name "
+                "FROM order_process_schedules s JOIN orders o ON o.id=s.order_id "
+                "JOIN processes p ON p.id=s.process_id "
+                "LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
+                "WHERE o.deleted_at IS NULL "
+                "ORDER BY s.plan_start,s.seq_order,o.order_no LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    @staticmethod
+    def list_schedule_allocations(schedule_ids, db=None):
+        """Return immutable split facts for the requested schedule rows."""
+        db = resolve_db(db)
+        normalized = sorted({
+            int(schedule_id)
+            for schedule_id in (schedule_ids or [])
+            if str(schedule_id or "").isdigit() and int(schedule_id) > 0
+        })
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        try:
+            return db.execute(
+                "SELECT a.id,a.schedule_id,a.segment_id,a.production_node_id,"
+                "a.quantity,a.serial_id,a.batch_key,a.changeover_minutes,"
+                "a.allocation_start_at,a.allocation_end_at,"
+                "n.node_code,n.node_name "
+                "FROM production_node_schedule_allocations a "
+                "LEFT JOIN production_nodes n ON n.id=a.production_node_id "
+                f"WHERE a.schedule_id IN ({placeholders}) "
+                "ORDER BY a.schedule_id,a.allocation_start_at,a.id",
+                normalized,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # V088 is additive; old read-only database copies have no split
+            # allocation table and should expose an empty detail list.
+            return []

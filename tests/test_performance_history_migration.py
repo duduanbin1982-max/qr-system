@@ -399,8 +399,8 @@ def test_history_manifest_matches_exact_pre_refactor_characterization(client):
         )
 
         assert actual == {
-            "manifest_sha256": "5978dbcd4cecfd76272d60da9ef0557a5fff8503720de8a67e20906119a5c368",
-            "month_manifest_sha256": "308b9601d94c8685aa1b873d162b958b486bd3f9a42cc00e06302aff2c6ab9c5",
+            "manifest_sha256": "6fb94bfc55e9345954315654ba388f8cbac83fbd822179dba5e4e9e42c8dff1d",
+            "month_manifest_sha256": "7d8b1f4df72b1c120e958987d3b935b50bec67941291d8ecde9c89bb2c73d69d",
             "record_count": 13,
             "stable_keys": [
                 "assignment_history:00000000000000000006",

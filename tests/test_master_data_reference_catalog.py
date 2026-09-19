@@ -8,6 +8,7 @@ from modules.db import get_db
 from modules.master_data_references import (
     POSITION_REFERENCES,
     PROCESS_REFERENCES,
+    PRODUCT_REFERENCES,
     ROUTE_REFERENCES,
     cataloged_reference_columns,
     discover_position_reference_columns,
@@ -76,6 +77,17 @@ def test_reference_catalog_includes_payroll_performance_price_time_and_quality()
     assert expected.issubset(columns)
     assert all(reference.business_label for reference in PROCESS_REFERENCES)
     assert all(reference.suggested_action for reference in ROUTE_REFERENCES)
+
+
+def test_reference_catalog_registers_production_node_capability_identity_columns():
+    columns = cataloged_reference_columns()
+    assert {
+        ("production_nodes", "process_id"),
+        ("production_node_capabilities", "product_id"),
+        ("production_node_capabilities", "route_version_id"),
+        ("production_node_capabilities", "process_version_id"),
+    }.issubset(columns)
+    assert all(reference.business_label for reference in PRODUCT_REFERENCES)
 
 
 def test_position_reference_catalog_covers_all_live_columns(client):

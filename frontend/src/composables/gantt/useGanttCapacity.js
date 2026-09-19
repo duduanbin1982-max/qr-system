@@ -12,15 +12,45 @@ const STANDARD_SCOPE_LABELS = Object.freeze({
   'process:generic': '工序 · 通用',
 })
 
+export const BLOCKED_MESSAGES = Object.freeze({
+  NO_COMPATIBLE_NODE: '没有满足能力要求的生产节点',
+  MISSING_WORK_TIME_STANDARD: '未配置有效标准工时',
+  VERSION_BINDING_MISMATCH: '订单、路线和工序版本不一致',
+  NODE_CALENDAR_UNAVAILABLE: '生产节点日历没有可用时间',
+  LOCKED_TASK_CONFLICT: '锁定任务发生冲突，需要授权解锁',
+  SERIAL_ITEM_SPLIT_FORBIDDEN: '单个序列工件不能跨节点拆分',
+  BATCH_CAPACITY_EXCEEDED: '批处理数量或批次配置不符合要求',
+  QUANTITY_CONSERVATION_FAILED: '排程拆分数量不守恒',
+})
 
-export function useGanttCapacity({ orders, riskLevel }) {
+function commandKey(prefix, id = 'command') {
+  return `${prefix}-${id}-${Date.now()}`
+}
+
+function permissionValue(permission) {
+  return permission?.value !== false
+}
+
+export function useGanttCapacity({
+  orders,
+  riskLevel,
+  productionNodes,
+  canGenerateSchedules,
+  canAdjustSchedules,
+  canLockSchedules,
+  canUnlockSchedules,
+  canSubmitSchedules,
+  canApproveSchedules,
+  canRejectSchedules,
+  canPublishSchedules,
+  canManageDowntime,
+}) {
   const viewMode = ref('orders')
-  const capacityLines = ref([])
   const operationSchedules = ref([])
   const capacityOrders = ref([])
   const capacityLoading = ref(false)
   const capacityProcessFilter = ref('')
-  const capacityLineFilter = ref('')
+  const capacityNodeFilter = ref('')
   const generationOrderId = ref('')
   const generationStartDate = ref('')
   const generationRunKey = ref('')
@@ -37,16 +67,27 @@ export function useGanttCapacity({ orders, riskLevel }) {
   const downtimeEvents = ref([])
   const downtimeLoading = ref(false)
   const downtimeForm = ref({
-    process_line_id: '',
+    production_node_id: '',
     start_at: '',
     end_at: '',
     reason: '',
   })
+  const showAdjustmentModal = ref(false)
+  const adjustmentForm = ref({
+    revision_item_id: '',
+    production_node_id: '',
+    planned_start_at: '',
+    row_version: 1,
+    reason: '',
+    idempotency_key: '',
+  })
+
+  const capacityNodes = computed(() => productionNodes?.value || [])
 
   const processOptions = computed(() => {
     const seen = new Map()
-    capacityLines.value.forEach((line) => {
-      if (!seen.has(line.process_id)) seen.set(line.process_id, line.process_name)
+    capacityNodes.value.forEach((node) => {
+      if (!seen.has(node.process_id)) seen.set(node.process_id, node.process_name)
     })
     operationSchedules.value.forEach((row) => {
       if (!seen.has(row.process_id)) seen.set(row.process_id, row.process_name)
@@ -55,8 +96,17 @@ export function useGanttCapacity({ orders, riskLevel }) {
   })
 
   const filteredOperations = computed(() => operationSchedules.value.filter((row) => {
-    if (capacityProcessFilter.value && String(row.process_id) !== String(capacityProcessFilter.value)) return false
-    if (capacityLineFilter.value && String(row.process_line_id || '') !== String(capacityLineFilter.value)) return false
+    if (
+      capacityProcessFilter.value
+      && String(row.process_id) !== String(capacityProcessFilter.value)
+    ) return false
+    if (capacityNodeFilter.value) {
+      const directMatch = String(row.production_node_id || '') === String(capacityNodeFilter.value)
+      const allocationMatch = (row.allocations || []).some(
+        allocation => String(allocation.production_node_id || '') === String(capacityNodeFilter.value),
+      )
+      if (!directMatch && !allocationMatch) return false
+    }
     return true
   }))
 
@@ -66,27 +116,27 @@ export function useGanttCapacity({ orders, riskLevel }) {
       total: rows.length,
       planned: rows.filter(row => row.schedule_status === 'planned' || row.status === 'planned').length,
       blocked: rows.filter(row => row.schedule_status === 'blocked' || row.status === 'blocked').length,
-      minutes: rows.reduce((sum, row) => sum + Number(row.occupied_minutes ?? row.planned_minutes ?? 0), 0),
+      minutes: rows.reduce(
+        (sum, row) => sum + Number(row.occupied_minutes ?? row.planned_minutes ?? 0),
+        0,
+      ),
     }
   })
 
   async function loadCapacity() {
     capacityLoading.value = true
     try {
-      const [lineData, scheduleData, orderData] = await Promise.all([
-        api.domains.production.listProcessCapacityLines(),
+      const [scheduleData, orderData] = await Promise.all([
         api.domains.production.listOperationSchedules({ limit: 1000 }),
         api.domains.production.listCapacityOrders({ limit: 1000 }),
       ])
-      capacityLines.value = lineData.lines || []
       operationSchedules.value = scheduleData.operations || []
       capacityOrders.value = orderData.orders || orders.value || []
-      if (!downtimeForm.value.process_line_id && capacityLines.value.length) {
-        downtimeForm.value.process_line_id = capacityLines.value[0].id
+      if (!downtimeForm.value.production_node_id && capacityNodes.value.length) {
+        downtimeForm.value.production_node_id = capacityNodes.value[0].id
       }
     } catch (error) {
       showToast(error.message || '加载工序排程失败', 'error')
-      capacityLines.value = []
       operationSchedules.value = []
     } finally {
       capacityLoading.value = false
@@ -115,50 +165,60 @@ export function useGanttCapacity({ orders, riskLevel }) {
   }
 
   async function createDowntime() {
+    if (!permissionValue(canManageDowntime)) return null
     const form = downtimeForm.value
-    if (!form.process_line_id) {
-      showToast('请选择停机产线', 'error')
-      return
+    if (!Number(form.production_node_id)) {
+      showToast('请选择停机生产节点', 'error')
+      return null
     }
     if (!form.start_at || !form.end_at) {
       showToast('请填写停机开始和结束时间', 'error')
-      return
+      return null
     }
     if (new Date(form.end_at) <= new Date(form.start_at)) {
       showToast('停机结束时间必须晚于开始时间', 'error')
-      return
+      return null
+    }
+    if (!String(form.reason || '').trim()) {
+      showToast('停机原因必填', 'error')
+      return null
     }
     try {
-      await api.domains.production.createScheduleDowntime({
-        process_line_id: Number(form.process_line_id),
+      const result = await api.domains.production.createScheduleNodeDowntime({
+        production_node_id: Number(form.production_node_id),
         start_at: form.start_at,
         end_at: form.end_at,
-        reason: String(form.reason || '').trim(),
+        reason: String(form.reason).trim(),
       })
       showToast('停机记录已保存')
       form.start_at = ''
       form.end_at = ''
       form.reason = ''
       await loadDowntime()
+      return result
     } catch (error) {
       showToast(error.message || '保存停机记录失败', 'error')
+      return null
     }
   }
 
   async function cancelDowntime(event) {
+    if (!permissionValue(canManageDowntime)) return null
     try {
-      await api.domains.production.cancelScheduleDowntime(event.id)
+      const result = await api.domains.production.cancelScheduleDowntime(event.id)
       showToast('停机记录已取消')
       await loadDowntime()
+      return result
     } catch (error) {
       showToast(error.message || '取消停机记录失败', 'error')
+      return null
     }
   }
 
   function startGeneration(order) {
     generationOrderId.value = order?.id || ''
     generationStartDate.value = order?.plan_start || new Date().toISOString().slice(0, 10)
-    generationRunKey.value = `schedule-${order?.id || 'order'}-${Date.now()}`
+    generationRunKey.value = commandKey('schedule', order?.id || 'order')
   }
 
   function prepareGeneration(orderId) {
@@ -168,28 +228,34 @@ export function useGanttCapacity({ orders, riskLevel }) {
   }
 
   async function generateSchedule() {
+    if (!permissionValue(canGenerateSchedules)) return null
     if (!generationOrderId.value) {
       showToast('请选择订单', 'error')
-      return
+      return null
     }
     try {
-      await api.domains.production.generateOrderOperationSchedule(generationOrderId.value, {
-        start_date: generationStartDate.value,
-        schedule_run_key: generationRunKey.value,
-      })
-      showToast('工序排程已生成')
+      const result = await api.domains.production.generateOrderOperationSchedule(
+        generationOrderId.value,
+        {
+          start_date: generationStartDate.value,
+          schedule_run_key: generationRunKey.value,
+        },
+      )
+      showToast('工序排程草稿已生成')
       await loadCapacity()
+      return result
     } catch (error) {
       showToast(error.message || '生成工序排程失败', 'error')
+      return null
     }
   }
 
   function startDynamicReplan(order) {
     replanOrderId.value = order?.id || ''
     const now = new Date()
-    const pad = (value) => String(value).padStart(2, '0')
+    const pad = value => String(value).padStart(2, '0')
     replanStartAt.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
-    replanRunKey.value = `dynamic-replan-${order?.id || 'order'}-${Date.now()}`
+    replanRunKey.value = commandKey('dynamic-replan', order?.id || 'order')
   }
 
   function prepareDynamicReplan(orderId) {
@@ -199,20 +265,27 @@ export function useGanttCapacity({ orders, riskLevel }) {
   }
 
   async function dynamicReplanSchedule() {
+    if (!permissionValue(canGenerateSchedules)) return null
     if (!replanOrderId.value) {
       showToast('请选择订单', 'error')
-      return
+      return null
+    }
+    if (!String(replanReason.value || '').trim()) {
+      showToast('动态重排原因必填', 'error')
+      return null
     }
     try {
-      await api.domains.production.dynamicReplanOrderSchedule(replanOrderId.value, {
+      const result = await api.domains.production.dynamicReplanOrderSchedule(replanOrderId.value, {
         start_at: replanStartAt.value,
         schedule_run_key: replanRunKey.value,
-        reason: replanReason.value,
+        reason: String(replanReason.value).trim(),
       })
-      showToast('已按实际生产事实生成动态重排版本')
+      showToast('已按实际生产事实生成动态重排草稿')
       await loadCapacity()
+      return result
     } catch (error) {
       showToast(error.message || '动态重排失败', 'error')
+      return null
     }
   }
 
@@ -220,11 +293,12 @@ export function useGanttCapacity({ orders, riskLevel }) {
     autoPlanVisible.value = true
     autoPlanStartDate.value = new Date().toISOString().slice(0, 10)
     autoPlanLimit.value = 100
-    autoPlanKey.value = `auto-plan-${Date.now()}`
+    autoPlanKey.value = commandKey('auto-plan')
     autoPlanResult.value = null
   }
 
   async function runAutoPlan() {
+    if (!permissionValue(canGenerateSchedules)) return null
     const startDate = String(autoPlanStartDate.value || '').trim()
     const runKey = String(autoPlanKey.value || '').trim()
     const limit = Number(autoPlanLimit.value)
@@ -265,8 +339,27 @@ export function useGanttCapacity({ orders, riskLevel }) {
     }
   }
 
-  function lineLabel(row) {
-    return row.line_name || (row.process_line_id ? `产线 #${row.process_line_id}` : '未分配')
+  function nodeLabel(row) {
+    if (row.node_code || row.node_name) {
+      return [row.node_code, row.node_name].filter(Boolean).join(' · ')
+    }
+    return row.production_node_id ? `生产节点 #${row.production_node_id}` : '未分配'
+  }
+
+  function allocationLabel(allocation) {
+    const node = [allocation.node_code, allocation.node_name].filter(Boolean).join(' · ')
+      || `生产节点 #${allocation.production_node_id}`
+    const quantity = Number(allocation.quantity || 0)
+    return `${node} × ${quantity}`
+  }
+
+  function blockedCode(row) {
+    return String(row.blocked_code || row.error_code || '').trim()
+  }
+
+  function blockedMessage(row) {
+    const code = blockedCode(row)
+    return BLOCKED_MESSAGES[code] || row.blocked_reason || row.reason || '前置条件不满足'
   }
 
   function standardScopeLabel(scope) {
@@ -285,14 +378,147 @@ export function useGanttCapacity({ orders, riskLevel }) {
     return riskLevel ? riskLevel(order) : (order.risk_level || 'none')
   }
 
+  function prepareAdjustment(row) {
+    if (!permissionValue(canAdjustSchedules)) return false
+    if (!row?.revision_item_id) {
+      showToast('该排程事实尚未建立可调整的修订条目', 'error')
+      return false
+    }
+    adjustmentForm.value = {
+      revision_item_id: row.revision_item_id,
+      production_node_id: row.production_node_id || '',
+      planned_start_at: String(row.planned_start_at || '').replace(' ', 'T').slice(0, 16),
+      row_version: Number(row.revision_item_row_version || 1),
+      reason: '',
+      idempotency_key: commandKey('schedule-adjust', row.revision_item_id),
+    }
+    showAdjustmentModal.value = true
+    return true
+  }
+
+  async function saveOperationAdjustment() {
+    if (!permissionValue(canAdjustSchedules)) return null
+    const form = adjustmentForm.value
+    if (!Number(form.revision_item_id) || !Number(form.production_node_id)) {
+      showToast('排程修订条目和生产节点必填', 'error')
+      return null
+    }
+    if (!form.planned_start_at) {
+      showToast('计划开始时间必填', 'error')
+      return null
+    }
+    if (!String(form.reason || '').trim()) {
+      showToast('人工调整原因必填', 'error')
+      return null
+    }
+    try {
+      const result = await api.domains.production.adjustScheduleItem(
+        Number(form.revision_item_id),
+        {
+          production_node_id: Number(form.production_node_id),
+          planned_start_at: form.planned_start_at,
+          row_version: Number(form.row_version || 1),
+          reason: String(form.reason).trim(),
+          idempotency_key: String(form.idempotency_key).trim(),
+        },
+      )
+      showToast('已生成新的排程草稿修订版')
+      showAdjustmentModal.value = false
+      await loadCapacity()
+      return result
+    } catch (error) {
+      showToast(error.message || '调整排程失败', 'error')
+      return null
+    }
+  }
+
+  async function runItemCommand(row, action, reason = '') {
+    const permission = action === 'lock' ? canLockSchedules : canUnlockSchedules
+    if (!permissionValue(permission)) return null
+    if (!row?.revision_item_id) {
+      showToast('该排程事实缺少修订条目，不能执行锁定操作', 'error')
+      return null
+    }
+    const actionReason = String(
+      reason || window.prompt(`请输入${action === 'lock' ? '锁定' : '解锁'}原因：`, '') || '',
+    ).trim()
+    if (!actionReason) {
+      showToast('锁定或解锁原因必填', 'error')
+      return null
+    }
+    const method = action === 'lock'
+      ? api.domains.production.lockScheduleItem
+      : api.domains.production.unlockScheduleItem
+    try {
+      const result = await method(row.revision_item_id, {
+        reason: actionReason,
+        idempotency_key: commandKey(`schedule-${action}`, row.revision_item_id),
+      })
+      showToast(action === 'lock' ? '排程任务已锁定' : '排程任务已解锁')
+      await loadCapacity()
+      return result
+    } catch (error) {
+      showToast(error.message || '排程锁定操作失败', 'error')
+      return null
+    }
+  }
+
+  const lockOperation = (row, reason = '') => runItemCommand(row, 'lock', reason)
+  const unlockOperation = (row, reason = '') => runItemCommand(row, 'unlock', reason)
+
+  async function runRevisionCommand(row, action, reason = '') {
+    const permissions = {
+      submit: canSubmitSchedules,
+      approve: canApproveSchedules,
+      reject: canRejectSchedules,
+      publish: canPublishSchedules,
+    }
+    if (!permissionValue(permissions[action])) return null
+    const revisionId = Number(row?.schedule_revision_id)
+    if (!revisionId) {
+      showToast('该排程事实缺少修订版本', 'error')
+      return null
+    }
+    const methods = {
+      submit: api.domains.production.submitScheduleRevision,
+      approve: api.domains.production.approveScheduleRevision,
+      reject: api.domains.production.rejectScheduleRevision,
+      publish: api.domains.production.publishScheduleRevision,
+    }
+    let payload = {}
+    if (action !== 'publish') {
+      const actionReason = String(
+        reason || window.prompt('请输入本次排程版本操作原因：', '') || '',
+      ).trim()
+      if (!actionReason) {
+        showToast('排程版本操作原因必填', 'error')
+        return null
+      }
+      payload = {
+        reason: actionReason,
+        idempotency_key: commandKey(`schedule-${action}`, revisionId),
+      }
+    }
+    try {
+      const result = await methods[action](revisionId, payload)
+      const labels = { submit: '已提交审批', approve: '已批准', reject: '已驳回', publish: '已发布' }
+      showToast(`排程版本${labels[action]}`)
+      await loadCapacity()
+      return result
+    } catch (error) {
+      showToast(error.message || '排程版本操作失败', 'error')
+      return null
+    }
+  }
+
   return {
     viewMode,
-    capacityLines,
+    capacityNodes,
     capacityOrders,
     operationSchedules,
     capacityLoading,
     capacityProcessFilter,
-    capacityLineFilter,
+    capacityNodeFilter,
     processOptions,
     filteredOperations,
     capacitySummary,
@@ -325,7 +551,20 @@ export function useGanttCapacity({ orders, riskLevel }) {
     loadDowntime,
     createDowntime,
     cancelDowntime,
-    lineLabel,
+    showAdjustmentModal,
+    adjustmentForm,
+    prepareAdjustment,
+    saveOperationAdjustment,
+    lockOperation,
+    unlockOperation,
+    submitRevision: (row, reason = '') => runRevisionCommand(row, 'submit', reason),
+    approveRevision: (row, reason = '') => runRevisionCommand(row, 'approve', reason),
+    rejectRevision: (row, reason = '') => runRevisionCommand(row, 'reject', reason),
+    publishRevision: row => runRevisionCommand(row, 'publish'),
+    nodeLabel,
+    allocationLabel,
+    blockedCode,
+    blockedMessage,
     standardScopeLabel,
     operationRisk,
     operationRiskLevel,

@@ -9,7 +9,7 @@ const emptyForm = () => ({
   order_no: '', customer: '', customer_id: null, product_name: '', product_id: null, product_code: '',
   model: '', spec: '', style: '', upper_opening: '', plate_thickness: '', category: '',
   quantity: 1, plan_start: '', plan_end: '', deadline: '', route_id: '',
-  production_line_id: null, remark: '', status: 'pending',
+  remark: '', status: 'pending',
   priority_level: 3, is_expedited: false, priority_reason: '',
   priority_effective_at: '', schedule_policy: 'auto', schedule_change_reason: '',
 })
@@ -75,7 +75,6 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
       plan_end: order.plan_end || '',
       deadline: order.deadline || '',
       route_id: order.route_id || '',
-      production_line_id: order.production_line_id || null,
       remark: order.remark || '',
       status: order.status || 'pending',
       priority_level: Number(order.priority_level || 3),
@@ -112,8 +111,6 @@ export function useOrderEditor({ customers, products, processRoutes, loadDropdow
       else if (modalEdit.value) data.route_id = null
       else delete data.route_id
       if (data.customer_id) data.customer_id = parseInt(data.customer_id)
-      if (data.production_line_id) data.production_line_id = parseInt(data.production_line_id) || null
-      else data.production_line_id = null
       data.priority_level = parseInt(data.priority_level, 10) || 3
       data.is_expedited = Boolean(data.is_expedited)
       data.priority_effective_at = data.priority_effective_at || ''

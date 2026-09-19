@@ -207,6 +207,10 @@ class ProductRepository:
                 "SELECT COUNT(*) FROM performance_source_facts WHERE product_id = ?",
                 (product_id,),
             ).fetchone()[0]),
+            "production_node_capabilities": int(db.execute(
+                "SELECT COUNT(*) FROM production_node_capabilities WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()[0]),
         }
 
     @staticmethod

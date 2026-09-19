@@ -31,27 +31,17 @@ export function isCompletedOrder(order) {
   )
 }
 
-export function useGanttData({ productionLines }) {
+export function useGanttData() {
   const orders = ref([])
   const loading = ref(true)
   const dayWidth = ref(38)
   const scheduleScope = ref('active')
-  const wsFilter = ref('')
   const serverStats = ref({ total: 0, producing: 0, pending: 0, completed: 0 })
   const dateRange = ref({ minDate: '', maxDate: '' })
 
   const stats = computed(() => serverStats.value)
-  const filteredOrders = computed(() => {
-    if (!wsFilter.value) return orders.value
-    return orders.value.filter(
-      order => String(order.production_line_id || '') === String(wsFilter.value),
-    )
-  })
+  const filteredOrders = computed(() => orders.value)
   const ganttData = computed(() => buildGanttData(filteredOrders.value, dateRange.value))
-  const dailyLoad = computed(() => calculateDailyLoad(
-    filteredOrders.value,
-    productionLines.value,
-  ))
   const riskSummary = computed(() => {
     const summary = {
       overdue: 0,
@@ -168,13 +158,6 @@ export function useGanttData({ productionLines }) {
     dayWidth.value = Math.max(dayWidth.value - 6, 20)
   }
 
-  function isOverloaded(date, lineId) {
-    if (!lineId || !date) return false
-    return dailyLoad.value.some(
-      load => load.date === date && String(load.lineId) === String(lineId),
-    )
-  }
-
   async function load() {
     loading.value = true
     try {
@@ -232,10 +215,8 @@ export function useGanttData({ productionLines }) {
     loading,
     dayWidth,
     scheduleScope,
-    wsFilter,
     filteredOrders,
     ganttData,
-    dailyLoad,
     riskSummary,
     barLeft,
     barWidth,
@@ -250,7 +231,6 @@ export function useGanttData({ productionLines }) {
     riskBarShadow,
     zoomIn,
     zoomOut,
-    isOverloaded,
     load,
     setScheduleScope,
   }
@@ -279,37 +259,4 @@ function buildGanttData(orders, range) {
     totalDays,
     days,
   }
-}
-
-function calculateDailyLoad(orders, productionLines) {
-  const loadMap = {}
-  orders.forEach((order) => {
-    if (!order.plan_start || !order.plan_end || !order.production_line_id) return
-    const end = new Date(order.plan_end)
-    for (let date = new Date(order.plan_start); date <= end; date.setDate(date.getDate() + 1)) {
-      const dateValue = date.toISOString().slice(0, 10)
-      const key = `${dateValue}|${order.production_line_id}`
-      if (!loadMap[key]) {
-        loadMap[key] = {
-          date: dateValue,
-          lineId: order.production_line_id,
-          line: order.production_line,
-          count: 0,
-          capacity: Number(order.line_capacity) > 0 ? Number(order.line_capacity) : 999,
-        }
-      }
-      loadMap[key].count++
-    }
-  })
-  productionLines.forEach((line) => {
-    Object.values(loadMap).forEach((load) => {
-      if (
-        String(load.lineId) === String(line.id)
-        && Number(line.capacity_per_day) > 0
-      ) {
-        load.capacity = Number(line.capacity_per_day)
-      }
-    })
-  })
-  return Object.values(loadMap).filter(load => load.count > load.capacity)
 }

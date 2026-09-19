@@ -38,6 +38,7 @@ ROUTE_MODULES = (
     "modules.routes.materials",  # 物料管理
     "modules.routes.departments",  # 部门班组管理
     "modules.routes.schedule",  # 生产排程
+    "modules.routes.production_nodes",  # 生产节点管理
     "modules.routes.work_time",  # 工时管理
     "modules.routes.rework",  # 返工管理
     "modules.routes.quality",  # 质量检验

@@ -256,3 +256,48 @@ def test_position_version_permissions_are_granular():
             "positions:reactivate",
         )
     )
+
+
+def test_production_node_and_schedule_permissions_are_granular():
+    assert ACTION_PERMISSION_DEFS["production_nodes"][1] == [
+        "view",
+        "manage",
+        "capability_manage",
+        "calendar_manage",
+        "downtime_manage",
+    ]
+    assert ACTION_PERMISSION_DEFS["schedules"][1] == [
+        "view",
+        "generate",
+        "adjust",
+        "lock",
+        "unlock",
+        "submit",
+        "approve",
+        "reject",
+    ]
+    expected = {
+        "production_nodes:view",
+        "production_nodes:manage",
+        "production_nodes:capability_manage",
+        "production_nodes:calendar_manage",
+        "production_nodes:downtime_manage",
+        "schedules:view",
+        "schedules:generate",
+        "schedules:adjust",
+        "schedules:lock",
+        "schedules:unlock",
+        "schedules:submit",
+        "schedules:approve",
+    }
+    assert expected.issubset(ALL_PERMISSION_CODES)
+    assert PAGE_OPERATION_BINDINGS["page:production.schedule"] == [
+        "schedule",
+        "production_nodes",
+        "schedules",
+    ]
+    for legacy_permission in ("schedule:view", "schedule:edit"):
+        assert all(
+            not has_permission_code([legacy_permission], permission)
+            for permission in expected
+        )

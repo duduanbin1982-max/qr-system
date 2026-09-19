@@ -38,7 +38,8 @@ class ScheduleDynamicReplanPolicy:
         }
 
     @classmethod
-    def build_input_snapshot(cls, *, order, operations, downtime, occupancy, reason, as_of):
+    def build_input_snapshot(cls, *, order, operations, downtime, occupancy, reason, as_of,
+                             locked_tasks=None):
         baselines = [cls.operation_baseline(item) for item in operations]
         snapshot = {
             "order_id": int(order["id"]),
@@ -47,26 +48,36 @@ class ScheduleDynamicReplanPolicy:
             "as_of": as_of or "",
             "reason": reason or "",
             "operations": baselines,
-            "downtime": [
+            "downtime": [cls._resource_fact(item, include_reason=True) for item in downtime],
+            "occupancy": [cls._resource_fact(item, include_schedule=True) for item in occupancy],
+            "locked_tasks": [
                 {
-                    "id": int(item["id"]),
-                    "process_line_id": int(item["process_line_id"]),
-                    "start_at": str(item["start_at"]),
-                    "end_at": str(item["end_at"]),
-                    "reason": item.get("reason", "") or "",
+                    "revision_item_id": int(item["revision_item_id"]),
+                    "order_process_id": int(item["order_process_id"]),
+                    "production_node_id": int(item["production_node_id"]),
+                    "planned_start_at": str(item.get("planned_start_at") or ""),
+                    "planned_end_at": str(item.get("planned_end_at") or ""),
                 }
-                for item in downtime
-            ],
-            "occupancy": [
-                {
-                    "process_line_id": int(item["process_line_id"]),
-                    "start_at": str(item["start_at"]),
-                    "end_at": str(item["end_at"]),
-                    "schedule_id": int(item.get("schedule_id") or 0),
-                }
-                for item in occupancy
+                for item in (locked_tasks or ())
             ],
         }
         encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return snapshot, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _resource_fact(item, *, include_reason=False, include_schedule=False):
+        fact = {
+            "start_at": str(item["start_at"]),
+            "end_at": str(item["end_at"]),
+        }
+        if item.get("production_node_id") not in (None, ""):
+            fact["production_node_id"] = int(item["production_node_id"])
+        elif item.get("process_line_id") not in (None, ""):
+            fact["process_line_id"] = int(item["process_line_id"])
+        if item.get("id") not in (None, ""):
+            fact["id"] = int(item["id"])
+        if include_reason:
+            fact["reason"] = item.get("reason", "") or ""
+        if include_schedule:
+            fact["schedule_id"] = int(item.get("schedule_id") or 0)
+        return fact

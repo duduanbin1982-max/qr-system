@@ -13,6 +13,7 @@ from modules.schemas.process_versioning import process_versioning_schemas
 from modules.schemas.process_config import process_config_schemas
 from modules.schemas.processes import processes_schemas
 from modules.schemas.products import products_schemas
+from modules.schemas.production_nodes import production_node_schemas
 from modules.schemas.quality import quality_schemas
 from modules.schemas.rework import rework_schemas
 from modules.schemas.scan import scan_schemas
@@ -34,6 +35,7 @@ SCHEMAS.update(process_versioning_schemas)
 SCHEMAS.update(process_config_schemas)
 SCHEMAS.update(processes_schemas)
 SCHEMAS.update(products_schemas)
+SCHEMAS.update(production_node_schemas)
 SCHEMAS.update(quality_schemas)
 SCHEMAS.update(rework_schemas)
 SCHEMAS.update(scan_schemas)
