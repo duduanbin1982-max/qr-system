@@ -914,6 +914,69 @@ def test_v087_records_unmapped_legacy_facts_without_guessing_by_process(
     assert len(differences) == 4
 
 
+def test_v087_preserves_blocked_unassigned_facts_without_inventing_a_node(
+    migrated_v085_db,
+):
+    from modules.migration_production_nodes import (
+        m086_production_node_master,
+        m087_production_node_schedule_facts,
+    )
+
+    m086_production_node_master(migrated_v085_db)
+    legacy_line_id = migrated_v085_db.execute(
+        "SELECT legacy_process_line_id FROM production_nodes ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    ids = _seed_v087_fact_set(
+        migrated_v085_db,
+        suffix="blocked-unassigned",
+        process_line_id=legacy_line_id,
+    )
+    migrated_v085_db.execute("DROP TRIGGER protect_schedule_revision_items_update")
+    migrated_v085_db.execute(
+        "UPDATE order_process_schedules SET process_line_id=NULL,status='blocked',"
+        "planned_start_at='',planned_end_at='' WHERE id=?",
+        (ids["schedule"],),
+    )
+    migrated_v085_db.execute(
+        "UPDATE schedule_revision_items SET process_line_id=NULL,status='blocked',"
+        "planned_start_at='',planned_end_at='' WHERE id=?",
+        (ids["revision_item"],),
+    )
+    migrated_v085_db.commit()
+
+    m087_production_node_schedule_facts(migrated_v085_db)
+
+    assert migrated_v085_db.execute(
+        "SELECT production_node_id FROM order_process_schedules WHERE id=?",
+        (ids["schedule"],),
+    ).fetchone()[0] is None
+    assert migrated_v085_db.execute(
+        "SELECT production_node_id FROM schedule_revision_items WHERE id=?",
+        (ids["revision_item"],),
+    ).fetchone()[0] is None
+    differences = migrated_v085_db.execute(
+        "SELECT source_table,source_id,difference_code "
+        "FROM production_node_migration_differences "
+        "WHERE source_id IN (?,?) ORDER BY source_table,source_id",
+        (ids["schedule"], ids["revision_item"]),
+    ).fetchall()
+    assert {
+        (row["source_table"], row["source_id"], row["difference_code"])
+        for row in differences
+    } == {
+        (
+            "order_process_schedules",
+            ids["schedule"],
+            "intentionally_unassigned_blocked",
+        ),
+        (
+            "schedule_revision_items",
+            ids["revision_item"],
+            "intentionally_unassigned_blocked",
+        ),
+    }
+
+
 def test_v087_adds_node_fact_columns_and_rebuilds_complete_immutable_trigger(
     migrated_v085_db,
 ):

@@ -25,6 +25,8 @@
    `python scripts/production_node_operations.py preflight ...`。
 2. 运行 `migrate-replica`，只对副本执行待迁移计划；确认源库摘要未变化。
 3. 核对 21 个核心节点、旧产线到节点映射、历史事实缺失数、外键和完整性检查。
+   状态为 `blocked` 且从未分配旧产线的修订项必须保持未分配，记录
+   `intentionally_unassigned_blocked` 审计证据；不得为消除差异而伪造生产节点。
 4. 生产维护窗口内完成最终数据库、附件和前端备份，校验 manifest 后再停服。
 5. 停止 `qr-system.service`，执行迁移，保持以下值为 `false`：
    `PRODUCTION_NODE_QUERY_ENABLED`、`PRODUCTION_NODE_COMPAT_AUDIT_ENABLED`、

@@ -235,6 +235,18 @@ def _historical_missing_count(db: sqlite3.Connection) -> int | None:
     )
 
 
+def _intentionally_unassigned_blocked_count(db: sqlite3.Connection) -> int | None:
+    if not _table_exists(db, "production_node_migration_differences"):
+        return None
+    return int(
+        _scalar(
+            db,
+            "SELECT COUNT(*) FROM production_node_migration_differences "
+            "WHERE difference_code='intentionally_unassigned_blocked'",
+        )
+    )
+
+
 def _latest_compat_metrics(db: sqlite3.Connection) -> tuple[int | None, int]:
     table = "production_node_compatibility_observations"
     if not _table_exists(db, table):
@@ -258,7 +270,25 @@ def _shadow_metrics(db: sqlite3.Connection) -> dict[str, Any]:
             "quantity_difference": 0,
             "serial_split_violation_count": 0,
         }
-    if _table_exists(db, "production_nodes"):
+    segment_columns = _columns(db, table)
+    schedule_columns = _columns(db, schedules)
+    if not {"schedule_id", "quantity"} <= segment_columns or not {
+        "id",
+        "quantity",
+    } <= schedule_columns:
+        return {
+            "shadow_conflict_count": 0,
+            "quantity_difference": 0,
+            "serial_split_violation_count": 0,
+        }
+
+    # V078-V085 segment facts predate production_node_id.  Stage-one
+    # preflight must be able to inspect that approved source schema before
+    # V087 adds the node reference; there cannot be a node conflict until the
+    # column exists.  Quantity conservation remains valid on both schemas.
+    if "production_node_id" not in segment_columns:
+        conflict_count = 0
+    elif _table_exists(db, "production_nodes"):
         conflict_sql = (
             "SELECT COUNT(*) FROM {table} a JOIN {table} b "
             "ON a.id < b.id AND a.production_node_id=b.production_node_id "
@@ -267,6 +297,7 @@ def _shadow_metrics(db: sqlite3.Connection) -> dict[str, Any]:
             "LEFT JOIN production_nodes n ON n.id=a.production_node_id "
             "WHERE COALESCE(n.capacity_mode,'exclusive')='exclusive'"
         ).format(table=table)
+        conflict_count = int(_scalar(db, conflict_sql))
     else:
         conflict_sql = (
             "SELECT COUNT(*) FROM {table} a JOIN {table} b "
@@ -274,7 +305,7 @@ def _shadow_metrics(db: sqlite3.Connection) -> dict[str, Any]:
             "AND a.segment_start_at < b.segment_end_at "
             "AND b.segment_start_at < a.segment_end_at"
         ).format(table=table)
-    conflict_count = int(_scalar(db, conflict_sql))
+        conflict_count = int(_scalar(db, conflict_sql))
     quantity_difference = 0
     for row in db.execute(
         "SELECT s.id,s.quantity,COALESCE(SUM(g.quantity),0) AS segment_quantity "
@@ -340,6 +371,11 @@ def run_preflight(
         else:
             report["counts"]["unmapped_historical_facts"] = historical_missing
             report["checks"]["unmapped_historical_facts"] = historical_missing == 0
+        intentionally_unassigned = _intentionally_unassigned_blocked_count(connection)
+        if intentionally_unassigned is not None:
+            report["counts"][
+                "intentionally_unassigned_blocked_facts"
+            ] = intentionally_unassigned
         latest_observations, latest_mismatch = _latest_compat_metrics(connection)
         if latest_observations is None:
             report["checks"]["latest_compat_mismatch_zero"] = None
