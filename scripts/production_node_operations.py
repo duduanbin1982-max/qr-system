@@ -357,13 +357,20 @@ def run_preflight(
         report["checks"]["expected_database_version"] = version in range(85, 91)
         node_count, mapping_missing, legacy_count = _mapping_metrics(connection)
         if node_count is None:
-            report["checks"]["core_node_count_21"] = None
+            report["checks"]["core_node_count_covers_legacy"] = None
             report["checks"]["legacy_mapping_complete"] = None
         else:
+            mapped_legacy_count = legacy_count - mapping_missing
             report["counts"]["core_node_count"] = node_count
             report["counts"]["legacy_process_line_count"] = legacy_count
+            report["counts"]["mapped_legacy_process_line_count"] = mapped_legacy_count
+            report["counts"]["node_only_count"] = max(
+                node_count - mapped_legacy_count, 0
+            )
             report["counts"]["legacy_mapping_missing"] = mapping_missing
-            report["checks"]["core_node_count_21"] = node_count == 21
+            report["checks"]["core_node_count_covers_legacy"] = (
+                node_count >= legacy_count
+            )
             report["checks"]["legacy_mapping_complete"] = mapping_missing == 0
         historical_missing = _historical_missing_count(connection)
         if historical_missing is None:

@@ -78,9 +78,18 @@ def _create_database(path: Path, *, version=87, mapped=True):
             );
             """
         )
-        db.execute(
-            "INSERT INTO process_production_lines VALUES (1,1,'WELD-01','焊接-01','active',1)"
-        )
+        for line_id in range(1, 22):
+            db.execute(
+                "INSERT INTO process_production_lines VALUES (?,?,?,?,?,?)",
+                (
+                    line_id,
+                    1,
+                    f"LINE-{line_id:02d}",
+                    f"产线-{line_id:02d}",
+                    "active",
+                    1,
+                ),
+            )
         if mapped:
             for node_id in range(1, 22):
                 db.execute(
@@ -95,7 +104,7 @@ def _create_database(path: Path, *, version=87, mapped=True):
                         "exclusive",
                         "active",
                         1,
-                        1 if node_id == 1 else None,
+                        node_id,
                     ),
                 )
         db.execute("PRAGMA user_version=%d" % version)
@@ -121,10 +130,37 @@ def test_preflight_is_read_only_and_reports_v087_baseline(node_database):
     assert report["ok"] is True
     assert report["mode"] == "read_only_preflight"
     assert report["checks"]["database_integrity"] is True
-    assert report["checks"]["core_node_count_21"] is True
+    assert report["checks"]["core_node_count_covers_legacy"] is True
     assert report["checks"]["legacy_mapping_complete"] is True
+    assert report["counts"]["mapped_legacy_process_line_count"] == 21
+    assert report["counts"]["node_only_count"] == 0
     assert report["checks"]["latest_compat_mismatch_zero"] is True
     assert node_database.read_bytes() == before
+
+
+def test_preflight_allows_additional_node_only_capacity(node_database):
+    with sqlite3.connect(node_database) as db:
+        db.executemany(
+            "INSERT INTO production_nodes "
+            "(id,process_id,node_code,node_name,capacity_mode,status,calendar_id,legacy_process_line_id) "
+            "VALUES (?,?,?,?,?,?,?,NULL)",
+            [
+                (22, 1, "GRIND-02", "打磨2线", "exclusive", "active", 1),
+                (23, 1, "GRIND-03", "打磨3线", "exclusive", "active", 1),
+            ],
+        )
+
+    report = production_node_operations.run_preflight(
+        node_database, expected_commit=COMMIT, actual_commit=COMMIT
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["core_node_count_covers_legacy"] is True
+    assert report["checks"]["legacy_mapping_complete"] is True
+    assert report["counts"]["core_node_count"] == 23
+    assert report["counts"]["legacy_process_line_count"] == 21
+    assert report["counts"]["mapped_legacy_process_line_count"] == 21
+    assert report["counts"]["node_only_count"] == 2
 
 
 def test_preflight_accepts_v085_segments_without_production_node_column(tmp_path):
