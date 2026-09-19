@@ -127,6 +127,43 @@ def test_preflight_is_read_only_and_reports_v087_baseline(node_database):
     assert node_database.read_bytes() == before
 
 
+def test_preflight_accepts_v085_segments_without_production_node_column(tmp_path):
+    path = tmp_path / "v085.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE order_process_schedules (
+                id INTEGER PRIMARY KEY,
+                quantity INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE order_process_schedule_segments (
+                id INTEGER PRIMARY KEY,
+                schedule_id INTEGER NOT NULL,
+                process_line_id INTEGER NOT NULL,
+                segment_start_at TEXT NOT NULL,
+                segment_end_at TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO order_process_schedules(id,quantity) VALUES (1,10);
+            INSERT INTO order_process_schedule_segments(
+                id,schedule_id,process_line_id,segment_start_at,segment_end_at,quantity
+            ) VALUES (1,1,7,'2026-09-19 08:00','2026-09-19 09:00',10);
+            PRAGMA user_version=85;
+            """
+        )
+
+    before = path.read_bytes()
+    report = production_node_operations.run_preflight(
+        path, expected_commit=COMMIT, actual_commit=COMMIT
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["expected_database_version"] is True
+    assert report["counts"]["shadow_conflict_count"] == 0
+    assert report["counts"]["quantity_difference"] == 0
+    assert path.read_bytes() == before
+
+
 def test_preflight_blocks_unmapped_historical_facts(node_database):
     with sqlite3.connect(node_database) as db:
         db.execute(

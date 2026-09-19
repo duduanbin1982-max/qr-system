@@ -323,7 +323,7 @@ def _backfill_node_snapshots(db, table, snapshot_cache):
     rows = _fetch_dicts(
         db,
         f"SELECT f.id AS source_id,f.process_line_id AS legacy_process_line_id,"
-        "f.execution_mode,n.id AS production_node_id "
+        "f.execution_mode,f.status,n.id AS production_node_id "
         f"FROM {table} f LEFT JOIN production_nodes n "
         "ON n.legacy_process_line_id=f.process_line_id "
         "WHERE f.production_node_id IS NULL ORDER BY f.id",
@@ -334,6 +334,22 @@ def _backfill_node_snapshots(db, table, snapshot_cache):
                 row["legacy_process_line_id"] is None
                 and row["execution_mode"] in ("outsourced", "non_scheduled")
             ):
+                continue
+            if (
+                row["legacy_process_line_id"] is None
+                and row["status"] == "blocked"
+            ):
+                # A blocked schedule is evidence that no resource was assigned;
+                # choosing one of several same-process nodes would invent a
+                # historical production fact.  Preserve the NULL assignment and
+                # retain a non-blocking audit difference instead.
+                _record_mapping_difference(
+                    db,
+                    source_table=table,
+                    source_id=row["source_id"],
+                    legacy_process_line_id=None,
+                    difference_code="intentionally_unassigned_blocked",
+                )
                 continue
             _record_mapping_difference(
                 db,
