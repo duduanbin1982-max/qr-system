@@ -7,6 +7,7 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
+    require_legacy_process_line_write,
     require_production_node_write,
     safe_audit_log,
     validate_json,
@@ -18,7 +19,7 @@ from modules.services.schedule_service import (
 )
 from modules.services.production_line_service import ProductionLineService
 from modules.services.schedule_capacity_service import ScheduleCapacityService
-from modules.domain.errors import DomainError
+from modules.domain.errors import DomainError, LegacyProcessLineWriteBlockedError
 from modules.domain.production_node_scheduling import NodeSchedulingError
 
 
@@ -54,6 +55,7 @@ def schedule_update_order(order_id):
     """drag to adjust schedule: update order plan start/end dates"""
     try:
         data = get_json_body()
+        ScheduleService.assert_no_legacy_production_line_write(data)
         plan_start = data.get("plan_start", "")
         plan_end = data.get("plan_end", "")
         ScheduleService.update_order_schedule(
@@ -68,6 +70,8 @@ def schedule_update_order(order_id):
         return jsonify({"error": str(e)}), 404
     except ScheduleConflictError as e:
         return jsonify({"error": str(e)}), 409
+    except LegacyProcessLineWriteBlockedError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -431,6 +435,7 @@ def list_production_lines():
 @app.route("/api/production-lines", methods=["POST"])
 @check_auth
 @check_permission("settings:edit")
+@require_legacy_process_line_write
 def create_production_line():
     """Create a production line"""
     try:
@@ -448,6 +453,7 @@ def create_production_line():
 @app.route("/api/production-lines/<int:line_id>", methods=["PUT"])
 @check_auth
 @check_permission("settings:edit")
+@require_legacy_process_line_write
 def update_production_line(line_id):
     """Update a production line"""
     try:
@@ -467,6 +473,7 @@ def update_production_line(line_id):
 @app.route("/api/production-lines/<int:line_id>", methods=["DELETE"])
 @check_auth
 @check_permission("settings:edit")
+@require_legacy_process_line_write
 def delete_production_line(line_id):
     """Delete a production line (only if no orders reference it)"""
     try:

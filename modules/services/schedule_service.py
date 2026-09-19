@@ -2,6 +2,8 @@
 qr-system - ScheduleService (Refactored: SQL -> ScheduleRepository)
 """
 from datetime import datetime, timedelta
+from modules import config
+from modules.domain.errors import LegacyProcessLineWriteBlockedError
 from modules.services import BaseService
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.repositories.production_line_repository import ProductionLineRepository
@@ -22,6 +24,18 @@ class ScheduleService:
     MAX_BATCH_SIZE = 50
     MAX_SHIFT_DAYS = 30
     _UNSET = object()
+
+    @staticmethod
+    def assert_no_legacy_production_line_write(data):
+        if (
+            config.LEGACY_PROCESS_LINE_WRITE_BLOCKED
+            and isinstance(data, dict)
+            and "production_line_id" in data
+        ):
+            raise LegacyProcessLineWriteBlockedError(
+                "Legacy 订单产线写入已关闭，请使用生产节点排程接口",
+                details={"fields": ["production_line_id"]},
+            )
 
     @staticmethod
     def _normalize_scope(schedule_scope):
@@ -180,12 +194,16 @@ class ScheduleService:
         production_line_id=_UNSET,
     ):
         """Update order plan dates and production line."""
+        update_production_line = production_line_id is not ScheduleService._UNSET
+        if update_production_line:
+            ScheduleService.assert_no_legacy_production_line_write(
+                {"production_line_id": production_line_id}
+            )
         plan_start = ScheduleService._normalize_date(plan_start, "计划开始日期")
         plan_end = ScheduleService._normalize_date(plan_end, "计划结束日期")
         if plan_start > plan_end:
             raise ValueError("计划开始日期不能晚于计划结束日期")
 
-        update_production_line = production_line_id is not ScheduleService._UNSET
         if update_production_line:
             production_line_id = ScheduleService._normalize_production_line_id(production_line_id)
 
