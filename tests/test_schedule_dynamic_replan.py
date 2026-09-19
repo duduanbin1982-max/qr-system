@@ -88,8 +88,11 @@ def test_dynamic_replan_treats_downtime_as_line_occupancy_and_is_idempotent(clie
         line_id = db.execute(
             "SELECT id FROM process_production_lines WHERE process_id=? ORDER BY id LIMIT 1", (process_id,)
         ).fetchone()[0]
+        node_id = db.execute(
+            "SELECT id FROM production_nodes WHERE legacy_process_line_id=?", (line_id,)
+        ).fetchone()[0]
         ScheduleCapacityService.create_downtime_event(
-            line_id, "2026-09-01 08:00", "2026-09-01 17:00", "设备检修", created_by=user_id
+            node_id, "2026-09-01 08:00", "2026-09-01 17:00", "设备检修", created_by=user_id
         )
         first = ScheduleCapacityService.dynamic_replan_order(
             order_id, start_at="2026-09-01 08:00", schedule_run_key="dynamic-downtime-v1", actor_id=user_id
@@ -156,12 +159,23 @@ def test_dynamic_replan_and_downtime_api_contract(client, auth_headers):
         line_id = db.execute(
             "SELECT id FROM process_production_lines WHERE process_id=? ORDER BY id LIMIT 1", (process_id,)
         ).fetchone()[0]
+        node_id = db.execute(
+            "SELECT id FROM production_nodes WHERE legacy_process_line_id=?", (line_id,)
+        ).fetchone()[0]
     event = client.post(
         "/api/schedule/downtime",
-        json={"process_line_id": line_id, "start_at": "2026-09-01 08:00", "end_at": "2026-09-01 09:00", "reason": "换刀"},
+        json={"production_node_id": node_id, "start_at": "2026-09-01 08:00", "end_at": "2026-09-01 09:00", "reason": "换刀"},
         headers=auth_headers,
     )
     assert event.status_code == 200, event.get_json()
+    assert event.get_json()["event"]["production_node_id"] == node_id
+    legacy_post = client.post(
+        "/api/schedule/downtime",
+        json={"process_line_id": line_id, "start_at": "2026-09-01 09:00", "end_at": "2026-09-01 10:00", "reason": "legacy"},
+        headers=auth_headers,
+    )
+    assert legacy_post.status_code == 400
+    assert "production_node_id" in legacy_post.get_json()["error"]
     listed = client.get("/api/schedule/downtime?limit=10", headers=auth_headers)
     assert listed.status_code == 200
     assert listed.get_json()["events"][0]["reason"] == "换刀"

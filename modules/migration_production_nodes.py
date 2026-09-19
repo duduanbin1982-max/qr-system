@@ -542,8 +542,98 @@ def m088_batch_serial_allocations(db):
     )
 
 
+def m089_schedule_revision_workflow(db):
+    """Add approval, lock and immutable workflow facts for node schedules."""
+    # Keep lifecycle (draft/published/superseded/cancelled) independent from
+    # approval state. Existing published revisions are already approved facts.
+    for column, definition in {
+        "approval_status": "TEXT NOT NULL DEFAULT 'draft' CHECK(approval_status IN ('draft','submitted','approved','rejected'))",
+        "submitted_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "submitted_at": "TEXT NOT NULL DEFAULT ''",
+        "submitted_reason": "TEXT NOT NULL DEFAULT ''",
+        "approved_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "approved_at": "TEXT NOT NULL DEFAULT ''",
+        "approved_reason": "TEXT NOT NULL DEFAULT ''",
+        "rejected_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "rejected_at": "TEXT NOT NULL DEFAULT ''",
+        "rejected_reason": "TEXT NOT NULL DEFAULT ''",
+    }.items():
+        add_column_if_missing(db, "schedule_revisions", column, definition)
+    add_column_if_missing(
+        db, "schedule_revision_items", "row_version",
+        "INTEGER NOT NULL DEFAULT 1 CHECK(row_version > 0)",
+    )
+    # V087 created the immutable-item trigger from the columns that existed at
+    # that time. Rebuild it after adding row_version so optimistic-lock facts
+    # cannot be changed in place on an existing revision item either.
+    db.execute("DROP TRIGGER IF EXISTS protect_schedule_revision_items_update")
+    _create_revision_item_immutability_trigger(db)
+    db.execute(
+        "UPDATE schedule_revisions SET approval_status='approved' "
+        "WHERE status='published' AND approval_status='draft'"
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS schedule_node_task_locks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            revision_item_id INTEGER NOT NULL,
+            production_node_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','released')),
+            locked_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            released_by INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+            released_at TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL,
+            release_reason TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(revision_item_id) REFERENCES schedule_revision_items(id) ON DELETE RESTRICT,
+            FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT
+        )"""
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_node_task_active_lock "
+        "ON schedule_node_task_locks(revision_item_id) WHERE status='active'"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_node_task_locks_node_time "
+        "ON schedule_node_task_locks(production_node_id,status,created_at)"
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS schedule_node_workflow_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            revision_id INTEGER NOT NULL,
+            revision_item_id INTEGER,
+            event_type TEXT NOT NULL CHECK(event_type IN ('adjust','lock','unlock','submit','approve','reject','supersede')),
+            actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            reason TEXT NOT NULL,
+            before_json TEXT NOT NULL DEFAULT '{}',
+            after_json TEXT NOT NULL DEFAULT '{}',
+            input_digest TEXT NOT NULL DEFAULT '',
+            idempotency_key TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY(revision_id) REFERENCES schedule_revisions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(revision_item_id) REFERENCES schedule_revision_items(id) ON DELETE RESTRICT
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_node_workflow_events_revision "
+        "ON schedule_node_workflow_events(revision_id,created_at,id)"
+    )
+    db.execute(
+        """CREATE TRIGGER IF NOT EXISTS protect_schedule_node_workflow_events_update
+        BEFORE UPDATE ON schedule_node_workflow_events
+        BEGIN SELECT RAISE(ABORT,'schedule node workflow events are immutable'); END
+        """
+    )
+    db.execute(
+        """CREATE TRIGGER IF NOT EXISTS protect_schedule_node_workflow_events_delete
+        BEFORE DELETE ON schedule_node_workflow_events
+        BEGIN SELECT RAISE(ABORT,'schedule node workflow events are immutable'); END
+        """
+    )
+
+
 MIGRATIONS = [
     (86, "Add stable production-node master data", m086_production_node_master),
     (87, "Add production-node scheduling facts", m087_production_node_schedule_facts),
     (88, "Add batch and serial node allocations", m088_batch_serial_allocations),
+    (89, "Add schedule revision lock and approval workflow", m089_schedule_revision_workflow),
 ]

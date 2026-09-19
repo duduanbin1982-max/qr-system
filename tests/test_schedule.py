@@ -179,11 +179,16 @@ def test_schedule_view_permission_cannot_modify_orders(client):
     assert batch.status_code == 403, batch.get_json()
 
 
-def test_schedule_edit_preserves_line_when_field_is_omitted(client):
+def test_schedule_edit_preserves_legacy_line_when_field_is_omitted(client):
     order_id, line_id = _seed_scheduled_order_with_line(client)
     headers = _permission_headers(
         client,
-        ["page:production", "page:production.schedule", "schedule:view", "schedule:edit"],
+        [
+            "page:production",
+            "page:production.schedule",
+            "schedule:view",
+            "schedules:adjust",
+        ],
     )
 
     response = client.patch(
@@ -203,8 +208,8 @@ def test_schedule_edit_preserves_line_when_field_is_omitted(client):
     assert order["production_line_id"] == line_id
 
 
-def test_schedule_edit_clears_line_only_when_explicitly_requested(client, auth_headers):
-    order_id, _ = _seed_scheduled_order_with_line(client)
+def test_schedule_edit_ignores_legacy_line_assignment(client, auth_headers):
+    order_id, line_id = _seed_scheduled_order_with_line(client)
 
     response = client.patch(
         f"/api/schedule/order/{order_id}",
@@ -222,11 +227,11 @@ def test_schedule_edit_clears_line_only_when_explicitly_requested(client, auth_h
             "SELECT production_line_id FROM orders WHERE id = ?",
             (order_id,),
         ).fetchone()["production_line_id"]
-    assert production_line_id is None
+    assert production_line_id == line_id
 
 
-def test_schedule_update_validates_dates_line_and_order_state(client, auth_headers):
-    order_id, _ = _seed_scheduled_order_with_line(client)
+def test_schedule_update_validates_dates_and_order_state(client, auth_headers):
+    order_id, line_id = _seed_scheduled_order_with_line(client)
 
     invalid_date = client.patch(
         f"/api/schedule/order/{order_id}",
@@ -238,7 +243,7 @@ def test_schedule_update_validates_dates_line_and_order_state(client, auth_heade
         json={"plan_start": "2026-07-04", "plan_end": "2026-07-03"},
         headers=auth_headers,
     )
-    invalid_line = client.patch(
+    legacy_line = client.patch(
         f"/api/schedule/order/{order_id}",
         json={
             "plan_start": "2026-07-01",
@@ -267,7 +272,13 @@ def test_schedule_update_validates_dates_line_and_order_state(client, auth_heade
 
     assert invalid_date.status_code == 400, invalid_date.get_json()
     assert reversed_dates.status_code == 400, reversed_dates.get_json()
-    assert invalid_line.status_code == 400, invalid_line.get_json()
+    assert legacy_line.status_code == 200, legacy_line.get_json()
+    with client.application.app_context():
+        preserved_line_id = get_db().execute(
+            "SELECT production_line_id FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()["production_line_id"]
+    assert preserved_line_id == line_id
     assert missing_order.status_code == 404, missing_order.get_json()
     assert completed_order.status_code == 409, completed_order.get_json()
 

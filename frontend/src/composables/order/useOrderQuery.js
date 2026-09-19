@@ -18,7 +18,6 @@ export function useOrderQuery() {
   const customers = ref([])
   const products = ref([])
   const processRoutes = ref([])
-  const productionLines = ref([])
   const expandedId = ref(null)
   const pendingCount = ref(0)
   const producingCount = ref(0)
@@ -115,12 +114,6 @@ export function useOrderQuery() {
 
   async function loadDropdownData() {
     try {
-      const data = await api.domains.production.listProductionLines()
-      productionLines.value = data.lines || []
-    } catch (error) {
-      productionLines.value = []
-    }
-    try {
       const [customerData, productData, routeData] = await Promise.all([
         api.domains.customers.listCustomers(),
         api.domains.products.listProducts(),
@@ -156,7 +149,7 @@ export function useOrderQuery() {
 
   return {
     orders, loading, total, page, limit, filterStatus, archiveFilter, searchKeyword, filterCustomer,
-    customers, products, processRoutes, productionLines, expandedId,
+    customers, products, processRoutes, expandedId,
     pendingCount, producingCount, completedCount, statusMap, priorityMap,
     canCreate, canEdit, canDelete, canView, canScanView, canReport,
     pct, scrapPct, riskLabel, formatHours, isOverdue,

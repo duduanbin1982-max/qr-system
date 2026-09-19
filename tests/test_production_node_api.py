@@ -255,6 +255,51 @@ def test_capability_replacement_validates_scope_boundaries_and_audits(client, au
     assert bad_process_version.status_code == 400, bad_process_version.get_json()
 
 
+def test_capability_query_uses_view_permission_and_does_not_mutate_facts(client):
+    node, _, _ = _node_fixture(client)
+    view_headers = _login_with_permissions(client, ["production_nodes:view"])
+    legacy_headers = _login_with_permissions(client, ["schedule:view", "schedule:edit"])
+    with client.application.app_context():
+        db = get_db()
+        before = [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM production_node_capabilities "
+                "WHERE production_node_id=? ORDER BY id",
+                (node["id"],),
+            ).fetchall()
+        ]
+
+    response = client.get(
+        f"/api/production-nodes/{node['id']}/capabilities",
+        headers=view_headers,
+    )
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["node"]["id"] == node["id"]
+    assert isinstance(payload["capabilities"], list)
+    assert client.get(
+        f"/api/production-nodes/{node['id']}/capabilities",
+        headers=legacy_headers,
+    ).status_code == 403
+    assert client.get(
+        "/api/production-nodes/999999999/capabilities",
+        headers=view_headers,
+    ).status_code == 404
+
+    with client.application.app_context():
+        db = get_db()
+        after = [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM production_node_capabilities "
+                "WHERE production_node_id=? ORDER BY id",
+                (node["id"],),
+            ).fetchall()
+        ]
+    assert after == before
+
+
 def test_calendar_override_create_cancel_and_audit_are_strict(client, auth_headers):
     node, _, _ = _node_fixture(client)
     command = {

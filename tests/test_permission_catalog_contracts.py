@@ -274,6 +274,7 @@ def test_production_node_and_schedule_permissions_are_granular():
         "unlock",
         "submit",
         "approve",
+        "reject",
     ]
     expected = {
         "production_nodes:view",

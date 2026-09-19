@@ -74,6 +74,27 @@ class ProductionNodeService:
         return node
 
     @staticmethod
+    def resolve_downtime_target(production_node_id, db):
+        """Resolve the node-native downtime target through its stable legacy key.
+
+        The legacy column remains NOT NULL during the gradual migration, so a
+        node without an explicit stable mapping must be rejected instead of
+        silently writing an unrelated line identifier.
+        """
+        node_id = ProductionNodeService._positive_int(
+            production_node_id, "production_node_id"
+        )
+        node = ProductionNodeService._node(node_id, db)
+        if node.get("status") != "active":
+            raise ValidationError("生产节点已停用，不能新建停机事件")
+        legacy_line_id = node.get("legacy_process_line_id")
+        if legacy_line_id in (None, ""):
+            raise ValidationError(
+                "生产节点缺少稳定的 Legacy 产线映射，不能新建停机事件"
+            )
+        return node
+
+    @staticmethod
     def _validate_node_references(data, db):
         if not ProductionNodeRepository.process_is_active(data["process_id"], db=db):
             raise ValidationError("工序不存在或已停用")
@@ -126,6 +147,18 @@ class ProductionNodeService:
         return ProductionNodeRepository.list_nodes(
             process_id=process_id, status=status, limit=limit
         )
+
+    @staticmethod
+    def list_capabilities(node_id):
+        node_id = ProductionNodeService._positive_int(node_id, "node_id")
+        with BaseService.transaction() as db:
+            node = ProductionNodeService._node(node_id, db)
+            return {
+                "node": node,
+                "capabilities": ProductionNodeRepository.list_capabilities(
+                    node_id, db=db
+                ),
+            }
 
     @staticmethod
     def create_node(data, actor_id):

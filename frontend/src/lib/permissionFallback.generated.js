@@ -509,6 +509,9 @@ export const IMPLIED_PERMISSIONS = {
   "schedules:approve": [
     "schedules:view"
   ],
+  "schedules:reject": [
+    "schedules:view"
+  ],
   "wages:view_self": [
     "wages:view"
   ],

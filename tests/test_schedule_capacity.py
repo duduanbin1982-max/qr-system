@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from factories import ensure_process, create_process_route
+from factories import TEST_HASH, ensure_process, create_process_route, ensure_user
 from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.process_service import ProcessService
@@ -47,6 +47,36 @@ def _seed_standard(db, route_id, process_id, *, unit=10, setup=20, factor=1):
         (route_id, route_version, process_id, process_version, unit, setup, factor),
     )
     db.commit()
+
+
+def _workflow_actor_ids(db):
+    creator_id = db.execute(
+        "SELECT id FROM users WHERE username='testrunner'"
+    ).fetchone()[0]
+    reviewer_id = ensure_user(
+        db,
+        "schedule-reviewer",
+        TEST_HASH,
+        "Schedule Reviewer",
+        "worker",
+        "SCHEDULE-REVIEWER-001",
+    )
+    return creator_id, reviewer_id
+
+
+def _approve_revision(revision_id, creator_id, reviewer_id, key_prefix):
+    ScheduleCapacityService.submit_revision(
+        revision_id,
+        "submit schedule revision",
+        f"{key_prefix}-submit",
+        creator_id,
+    )
+    ScheduleCapacityService.approve_revision(
+        revision_id,
+        "independent schedule approval",
+        f"{key_prefix}-approve",
+        reviewer_id,
+    )
 
 
 def test_default_capacity_pool_matches_parallel_line_requirements(client):
@@ -499,7 +529,7 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
         db.close()
 
     report = run_preflight(source, limit=10)
-    assert report["database_user_version"] == before == 88
+    assert report["database_user_version"] == before == 89
     assert report["operations"] == 0
     assert report["coverage_percent"] == 100.0
     assert report["process_statistics"] == []
@@ -699,26 +729,31 @@ def test_regeneration_keeps_history_and_publish_supersedes_previous_revision(cli
         route_id = create_process_route(db, [process], name="Revision History")
         order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
         _seed_standard(db, route_id, process, unit=5)
+        creator_id, reviewer_id = _workflow_actor_ids(db)
 
         first = ScheduleCapacityService.generate_order_schedule(
-            order_id, schedule_run_key="capacity-revision-history-v1"
+            order_id, schedule_run_key="capacity-revision-history-v1",
+            actor_id=creator_id,
         )
         first_id = first["schedule_revision_id"]
-        ScheduleCapacityService.publish_revision(first_id, published_by=1000)
+        _approve_revision(first_id, creator_id, reviewer_id, "revision-history-v1")
+        ScheduleCapacityService.publish_revision(first_id, published_by=creator_id)
         first_published_at = db.execute(
             "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
         ).fetchone()[0]
         # Publishing the same revision again is a no-op, including timestamps.
-        ScheduleCapacityService.publish_revision(first_id, published_by=1000)
+        ScheduleCapacityService.publish_revision(first_id, published_by=creator_id)
         assert db.execute(
             "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
         ).fetchone()[0] == first_published_at
 
         second = ScheduleCapacityService.generate_order_schedule(
-            order_id, schedule_run_key="capacity-revision-history-v2"
+            order_id, schedule_run_key="capacity-revision-history-v2",
+            actor_id=creator_id,
         )
         second_id = second["schedule_revision_id"]
-        ScheduleCapacityService.publish_revision(second_id, published_by=1000)
+        _approve_revision(second_id, creator_id, reviewer_id, "revision-history-v2")
+        ScheduleCapacityService.publish_revision(second_id, published_by=creator_id)
         rows = db.execute(
             "SELECT id,status,superseded_by FROM schedule_revisions "
             "WHERE order_id=? ORDER BY revision_no", (order_id,)
@@ -737,8 +772,10 @@ def test_revision_publish_requires_exact_operation_set(client):
         order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
         other_order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
         _seed_standard(db, route_id, process, unit=5)
+        creator_id, reviewer_id = _workflow_actor_ids(db)
         result = ScheduleCapacityService.generate_order_schedule(
-            order_id, schedule_run_key="capacity-revision-completeness-v1"
+            order_id, schedule_run_key="capacity-revision-completeness-v1",
+            actor_id=creator_id,
         )
         revision_id = result["schedule_revision_id"]
         other_op_id = db.execute(
@@ -749,7 +786,11 @@ def test_revision_publish_requires_exact_operation_set(client):
         ).fetchone()[0]
         assert op != other_op_id
         malformed = ScheduleCapacityRepository.create_revision(
-            order_id, None, "capacity-revision-completeness-malformed", db
+            order_id,
+            None,
+            "capacity-revision-completeness-malformed",
+            db,
+            created_by=creator_id,
         )
         db.execute(
             "INSERT INTO schedule_revision_items "
@@ -757,8 +798,16 @@ def test_revision_publish_requires_exact_operation_set(client):
             (malformed, other_op_id, process, 1),
         )
         db.commit()
+        _approve_revision(
+            malformed,
+            creator_id,
+            reviewer_id,
+            "revision-completeness-malformed",
+        )
         with pytest.raises(ValueError, match="条目不完整"):
-            ScheduleCapacityService.publish_revision(malformed, published_by=1000)
+            ScheduleCapacityService.publish_revision(
+                malformed, published_by=creator_id
+            )
 
 
 def test_revision_api_contracts_and_permissions(client, auth_headers, worker_auth_headers):
@@ -768,10 +817,16 @@ def test_revision_api_contracts_and_permissions(client, auth_headers, worker_aut
         route_id = create_process_route(db, [process], name="Revision API")
         order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
         _seed_standard(db, route_id, process, unit=5)
+        creator_id, reviewer_id = _workflow_actor_ids(db)
         result = ScheduleCapacityService.generate_order_schedule(
-            order_id, schedule_run_key="capacity-revision-api-v1"
+            order_id,
+            schedule_run_key="capacity-revision-api-v1",
+            actor_id=creator_id,
         )
         revision_id = result["schedule_revision_id"]
+        _approve_revision(
+            revision_id, creator_id, reviewer_id, "revision-api-v1"
+        )
 
     revisions = client.get(
         f"/api/schedule/order/{order_id}/revisions?limit=1", headers=auth_headers

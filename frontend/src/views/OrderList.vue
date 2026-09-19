@@ -300,23 +300,13 @@
           <div v-else class="form-group"><label>优先级说明</label>
             <textarea class="form-input" v-model="form.priority_reason" rows="2" placeholder="如：客户急单、交期调整、等待物料等"></textarea>
           </div>
-          <div class="form-row">
-            <div class="form-col"><div class="form-group"><label>产线</label>
-              <select class="form-input" v-model="form.production_line_id">
-                <option value="">-- 自动分配 --</option>
-                <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }} (日产能: {{ pl.capacity_per_day || '-' }})</option>
-              </select>
-            </div></div>
-            <div class="form-col" v-if="modalEdit">
-              <div class="form-group"><label>状态</label>
-                <select class="form-input" v-model="form.status">
-                  <option value="pending">待生产</option>
-                  <option value="producing">生产中</option>
-                  <option value="cancelled">已取消</option>
-                  <option value="paused">已暂停</option>
-                </select>
-              </div>
-            </div>
+          <div v-if="modalEdit" class="form-group"><label>状态</label>
+            <select class="form-input" v-model="form.status">
+              <option value="pending">待生产</option>
+              <option value="producing">生产中</option>
+              <option value="cancelled">已取消</option>
+              <option value="paused">已暂停</option>
+            </select>
           </div>
           <div class="form-group"><label>备注</label><textarea class="form-input" v-model="form.remark" rows="2" placeholder="备注信息"></textarea></div>
 

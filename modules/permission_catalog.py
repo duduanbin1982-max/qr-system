@@ -142,7 +142,7 @@ ACTION_PERMISSION_DEFS = {
     ),
     "schedules": (
         "节点排程",
-        ["view", "generate", "adjust", "lock", "unlock", "submit", "approve"],
+        ["view", "generate", "adjust", "lock", "unlock", "submit", "approve", "reject"],
     ),
     "wages": (
         "工资核算",
@@ -383,6 +383,7 @@ PERMISSION_IMPLICATIONS = {
     "schedules:unlock": ["schedules:view"],
     "schedules:submit": ["schedules:view"],
     "schedules:approve": ["schedules:view"],
+    "schedules:reject": ["schedules:view"],
     "wages:view_self": ["wages:view"],
     "wages:view_all": ["wages:view"],
     "wages:prepare": ["wages:view", "wages:view_all"],

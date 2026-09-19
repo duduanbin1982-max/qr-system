@@ -32,11 +32,7 @@
             :style="{padding:'4px 12px',borderRadius:'999px',background:scheduleScope===tab.key?'var(--primary)':'transparent',color:scheduleScope===tab.key?'#fff':'var(--text-secondary)',boxShadow:'none'}"
             @click="setScheduleScope(tab.key)">{{ tab.label }}</button>
         </div>
-        <select v-if="viewMode==='orders'" v-model="wsFilter" class="form-input" style="width:140px;padding:6px 10px;font-size:var(--text-sm)">
-          <option value="">全部产线</option>
-          <option v-for="pl in productionLines" :key="pl.id" :value="String(pl.id)">{{ pl.name }}</option>
-        </select>
-        <button v-if="canManageLines" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showLineMgr=true">🏭 产线管理</button>
+        <button v-if="canManageNodes || canManageCalendars" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showNodeMgr=true">⚙️ 生产节点管理</button>
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
         <button @click="zoomIn" title="放大" class="btn-default btn-sm">+</button>
         <button class="btn btn-sm" style="background:var(--success);color:#fff" @click="exportImage" title="导出PNG">📥 导出</button>
@@ -50,12 +46,6 @@
       <button class="btn-default btn-sm" @click="batchShift('left')" style="font-size:var(--text-xs)">◀ 左移</button>
       <button class="btn-default btn-sm" @click="batchShift('right')" style="font-size:var(--text-xs)">右移 ▶</button>
       <span style="font-size:10px;color:var(--text-placeholder);margin-left:8px">提示: ← → 微调1天, Shift+← → 微调7天</span>
-    </div>
-
-    <div v-if="viewMode==='orders' && dailyLoad.length" style="padding:6px 20px;background:var(--danger-light);border-bottom:1px solid var(--danger);font-size:var(--text-xs);color:var(--danger);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
-      <span>⚠️ 产能超载:</span>
-      <span v-for="v in dailyLoad.slice(0,5)" :key="v.date+v.line" style="white-space:nowrap">{{ v.date }} {{ v.line }}: {{ v.count }}/{{ v.capacity }}</span>
-      <span v-if="dailyLoad.length > 5" style="color:var(--text-placeholder)">...共 {{ dailyLoad.length }} 处</span>
     </div>
 
     <div v-if="viewMode==='orders' && (riskSummary.overdue || riskSummary.high || riskSummary.medium)" style="padding:7px 20px;background:linear-gradient(90deg,#fff7ed,#fff1f2);border-bottom:1px solid #fed7aa;font-size:var(--text-xs);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
@@ -72,9 +62,9 @@
           <option value="">全部工序</option>
           <option v-for="process in processOptions" :key="process.id" :value="String(process.id)">{{ process.name }}</option>
         </select>
-        <select v-model="capacityLineFilter" class="form-input" style="width:170px;padding:6px 10px;font-size:var(--text-sm)">
-          <option value="">全部工序产线</option>
-          <option v-for="line in capacityLines" :key="line.id" :value="String(line.id)">{{ line.process_name }} · {{ line.line_name }}</option>
+        <select v-model="capacityNodeFilter" class="form-input" style="width:210px;padding:6px 10px;font-size:var(--text-sm)">
+          <option value="">全部生产节点</option>
+          <option v-for="node in capacityNodes" :key="node.id" :value="String(node.id)">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
         </select>
         <span style="font-size:var(--text-xs);color:var(--text-secondary)">共 {{ capacitySummary.total }} 道工序 · 已排 {{ capacitySummary.planned }} · 阻断 {{ capacitySummary.blocked }} · {{ Math.round(capacitySummary.minutes) }} 分钟</span>
         <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
@@ -83,15 +73,15 @@
             <option v-for="order in capacityOrders" :key="order.id" :value="order.id">{{ order.order_no }}</option>
           </select>
           <input v-model="generationStartDate" type="date" class="form-input" style="width:145px;padding:6px 10px;font-size:var(--text-sm)">
-          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--primary);color:#fff" @click="generateSchedule">生成工序排程</button>
+          <button v-if="canGenerateSchedules" type="button" class="btn btn-sm" style="background:var(--primary);color:#fff" @click="generateSchedule">生成工序排程</button>
           <select v-model="replanOrderId" @change="prepareDynamicReplan(replanOrderId)" class="form-input" style="width:180px;padding:6px 10px;font-size:var(--text-sm)" title="依据已报工、返工和停机事实重排未完成工作">
             <option value="">选择订单动态重排</option>
             <option v-for="order in capacityOrders" :key="`replan-${order.id}`" :value="order.id">{{ order.order_no }}</option>
           </select>
           <input v-model="replanStartAt" type="datetime-local" class="form-input" style="width:175px;padding:6px 10px;font-size:var(--text-sm)" title="重排起点">
           <input v-model="replanReason" type="text" class="form-input" style="width:220px;padding:6px 10px;font-size:var(--text-sm)" placeholder="动态重排原因">
-          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--warning);color:#fff" @click="dynamicReplanSchedule">按实际进度重排</button>
-          <button v-if="canEdit" type="button" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="prepareAutoPlan">⚡ 自动排程</button>
+          <button v-if="canGenerateSchedules" type="button" class="btn btn-sm" style="background:var(--warning);color:#fff" @click="dynamicReplanSchedule">按实际进度重排</button>
+          <button v-if="canGenerateSchedules" type="button" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="prepareAutoPlan">⚡ 自动排程</button>
           <button type="button" class="btn-default btn-sm" @click="loadCapacity">刷新</button>
         </div>
       </div>
@@ -101,7 +91,7 @@
           <span style="font-size:var(--text-xs);color:var(--text-secondary)">按 P1→P5、加急、交期和订单号排序；每次运行使用独立幂等键并保留运行台账</span>
           <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="autoPlanVisible=false">收起</button>
         </div>
-        <form v-if="canEdit" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="runAutoPlan">
+        <form v-if="canGenerateSchedules" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="runAutoPlan">
           <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">开始日期
             <input v-model="autoPlanStartDate" type="date" class="form-input" style="width:145px;padding:6px 8px;font-size:var(--text-sm)" required>
           </label>
@@ -120,14 +110,14 @@
       </div>
       <div class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid var(--border-light);background:var(--bg-surface)">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <strong style="font-size:var(--text-sm)">🛑 产线停机管理</strong>
+          <strong style="font-size:var(--text-sm)">🛑 生产节点停机管理</strong>
           <span style="font-size:var(--text-xs);color:var(--text-secondary)">停机事实会参与动态重排；取消仅标记为已取消并保留审计记录</span>
           <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="loadDowntime">刷新停机记录</button>
         </div>
-        <form v-if="canEdit" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="createDowntime">
-          <select v-model="downtimeForm.process_line_id" class="form-input" style="width:190px;padding:6px 10px;font-size:var(--text-sm)" aria-label="停机产线">
-            <option value="">选择产线</option>
-            <option v-for="line in capacityLines" :key="`downtime-line-${line.id}`" :value="line.id">{{ line.process_name }} · {{ line.line_name }}</option>
+        <form v-if="canManageDowntime" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" @submit.prevent="createDowntime">
+          <select v-model="downtimeForm.production_node_id" class="form-input" style="width:220px;padding:6px 10px;font-size:var(--text-sm)" aria-label="停机生产节点">
+            <option value="">选择生产节点</option>
+            <option v-for="node in capacityNodes" :key="`downtime-node-${node.id}`" :value="node.id">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
           </select>
           <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-secondary)">开始
             <input v-model="downtimeForm.start_at" type="datetime-local" class="form-input" style="width:175px;padding:6px 8px;font-size:var(--text-sm)" required>
@@ -141,10 +131,10 @@
         <div v-if="downtimeLoading" style="padding:12px 0 2px;font-size:var(--text-xs);color:var(--text-placeholder)">⏳ 加载停机记录中...</div>
         <div v-else-if="downtimeEvents.length" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:190px;overflow-y:auto">
           <div v-for="event in downtimeEvents" :key="`downtime-${event.id}`" style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--bg-hover);border-radius:var(--radius-sm);font-size:var(--text-xs)">
-            <span style="font-weight:600;min-width:150px">{{ event.process_name || '-' }} · {{ event.line_name || `产线 #${event.process_line_id}` }}</span>
+            <span style="font-weight:600;min-width:180px">{{ event.process_name || '-' }} · {{ event.node_code || '' }} · {{ event.node_name || `生产节点 #${event.production_node_id}` }}</span>
             <span style="white-space:nowrap">{{ event.start_at }} ~ {{ event.end_at }}</span>
             <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" :title="event.reason || ''">{{ event.reason || '未填写原因' }}</span>
-            <button v-if="canEdit" type="button" class="btn-default btn-sm" style="padding:2px 8px;color:var(--danger);font-size:var(--text-xs)" @click="cancelDowntime(event)">取消</button>
+            <button v-if="canManageDowntime" type="button" class="btn-default btn-sm" style="padding:2px 8px;color:var(--danger);font-size:var(--text-xs)" @click="cancelDowntime(event)">取消</button>
           </div>
         </div>
         <div v-else style="padding:10px 0 2px;font-size:var(--text-xs);color:var(--text-placeholder)">暂无有效停机记录</div>
@@ -152,14 +142,20 @@
       <div v-if="capacityLoading" style="padding:36px;text-align:center;color:var(--text-placeholder)">⏳ 加载工序排程中...</div>
       <div v-else-if="!filteredOperations.length" style="padding:36px;text-align:center;color:var(--text-placeholder)">暂无工序排程数据，请选择订单生成排程</div>
       <div v-else style="overflow:auto;border:1px solid var(--border-light)">
-        <table style="width:100%;border-collapse:collapse;min-width:1200px;font-size:var(--text-sm)">
+        <table style="width:100%;border-collapse:collapse;min-width:1540px;font-size:var(--text-sm)">
           <thead><tr style="background:var(--bg-hover);text-align:left">
-            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">产线</th><th style="padding:9px 10px">预计时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">交期风险</th><th style="padding:9px 10px">状态</th>
+            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">生产节点</th><th style="padding:9px 10px">拆分明细</th><th style="padding:9px 10px">预计时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">交期风险</th><th style="padding:9px 10px">状态</th><th style="padding:9px 10px">操作</th>
           </tr></thead>
           <tbody><tr v-for="row in filteredOperations" :key="row.id || `${row.order_id}-${row.order_process_id}`" style="border-top:1px solid var(--bg-hover)">
             <td style="padding:8px 10px;font-weight:600;color:var(--primary)">{{ row.order_no || row.order_id }}</td>
             <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
-            <td style="padding:8px 10px">{{ lineLabel(row) }}</td>
+            <td style="padding:8px 10px">{{ nodeLabel(row) }}</td>
+            <td style="padding:8px 10px;min-width:180px">
+              <div v-if="row.allocations && row.allocations.length" style="display:flex;flex-direction:column;gap:3px">
+                <span v-for="allocation in row.allocations" :key="allocation.id || `${allocation.production_node_id}-${allocation.quantity}`" style="font-size:var(--text-xs)">{{ allocationLabel(allocation) }}</span>
+              </div>
+              <span v-else style="color:var(--text-placeholder)">未拆分</span>
+            </td>
             <td style="padding:8px 10px;white-space:nowrap">{{ row.planned_start_at || row.plan_start || '-' }}<span v-if="row.planned_end_at"> ~ {{ row.planned_end_at }}</span><span v-else-if="row.plan_end"> ~ {{ row.plan_end }}</span></td>
             <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
             <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
@@ -167,7 +163,22 @@
             <td style="padding:8px 10px">{{ row.difficulty_factor || 1 }}</td>
             <td style="padding:8px 10px">{{ Math.round(row.occupied_minutes || row.planned_minutes || 0) }}</td>
             <td style="padding:8px 10px;white-space:nowrap"><span :style="{color:riskColor(operationRiskLevel(row)),fontWeight:700}" :title="operationRisk(row).risk_reason || ''">{{ riskIcon(operationRiskLevel(row)) }} {{ riskLabel(operationRiskLevel(row)) }}</span><span v-if="Number(operationRisk(row).delay_minutes)>0" style="display:block;font-size:10px;color:var(--danger)">+{{ formatRiskMinutes(operationRisk(row).delay_minutes) }}</span></td>
-            <td style="padding:8px 10px"><span :style="{color:(row.schedule_status==='blocked'||row.status==='blocked')?'var(--danger)':'var(--success)',fontWeight:600}">{{ (row.schedule_status==='blocked'||row.status==='blocked') ? `阻断：${row.blocked_reason || row.reason || '前置条件不满足'}` : '已排程' }}</span></td>
+            <td style="padding:8px 10px;min-width:180px">
+              <span v-if="row.schedule_status==='blocked'||row.status==='blocked'" :data-test="`blocked-code-${blockedCode(row) || 'UNKNOWN'}`" style="color:var(--danger);font-weight:600">阻断：{{ blockedMessage(row) }}</span>
+              <span v-else style="color:var(--success);font-weight:600">{{ row.revision_status || '已排程' }}</span>
+              <span v-if="row.locked" data-test="locked-task" style="display:block;margin-top:3px;color:var(--warning);font-size:var(--text-xs)">🔒 已锁定</span>
+            </td>
+            <td style="padding:8px 10px;min-width:250px">
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <button v-if="canAdjustSchedules && row.revision_item_id" type="button" class="btn-default btn-sm" @click="prepareAdjustment(row)">调整</button>
+                <button v-if="canLockSchedules && row.revision_item_id && !row.locked" type="button" class="btn-default btn-sm" @click="lockOperation(row)">锁定</button>
+                <button v-if="canUnlockSchedules && row.revision_item_id && row.locked" type="button" class="btn-default btn-sm" @click="unlockOperation(row)">解锁</button>
+                <button v-if="canSubmitSchedules && row.schedule_revision_id && (!row.revision_status || row.revision_status==='draft')" type="button" class="btn-default btn-sm" @click="submitRevision(row)">提交</button>
+                <button v-if="canApproveSchedules && row.schedule_revision_id && row.revision_status==='pending_approval'" type="button" class="btn-default btn-sm" @click="approveRevision(row)">批准</button>
+                <button v-if="canRejectSchedules && row.schedule_revision_id && row.revision_status==='pending_approval'" type="button" class="btn-default btn-sm" style="color:var(--danger)" @click="rejectRevision(row)">驳回</button>
+                <button v-if="canPublishSchedules && row.schedule_revision_id && row.revision_status==='approved'" type="button" class="btn-default btn-sm" style="color:var(--success)" @click="publishRevision(row)">发布</button>
+              </div>
+            </td>
           </tr></tbody>
         </table>
       </div>
@@ -232,15 +243,15 @@
                   cursor: canAdjustOrder(order) ? 'col-resize' : 'default',
                   display:'flex',alignItems:'center',justifyContent:'center',
                   color:'#fff',fontSize:'10px',fontWeight:600,
-                  boxShadow: riskBarShadow(order, isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id)),zIndex:1,
+                  boxShadow: riskBarShadow(order),zIndex:1,
                   transition: dragTarget===order ? 'none' : 'box-shadow 0.15s',
                   userSelect:'none'
                 }"
                 @mousedown="onBarMouseDown($event, order)"
                 @dblclick="editOrderDates(order)"
-                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (order.production_line ? ' | 产线: ' + order.production_line : '') + (riskTooltip(order) ? ' | ' + riskTooltip(order) : '') + (isOverloaded(ganttData.days[Math.floor(barLeft(order)/dayWidth)]?.date, order.production_line_id) ? ' ⚠️产能超载' : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
+                :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (riskTooltip(order) ? ' | ' + riskTooltip(order) : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
                 <span v-if="order.quantity" style="margin-right:4px">{{ order.completed_qty||0 }}/{{ order.quantity }}</span>
-                {{ order.production_line || statusLabel(order.status) }}
+                {{ statusLabel(order.status) }}
               </div>
               <div v-if="dragTarget===order"
                 :style="{position:'absolute',left:dragPreviewLeft+'px',top:'12px',width:dragPreviewWidth+'px',height:'28px',background:'rgba(37,99,235,0.3)',border:'2px dashed #2563eb',borderRadius:'6px',zIndex:3,pointerEvents:'none'}">
@@ -258,12 +269,6 @@
         <div class="modal-body">
           <div class="form-group"><label>开始日期</label><input v-model="editForm.plan_start" type="date" class="form-input"></div>
           <div class="form-group"><label>结束日期</label><input v-model="editForm.plan_end" type="date" class="form-input"></div>
-          <div class="form-group"><label>产线</label>
-            <select v-model="editForm.production_line_id" class="form-input">
-              <option value="">未分配</option>
-              <option v-for="pl in productionLines" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
-            </select>
-          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-default" @click="undoLastDrag">取消</button>
@@ -272,26 +277,130 @@
       </div>
     </div>
 
-    <!-- Prod Line Modal -->
-    <div v-if="showLineMgr" class="modal-overlay" @click.self="showLineMgr=false">
-      <div class="modal" style="max-width:480px">
-        <div class="modal-header"><h3>🏭 产线管理</h3></div>
+    <!-- Production Node Modal -->
+    <div v-if="showNodeMgr" class="modal-overlay" @click.self="showNodeMgr=false">
+      <div class="modal" style="max-width:900px">
+        <div class="modal-header"><h3>⚙️ 生产节点管理</h3></div>
         <div class="modal-body">
-          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-            <input v-model="lineForm.name" class="form-input" placeholder="产线名称" style="flex:1;min-width:120px">
-            <input v-model="lineForm.remark" class="form-input" placeholder="描述" style="flex:1;min-width:100px">
-            <input v-model.number="lineForm.capacity_per_day" type="number" class="form-input" placeholder="产能/天" style="width:80px">
-            <button class="btn btn-primary btn-sm" @click="addLine">添加</button>
-          </div>
-          <div v-if="productionLines.length" style="max-height:200px;overflow-y:auto">
-            <div v-for="pl in productionLines" :key="pl.id" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--bg-hover);gap:8px">
-              <span style="font-weight:600;min-width:80px">{{ pl.name }}</span>
-              <span style="font-size:var(--text-xs);color:var(--text-placeholder);flex:1">{{ pl.remark || '-' }} · 产能: {{ pl.capacity_per_day || '-' }}/天</span>
-              <button class="btn-default" style="font-size:var(--text-xs);padding:2px 8px;color:var(--danger)" @click="delLine(pl)">删除</button>
+          <form v-if="canManageNodes" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;margin-bottom:16px" @submit.prevent="saveNode">
+            <select v-model="nodeForm.process_id" class="form-input" :disabled="Boolean(nodeForm.id)" required>
+              <option value="">选择工序</option>
+              <option v-for="process in processOptions" :key="`node-process-${process.id}`" :value="process.id">{{ process.name }}</option>
+            </select>
+            <input v-model="nodeForm.node_code" class="form-input" placeholder="节点编码，如 WELD-01" required>
+            <input v-model="nodeForm.node_name" class="form-input" placeholder="节点名称，如 焊接-01" required>
+            <select v-model="nodeForm.capacity_mode" class="form-input">
+              <option value="exclusive">独占容量</option>
+              <option value="batch">批处理容量</option>
+            </select>
+            <select v-model="nodeForm.calendar_id" class="form-input" required>
+              <option value="">选择工作日历</option>
+              <option v-for="calendar in productionCalendars" :key="`calendar-${calendar.id}`" :value="calendar.id">{{ calendar.calendar_name || calendar.name || `日历 #${calendar.id}` }}</option>
+            </select>
+            <select v-model="nodeForm.status" class="form-input">
+              <option value="active">启用</option>
+              <option value="maintenance">维护中</option>
+              <option value="inactive">停用</option>
+            </select>
+            <input v-model="nodeForm.reason" class="form-input" placeholder="变更原因（必填）" required>
+            <input v-model="nodeForm.idempotency_key" class="form-input" placeholder="幂等键" required>
+            <div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px">
+              <button type="button" class="btn-default btn-sm" @click="resetNodeForm()">新建节点</button>
+              <button type="submit" class="btn btn-primary btn-sm">{{ nodeForm.id ? '保存节点修改' : '创建生产节点' }}</button>
             </div>
+          </form>
+          <div v-if="nodesLoading" style="padding:20px;text-align:center;color:var(--text-placeholder)">加载生产节点中...</div>
+          <div v-else-if="nodesByProcess.length" style="max-height:300px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm)">
+            <section v-for="group in nodesByProcess" :key="`node-group-${group.process_id}`" style="padding:10px 12px;border-bottom:1px solid var(--border-light)">
+              <strong>{{ group.process_name }}</strong>
+              <div v-for="node in group.nodes" :key="node.id" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--bg-hover);font-size:var(--text-sm)">
+                <span style="font-weight:700;min-width:90px">{{ node.node_code }}</span>
+                <span style="min-width:120px">{{ node.node_name }}</span>
+                <span style="color:var(--text-secondary)">{{ node.capacity_mode === 'batch' ? '批处理容量' : '独占容量' }}</span>
+                <span style="color:var(--text-secondary)">日容量 {{ node.capacity_minutes || 0 }} 分钟</span>
+                <span style="color:var(--text-secondary)">状态 {{ node.status }}</span>
+                <button v-if="canManageNodes" type="button" class="btn-default btn-sm" style="margin-left:auto" @click="editNode(node)">编辑</button>
+                <button v-if="canManageCapabilities" type="button" class="btn-default btn-sm" :style="{marginLeft:canManageNodes?'0':'auto'}" @click="loadCapabilities(node)">能力限制</button>
+                <button v-if="canManageCalendars" type="button" class="btn-default btn-sm" @click="prepareOverride(node)">日历例外</button>
+              </div>
+            </section>
           </div>
+          <div v-else style="padding:18px;text-align:center;color:var(--text-placeholder)">暂无生产节点</div>
+          <form v-if="canManageCalendars" style="margin-top:16px;padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-sm)" @submit.prevent="createCalendarOverride">
+            <strong style="display:block;margin-bottom:8px">节点日历例外</strong>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px">
+              <select v-model="overrideForm.production_node_id" class="form-input" required>
+                <option value="">选择生产节点</option>
+                <option v-for="node in productionNodes" :key="`override-node-${node.id}`" :value="node.id">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
+              </select>
+              <input v-model="overrideForm.start_at" type="datetime-local" class="form-input" required>
+              <input v-model="overrideForm.end_at" type="datetime-local" class="form-input" required>
+              <select v-model="overrideForm.override_type" class="form-input">
+                <option value="unavailable">不可用</option>
+                <option value="maintenance">维护</option>
+                <option value="overtime">加班</option>
+                <option value="holiday">停工假日</option>
+              </select>
+              <input v-model="overrideForm.reason" class="form-input" placeholder="日历调整原因（必填）" required>
+              <input v-model="overrideForm.idempotency_key" class="form-input" placeholder="幂等键" required>
+              <button type="submit" class="btn btn-primary btn-sm" style="grid-column:3">保存日历例外</button>
+            </div>
+          </form>
+          <form v-if="canManageCapabilities && capabilityForm.production_node_id" style="margin-top:16px;padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-sm)" @submit.prevent="saveCapabilities">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <strong>节点能力限制：{{ capabilityForm.node_label }}</strong>
+              <span style="font-size:var(--text-xs);color:var(--text-secondary)">空列表表示仅按所属工序匹配，不附加产品或版本限制</span>
+              <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="addCapability">新增限制</button>
+            </div>
+            <div v-if="capabilitiesLoading" style="padding:12px;text-align:center;color:var(--text-placeholder)">加载能力配置中...</div>
+            <div v-for="(capability, index) in capabilityForm.capabilities" :key="`capability-${index}`" style="display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:6px;padding:8px 0;border-top:1px solid var(--bg-hover)">
+              <input v-model.number="capability.product_id" type="number" min="1" class="form-input" placeholder="产品 ID（可空）">
+              <input v-model="capability.product_family" class="form-input" placeholder="产品族（可空）">
+              <input v-model="capability.material_code" class="form-input" placeholder="材料编码（可空）">
+              <input v-model="capability.specification" class="form-input" placeholder="规格（可空）">
+              <input v-model.number="capability.route_version_id" type="number" min="1" class="form-input" placeholder="路线版本 ID">
+              <input v-model.number="capability.process_version_id" type="number" min="1" class="form-input" placeholder="工序版本 ID">
+              <input v-model.number="capability.max_batch_quantity" type="number" min="1" class="form-input" placeholder="最大批量">
+              <input v-model.number="capability.batch_minutes" type="number" min="0.01" step="0.01" class="form-input" placeholder="批次分钟">
+              <input v-model.number="capability.changeover_minutes" type="number" min="0" step="0.01" class="form-input" placeholder="换型分钟">
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:var(--text-xs)"><input v-model="capability.allow_mixed_orders" type="checkbox"> 允许混单</label>
+                <select v-model="capability.status" class="form-input" style="width:90px"><option value="active">启用</option><option value="inactive">停用</option></select>
+                <button type="button" class="btn-default btn-sm" style="color:var(--danger)" @click="removeCapability(index)">移除</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 2fr auto;gap:8px;margin-top:8px">
+              <input v-model="capabilityForm.reason" class="form-input" placeholder="能力变更原因（必填）" required>
+              <input v-model="capabilityForm.idempotency_key" class="form-input" placeholder="幂等键" required>
+              <button type="submit" class="btn btn-primary btn-sm">保存能力配置</button>
+            </div>
+          </form>
         </div>
-        <div class="modal-footer"><button class="btn btn-default" @click="showLineMgr=false">关闭</button></div>
+        <div class="modal-footer"><button class="btn btn-default" @click="showNodeMgr=false">关闭</button></div>
+      </div>
+    </div>
+
+    <!-- Schedule Adjustment Modal -->
+    <div v-if="showAdjustmentModal" class="modal-overlay" @click.self="showAdjustmentModal=false">
+      <div class="modal" style="max-width:520px">
+        <div class="modal-header"><h3>✏️ 调整生产节点排程</h3></div>
+        <form @submit.prevent="saveOperationAdjustment">
+          <div class="modal-body">
+            <div class="form-group"><label>生产节点</label>
+              <select v-model="adjustmentForm.production_node_id" class="form-input" required>
+                <option value="">选择生产节点</option>
+                <option v-for="node in capacityNodes" :key="`adjust-node-${node.id}`" :value="node.id">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
+              </select>
+            </div>
+            <div class="form-group"><label>计划开始时间</label><input v-model="adjustmentForm.planned_start_at" type="datetime-local" class="form-input" required></div>
+            <div class="form-group"><label>调整原因</label><input v-model="adjustmentForm.reason" class="form-input" required></div>
+            <div class="form-group"><label>幂等键</label><input v-model="adjustmentForm.idempotency_key" class="form-input" required></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-default" @click="showAdjustmentModal=false">取消</button>
+            <button type="submit" class="btn btn-primary">生成新草稿修订版</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

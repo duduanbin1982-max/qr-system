@@ -9,13 +9,12 @@ export function useGanttEditor({
   ganttData,
   barLeft,
   canAdjustOrder,
-  productionLines,
 }) {
   const dragTarget = ref(null)
   const dragPreviewLeft = ref(0)
   const dragPreviewWidth = ref(0)
   const showEditModal = ref(false)
-  const editForm = ref({ plan_start: '', plan_end: '', production_line_id: '' })
+  const editForm = ref({ plan_start: '', plan_end: '' })
   let dragStartX = 0
   let dragStartWidth = 0
   let dragResizeEdge = null
@@ -107,7 +106,6 @@ export function useGanttEditor({
     editForm.value = {
       plan_start: order.plan_start || '',
       plan_end: order.plan_end || '',
-      production_line_id: order.production_line_id || '',
     }
     showEditModal.value = true
   }
@@ -118,24 +116,14 @@ export function useGanttEditor({
       await api.domains.production.updateScheduleOrder(dragTarget.value.id, {
         plan_start: editForm.value.plan_start,
         plan_end: editForm.value.plan_end,
-        production_line_id: editForm.value.production_line_id || null,
       })
-      applyEditedDates()
+      dragTarget.value.plan_start = editForm.value.plan_start
+      dragTarget.value.plan_end = editForm.value.plan_end
       showToast('已保存')
       showEditModal.value = false
     } catch (error) {
       showToast(error.message || '保存失败', 'error')
     }
-  }
-
-  function applyEditedDates() {
-    dragTarget.value.plan_start = editForm.value.plan_start
-    dragTarget.value.plan_end = editForm.value.plan_end
-    const line = productionLines.value.find(
-      item => String(item.id) === String(editForm.value.production_line_id),
-    )
-    dragTarget.value.production_line = line?.name || ''
-    dragTarget.value.production_line_id = editForm.value.production_line_id || null
   }
 
   function undoLastDrag() {

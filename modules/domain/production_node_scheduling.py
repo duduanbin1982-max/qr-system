@@ -39,6 +39,10 @@ class ProductionNodePolicy:
             "SERIAL_ITEM_SPLIT_FORBIDDEN",
             "BATCH_CAPACITY_EXCEEDED",
             "QUANTITY_CONSERVATION_FAILED",
+            "IDEMPOTENCY_CONFLICT",
+            "ROW_VERSION_CONFLICT",
+            "REVISION_STATE_CONFLICT",
+            "INDEPENDENT_APPROVER_REQUIRED",
         }
     )
     CAPABILITY_FIELDS = (

@@ -9,6 +9,7 @@ from modules.route_decorators import (
     get_json_body,
     has_permission,
     safe_audit_log,
+    validate_json,
 )
 from modules.services.schedule_service import (
     ScheduleConflictError,
@@ -17,6 +18,18 @@ from modules.services.schedule_service import (
 )
 from modules.services.production_line_service import ProductionLineService
 from modules.services.schedule_capacity_service import ScheduleCapacityService
+from modules.domain.production_node_scheduling import NodeSchedulingError
+
+
+def _schedule_workflow_response(callback):
+    try:
+        return jsonify(callback())
+    except NodeSchedulingError as exc:
+        return jsonify(exc.to_payload()), 409
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "不存在" in message else 400
+        return jsonify({"error": message}), status
 
 
 @app.route("/api/schedule/gantt", methods=["GET"])
@@ -33,22 +46,17 @@ def schedule_gantt():
 
 @app.route("/api/schedule/order/<int:order_id>", methods=["PUT", "PATCH"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:adjust")
 def schedule_update_order(order_id):
     """drag to adjust schedule: update order plan start/end dates"""
     try:
         data = get_json_body()
         plan_start = data.get("plan_start", "")
         plan_end = data.get("plan_end", "")
-        update_kwargs = {}
-        if "production_line_id" in data:
-            update_kwargs["production_line_id"] = data.get("production_line_id")
-
         ScheduleService.update_order_schedule(
             order_id,
             plan_start,
             plan_end,
-            **update_kwargs,
         )
         safe_audit_log("update_schedule", "order", order_id,
                        f"plan: {plan_start} ~ {plan_end}")
@@ -63,7 +71,7 @@ def schedule_update_order(order_id):
 
 @app.route("/api/schedule/batch-shift", methods=["POST"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:adjust")
 def schedule_batch_shift():
     """batch shift schedule: {order_ids: [1,2,3], days: 3}"""
     try:
@@ -111,7 +119,7 @@ def schedule_capacity_orders():
 
 @app.route("/api/schedule/auto-plan", methods=["POST"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:generate")
 def schedule_auto_plan():
     """Generate a priority-ordered plan with an auditable idempotency key."""
     try:
@@ -171,19 +179,88 @@ def schedule_revision_detail(revision_id):
 
 @app.route("/api/schedule/revisions/<int:revision_id>/publish", methods=["POST"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:approve")
 def schedule_revision_publish(revision_id):
     try:
         return jsonify(ScheduleCapacityService.publish_revision(
             revision_id, published_by=g.current_user.get("id")
         ))
+    except NodeSchedulingError as exc:
+        return jsonify(exc.to_payload()), 409
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/schedule/revision-items/<int:revision_item_id>/lock", methods=["POST"])
+@check_auth
+@check_permission("schedules:lock")
+@validate_json("schedule_workflow_action")
+def schedule_revision_item_lock(revision_item_id):
+    data = get_json_body()
+    return _schedule_workflow_response(lambda: ScheduleCapacityService.lock_schedule_item(
+        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+    ))
+
+
+@app.route("/api/schedule/revision-items/<int:revision_item_id>/unlock", methods=["POST"])
+@check_auth
+@check_permission("schedules:unlock")
+@validate_json("schedule_workflow_action")
+def schedule_revision_item_unlock(revision_item_id):
+    data = get_json_body()
+    return _schedule_workflow_response(lambda: ScheduleCapacityService.unlock_schedule_item(
+        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+    ))
+
+
+@app.route("/api/schedule/revision-items/<int:revision_item_id>/adjust", methods=["POST"])
+@check_auth
+@check_permission("schedules:adjust")
+@validate_json("schedule_revision_item_adjust")
+def schedule_revision_item_adjust(revision_item_id):
+    data = get_json_body()
+    return _schedule_workflow_response(lambda: ScheduleCapacityService.adjust_schedule_item(
+        revision_item_id, data["production_node_id"], data["planned_start_at"],
+        data["reason"], data["row_version"], data["idempotency_key"],
+        g.current_user.get("id"),
+    ))
+
+
+def _revision_workflow(revision_id, operation):
+    data = get_json_body()
+    method = getattr(ScheduleCapacityService, f"{operation}_revision")
+    return _schedule_workflow_response(lambda: method(
+        revision_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+    ))
+
+
+@app.route("/api/schedule/revisions/<int:revision_id>/submit", methods=["POST"])
+@check_auth
+@check_permission("schedules:submit")
+@validate_json("schedule_workflow_action")
+def schedule_revision_submit(revision_id):
+    return _revision_workflow(revision_id, "submit")
+
+
+@app.route("/api/schedule/revisions/<int:revision_id>/approve", methods=["POST"])
+@check_auth
+@check_permission("schedules:approve")
+@validate_json("schedule_workflow_action")
+def schedule_revision_approve(revision_id):
+    return _revision_workflow(revision_id, "approve")
+
+
+@app.route("/api/schedule/revisions/<int:revision_id>/reject", methods=["POST"])
+@check_auth
+@check_permission("schedules:reject")
+@validate_json("schedule_workflow_action")
+def schedule_revision_reject(revision_id):
+    return _revision_workflow(revision_id, "reject")
+
+
 @app.route("/api/schedule/order/<int:order_id>/generate", methods=["POST"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:generate")
 def schedule_generate_operations(order_id):
     try:
         data = get_json_body()
@@ -191,14 +268,17 @@ def schedule_generate_operations(order_id):
             order_id,
             start_date=data.get("start_date"),
             schedule_run_key=data.get("schedule_run_key", ""),
+            actor_id=g.current_user.get("id") if g.current_user else None,
         ))
+    except NodeSchedulingError as exc:
+        return jsonify(exc.to_payload()), 409
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/schedule/order/<int:order_id>/dynamic-replan", methods=["POST"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("schedules:generate")
 def schedule_dynamic_replan(order_id):
     """Replan unfinished work from approved reports, rework and downtime facts."""
     try:
@@ -213,6 +293,8 @@ def schedule_dynamic_replan(order_id):
         safe_audit_log("dynamic_replan_schedule", "order", order_id,
                        f"run={data.get('schedule_run_key', '')}; reason={data.get('reason', '')}")
         return jsonify(result)
+    except NodeSchedulingError as exc:
+        return jsonify(exc.to_payload()), 409
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -223,6 +305,7 @@ def schedule_downtime():
     if request.method == "GET":
         try:
             return jsonify(ScheduleCapacityService.list_downtime_events(
+                production_node_id=request.args.get("production_node_id", type=int),
                 process_line_id=request.args.get("process_line_id", type=int),
                 start_at=request.args.get("start_at", ""),
                 end_at=request.args.get("end_at", ""),
@@ -230,16 +313,16 @@ def schedule_downtime():
             ))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-    if not has_permission(g.current_user, "schedule:edit"):
+    if not has_permission(g.current_user, "production_nodes:downtime_manage"):
         return jsonify({"error": "无权限"}), 403
     try:
         data = get_json_body()
         result = ScheduleCapacityService.create_downtime_event(
-            data.get("process_line_id"), data.get("start_at"), data.get("end_at"),
+            data.get("production_node_id"), data.get("start_at"), data.get("end_at"),
             data.get("reason", ""), created_by=g.current_user.get("id") if g.current_user else None,
         )
         safe_audit_log("create_schedule_downtime", "schedule_downtime", result["event"]["id"],
-                       f"line={data.get('process_line_id')}; {data.get('start_at')}~{data.get('end_at')}")
+                       f"node={data.get('production_node_id')}; {data.get('start_at')}~{data.get('end_at')}")
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -247,7 +330,7 @@ def schedule_downtime():
 
 @app.route("/api/schedule/downtime/<int:event_id>", methods=["DELETE"])
 @check_auth
-@check_permission("schedule:edit")
+@check_permission("production_nodes:downtime_manage")
 def schedule_downtime_cancel(event_id):
     try:
         result = ScheduleCapacityService.cancel_downtime_event(event_id)

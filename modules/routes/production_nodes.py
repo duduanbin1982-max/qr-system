@@ -69,6 +69,15 @@ def replace_production_node_capabilities(node_id):
 
 
 @app.route(
+    "/api/production-nodes/<int:node_id>/capabilities", methods=["GET"]
+)
+@check_auth
+@check_permission("production_nodes:view")
+def list_production_node_capabilities(node_id):
+    return jsonify(ProductionNodeService.list_capabilities(node_id))
+
+
+@app.route(
     "/api/production-nodes/<int:node_id>/calendar-overrides", methods=["GET"]
 )
 @check_auth

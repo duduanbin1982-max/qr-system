@@ -271,21 +271,22 @@ class ProductionNodeRepository:
         db = resolve_db(db)
         return db.execute(
             """
-            SELECT ss.production_node_id, ss.segment_start_at AS start_at,
+            SELECT ss.production_node_id, ss.process_line_id,
+                   ss.segment_start_at AS start_at,
                    ss.segment_end_at AS end_at, ss.schedule_id,
-                   s.id AS occupancy_id, s.locked
+                   s.id AS occupancy_id, s.locked, 'schedule' AS fact_type
             FROM order_process_schedule_segments ss
             JOIN order_process_schedules s ON s.id=ss.schedule_id
             JOIN orders o ON o.id=s.order_id
             WHERE s.order_id != ? AND o.deleted_at IS NULL
               AND s.status != 'blocked' AND ss.production_node_id IS NOT NULL
             UNION ALL
-            SELECT s.production_node_id,
+            SELECT s.production_node_id,s.process_line_id,
                    CASE WHEN COALESCE(s.planned_start_at,'')<>''
                         THEN s.planned_start_at ELSE s.plan_start || ' 00:00' END,
                    CASE WHEN COALESCE(s.planned_end_at,'')<>''
                         THEN s.planned_end_at ELSE s.plan_end || ' 23:59' END,
-                   s.id, s.id, s.locked
+                   s.id, s.id, s.locked, 'schedule' AS fact_type
             FROM order_process_schedules s
             JOIN orders o ON o.id=s.order_id
             WHERE s.order_id != ? AND o.deleted_at IS NULL
@@ -294,9 +295,20 @@ class ProductionNodeRepository:
                   SELECT 1 FROM order_process_schedule_segments ss
                   WHERE ss.schedule_id=s.id
               )
+            UNION ALL
+            SELECT l.production_node_id,i.process_line_id,
+                   i.planned_start_at,i.planned_end_at,
+                   i.source_schedule_id,i.id,1,'locked_revision_item'
+            FROM schedule_node_task_locks l
+            JOIN schedule_revision_items i ON i.id=l.revision_item_id
+            JOIN schedule_revisions r ON r.id=i.revision_id
+            WHERE r.order_id != ? AND r.status IN ('draft','published')
+              AND l.status='active' AND i.status<>'blocked'
+              AND COALESCE(i.planned_start_at,'')<>''
+              AND COALESCE(i.planned_end_at,'')<>''
             ORDER BY start_at,end_at,production_node_id,occupancy_id
             """,
-            (exclude_order_id, exclude_order_id),
+            (exclude_order_id, exclude_order_id, exclude_order_id),
         ).fetchall()
 
     @staticmethod
@@ -324,6 +336,19 @@ class ProductionNodeRepository:
             "JOIN processes p ON p.id=n.process_id "
             "JOIN schedule_calendars c ON c.id=n.calendar_id WHERE n.id=?",
             (node_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def find_node_by_legacy_line_id(process_line_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT n.*,p.name AS process_name,c.calendar_code,c.calendar_name "
+            "FROM production_nodes n "
+            "JOIN processes p ON p.id=n.process_id "
+            "JOIN schedule_calendars c ON c.id=n.calendar_id "
+            "WHERE n.legacy_process_line_id=? ORDER BY n.id LIMIT 1",
+            (process_line_id,),
         ).fetchone()
         return dict(row) if row else None
 

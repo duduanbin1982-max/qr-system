@@ -100,10 +100,37 @@ production_node_calendar_override_cancel = {
     "additionalProperties": False,
 }
 
+schedule_workflow_action = {
+    "type": "object",
+    "required": ["reason", "idempotency_key"],
+    "properties": {"reason": _REASON, "idempotency_key": _KEY},
+    "additionalProperties": False,
+}
+
+schedule_revision_item_adjust = {
+    "type": "object",
+    "required": [
+        "production_node_id",
+        "planned_start_at",
+        "row_version",
+        "reason",
+        "idempotency_key",
+    ],
+    "properties": {
+        "production_node_id": {"type": "integer", "minimum": 1},
+        "planned_start_at": _DATETIME,
+        "row_version": {"type": "integer", "minimum": 1},
+        "reason": _REASON,
+        "idempotency_key": _KEY,
+    },
+    "additionalProperties": False,
+}
+
 production_node_schemas = {
     "production_node_write": production_node_write,
     "production_node_capabilities_replace": production_node_capabilities_replace,
     "production_node_calendar_override_create": production_node_calendar_override_create,
     "production_node_calendar_override_cancel": production_node_calendar_override_cancel,
+    "schedule_workflow_action": schedule_workflow_action,
+    "schedule_revision_item_adjust": schedule_revision_item_adjust,
 }
-
