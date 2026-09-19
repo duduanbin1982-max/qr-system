@@ -16,7 +16,10 @@ export default defineConfig({
   outputDir: './test-results/playwright',
   fullyParallel: false,
   workers: 1,
-  timeout: 30_000,
+  // The production deployment host runs the critical suite after the full
+  // backend and frontend suites. Keep enough headroom for cold browser/page
+  // startup without weakening assertion timeouts or retrying failed actions.
+  timeout: 60_000,
   expect: {
     timeout: 5_000,
   },
