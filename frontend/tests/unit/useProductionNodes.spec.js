@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   updateProductionNode: vi.fn(),
   listProductionNodeCapabilities: vi.fn(),
   replaceProductionNodeCapabilities: vi.fn(),
+  listProductionNodeOverrides: vi.fn(),
   createProductionNodeOverride: vi.fn(),
+  cancelProductionNodeOverride: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
@@ -24,7 +26,9 @@ vi.mock('@/lib/api.js', () => ({
         updateProductionNode: mocks.updateProductionNode,
         listProductionNodeCapabilities: mocks.listProductionNodeCapabilities,
         replaceProductionNodeCapabilities: mocks.replaceProductionNodeCapabilities,
+        listProductionNodeOverrides: mocks.listProductionNodeOverrides,
         createProductionNodeOverride: mocks.createProductionNodeOverride,
+        cancelProductionNodeOverride: mocks.cancelProductionNodeOverride,
       },
     },
   },
@@ -135,5 +139,70 @@ describe('useProductionNodes', () => {
       override_type: 'unavailable',
       reason: '计划检修',
     }))
+  })
+
+  it('keeps node load errors in node state and allows retry', async () => {
+    mocks.listProductionNodes
+      .mockRejectedValueOnce(new Error('节点目录不可用'))
+      .mockResolvedValueOnce({ nodes: [] })
+    const nodes = createNodes()
+
+    await nodes.loadNodes()
+    expect(nodes.nodesError.value).toBe('节点目录不可用')
+
+    await nodes.loadNodes()
+    expect(nodes.nodesError.value).toBe('')
+  })
+
+  it('loads and cancels calendar overrides for the selected node', async () => {
+    mocks.listProductionNodeOverrides.mockResolvedValue({
+      overrides: [{ id: 81, production_node_id: 11, status: 'active' }],
+    })
+    mocks.cancelProductionNodeOverride.mockResolvedValue({ id: 81, status: 'cancelled' })
+    const nodes = createNodes()
+
+    await nodes.loadOverrides({ id: 11 })
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 81, production_node_id: 11 }),
+    ])
+
+    await nodes.cancelOverride({ id: 81, production_node_id: 11 })
+    expect(mocks.cancelProductionNodeOverride).toHaveBeenCalledWith(
+      81,
+      expect.objectContaining({ reason: expect.any(String), idempotency_key: expect.any(String) }),
+    )
+  })
+
+  it('ignores a stale capability response after the selected node changes', async () => {
+    let resolveFirst
+    mocks.listProductionNodeCapabilities
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'CURRENT' }] })
+    const nodes = createNodes()
+
+    const first = nodes.loadCapabilities({ id: 11, node_code: 'A' })
+    await nodes.loadCapabilities({ id: 12, node_code: 'B' })
+    resolveFirst({ capabilities: [{ product_family: 'STALE' }] })
+    await first
+
+    expect(nodes.capabilityForm.value.production_node_id).toBe(12)
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('CURRENT')
+  })
+
+  it('ignores stale calendar overrides after the selected node changes', async () => {
+    let resolveFirst
+    mocks.listProductionNodeOverrides
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12 }] })
+    const nodes = createNodes()
+
+    const first = nodes.loadOverrides({ id: 11 })
+    await nodes.loadOverrides({ id: 12 })
+    resolveFirst({ overrides: [{ id: 81, production_node_id: 11 }] })
+    await first
+
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12 }),
+    ])
   })
 })

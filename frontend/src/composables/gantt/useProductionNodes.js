@@ -56,6 +56,28 @@ function freshCapabilityForm() {
   }
 }
 
+function capabilityFormFrom(node, capabilities) {
+  return {
+    production_node_id: node.id,
+    node_label: [node.node_code, node.node_name].filter(Boolean).join(' · '),
+    capabilities: capabilities.map(item => ({
+      product_id: item.product_id ?? null,
+      product_family: item.product_family || '',
+      material_code: item.material_code || '',
+      specification: item.specification || '',
+      route_version_id: item.route_version_id ?? null,
+      process_version_id: item.process_version_id ?? null,
+      max_batch_quantity: item.max_batch_quantity ?? null,
+      batch_minutes: item.batch_minutes ?? null,
+      changeover_minutes: Number(item.changeover_minutes || 0),
+      allow_mixed_orders: Boolean(item.allow_mixed_orders),
+      status: item.status || 'active',
+    })),
+    reason: '',
+    idempotency_key: commandKey('production-node-capabilities', node.id),
+  }
+}
+
 function commandKey(prefix, id = 'new') {
   return `${prefix}-${id}-${Date.now()}`
 }
@@ -69,11 +91,21 @@ export function useProductionNodes({
   const productionNodes = ref([])
   const productionCalendars = ref([])
   const nodesLoading = ref(false)
+  const nodesError = ref('')
   const showNodeMgr = ref(false)
   const nodeForm = ref(freshNodeForm())
+  const nodeSaving = ref(false)
   const overrideForm = ref(freshOverrideForm())
+  const nodeOverrides = ref([])
+  const overridesLoading = ref(false)
+  const overridesError = ref('')
+  const overrideSaving = ref(false)
   const capabilityForm = ref(freshCapabilityForm())
   const capabilitiesLoading = ref(false)
+  const capabilitiesError = ref('')
+  const capabilitySaving = ref(false)
+  let capabilityRequest = 0
+  let overrideRequest = 0
 
   const nodesByProcess = computed(() => Object.values(
     productionNodes.value.reduce((groups, node) => {
@@ -92,6 +124,7 @@ export function useProductionNodes({
 
   async function loadNodes(params = {}) {
     nodesLoading.value = true
+    nodesError.value = ''
     try {
       const [data, calendarData] = await Promise.all([
         api.domains.production.listProductionNodes({ limit: 500, ...params }),
@@ -103,10 +136,10 @@ export function useProductionNodes({
         overrideForm.value.production_node_id = productionNodes.value[0].id
       }
     } catch (error) {
-      console.warn('Production nodes load failed:', error)
       productionNodes.value = []
       productionCalendars.value = []
-      showToast(error.message || '加载生产节点失败', 'error')
+      nodesError.value = error.message || '加载生产节点失败'
+      showToast(nodesError.value, 'error')
     } finally {
       nodesLoading.value = false
     }
@@ -137,8 +170,7 @@ export function useProductionNodes({
     showNodeMgr.value = true
   }
 
-  async function saveNode() {
-    if (!canManageNodes.value) return null
+  async function saveNodeCommand() {
     const form = nodeForm.value
     if (!Number(form.process_id) || !String(form.node_code || '').trim()
       || !String(form.node_name || '').trim() || !Number(form.calendar_id)) {
@@ -187,8 +219,7 @@ export function useProductionNodes({
     }
   }
 
-  async function createCalendarOverride() {
-    if (!canManageCalendars.value) return null
+  async function createCalendarOverrideCommand() {
     const form = overrideForm.value
     if (!Number(form.production_node_id)) {
       showToast('请选择生产节点', 'error')
@@ -225,34 +256,67 @@ export function useProductionNodes({
 
   async function loadCapabilities(node) {
     if (!canManageCapabilities.value || !node?.id) return null
+    const requestId = ++capabilityRequest
     capabilitiesLoading.value = true
+    capabilitiesError.value = ''
     try {
       const result = await api.domains.production.listProductionNodeCapabilities(node.id)
-      capabilityForm.value = {
-        production_node_id: node.id,
-        node_label: [node.node_code, node.node_name].filter(Boolean).join(' · '),
-        capabilities: (result.capabilities || []).map(item => ({
-          product_id: item.product_id ?? null,
-          product_family: item.product_family || '',
-          material_code: item.material_code || '',
-          specification: item.specification || '',
-          route_version_id: item.route_version_id ?? null,
-          process_version_id: item.process_version_id ?? null,
-          max_batch_quantity: item.max_batch_quantity ?? null,
-          batch_minutes: item.batch_minutes ?? null,
-          changeover_minutes: Number(item.changeover_minutes || 0),
-          allow_mixed_orders: Boolean(item.allow_mixed_orders),
-          status: item.status || 'active',
-        })),
-        reason: '',
-        idempotency_key: commandKey('production-node-capabilities', node.id),
-      }
+      if (requestId !== capabilityRequest) return null
+      capabilityForm.value = capabilityFormFrom(node, result.capabilities || [])
       return result
     } catch (error) {
-      showToast(error.message || '加载节点能力失败', 'error')
+      if (requestId === capabilityRequest) {
+        capabilitiesError.value = error.message || '加载节点能力失败'
+        showToast(capabilitiesError.value, 'error')
+      }
       return null
     } finally {
-      capabilitiesLoading.value = false
+      if (requestId === capabilityRequest) capabilitiesLoading.value = false
+    }
+  }
+
+  async function loadOverrides(node) {
+    if (!canManageCalendars.value || !node?.id) return null
+    const requestId = ++overrideRequest
+    overridesLoading.value = true
+    overridesError.value = ''
+    try {
+      const result = await api.domains.production.listProductionNodeOverrides(
+        node.id,
+        { limit: 200 },
+      )
+      if (requestId !== overrideRequest) return null
+      nodeOverrides.value = result.overrides || result.items || []
+      return result
+    } catch (error) {
+      if (requestId === overrideRequest) {
+        overridesError.value = error.message || '加载节点日历例外失败'
+        showToast(overridesError.value, 'error')
+      }
+      return null
+    } finally {
+      if (requestId === overrideRequest) overridesLoading.value = false
+    }
+  }
+
+  async function cancelOverride(override, reason = '取消节点日历例外') {
+    if (!canManageCalendars.value || !override?.id) return null
+    overrideSaving.value = true
+    try {
+      const result = await api.domains.production.cancelProductionNodeOverride(
+        override.id,
+        {
+          reason,
+          idempotency_key: commandKey('production-node-calendar-cancel', override.id),
+        },
+      )
+      const node = productionNodes.value.find(
+        item => String(item.id) === String(override.production_node_id),
+      )
+      if (node) await loadOverrides(node)
+      return result
+    } finally {
+      overrideSaving.value = false
     }
   }
 
@@ -266,8 +330,7 @@ export function useProductionNodes({
     capabilityForm.value.capabilities.splice(index, 1)
   }
 
-  async function saveCapabilities() {
-    if (!canManageCapabilities.value) return null
+  async function saveCapabilitiesCommand() {
     const form = capabilityForm.value
     if (!Number(form.production_node_id)) {
       showToast('请先选择生产节点并加载能力配置', 'error')
@@ -310,6 +373,76 @@ export function useProductionNodes({
     }
   }
 
+  async function saveNode() {
+    if (!canManageNodes.value || nodeSaving.value) return null
+    nodeSaving.value = true
+    try {
+      return await saveNodeCommand()
+    } finally {
+      nodeSaving.value = false
+    }
+  }
+
+  async function createCalendarOverride() {
+    if (!canManageCalendars.value || overrideSaving.value) return null
+    overrideSaving.value = true
+    try {
+      return await createCalendarOverrideCommand()
+    } finally {
+      overrideSaving.value = false
+    }
+  }
+
+  async function saveCapabilities() {
+    if (!canManageCapabilities.value || capabilitySaving.value) return null
+    capabilitySaving.value = true
+    try {
+      return await saveCapabilitiesCommand()
+    } finally {
+      capabilitySaving.value = false
+    }
+  }
+
+  const nodeManager = {
+    state: {
+      productionNodes,
+      productionCalendars,
+      nodesByProcess,
+      nodesLoading,
+      nodesError,
+      nodeForm,
+      nodeSaving,
+      overrideForm,
+      nodeOverrides,
+      overridesLoading,
+      overridesError,
+      overrideSaving,
+      capabilityForm,
+      capabilitiesLoading,
+      capabilitiesError,
+      capabilitySaving,
+    },
+    permissions: {
+      canManageNodes,
+      canManageCapabilities,
+      canManageCalendars,
+    },
+    actions: {
+      loadNodes,
+      resetNodeForm,
+      editNode,
+      saveNode,
+      prepareOverride,
+      loadOverrides,
+      createCalendarOverride,
+      cancelOverride,
+      loadCapabilities,
+      addCapability,
+      removeCapability,
+      saveCapabilities,
+    },
+  }
+
   resetNodeForm()
 
   return {
@@ -317,20 +450,31 @@ export function useProductionNodes({
     productionCalendars,
     nodesByProcess,
     nodesLoading,
+    nodesError,
     showNodeMgr,
     nodeForm,
+    nodeSaving,
     overrideForm,
+    nodeOverrides,
+    overridesLoading,
+    overridesError,
+    overrideSaving,
     capabilityForm,
     capabilitiesLoading,
+    capabilitiesError,
+    capabilitySaving,
     loadNodes,
     resetNodeForm,
     editNode,
     saveNode,
     prepareOverride,
+    loadOverrides,
     createCalendarOverride,
+    cancelOverride,
     loadCapabilities,
     addCapability,
     removeCapability,
     saveCapabilities,
+    nodeManager,
   }
 }
