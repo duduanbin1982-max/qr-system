@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, unref, watch } from 'vue'
 
+import NodeCalendarPanel from './NodeCalendarPanel.vue'
 import NodeEditorPanel from './NodeEditorPanel.vue'
 import NodeListPanel from './NodeListPanel.vue'
 import { PRODUCTION_NODE_TABS, useProductionNodeWorkbench } from '@/composables/gantt/useProductionNodeWorkbench.js'
@@ -29,7 +30,13 @@ const nodesLoading = computed(() => Boolean(unref(state.nodesLoading)))
 const nodesError = computed(() => String(unref(state.nodesError) || ''))
 const nodeForm = computed(() => unref(state.nodeForm) || {})
 const nodeSaving = computed(() => Boolean(unref(state.nodeSaving)))
+const overrideForm = computed(() => unref(state.overrideForm) || {})
+const nodeOverrides = computed(() => unref(state.nodeOverrides) || [])
+const overridesLoading = computed(() => Boolean(unref(state.overridesLoading)))
+const overridesError = computed(() => String(unref(state.overridesError) || ''))
+const overrideSaving = computed(() => Boolean(unref(state.overrideSaving)))
 const canManageNodes = computed(() => Boolean(unref(permissions.canManageNodes)))
+const canManageCalendars = computed(() => Boolean(unref(permissions.canManageCalendars)))
 
 function closeWorkbench() {
   emit('update:modelValue', false)
@@ -68,6 +75,10 @@ const selectedNodeLabel = computed(() => {
 const editorForm = computed(() => (
   canManageNodes.value ? nodeForm.value : (workbench.selectedNode.value || nodeForm.value)
 ))
+const selectedCalendar = computed(() => {
+  const calendarId = workbench.selectedNode.value?.calendar_id
+  return productionCalendars.value.find(item => String(item.id) === String(calendarId)) || null
+})
 
 function selectNodeById(value) {
   const node = productionNodes.value.find(item => String(item.id) === String(value))
@@ -279,6 +290,22 @@ onBeforeUnmount(() => {
               :on-save="actions.saveNode"
               @dirty-change="workbench.markDirty"
               @saved="handleNodeSaved"
+            />
+            <NodeCalendarPanel
+              v-else-if="workbench.activeTab.value === 'calendar'"
+              :node="workbench.selectedNode.value"
+              :calendar="selectedCalendar"
+              :overrides="nodeOverrides"
+              :form="overrideForm"
+              :loading="overridesLoading"
+              :error="overridesError"
+              :saving="overrideSaving"
+              :can-manage="canManageCalendars"
+              :on-retry="() => actions.loadOverrides(workbench.selectedNode.value)"
+              :on-save="actions.createCalendarOverride"
+              :on-cancel-override="actions.cancelOverride"
+              @dirty-change="workbench.markDirty"
+              @saved="workbench.markDirty(false)"
             />
             <slot
               v-else
