@@ -105,6 +105,7 @@ export function useProductionNodes({
   const capabilitiesError = ref('')
   const capabilitySaving = ref(false)
   let capabilityRequest = 0
+  let capabilityContextNodeId = null
   let capabilityContextVersion = 0
   let overrideRequest = 0
   let overrideNodeId = null
@@ -115,6 +116,15 @@ export function useProductionNodes({
     if (overrideNodeId === nextNodeId) return
     overrideNodeId = nextNodeId
     overrideContextVersion += 1
+  }
+
+  function selectCapabilityContext(node) {
+    const nextNodeId = node?.id ? String(node.id) : null
+    if (capabilityContextNodeId === nextNodeId) return
+    capabilityContextNodeId = nextNodeId
+    capabilityContextVersion += 1
+    capabilityForm.value = node ? capabilityFormFrom(node, []) : freshCapabilityForm()
+    capabilitiesError.value = ''
   }
 
   const nodesByProcess = computed(() => Object.values(
@@ -276,24 +286,30 @@ export function useProductionNodes({
   }
 
   async function loadCapabilities(node) {
-    if (!canManageCapabilities.value || !node?.id) return null
-    capabilityContextVersion += 1
+    if (!node?.id) return null
+    selectCapabilityContext(node)
+    const contextNodeId = String(node.id)
+    const contextVersion = capabilityContextVersion
+    const contextIsCurrent = () => (
+      capabilityContextNodeId === contextNodeId
+      && capabilityContextVersion === contextVersion
+    )
     const requestId = ++capabilityRequest
     capabilitiesLoading.value = true
     capabilitiesError.value = ''
     try {
       const result = await api.domains.production.listProductionNodeCapabilities(node.id)
-      if (requestId !== capabilityRequest) return null
+      if (requestId !== capabilityRequest || !contextIsCurrent()) return null
       capabilityForm.value = capabilityFormFrom(node, result.capabilities || [])
       return result
     } catch (error) {
-      if (requestId === capabilityRequest) {
+      if (requestId === capabilityRequest && contextIsCurrent()) {
         capabilitiesError.value = error.message || '加载节点能力失败'
         showToast(capabilitiesError.value, 'error')
       }
       return null
     } finally {
-      if (requestId === capabilityRequest) capabilitiesLoading.value = false
+      if (requestId === capabilityRequest && contextIsCurrent()) capabilitiesLoading.value = false
     }
   }
 
@@ -362,7 +378,12 @@ export function useProductionNodes({
 
   async function saveCapabilitiesCommand() {
     const form = capabilityForm.value
+    const contextNodeId = String(form.production_node_id || '')
     const contextVersion = capabilityContextVersion
+    const contextIsCurrent = () => (
+      capabilityContextNodeId === contextNodeId
+      && capabilityContextVersion === contextVersion
+    )
     if (!Number(form.production_node_id)) {
       showToast('请先选择生产节点并加载能力配置', 'error')
       return null
@@ -392,11 +413,18 @@ export function useProductionNodes({
           idempotency_key: String(form.idempotency_key || '').trim(),
         },
       )
-      showToast('生产节点能力已更新')
+      if (!contextIsCurrent()) return null
       const node = productionNodes.value.find(
         item => String(item.id) === String(form.production_node_id),
       )
-      if (node && contextVersion === capabilityContextVersion) await loadCapabilities(node)
+      if (!node) return null
+      const refreshed = await loadCapabilities(node)
+      if (!refreshed || !contextIsCurrent()
+        || capabilityForm.value === form
+        || String(capabilityForm.value.production_node_id) !== contextNodeId) {
+        return null
+      }
+      showToast('生产节点能力已更新')
       return result
     } catch (error) {
       showToast(error.message || '保存节点能力失败', 'error')

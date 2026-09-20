@@ -22,6 +22,8 @@ const formDisabled = computed(() => (
   props.loading || Boolean(props.error) || props.saving || submitting.value
 ))
 const isBatch = computed(() => props.node?.capacity_mode === 'batch')
+const displayValue = value => (value === null || value === undefined || value === '' ? '-' : value)
+const statusLabel = value => ({ active: '启用', inactive: '停用' }[value] || displayValue(value))
 
 watch(
   () => props.form,
@@ -176,7 +178,31 @@ async function submit() {
       </fieldset>
     </form>
 
-    <div v-else class="node-capability-panel__notice">当前账号无节点能力管理权限。</div>
+    <section v-else class="node-capability-panel__readonly" aria-label="节点能力摘要">
+      <div v-if="!form.capabilities.length" class="node-capability-panel__empty">暂无能力限制。</div>
+      <article
+        v-for="(capability, index) in form.capabilities"
+        :key="index"
+        class="capability-row node-capability-panel__readonly-row"
+        data-test="capability-row"
+      >
+        <dl>
+          <div><dt>产品 ID</dt><dd>{{ displayValue(capability.product_id) }}</dd></div>
+          <div><dt>产品族</dt><dd>{{ displayValue(capability.product_family) }}</dd></div>
+          <div><dt>物料编码</dt><dd>{{ displayValue(capability.material_code) }}</dd></div>
+          <div><dt>规格</dt><dd>{{ displayValue(capability.specification) }}</dd></div>
+          <div><dt>工艺路线版本 ID</dt><dd>{{ displayValue(capability.route_version_id) }}</dd></div>
+          <div><dt>工序版本 ID</dt><dd>{{ displayValue(capability.process_version_id) }}</dd></div>
+          <template v-if="isBatch">
+            <div><dt>最大批量</dt><dd>{{ displayValue(capability.max_batch_quantity) }}</dd></div>
+            <div><dt>批处理分钟</dt><dd>{{ displayValue(capability.batch_minutes) }}</dd></div>
+            <div><dt>换型分钟</dt><dd>{{ displayValue(capability.changeover_minutes) }}</dd></div>
+            <div><dt>允许混单</dt><dd>{{ capability.allow_mixed_orders ? '是' : '否' }}</dd></div>
+          </template>
+          <div><dt>状态</dt><dd>{{ statusLabel(capability.status) }}</dd></div>
+        </dl>
+      </article>
+    </section>
   </section>
 </template>
 
@@ -225,6 +251,30 @@ async function submit() {
   min-width: 0;
   padding: 0;
   border: 0;
+}
+
+.node-capability-panel__readonly {
+  display: grid;
+  gap: 16px;
+}
+
+.node-capability-panel__readonly-row dl {
+  display: contents;
+}
+
+.node-capability-panel__readonly-row dl > div {
+  min-width: 0;
+}
+
+.node-capability-panel__readonly-row dt {
+  color: var(--text-placeholder);
+  font-size: 12px;
+}
+
+.node-capability-panel__readonly-row dd {
+  margin: 6px 0 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .capability-row {

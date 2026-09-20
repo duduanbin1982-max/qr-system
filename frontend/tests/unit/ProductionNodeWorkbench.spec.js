@@ -3,6 +3,7 @@ import { h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
+import NodeCapabilityPanel from '@/components/production-nodes/NodeCapabilityPanel.vue'
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
@@ -13,6 +14,8 @@ const productionMocks = vi.hoisted(() => ({
   listScheduleCalendars: vi.fn(),
   createProductionNodeOverride: vi.fn(),
   listProductionNodeOverrides: vi.fn(),
+  listProductionNodeCapabilities: vi.fn(),
+  replaceProductionNodeCapabilities: vi.fn(),
   showToast: vi.fn(),
 }))
 
@@ -24,6 +27,8 @@ vi.mock('@/lib/api.js', () => ({
         listScheduleCalendars: productionMocks.listScheduleCalendars,
         createProductionNodeOverride: productionMocks.createProductionNodeOverride,
         listProductionNodeOverrides: productionMocks.listProductionNodeOverrides,
+        listProductionNodeCapabilities: productionMocks.listProductionNodeCapabilities,
+        replaceProductionNodeCapabilities: productionMocks.replaceProductionNodeCapabilities,
       },
     },
   },
@@ -255,6 +260,78 @@ describe('ProductionNodeWorkbench', () => {
     mobileSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+  })
+
+  it('loads and displays capability summaries without edit controls for read-only users', async () => {
+    const manager = managerFixture()
+    manager.permissions.canManageCapabilities.value = false
+    manager.state.capabilityForm.value = {
+      production_node_id: 11,
+      node_label: 'WELD-01 · 焊接-01',
+      capabilities: [{
+        product_id: 101,
+        product_family: 'READ-ONLY',
+        material_code: 'MAT-01',
+        specification: '20mm',
+        route_version_id: 201,
+        process_version_id: 301,
+        max_batch_quantity: null,
+        batch_minutes: null,
+        changeover_minutes: 0,
+        allow_mixed_orders: false,
+        status: 'active',
+      }],
+      reason: '',
+      idempotency_key: 'capability-11',
+    }
+    const { wrapper } = mountWorkbench({ manager })
+    const capabilityTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '能力限制')
+
+    await capabilityTab.click()
+    await flushPromises()
+
+    expect(manager.actions.loadCapabilities).toHaveBeenCalledWith(expect.objectContaining({ id: 11 }))
+    const panel = wrapper.findComponent(NodeCapabilityPanel)
+    expect(panel.get('[data-test="capability-row"]').text()).toContain('READ-ONLY')
+    expect(panel.find('input').exists()).toBe(false)
+    expect(panel.find('[data-test="capability-save"]').exists()).toBe(false)
+  })
+
+  it('does not show node A capability rows when node B capability loading fails', async () => {
+    productionMocks.listProductionNodes.mockReset().mockResolvedValue({
+      nodes: [
+        { id: 11, process_id: 7, process_name: '焊接', node_code: 'A', node_name: '节点 A', status: 'active', capacity_mode: 'exclusive' },
+        { id: 12, process_id: 8, process_name: '装配', node_code: 'B', node_name: '节点 B', status: 'active', capacity_mode: 'exclusive' },
+      ],
+    })
+    productionMocks.listScheduleCalendars.mockReset().mockResolvedValue({ calendars: [] })
+    productionMocks.listProductionNodeCapabilities
+      .mockReset()
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A-ONLY' }] })
+      .mockRejectedValueOnce(new Error('B 能力读取失败'))
+    const managerState = useProductionNodes({
+      canManageNodes: ref(true),
+      canManageCapabilities: ref(true),
+      canManageCalendars: ref(true),
+    })
+    await managerState.loadNodes()
+    const { wrapper } = mountWorkbench({ manager: managerState.nodeManager })
+    const capabilityTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '能力限制')
+    await capabilityTab.click()
+    await flushPromises()
+    expect(wrapper.findComponent(NodeCapabilityPanel)
+      .get('[data-test="capability-product-family"]').element.value).toBe('A-ONLY')
+
+    await document.body.querySelector('[data-test="node-item-12"]').click()
+    await flushPromises()
+
+    const panel = wrapper.findComponent(NodeCapabilityPanel)
+    expect(panel.text()).toContain('B 能力读取失败')
+    expect(panel.text()).toContain('B · 节点 B')
+    expect(panel.text()).not.toContain('A-ONLY')
+    expect(panel.findAll('[data-test="capability-row"]')).toHaveLength(0)
   })
 
   it('renders the refreshed override list after the manager save action reloads the selected node', async () => {

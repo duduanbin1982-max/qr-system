@@ -179,6 +179,66 @@ describe('NodeCapabilityPanel', () => {
     expect(wrapper.get('[data-test="capability-fields"]').attributes('disabled')).toBeUndefined()
   })
 
+  it('renders capability summaries without modification controls for read-only users', () => {
+    const wrapper = mountCapabilities({
+      form: capabilityFormFixture({
+        capabilities: [{
+          product_id: 101,
+          product_family: 'READ-ONLY',
+          material_code: 'MAT-01',
+          specification: '20mm',
+          route_version_id: 201,
+          process_version_id: 301,
+          max_batch_quantity: 50,
+          batch_minutes: 90,
+          changeover_minutes: 15,
+          allow_mixed_orders: true,
+          status: 'active',
+        }],
+      }),
+      props: { node: { id: 11, capacity_mode: 'batch' }, canManage: false },
+    })
+
+    expect(wrapper.get('[data-test="capability-row"]').text()).toContain('READ-ONLY')
+    expect(wrapper.get('[data-test="capability-row"]').text()).toContain('MAT-01')
+    expect(wrapper.get('[data-test="capability-row"]').text()).toContain('90')
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.find('input').exists()).toBe(false)
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.find('[data-test="capability-add"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="capability-remove"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="capability-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="capability-reason"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="capability-idempotency-key"]').exists()).toBe(false)
+  })
+
+  it('clears dirty state only after save replaces the manager form with refreshed data', async () => {
+    const editedForm = capabilityFormFixture()
+    const refreshedForm = capabilityFormFixture({
+      capabilities: [{
+        ...editedForm.capabilities[0],
+        product_family: 'REFRESHED',
+      }],
+      reason: '',
+      idempotency_key: 'capability-11-refreshed',
+    })
+    let wrapper
+    const onSave = vi.fn(async () => {
+      await wrapper.setProps({ form: refreshedForm })
+      return { capabilities: refreshedForm.capabilities }
+    })
+    wrapper = mountCapabilities({ form: editedForm, props: { onSave } })
+
+    await wrapper.get('[data-test="capability-product-family"]').setValue('EDITED')
+    await wrapper.get('[data-test="capability-reason"]').setValue('更新能力')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="capability-product-family"]').element.value).toBe('REFRESHED')
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([false])
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+  })
+
   it('uses only the shared 899px responsive boundary', () => {
     expect(nodeCapabilityPanelSource).toContain('@media (max-width: 899px)')
     expect(nodeCapabilityPanelSource.match(/@media/g)).toHaveLength(1)

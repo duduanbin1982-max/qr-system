@@ -92,6 +92,9 @@ describe('useProductionNodes', () => {
   })
 
   it('enforces granular node permissions before sending write commands', async () => {
+    mocks.listProductionNodeCapabilities.mockResolvedValueOnce({
+      capabilities: [{ product_family: 'READ-ONLY' }],
+    })
     const nodes = createNodes({ nodes: false, capabilities: false, calendars: false })
     nodes.nodeForm.value = {
       process_id: 7,
@@ -106,10 +109,15 @@ describe('useProductionNodes', () => {
     }
 
     expect(await nodes.saveNode()).toBeNull()
-    expect(await nodes.loadCapabilities({ id: 11 })).toBeNull()
+    expect(await nodes.loadCapabilities({ id: 11, node_code: 'WELD-01' })).toEqual({
+      capabilities: [{ product_family: 'READ-ONLY' }],
+    })
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('READ-ONLY')
+    expect(await nodes.saveCapabilities()).toBeNull()
     expect(await nodes.createCalendarOverride()).toBeNull()
     expect(mocks.createProductionNode).not.toHaveBeenCalled()
-    expect(mocks.listProductionNodeCapabilities).not.toHaveBeenCalled()
+    expect(mocks.listProductionNodeCapabilities).toHaveBeenCalledWith(11)
+    expect(mocks.replaceProductionNodeCapabilities).not.toHaveBeenCalled()
     expect(mocks.createProductionNodeOverride).not.toHaveBeenCalled()
   })
 
@@ -268,6 +276,80 @@ describe('useProductionNodes', () => {
     expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('CURRENT')
   })
 
+  it('establishes an empty node B capability context before loading and keeps it after failure', async () => {
+    const pendingB = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A ONLY' }] })
+      .mockReturnValueOnce(pendingB.promise)
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'A', node_name: '节点 A' }
+    const nodeB = { id: 12, node_code: 'B', node_name: '节点 B' }
+    await nodes.loadCapabilities(nodeA)
+
+    const loadingB = nodes.loadCapabilities(nodeB)
+    expect(nodes.capabilityForm.value).toMatchObject({
+      production_node_id: 12,
+      node_label: 'B · 节点 B',
+      capabilities: [],
+    })
+    expect(nodes.capabilitiesLoading.value).toBe(true)
+
+    pendingB.reject(new Error('B 能力读取失败'))
+    await loadingB
+
+    expect(nodes.capabilityForm.value).toMatchObject({
+      production_node_id: 12,
+      node_label: 'B · 节点 B',
+      capabilities: [],
+    })
+    expect(nodes.capabilitiesError.value).toBe('B 能力读取失败')
+  })
+
+  it('allows a same-node reload while saving and still confirms the post-save refresh', async () => {
+    const pendingSave = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 初始' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 同节点重载' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 已刷新' }] })
+    mocks.replaceProductionNodeCapabilities.mockReturnValueOnce(pendingSave.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    await nodes.loadCapabilities(nodeA)
+    nodes.capabilityForm.value.reason = 'A 更新'
+
+    const savingA = nodes.saveCapabilities()
+    await nodes.loadCapabilities(nodeA)
+    pendingSave.resolve({ capabilities: [] })
+    const result = await savingA
+
+    expect(result).toEqual({ capabilities: [] })
+    expect(mocks.listProductionNodeCapabilities).toHaveBeenCalledTimes(3)
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('A 已刷新')
+    expect(nodes.capabilityForm.value.reason).toBe('')
+  })
+
+  it('returns failure and preserves the edited form when post-save refresh fails', async () => {
+    mocks.listProductionNodeCapabilities
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 初始' }] })
+      .mockRejectedValueOnce(new Error('保存后刷新失败'))
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    await nodes.loadCapabilities(nodeA)
+    nodes.capabilityForm.value.capabilities[0].product_family = 'A 已编辑'
+    nodes.capabilityForm.value.reason = '保留输入'
+    const editedForm = nodes.capabilityForm.value
+
+    const result = await nodes.saveCapabilities()
+
+    expect(result).toBeNull()
+    expect(nodes.capabilityForm.value).toBe(editedForm)
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('A 已编辑')
+    expect(nodes.capabilityForm.value.reason).toBe('保留输入')
+    expect(nodes.capabilitiesError.value).toBe('保存后刷新失败')
+  })
+
   it('does not refresh a saved capability into a node selected while the save was pending', async () => {
     const pendingSave = deferred()
     mocks.listProductionNodeCapabilities
@@ -285,11 +367,38 @@ describe('useProductionNodes', () => {
     const savingA = nodes.saveCapabilities()
     await nodes.loadCapabilities(nodeB)
     pendingSave.resolve({ capabilities: [] })
-    await savingA
+    const result = await savingA
 
+    expect(result).toBeNull()
     expect(nodes.capabilityForm.value.production_node_id).toBe(12)
     expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('B 当前')
     expect(mocks.listProductionNodeCapabilities).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let an old A save confirm or refresh after an A to B to A context cycle', async () => {
+    const pendingSave = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 初始' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'B 当前' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 新上下文' }] })
+    mocks.replaceProductionNodeCapabilities.mockReturnValueOnce(pendingSave.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    await nodes.loadCapabilities(nodeA)
+    nodes.capabilityForm.value.reason = 'A 旧保存'
+
+    const oldSave = nodes.saveCapabilities()
+    await nodes.loadCapabilities(nodeB)
+    await nodes.loadCapabilities(nodeA)
+    pendingSave.resolve({ capabilities: [] })
+    const result = await oldSave
+
+    expect(result).toBeNull()
+    expect(nodes.capabilityForm.value.production_node_id).toBe(11)
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('A 新上下文')
+    expect(mocks.listProductionNodeCapabilities).toHaveBeenCalledTimes(3)
   })
 
   it('ignores stale calendar overrides after the selected node changes', async () => {
