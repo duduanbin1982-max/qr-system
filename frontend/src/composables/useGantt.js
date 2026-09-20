@@ -18,12 +18,14 @@ export function useGantt() {
   const canApproveSchedules = computed(() => can('schedules:approve'))
   const canRejectSchedules = computed(() => can('schedules:reject'))
   const canPublishSchedules = computed(() => can('schedules:approve'))
+  const canViewNodes = computed(() => can('production_nodes:view'))
   const canManageNodes = computed(() => can('production_nodes:manage'))
   const canManageCapabilities = computed(() => can('production_nodes:capability_manage'))
   const canManageCalendars = computed(() => can('production_nodes:calendar_manage'))
   const canManageDowntime = computed(() => can('production_nodes:downtime_manage'))
   const canEdit = canAdjustSchedules
   const nodes = useProductionNodes({
+    canViewNodes,
     canManageNodes,
     canManageCapabilities,
     canManageCalendars,
@@ -105,6 +107,7 @@ export function useGantt() {
     canApproveSchedules,
     canRejectSchedules,
     canPublishSchedules,
+    canViewNodes,
     canManageNodes,
     canManageCapabilities,
     canManageCalendars,

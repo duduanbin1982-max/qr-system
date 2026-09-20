@@ -32,7 +32,7 @@
             :style="{padding:'4px 12px',borderRadius:'999px',background:scheduleScope===tab.key?'var(--primary)':'transparent',color:scheduleScope===tab.key?'#fff':'var(--text-secondary)',boxShadow:'none'}"
             @click="setScheduleScope(tab.key)">{{ tab.label }}</button>
         </div>
-        <button v-if="canManageNodes || canManageCalendars" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showNodeMgr=true">⚙️ 生产节点管理</button>
+        <button v-if="canViewNodes" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showNodeMgr=true">⚙️ 生产节点管理</button>
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
         <button @click="zoomIn" title="放大" class="btn-default btn-sm">+</button>
         <button class="btn btn-sm" style="background:var(--success);color:#fff" @click="exportImage" title="导出PNG">📥 导出</button>

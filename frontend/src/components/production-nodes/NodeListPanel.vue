@@ -18,7 +18,18 @@ defineEmits([
 ])
 
 function statusLabel(status) {
-  return status === 'active' ? '启用' : '停用'
+  return {
+    active: '启用',
+    maintenance: '维护中',
+    inactive: '停用',
+  }[status] || status || '-'
+}
+
+function capacityLabel(mode) {
+  return {
+    exclusive: '独占产能',
+    batch: '批处理产能',
+  }[mode] || mode || '-'
 }
 </script>
 
@@ -46,6 +57,7 @@ function statusLabel(status) {
         >
           <option value="">全部状态</option>
           <option value="active">启用</option>
+          <option value="maintenance">维护中</option>
           <option value="inactive">停用</option>
         </select>
       </label>
@@ -89,7 +101,7 @@ function statusLabel(status) {
             </span>
           </span>
           <strong>{{ node.node_name }}</strong>
-          <small>{{ node.capacity_mode === 'shared' ? '共享产能' : '独占产能' }}</small>
+          <small>{{ capacityLabel(node.capacity_mode) }}</small>
         </button>
       </section>
     </div>

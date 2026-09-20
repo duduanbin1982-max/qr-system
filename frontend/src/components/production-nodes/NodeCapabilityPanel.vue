@@ -76,21 +76,23 @@ async function submit() {
       </button>
     </header>
 
-    <div v-if="error" class="node-capability-panel__notice node-capability-panel__notice--error" role="alert">
-      <span>{{ error }}</span>
-      <button
-        data-test="capability-retry"
-        type="button"
-        class="btn btn-default"
-        :disabled="loading || saving || submitting"
-        @click="onRetry"
-      >
-        重试
-      </button>
-    </div>
-    <div v-else-if="loading" class="node-capability-panel__notice" role="status">正在加载节点能力…</div>
+    <div v-if="!node" class="node-capability-panel__notice">请选择生产节点查看能力限制</div>
+    <template v-else>
+      <div v-if="error" class="node-capability-panel__notice node-capability-panel__notice--error" role="alert">
+        <span>{{ error }}</span>
+        <button
+          data-test="capability-retry"
+          type="button"
+          class="btn btn-default"
+          :disabled="loading || saving || submitting"
+          @click="onRetry"
+        >
+          重试
+        </button>
+      </div>
+      <div v-else-if="loading" class="node-capability-panel__notice" role="status">正在加载节点能力…</div>
 
-    <form v-if="canManage" class="node-capability-panel__form" @submit.prevent="submit">
+      <form v-if="canManage" class="node-capability-panel__form" @submit.prevent="submit">
       <fieldset data-test="capability-fields" class="node-capability-panel__fields" :disabled="formDisabled">
         <div v-if="!form.capabilities.length" class="node-capability-panel__empty">
           暂无能力限制，可添加第一条能力。
@@ -132,11 +134,11 @@ async function submit() {
             </label>
             <label>
               <span>批处理分钟</span>
-              <input v-model.number="capability.batch_minutes" data-test="batch-minutes" type="number" min="1" class="form-input">
+              <input v-model.number="capability.batch_minutes" data-test="batch-minutes" type="number" min="0.01" step="0.01" class="form-input">
             </label>
             <label>
               <span>换型分钟</span>
-              <input v-model.number="capability.changeover_minutes" data-test="changeover-minutes" type="number" min="0" class="form-input">
+              <input v-model.number="capability.changeover_minutes" data-test="changeover-minutes" type="number" min="0" step="0.01" class="form-input">
             </label>
             <label class="node-capability-panel__checkbox">
               <input v-model="capability.allow_mixed_orders" data-test="allow-mixed-orders" type="checkbox">
@@ -176,33 +178,34 @@ async function submit() {
           </button>
         </div>
       </fieldset>
-    </form>
+      </form>
 
-    <section v-else class="node-capability-panel__readonly" aria-label="节点能力摘要">
-      <div v-if="!form.capabilities.length" class="node-capability-panel__empty">暂无能力限制。</div>
-      <article
-        v-for="(capability, index) in form.capabilities"
-        :key="index"
-        class="capability-row node-capability-panel__readonly-row"
-        data-test="capability-row"
-      >
-        <dl>
-          <div><dt>产品 ID</dt><dd>{{ displayValue(capability.product_id) }}</dd></div>
-          <div><dt>产品族</dt><dd>{{ displayValue(capability.product_family) }}</dd></div>
-          <div><dt>物料编码</dt><dd>{{ displayValue(capability.material_code) }}</dd></div>
-          <div><dt>规格</dt><dd>{{ displayValue(capability.specification) }}</dd></div>
-          <div><dt>工艺路线版本 ID</dt><dd>{{ displayValue(capability.route_version_id) }}</dd></div>
-          <div><dt>工序版本 ID</dt><dd>{{ displayValue(capability.process_version_id) }}</dd></div>
-          <template v-if="isBatch">
-            <div><dt>最大批量</dt><dd>{{ displayValue(capability.max_batch_quantity) }}</dd></div>
-            <div><dt>批处理分钟</dt><dd>{{ displayValue(capability.batch_minutes) }}</dd></div>
-            <div><dt>换型分钟</dt><dd>{{ displayValue(capability.changeover_minutes) }}</dd></div>
-            <div><dt>允许混单</dt><dd>{{ capability.allow_mixed_orders ? '是' : '否' }}</dd></div>
-          </template>
-          <div><dt>状态</dt><dd>{{ statusLabel(capability.status) }}</dd></div>
-        </dl>
-      </article>
-    </section>
+      <section v-else class="node-capability-panel__readonly" aria-label="节点能力摘要">
+        <div v-if="!form.capabilities.length" class="node-capability-panel__empty">暂无能力限制。</div>
+        <article
+          v-for="(capability, index) in form.capabilities"
+          :key="index"
+          class="capability-row node-capability-panel__readonly-row"
+          data-test="capability-row"
+        >
+          <dl>
+            <div><dt>产品 ID</dt><dd>{{ displayValue(capability.product_id) }}</dd></div>
+            <div><dt>产品族</dt><dd>{{ displayValue(capability.product_family) }}</dd></div>
+            <div><dt>物料编码</dt><dd>{{ displayValue(capability.material_code) }}</dd></div>
+            <div><dt>规格</dt><dd>{{ displayValue(capability.specification) }}</dd></div>
+            <div><dt>工艺路线版本 ID</dt><dd>{{ displayValue(capability.route_version_id) }}</dd></div>
+            <div><dt>工序版本 ID</dt><dd>{{ displayValue(capability.process_version_id) }}</dd></div>
+            <template v-if="isBatch">
+              <div><dt>最大批量</dt><dd>{{ displayValue(capability.max_batch_quantity) }}</dd></div>
+              <div><dt>批处理分钟</dt><dd>{{ displayValue(capability.batch_minutes) }}</dd></div>
+              <div><dt>换型分钟</dt><dd>{{ displayValue(capability.changeover_minutes) }}</dd></div>
+              <div><dt>允许混单</dt><dd>{{ capability.allow_mixed_orders ? '是' : '否' }}</dd></div>
+            </template>
+            <div><dt>状态</dt><dd>{{ statusLabel(capability.status) }}</dd></div>
+          </dl>
+        </article>
+      </section>
+    </template>
   </section>
 </template>
 

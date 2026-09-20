@@ -9,12 +9,15 @@ export const PRODUCTION_NODE_TABS = Object.freeze([
 
 export function useProductionNodeWorkbench({
   nodes,
+  selectedNodeId: controlledSelectedNodeId = null,
   onEnterTab = () => {},
   onSelectNode = () => {},
   onClose = () => {},
+  onDiscard = () => {},
 }) {
   const activeTab = ref('list')
-  const selectedNodeId = ref(null)
+  const localSelectedNodeId = ref(null)
+  const selectedNodeId = controlledSelectedNodeId || localSelectedNodeId
   const search = ref('')
   const statusFilter = ref('')
   const isDirty = ref(false)
@@ -46,43 +49,67 @@ export function useProductionNodeWorkbench({
     return [...groups.values()]
   })
 
-  function requestTransition(transition) {
+  function commitNode(node) {
+    if (!controlledSelectedNodeId) localSelectedNodeId.value = node?.id ?? null
+    return onSelectNode(node || null)
+  }
+
+  function runTransition(transition) {
     if (!isDirty.value) {
-      transition()
-      return true
+      return transition()
     }
     pendingTransition.value = transition
     showDiscardConfirm.value = true
     return false
   }
 
+  function requestTransition(transition) {
+    return runTransition(transition)
+  }
+
   function requestTab(tab) {
-    return requestTransition(() => {
+    if (activeTab.value === tab) return true
+    return runTransition(() => {
       activeTab.value = tab
-      onEnterTab(tab, selectedNode.value)
+      return onEnterTab(tab, selectedNode.value)
     })
   }
 
   function requestNode(node) {
-    return requestTransition(() => {
-      selectedNodeId.value = node?.id ?? null
-      onSelectNode(node || null)
-    })
+    return runTransition(() => commitNode(node))
   }
 
   function requestClose() {
-    return requestTransition(() => onClose())
+    return runTransition(() => onClose())
+  }
+
+  function finishTransition(transition) {
+    const rollback = onDiscard(activeTab.value, selectedNode.value)
+    if (rollback && typeof rollback.then === 'function') {
+      return rollback.then(() => transition?.())
+    }
+    return transition?.()
   }
 
   function confirmDiscard() {
-    isDirty.value = false
-    showDiscardConfirm.value = false
     const transition = pendingTransition.value
     pendingTransition.value = null
-    transition?.()
+    showDiscardConfirm.value = false
+    isDirty.value = false
+    return finishTransition(transition)
   }
 
   function cancelDiscard() {
+    showDiscardConfirm.value = false
+    pendingTransition.value = null
+  }
+
+  function resetSession() {
+    activeTab.value = 'list'
+    selectedNodeId.value = null
+    search.value = ''
+    statusFilter.value = ''
+    isDirty.value = false
     showDiscardConfirm.value = false
     pendingTransition.value = null
   }
@@ -106,6 +133,7 @@ export function useProductionNodeWorkbench({
     requestClose,
     confirmDiscard,
     cancelDiscard,
+    resetSession,
     markDirty,
   }
 }
