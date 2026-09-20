@@ -60,7 +60,7 @@ function createNodes(permissions = {}) {
 
 describe('useProductionNodes', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.listProductionNodes.mockResolvedValue({
       nodes: [
         { id: 11, process_id: 7, process_name: '焊接', node_code: 'WELD-01', node_name: '焊接-01', calendar_id: 1, row_version: 2 },
@@ -172,6 +172,51 @@ describe('useProductionNodes', () => {
     expect(mocks.listProductionNodeOverrides).toHaveBeenLastCalledWith(11, { limit: 200 })
     expect(nodes.nodeOverrides.value).toEqual([
       expect.objectContaining({ id: 91, production_node_id: 11, reason: '新建检修' }),
+    ])
+  })
+
+  it('does not let a stale create completion overwrite the current override context', async () => {
+    const pendingCreate = deferred()
+    mocks.createProductionNodeOverride
+      .mockReturnValueOnce(pendingCreate.promise)
+      .mockResolvedValueOnce({ id: 92 })
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, reason: 'A 初始' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12, reason: 'B 当前' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 92, production_node_id: 12, reason: 'B 新建' }] })
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.prepareOverride(nodeA)
+    await nodes.loadOverrides(nodeA)
+    nodes.overrideForm.value.start_at = '2026-09-21T08:00'
+    nodes.overrideForm.value.end_at = '2026-09-21T12:00'
+    nodes.overrideForm.value.reason = 'A 慢请求'
+
+    const creatingA = nodes.createCalendarOverride()
+    nodes.prepareOverride(nodeB)
+    await nodes.loadOverrides(nodeB)
+    pendingCreate.resolve({ id: 91 })
+    await creatingA
+
+    expect(nodes.overrideForm.value.production_node_id).toBe(12)
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12, reason: 'B 当前' }),
+    ])
+    expect(mocks.listProductionNodeOverrides).toHaveBeenCalledTimes(2)
+
+    nodes.overrideForm.value.start_at = '2026-09-21T13:00'
+    nodes.overrideForm.value.end_at = '2026-09-21T17:00'
+    nodes.overrideForm.value.reason = 'B 新建'
+    await nodes.createCalendarOverride()
+
+    expect(mocks.createProductionNodeOverride).toHaveBeenLastCalledWith(12, expect.objectContaining({
+      reason: 'B 新建',
+    }))
+    expect(nodes.overrideForm.value.production_node_id).toBe(12)
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 92, production_node_id: 12, reason: 'B 新建' }),
     ])
   })
 

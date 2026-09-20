@@ -107,6 +107,14 @@ export function useProductionNodes({
   let capabilityRequest = 0
   let overrideRequest = 0
   let overrideNodeId = null
+  let overrideContextVersion = 0
+
+  function selectOverrideContext(nodeId) {
+    const nextNodeId = nodeId ? String(nodeId) : null
+    if (overrideNodeId === nextNodeId) return
+    overrideNodeId = nextNodeId
+    overrideContextVersion += 1
+  }
 
   const nodesByProcess = computed(() => Object.values(
     productionNodes.value.reduce((groups, node) => {
@@ -213,6 +221,7 @@ export function useProductionNodes({
 
   function prepareOverride(node) {
     if (!canManageCalendars.value) return
+    selectOverrideContext(node?.id)
     overrideForm.value = {
       ...freshOverrideForm(),
       production_node_id: node?.id || '',
@@ -242,16 +251,22 @@ export function useProductionNodes({
       reason: String(form.reason).trim(),
       idempotency_key: String(form.idempotency_key || commandKey('production-node-calendar')).trim(),
     }
+    const contextNodeId = String(productionNodeId)
+    const contextVersion = overrideContextVersion
+    const contextIsCurrent = () => (
+      overrideNodeId === contextNodeId && overrideContextVersion === contextVersion
+    )
     try {
       const result = await api.domains.production.createProductionNodeOverride(
         productionNodeId, payload,
       )
       showToast('生产节点日历例外已保存')
-      prepareOverride({ id: productionNodeId })
+      if (!contextIsCurrent()) return result
       await loadNodes()
-      if (overrideNodeId === String(productionNodeId)) {
-        await loadOverrides({ id: productionNodeId })
-      }
+      if (!contextIsCurrent()) return result
+      prepareOverride({ id: productionNodeId })
+      await loadOverrides({ id: productionNodeId })
+      if (!contextIsCurrent()) return result
       return result
     } catch (error) {
       showToast(error.message || '保存节点日历例外失败', 'error')
@@ -282,7 +297,7 @@ export function useProductionNodes({
 
   async function loadOverrides(node) {
     if (!canManageCalendars.value || !node?.id) return null
-    overrideNodeId = String(node.id)
+    selectOverrideContext(node.id)
     const requestId = ++overrideRequest
     overridesLoading.value = true
     overridesError.value = ''

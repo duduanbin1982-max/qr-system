@@ -6,6 +6,38 @@ import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
+import { useProductionNodes } from '@/composables/gantt/useProductionNodes.js'
+
+const productionMocks = vi.hoisted(() => ({
+  listProductionNodes: vi.fn(),
+  listScheduleCalendars: vi.fn(),
+  createProductionNodeOverride: vi.fn(),
+  listProductionNodeOverrides: vi.fn(),
+  showToast: vi.fn(),
+}))
+
+vi.mock('@/lib/api.js', () => ({
+  api: {
+    domains: {
+      production: {
+        listProductionNodes: productionMocks.listProductionNodes,
+        listScheduleCalendars: productionMocks.listScheduleCalendars,
+        createProductionNodeOverride: productionMocks.createProductionNodeOverride,
+        listProductionNodeOverrides: productionMocks.listProductionNodeOverrides,
+      },
+    },
+  },
+}))
+
+vi.mock('@/lib/store.js', () => ({ showToast: productionMocks.showToast }))
+
+function deferredCommand() {
+  let resolve
+  const promise = new Promise(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 function managerFixture(overrides = {}) {
   const nodes = ref(overrides.nodes || [
@@ -272,6 +304,80 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.loadOverrides).toHaveBeenCalledTimes(2)
     expect(manager.actions.loadOverrides).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
     expect(wrapper.findComponent(NodeCalendarPanel).text()).toContain('新建检修')
+  })
+
+  it('keeps node B selected and submits to B after node A finishes a stale slow create', async () => {
+    const pendingCreate = deferredCommand()
+    productionMocks.listProductionNodes.mockReset().mockResolvedValue({
+      nodes: [
+        { id: 11, process_id: 7, process_name: '焊接', node_code: 'WELD-01', node_name: '焊接-01', status: 'active', calendar_id: 3 },
+        { id: 12, process_id: 8, process_name: '装配', node_code: 'ASSY-01', node_name: '装配-01', status: 'active', calendar_id: 3 },
+      ],
+    })
+    productionMocks.listScheduleCalendars.mockReset().mockResolvedValue({
+      calendars: [{ id: 3, calendar_name: '生产九小时日历', daily_minutes: 540 }],
+    })
+    productionMocks.listProductionNodeOverrides
+      .mockReset()
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, reason: 'A 初始' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12, reason: 'B 当前' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 92, production_node_id: 12, reason: 'B 新建' }] })
+    productionMocks.createProductionNodeOverride
+      .mockReset()
+      .mockReturnValueOnce(pendingCreate.promise)
+      .mockResolvedValueOnce({ id: 92 })
+    const managerState = useProductionNodes({
+      canManageNodes: ref(true),
+      canManageCapabilities: ref(true),
+      canManageCalendars: ref(true),
+    })
+    await managerState.loadNodes()
+    const { wrapper } = mountWorkbench({ manager: managerState.nodeManager })
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await flushPromises()
+
+    const calendarPanel = wrapper.findComponent(NodeCalendarPanel)
+    await calendarPanel.get('[data-test="override-start"]').setValue('2026-09-21T08:00')
+    await calendarPanel.get('[data-test="override-end"]').setValue('2026-09-21T12:00')
+    await calendarPanel.get('[data-test="override-reason"]').setValue('A 慢请求')
+    await calendarPanel.get('form').trigger('submit')
+    await nextTick()
+
+    await document.body.querySelector('[data-test="node-item-12"]').click()
+    await nextTick()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
+    expect(managerState.overrideForm.value.production_node_id).toBe(12)
+    expect(managerState.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12, reason: 'B 当前' }),
+    ])
+
+    pendingCreate.resolve({ id: 91 })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
+    expect(managerState.overrideForm.value.production_node_id).toBe(12)
+    expect(managerState.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12, reason: 'B 当前' }),
+    ])
+
+    await calendarPanel.get('[data-test="override-start"]').setValue('2026-09-21T13:00')
+    await calendarPanel.get('[data-test="override-end"]').setValue('2026-09-21T17:00')
+    await calendarPanel.get('[data-test="override-reason"]').setValue('B 新建')
+    await calendarPanel.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(productionMocks.createProductionNodeOverride).toHaveBeenLastCalledWith(12, expect.objectContaining({
+      reason: 'B 新建',
+    }))
+    expect(managerState.overrideForm.value.production_node_id).toBe(12)
+    expect(wrapper.findComponent(NodeCalendarPanel).text()).toContain('B 新建')
   })
 
   it('selects a created node after the controller-owned refresh without reloading again', async () => {
