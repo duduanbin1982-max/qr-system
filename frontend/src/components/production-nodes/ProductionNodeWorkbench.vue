@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, unref, watch } from 'vue'
 
+import NodeEditorPanel from './NodeEditorPanel.vue'
 import NodeListPanel from './NodeListPanel.vue'
 import { PRODUCTION_NODE_TABS, useProductionNodeWorkbench } from '@/composables/gantt/useProductionNodeWorkbench.js'
 
@@ -26,6 +27,8 @@ const productionNodes = computed(() => unref(state.productionNodes) || [])
 const productionCalendars = computed(() => unref(state.productionCalendars) || [])
 const nodesLoading = computed(() => Boolean(unref(state.nodesLoading)))
 const nodesError = computed(() => String(unref(state.nodesError) || ''))
+const nodeForm = computed(() => unref(state.nodeForm) || {})
+const nodeSaving = computed(() => Boolean(unref(state.nodeSaving)))
 const canManageNodes = computed(() => Boolean(unref(permissions.canManageNodes)))
 
 function closeWorkbench() {
@@ -62,6 +65,9 @@ const selectedNodeLabel = computed(() => {
   if (!node) return '未选择'
   return [node.process_name, node.node_code, node.node_name].filter(Boolean).join(' · ')
 })
+const editorForm = computed(() => (
+  canManageNodes.value ? nodeForm.value : (workbench.selectedNode.value || nodeForm.value)
+))
 
 function selectNodeById(value) {
   const node = productionNodes.value.find(item => String(item.id) === String(value))
@@ -75,6 +81,22 @@ function openCreate() {
     workbench.selectedNodeId.value = null
     workbench.requestTab('editor')
   })
+}
+
+function resetEditor() {
+  workbench.requestTransition(() => {
+    actions.resetNodeForm()
+    workbench.selectedNodeId.value = null
+    workbench.markDirty(false)
+  })
+}
+
+async function handleNodeSaved(result) {
+  await actions.loadNodes()
+  const savedId = result?.id ?? result?.node?.id ?? result?.production_node?.id
+  const savedNode = productionNodes.value.find(node => String(node.id) === String(savedId))
+  if (savedNode) await workbench.requestNode(savedNode)
+  workbench.markDirty(false)
 }
 
 const focusableSelector = [
@@ -238,7 +260,20 @@ onBeforeUnmount(() => {
           />
 
           <main class="node-workbench__panel">
+            <NodeEditorPanel
+              v-if="workbench.activeTab.value === 'editor'"
+              :form="editorForm"
+              :process-options="processOptions"
+              :calendars="productionCalendars"
+              :can-manage="canManageNodes"
+              :saving="nodeSaving"
+              :on-reset="resetEditor"
+              :on-save="actions.saveNode"
+              @dirty-change="workbench.markDirty"
+              @saved="handleNodeSaved"
+            />
             <slot
+              v-else
               :active-tab="workbench.activeTab.value"
               :selected-node="workbench.selectedNode.value"
               :mark-dirty="workbench.markDirty"

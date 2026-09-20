@@ -1,8 +1,9 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
+import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 
 function managerFixture(overrides = {}) {
@@ -33,7 +34,17 @@ function managerFixture(overrides = {}) {
       productionCalendars: ref([]),
       nodesLoading: ref(false),
       nodesError: ref(''),
-      nodeForm: ref({}),
+      nodeForm: ref({
+        id: null,
+        process_id: '',
+        node_code: '',
+        node_name: '',
+        capacity_mode: 'exclusive',
+        calendar_id: '',
+        status: 'active',
+        reason: '',
+        idempotency_key: 'node-new',
+      }),
       nodeSaving: ref(false),
       overrideForm: ref({}),
       nodeOverrides: ref([]),
@@ -211,6 +222,26 @@ describe('ProductionNodeWorkbench', () => {
     mobileSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+  })
+
+  it('renders the editor tab from manager state and reloads and reselects after save', async () => {
+    const manager = managerFixture()
+    manager.actions.saveNode.mockResolvedValue({ id: 12 })
+    const { wrapper } = mountWorkbench({ manager, props: { processOptions: [{ id: 7, name: '焊接' }] } })
+    const editorTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '节点编辑')
+
+    await editorTab.click()
+    await nextTick()
+
+    expect(wrapper.findComponent(NodeEditorPanel).exists()).toBe(true)
+    expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+
+    wrapper.findComponent(NodeEditorPanel).vm.$emit('saved', { id: 12 })
+    await flushPromises()
+
+    expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
   })
 
   it('guards close while dirty and closes only after discard confirmation', async () => {
