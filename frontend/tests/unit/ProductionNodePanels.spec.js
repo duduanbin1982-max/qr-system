@@ -67,7 +67,7 @@ describe('NodeEditorPanel', () => {
     })
   })
 
-  it('preserves dirty input after a failed save and emits saved after success', async () => {
+  it('preserves dirty input after a failed save and emits the pre-save identity after success', async () => {
     const form = formFixture()
     const onSave = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 11 })
     const wrapper = mountEditor({ form, props: { onSave } })
@@ -79,8 +79,8 @@ describe('NodeEditorPanel', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
 
     await wrapper.get('form').trigger('submit')
-    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([false])
-    expect(wrapper.emitted('saved')).toEqual([[{ id: 11 }]])
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([true])
+    expect(wrapper.emitted('saved')).toEqual([[{ id: 11 }, { id: 11, node_code: 'WELD-01' }]])
   })
 
   it('shows labelled read-only values without form controls when management is forbidden', () => {

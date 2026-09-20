@@ -91,11 +91,19 @@ function resetEditor() {
   })
 }
 
-async function handleNodeSaved(result) {
-  await actions.loadNodes()
+function handleNodeSaved(result, savedIdentity = {}) {
   const savedId = result?.id ?? result?.node?.id ?? result?.production_node?.id
-  const savedNode = productionNodes.value.find(node => String(node.id) === String(savedId))
-  if (savedNode) await workbench.requestNode(savedNode)
+  let savedNode = null
+  if (savedId != null) {
+    savedNode = productionNodes.value.find(node => String(node.id) === String(savedId)) || null
+  } else if (savedIdentity.id != null) {
+    savedNode = productionNodes.value.find(node => String(node.id) === String(savedIdentity.id)) || null
+  } else if (savedIdentity.node_code) {
+    savedNode = productionNodes.value.find(node => node.node_code === savedIdentity.node_code) || null
+  }
+  if (!savedNode) return
+  workbench.selectedNodeId.value = savedNode.id
+  actions.editNode(savedNode)
   workbench.markDirty(false)
 }
 

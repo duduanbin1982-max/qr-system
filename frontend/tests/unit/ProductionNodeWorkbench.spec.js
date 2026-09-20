@@ -224,24 +224,123 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
   })
 
-  it('renders the editor tab from manager state and reloads and reselects after save', async () => {
+  it('selects a created node after the controller-owned refresh without reloading again', async () => {
     const manager = managerFixture()
-    manager.actions.saveNode.mockResolvedValue({ id: 12 })
+    manager.actions.saveNode.mockImplementation(async () => {
+      await manager.actions.loadNodes()
+      manager.state.productionNodes.value.push({
+        id: 21,
+        process_id: 7,
+        process_name: '焊接',
+        node_code: 'WELD-NEW',
+        node_name: '新焊接节点',
+        status: 'active',
+        capacity_mode: 'exclusive',
+      })
+      return { id: 21 }
+    })
     const { wrapper } = mountWorkbench({ manager, props: { processOptions: [{ id: 7, name: '焊接' }] } })
+
+    await document.body.querySelector('[data-test="node-create"]').click()
+    await nextTick()
+    manager.state.nodeForm.value = {
+      id: null,
+      process_id: 7,
+      node_code: 'WELD-NEW',
+      node_name: '新焊接节点',
+      capacity_mode: 'exclusive',
+      calendar_id: 1,
+      status: 'active',
+      reason: '新建',
+      idempotency_key: 'node-new',
+    }
+    await nextTick()
+
+    expect(wrapper.findComponent(NodeEditorPanel).exists()).toBe(true)
+    await wrapper.findComponent(NodeEditorPanel).get('form').trigger('submit')
+    await flushPromises()
+
+    expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('[data-test="node-item-21"]').getAttribute('aria-current')).toBe('true')
+    expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 21 }))
+  })
+
+  it('retains the updated node selection using its pre-save identity when the result omits an id', async () => {
+    const manager = managerFixture()
+    manager.state.nodeForm.value = {
+      id: 11,
+      process_id: 7,
+      node_code: 'WELD-01',
+      node_name: '焊接主节点',
+      capacity_mode: 'exclusive',
+      calendar_id: 1,
+      status: 'active',
+      reason: '更新',
+      idempotency_key: 'node-11-update',
+    }
+    manager.actions.saveNode.mockImplementation(async () => {
+      await manager.actions.loadNodes()
+      return {}
+    })
+    const { wrapper } = mountWorkbench({ manager })
     const editorTab = [...document.body.querySelectorAll('[role="tab"]')]
       .find(tab => tab.textContent === '节点编辑')
 
     await editorTab.click()
     await nextTick()
-
-    expect(wrapper.findComponent(NodeEditorPanel).exists()).toBe(true)
-    expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
-
-    wrapper.findComponent(NodeEditorPanel).vm.$emit('saved', { id: 12 })
+    await wrapper.findComponent(NodeEditorPanel).get('[data-test="node-name"]').setValue('焊接主节点')
+    await wrapper.findComponent(NodeEditorPanel).get('form').trigger('submit')
     await flushPromises()
 
     expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
-    expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
+    expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBe('true')
+    expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+  })
+
+  it('keeps dirty state and exposes the controller error when the refreshed node is absent', async () => {
+    const manager = managerFixture()
+    manager.actions.saveNode.mockImplementation(async () => {
+      await manager.actions.loadNodes()
+      manager.state.productionNodes.value = []
+      manager.state.nodesError.value = '保存成功，但刷新节点失败'
+      manager.state.nodeForm.value = {
+        id: null,
+        process_id: '',
+        node_code: '',
+        node_name: '',
+        capacity_mode: 'exclusive',
+        calendar_id: '',
+        status: 'active',
+        reason: '',
+        idempotency_key: 'node-next',
+      }
+      return { id: 99 }
+    })
+    const { wrapper } = mountWorkbench({ manager })
+
+    await document.body.querySelector('[data-test="node-create"]').click()
+    manager.state.nodeForm.value = {
+      id: null,
+      process_id: 7,
+      node_code: 'WELD-MISSING',
+      node_name: '待刷新节点',
+      capacity_mode: 'exclusive',
+      calendar_id: 1,
+      status: 'active',
+      reason: '新建',
+      idempotency_key: 'node-missing',
+    }
+    await nextTick()
+    await wrapper.findComponent(NodeEditorPanel).get('[data-test="node-name"]').setValue('待刷新节点修改')
+    await wrapper.findComponent(NodeEditorPanel).get('form').trigger('submit')
+    await flushPromises()
+
+    expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
+    expect(document.body.textContent).toContain('保存成功，但刷新节点失败')
+    expect(document.body.querySelector('[aria-current="true"]')).toBeNull()
+
+    await document.body.querySelector('.node-workbench__footer button').click()
+    expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
   })
 
   it('guards close while dirty and closes only after discard confirmation', async () => {

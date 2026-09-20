@@ -14,6 +14,7 @@ const props = defineProps({
 const emit = defineEmits(['dirty-change', 'saved'])
 const digest = value => JSON.stringify(value || {})
 const initialDigest = ref(digest(props.form))
+const submitting = ref(false)
 
 const processLabel = computed(() => (
   props.processOptions.find(item => String(item.id) === String(props.form.process_id))?.name
@@ -38,22 +39,32 @@ watch(
   () => props.form,
   value => {
     initialDigest.value = digest(value)
-    emit('dirty-change', false)
+    if (!submitting.value) emit('dirty-change', false)
   },
 )
 
 watch(
   () => props.form,
-  value => emit('dirty-change', digest(value) !== initialDigest.value),
+  value => {
+    if (!submitting.value) emit('dirty-change', digest(value) !== initialDigest.value)
+  },
   { deep: true },
 )
 
 async function submit() {
-  const result = await props.onSave()
-  if (!result) return
-  initialDigest.value = digest(props.form)
-  emit('dirty-change', false)
-  emit('saved', result)
+  const savedIdentity = {
+    id: props.form.id ?? null,
+    node_code: String(props.form.node_code || '').trim(),
+  }
+  submitting.value = true
+  try {
+    const result = await props.onSave()
+    if (!result) return
+    initialDigest.value = digest(props.form)
+    emit('saved', result, savedIdentity)
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
