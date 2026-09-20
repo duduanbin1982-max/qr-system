@@ -106,6 +106,7 @@ export function useProductionNodes({
   const capabilitySaving = ref(false)
   let capabilityRequest = 0
   let overrideRequest = 0
+  let overrideNodeId = null
 
   const nodesByProcess = computed(() => Object.values(
     productionNodes.value.reduce((groups, node) => {
@@ -277,6 +278,7 @@ export function useProductionNodes({
 
   async function loadOverrides(node) {
     if (!canManageCalendars.value || !node?.id) return null
+    overrideNodeId = String(node.id)
     const requestId = ++overrideRequest
     overridesLoading.value = true
     overridesError.value = ''
@@ -300,8 +302,9 @@ export function useProductionNodes({
   }
 
   async function cancelOverride(override, reason = '取消节点日历例外') {
-    if (!canManageCalendars.value || !override?.id) return null
+    if (!canManageCalendars.value || !override?.id || overrideSaving.value) return null
     overrideSaving.value = true
+    overridesError.value = ''
     try {
       const result = await api.domains.production.cancelProductionNodeOverride(
         override.id,
@@ -313,8 +316,14 @@ export function useProductionNodes({
       const node = productionNodes.value.find(
         item => String(item.id) === String(override.production_node_id),
       )
-      if (node) await loadOverrides(node)
+      if (node && overrideNodeId === String(override.production_node_id)) {
+        await loadOverrides(node)
+      }
       return result
+    } catch (error) {
+      overridesError.value = error.message || '取消节点日历例外失败'
+      showToast(overridesError.value, 'error')
+      return null
     } finally {
       overrideSaving.value = false
     }

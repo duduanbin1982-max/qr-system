@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   listProductionNodeOverrides: vi.fn(),
   createProductionNodeOverride: vi.fn(),
   cancelProductionNodeOverride: vi.fn(),
+  showToast: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({
@@ -34,7 +35,18 @@ vi.mock('@/lib/api.js', () => ({
   },
 }))
 
-vi.mock('@/lib/store.js', () => ({ showToast: vi.fn() }))
+vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
+
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
 
 
 function createNodes(permissions = {}) {
@@ -201,6 +213,135 @@ describe('useProductionNodes', () => {
     resolveFirst({ overrides: [{ id: 81, production_node_id: 11 }] })
     await first
 
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12 }),
+    ])
+  })
+
+  it('exposes grouped manager state, permissions, and actions with shared identity', () => {
+    const nodes = createNodes()
+
+    expect(nodes.nodeManager.state.productionNodes).toBe(nodes.productionNodes)
+    expect(nodes.nodeManager.state.nodesError).toBe(nodes.nodesError)
+    expect(nodes.nodeManager.state.overrideSaving).toBe(nodes.overrideSaving)
+    expect(nodes.nodeManager.state.capabilitySaving).toBe(nodes.capabilitySaving)
+    expect(nodes.nodeManager.permissions.canManageNodes.value).toBe(true)
+    expect(nodes.nodeManager.permissions.canManageCapabilities.value).toBe(true)
+    expect(nodes.nodeManager.permissions.canManageCalendars.value).toBe(true)
+    expect(nodes.nodeManager.actions.loadNodes).toBe(nodes.loadNodes)
+    expect(nodes.nodeManager.actions.cancelOverride).toBe(nodes.cancelOverride)
+    expect(nodes.nodeManager.actions.saveCapabilities).toBe(nodes.saveCapabilities)
+  })
+
+  it('blocks duplicate node saves while exposing saving state', async () => {
+    const pending = deferred()
+    mocks.createProductionNode.mockReturnValueOnce(pending.promise)
+    const nodes = createNodes()
+    nodes.nodeForm.value = {
+      process_id: 7,
+      node_code: 'WELD-03',
+      node_name: '焊接-03',
+      capacity_mode: 'exclusive',
+      status: 'active',
+      calendar_id: 1,
+      row_version: 1,
+      reason: '扩充生产节点',
+      idempotency_key: 'node-duplicate-test',
+    }
+
+    const first = nodes.saveNode()
+    expect(nodes.nodeSaving.value).toBe(true)
+    expect(await nodes.saveNode()).toBeNull()
+    expect(mocks.createProductionNode).toHaveBeenCalledTimes(1)
+    pending.resolve({ id: 22 })
+    await first
+    expect(nodes.nodeSaving.value).toBe(false)
+  })
+
+  it('blocks duplicate capability saves while exposing saving state', async () => {
+    const pending = deferred()
+    mocks.replaceProductionNodeCapabilities.mockReturnValueOnce(pending.promise)
+    const nodes = createNodes()
+    nodes.capabilityForm.value = {
+      production_node_id: 11,
+      node_label: 'WELD-01',
+      capabilities: [],
+      reason: '更新能力',
+      idempotency_key: 'capability-duplicate-test',
+    }
+
+    const first = nodes.saveCapabilities()
+    expect(nodes.capabilitySaving.value).toBe(true)
+    expect(await nodes.saveCapabilities()).toBeNull()
+    expect(mocks.replaceProductionNodeCapabilities).toHaveBeenCalledTimes(1)
+    pending.resolve({ capabilities: [] })
+    await first
+    expect(nodes.capabilitySaving.value).toBe(false)
+  })
+
+  it('blocks duplicate override creation while exposing saving state', async () => {
+    const pending = deferred()
+    mocks.createProductionNodeOverride.mockReturnValueOnce(pending.promise)
+    const nodes = createNodes()
+    nodes.overrideForm.value = {
+      production_node_id: 11,
+      start_at: '2026-09-20T08:00',
+      end_at: '2026-09-20T12:00',
+      override_type: 'unavailable',
+      reason: '计划检修',
+      idempotency_key: 'override-duplicate-test',
+    }
+
+    const first = nodes.createCalendarOverride()
+    expect(nodes.overrideSaving.value).toBe(true)
+    expect(await nodes.createCalendarOverride()).toBeNull()
+    expect(mocks.createProductionNodeOverride).toHaveBeenCalledTimes(1)
+    pending.resolve({ id: 31 })
+    await first
+    expect(nodes.overrideSaving.value).toBe(false)
+  })
+
+  it('blocks duplicate override cancellation while exposing saving state', async () => {
+    const pending = deferred()
+    mocks.cancelProductionNodeOverride.mockReturnValueOnce(pending.promise)
+    const nodes = createNodes()
+
+    const first = nodes.cancelOverride({ id: 81, production_node_id: 11 })
+    expect(nodes.overrideSaving.value).toBe(true)
+    expect(await nodes.cancelOverride({ id: 81, production_node_id: 11 })).toBeNull()
+    expect(mocks.cancelProductionNodeOverride).toHaveBeenCalledTimes(1)
+    pending.resolve({ id: 81, status: 'cancelled' })
+    await first
+    expect(nodes.overrideSaving.value).toBe(false)
+  })
+
+  it('keeps cancellation errors local and resets saving state', async () => {
+    mocks.cancelProductionNodeOverride.mockRejectedValueOnce(new Error('取消失败'))
+    const nodes = createNodes()
+
+    expect(await nodes.cancelOverride({ id: 81, production_node_id: 11 })).toBeNull()
+    expect(nodes.overridesError.value).toBe('取消失败')
+    expect(nodes.overrideSaving.value).toBe(false)
+    expect(mocks.showToast).toHaveBeenCalledWith('取消失败', 'error')
+  })
+
+  it('does not refresh a cancelled node after override selection moves elsewhere', async () => {
+    const cancellation = deferred()
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11 }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12 }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 83, production_node_id: 11 }] })
+    mocks.cancelProductionNodeOverride.mockReturnValueOnce(cancellation.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    await nodes.loadOverrides({ id: 11 })
+
+    const cancelling = nodes.cancelOverride({ id: 81, production_node_id: 11 })
+    await nodes.loadOverrides({ id: 12 })
+    cancellation.resolve({ id: 81, status: 'cancelled' })
+    await cancelling
+
+    expect(mocks.listProductionNodeOverrides).toHaveBeenCalledTimes(2)
     expect(nodes.nodeOverrides.value).toEqual([
       expect.objectContaining({ id: 82, production_node_id: 12 }),
     ])
