@@ -352,6 +352,234 @@ def test_work_time_standard_routes_include_unconfigured_route_processes(client, 
     assert group["items"][0]["id"] is None
 
 
+def test_work_time_standard_routes_default_to_current_route_version(
+    client, auth_headers, test_order_id
+):
+    ids = _fixture_ids(client, test_order_id)
+    with client.application.app_context():
+        db = get_db()
+        current_version_id = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?",
+            (ids["route_id"],),
+        ).fetchone()["current_effective_version_id"]
+        process_version_id = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (current_version_id, ids["process_id"]),
+        ).fetchone()["process_version_id"]
+        historical_version_id = db.execute(
+            "INSERT INTO process_route_versions "
+            "(process_route_id,version,route_code_snapshot,name,category,description,status) "
+            "SELECT process_route_id,version+1,route_code_snapshot,name,category,description,'draft' "
+            "FROM process_route_versions WHERE id=?",
+            (current_version_id,),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO process_route_version_items "
+            "(route_version_id,process_id,process_version_id,seq_order) VALUES (?,?,?,1)",
+            (historical_version_id, ids["process_id"], process_version_id),
+        )
+        db.execute(
+            "UPDATE process_route_versions SET status='superseded' WHERE id=?",
+            (historical_version_id,),
+        )
+        db.execute(
+            "INSERT INTO work_time_standards "
+            "(route_id,route_version_id,process_id,process_version_id,standard_minutes_per_unit,"
+            "effective_from,status,version) VALUES (?,?,?,?,10,'2026-01-01','active',1)",
+            (ids["route_id"], historical_version_id, ids["process_id"], process_version_id),
+        )
+        db.commit()
+
+    current = client.get(
+        f"/api/work-time/standards/routes?route_id={ids['route_id']}",
+        headers=auth_headers,
+    )
+    assert current.status_code == 200, current.get_json()
+    current_payload = current.get_json()
+    assert current_payload["include_history"] is False
+    assert [g["route_version_id"] for g in current_payload["route_groups"]] == [current_version_id]
+
+    history = client.get(
+        f"/api/work-time/standards/routes?route_id={ids['route_id']}&include_history=true",
+        headers=auth_headers,
+    )
+    assert history.status_code == 200, history.get_json()
+    history_payload = history.get_json()
+    assert history_payload["include_history"] is True
+    assert {g["route_version_id"] for g in history_payload["route_groups"]} == {
+        current_version_id,
+        historical_version_id,
+    }
+
+    current_rows = client.get(
+        f"/api/work-time/standards?route_id={ids['route_id']}",
+        headers=auth_headers,
+    )
+    assert current_rows.status_code == 200, current_rows.get_json()
+    assert current_rows.get_json()["items"] == []
+
+    historical_rows = client.get(
+        f"/api/work-time/standards?route_id={ids['route_id']}&include_history=true",
+        headers=auth_headers,
+    )
+    assert historical_rows.status_code == 200, historical_rows.get_json()
+    historical_payload = historical_rows.get_json()
+    assert historical_payload["include_history"] is True
+    assert [item["route_version_id"] for item in historical_payload["items"]] == [
+        historical_version_id
+    ]
+
+
+def _seed_historical_standard_and_current_revision(client, test_order_id):
+    ids = _fixture_ids(client, test_order_id)
+    with client.application.app_context():
+        db = get_db()
+        historical_version_id = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?",
+            (ids["route_id"],),
+        ).fetchone()["current_effective_version_id"]
+        process_version_id = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (historical_version_id, ids["process_id"]),
+        ).fetchone()["process_version_id"]
+        historical_standard_id = db.execute(
+            "INSERT INTO work_time_standards "
+            "(route_id,route_version_id,process_id,process_version_id,"
+            "standard_minutes_per_unit,setup_minutes,difficulty_factor,"
+            "effective_from,status,version) "
+            "VALUES (?,?,?,?,12,3,1.1,'2026-01-01','active',1)",
+            (
+                ids["route_id"],
+                historical_version_id,
+                ids["process_id"],
+                process_version_id,
+            ),
+        ).lastrowid
+        current_version_id = db.execute(
+            "INSERT INTO process_route_versions "
+            "(process_route_id,version,route_code_snapshot,name,category,"
+            "description,status,effective_from) "
+            "SELECT process_route_id,version+1,route_code_snapshot,name,category,"
+            "description,'draft','2026-09-20' "
+            "FROM process_route_versions WHERE id=?",
+            (historical_version_id,),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO process_route_version_items "
+            "(route_version_id,process_id,process_version_id,seq_order) "
+            "VALUES (?,?,?,1)",
+            (current_version_id, ids["process_id"], process_version_id),
+        )
+        db.execute(
+            "UPDATE process_route_versions SET status='superseded' WHERE id=?",
+            (historical_version_id,),
+        )
+        db.execute(
+            "UPDATE process_route_versions SET status='published' WHERE id=?",
+            (current_version_id,),
+        )
+        db.execute(
+            "UPDATE process_routes SET current_effective_version_id=? WHERE id=?",
+            (current_version_id, ids["route_id"]),
+        )
+        db.commit()
+    return {
+        **ids,
+        "historical_version_id": historical_version_id,
+        "current_version_id": current_version_id,
+        "process_version_id": process_version_id,
+        "historical_standard_id": historical_standard_id,
+    }
+
+
+def test_work_time_route_batch_preserves_historical_standard_when_current_is_empty(
+    client, auth_headers, test_order_id
+):
+    ids = _seed_historical_standard_and_current_revision(client, test_order_id)
+
+    response = client.post(
+        "/api/work-time/standards/route",
+        json={
+            "route_id": ids["route_id"],
+            "route_version_id": ids["current_version_id"],
+            "effective_from": "2026-09-20",
+            "items": [
+                {
+                    "process_id": ids["process_id"],
+                    "process_version_id": ids["process_version_id"],
+                    "enabled": True,
+                    "standard_minutes_per_unit": 20,
+                    "setup_minutes": 5,
+                    "difficulty_factor": 1.2,
+                }
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    with client.application.app_context():
+        db = get_db()
+        historical = db.execute(
+            "SELECT route_version_id,standard_minutes_per_unit "
+            "FROM work_time_standards WHERE id=?",
+            (ids["historical_standard_id"],),
+        ).fetchone()
+        current = db.execute(
+            "SELECT route_version_id,standard_minutes_per_unit "
+            "FROM work_time_standards WHERE route_version_id=?",
+            (ids["current_version_id"],),
+        ).fetchone()
+        assert dict(historical) == {
+            "route_version_id": ids["historical_version_id"],
+            "standard_minutes_per_unit": 12.0,
+        }
+        assert dict(current) == {
+            "route_version_id": ids["current_version_id"],
+            "standard_minutes_per_unit": 20.0,
+        }
+
+
+def test_work_time_historical_standard_write_endpoints_are_rejected(
+    client, auth_headers, test_order_id
+):
+    ids = _seed_historical_standard_and_current_revision(client, test_order_id)
+    payload = {
+        "route_id": ids["route_id"],
+        "process_id": ids["process_id"],
+        "route_version_id": ids["historical_version_id"],
+        "process_version_id": ids["process_version_id"],
+        "standard_minutes_per_unit": 12,
+        "setup_minutes": 3,
+        "difficulty_factor": 1.1,
+        "effective_from": "2026-01-01",
+        "status": "active",
+    }
+
+    create = client.post(
+        "/api/work-time/standards", json=payload, headers=auth_headers
+    )
+    update = client.put(
+        f"/api/work-time/standards/{ids['historical_standard_id']}",
+        json=payload,
+        headers=auth_headers,
+    )
+    deactivate = client.delete(
+        f"/api/work-time/standards/{ids['historical_standard_id']}",
+        headers=auth_headers,
+    )
+
+    assert create.status_code == 409
+    assert update.status_code == 409
+    assert deactivate.status_code == 409
+    assert all(
+        "历史路线版本" in response.get_json()["error"]
+        for response in (create, update, deactivate)
+    )
+
+
 
 def test_work_time_record_rejects_process_outside_order_route(client, auth_headers, test_order_id):
     ids = _fixture_ids(client, test_order_id)

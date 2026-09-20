@@ -53,6 +53,17 @@ class WorkTimeRepository:
         ).fetchone()
 
     @staticmethod
+    def find_current_route_version(route_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT version.* FROM process_routes route "
+            "JOIN process_route_versions version "
+            "ON version.id=route.current_effective_version_id "
+            "WHERE route.id=?",
+            (route_id,),
+        ).fetchone()
+
+    @staticmethod
     def find_process_version(process_version_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -112,6 +123,19 @@ class WorkTimeRepository:
             "WHERE pri.route_id = ? "
             "ORDER BY pri.seq_order ASC, pri.id ASC",
             (route_id,),
+        ).fetchall()
+
+    @staticmethod
+    def list_route_version_processes(route_version_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT item.route_version_id,item.process_id,item.process_version_id,"
+            "item.seq_order,version.name AS process_name "
+            "FROM process_route_version_items item "
+            "JOIN process_versions version ON version.id=item.process_version_id "
+            "WHERE item.route_version_id=? "
+            "ORDER BY item.seq_order,item.id",
+            (route_version_id,),
         ).fetchall()
 
     @staticmethod
@@ -235,6 +259,11 @@ class WorkTimeRepository:
         if filters.get("process_version_id"):
             where.append("w.process_version_id = ?")
             params.append(filters["process_version_id"])
+        if not filters.get("include_history") and not filters.get("route_version_id"):
+            where.append(
+                "(w.route_version_id IS NULL OR w.route_version_id = "
+                "r.current_effective_version_id)"
+            )
         where_clause = (" WHERE " + " AND ".join(where)) if where else ""
         total = db.execute(
             "SELECT COUNT(*) FROM work_time_standards w "
@@ -298,6 +327,8 @@ class WorkTimeRepository:
         if filters.get("route_version_id"):
             route_where.append("rv.id = ?")
             route_params.append(filters["route_version_id"])
+        elif not filters.get("include_history"):
+            route_where.append("rv.id = r.current_effective_version_id")
         if filters.get("process_id"):
             route_where.append(
                 "EXISTS (SELECT 1 FROM process_route_version_items i_proc "
@@ -396,7 +427,14 @@ class WorkTimeRepository:
                 "configured_count": sum(1 for item in route_items if item.get("id")),
                 "active_count": sum(1 for item in route_items if item.get("status") == "active"),
             })
-        return {"route_groups": groups, "items": item_rows, "total": total, "page": page, "per_page": per_page}
+        return {
+            "route_groups": groups,
+            "items": item_rows,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "include_history": bool(filters.get("include_history")),
+        }
 
     @staticmethod
     def insert_standard(data, db):

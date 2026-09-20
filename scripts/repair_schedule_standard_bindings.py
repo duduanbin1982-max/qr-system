@@ -81,9 +81,15 @@ def _existing_targets(db, route_version_id, process_version_id, source):
     ).fetchall()
 
 
-def _target_payload(source, target_route, target_process, operator_id):
+def _target_payload(
+    source,
+    target_route,
+    target_process,
+    operator_id,
+    evidence_label="V085受控历史绑定",
+):
     remark = (source["remark"] or "").strip()
-    suffix = f"V085受控历史绑定，源标准ID={source['id']}"
+    suffix = f"{evidence_label}，源标准ID={source['id']}"
     return {
         "product_id": source["product_id"],
         "product_code": source["product_code"] or "",
@@ -151,9 +157,10 @@ def _insert_event(db, event):
     )
 
 
-def build_plan(db, idempotency_key, operator_id, approver_id):
+def build_plan(db, idempotency_key, operator_id, approver_id, bindings=None):
     plan = []
-    for mapping in APPROVED_BINDINGS:
+    effective_bindings = APPROVED_BINDINGS if bindings is None else bindings
+    for mapping in effective_bindings:
         target_route_version_id = mapping["target_route_version_id"]
         for source_id in mapping["source_standard_ids"]:
             source = db.execute("SELECT * FROM work_time_standards WHERE id=?", (source_id,)).fetchone()
@@ -165,7 +172,17 @@ def build_plan(db, idempotency_key, operator_id, approver_id):
             target_route, target_process = _route_process_binding(
                 db, target_route_version_id, source["process_id"],
             )
-            payload = _target_payload(source, target_route, target_process, operator_id)
+            payload = _target_payload(
+                source,
+                target_route,
+                target_process,
+                operator_id,
+                mapping.get("evidence_label", "V085受控历史绑定"),
+            )
+            if mapping.get("effective_from"):
+                payload["effective_from"] = mapping["effective_from"]
+            if "effective_to" in mapping:
+                payload["effective_to"] = mapping["effective_to"] or ""
             key = f"{idempotency_key}:route-{target_route_version_id}:source-{source_id}"
             prior = db.execute(
                 "SELECT * FROM work_time_standard_binding_events WHERE idempotency_key=?", (key,)

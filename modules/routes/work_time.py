@@ -2,6 +2,7 @@
 
 from flask import jsonify, request, g
 
+from modules.domain.errors import ConflictError
 from modules.route_decorators import (
     app,
     check_auth,
@@ -39,6 +40,8 @@ def work_time_list_standards():
         "route_id": request.args.get("route_id", type=int),
         "route_version_id": request.args.get("route_version_id", type=int),
         "process_version_id": request.args.get("process_version_id", type=int),
+        "include_history": request.args.get("include_history", "").strip().lower()
+        in {"1", "true", "yes", "on"},
     }
     return jsonify(WorkTimeService.list_standards(filters, _page_arg(), _limit_arg()))
 
@@ -54,6 +57,8 @@ def work_time_list_standard_routes():
         "route_id": request.args.get("route_id", type=int),
         "route_version_id": request.args.get("route_version_id", type=int),
         "process_version_id": request.args.get("process_version_id", type=int),
+        "include_history": request.args.get("include_history", "").strip().lower()
+        in {"1", "true", "yes", "on"},
     }
     return jsonify(WorkTimeService.list_standard_routes(filters, _page_arg(), _limit_arg()))
 
@@ -78,6 +83,8 @@ def work_time_save_route_standards():
             "batch saved",
         )
         return jsonify({"ok": True, "message": "路线标准工时已保存", **result})
+    except ConflictError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -90,6 +97,8 @@ def work_time_create_standard():
         standard_id = WorkTimeService.create_standard(get_json_body(), g.current_user.get("id"))
         safe_audit_log("work_time_standard_create", "work_time_standard", standard_id, "created")
         return jsonify({"ok": True, "id": standard_id, "message": "标准工时已创建"})
+    except ConflictError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -111,6 +120,8 @@ def work_time_delete_standard(standard_id):
         WorkTimeService.deactivate_standard(standard_id, g.current_user.get("id"))
         safe_audit_log("work_time_standard_deactivate", "work_time_standard", standard_id, "inactive")
         return jsonify({"ok": True, "message": "标准工时已停用"})
+    except ConflictError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404
 
