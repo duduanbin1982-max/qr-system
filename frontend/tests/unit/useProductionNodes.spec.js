@@ -106,6 +106,59 @@ describe('useProductionNodes', () => {
     expect(mocks.showToast).not.toHaveBeenCalled()
   })
 
+  it('does not load the calendar catalog without node view permission', async () => {
+    const nodes = createNodes({ view: false })
+
+    expect(await nodes.loadCalendars()).toBeNull()
+    expect(mocks.listScheduleCalendars).not.toHaveBeenCalled()
+    expect(nodes.calendarsLoading.value).toBe(false)
+  })
+
+  it('publishes the node directory before a slow calendar catalog settles', async () => {
+    const pendingCalendars = deferred()
+    mocks.listScheduleCalendars.mockReturnValueOnce(pendingCalendars.promise)
+    const nodes = createNodes()
+    const loading = nodes.loadNodes()
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(nodes.productionNodes.value).toHaveLength(3)
+    expect(nodes.nodesLoading.value).toBe(false)
+    expect(nodes.calendarsLoading.value).toBe(true)
+
+    pendingCalendars.resolve({ calendars: [{ id: 1, calendar_name: '九小时工作制' }] })
+    await loading
+    expect(nodes.calendarsLoading.value).toBe(false)
+  })
+
+  it('records an independent calendar result when the node directory fails', async () => {
+    mocks.listProductionNodes.mockRejectedValueOnce(new Error('节点目录失败'))
+    mocks.listScheduleCalendars.mockResolvedValueOnce({
+      calendars: [{ id: 2, calendar_name: '备用日历' }],
+    })
+    const nodes = createNodes()
+
+    expect(await nodes.loadNodes()).toBeNull()
+
+    expect(nodes.nodesError.value).toBe('节点目录失败')
+    expect(nodes.productionCalendars.value).toEqual([{ id: 2, calendar_name: '备用日历' }])
+    expect(nodes.calendarsError.value).toBe('')
+    expect(nodes.calendarsLoading.value).toBe(false)
+  })
+
+  it('retains an independent calendar failure when the node directory also fails', async () => {
+    mocks.listProductionNodes.mockRejectedValueOnce(new Error('节点目录失败'))
+    mocks.listScheduleCalendars.mockRejectedValueOnce(new Error('日历目录失败'))
+    const nodes = createNodes()
+
+    expect(await nodes.loadNodes()).toBeNull()
+
+    expect(nodes.nodesError.value).toBe('节点目录失败')
+    expect(nodes.calendarsError.value).toBe('日历目录失败')
+    expect(nodes.calendarsLoading.value).toBe(false)
+  })
+
   it('exposes calendar loading independently for the editor state', async () => {
     const calendars = deferred()
     mocks.listScheduleCalendars.mockReturnValueOnce(calendars.promise)
@@ -974,6 +1027,65 @@ describe('useProductionNodes', () => {
     expect(nodes.nodeOverrides.value).toEqual([
       expect.objectContaining({ id: 82, production_node_id: 12 }),
     ])
+  })
+
+  it('does not let a cancelled request rejection overwrite a newer same-node reload', async () => {
+    const cancellation = deferred()
+    const newerLoad = deferred()
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, status: 'active' }] })
+      .mockReturnValueOnce(newerLoad.promise)
+    mocks.cancelProductionNodeOverride.mockReturnValueOnce(cancellation.promise)
+    const nodes = createNodes()
+    const node = { id: 11, process_id: 7, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(node)
+    nodes.prepareOverride(node)
+    await nodes.loadOverrides(node)
+
+    const cancelling = nodes.cancelOverride({ id: 81, production_node_id: 11, status: 'active' })
+    expect(mocks.cancelProductionNodeOverride).toHaveBeenCalledOnce()
+    nodes.prepareOverride(node)
+    const reloading = nodes.loadOverrides(node)
+    newerLoad.resolve({ overrides: [{ id: 82, production_node_id: 11, status: 'active' }] })
+    await reloading
+    cancellation.reject(new Error('旧取消失败'))
+    await cancelling
+
+    expect(nodes.overridesError.value).toBe('')
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 11 }),
+    ])
+    expect(mocks.showToast).not.toHaveBeenCalledWith('旧取消失败', 'error')
+  })
+
+  it('counts only future active overrides in the node summary', async () => {
+    mocks.listProductionNodeCapabilities.mockResolvedValueOnce({ capabilities: [] })
+    mocks.listProductionNodeOverrides.mockResolvedValueOnce({
+      overrides: [
+        { id: 81, end_at: '2099-01-01T12:00:00', status: 'active' },
+        { id: 82, end_at: '2099-01-02T12:00:00', status: 'completed' },
+        { id: 83, end_at: '2099-01-03T12:00:00', status: 'expired' },
+        { id: 84, end_at: '2099-01-04T12:00:00', status: 'cancelled' },
+      ],
+    })
+    const nodes = createNodes()
+    const node = { id: 11, process_id: 7, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(node)
+
+    await nodes.loadNodeSummary(node)
+
+    expect(nodes.nodeSummary.value.future_override_count).toBe(1)
+  })
+
+  it('rejects programmatic cancellation of completed or expired overrides', async () => {
+    const nodes = createNodes()
+    const node = { id: 11, process_id: 7, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(node)
+    nodes.prepareOverride(node)
+
+    expect(await nodes.cancelOverride({ id: 81, production_node_id: 11, status: 'completed' })).toBeNull()
+    expect(await nodes.cancelOverride({ id: 82, production_node_id: 11, status: 'expired' })).toBeNull()
+    expect(mocks.cancelProductionNodeOverride).not.toHaveBeenCalled()
   })
 
   it('does not let an old cancellation affect a newer A context after an A to B to A cycle', async () => {

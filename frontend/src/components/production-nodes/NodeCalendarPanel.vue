@@ -51,12 +51,17 @@ const typeLabel = value => ({
   overtime: '加班',
   holiday: '停工假日',
 }[value] || value || '-')
-const statusLabel = value => ({
-  active: '生效中',
-  cancelled: '已取消',
-  canceled: '已取消',
-  expired: '已过期',
-}[value] || value || '-')
+const statusLabel = value => {
+  const normalized = String(value || '').toLowerCase()
+  return ({
+    active: '生效中',
+    cancelled: '已取消',
+    canceled: '已取消',
+    completed: '已完成',
+    expired: '已过期',
+  }[normalized] || value || '-')
+}
+const isCancelable = value => String(value || '').toLowerCase() === 'active'
 
 function formatDateTime(value) {
   if (!value) return '-'
@@ -173,7 +178,7 @@ async function submit() {
                 <td>{{ item.reason || '-' }}</td>
                 <td v-if="canManage">
                   <button
-                    v-if="item.status !== 'cancelled' && item.status !== 'canceled'"
+                    v-if="isCancelable(item.status)"
                     data-test="override-cancel"
                     type="button"
                     class="btn btn-default"

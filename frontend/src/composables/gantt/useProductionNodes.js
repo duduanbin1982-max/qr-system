@@ -96,7 +96,9 @@ const nodeKey = value => (value === null || value === undefined || value === '' 
 function futureOverrideCount(overrides) {
   const now = Date.now()
   return overrides.filter(item => {
-    if (['cancelled', 'canceled', 'expired'].includes(item.status)) return false
+    if (['cancelled', 'canceled', 'expired', 'completed'].includes(String(item.status || '').toLowerCase())) {
+      return false
+    }
     const end = Date.parse(item.end_at || item.start_at || '')
     return Number.isFinite(end) && end > now
   }).length
@@ -144,6 +146,7 @@ export function useProductionNodes({
   let overrideCountVersion = 0
   const requestTokens = {
     nodes: 0,
+    calendars: 0,
     summary: 0,
     capabilityLoad: 0,
     overrideLoad: 0,
@@ -244,43 +247,50 @@ export function useProductionNodes({
     }
   }
 
+  async function loadCalendars() {
+    if (!canViewNodes.value) return null
+    const requestId = ++requestTokens.calendars
+    calendarsLoading.value = true
+    calendarsError.value = ''
+    try {
+      const data = await api.domains.production.listScheduleCalendars()
+      if (requestId !== requestTokens.calendars) return null
+      const nextCalendars = data.calendars || data || []
+      productionCalendars.value = nextCalendars
+      return nextCalendars
+    } catch (error) {
+      if (requestId === requestTokens.calendars) {
+        calendarsError.value = error?.message || '加载工作日历失败'
+      }
+      return null
+    } finally {
+      if (requestId === requestTokens.calendars) calendarsLoading.value = false
+    }
+  }
+
   async function loadNodes(params = {}) {
     if (!canViewNodes.value) return null
     const requestId = ++requestTokens.nodes
     nodesLoading.value = true
     nodesError.value = ''
-    calendarsLoading.value = true
-    calendarsError.value = ''
+    loadCalendars()
     try {
-      const [nodeResult, calendarResult] = await Promise.allSettled([
-        api.domains.production.listProductionNodes({ limit: 500, ...params }),
-        api.domains.production.listScheduleCalendars(),
-      ])
+      const data = await api.domains.production.listProductionNodes({ limit: 500, ...params })
       if (requestId !== requestTokens.nodes) return null
-      if (nodeResult.status === 'rejected') throw nodeResult.reason
-      const data = nodeResult.value
       const nextNodes = data.nodes || data || []
-      const nextCalendars = calendarResult.status === 'fulfilled'
-        ? (calendarResult.value.calendars || calendarResult.value || [])
-        : productionCalendars.value
       productionNodes.value = nextNodes
-      if (calendarResult.status === 'fulfilled') {
-        productionCalendars.value = nextCalendars
-      } else {
-        calendarsError.value = calendarResult.reason?.message || '加载工作日历失败'
+      return {
+        nodes: nextNodes,
+        calendars: productionCalendars.value,
       }
-      return { nodes: nextNodes, calendars: nextCalendars }
     } catch (error) {
       if (requestId === requestTokens.nodes) {
-        nodesError.value = error.message || '加载生产节点失败'
+        nodesError.value = error?.message || '加载生产节点失败'
         showToast(nodesError.value, 'error')
       }
       return null
     } finally {
-      if (requestId === requestTokens.nodes) {
-        nodesLoading.value = false
-        calendarsLoading.value = false
-      }
+      if (requestId === requestTokens.nodes) nodesLoading.value = false
     }
   }
 
@@ -564,12 +574,24 @@ export function useProductionNodes({
 
   async function cancelOverride(override, reason = '取消节点日历例外') {
     if (!canManageCalendars.value || !override?.id || overrideSaving.value) return null
+    const overrideStatus = String(override.status || '').toLowerCase()
+    if (overrideStatus && overrideStatus !== 'active') return null
     const targetNodeId = nodeKey(override.production_node_id)
     if (!targetNodeId || targetNodeId !== nodeKey(currentNodeId.value)
       || nodeKey(overrideForm.value.production_node_id) !== targetNodeId) {
       return null
     }
     const snapshot = capture('overrideCancel', override.production_node_id)
+    const overrideFormVersion = overrideFormGeneration
+    const overrideFormRef = overrideForm.value
+    const overrideLoadToken = requestTokens.overrideLoad
+    const overrideContextIsCurrent = ({ latestLoad = false } = {}) => (
+      contextIsCurrent(snapshot)
+      && overrideFormGeneration === overrideFormVersion
+      && overrideForm.value === overrideFormRef
+      && nodeKey(overrideForm.value.production_node_id) === snapshot.nodeId
+      && (!latestLoad || requestTokens.overrideLoad === overrideLoadToken)
+    )
     overrideSaving.value = true
     overridesError.value = ''
     try {
@@ -580,13 +602,13 @@ export function useProductionNodes({
           idempotency_key: commandKey('production-node-calendar-cancel', override.id),
         },
       )
-      if (!contextIsCurrent(snapshot)) return null
+      if (!overrideContextIsCurrent({ latestLoad: true })) return null
       const node = productionNodes.value.find(item => nodeKey(item.id) === snapshot.nodeId)
         || { id: override.production_node_id }
       const refreshed = await loadOverrides(node)
-      return refreshed && contextIsCurrent(snapshot) ? result : null
+      return refreshed && overrideContextIsCurrent() ? result : null
     } catch (error) {
-      if (contextIsCurrent(snapshot)) {
+      if (overrideContextIsCurrent({ latestLoad: true })) {
         overridesError.value = error.message || '取消节点日历例外失败'
         showToast(overridesError.value, 'error')
       }
@@ -728,6 +750,7 @@ export function useProductionNodes({
     },
     actions: {
       loadNodes,
+      loadCalendars,
       selectNodeContext,
       loadNodeSummary,
       rollbackPanel,
@@ -774,6 +797,7 @@ export function useProductionNodes({
     capabilitiesError,
     capabilitySaving,
     loadNodes,
+    loadCalendars,
     selectNodeContext,
     loadNodeSummary,
     rollbackPanel,

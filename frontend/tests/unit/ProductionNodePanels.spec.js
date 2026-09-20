@@ -378,6 +378,27 @@ describe('NodeEditorPanel', () => {
     expect(wrapper.get('[data-test="node-save"]').text()).toContain('加载工作日历')
   })
 
+  it('blocks saves on a stale non-empty calendar catalog after refresh failure', async () => {
+    const onRetryCalendars = vi.fn()
+    const onSave = vi.fn()
+    const wrapper = mountEditor({
+      props: {
+        calendars: [{ id: 1, calendar_name: '旧日历' }],
+        calendarError: '工作日历刷新失败',
+        onRetryCalendars,
+        onSave,
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('工作日历刷新失败')
+    expect(wrapper.get('[data-test="node-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="node-save"]').text()).toContain('等待工作日历')
+    await wrapper.get('[data-test="node-calendar-retry"]').trigger('click')
+
+    expect(onRetryCalendars).toHaveBeenCalledOnce()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('uses the shared 899px responsive boundary for its single-column layout', () => {
     expect(nodeEditorPanelSource).toContain('@media (max-width: 899px)')
     expect(nodeEditorPanelSource).not.toMatch(/max-width:\s*699px/)
@@ -576,6 +597,51 @@ describe('NodeCalendarPanel', () => {
     expect(rows[1].text()).toContain('早期停机')
     await rows[1].get('[data-test="override-cancel"]').trigger('click')
     expect(onCancelOverride).toHaveBeenCalledWith(older)
+  })
+
+  it('labels completed and expired overrides and only offers cancellation for active rows', async () => {
+    const active = {
+      id: 81,
+      production_node_id: 11,
+      override_type: 'maintenance',
+      start_at: '2026-09-20T08:00:00',
+      end_at: '2026-09-20T10:00:00',
+      status: 'active',
+      reason: '当前检修',
+    }
+    const completed = { ...active, id: 82, status: 'completed', reason: '已完成' }
+    const expired = { ...active, id: 83, status: 'expired', reason: '已过期' }
+    const onCancelOverride = vi.fn()
+    const wrapper = mount(NodeCalendarPanel, {
+      props: {
+        node: { id: 11, calendar_id: 3 },
+        calendar: { id: 3, calendar_name: '生产九小时日历', daily_minutes: 540 },
+        overrides: [completed, expired, active],
+        form: {
+          production_node_id: 11,
+          start_at: '',
+          end_at: '',
+          override_type: 'maintenance',
+          reason: '',
+          idempotency_key: 'calendar-11',
+        },
+        loading: false,
+        error: '',
+        saving: false,
+        canManage: true,
+        onRetry: vi.fn(),
+        onSave: vi.fn(),
+        onCancelOverride,
+      },
+    })
+
+    const rows = wrapper.findAll('[data-test="override-row"]')
+    expect(rows).toHaveLength(3)
+    expect(rows.find(row => row.text().includes('已完成'))?.text()).toContain('已完成')
+    expect(rows.find(row => row.text().includes('已过期'))?.text()).toContain('已过期')
+    expect(rows.find(row => row.text().includes('已完成'))?.find('[data-test="override-cancel"]').exists()).toBe(false)
+    expect(rows.find(row => row.text().includes('已过期'))?.find('[data-test="override-cancel"]').exists()).toBe(false)
+    expect(rows.find(row => row.text().includes('当前检修'))?.find('[data-test="override-cancel"]').exists()).toBe(true)
   })
 
   it('emits dirty state from the local form digest and resets it after a successful save', async () => {

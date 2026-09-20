@@ -18,8 +18,7 @@ const emit = defineEmits(['dirty-change', 'saved'])
 const digest = value => JSON.stringify(value || {})
 const initialDigest = ref(digest(props.form))
 const submitting = ref(false)
-const calendarUnavailable = computed(() => props.calendarLoading
-  || (Boolean(props.calendarError) && !props.calendars.length))
+const calendarUnavailable = computed(() => props.calendarLoading || Boolean(props.calendarError))
 const formDisabled = computed(() => props.saving || submitting.value || calendarUnavailable.value)
 
 const processLabel = computed(() => (
