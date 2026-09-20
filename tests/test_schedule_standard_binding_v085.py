@@ -4,6 +4,7 @@ import pytest
 
 from factories import create_process_route, ensure_process
 from modules.db import get_db
+from modules.domain.errors import ConflictError
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.work_time_service import WorkTimeService
 from scripts import repair_schedule_standard_bindings as repair
@@ -63,7 +64,19 @@ def test_v085_declares_the_exact_approved_19_row_manifest():
     assert {item["target_route_version_id"] for item in repair.APPROVED_BINDINGS} == {53, 60, 69}
 
 
-def test_explicit_standard_binding_does_not_follow_current_route_version(client):
+def test_controlled_copy_explicit_empty_bindings_is_noop(client):
+    with client.application.app_context():
+        db = get_db()
+        assert repair.build_plan(
+            db,
+            "v085-empty-bindings",
+            operator_id=None,
+            approver_id=None,
+            bindings=[],
+        ) == []
+
+
+def test_normal_service_rejects_explicit_historical_standard_binding(client):
     with client.application.app_context():
         db = get_db()
         process_id = ensure_process(db, "V085精确绑定工序")
@@ -77,22 +90,20 @@ def test_explicit_standard_binding_does_not_follow_current_route_version(client)
             "WHERE route_version_id=? AND process_id=?", (target_route_version_id, process_id)
         ).fetchone()[0]
 
-        standard_id = WorkTimeService.create_standard({
-            "route_id": route_id,
-            "process_id": process_id,
-            "route_version_id": target_route_version_id,
-            "process_version_id": target_process_version_id,
-            "standard_minutes_per_unit": 12.5,
-            "effective_from": "2026-06-01",
-        }, user_id=None)
-        stored = db.execute(
-            "SELECT route_version_id,process_version_id,version_binding_source "
-            "FROM work_time_standards WHERE id=?", (standard_id,)
-        ).fetchone()
-        assert stored["route_version_id"] == target_route_version_id
-        assert stored["route_version_id"] != current_route_version_id
-        assert stored["process_version_id"] == target_process_version_id
-        assert stored["version_binding_source"] == "captured"
+        with pytest.raises(ConflictError, match="历史路线版本"):
+            WorkTimeService.create_standard({
+                "route_id": route_id,
+                "process_id": process_id,
+                "route_version_id": target_route_version_id,
+                "process_version_id": target_process_version_id,
+                "standard_minutes_per_unit": 12.5,
+                "effective_from": "2026-06-01",
+            }, user_id=None)
+        assert db.execute(
+            "SELECT COUNT(*) FROM work_time_standards "
+            "WHERE route_version_id=? AND process_version_id=?",
+            (target_route_version_id, target_process_version_id),
+        ).fetchone()[0] == 0
 
 
 def test_controlled_copy_is_idempotent_preserves_source_and_blocks_conflict(client, monkeypatch):

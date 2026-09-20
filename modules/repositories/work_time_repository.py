@@ -53,6 +53,17 @@ class WorkTimeRepository:
         ).fetchone()
 
     @staticmethod
+    def find_current_route_version(route_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT version.* FROM process_routes route "
+            "JOIN process_route_versions version "
+            "ON version.id=route.current_effective_version_id "
+            "WHERE route.id=?",
+            (route_id,),
+        ).fetchone()
+
+    @staticmethod
     def find_process_version(process_version_id, db=None):
         db = resolve_db(db)
         return db.execute(
@@ -112,6 +123,19 @@ class WorkTimeRepository:
             "WHERE pri.route_id = ? "
             "ORDER BY pri.seq_order ASC, pri.id ASC",
             (route_id,),
+        ).fetchall()
+
+    @staticmethod
+    def list_route_version_processes(route_version_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT item.route_version_id,item.process_id,item.process_version_id,"
+            "item.seq_order,version.name AS process_name "
+            "FROM process_route_version_items item "
+            "JOIN process_versions version ON version.id=item.process_version_id "
+            "WHERE item.route_version_id=? "
+            "ORDER BY item.seq_order,item.id",
+            (route_version_id,),
         ).fetchall()
 
     @staticmethod

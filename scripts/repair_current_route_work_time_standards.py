@@ -308,7 +308,6 @@ def run(
             }
         if apply:
             controlled_copy.apply_plan(db, plan)
-            db.commit()
         postflight = (
             build_preflight(
                 db,
@@ -327,8 +326,16 @@ def run(
             if apply
             else True
         )
+        postflight_ok = bool(
+            not apply or (postflight["ok"] and target_count_ok)
+        )
+        if apply:
+            if postflight_ok:
+                db.commit()
+            else:
+                db.rollback()
         return {
-            "ok": not blocked and target_count_ok,
+            "ok": not blocked and postflight_ok,
             "mode": "apply" if apply else "dry-run",
             "idempotency_key": idempotency_key,
             "operator_id": operator_id,
@@ -337,7 +344,12 @@ def run(
             "postflight": postflight,
             "total": len(plan),
             "planned": planned_before_apply,
-            "applied": planned_before_apply if apply else 0,
+            "applied": (
+                planned_before_apply if apply and postflight_ok else 0
+            ),
+            "rolled_back": (
+                planned_before_apply if apply and not postflight_ok else 0
+            ),
             "replayed": replayed,
             "skipped": sum(item["status"] == "skipped" for item in plan),
             "blocked": len(blocked),

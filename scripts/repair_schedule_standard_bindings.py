@@ -159,7 +159,8 @@ def _insert_event(db, event):
 
 def build_plan(db, idempotency_key, operator_id, approver_id, bindings=None):
     plan = []
-    for mapping in bindings or APPROVED_BINDINGS:
+    effective_bindings = APPROVED_BINDINGS if bindings is None else bindings
+    for mapping in effective_bindings:
         target_route_version_id = mapping["target_route_version_id"]
         for source_id in mapping["source_standard_ids"]:
             source = db.execute("SELECT * FROM work_time_standards WHERE id=?", (source_id,)).fetchone()

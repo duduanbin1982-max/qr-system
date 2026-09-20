@@ -224,3 +224,45 @@ def test_current_route_standard_repair_applies_exactly_once(client):
             + ")",
             bundle["source_standard_ids"],
         ).fetchone()[0] == 7
+
+
+def test_current_route_standard_repair_rolls_back_when_postflight_fails(
+    client, monkeypatch
+):
+    bundle = _seed_bundle(client)
+    original = repair.build_preflight
+    calls = {"count": 0}
+
+    def fail_postflight(*args, **kwargs):
+        calls["count"] += 1
+        result = original(*args, **kwargs)
+        if calls["count"] == 2:
+            result["existing_target_standard_ids"] = []
+        return result
+
+    monkeypatch.setattr(repair, "build_preflight", fail_postflight)
+    report = repair.run(
+        bundle["db_path"],
+        apply=True,
+        idempotency_key="work-time-current-route-postflight-failure",
+        operator_id=bundle["operator_id"],
+        approver_id=bundle["approver_id"],
+        route_id=bundle["route_id"],
+        source_route_version_id=bundle["source_version_id"],
+        target_route_version_id=bundle["target_version_id"],
+        supporting_routes=bundle["supporting_routes"],
+        expected_database_version=bundle["database_version"],
+    )
+
+    assert report["ok"] is False
+    with client.application.app_context():
+        db = get_db()
+        assert db.execute(
+            "SELECT COUNT(*) FROM work_time_standards WHERE route_version_id=?",
+            (bundle["target_version_id"],),
+        ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM work_time_standard_binding_events "
+            "WHERE target_route_version_id=?",
+            (bundle["target_version_id"],),
+        ).fetchone()[0] == 0
