@@ -51,6 +51,7 @@ function deferred() {
 
 function createNodes(permissions = {}) {
   return useProductionNodes({
+    canViewNodes: ref(permissions.view ?? true),
     canManageNodes: ref(permissions.nodes ?? true),
     canManageCapabilities: ref(permissions.capabilities ?? true),
     canManageCalendars: ref(permissions.calendars ?? true),
@@ -89,6 +90,260 @@ describe('useProductionNodes', () => {
       expect.objectContaining({ process_id: 8, process_name: '打磨' }),
     ])
     expect(nodes.productionCalendars.value).toEqual([{ id: 1, calendar_name: '九小时工作制' }])
+  })
+
+  it('keeps the permitted node directory when the separate schedule-calendar read is denied', async () => {
+    mocks.listScheduleCalendars.mockRejectedValueOnce(new Error('无权限'))
+    const nodes = createNodes({ view: true, nodes: false, capabilities: false, calendars: false })
+
+    const result = await nodes.loadNodes()
+
+    expect(result?.nodes).toHaveLength(3)
+    expect(nodes.productionNodes.value).toHaveLength(3)
+    expect(nodes.productionCalendars.value).toEqual([])
+    expect(nodes.nodesError.value).toBe('')
+    expect(nodes.calendarsError.value).toBe('无权限')
+    expect(mocks.showToast).not.toHaveBeenCalled()
+  })
+
+  it('exposes calendar loading independently for the editor state', async () => {
+    const calendars = deferred()
+    mocks.listScheduleCalendars.mockReturnValueOnce(calendars.promise)
+    const nodes = createNodes()
+
+    const loading = nodes.loadNodes()
+    expect(nodes.calendarsLoading.value).toBe(true)
+    calendars.resolve({ calendars: [{ id: 1, calendar_name: '九小时工作制' }] })
+    await loading
+
+    expect(nodes.calendarsLoading.value).toBe(false)
+    expect(nodes.calendarsError.value).toBe('')
+  })
+
+  it('keeps only the latest overlapping node directory response authoritative', async () => {
+    const olderNodes = deferred()
+    const olderCalendars = deferred()
+    const newerNodes = deferred()
+    const newerCalendars = deferred()
+    mocks.listProductionNodes
+      .mockReset()
+      .mockReturnValueOnce(olderNodes.promise)
+      .mockReturnValueOnce(newerNodes.promise)
+    mocks.listScheduleCalendars
+      .mockReset()
+      .mockReturnValueOnce(olderCalendars.promise)
+      .mockReturnValueOnce(newerCalendars.promise)
+    const nodes = createNodes()
+
+    const older = nodes.loadNodes()
+    const newer = nodes.loadNodes()
+    olderNodes.resolve({ nodes: [{ id: 11, node_code: 'STALE' }] })
+    olderCalendars.resolve({ calendars: [{ id: 1, calendar_name: '旧日历' }] })
+    await older
+
+    expect(nodes.nodesLoading.value).toBe(true)
+    expect(nodes.productionNodes.value).toEqual([])
+
+    newerNodes.resolve({ nodes: [{ id: 12, node_code: 'CURRENT' }] })
+    newerCalendars.resolve({ calendars: [{ id: 2, calendar_name: '当前日历' }] })
+    await newer
+
+    expect(nodes.nodesLoading.value).toBe(false)
+    expect(nodes.nodesError.value).toBe('')
+    expect(nodes.productionNodes.value).toEqual([{ id: 12, node_code: 'CURRENT' }])
+    expect(nodes.productionCalendars.value).toEqual([{ id: 2, calendar_name: '当前日历' }])
+  })
+
+  it('ignores an older node-directory failure after a newer request succeeds', async () => {
+    const olderNodes = deferred()
+    const olderCalendars = deferred()
+    mocks.listProductionNodes
+      .mockReset()
+      .mockReturnValueOnce(olderNodes.promise)
+      .mockResolvedValueOnce({ nodes: [{ id: 12, node_code: 'CURRENT' }] })
+    mocks.listScheduleCalendars
+      .mockReset()
+      .mockReturnValueOnce(olderCalendars.promise)
+      .mockResolvedValueOnce({ calendars: [{ id: 2, calendar_name: '当前日历' }] })
+    const nodes = createNodes()
+
+    const older = nodes.loadNodes()
+    await nodes.loadNodes()
+    olderCalendars.resolve({ calendars: [{ id: 1, calendar_name: '旧日历' }] })
+    olderNodes.reject(new Error('旧目录失败'))
+    await older
+
+    expect(nodes.nodesLoading.value).toBe(false)
+    expect(nodes.nodesError.value).toBe('')
+    expect(nodes.productionNodes.value).toEqual([{ id: 12, node_code: 'CURRENT' }])
+    expect(nodes.productionCalendars.value).toEqual([{ id: 2, calendar_name: '当前日历' }])
+  })
+
+  it('loads calendar data with view permission even without calendar write permission', async () => {
+    mocks.listProductionNodeOverrides.mockResolvedValueOnce({
+      overrides: [{ id: 81, production_node_id: 11, status: 'active' }],
+    })
+    const nodes = createNodes({ calendars: false, view: true })
+    const node = { id: 11, node_code: 'WELD-01', node_name: '焊接-01' }
+
+    nodes.selectNodeContext(node)
+    const result = await nodes.loadOverrides(node)
+
+    expect(result).toEqual({
+      overrides: [{ id: 81, production_node_id: 11, status: 'active' }],
+    })
+    expect(mocks.listProductionNodeOverrides).toHaveBeenCalledWith(11, { limit: 200 })
+  })
+
+  it('clears detail contexts and blocks stale writes after the current node becomes null', async () => {
+    mocks.listProductionNodeCapabilities.mockResolvedValueOnce({ capabilities: [] })
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(nodeA)
+    nodes.prepareOverride(nodeA)
+    await nodes.loadCapabilities(nodeA)
+    nodes.overrideForm.value = {
+      production_node_id: 11,
+      start_at: '2026-09-20T08:00',
+      end_at: '2026-09-20T12:00',
+      override_type: 'maintenance',
+      reason: '旧节点例外',
+      idempotency_key: 'override-stale-node-a',
+    }
+    nodes.capabilityForm.value.reason = '旧节点能力'
+
+    nodes.selectNodeContext(null)
+    await nodes.loadNodes()
+
+    expect(nodes.currentNodeId.value).toBeNull()
+    expect(nodes.overrideForm.value.production_node_id).toBe('')
+    expect(nodes.capabilityForm.value.production_node_id).toBe('')
+    expect(await nodes.createCalendarOverride()).toBeNull()
+    expect(await nodes.saveCapabilities()).toBeNull()
+    expect(mocks.createProductionNodeOverride).not.toHaveBeenCalled()
+    expect(mocks.replaceProductionNodeCapabilities).not.toHaveBeenCalled()
+  })
+
+  it('loads a real selected-node summary with capability and future override counts', async () => {
+    mocks.listProductionNodeCapabilities.mockResolvedValueOnce({
+      capabilities: [{ id: 1 }, { id: 2 }],
+    })
+    mocks.listProductionNodeOverrides.mockResolvedValueOnce({
+      overrides: [
+        { id: 81, end_at: '2099-01-01T12:00:00', status: 'active' },
+        { id: 82, end_at: '2099-01-02T12:00:00', status: 'cancelled' },
+        { id: 83, end_at: '2000-01-01T12:00:00', status: 'active' },
+      ],
+    })
+    const nodes = createNodes()
+    const node = { id: 11, node_code: 'WELD-01', node_name: '焊接-01', capacity_minutes: 540 }
+    nodes.selectNodeContext(node)
+
+    await nodes.loadNodeSummary(node)
+
+    expect(nodes.nodeSummary.value).toMatchObject({
+      production_node_id: 11,
+      capability_count: 2,
+      future_override_count: 1,
+    })
+  })
+
+  it('ignores a stale selected-node summary after the context moves to another node', async () => {
+    const capabilityA = deferred()
+    const overridesA = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockReturnValueOnce(capabilityA.promise)
+      .mockResolvedValueOnce({ capabilities: [{ id: 2 }] })
+    mocks.listProductionNodeOverrides
+      .mockReturnValueOnce(overridesA.promise)
+      .mockResolvedValueOnce({
+        overrides: [{ id: 82, end_at: '2099-01-02T12:00:00', status: 'active' }],
+      })
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'A' }
+    const nodeB = { id: 12, node_code: 'B' }
+    nodes.selectNodeContext(nodeA)
+    const loadingA = nodes.loadNodeSummary(nodeA)
+
+    nodes.selectNodeContext(nodeB)
+    await nodes.loadNodeSummary(nodeB)
+    capabilityA.resolve({ capabilities: [{ id: 1 }, { id: 3 }] })
+    overridesA.resolve({
+      overrides: [
+        { id: 81, end_at: '2099-01-01T12:00:00', status: 'active' },
+        { id: 83, end_at: '2099-01-03T12:00:00', status: 'active' },
+      ],
+    })
+    await loadingA
+
+    expect(nodes.nodeSummary.value).toMatchObject({
+      production_node_id: 12,
+      capability_count: 1,
+      future_override_count: 1,
+    })
+  })
+
+  it('does not let a late summary overwrite newer same-node detail counts', async () => {
+    const pendingSummaryCapabilities = deferred()
+    const pendingSummaryOverrides = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockReturnValueOnce(pendingSummaryCapabilities.promise)
+      .mockResolvedValueOnce({ capabilities: [{ id: 1 }, { id: 2 }, { id: 3 }] })
+    mocks.listProductionNodeOverrides
+      .mockReturnValueOnce(pendingSummaryOverrides.promise)
+      .mockResolvedValueOnce({
+        overrides: [
+          { id: 91, end_at: '2099-01-01T12:00:00', status: 'active' },
+          { id: 92, end_at: '2099-01-02T12:00:00', status: 'active' },
+        ],
+      })
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'A', node_name: '节点 A' }
+    nodes.selectNodeContext(nodeA)
+
+    const loadingSummary = nodes.loadNodeSummary(nodeA)
+    await nodes.loadCapabilities(nodeA)
+    await nodes.loadOverrides(nodeA)
+    pendingSummaryCapabilities.resolve({ capabilities: [{ id: 99 }] })
+    pendingSummaryOverrides.resolve({
+      overrides: [{ id: 99, end_at: '2099-01-03T12:00:00', status: 'active' }],
+    })
+    await loadingSummary
+
+    expect(nodes.nodeSummary.value).toMatchObject({
+      production_node_id: 11,
+      capability_count: 3,
+      future_override_count: 2,
+    })
+  })
+
+  it('does not surface a stale summary error after newer same-node details succeed', async () => {
+    const pendingSummaryCapabilities = deferred()
+    const pendingSummaryOverrides = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockReturnValueOnce(pendingSummaryCapabilities.promise)
+      .mockResolvedValueOnce({ capabilities: [{ id: 1 }, { id: 2 }] })
+    mocks.listProductionNodeOverrides
+      .mockReturnValueOnce(pendingSummaryOverrides.promise)
+      .mockResolvedValueOnce({
+        overrides: [{ id: 91, end_at: '2099-01-01T12:00:00', status: 'active' }],
+      })
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'A', node_name: '节点 A' }
+    nodes.selectNodeContext(nodeA)
+
+    const loadingSummary = nodes.loadNodeSummary(nodeA)
+    await nodes.loadCapabilities(nodeA)
+    await nodes.loadOverrides(nodeA)
+    pendingSummaryOverrides.resolve({ overrides: [] })
+    pendingSummaryCapabilities.reject(new Error('旧摘要失败'))
+    await loadingSummary
+
+    expect(nodes.nodeSummaryError.value).toBe('')
+    expect(nodes.nodeSummary.value).toMatchObject({
+      capability_count: 2,
+      future_override_count: 1,
+    })
   })
 
   it('enforces granular node permissions before sending write commands', async () => {
@@ -239,6 +494,147 @@ describe('useProductionNodes', () => {
 
     await nodes.loadNodes()
     expect(nodes.nodesError.value).toBe('')
+  })
+
+  it('does not let a slow node A save replace node B edits', async () => {
+    const pendingSave = deferred()
+    mocks.updateProductionNode.mockReturnValueOnce(pendingSave.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.selectNodeContext(nodeA)
+    nodes.editNode(nodeA)
+    nodes.nodeForm.value.node_name = 'A 已编辑'
+    nodes.nodeForm.value.reason = '保存 A'
+
+    const savingA = nodes.saveNode()
+    nodes.selectNodeContext(nodeB)
+    nodes.editNode(nodeB)
+    nodes.nodeForm.value.node_name = 'B 新编辑'
+    const nodeBForm = nodes.nodeForm.value
+    pendingSave.resolve({ ...nodeA, node_name: 'A 已保存', row_version: 3 })
+    const result = await savingA
+
+    expect(result).toBeNull()
+    expect(nodes.currentNodeId.value).toBe(12)
+    expect(nodes.nodeForm.value).toBe(nodeBForm)
+    expect(nodes.nodeForm.value.node_name).toBe('B 新编辑')
+    expect(nodes.productionNodes.value.find(node => node.id === 11)).toMatchObject({
+      node_name: 'A 已保存',
+      row_version: 3,
+    })
+    expect(mocks.listProductionNodes).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let an old A save replace a newer A context after an A to B to A cycle', async () => {
+    const pendingSave = deferred()
+    mocks.updateProductionNode.mockReturnValueOnce(pendingSave.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.selectNodeContext(nodeA)
+    nodes.editNode(nodeA)
+    nodes.nodeForm.value.node_name = 'A 旧编辑'
+    nodes.nodeForm.value.reason = '保存 A 旧上下文'
+
+    const oldSave = nodes.saveNode()
+    nodes.selectNodeContext(nodeB)
+    nodes.editNode(nodeB)
+    nodes.selectNodeContext(nodeA)
+    nodes.editNode(nodeA)
+    nodes.nodeForm.value.node_name = 'A 新上下文编辑'
+    const freshAForm = nodes.nodeForm.value
+    pendingSave.resolve({ ...nodeA, node_name: 'A 已保存', row_version: 3 })
+    const result = await oldSave
+
+    expect(result).toBeNull()
+    expect(nodes.currentNodeId.value).toBe(11)
+    expect(nodes.nodeForm.value).toBe(freshAForm)
+    expect(nodes.nodeForm.value.node_name).toBe('A 新上下文编辑')
+    expect(nodes.productionNodes.value.find(node => node.id === 11)).toMatchObject({
+      node_name: 'A 已保存',
+      row_version: 3,
+    })
+    expect(mocks.listProductionNodes).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not confirm a node save after selection changes during the trailing summary refresh', async () => {
+    const summaryStarted = deferred()
+    const pendingCapabilities = deferred()
+    const pendingOverrides = deferred()
+    mocks.updateProductionNode.mockResolvedValueOnce({
+      id: 11,
+      process_id: 7,
+      process_name: '焊接',
+      node_code: 'WELD-01',
+      node_name: 'A 已保存',
+      calendar_id: 1,
+      row_version: 3,
+    })
+    mocks.listProductionNodeCapabilities.mockImplementationOnce(() => {
+      summaryStarted.resolve()
+      return pendingCapabilities.promise
+    })
+    mocks.listProductionNodeOverrides.mockReturnValueOnce(pendingOverrides.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.selectNodeContext(nodeA)
+    nodes.editNode(nodeA)
+    nodes.nodeForm.value.node_name = 'A 已编辑'
+    nodes.nodeForm.value.reason = '保存 A'
+
+    const savingA = nodes.saveNode()
+    await summaryStarted.promise
+    nodes.selectNodeContext(nodeB)
+    nodes.editNode(nodeB)
+    nodes.nodeForm.value.node_name = 'B 新编辑'
+    const nodeBForm = nodes.nodeForm.value
+    pendingCapabilities.resolve({ capabilities: [] })
+    pendingOverrides.resolve({ overrides: [] })
+    const result = await savingA
+
+    expect(result).toBeNull()
+    expect(nodes.currentNodeId.value).toBe(12)
+    expect(nodes.nodeForm.value).toBe(nodeBForm)
+    expect(nodes.nodeForm.value.node_name).toBe('B 新编辑')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('生产节点已更新')
+  })
+
+  it('preserves node input and dirty context when the post-save directory refresh fails', async () => {
+    mocks.listProductionNodes
+      .mockResolvedValueOnce({
+        nodes: [{
+          id: 11,
+          process_id: 7,
+          process_name: '焊接',
+          node_code: 'WELD-01',
+          node_name: '焊接-01',
+          calendar_id: 1,
+          row_version: 2,
+        }],
+      })
+      .mockRejectedValueOnce(new Error('保存后刷新节点失败'))
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    nodes.selectNodeContext(nodeA)
+    nodes.editNode(nodeA)
+    nodes.nodeForm.value.node_name = '必须保留的节点名称'
+    nodes.nodeForm.value.reason = '更新节点'
+    const editedForm = nodes.nodeForm.value
+
+    const result = await nodes.saveNode()
+
+    expect(result).toBeNull()
+    expect(nodes.nodeForm.value).toBe(editedForm)
+    expect(nodes.nodeForm.value.node_name).toBe('必须保留的节点名称')
+    expect(nodes.nodeForm.value.reason).toBe('更新节点')
+    expect(nodes.nodesError.value).toBe('保存后刷新节点失败')
+    expect(nodes.productionNodes.value).toEqual([expect.objectContaining({ id: 11, node_code: 'WELD-01' })])
   })
 
   it('loads and cancels calendar overrides for the selected node', async () => {
@@ -462,6 +858,7 @@ describe('useProductionNodes', () => {
     const pending = deferred()
     mocks.replaceProductionNodeCapabilities.mockReturnValueOnce(pending.promise)
     const nodes = createNodes()
+    nodes.selectNodeContext({ id: 11, node_code: 'WELD-01', node_name: '焊接-01' })
     nodes.capabilityForm.value = {
       production_node_id: 11,
       node_label: 'WELD-01',
@@ -483,6 +880,8 @@ describe('useProductionNodes', () => {
     const pending = deferred()
     mocks.createProductionNodeOverride.mockReturnValueOnce(pending.promise)
     const nodes = createNodes()
+    nodes.selectNodeContext({ id: 11, node_code: 'WELD-01', node_name: '焊接-01' })
+    nodes.prepareOverride({ id: 11 })
     nodes.overrideForm.value = {
       production_node_id: 11,
       start_at: '2026-09-20T08:00',
@@ -505,6 +904,8 @@ describe('useProductionNodes', () => {
     const pending = deferred()
     mocks.cancelProductionNodeOverride.mockReturnValueOnce(pending.promise)
     const nodes = createNodes()
+    nodes.selectNodeContext({ id: 11, node_code: 'WELD-01', node_name: '焊接-01' })
+    nodes.prepareOverride({ id: 11 })
 
     const first = nodes.cancelOverride({ id: 81, production_node_id: 11 })
     expect(nodes.overrideSaving.value).toBe(true)
@@ -518,6 +919,8 @@ describe('useProductionNodes', () => {
   it('keeps cancellation errors local and resets saving state', async () => {
     mocks.cancelProductionNodeOverride.mockRejectedValueOnce(new Error('取消失败'))
     const nodes = createNodes()
+    nodes.selectNodeContext({ id: 11, node_code: 'WELD-01', node_name: '焊接-01' })
+    nodes.prepareOverride({ id: 11 })
 
     expect(await nodes.cancelOverride({ id: 81, production_node_id: 11 })).toBeNull()
     expect(nodes.overridesError.value).toBe('取消失败')
@@ -545,5 +948,78 @@ describe('useProductionNodes', () => {
     expect(nodes.nodeOverrides.value).toEqual([
       expect.objectContaining({ id: 82, production_node_id: 12 }),
     ])
+  })
+
+  it('does not let a stale cancellation rejection hide the current node override list', async () => {
+    const cancellation = deferred()
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11 }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12 }] })
+    mocks.cancelProductionNodeOverride.mockReturnValueOnce(cancellation.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.selectNodeContext(nodeA)
+    await nodes.loadOverrides(nodeA)
+
+    const cancelling = nodes.cancelOverride({ id: 81, production_node_id: 11 })
+    nodes.selectNodeContext(nodeB)
+    await nodes.loadOverrides(nodeB)
+    cancellation.reject(new Error('A 取消失败'))
+    await cancelling
+
+    expect(nodes.currentNodeId.value).toBe(12)
+    expect(nodes.overridesError.value).toBe('')
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 82, production_node_id: 12 }),
+    ])
+  })
+
+  it('does not let an old cancellation affect a newer A context after an A to B to A cycle', async () => {
+    const cancellation = deferred()
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, reason: 'A 旧上下文' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12, reason: 'B 当前' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 83, production_node_id: 11, reason: 'A 新上下文' }] })
+    mocks.cancelProductionNodeOverride.mockReturnValueOnce(cancellation.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    nodes.selectNodeContext(nodeA)
+    await nodes.loadOverrides(nodeA)
+
+    const cancelling = nodes.cancelOverride({ id: 81, production_node_id: 11 })
+    nodes.selectNodeContext(nodeB)
+    await nodes.loadOverrides(nodeB)
+    nodes.selectNodeContext(nodeA)
+    await nodes.loadOverrides(nodeA)
+    cancellation.reject(new Error('A 旧取消失败'))
+    await cancelling
+
+    expect(nodes.currentNodeId.value).toBe(11)
+    expect(nodes.overridesError.value).toBe('')
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 83, production_node_id: 11, reason: 'A 新上下文' }),
+    ])
+    expect(mocks.listProductionNodeOverrides).toHaveBeenCalledTimes(3)
+  })
+
+  it('ignores a late override load after the current node is cleared', async () => {
+    const pendingLoad = deferred()
+    mocks.listProductionNodeOverrides.mockReturnValueOnce(pendingLoad.promise)
+    const nodes = createNodes()
+    const nodeA = { id: 11, node_code: 'A' }
+    nodes.selectNodeContext(nodeA)
+
+    const loading = nodes.loadOverrides(nodeA)
+    nodes.selectNodeContext(null)
+    pendingLoad.resolve({ overrides: [{ id: 81, production_node_id: 11 }] })
+    await loading
+
+    expect(nodes.currentNodeId.value).toBeNull()
+    expect(nodes.nodeOverrides.value).toEqual([])
+    expect(nodes.overridesError.value).toBe('')
   })
 })

@@ -28,6 +28,10 @@ function createState() {
     state: {
       productionNodes: [node],
       productionCalendars: [{ id: 3, calendar_name: '九小时工作日历' }],
+      currentNodeId: null,
+      nodeSummary: { production_node_id: 41, capability_count: 0, future_override_count: 0 },
+      nodeSummaryLoading: false,
+      nodeSummaryError: '',
       nodesByProcess: [{ process_id: 7, process_name: '焊接', nodes: [node] }],
       nodesLoading: false,
       nodesError: '',
@@ -44,12 +48,17 @@ function createState() {
       capabilitySaving: false,
     },
     permissions: {
+      canViewNodes: true,
       canManageNodes: true,
       canManageCapabilities: true,
       canManageCalendars: true,
     },
     actions: {
       loadNodes: fn(),
+      selectNodeContext: fn(),
+      loadNodeSummary: fn(),
+      rollbackPanel: fn(),
+      resetWorkbenchSession: fn(),
       resetNodeForm: fn(),
       editNode: fn(),
       saveNode: fn(),
@@ -68,6 +77,7 @@ function createState() {
     riskSummary: { overdue: 0, high: 0, medium: 0, delayed: 0, totalDelayMinutes: 0 },
     viewMode: 'operations',
     scheduleScope: 'active',
+    canViewNodes: true,
     canManageNodes: true,
     canManageCapabilities: true,
     canManageCalendars: true,
@@ -234,5 +244,27 @@ describe('GanttChart production-node UX', () => {
     expect(wrapper.text()).not.toContain('停机产线')
     expect(wrapper.find('[data-test="locked-task"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="blocked-code-NO_COMPATIBLE_NODE"]').text()).toContain('没有满足能力要求的生产节点')
+  })
+
+  it.each([
+    ['view-only', { view: true, nodes: false, capabilities: false, calendars: false }, true],
+    ['node-only', { view: true, nodes: true, capabilities: false, calendars: false }, true],
+    ['capability-only', { view: true, nodes: false, capabilities: true, calendars: false }, true],
+    ['calendar-only', { view: true, nodes: false, capabilities: false, calendars: true }, true],
+    ['no-access', { view: false, nodes: false, capabilities: false, calendars: false }, false],
+  ])('applies the production-node permission matrix for %s users', (_label, permissions, visible) => {
+    ganttState.showNodeMgr = false
+    ganttState.canViewNodes = permissions.view
+    ganttState.canManageNodes = permissions.nodes
+    ganttState.canManageCapabilities = permissions.capabilities
+    ganttState.canManageCalendars = permissions.calendars
+    ganttState.productionNodeManager.permissions.canViewNodes = permissions.view
+    ganttState.productionNodeManager.permissions.canManageNodes = permissions.nodes
+    ganttState.productionNodeManager.permissions.canManageCapabilities = permissions.capabilities
+    ganttState.productionNodeManager.permissions.canManageCalendars = permissions.calendars
+
+    wrapper = mount(GanttChart)
+
+    expect(wrapper.findAll('button').some(button => button.text().includes('生产节点管理'))).toBe(visible)
   })
 })

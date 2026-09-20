@@ -7,6 +7,8 @@ import nodeCapabilityPanelSource from '@/components/production-nodes/NodeCapabil
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import nodeCalendarPanelSource from '@/components/production-nodes/NodeCalendarPanel.vue?raw'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
+import nodeEditorPanelSource from '@/components/production-nodes/NodeEditorPanel.vue?raw'
+import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 
 function deferred() {
@@ -148,6 +150,28 @@ describe('NodeCapabilityPanel', () => {
     expect(onRemove).toHaveBeenCalledWith(0)
   })
 
+  it('accepts decimal batch and changeover minutes allowed by the backend contract', async () => {
+    const form = capabilityFormFixture()
+    const wrapper = mountCapabilities({
+      form,
+      props: { node: { id: 11, capacity_mode: 'batch' } },
+    })
+    const batchMinutes = wrapper.get('[data-test="batch-minutes"]')
+    const changeoverMinutes = wrapper.get('[data-test="changeover-minutes"]')
+
+    expect(batchMinutes.attributes('step')).toBe('0.01')
+    expect(batchMinutes.attributes('min')).toBe('0.01')
+    expect(changeoverMinutes.attributes('step')).toBe('0.01')
+    expect(changeoverMinutes.attributes('min')).toBe('0')
+
+    await batchMinutes.setValue('0.5')
+    await changeoverMinutes.setValue('1.25')
+    expect(form.capabilities[0]).toMatchObject({
+      batch_minutes: 0.5,
+      changeover_minutes: 1.25,
+    })
+  })
+
   it('closes loading, error, retry, successful save, and slow-submit states', async () => {
     const pending = deferred()
     const onRetry = vi.fn()
@@ -278,6 +302,18 @@ describe('NodeEditorPanel', () => {
     })
   })
 
+  it('offers only backend-supported exclusive and batch capacity modes', () => {
+    const wrapper = mountEditor()
+
+    expect(wrapper.get('[data-test="node-capacity-mode"]').findAll('option').map(option => ({
+      value: option.element.value,
+      label: option.text(),
+    }))).toEqual([
+      { value: 'exclusive', label: '独占产能' },
+      { value: 'batch', label: '批处理产能' },
+    ])
+  })
+
   it('preserves dirty input after a failed save and emits the pre-save identity after success', async () => {
     const form = formFixture()
     const onSave = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 11 })
@@ -304,13 +340,73 @@ describe('NodeEditorPanel', () => {
     expect(wrapper.text()).toContain('启用')
   })
 
-  it('disables save while saving and delegates reset to the controller', async () => {
+  it('disables the complete editor form while saving', async () => {
     const onReset = vi.fn()
     const wrapper = mountEditor({ props: { saving: true, onReset } })
 
+    expect(wrapper.get('[data-test="node-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="node-name"]').element.matches(':disabled')).toBe(true)
     expect(wrapper.get('[data-test="node-save"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="node-reset"]').trigger('click')
-    expect(onReset).toHaveBeenCalledOnce()
+    expect(onReset).not.toHaveBeenCalled()
+  })
+
+  it('shows a local calendar-catalog error and blocks node saves until retry', async () => {
+    const onRetryCalendars = vi.fn()
+    const onSave = vi.fn()
+    const wrapper = mountEditor({
+      props: {
+        calendars: [],
+        calendarError: '工作日历读取失败',
+        onRetryCalendars,
+        onSave,
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('工作日历读取失败')
+    expect(wrapper.get('[role="alert"]').text()).toContain('暂时无法保存节点')
+    expect(wrapper.get('[data-test="node-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="node-save"]').text()).toContain('等待工作日历')
+    await wrapper.get('[data-test="node-calendar-retry"]').trigger('click')
+
+    expect(onRetryCalendars).toHaveBeenCalledOnce()
+    expect(onSave).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ calendarError: '', calendarLoading: true })
+    expect(wrapper.get('[role="status"]').text()).toContain('正在加载工作日历')
+    expect(wrapper.get('[data-test="node-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="node-save"]').text()).toContain('加载工作日历')
+  })
+
+  it('uses the shared 899px responsive boundary for its single-column layout', () => {
+    expect(nodeEditorPanelSource).toContain('@media (max-width: 899px)')
+    expect(nodeEditorPanelSource).not.toMatch(/max-width:\s*699px/)
+  })
+})
+
+describe('NodeListPanel', () => {
+  it('maps and filters every legal node status and capacity mode', () => {
+    const wrapper = mount(NodeListPanel, {
+      props: {
+        groups: [{
+          process_id: 7,
+          process_name: '焊接',
+          nodes: [
+            { id: 11, node_code: 'A', node_name: '独占', status: 'active', capacity_mode: 'exclusive' },
+            { id: 12, node_code: 'B', node_name: '批处理', status: 'maintenance', capacity_mode: 'batch' },
+            { id: 13, node_code: 'C', node_name: '停用', status: 'inactive', capacity_mode: 'exclusive' },
+          ],
+        }],
+      },
+    })
+
+    expect(wrapper.get('[data-test="node-status-filter"]').findAll('option').map(option => option.element.value))
+      .toEqual(['', 'active', 'maintenance', 'inactive'])
+    expect(wrapper.get('[data-test="node-item-11"]').text()).toContain('启用')
+    expect(wrapper.get('[data-test="node-item-11"]').text()).toContain('独占产能')
+    expect(wrapper.get('[data-test="node-item-12"]').text()).toContain('维护中')
+    expect(wrapper.get('[data-test="node-item-12"]').text()).toContain('批处理产能')
+    expect(wrapper.get('[data-test="node-item-13"]').text()).toContain('停用')
   })
 })
 
@@ -392,6 +488,41 @@ describe('NodeCalendarPanel', () => {
 
     expect(onSave).toHaveBeenCalledOnce()
     expect(wrapper.emitted('saved')).toEqual([[{ id: 91 }]])
+  })
+
+  it('does not present a missing base-calendar catalog as a valid fallback', async () => {
+    const onRetryCalendar = vi.fn()
+    const wrapper = mount(NodeCalendarPanel, {
+      props: {
+        node: { id: 11, calendar_id: 3 },
+        calendar: null,
+        calendarLoading: false,
+        calendarError: '工作日历读取失败',
+        overrides: [],
+        form: {
+          production_node_id: 11,
+          start_at: '',
+          end_at: '',
+          override_type: 'maintenance',
+          reason: '',
+          idempotency_key: 'calendar-11',
+        },
+        loading: false,
+        error: '',
+        saving: false,
+        canManage: false,
+        onRetry: vi.fn(),
+        onRetryCalendar,
+        onSave: vi.fn(),
+        onCancelOverride: vi.fn(),
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('工作日历读取失败')
+    expect(wrapper.get('[data-test="base-calendar-retry"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('日历 #3')
+    await wrapper.get('[data-test="base-calendar-retry"]').trigger('click')
+    expect(onRetryCalendar).toHaveBeenCalledOnce()
   })
 
   it('orders overrides newest first and delegates cancellation', async () => {

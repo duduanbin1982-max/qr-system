@@ -12,6 +12,7 @@ function createWorkbench(callbacks = {}) {
     onEnterTab: callbacks.onEnterTab || vi.fn(),
     onSelectNode: callbacks.onSelectNode || vi.fn(),
     onClose: callbacks.onClose || vi.fn(),
+    onDiscard: callbacks.onDiscard || vi.fn(),
   })
 }
 
@@ -38,6 +39,18 @@ describe('useProductionNodeWorkbench', () => {
     expect(workbench.isDirty.value).toBe(false)
   })
 
+  it('does not guard a click on the already-active tab', () => {
+    const onEnterTab = vi.fn()
+    const workbench = createWorkbench({ onEnterTab })
+    workbench.activeTab.value = 'editor'
+    workbench.markDirty(true)
+
+    expect(workbench.requestTab('editor')).toBe(true)
+    expect(workbench.showDiscardConfirm.value).toBe(false)
+    expect(workbench.isDirty.value).toBe(true)
+    expect(onEnterTab).not.toHaveBeenCalled()
+  })
+
   it('defers a custom transition while dirty and discards or preserves it explicitly', () => {
     const transition = vi.fn()
     const workbench = createWorkbench()
@@ -54,6 +67,41 @@ describe('useProductionNodeWorkbench', () => {
     workbench.confirmDiscard()
     expect(transition).toHaveBeenCalledOnce()
     expect(workbench.isDirty.value).toBe(false)
+  })
+
+  it('rolls back the active context before running a confirmed transition', async () => {
+    const calls = []
+    const workbench = createWorkbench({
+      onDiscard: vi.fn(() => calls.push('rollback')),
+    })
+    workbench.selectedNodeId.value = 11
+    workbench.activeTab.value = 'editor'
+    workbench.markDirty(true)
+    workbench.requestTransition(() => calls.push('transition'))
+
+    await workbench.confirmDiscard()
+
+    expect(calls).toEqual(['rollback', 'transition'])
+    expect(workbench.isDirty.value).toBe(false)
+  })
+
+  it('resets tab, selection, filters, dirty state, and pending transitions for a new session', () => {
+    const workbench = createWorkbench()
+    workbench.activeTab.value = 'capabilities'
+    workbench.selectedNodeId.value = 12
+    workbench.search.value = 'WELD'
+    workbench.statusFilter.value = 'maintenance'
+    workbench.markDirty(true)
+    workbench.requestClose()
+
+    workbench.resetSession()
+
+    expect(workbench.activeTab.value).toBe('list')
+    expect(workbench.selectedNodeId.value).toBeNull()
+    expect(workbench.search.value).toBe('')
+    expect(workbench.statusFilter.value).toBe('')
+    expect(workbench.isDirty.value).toBe(false)
+    expect(workbench.showDiscardConfirm.value).toBe(false)
   })
 
   it('defers a dirty node transition until discard is confirmed', () => {

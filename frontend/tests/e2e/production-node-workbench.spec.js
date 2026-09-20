@@ -16,10 +16,24 @@ test('production node workbench remains viewport-fixed and responsive', async ({
     status: 'active',
     capacity_mode: 'exclusive',
     calendar_id: 1,
+    capacity_minutes: 540,
   }))
   await page.route(/\/api\/production-nodes(?:\?.*)?$/, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ nodes }),
+  }))
+  await page.route(/\/api\/production-nodes\/\d+\/capabilities(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ capabilities: [{ id: 1 }, { id: 2 }] }),
+  }))
+  await page.route(/\/api\/production-nodes\/\d+\/calendar-overrides(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      overrides: [
+        { id: 81, end_at: '2099-01-01T12:00:00', status: 'active' },
+        { id: 82, end_at: '2099-01-02T12:00:00', status: 'cancelled' },
+      ],
+    }),
   }))
   await page.route(/\/api\/schedule\/operations(?:\?.*)?$/, route => {
     operationRequestCount += 1
@@ -47,6 +61,11 @@ test('production node workbench remains viewport-fixed and responsive', async ({
   await trigger.click()
   const dialog = page.getByRole('dialog', { name: '生产节点管理' })
   await expect(dialog).toBeVisible()
+  const summary = dialog.locator('[data-test="node-summary"]')
+  await expect(summary).toContainText('NODE-01')
+  await expect(summary).toContainText('540 分钟')
+  await expect(summary).toContainText('2 条')
+  await expect(summary).toContainText('1 条')
 
   const desktopBox = await dialog.boundingBox()
   expect(desktopBox.x).toBeGreaterThanOrEqual(0)
@@ -60,8 +79,63 @@ test('production node workbench remains viewport-fixed and responsive', async ({
   await dialog.getByRole('searchbox', { name: '搜索生产节点' }).fill('NODE-25')
   await expect(dialog.locator('[data-test^="node-item-"]')).toHaveCount(1)
 
-  await page.setViewportSize({ width: 390, height: 844 })
+  const listTab = dialog.getByRole('tab', { name: '节点列表' })
+  const editorTab = dialog.getByRole('tab', { name: '节点编辑' })
+  const capabilityTab = dialog.getByRole('tab', { name: '能力限制' })
+  await listTab.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(editorTab).toBeFocused()
+  await expect(editorTab).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('End')
+  await expect(capabilityTab).toBeFocused()
+  await expect(capabilityTab).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Home')
+  await expect(listTab).toBeFocused()
+  await expect(listTab).toHaveAttribute('aria-selected', 'true')
+
+  await page.setViewportSize({ width: 800, height: 844 })
   await expect(dialog).toHaveClass(/node-workbench/)
+  await expect(dialog.getByLabel('选择生产节点')).toBeVisible()
+  await expect(dialog.locator('.node-workbench__tabs')).toHaveCSS('overflow-x', 'auto')
+  await editorTab.click()
+  const editorFields = dialog.locator('[data-test="node-fields"]')
+  const editorColumns = await editorFields.evaluate(element => getComputedStyle(element).gridTemplateColumns)
+  expect(editorColumns.trim().split(/\s+/)).toHaveLength(1)
+
+  const nodeName = dialog.locator('[data-test="node-name"]')
+  await expect(nodeName).toHaveValue('生产节点-01')
+  await nodeName.fill('应被放弃的节点名称')
+  await page.keyboard.press('Escape')
+  const discardDialog = dialog.getByRole('alertdialog', { name: '未保存更改' })
+  await expect(discardDialog).toBeVisible()
+
+  const operationRequestsBeforeDiscardClose = operationRequestCount
+  const capacityOrderRequestsBeforeDiscardClose = capacityOrderRequestCount
+  const discardOperationResponse = page.waitForResponse(
+    response => /\/api\/schedule\/operations(?:\?.*)?$/.test(response.url()),
+  )
+  const discardCapacityOrderResponse = page.waitForResponse(
+    response => /\/api\/schedule\/capacity-orders(?:\?.*)?$/.test(response.url()),
+  )
+  await discardDialog.getByRole('button', { name: '放弃更改' }).click()
+  const [discardOperationResult, discardCapacityOrderResult] = await Promise.all([
+    discardOperationResponse,
+    discardCapacityOrderResponse,
+  ])
+  expect(discardOperationResult.status()).toBe(200)
+  expect(discardCapacityOrderResult.status()).toBe(200)
+  expect(operationRequestCount).toBe(operationRequestsBeforeDiscardClose + 1)
+  expect(capacityOrderRequestCount).toBe(capacityOrderRequestsBeforeDiscardClose + 1)
+  await expect(dialog).toBeHidden()
+  await expect(trigger).toBeFocused()
+
+  await trigger.click()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('tab', { name: '节点列表' })).toHaveAttribute('aria-selected', 'true')
+  await dialog.getByRole('tab', { name: '节点编辑' }).click()
+  await expect(dialog.locator('[data-test="node-name"]')).toHaveValue('生产节点-01')
+
+  await page.setViewportSize({ width: 390, height: 844 })
   await expect(dialog.getByLabel('选择生产节点')).toBeVisible()
   const mobileBox = await dialog.boundingBox()
   expect(Math.abs(mobileBox.width - 390)).toBeLessThanOrEqual(1)

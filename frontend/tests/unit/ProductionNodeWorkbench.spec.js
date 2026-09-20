@@ -7,6 +7,7 @@ import NodeCapabilityPanel from '@/components/production-nodes/NodeCapabilityPan
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
+import productionNodeWorkbenchSource from '@/components/production-nodes/ProductionNodeWorkbench.vue?raw'
 import { useProductionNodes } from '@/composables/gantt/useProductionNodes.js'
 
 const productionMocks = vi.hoisted(() => ({
@@ -62,14 +63,24 @@ function managerFixture(overrides = {}) {
       node_code: 'ASSY-01',
       node_name: '装配-01',
       status: 'inactive',
-      capacity_mode: 'shared',
+      capacity_mode: 'batch',
     },
   ])
+
+  const currentNodeId = ref(null)
 
   return {
     state: {
       productionNodes: nodes,
       productionCalendars: ref([]),
+      currentNodeId,
+      nodeSummary: ref({
+        production_node_id: 11,
+        capability_count: 2,
+        future_override_count: 1,
+      }),
+      nodeSummaryLoading: ref(false),
+      nodeSummaryError: ref(''),
       nodesLoading: ref(false),
       nodesError: ref(''),
       nodeForm: ref({
@@ -95,12 +106,21 @@ function managerFixture(overrides = {}) {
       capabilitySaving: ref(false),
     },
     permissions: {
+      canViewNodes: ref(true),
       canManageNodes: ref(true),
       canManageCapabilities: ref(true),
       canManageCalendars: ref(true),
     },
     actions: {
       loadNodes: vi.fn(),
+      selectNodeContext: vi.fn(node => {
+        currentNodeId.value = node?.id ?? null
+      }),
+      loadNodeSummary: vi.fn(),
+      rollbackPanel: vi.fn(),
+      resetWorkbenchSession: vi.fn(() => {
+        currentNodeId.value = null
+      }),
       resetNodeForm: vi.fn(),
       editNode: vi.fn(),
       saveNode: vi.fn(),
@@ -133,11 +153,17 @@ function mountWorkbench(options = {}) {
     slots: options.slots,
     attachTo: document.body,
   })
+  mountedWrappers.push(wrapper)
 
   return { manager, trigger, wrapper }
 }
 
+const mountedWrappers = []
+
 afterEach(() => {
+  for (const wrapper of mountedWrappers.splice(0)) {
+    if (wrapper.exists()) wrapper.unmount()
+  }
   document.body.innerHTML = ''
   document.body.style.overflow = ''
 })
@@ -180,6 +206,152 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.editNode).not.toHaveBeenCalled()
   })
 
+  it('renders the selected-node summary and an intentional empty state', async () => {
+    const manager = managerFixture()
+    manager.state.productionNodes.value[0].capacity_minutes = 540
+    mountWorkbench({ manager })
+    await nextTick()
+
+    const summary = document.body.querySelector('[data-test="node-summary"]')
+    expect(summary).not.toBeNull()
+    expect(summary.textContent).toContain('WELD-01')
+    expect(summary.textContent).toContain('焊接-01')
+    expect(summary.textContent).toContain('540 分钟')
+    expect(summary.textContent).toContain('2 条')
+    expect(summary.textContent).toContain('1 条')
+    expect(manager.actions.loadNodeSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 11 }))
+
+    const emptyManager = managerFixture({ nodes: [] })
+    mountWorkbench({ manager: emptyManager })
+    await nextTick()
+    expect(document.body.textContent).toContain('请选择生产节点查看摘要')
+  })
+
+  it('uses standard keyboard tab semantics and ARIA panel relationships', async () => {
+    mountWorkbench()
+    await nextTick()
+    const tabs = [...document.body.querySelectorAll('[role="tab"]')]
+
+    expect(tabs.map(tab => tab.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1'])
+    for (const tab of tabs) {
+      const panelId = tab.getAttribute('aria-controls')
+      expect(tab.id).toBeTruthy()
+      expect(panelId).toBeTruthy()
+      const panel = document.body.querySelector(`#${panelId}`)
+      expect(panel?.getAttribute('role')).toBe('tabpanel')
+      expect(panel?.getAttribute('aria-labelledby')).toBe(tab.id)
+    }
+
+    tabs[0].focus()
+    tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    await nextTick()
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[1])
+
+    tabs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    await nextTick()
+    expect(tabs.at(-1).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs.at(-1))
+
+    tabs.at(-1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    await nextTick()
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[0])
+
+    tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    await nextTick()
+    expect(tabs.at(-1).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs.at(-1))
+  })
+
+  it('focuses the newly active tab after a dirty keyboard transition is discarded', async () => {
+    mountWorkbench({
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+    await nextTick()
+    const tabs = [...document.body.querySelectorAll('[role="tab"]')]
+    await document.body.querySelector('[data-test="make-dirty"]').click()
+    tabs[0].focus()
+    tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    await nextTick()
+
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[1])
+  })
+
+  it('keeps roving tab focus on the active tab when a mouse transition is cancelled', async () => {
+    mountWorkbench({
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+    await nextTick()
+    const tabs = [...document.body.querySelectorAll('[role="tab"]')]
+    await document.body.querySelector('[data-test="make-dirty"]').click()
+    await tabs[1].click()
+    const continueEditing = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '继续编辑')
+    await continueEditing.click()
+    await nextTick()
+
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[0])
+  })
+
+  it('restores destination tab focus before an async discarded transition settles', async () => {
+    const pendingLoad = deferredCommand()
+    const manager = managerFixture()
+    manager.actions.loadCapabilities.mockReturnValueOnce(pendingLoad.promise)
+    mountWorkbench({
+      manager,
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+    await nextTick()
+    const tabs = [...document.body.querySelectorAll('[role="tab"]')]
+    const makeDirty = document.body.querySelector('[data-test="make-dirty"]')
+    await makeDirty.click()
+    tabs[0].focus()
+    await tabs[2].click()
+    await nextTick()
+
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    discard?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+
+    expect(tabs[2].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[2])
+
+    pendingLoad.resolve()
+    await flushPromises()
+  })
+
+  it('keeps the small-screen tab strip horizontally scrollable', () => {
+    expect(productionNodeWorkbenchSource).toMatch(/\.node-workbench__tabs\s*\{[^}]*overflow-x:\s*auto/s)
+    expect(productionNodeWorkbenchSource).toMatch(/\.node-workbench__tabs button\s*\{[^}]*flex:\s*0 0 auto/s)
+  })
+
   it('does not expose or run the create workflow without node-management permission', async () => {
     const manager = managerFixture()
     manager.permissions.canManageNodes.value = false
@@ -190,6 +362,61 @@ describe('ProductionNodeWorkbench', () => {
     wrapper.findComponent(NodeListPanel).vm.$emit('create')
     await nextTick()
     expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
+  })
+
+  it('invalidates detail contexts and hides detail writes when creating a node clears selection', async () => {
+    const manager = managerFixture()
+    const { wrapper } = mountWorkbench({ manager })
+    await nextTick()
+
+    await document.body.querySelector('[data-test="node-create"]').click()
+    await nextTick()
+
+    expect(manager.actions.selectNodeContext).toHaveBeenLastCalledWith(null)
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await nextTick()
+    expect(wrapper.findComponent(NodeCalendarPanel).find('[data-test="override-save"]').exists()).toBe(false)
+
+    const capabilityTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '能力限制')
+    await capabilityTab.click()
+    await nextTick()
+    expect(wrapper.findComponent(NodeCapabilityPanel).find('[data-test="capability-save"]').exists()).toBe(false)
+    expect(wrapper.findComponent(NodeCapabilityPanel).find('[data-test="capability-add"]').exists()).toBe(false)
+  })
+
+  it('does not let an inactive panel refresh clear the active panel dirty guard', async () => {
+    const manager = managerFixture()
+    manager.state.overrideForm.value = {
+      production_node_id: 11,
+      start_at: '',
+      end_at: '',
+      override_type: 'maintenance',
+      reason: '',
+      idempotency_key: 'calendar-11',
+    }
+    const { wrapper } = mountWorkbench({ manager })
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await flushPromises()
+    await wrapper.findComponent(NodeCalendarPanel)
+      .get('[data-test="override-reason"]').setValue('未保存检修')
+
+    manager.state.capabilityForm.value = {
+      production_node_id: 11,
+      node_label: 'WELD-01 · 焊接-01',
+      capabilities: [{ product_family: '异步刷新', status: 'active' }],
+      reason: '',
+      idempotency_key: 'capability-11-refresh',
+    }
+    await nextTick()
+    await document.body.querySelector('.node-workbench__footer button').click()
+
+    expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
   it('guards the create workflow until dirty changes are explicitly discarded', async () => {
@@ -241,6 +468,209 @@ describe('ProductionNodeWorkbench', () => {
     await document.body.querySelector('.node-workbench__footer button').click()
     expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
     expect(wrapper.emitted('update:modelValue')).toEqual([[false]])
+  })
+
+  it('treats Escape inside the discard alert as continue editing without replacing the pending action', async () => {
+    const manager = managerFixture()
+    const { wrapper } = mountWorkbench({
+      manager,
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+    await nextTick()
+    await document.body.querySelector('[data-test="make-dirty"]').click()
+    await document.body.querySelector('[data-test="node-create"]').click()
+    const alert = document.body.querySelector('[role="alertdialog"]')
+
+    alert.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+
+    await document.body.querySelector('[data-test="node-create"]').click()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(manager.actions.resetNodeForm).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点编辑')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('rolls back editor data before a confirmed dirty tab change', async () => {
+    const manager = managerFixture()
+    manager.actions.editNode.mockImplementation(node => {
+      manager.state.nodeForm.value = {
+        ...node,
+        reason: '',
+        idempotency_key: `node-${node.id}`,
+      }
+    })
+    manager.actions.rollbackPanel.mockImplementation(tab => {
+      if (tab === 'editor') manager.actions.editNode(manager.state.productionNodes.value[0])
+    })
+    const { wrapper } = mountWorkbench({ manager })
+    await nextTick()
+    const editorTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '节点编辑')
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await editorTab.click()
+    await nextTick()
+    await wrapper.findComponent(NodeEditorPanel).get('[data-test="node-name"]').setValue('未保存名称')
+
+    await calendarTab.click()
+    await nextTick()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(manager.actions.rollbackPanel).toHaveBeenCalledWith(
+      'editor',
+      expect.objectContaining({ id: 11 }),
+    )
+    expect(manager.state.nodeForm.value.node_name).toBe('焊接-01')
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('工作日历')
+  })
+
+  it('rolls back calendar data before a confirmed dirty node change', async () => {
+    const manager = managerFixture()
+    manager.state.overrideForm.value = {
+      production_node_id: 11,
+      start_at: '',
+      end_at: '',
+      override_type: 'maintenance',
+      reason: '',
+      idempotency_key: 'calendar-11',
+    }
+    manager.actions.prepareOverride.mockImplementation(node => {
+      manager.state.overrideForm.value = {
+        production_node_id: node.id,
+        start_at: '',
+        end_at: '',
+        override_type: 'maintenance',
+        reason: '',
+        idempotency_key: `calendar-${node.id}`,
+      }
+    })
+    manager.actions.rollbackPanel.mockImplementation(tab => {
+      if (tab === 'calendar') manager.actions.prepareOverride(manager.state.productionNodes.value[0])
+    })
+    const { wrapper } = mountWorkbench({ manager })
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await flushPromises()
+    await wrapper.findComponent(NodeCalendarPanel).get('[data-test="override-reason"]').setValue('未保存检修')
+
+    await document.body.querySelector('[data-test="node-item-12"]').click()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(manager.actions.rollbackPanel).toHaveBeenCalledWith(
+      'calendar',
+      expect.objectContaining({ id: 11 }),
+    )
+    expect(manager.state.overrideForm.value.production_node_id).toBe(12)
+    expect(manager.state.overrideForm.value.reason).toBe('')
+    expect(manager.actions.selectNodeContext).toHaveBeenLastCalledWith(expect.objectContaining({ id: 12 }))
+  })
+
+  it('rolls back capability data when Escape closes a dirty session', async () => {
+    const manager = managerFixture()
+    manager.state.capabilityForm.value = {
+      production_node_id: 11,
+      node_label: 'WELD-01 · 焊接-01',
+      capabilities: [{ product_family: 'BASELINE', status: 'active' }],
+      reason: '',
+      idempotency_key: 'capability-11',
+    }
+    manager.actions.rollbackPanel.mockImplementation(tab => {
+      if (tab === 'capabilities') manager.state.capabilityForm.value.reason = ''
+    })
+    const { wrapper } = mountWorkbench({ manager })
+    const capabilityTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '能力限制')
+    await capabilityTab.click()
+    await flushPromises()
+    await wrapper.findComponent(NodeCapabilityPanel).get('[data-test="capability-reason"]').setValue('未保存能力')
+
+    document.body.querySelector('.node-workbench').dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(manager.actions.rollbackPanel).toHaveBeenCalledWith(
+      'capabilities',
+      expect.objectContaining({ id: 11 }),
+    )
+    expect(manager.state.capabilityForm.value.reason).toBe('')
+    expect(manager.actions.resetWorkbenchSession).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]])
+  })
+
+  it('starts a fresh session after close and does not revive discarded editor input', async () => {
+    const manager = managerFixture()
+    const baselineNode = manager.state.productionNodes.value[0]
+    manager.actions.editNode.mockImplementation(node => {
+      manager.state.nodeForm.value = {
+        ...node,
+        reason: '',
+        idempotency_key: `node-${node.id}`,
+      }
+    })
+    manager.actions.rollbackPanel.mockImplementation(tab => {
+      if (tab === 'editor') manager.actions.editNode(baselineNode)
+    })
+    manager.actions.resetWorkbenchSession.mockImplementation(() => {
+      manager.state.currentNodeId.value = null
+      manager.actions.editNode(baselineNode)
+    })
+    const { wrapper } = mountWorkbench({ manager })
+    const editorTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '节点编辑')
+    await editorTab.click()
+    await nextTick()
+    await wrapper.findComponent(NodeEditorPanel).get('[data-test="node-name"]').setValue('应被放弃的名称')
+    await document.body.querySelector('.node-workbench__footer button').click()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+    await wrapper.setProps({ modelValue: false })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    expect(manager.actions.resetWorkbenchSession).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点列表')
+    expect(manager.state.nodeForm.value.node_name).toBe('焊接-01')
+
+    const reopenedEditorTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '节点编辑')
+    await reopenedEditorTab.click()
+    await nextTick()
+    expect(wrapper.findComponent(NodeEditorPanel).get('[data-test="node-name"]').element.value).toBe('焊接-01')
   })
 
   it('selects the initial node and supports node selection from desktop and mobile controls', async () => {
@@ -308,8 +738,10 @@ describe('ProductionNodeWorkbench', () => {
     productionMocks.listScheduleCalendars.mockReset().mockResolvedValue({ calendars: [] })
     productionMocks.listProductionNodeCapabilities
       .mockReset()
+      .mockResolvedValueOnce({ capabilities: [] })
       .mockResolvedValueOnce({ capabilities: [{ product_family: 'A-ONLY' }] })
       .mockRejectedValueOnce(new Error('B 能力读取失败'))
+    productionMocks.listProductionNodeOverrides.mockReset().mockResolvedValue({ overrides: [] })
     const managerState = useProductionNodes({
       canManageNodes: ref(true),
       canManageCapabilities: ref(true),
@@ -394,8 +826,10 @@ describe('ProductionNodeWorkbench', () => {
     productionMocks.listScheduleCalendars.mockReset().mockResolvedValue({
       calendars: [{ id: 3, calendar_name: '生产九小时日历', daily_minutes: 540 }],
     })
+    productionMocks.listProductionNodeCapabilities.mockReset().mockResolvedValue({ capabilities: [] })
     productionMocks.listProductionNodeOverrides
       .mockReset()
+      .mockResolvedValueOnce({ overrides: [] })
       .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, reason: 'A 初始' }] })
       .mockResolvedValueOnce({ overrides: [{ id: 82, production_node_id: 12, reason: 'B 当前' }] })
       .mockResolvedValueOnce({ overrides: [{ id: 92, production_node_id: 12, reason: 'B 新建' }] })
@@ -496,6 +930,9 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
     expect(document.body.querySelector('[data-test="node-item-21"]').getAttribute('aria-current')).toBe('true')
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 21 }))
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点列表')
+    expect(document.activeElement).toBe(document.body.querySelector('[role="tab"][aria-selected="true"]'))
+    expect(document.body.querySelector('[data-test="node-summary"]').textContent).toContain('新焊接节点')
   })
 
   it('retains the updated node selection using its pre-save identity when the result omits an id', async () => {
@@ -528,6 +965,7 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.loadNodes).toHaveBeenCalledOnce()
     expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBe('true')
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点列表')
   })
 
   it('keeps dirty state and exposes the controller error when the refreshed node is absent', async () => {
