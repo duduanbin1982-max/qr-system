@@ -143,6 +143,57 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
   })
 
+  it('guards the create workflow until dirty changes are explicitly discarded', async () => {
+    const manager = managerFixture()
+    manager.state.nodeForm.value = { id: 11, node_name: '未保存名称' }
+    const { wrapper } = mountWorkbench({
+      manager,
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+    await nextTick()
+
+    await document.body.querySelector('[data-test="make-dirty"]').click()
+    await document.body.querySelector('[data-test="node-create"]').click()
+
+    expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
+    expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
+    expect(manager.state.nodeForm.value).toEqual({ id: 11, node_name: '未保存名称' })
+    expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBe('true')
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点列表')
+
+    const continueEditing = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '继续编辑')
+    await continueEditing.click()
+    await nextTick()
+
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
+    expect(manager.state.nodeForm.value).toEqual({ id: 11, node_name: '未保存名称' })
+    expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBe('true')
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点列表')
+
+    await document.body.querySelector('[data-test="node-create"]').click()
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await nextTick()
+
+    expect(manager.actions.resetNodeForm).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBeNull()
+    expect(document.body.querySelector('[data-test="mobile-node-select"]').value).toBe('')
+    expect(document.body.querySelector('[role="tab"][aria-selected="true"]').textContent).toBe('节点编辑')
+
+    await document.body.querySelector('.node-workbench__footer button').click()
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]])
+  })
+
   it('selects the initial node and supports node selection from desktop and mobile controls', async () => {
     const { manager } = mountWorkbench()
 

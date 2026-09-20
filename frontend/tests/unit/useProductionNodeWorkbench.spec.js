@@ -38,6 +38,24 @@ describe('useProductionNodeWorkbench', () => {
     expect(workbench.isDirty.value).toBe(false)
   })
 
+  it('defers a custom transition while dirty and discards or preserves it explicitly', () => {
+    const transition = vi.fn()
+    const workbench = createWorkbench()
+    workbench.markDirty(true)
+
+    expect(workbench.requestTransition(transition)).toBe(false)
+    expect(transition).not.toHaveBeenCalled()
+
+    workbench.cancelDiscard()
+    expect(transition).not.toHaveBeenCalled()
+    expect(workbench.isDirty.value).toBe(true)
+
+    expect(workbench.requestTransition(transition)).toBe(false)
+    workbench.confirmDiscard()
+    expect(transition).toHaveBeenCalledOnce()
+    expect(workbench.isDirty.value).toBe(false)
+  })
+
   it('defers a dirty node transition until discard is confirmed', () => {
     const onSelectNode = vi.fn()
     const workbench = createWorkbench({ onSelectNode })

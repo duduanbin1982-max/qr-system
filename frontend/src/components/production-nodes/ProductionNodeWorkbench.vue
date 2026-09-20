@@ -70,10 +70,11 @@ function selectNodeById(value) {
 
 function openCreate() {
   if (!canManageNodes.value) return
-  actions.resetNodeForm()
-  workbench.selectedNodeId.value = null
-  workbench.markDirty(false)
-  workbench.requestTab('editor')
+  workbench.requestTransition(() => {
+    actions.resetNodeForm()
+    workbench.selectedNodeId.value = null
+    workbench.requestTab('editor')
+  })
 }
 
 const focusableSelector = [

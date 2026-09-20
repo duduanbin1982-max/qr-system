@@ -46,7 +46,7 @@ export function useProductionNodeWorkbench({
     return [...groups.values()]
   })
 
-  function runOrGuard(transition) {
+  function requestTransition(transition) {
     if (!isDirty.value) {
       transition()
       return true
@@ -57,21 +57,21 @@ export function useProductionNodeWorkbench({
   }
 
   function requestTab(tab) {
-    return runOrGuard(() => {
+    return requestTransition(() => {
       activeTab.value = tab
       onEnterTab(tab, selectedNode.value)
     })
   }
 
   function requestNode(node) {
-    return runOrGuard(() => {
+    return requestTransition(() => {
       selectedNodeId.value = node?.id ?? null
       onSelectNode(node || null)
     })
   }
 
   function requestClose() {
-    return runOrGuard(() => onClose())
+    return requestTransition(() => onClose())
   }
 
   function confirmDiscard() {
@@ -100,6 +100,7 @@ export function useProductionNodeWorkbench({
     filteredGroups,
     isDirty,
     showDiscardConfirm,
+    requestTransition,
     requestTab,
     requestNode,
     requestClose,
