@@ -226,6 +226,7 @@ onBeforeUnmount(() => {
       <section
         ref="dialogRef"
         class="node-workbench"
+        data-test="production-node-workbench"
         role="dialog"
         aria-modal="true"
         aria-labelledby="production-node-workbench-title"

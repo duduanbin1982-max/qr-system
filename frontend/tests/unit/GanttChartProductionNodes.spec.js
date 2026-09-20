@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GanttChart from '@/views/GanttChart.vue'
 
@@ -22,6 +22,45 @@ function createState() {
     capacity_mode: 'exclusive',
     capacity_minutes: 540,
     status: 'active',
+  }
+  const productionNodeManager = {
+    state: {
+      productionNodes: [node],
+      productionCalendars: [{ id: 3, calendar_name: '九小时工作日历' }],
+      nodesByProcess: [{ process_id: 7, process_name: '焊接', nodes: [node] }],
+      nodesLoading: false,
+      nodesError: '',
+      nodeForm: {},
+      nodeSaving: false,
+      overrideForm: {},
+      nodeOverrides: [],
+      overridesLoading: false,
+      overridesError: '',
+      overrideSaving: false,
+      capabilityForm: { capabilities: [] },
+      capabilitiesLoading: false,
+      capabilitiesError: '',
+      capabilitySaving: false,
+    },
+    permissions: {
+      canManageNodes: true,
+      canManageCapabilities: true,
+      canManageCalendars: true,
+    },
+    actions: {
+      loadNodes: fn(),
+      resetNodeForm: fn(),
+      editNode: fn(),
+      saveNode: fn(),
+      prepareOverride: fn(),
+      loadOverrides: fn(),
+      createCalendarOverride: fn(),
+      cancelOverride: fn(),
+      loadCapabilities: fn(),
+      addCapability: fn(),
+      removeCapability: fn(),
+      saveCapabilities: fn(),
+    },
   }
   return {
     stats: { total: 1, producing: 1, pending: 0, completed: 0 },
@@ -117,6 +156,7 @@ function createState() {
     selectedOrderIds: [],
     showEditModal: false,
     showNodeMgr: true,
+    productionNodeManager,
     nodesLoading: false,
     nodesByProcess: [{ process_id: 7, process_name: '焊接', nodes: [node] }],
     productionNodes: [node],
@@ -160,6 +200,23 @@ function createState() {
 describe('GanttChart production-node UX', () => {
   beforeEach(() => {
     ganttState = createState()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+    document.body.style.overflow = ''
+  })
+
+  it('delegates production-node management to the viewport workbench', () => {
+    const wrapper = mount(GanttChart, { attachTo: document.body })
+
+    expect(document.body.querySelector('[data-test="production-node-workbench"]')).not.toBeNull()
+    expect(wrapper.find('[data-test="legacy-node-manager-form"]').exists()).toBe(false)
+    expect(document.body.querySelector('input[placeholder="节点编码，如 WELD-01"]')).toBeNull()
+    expect(document.body.textContent).toContain('节点列表')
+    expect(document.body.textContent).toContain('节点编辑')
+    expect(document.body.textContent).toContain('工作日历')
+    expect(document.body.textContent).toContain('能力限制')
   })
 
   it('renders production-node management, precise blocking, and locked-task evidence', () => {

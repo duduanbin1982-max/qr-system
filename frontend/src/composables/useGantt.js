@@ -91,6 +91,8 @@ export function useGantt() {
     ...capacity,
     ...batch,
     ...imageExport,
+    productionNodeManager: nodes.nodeManager,
+    processOptions: capacity.processOptions,
     setScheduleScope,
     isCompleted: isCompletedOrder,
     canAdjustOrder,

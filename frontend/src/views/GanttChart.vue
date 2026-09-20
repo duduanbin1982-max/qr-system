@@ -277,108 +277,12 @@
       </div>
     </div>
 
-    <!-- Production Node Modal -->
-    <div v-if="showNodeMgr" class="modal-overlay" @click.self="showNodeMgr=false">
-      <div class="modal" style="max-width:900px">
-        <div class="modal-header"><h3>⚙️ 生产节点管理</h3></div>
-        <div class="modal-body">
-          <form v-if="canManageNodes" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;margin-bottom:16px" @submit.prevent="saveNode">
-            <select v-model="nodeForm.process_id" class="form-input" :disabled="Boolean(nodeForm.id)" required>
-              <option value="">选择工序</option>
-              <option v-for="process in processOptions" :key="`node-process-${process.id}`" :value="process.id">{{ process.name }}</option>
-            </select>
-            <input v-model="nodeForm.node_code" class="form-input" placeholder="节点编码，如 WELD-01" required>
-            <input v-model="nodeForm.node_name" class="form-input" placeholder="节点名称，如 焊接-01" required>
-            <select v-model="nodeForm.capacity_mode" class="form-input">
-              <option value="exclusive">独占容量</option>
-              <option value="batch">批处理容量</option>
-            </select>
-            <select v-model="nodeForm.calendar_id" class="form-input" required>
-              <option value="">选择工作日历</option>
-              <option v-for="calendar in productionCalendars" :key="`calendar-${calendar.id}`" :value="calendar.id">{{ calendar.calendar_name || calendar.name || `日历 #${calendar.id}` }}</option>
-            </select>
-            <select v-model="nodeForm.status" class="form-input">
-              <option value="active">启用</option>
-              <option value="maintenance">维护中</option>
-              <option value="inactive">停用</option>
-            </select>
-            <input v-model="nodeForm.reason" class="form-input" placeholder="变更原因（必填）" required>
-            <input v-model="nodeForm.idempotency_key" class="form-input" placeholder="幂等键" required>
-            <div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px">
-              <button type="button" class="btn-default btn-sm" @click="resetNodeForm()">新建节点</button>
-              <button type="submit" class="btn btn-primary btn-sm">{{ nodeForm.id ? '保存节点修改' : '创建生产节点' }}</button>
-            </div>
-          </form>
-          <div v-if="nodesLoading" style="padding:20px;text-align:center;color:var(--text-placeholder)">加载生产节点中...</div>
-          <div v-else-if="nodesByProcess.length" style="max-height:300px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm)">
-            <section v-for="group in nodesByProcess" :key="`node-group-${group.process_id}`" style="padding:10px 12px;border-bottom:1px solid var(--border-light)">
-              <strong>{{ group.process_name }}</strong>
-              <div v-for="node in group.nodes" :key="node.id" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--bg-hover);font-size:var(--text-sm)">
-                <span style="font-weight:700;min-width:90px">{{ node.node_code }}</span>
-                <span style="min-width:120px">{{ node.node_name }}</span>
-                <span style="color:var(--text-secondary)">{{ node.capacity_mode === 'batch' ? '批处理容量' : '独占容量' }}</span>
-                <span style="color:var(--text-secondary)">日容量 {{ node.capacity_minutes || 0 }} 分钟</span>
-                <span style="color:var(--text-secondary)">状态 {{ node.status }}</span>
-                <button v-if="canManageNodes" type="button" class="btn-default btn-sm" style="margin-left:auto" @click="editNode(node)">编辑</button>
-                <button v-if="canManageCapabilities" type="button" class="btn-default btn-sm" :style="{marginLeft:canManageNodes?'0':'auto'}" @click="loadCapabilities(node)">能力限制</button>
-                <button v-if="canManageCalendars" type="button" class="btn-default btn-sm" @click="prepareOverride(node)">日历例外</button>
-              </div>
-            </section>
-          </div>
-          <div v-else style="padding:18px;text-align:center;color:var(--text-placeholder)">暂无生产节点</div>
-          <form v-if="canManageCalendars" style="margin-top:16px;padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-sm)" @submit.prevent="createCalendarOverride">
-            <strong style="display:block;margin-bottom:8px">节点日历例外</strong>
-            <div style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px">
-              <select v-model="overrideForm.production_node_id" class="form-input" required>
-                <option value="">选择生产节点</option>
-                <option v-for="node in productionNodes" :key="`override-node-${node.id}`" :value="node.id">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
-              </select>
-              <input v-model="overrideForm.start_at" type="datetime-local" class="form-input" required>
-              <input v-model="overrideForm.end_at" type="datetime-local" class="form-input" required>
-              <select v-model="overrideForm.override_type" class="form-input">
-                <option value="unavailable">不可用</option>
-                <option value="maintenance">维护</option>
-                <option value="overtime">加班</option>
-                <option value="holiday">停工假日</option>
-              </select>
-              <input v-model="overrideForm.reason" class="form-input" placeholder="日历调整原因（必填）" required>
-              <input v-model="overrideForm.idempotency_key" class="form-input" placeholder="幂等键" required>
-              <button type="submit" class="btn btn-primary btn-sm" style="grid-column:3">保存日历例外</button>
-            </div>
-          </form>
-          <form v-if="canManageCapabilities && capabilityForm.production_node_id" style="margin-top:16px;padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-sm)" @submit.prevent="saveCapabilities">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <strong>节点能力限制：{{ capabilityForm.node_label }}</strong>
-              <span style="font-size:var(--text-xs);color:var(--text-secondary)">空列表表示仅按所属工序匹配，不附加产品或版本限制</span>
-              <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="addCapability">新增限制</button>
-            </div>
-            <div v-if="capabilitiesLoading" style="padding:12px;text-align:center;color:var(--text-placeholder)">加载能力配置中...</div>
-            <div v-for="(capability, index) in capabilityForm.capabilities" :key="`capability-${index}`" style="display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:6px;padding:8px 0;border-top:1px solid var(--bg-hover)">
-              <input v-model.number="capability.product_id" type="number" min="1" class="form-input" placeholder="产品 ID（可空）">
-              <input v-model="capability.product_family" class="form-input" placeholder="产品族（可空）">
-              <input v-model="capability.material_code" class="form-input" placeholder="材料编码（可空）">
-              <input v-model="capability.specification" class="form-input" placeholder="规格（可空）">
-              <input v-model.number="capability.route_version_id" type="number" min="1" class="form-input" placeholder="路线版本 ID">
-              <input v-model.number="capability.process_version_id" type="number" min="1" class="form-input" placeholder="工序版本 ID">
-              <input v-model.number="capability.max_batch_quantity" type="number" min="1" class="form-input" placeholder="最大批量">
-              <input v-model.number="capability.batch_minutes" type="number" min="0.01" step="0.01" class="form-input" placeholder="批次分钟">
-              <input v-model.number="capability.changeover_minutes" type="number" min="0" step="0.01" class="form-input" placeholder="换型分钟">
-              <div style="display:flex;align-items:center;gap:8px">
-                <label style="font-size:var(--text-xs)"><input v-model="capability.allow_mixed_orders" type="checkbox"> 允许混单</label>
-                <select v-model="capability.status" class="form-input" style="width:90px"><option value="active">启用</option><option value="inactive">停用</option></select>
-                <button type="button" class="btn-default btn-sm" style="color:var(--danger)" @click="removeCapability(index)">移除</button>
-              </div>
-            </div>
-            <div style="display:grid;grid-template-columns:2fr 2fr auto;gap:8px;margin-top:8px">
-              <input v-model="capabilityForm.reason" class="form-input" placeholder="能力变更原因（必填）" required>
-              <input v-model="capabilityForm.idempotency_key" class="form-input" placeholder="幂等键" required>
-              <button type="submit" class="btn btn-primary btn-sm">保存能力配置</button>
-            </div>
-          </form>
-        </div>
-        <div class="modal-footer"><button class="btn btn-default" @click="showNodeMgr=false">关闭</button></div>
-      </div>
-    </div>
+    <ProductionNodeWorkbench
+      v-model="showNodeMgr"
+      :manager="productionNodeManager"
+      :process-options="processOptions"
+      @closed="loadCapacity"
+    />
 
     <!-- Schedule Adjustment Modal -->
     <div v-if="showAdjustmentModal" class="modal-overlay" @click.self="showAdjustmentModal=false">
@@ -408,9 +312,11 @@
 </template>
 
 <script>
+import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 import { useGantt } from '@/composables/useGantt.js'
 
 export default {
+  components: { ProductionNodeWorkbench },
   setup() {
     return { ...useGantt() }
   }
