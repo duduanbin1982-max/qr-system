@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
+import NodeCapabilityPanel from '@/components/production-nodes/NodeCapabilityPanel.vue'
+import nodeCapabilityPanelSource from '@/components/production-nodes/NodeCapabilityPanel.vue?raw'
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import nodeCalendarPanelSource from '@/components/production-nodes/NodeCalendarPanel.vue?raw'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
@@ -44,6 +46,144 @@ function mountEditor(options = {}) {
     },
   })
 }
+
+function capabilityFormFixture(overrides = {}) {
+  return reactive({
+    production_node_id: 11,
+    node_label: 'WELD-01 · 焊接-01',
+    capabilities: [{
+      product_id: null,
+      product_family: 'HOUSING',
+      material_code: '',
+      specification: '',
+      route_version_id: null,
+      process_version_id: null,
+      max_batch_quantity: null,
+      batch_minutes: null,
+      changeover_minutes: 0,
+      allow_mixed_orders: false,
+      status: 'active',
+    }],
+    reason: '',
+    idempotency_key: 'capability-11',
+    ...overrides,
+  })
+}
+
+function mountCapabilities(options = {}) {
+  return mount(NodeCapabilityPanel, {
+    props: {
+      node: { id: 11, node_code: 'WELD-01', node_name: '焊接-01', capacity_mode: 'exclusive' },
+      form: options.form || capabilityFormFixture(),
+      loading: false,
+      error: '',
+      saving: false,
+      canManage: true,
+      onAdd: vi.fn(),
+      onRemove: vi.fn(),
+      onSave: vi.fn(),
+      onRetry: vi.fn(),
+      ...options.props,
+    },
+  })
+}
+
+describe('NodeCapabilityPanel', () => {
+  it('shows batch fields only for batch nodes and preserves capability rows on save failure', async () => {
+    const form = capabilityFormFixture()
+    const onSave = vi.fn().mockResolvedValue(null)
+    const wrapper = mountCapabilities({ form, props: { onSave } })
+
+    expect(wrapper.find('[data-test="batch-minutes"]').exists()).toBe(false)
+    await wrapper.get('[data-test="capability-product-family"]').setValue('SB121')
+    await wrapper.get('[data-test="capability-reason"]').setValue('更新产品族')
+    await wrapper.get('form').trigger('submit')
+
+    expect(form.capabilities[0].product_family).toBe('SB121')
+    expect(form.reason).toBe('更新产品族')
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([true])
+    expect(wrapper.emitted('saved')).toBeUndefined()
+
+    await wrapper.setProps({ node: { id: 11, capacity_mode: 'batch' } })
+    expect(wrapper.find('[data-test="batch-minutes"]').exists()).toBe(true)
+  })
+
+  it('binds every capability field to the manager form and delegates row actions', async () => {
+    const form = capabilityFormFixture()
+    const onAdd = vi.fn()
+    const onRemove = vi.fn()
+    const wrapper = mountCapabilities({
+      form,
+      props: { node: { id: 11, capacity_mode: 'batch' }, onAdd, onRemove },
+    })
+
+    await wrapper.get('[data-test="capability-product-id"]').setValue('101')
+    await wrapper.get('[data-test="capability-product-family"]').setValue('SB121')
+    await wrapper.get('[data-test="capability-material-code"]').setValue('MAT-01')
+    await wrapper.get('[data-test="capability-specification"]').setValue('20mm')
+    await wrapper.get('[data-test="capability-route-version-id"]').setValue('201')
+    await wrapper.get('[data-test="capability-process-version-id"]').setValue('301')
+    await wrapper.get('[data-test="max-batch-quantity"]').setValue('50')
+    await wrapper.get('[data-test="batch-minutes"]').setValue('90')
+    await wrapper.get('[data-test="changeover-minutes"]').setValue('15')
+    await wrapper.get('[data-test="allow-mixed-orders"]').setValue(true)
+    await wrapper.get('[data-test="capability-status"]').setValue('inactive')
+    await wrapper.get('[data-test="capability-add"]').trigger('click')
+    await wrapper.get('[data-test="capability-remove"]').trigger('click')
+
+    expect(form.capabilities[0]).toMatchObject({
+      product_id: 101,
+      product_family: 'SB121',
+      material_code: 'MAT-01',
+      specification: '20mm',
+      route_version_id: 201,
+      process_version_id: 301,
+      max_batch_quantity: 50,
+      batch_minutes: 90,
+      changeover_minutes: 15,
+      allow_mixed_orders: true,
+      status: 'inactive',
+    })
+    expect(onAdd).toHaveBeenCalledOnce()
+    expect(onRemove).toHaveBeenCalledWith(0)
+  })
+
+  it('closes loading, error, retry, successful save, and slow-submit states', async () => {
+    const pending = deferred()
+    const onRetry = vi.fn()
+    const form = capabilityFormFixture()
+    const wrapper = mountCapabilities({
+      form,
+      props: { error: '能力读取失败', onRetry, onSave: vi.fn(() => pending.promise) },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('能力读取失败')
+    expect(wrapper.get('[data-test="capability-fields"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="capability-retry"]').trigger('click')
+    expect(onRetry).toHaveBeenCalledOnce()
+
+    await wrapper.setProps({ error: '', loading: true })
+    expect(wrapper.get('[role="status"]').text()).toContain('正在加载')
+    await wrapper.setProps({ loading: false })
+    await wrapper.get('[data-test="capability-reason"]').setValue('更新能力')
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+
+    expect(wrapper.get('[data-test="capability-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="capability-add"]').attributes('disabled')).toBeDefined()
+    pending.resolve({ capabilities: [] })
+    await flushPromises()
+
+    expect(wrapper.emitted('saved')).toEqual([[{ capabilities: [] }]])
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([false])
+    expect(wrapper.get('[data-test="capability-fields"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('uses only the shared 899px responsive boundary', () => {
+    expect(nodeCapabilityPanelSource).toContain('@media (max-width: 899px)')
+    expect(nodeCapabilityPanelSource.match(/@media/g)).toHaveLength(1)
+  })
+})
 
 describe('NodeEditorPanel', () => {
   it('locks the process for existing nodes and emits dirty changes', async () => {
@@ -349,10 +489,15 @@ function calendarWorkbenchManager() {
       overridesLoading: ref(false),
       overridesError: ref(''),
       overrideSaving: ref(false),
+      capabilityForm: ref(capabilityFormFixture()),
+      capabilitiesLoading: ref(false),
+      capabilitiesError: ref(''),
+      capabilitySaving: ref(false),
     },
     permissions: {
       canManageNodes: ref(true),
       canManageCalendars: ref(true),
+      canManageCapabilities: ref(true),
     },
     actions: {
       loadNodes: vi.fn(),
@@ -364,6 +509,9 @@ function calendarWorkbenchManager() {
       createCalendarOverride: vi.fn(),
       cancelOverride: vi.fn(),
       loadCapabilities: vi.fn(),
+      addCapability: vi.fn(),
+      removeCapability: vi.fn(),
+      saveCapabilities: vi.fn(),
     },
   }
 }
@@ -428,6 +576,52 @@ describe('ProductionNodeWorkbench calendar integration', () => {
 
     expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
     expect(manager.actions.loadOverrides).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+    document.body.innerHTML = ''
+    document.body.style.overflow = ''
+  })
+})
+
+describe('ProductionNodeWorkbench capability integration', () => {
+  it('loads capabilities only on tab entry and shares guarded node selection with the workbench', async () => {
+    const manager = calendarWorkbenchManager()
+    const wrapper = mount(ProductionNodeWorkbench, {
+      props: { modelValue: true, manager },
+      attachTo: document.body,
+    })
+    await nextTick()
+
+    expect(manager.actions.loadCapabilities).not.toHaveBeenCalled()
+    const capabilityTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '能力限制')
+    await capabilityTab.click()
+    await flushPromises()
+
+    expect(wrapper.findComponent(NodeCapabilityPanel).exists()).toBe(true)
+    expect(manager.actions.loadCapabilities).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+
+    await wrapper.findComponent(NodeCapabilityPanel).get('[data-test="capability-reason"]').setValue('未保存能力')
+    await document.body.querySelector('[data-test="node-item-12"]').click()
+    await nextTick()
+
+    expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
+    expect(manager.actions.loadCapabilities).toHaveBeenCalledTimes(1)
+    expect(document.body.querySelector('[data-test="node-item-11"]').getAttribute('aria-current')).toBe('true')
+
+    const discard = [...document.body.querySelectorAll('.node-discard-dialog button')]
+      .find(button => button.textContent === '放弃更改')
+    await discard.click()
+    await flushPromises()
+
+    expect(manager.actions.loadCapabilities).toHaveBeenCalledTimes(2)
+    expect(manager.actions.loadCapabilities).toHaveBeenLastCalledWith(expect.objectContaining({ id: 12 }))
+    expect(document.body.querySelector('[data-test="node-item-12"]').getAttribute('aria-current')).toBe('true')
+
+    manager.state.capabilitiesError.value = '能力读取失败'
+    await nextTick()
+    await wrapper.findComponent(NodeCapabilityPanel).get('[data-test="capability-retry"]').trigger('click')
+    expect(manager.actions.loadCapabilities).toHaveBeenLastCalledWith(expect.objectContaining({ id: 12 }))
 
     wrapper.unmount()
     document.body.innerHTML = ''

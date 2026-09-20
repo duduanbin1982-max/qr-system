@@ -105,6 +105,7 @@ export function useProductionNodes({
   const capabilitiesError = ref('')
   const capabilitySaving = ref(false)
   let capabilityRequest = 0
+  let capabilityContextVersion = 0
   let overrideRequest = 0
   let overrideNodeId = null
   let overrideContextVersion = 0
@@ -276,6 +277,7 @@ export function useProductionNodes({
 
   async function loadCapabilities(node) {
     if (!canManageCapabilities.value || !node?.id) return null
+    capabilityContextVersion += 1
     const requestId = ++capabilityRequest
     capabilitiesLoading.value = true
     capabilitiesError.value = ''
@@ -360,6 +362,7 @@ export function useProductionNodes({
 
   async function saveCapabilitiesCommand() {
     const form = capabilityForm.value
+    const contextVersion = capabilityContextVersion
     if (!Number(form.production_node_id)) {
       showToast('请先选择生产节点并加载能力配置', 'error')
       return null
@@ -393,7 +396,7 @@ export function useProductionNodes({
       const node = productionNodes.value.find(
         item => String(item.id) === String(form.production_node_id),
       )
-      if (node) await loadCapabilities(node)
+      if (node && contextVersion === capabilityContextVersion) await loadCapabilities(node)
       return result
     } catch (error) {
       showToast(error.message || '保存节点能力失败', 'error')

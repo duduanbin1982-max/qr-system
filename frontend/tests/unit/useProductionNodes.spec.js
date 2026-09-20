@@ -268,6 +268,30 @@ describe('useProductionNodes', () => {
     expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('CURRENT')
   })
 
+  it('does not refresh a saved capability into a node selected while the save was pending', async () => {
+    const pendingSave = deferred()
+    mocks.listProductionNodeCapabilities
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 初始' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'B 当前' }] })
+      .mockResolvedValueOnce({ capabilities: [{ product_family: 'A 错误刷新' }] })
+    mocks.replaceProductionNodeCapabilities.mockReturnValueOnce(pendingSave.promise)
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const nodeA = nodes.productionNodes.value[0]
+    const nodeB = nodes.productionNodes.value[1]
+    await nodes.loadCapabilities(nodeA)
+    nodes.capabilityForm.value.reason = 'A 慢请求'
+
+    const savingA = nodes.saveCapabilities()
+    await nodes.loadCapabilities(nodeB)
+    pendingSave.resolve({ capabilities: [] })
+    await savingA
+
+    expect(nodes.capabilityForm.value.production_node_id).toBe(12)
+    expect(nodes.capabilityForm.value.capabilities[0].product_family).toBe('B 当前')
+    expect(mocks.listProductionNodeCapabilities).toHaveBeenCalledTimes(2)
+  })
+
   it('ignores stale calendar overrides after the selected node changes', async () => {
     let resolveFirst
     mocks.listProductionNodeOverrides

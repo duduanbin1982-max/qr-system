@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, unref, watch } from 'vue'
 
+import NodeCapabilityPanel from './NodeCapabilityPanel.vue'
 import NodeCalendarPanel from './NodeCalendarPanel.vue'
 import NodeEditorPanel from './NodeEditorPanel.vue'
 import NodeListPanel from './NodeListPanel.vue'
@@ -35,8 +36,13 @@ const nodeOverrides = computed(() => unref(state.nodeOverrides) || [])
 const overridesLoading = computed(() => Boolean(unref(state.overridesLoading)))
 const overridesError = computed(() => String(unref(state.overridesError) || ''))
 const overrideSaving = computed(() => Boolean(unref(state.overrideSaving)))
+const capabilityForm = computed(() => unref(state.capabilityForm) || { capabilities: [] })
+const capabilitiesLoading = computed(() => Boolean(unref(state.capabilitiesLoading)))
+const capabilitiesError = computed(() => String(unref(state.capabilitiesError) || ''))
+const capabilitySaving = computed(() => Boolean(unref(state.capabilitySaving)))
 const canManageNodes = computed(() => Boolean(unref(permissions.canManageNodes)))
 const canManageCalendars = computed(() => Boolean(unref(permissions.canManageCalendars)))
+const canManageCapabilities = computed(() => Boolean(unref(permissions.canManageCapabilities)))
 
 function closeWorkbench() {
   emit('update:modelValue', false)
@@ -304,6 +310,21 @@ onBeforeUnmount(() => {
               :on-retry="() => actions.loadOverrides(workbench.selectedNode.value)"
               :on-save="actions.createCalendarOverride"
               :on-cancel-override="actions.cancelOverride"
+              @dirty-change="workbench.markDirty"
+              @saved="workbench.markDirty(false)"
+            />
+            <NodeCapabilityPanel
+              v-else-if="workbench.activeTab.value === 'capabilities'"
+              :node="workbench.selectedNode.value"
+              :form="capabilityForm"
+              :loading="capabilitiesLoading"
+              :error="capabilitiesError"
+              :saving="capabilitySaving"
+              :can-manage="canManageCapabilities"
+              :on-add="actions.addCapability"
+              :on-remove="actions.removeCapability"
+              :on-save="actions.saveCapabilities"
+              :on-retry="() => actions.loadCapabilities(workbench.selectedNode.value)"
               @dirty-change="workbench.markDirty"
               @saved="workbench.markDirty(false)"
             />
