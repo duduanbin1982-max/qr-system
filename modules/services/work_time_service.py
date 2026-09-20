@@ -56,6 +56,7 @@ class WorkTimeService:
     def list_standards(filters, page=1, per_page=20):
         result = WorkTimeRepository.list_standards(filters or {}, page, per_page)
         result["route_groups"] = WorkTimeService._standard_route_groups(result.get("items", []))
+        result["include_history"] = bool((filters or {}).get("include_history"))
         return result
 
     @staticmethod

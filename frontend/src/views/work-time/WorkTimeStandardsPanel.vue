@@ -20,6 +20,10 @@
         <option value="">全部路线工序</option>
         <option v-for="p in filterRouteProcesses" :key="p.id" :value="p.id">{{ p.seqLabel }}{{ p.name }}</option>
       </select>
+      <label class="history-toggle">
+        <input type="checkbox" v-model="includeHistory" @change="load">
+        查看历史路线版本
+      </label>
       <button class="btn btn-default btn-sm" :disabled="!hasStandardFilters" @click="clearStandardFilters">清空筛选</button>
     </div>
 
@@ -57,7 +61,9 @@
             </div>
             <div class="route-header-actions">
               <button class="btn btn-default btn-sm" @click="toggleGroupCollapse(group)">{{ isGroupCollapsed(group) ? '展开' : '收起' }}</button>
-              <button class="btn btn-default btn-sm" @click="openStandardGroup(group)">批量编辑</button>
+              <button class="btn btn-default btn-sm" :disabled="!isEditableGroup(group)" @click="openStandardGroup(group)">
+                {{ isEditableGroup(group) ? '批量编辑' : '仅查看' }}
+              </button>
             </div>
           </div>
           <div v-show="!isGroupCollapsed(group)" class="table-wrap route-standard-table-wrap">
@@ -83,8 +89,10 @@
                   <td><span class="badge" :class="standardStatusClass(row)">{{ standardStatusLabel(row) }}</span></td>
                   <td class="remark-cell" :title="row.remark || ''">{{ row.remark || '-' }}</td>
                   <td class="operation-cell">
-                    <button class="btn btn-default btn-sm" @click="openStandardGroup(group)">编辑路线</button>
-                    <button class="btn btn-default btn-sm" style="color:var(--danger)" :disabled="!row.id || row.status!=='active'" @click="deactivateStandard(row)">停用</button>
+                    <button class="btn btn-default btn-sm" :disabled="!isEditableGroup(group)" @click="openStandardGroup(group)">
+                      {{ isEditableGroup(group) ? '编辑路线' : '仅查看' }}
+                    </button>
+                    <button class="btn btn-default btn-sm" style="color:var(--danger)" :disabled="!isEditableGroup(group) || !row.id || row.status!=='active'" @click="deactivateStandard(row)">停用</button>
                   </td>
                 </tr>
               </tbody>
@@ -207,6 +215,7 @@ const isLoading = ref(false)
 const isSaving = ref(false)
 const showStandardModal = ref(false)
 const standardFilters = ref({ scope: 'all', route_id: '', process_id: '' })
+const includeHistory = ref(false)
 const standardForm = ref({ route_id: '', effective_from: today() })
 const routeVersionOptions = ref([])
 const batchDefaults = ref({ standard_minutes_per_unit: 5, setup_minutes: 0, difficulty_factor: 1 })
@@ -241,7 +250,7 @@ const standardOverview = computed(() => {
 })
 
 const visibleStandardItemCount = computed(() => standardGroups.value.reduce((sum, group) => sum + group.items.length, 0))
-const hasStandardFilters = computed(() => standardFilters.value.scope !== 'all' || !!standardFilters.value.route_id || !!standardFilters.value.process_id)
+const hasStandardFilters = computed(() => standardFilters.value.scope !== 'all' || !!standardFilters.value.route_id || !!standardFilters.value.process_id || includeHistory.value)
 const standardScopeOptions = computed(() => [
   { key: 'all', label: '全部', count: standardOverview.value.total },
   { key: 'unconfigured', label: '未设置', count: standardOverview.value.unconfigured },
@@ -285,11 +294,16 @@ function setStandardScope(scope) {
 
 function clearStandardFilters() {
   standardFilters.value = { scope: 'all', route_id: '', process_id: '' }
+  includeHistory.value = false
   load()
 }
 
 function standardGroupKey(group) {
   return String(group.route_version_id || `${group.route_id || 'no-route'}:${group.route_version || ''}`)
+}
+
+function isEditableGroup(group) {
+  return Boolean(group?.is_current_version && group?.route_version_status === 'published')
 }
 
 function isGroupCollapsed(group) {
@@ -329,6 +343,7 @@ async function load() {
       route_id: standardFilters.value.route_id,
       process_id: standardFilters.value.process_id,
       keyword: props.keyword,
+      include_history: includeHistory.value,
       limit: 200,
     }
     const result = await api.domains.workTime.listWorkTimeStandardRoutes(params)
@@ -363,6 +378,10 @@ async function onStandardRouteVersionChange() {
 }
 
 async function openStandardGroup(group) {
+  if (group && !isEditableGroup(group)) {
+    showToast('历史路线版本仅供审计查看，不能直接编辑', 'error')
+    return
+  }
   const routeId = group?.route_id || standardFilters.value.route_id || ''
   standardForm.value = { route_id: routeId, route_version_id: group?.route_version_id || '', effective_from: today() }
   routeVersionOptions.value = []
@@ -498,6 +517,14 @@ defineExpose({ load, openStandardGroup })
 }
 .route-select { width: 240px; }
 .process-select { width: 200px; }
+.history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
 .standard-overview {
   margin-right: auto;
   color: var(--text-secondary);

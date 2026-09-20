@@ -39,6 +39,8 @@ def work_time_list_standards():
         "route_id": request.args.get("route_id", type=int),
         "route_version_id": request.args.get("route_version_id", type=int),
         "process_version_id": request.args.get("process_version_id", type=int),
+        "include_history": request.args.get("include_history", "").strip().lower()
+        in {"1", "true", "yes", "on"},
     }
     return jsonify(WorkTimeService.list_standards(filters, _page_arg(), _limit_arg()))
 
@@ -54,6 +56,8 @@ def work_time_list_standard_routes():
         "route_id": request.args.get("route_id", type=int),
         "route_version_id": request.args.get("route_version_id", type=int),
         "process_version_id": request.args.get("process_version_id", type=int),
+        "include_history": request.args.get("include_history", "").strip().lower()
+        in {"1", "true", "yes", "on"},
     }
     return jsonify(WorkTimeService.list_standard_routes(filters, _page_arg(), _limit_arg()))
 

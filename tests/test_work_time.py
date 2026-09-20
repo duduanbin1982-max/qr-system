@@ -352,6 +352,85 @@ def test_work_time_standard_routes_include_unconfigured_route_processes(client, 
     assert group["items"][0]["id"] is None
 
 
+def test_work_time_standard_routes_default_to_current_route_version(
+    client, auth_headers, test_order_id
+):
+    ids = _fixture_ids(client, test_order_id)
+    with client.application.app_context():
+        db = get_db()
+        current_version_id = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?",
+            (ids["route_id"],),
+        ).fetchone()["current_effective_version_id"]
+        process_version_id = db.execute(
+            "SELECT process_version_id FROM process_route_version_items "
+            "WHERE route_version_id=? AND process_id=?",
+            (current_version_id, ids["process_id"]),
+        ).fetchone()["process_version_id"]
+        historical_version_id = db.execute(
+            "INSERT INTO process_route_versions "
+            "(process_route_id,version,route_code_snapshot,name,category,description,status) "
+            "SELECT process_route_id,version+1,route_code_snapshot,name,category,description,'draft' "
+            "FROM process_route_versions WHERE id=?",
+            (current_version_id,),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO process_route_version_items "
+            "(route_version_id,process_id,process_version_id,seq_order) VALUES (?,?,?,1)",
+            (historical_version_id, ids["process_id"], process_version_id),
+        )
+        db.execute(
+            "UPDATE process_route_versions SET status='superseded' WHERE id=?",
+            (historical_version_id,),
+        )
+        db.execute(
+            "INSERT INTO work_time_standards "
+            "(route_id,route_version_id,process_id,process_version_id,standard_minutes_per_unit,"
+            "effective_from,status,version) VALUES (?,?,?,?,10,'2026-01-01','active',1)",
+            (ids["route_id"], historical_version_id, ids["process_id"], process_version_id),
+        )
+        db.commit()
+
+    current = client.get(
+        f"/api/work-time/standards/routes?route_id={ids['route_id']}",
+        headers=auth_headers,
+    )
+    assert current.status_code == 200, current.get_json()
+    current_payload = current.get_json()
+    assert current_payload["include_history"] is False
+    assert [g["route_version_id"] for g in current_payload["route_groups"]] == [current_version_id]
+
+    history = client.get(
+        f"/api/work-time/standards/routes?route_id={ids['route_id']}&include_history=true",
+        headers=auth_headers,
+    )
+    assert history.status_code == 200, history.get_json()
+    history_payload = history.get_json()
+    assert history_payload["include_history"] is True
+    assert {g["route_version_id"] for g in history_payload["route_groups"]} == {
+        current_version_id,
+        historical_version_id,
+    }
+
+    current_rows = client.get(
+        f"/api/work-time/standards?route_id={ids['route_id']}",
+        headers=auth_headers,
+    )
+    assert current_rows.status_code == 200, current_rows.get_json()
+    assert current_rows.get_json()["items"] == []
+
+    historical_rows = client.get(
+        f"/api/work-time/standards?route_id={ids['route_id']}&include_history=true",
+        headers=auth_headers,
+    )
+    assert historical_rows.status_code == 200, historical_rows.get_json()
+    historical_payload = historical_rows.get_json()
+    assert historical_payload["include_history"] is True
+    assert [item["route_version_id"] for item in historical_payload["items"]] == [
+        historical_version_id
+    ]
+
+
 
 def test_work_time_record_rejects_process_outside_order_route(client, auth_headers, test_order_id):
     ids = _fixture_ids(client, test_order_id)
