@@ -5,6 +5,8 @@ import { loginAdmin, observeRuntimeFailures, openSidebarPage } from './helpers.j
 
 test('production node workbench remains viewport-fixed and responsive', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
+  let operationRequestCount = 0
+  let capacityOrderRequestCount = 0
   const nodes = Array.from({ length: 25 }, (_, index) => ({
     id: index + 1,
     process_id: index < 10 ? 7 : 8,
@@ -19,6 +21,20 @@ test('production node workbench remains viewport-fixed and responsive', async ({
     contentType: 'application/json',
     body: JSON.stringify({ nodes }),
   }))
+  await page.route(/\/api\/schedule\/operations(?:\?.*)?$/, route => {
+    operationRequestCount += 1
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ operations: [] }),
+    })
+  })
+  await page.route(/\/api\/schedule\/capacity-orders(?:\?.*)?$/, route => {
+    capacityOrderRequestCount += 1
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ orders: [] }),
+    })
+  })
   await page.setViewportSize({ width: 1366, height: 768 })
   await loginAdmin(page)
   await openSidebarPage(page, '生产管理', '生产管理')
@@ -51,11 +67,37 @@ test('production node workbench remains viewport-fixed and responsive', async ({
   expect(Math.abs(mobileBox.width - 390)).toBeLessThanOrEqual(1)
   expect(Math.abs(mobileBox.height - 844)).toBeLessThanOrEqual(1)
 
-  await dialog.getByRole('button', { name: '关闭生产节点管理' }).focus()
-  await page.keyboard.press('Tab')
-  await expect(dialog.locator(':focus')).toBeVisible()
+  const firstFocus = dialog.locator('[data-test="workbench-first-focus"]')
+  const lastFocus = dialog.locator('[data-test="workbench-last-focus"]')
+  await expect(firstFocus).toBeVisible({ timeout: 5_000 })
+  await expect(lastFocus).toBeVisible()
 
-  await dialog.getByRole('button', { name: '关闭生产节点管理' }).click()
+  await lastFocus.focus()
+  await page.keyboard.press('Tab')
+  await expect(firstFocus).toBeFocused()
+
+  await firstFocus.focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(lastFocus).toBeFocused()
+
+  const operationRequestsBeforeClose = operationRequestCount
+  const capacityOrderRequestsBeforeClose = capacityOrderRequestCount
+  const operationResponse = page.waitForResponse(
+    response => /\/api\/schedule\/operations(?:\?.*)?$/.test(response.url()),
+  )
+  const capacityOrderResponse = page.waitForResponse(
+    response => /\/api\/schedule\/capacity-orders(?:\?.*)?$/.test(response.url()),
+  )
+  await firstFocus.click()
+  const [operationResult, capacityOrderResult] = await Promise.all([
+    operationResponse,
+    capacityOrderResponse,
+  ])
+
+  expect(operationResult.status()).toBe(200)
+  expect(capacityOrderResult.status()).toBe(200)
+  expect(operationRequestCount).toBe(operationRequestsBeforeClose + 1)
+  expect(capacityOrderRequestCount).toBe(capacityOrderRequestsBeforeClose + 1)
   await expect(dialog).toBeHidden()
   await expect(trigger).toBeFocused()
   expect(failures).toEqual([])

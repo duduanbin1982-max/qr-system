@@ -237,7 +237,13 @@ onBeforeUnmount(() => {
             <h2 id="production-node-workbench-title" ref="titleRef" tabindex="-1">生产节点管理</h2>
             <p>共 {{ productionNodes.length }} 个生产节点</p>
           </div>
-          <button type="button" class="modal-close" aria-label="关闭生产节点管理" @click="workbench.requestClose">×</button>
+          <button
+            type="button"
+            class="modal-close"
+            data-test="workbench-first-focus"
+            aria-label="关闭生产节点管理"
+            @click="workbench.requestClose"
+          >×</button>
         </header>
 
         <nav class="node-workbench__tabs" role="tablist" aria-label="生产节点管理功能">
@@ -343,7 +349,12 @@ onBeforeUnmount(() => {
 
         <footer class="node-workbench__footer">
           <span>当前节点：{{ selectedNodeLabel }}</span>
-          <button type="button" class="btn btn-default" @click="workbench.requestClose">关闭</button>
+          <button
+            type="button"
+            class="btn btn-default"
+            data-test="workbench-last-focus"
+            @click="workbench.requestClose"
+          >关闭</button>
         </footer>
 
         <div

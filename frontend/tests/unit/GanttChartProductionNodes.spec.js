@@ -5,6 +5,7 @@ import GanttChart from '@/views/GanttChart.vue'
 
 
 let ganttState
+let wrapper
 
 vi.mock('@/composables/useGantt.js', () => ({
   useGantt: () => ganttState,
@@ -203,12 +204,14 @@ describe('GanttChart production-node UX', () => {
   })
 
   afterEach(() => {
+    wrapper?.unmount()
+    wrapper = null
     document.body.innerHTML = ''
     document.body.style.overflow = ''
   })
 
   it('delegates production-node management to the viewport workbench', () => {
-    const wrapper = mount(GanttChart, { attachTo: document.body })
+    wrapper = mount(GanttChart, { attachTo: document.body })
 
     expect(document.body.querySelector('[data-test="production-node-workbench"]')).not.toBeNull()
     expect(wrapper.find('[data-test="legacy-node-manager-form"]').exists()).toBe(false)
@@ -220,7 +223,7 @@ describe('GanttChart production-node UX', () => {
   })
 
   it('renders production-node management, precise blocking, and locked-task evidence', () => {
-    const wrapper = mount(GanttChart)
+    wrapper = mount(GanttChart)
 
     expect(wrapper.text()).toContain('生产节点管理')
     expect(wrapper.text()).toContain('WELD-01')
