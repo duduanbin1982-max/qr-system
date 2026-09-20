@@ -222,7 +222,8 @@ export function useProductionNodes({
 
   async function createCalendarOverrideCommand() {
     const form = overrideForm.value
-    if (!Number(form.production_node_id)) {
+    const productionNodeId = Number(form.production_node_id)
+    if (!productionNodeId) {
       showToast('请选择生产节点', 'error')
       return null
     }
@@ -243,11 +244,14 @@ export function useProductionNodes({
     }
     try {
       const result = await api.domains.production.createProductionNodeOverride(
-        Number(form.production_node_id), payload,
+        productionNodeId, payload,
       )
       showToast('生产节点日历例外已保存')
-      prepareOverride({ id: form.production_node_id })
+      prepareOverride({ id: productionNodeId })
       await loadNodes()
+      if (overrideNodeId === String(productionNodeId)) {
+        await loadOverrides({ id: productionNodeId })
+      }
       return result
     } catch (error) {
       showToast(error.message || '保存节点日历例外失败', 'error')

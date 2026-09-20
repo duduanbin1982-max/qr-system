@@ -19,6 +19,7 @@ const emit = defineEmits(['dirty-change', 'saved'])
 const digest = value => JSON.stringify(value || {})
 const initialDigest = ref(digest(props.form))
 const submitting = ref(false)
+const formDisabled = computed(() => props.saving || submitting.value)
 
 const calendarName = computed(() => (
   props.calendar?.calendar_name || props.calendar?.name || `日历 #${props.node?.calendar_id || '-'}`
@@ -169,36 +170,38 @@ async function submit() {
     <section v-if="canManage" class="node-calendar-panel__region" aria-labelledby="add-override-title">
       <h4 id="add-override-title">新增日历例外</h4>
       <form class="node-calendar-panel__form" @submit.prevent="submit">
-        <label>
-          <span>开始时间</span>
-          <input v-model="form.start_at" data-test="override-start" type="datetime-local" class="form-input" required>
-        </label>
-        <label>
-          <span>结束时间</span>
-          <input v-model="form.end_at" data-test="override-end" type="datetime-local" class="form-input" required>
-        </label>
-        <label>
-          <span>例外类型</span>
-          <select v-model="form.override_type" data-test="override-type" class="form-input">
-            <option value="unavailable">不可用</option>
-            <option value="maintenance">维护</option>
-            <option value="overtime">加班</option>
-            <option value="holiday">停工假日</option>
-          </select>
-        </label>
-        <label class="node-calendar-panel__wide">
-          <span>调整原因</span>
-          <textarea v-model="form.reason" data-test="override-reason" class="form-input" rows="3" required />
-        </label>
-        <label class="node-calendar-panel__wide">
-          <span>幂等键</span>
-          <input v-model="form.idempotency_key" data-test="override-idempotency-key" class="form-input" required>
-        </label>
-        <div class="node-calendar-panel__actions">
-          <button data-test="override-save" type="submit" class="btn btn-primary" :disabled="saving">
-            {{ saving ? '正在保存…' : '保存日历例外' }}
-          </button>
-        </div>
+        <fieldset data-test="override-fields" class="node-calendar-panel__fields" :disabled="formDisabled">
+          <label>
+            <span>开始时间</span>
+            <input v-model="form.start_at" data-test="override-start" type="datetime-local" class="form-input" required>
+          </label>
+          <label>
+            <span>结束时间</span>
+            <input v-model="form.end_at" data-test="override-end" type="datetime-local" class="form-input" required>
+          </label>
+          <label>
+            <span>例外类型</span>
+            <select v-model="form.override_type" data-test="override-type" class="form-input">
+              <option value="unavailable">不可用</option>
+              <option value="maintenance">维护</option>
+              <option value="overtime">加班</option>
+              <option value="holiday">停工假日</option>
+            </select>
+          </label>
+          <label class="node-calendar-panel__wide">
+            <span>调整原因</span>
+            <textarea v-model="form.reason" data-test="override-reason" class="form-input" rows="3" required />
+          </label>
+          <label class="node-calendar-panel__wide">
+            <span>幂等键</span>
+            <input v-model="form.idempotency_key" data-test="override-idempotency-key" class="form-input" required>
+          </label>
+          <div class="node-calendar-panel__actions">
+            <button data-test="override-save" type="submit" class="btn btn-primary">
+              {{ formDisabled ? '正在保存…' : '保存日历例外' }}
+            </button>
+          </div>
+        </fieldset>
       </form>
     </section>
   </section>
@@ -242,11 +245,17 @@ async function submit() {
 }
 
 .node-calendar-panel__summary,
-.node-calendar-panel__form {
+.node-calendar-panel__fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin: 14px 0 0;
+}
+
+.node-calendar-panel__fields {
+  min-width: 0;
+  padding: 0;
+  border: 0;
 }
 
 .node-calendar-panel__summary div {
@@ -305,7 +314,7 @@ async function submit() {
   white-space: nowrap;
 }
 
-.node-calendar-panel__form label {
+.node-calendar-panel__fields label {
   display: grid;
   gap: 7px;
   color: var(--text-secondary);
@@ -323,9 +332,9 @@ async function submit() {
   justify-content: flex-end;
 }
 
-@media (max-width: 699px) {
+@media (max-width: 899px) {
   .node-calendar-panel__summary,
-  .node-calendar-panel__form {
+  .node-calendar-panel__fields {
     grid-template-columns: 1fr;
   }
 }

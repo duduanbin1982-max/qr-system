@@ -3,6 +3,7 @@ import { h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
+import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 
@@ -222,6 +223,55 @@ describe('ProductionNodeWorkbench', () => {
     mobileSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
     expect(manager.actions.editNode).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+  })
+
+  it('renders the refreshed override list after the manager save action reloads the selected node', async () => {
+    const manager = managerFixture()
+    manager.state.productionNodes.value = manager.state.productionNodes.value.map(node => ({
+      ...node,
+      calendar_id: 3,
+    }))
+    manager.state.productionCalendars.value = [{ id: 3, calendar_name: '生产九小时日历', daily_minutes: 540 }]
+    manager.state.overrideForm.value = {
+      production_node_id: 11,
+      start_at: '2026-09-21T08:00',
+      end_at: '2026-09-21T12:00',
+      override_type: 'maintenance',
+      reason: '新建检修',
+      idempotency_key: 'calendar-11',
+    }
+    manager.actions.loadOverrides.mockImplementation(async node => {
+      if (manager.actions.createCalendarOverride.mock.calls.length) {
+        manager.state.nodeOverrides.value = [{
+          id: 91,
+          production_node_id: node.id,
+          override_type: 'maintenance',
+          start_at: '2026-09-21T08:00:00',
+          end_at: '2026-09-21T12:00:00',
+          status: 'active',
+          reason: '新建检修',
+          created_at: '2026-09-20T16:00:00',
+        }]
+      }
+      return { overrides: manager.state.nodeOverrides.value }
+    })
+    manager.actions.createCalendarOverride.mockImplementation(async () => {
+      await manager.actions.loadOverrides(manager.state.productionNodes.value[0])
+      return { id: 91 }
+    })
+    const { wrapper } = mountWorkbench({ manager })
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await flushPromises()
+
+    await wrapper.findComponent(NodeCalendarPanel).get('form').trigger('submit')
+    await flushPromises()
+
+    expect(manager.actions.createCalendarOverride).toHaveBeenCalledOnce()
+    expect(manager.actions.loadOverrides).toHaveBeenCalledTimes(2)
+    expect(manager.actions.loadOverrides).toHaveBeenLastCalledWith(expect.objectContaining({ id: 11 }))
+    expect(wrapper.findComponent(NodeCalendarPanel).text()).toContain('新建检修')
   })
 
   it('selects a created node after the controller-owned refresh without reloading again', async () => {

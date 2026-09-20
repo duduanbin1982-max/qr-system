@@ -153,6 +153,28 @@ describe('useProductionNodes', () => {
     }))
   })
 
+  it('refreshes the selected node override list after a successful create', async () => {
+    mocks.listProductionNodeOverrides
+      .mockResolvedValueOnce({ overrides: [{ id: 81, production_node_id: 11, reason: '旧例外' }] })
+      .mockResolvedValueOnce({ overrides: [{ id: 91, production_node_id: 11, reason: '新建检修' }] })
+    const nodes = createNodes()
+    await nodes.loadNodes()
+    const selectedNode = nodes.productionNodes.value[0]
+    nodes.prepareOverride(selectedNode)
+    await nodes.loadOverrides(selectedNode)
+    nodes.overrideForm.value.start_at = '2026-09-21T08:00'
+    nodes.overrideForm.value.end_at = '2026-09-21T12:00'
+    nodes.overrideForm.value.reason = '新建检修'
+
+    await nodes.createCalendarOverride()
+
+    expect(mocks.listProductionNodeOverrides).toHaveBeenCalledTimes(2)
+    expect(mocks.listProductionNodeOverrides).toHaveBeenLastCalledWith(11, { limit: 200 })
+    expect(nodes.nodeOverrides.value).toEqual([
+      expect.objectContaining({ id: 91, production_node_id: 11, reason: '新建检修' }),
+    ])
+  })
+
   it('keeps node load errors in node state and allows retry', async () => {
     mocks.listProductionNodes
       .mockRejectedValueOnce(new Error('节点目录不可用'))

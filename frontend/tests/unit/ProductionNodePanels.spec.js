@@ -3,8 +3,17 @@ import { nextTick, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCalendarPanel from '@/components/production-nodes/NodeCalendarPanel.vue'
+import nodeCalendarPanelSource from '@/components/production-nodes/NodeCalendarPanel.vue?raw'
 import NodeEditorPanel from '@/components/production-nodes/NodeEditorPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
+
+function deferred() {
+  let resolve
+  const promise = new Promise(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 function formFixture(overrides = {}) {
   return reactive({
@@ -106,6 +115,11 @@ describe('NodeEditorPanel', () => {
 })
 
 describe('NodeCalendarPanel', () => {
+  it('uses the workbench-wide 899px responsive boundary without a second breakpoint', () => {
+    expect(nodeCalendarPanelSource).toContain('@media (max-width: 899px)')
+    expect(nodeCalendarPanelSource).not.toMatch(/max-width:\s*699px/)
+  })
+
   it('derives effective minutes from the calendar shifts returned by the schedule API', () => {
     const wrapper = mount(NodeCalendarPanel, {
       props: {
@@ -264,6 +278,50 @@ describe('NodeCalendarPanel', () => {
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('saved')).toEqual([[{ id: 91 }]])
     expect(wrapper.emitted('dirty-change').at(-1)).toEqual([false])
+  })
+
+  it('disables the whole form during a slow save and preserves dirty input after failure', async () => {
+    const pending = deferred()
+    const form = reactive({
+      production_node_id: 11,
+      start_at: '2026-09-21T08:00',
+      end_at: '2026-09-21T12:00',
+      override_type: 'maintenance',
+      reason: '',
+      idempotency_key: 'calendar-11',
+    })
+    const wrapper = mount(NodeCalendarPanel, {
+      props: {
+        node: { id: 11, calendar_id: 3 },
+        calendar: null,
+        overrides: [],
+        form,
+        loading: false,
+        error: '',
+        saving: false,
+        canManage: true,
+        onRetry: vi.fn(),
+        onSave: vi.fn(() => pending.promise),
+        onCancelOverride: vi.fn(),
+      },
+    })
+
+    await wrapper.get('[data-test="override-reason"]').setValue('慢请求检修')
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([true])
+
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+
+    expect(wrapper.get('[data-test="override-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="override-reason"]').element.matches(':disabled')).toBe(true)
+
+    pending.resolve(null)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="override-fields"]').attributes('disabled')).toBeUndefined()
+    expect(form.reason).toBe('慢请求检修')
+    expect(wrapper.emitted('dirty-change').at(-1)).toEqual([true])
+    expect(wrapper.emitted('saved')).toBeUndefined()
   })
 })
 
