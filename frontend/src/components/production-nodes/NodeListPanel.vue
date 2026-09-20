@@ -6,6 +6,7 @@ defineProps({
   statusFilter: { type: String, default: '' },
   loading: Boolean,
   error: { type: String, default: '' },
+  canCreate: { type: Boolean, default: true },
 })
 
 defineEmits([
@@ -48,7 +49,13 @@ function statusLabel(status) {
           <option value="inactive">停用</option>
         </select>
       </label>
-      <button data-test="node-create" type="button" class="btn btn-primary" @click="$emit('create')">
+      <button
+        v-if="canCreate"
+        data-test="node-create"
+        type="button"
+        class="btn btn-primary"
+        @click="$emit('create')"
+      >
         新建节点
       </button>
     </div>

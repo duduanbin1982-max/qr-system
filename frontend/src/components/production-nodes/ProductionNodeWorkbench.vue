@@ -13,8 +13,11 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'closed'])
 const dialogRef = ref(null)
 const titleRef = ref(null)
+const discardDialogRef = ref(null)
 let returnFocus = null
 let previousBodyOverflow = ''
+let ownsBodyScrollLock = false
+let discardReturnFocus = null
 
 const state = props.manager.state
 const actions = props.manager.actions
@@ -23,6 +26,7 @@ const productionNodes = computed(() => unref(state.productionNodes) || [])
 const productionCalendars = computed(() => unref(state.productionCalendars) || [])
 const nodesLoading = computed(() => Boolean(unref(state.nodesLoading)))
 const nodesError = computed(() => String(unref(state.nodesError) || ''))
+const canManageNodes = computed(() => Boolean(unref(permissions.canManageNodes)))
 
 function closeWorkbench() {
   emit('update:modelValue', false)
@@ -65,6 +69,7 @@ function selectNodeById(value) {
 }
 
 function openCreate() {
+  if (!canManageNodes.value) return
   actions.resetNodeForm()
   workbench.selectedNodeId.value = null
   workbench.markDirty(false)
@@ -86,26 +91,68 @@ function onDialogKeydown(event) {
     return
   }
   if (event.key !== 'Tab') return
-  const focusable = [...(dialogRef.value?.querySelectorAll(focusableSelector) || [])]
+  const focusRoot = discardDialogRef.value || dialogRef.value
+  const focusable = [...(focusRoot?.querySelectorAll(focusableSelector) || [])]
   if (!focusable.length) return
   const first = focusable[0]
   const last = focusable.at(-1)
-  if (event.shiftKey && document.activeElement === first) {
+  const activeElement = document.activeElement
+  const activeIndex = focusable.indexOf(activeElement)
+  if (event.shiftKey && activeIndex <= 0) {
     event.preventDefault()
     last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
+  } else if (!event.shiftKey && (activeIndex === -1 || activeElement === last)) {
     event.preventDefault()
     first.focus()
   }
 }
 
+function acquireBodyScrollLock() {
+  if (ownsBodyScrollLock) return
+  returnFocus = document.activeElement
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  ownsBodyScrollLock = true
+}
+
+function releaseBodyScrollLock() {
+  if (!ownsBodyScrollLock) return
+  const focusTarget = returnFocus
+  document.body.style.overflow = previousBodyOverflow
+  ownsBodyScrollLock = false
+  previousBodyOverflow = ''
+  returnFocus = null
+  focusTarget?.focus?.()
+}
+
+async function cancelDiscard() {
+  const focusTarget = discardReturnFocus
+  discardReturnFocus = null
+  workbench.cancelDiscard()
+  await nextTick()
+  focusTarget?.isConnected && focusTarget.focus()
+}
+
+async function confirmDiscard() {
+  const focusTarget = discardReturnFocus
+  discardReturnFocus = null
+  workbench.confirmDiscard()
+  await nextTick()
+  focusTarget?.isConnected && focusTarget.focus()
+}
+
+watch(workbench.showDiscardConfirm, async visible => {
+  if (!visible) return
+  discardReturnFocus = document.activeElement
+  await nextTick()
+  discardDialogRef.value?.querySelector(focusableSelector)?.focus()
+})
+
 watch(
   () => props.modelValue,
   async open => {
     if (open) {
-      returnFocus = document.activeElement
-      previousBodyOverflow = document.body.style.overflow
-      document.body.style.overflow = 'hidden'
+      acquireBodyScrollLock()
       if (!workbench.selectedNodeId.value && productionNodes.value.length) {
         workbench.requestNode(productionNodes.value[0])
       }
@@ -113,15 +160,15 @@ watch(
       titleRef.value?.focus()
       return
     }
-    document.body.style.overflow = previousBodyOverflow
-    returnFocus?.focus?.()
+    discardReturnFocus = null
+    releaseBodyScrollLock()
   },
   { immediate: true },
 )
 
 onBeforeUnmount(() => {
-  document.body.style.overflow = previousBodyOverflow
-  returnFocus?.focus?.()
+  discardReturnFocus = null
+  releaseBodyScrollLock()
 })
 </script>
 
@@ -181,6 +228,7 @@ onBeforeUnmount(() => {
             :status-filter="workbench.statusFilter.value"
             :loading="nodesLoading"
             :error="nodesError"
+            :can-create="canManageNodes"
             @update:search="workbench.search.value = $event"
             @update:status-filter="workbench.statusFilter.value = $event"
             @select="workbench.requestNode"
@@ -207,6 +255,7 @@ onBeforeUnmount(() => {
 
         <div
           v-if="workbench.showDiscardConfirm.value"
+          ref="discardDialogRef"
           class="node-discard-dialog"
           role="alertdialog"
           aria-modal="true"
@@ -214,8 +263,8 @@ onBeforeUnmount(() => {
         >
           <p>当前页签存在未保存更改，是否放弃？</p>
           <div>
-            <button type="button" class="btn btn-default" @click="workbench.cancelDiscard">继续编辑</button>
-            <button type="button" class="btn btn-danger" @click="workbench.confirmDiscard">放弃更改</button>
+            <button type="button" class="btn btn-default" @click="cancelDiscard">继续编辑</button>
+            <button type="button" class="btn btn-danger" @click="confirmDiscard">放弃更改</button>
           </div>
         </div>
       </section>

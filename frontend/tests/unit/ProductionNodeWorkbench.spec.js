@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import NodeListPanel from '@/components/production-nodes/NodeListPanel.vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 
 function managerFixture(overrides = {}) {
@@ -130,6 +131,18 @@ describe('ProductionNodeWorkbench', () => {
     expect(manager.actions.editNode).not.toHaveBeenCalled()
   })
 
+  it('does not expose or run the create workflow without node-management permission', async () => {
+    const manager = managerFixture()
+    manager.permissions.canManageNodes.value = false
+    const { wrapper } = mountWorkbench({ manager })
+
+    expect(document.body.querySelector('[data-test="node-create"]')).toBeNull()
+
+    wrapper.findComponent(NodeListPanel).vm.$emit('create')
+    await nextTick()
+    expect(manager.actions.resetNodeForm).not.toHaveBeenCalled()
+  })
+
   it('selects the initial node and supports node selection from desktop and mobile controls', async () => {
     const { manager } = mountWorkbench()
 
@@ -198,6 +211,88 @@ describe('ProductionNodeWorkbench', () => {
     await wrapper.setProps({ modelValue: false })
     expect(document.body.style.overflow).toBe('auto')
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it('wraps Shift+Tab from the initially focused title back into the dialog', async () => {
+    mountWorkbench()
+    await nextTick()
+
+    const dialog = document.body.querySelector('.node-workbench')
+    const title = document.body.querySelector('#production-node-workbench-title')
+    const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+
+    expect(document.activeElement).toBe(title)
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(focusable.at(-1))
+  })
+
+  it('moves focus into the discard alert, traps it there, and restores it when editing continues', async () => {
+    mountWorkbench({
+      slots: {
+        default: ({ markDirty }) => h(
+          'button',
+          { 'data-test': 'make-dirty', onClick: () => markDirty() },
+          '修改',
+        ),
+      },
+    })
+
+    await document.body.querySelector('[data-test="make-dirty"]').click()
+    const closeButton = document.body.querySelector('.node-workbench__footer button')
+    closeButton.focus()
+    await closeButton.click()
+    await nextTick()
+
+    const dialog = document.body.querySelector('.node-workbench')
+    const alert = document.body.querySelector('.node-discard-dialog')
+    const alertButtons = [...alert.querySelectorAll('button')]
+    expect(document.activeElement).toBe(alertButtons[0])
+
+    alertButtons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(alertButtons.at(-1))
+
+    alertButtons.at(-1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(alertButtons[0])
+
+    document.body.querySelector('#production-node-workbench-title').focus()
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(alertButtons[0])
+
+    await alertButtons[0].click()
+    await nextTick()
+    expect(document.body.querySelector('.node-discard-dialog')).toBeNull()
+    expect(document.activeElement).toBe(closeButton)
+  })
+
+  it('does not alter an existing body scroll lock when mounted closed', async () => {
+    document.body.style.overflow = 'hidden'
+    const { wrapper } = mountWorkbench({ props: { modelValue: false } })
+    await nextTick()
+
+    expect(document.body.style.overflow).toBe('hidden')
+    wrapper.unmount()
+    expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('releases scroll and restores focus once, then leaves later modal ownership untouched on unmount', async () => {
+    document.body.style.overflow = 'auto'
+    const { trigger, wrapper } = mountWorkbench()
+    const focusSpy = vi.spyOn(trigger, 'focus')
+    await nextTick()
+
+    await wrapper.setProps({ modelValue: false })
+    expect(document.body.style.overflow).toBe('auto')
+    expect(focusSpy).toHaveBeenCalledOnce()
+
+    const laterModalControl = document.createElement('button')
+    document.body.appendChild(laterModalControl)
+    laterModalControl.focus()
+    document.body.style.overflow = 'hidden'
+
+    wrapper.unmount()
+    expect(document.body.style.overflow).toBe('hidden')
+    expect(document.activeElement).toBe(laterModalControl)
+    expect(focusSpy).toHaveBeenCalledOnce()
   })
 
   it('shows loading and error states and retries loading nodes', async () => {
