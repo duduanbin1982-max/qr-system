@@ -399,6 +399,28 @@ describe('NodeEditorPanel', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  it('blocks editable saves when the calendar catalog is empty and offers retry', async () => {
+    const onRetryCalendars = vi.fn()
+    const onSave = vi.fn()
+    const wrapper = mountEditor({
+      props: {
+        calendars: [],
+        calendarError: '',
+        calendarLoading: false,
+        onRetryCalendars,
+        onSave,
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('暂无可用工作日历')
+    expect(wrapper.get('[data-test="node-fields"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="node-save"]').text()).toContain('等待工作日历')
+    await wrapper.get('[data-test="node-calendar-retry"]').trigger('click')
+
+    expect(onRetryCalendars).toHaveBeenCalledOnce()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('uses the shared 899px responsive boundary for its single-column layout', () => {
     expect(nodeEditorPanelSource).toContain('@media (max-width: 899px)')
     expect(nodeEditorPanelSource).not.toMatch(/max-width:\s*699px/)
@@ -678,6 +700,8 @@ describe('NodeCalendarPanel', () => {
     expect(rows.find(row => row.text().includes('已完成'))?.find('[data-test="override-cancel"]').exists()).toBe(false)
     expect(rows.find(row => row.text().includes('已过期'))?.find('[data-test="override-cancel"]').exists()).toBe(false)
     expect(rows.find(row => row.text().includes('当前检修'))?.find('[data-test="override-cancel"]').exists()).toBe(true)
+    await rows.find(row => row.text().includes('当前检修')).get('[data-test="override-cancel"]').trigger('click')
+    expect(onCancelOverride).toHaveBeenCalledWith(active)
   })
 
   it('emits dirty state from the local form digest and resets it after a successful save', async () => {

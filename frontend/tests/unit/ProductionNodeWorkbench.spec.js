@@ -14,6 +14,7 @@ const productionMocks = vi.hoisted(() => ({
   listProductionNodes: vi.fn(),
   listScheduleCalendars: vi.fn(),
   createProductionNodeOverride: vi.fn(),
+  cancelProductionNodeOverride: vi.fn(),
   listProductionNodeOverrides: vi.fn(),
   listProductionNodeCapabilities: vi.fn(),
   replaceProductionNodeCapabilities: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@/lib/api.js', () => ({
         listProductionNodes: productionMocks.listProductionNodes,
         listScheduleCalendars: productionMocks.listScheduleCalendars,
         createProductionNodeOverride: productionMocks.createProductionNodeOverride,
+        cancelProductionNodeOverride: productionMocks.cancelProductionNodeOverride,
         listProductionNodeOverrides: productionMocks.listProductionNodeOverrides,
         listProductionNodeCapabilities: productionMocks.listProductionNodeCapabilities,
         replaceProductionNodeCapabilities: productionMocks.replaceProductionNodeCapabilities,
@@ -764,6 +766,67 @@ describe('ProductionNodeWorkbench', () => {
     expect(panel.text()).toContain('B · 节点 B')
     expect(panel.text()).not.toContain('A-ONLY')
     expect(panel.findAll('[data-test="capability-row"]')).toHaveLength(0)
+  })
+
+  it('renders bare-array overrides and cancels the selected active row only', async () => {
+    productionMocks.listProductionNodes.mockReset().mockResolvedValue({
+      nodes: [{
+        id: 11,
+        process_id: 7,
+        process_name: '焊接',
+        node_code: 'WELD-01',
+        node_name: '焊接-01',
+        status: 'active',
+        capacity_mode: 'exclusive',
+        calendar_id: 3,
+      }],
+    })
+    productionMocks.listScheduleCalendars.mockReset().mockResolvedValue({
+      calendars: [{ id: 3, calendar_name: '生产九小时日历', daily_minutes: 540 }],
+    })
+    productionMocks.listProductionNodeCapabilities.mockReset().mockResolvedValue({ capabilities: [] })
+    productionMocks.listProductionNodeOverrides
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 91, production_node_id: 11, status: 'active', reason: '当前检修' },
+        { id: 92, production_node_id: 11, status: 'completed', reason: '已完成' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 91, production_node_id: 11, status: 'cancelled', reason: '当前检修' },
+        { id: 92, production_node_id: 11, status: 'completed', reason: '已完成' },
+      ])
+    productionMocks.cancelProductionNodeOverride.mockReset().mockResolvedValue({
+      id: 91,
+      production_node_id: 11,
+      status: 'cancelled',
+    })
+    const managerState = useProductionNodes({
+      canManageNodes: ref(true),
+      canManageCapabilities: ref(true),
+      canManageCalendars: ref(true),
+    })
+    await managerState.loadNodes()
+    const { wrapper } = mountWorkbench({ manager: managerState.nodeManager })
+    const calendarTab = [...document.body.querySelectorAll('[role="tab"]')]
+      .find(tab => tab.textContent === '工作日历')
+    await calendarTab.click()
+    await flushPromises()
+
+    const panel = wrapper.findComponent(NodeCalendarPanel)
+    const rows = panel.findAll('[data-test="override-row"]')
+    expect(rows).toHaveLength(2)
+    const completedRow = rows.find(row => row.text().includes('已完成'))
+    const activeRow = rows.find(row => row.text().includes('当前检修'))
+    expect(completedRow?.find('[data-test="override-cancel"]').exists()).toBe(false)
+    expect(activeRow?.find('[data-test="override-cancel"]').exists()).toBe(true)
+    await activeRow.get('[data-test="override-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(productionMocks.cancelProductionNodeOverride).toHaveBeenCalledWith(
+      91,
+      expect.objectContaining({ reason: expect.any(String), idempotency_key: expect.any(String) }),
+    )
   })
 
   it('renders the refreshed override list after the manager save action reloads the selected node', async () => {

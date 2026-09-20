@@ -18,7 +18,9 @@ const emit = defineEmits(['dirty-change', 'saved'])
 const digest = value => JSON.stringify(value || {})
 const initialDigest = ref(digest(props.form))
 const submitting = ref(false)
-const calendarUnavailable = computed(() => props.calendarLoading || Boolean(props.calendarError))
+const calendarUnavailable = computed(() => props.canManage && (
+  props.calendarLoading || Boolean(props.calendarError) || !props.calendars.length
+))
 const formDisabled = computed(() => props.saving || submitting.value || calendarUnavailable.value)
 
 const processLabel = computed(() => (
@@ -94,6 +96,20 @@ async function submit() {
       role="alert"
     >
       <span>{{ calendarError }}{{ calendarUnavailable ? '，暂时无法保存节点。' : '' }}</span>
+      <button
+        data-test="node-calendar-retry"
+        type="button"
+        class="btn btn-default"
+        :disabled="saving || submitting"
+        @click="onRetryCalendars"
+      >重试</button>
+    </div>
+    <div
+      v-else-if="canManage && !calendars.length"
+      class="node-editor-panel__notice node-editor-panel__notice--error"
+      role="alert"
+    >
+      <span>暂无可用工作日历，暂时无法保存节点。</span>
       <button
         data-test="node-calendar-retry"
         type="button"

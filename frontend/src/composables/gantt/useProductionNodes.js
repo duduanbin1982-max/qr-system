@@ -104,6 +104,10 @@ function futureOverrideCount(overrides) {
   }).length
 }
 
+function normalizeOverrideList(result) {
+  return Array.isArray(result) ? result : result?.overrides || result?.items || []
+}
+
 
 export function useProductionNodes({
   canViewNodes = ref(true),
@@ -437,7 +441,7 @@ export function useProductionNodes({
       ])
       if (!contextIsCurrent(snapshot)) return null
       const capabilities = capabilityData.capabilities || []
-      const overrides = overrideData.overrides || overrideData.items || []
+      const overrides = normalizeOverrideList(overrideData)
       const nextSummary = {
         ...nodeSummary.value,
         production_node_id: node.id,
@@ -501,7 +505,7 @@ export function useProductionNodes({
         { limit: 200 },
       )
       if (!contextIsCurrent(snapshot)) return null
-      const overrides = result.overrides || result.items || []
+      const overrides = normalizeOverrideList(result)
       nodeOverrides.value = overrides
       if (nodeKey(nodeSummary.value.production_node_id) === snapshot.nodeId) {
         overrideCountVersion += 1

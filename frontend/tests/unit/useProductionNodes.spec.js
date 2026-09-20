@@ -248,6 +248,43 @@ describe('useProductionNodes', () => {
     expect(mocks.listProductionNodeOverrides).toHaveBeenCalledWith(11, { limit: 200 })
   })
 
+  it('loads bare-array calendar overrides into the selected-node detail state', async () => {
+    const overrides = [{
+      id: 91,
+      production_node_id: 11,
+      start_at: '2099-01-01T08:00:00',
+      end_at: '2099-01-01T12:00:00',
+      status: 'active',
+    }]
+    mocks.listProductionNodeOverrides.mockResolvedValueOnce(overrides)
+    const nodes = createNodes()
+    const node = { id: 11, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(node)
+
+    const result = await nodes.loadOverrides(node)
+
+    expect(result).toEqual(overrides)
+    expect(nodes.nodeOverrides.value).toEqual(overrides)
+    expect(nodes.nodeSummary.value.future_override_count).toBe(1)
+  })
+
+  it('counts future overrides from a bare-array summary response', async () => {
+    mocks.listProductionNodeCapabilities.mockResolvedValueOnce({ capabilities: [] })
+    mocks.listProductionNodeOverrides.mockResolvedValueOnce([{
+      id: 92,
+      production_node_id: 11,
+      end_at: '2099-01-02T12:00:00',
+      status: 'active',
+    }])
+    const nodes = createNodes()
+    const node = { id: 11, node_code: 'WELD-01', node_name: '焊接-01' }
+    nodes.selectNodeContext(node)
+
+    await nodes.loadNodeSummary(node)
+
+    expect(nodes.nodeSummary.value.future_override_count).toBe(1)
+  })
+
   it('clears detail contexts and blocks stale writes after the current node becomes null', async () => {
     mocks.listProductionNodeCapabilities.mockResolvedValueOnce({ capabilities: [] })
     const nodes = createNodes()
