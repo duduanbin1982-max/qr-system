@@ -546,6 +546,42 @@ describe('NodeCalendarPanel', () => {
     expect(onRetryCalendar).toHaveBeenCalledOnce()
   })
 
+  it('keeps stale base-calendar data visibly retryable after refresh failure', async () => {
+    const onRetryCalendar = vi.fn()
+    const wrapper = mount(NodeCalendarPanel, {
+      props: {
+        node: { id: 11, calendar_id: 3 },
+        calendar: { id: 3, calendar_name: '旧生产日历', daily_minutes: 540 },
+        calendarLoading: false,
+        calendarError: '工作日历刷新失败',
+        overrides: [],
+        form: {
+          production_node_id: 11,
+          start_at: '',
+          end_at: '',
+          override_type: 'maintenance',
+          reason: '',
+          idempotency_key: 'calendar-11',
+        },
+        loading: false,
+        error: '',
+        saving: false,
+        canManage: false,
+        onRetry: vi.fn(),
+        onRetryCalendar,
+        onSave: vi.fn(),
+        onCancelOverride: vi.fn(),
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('工作日历刷新失败')
+    expect(wrapper.get('[role="alert"]').text()).toContain('显示最近一次工作日历')
+    expect(wrapper.get('[data-test="base-calendar-retry"]').exists()).toBe(true)
+    await wrapper.get('[data-test="base-calendar-retry"]').trigger('click')
+
+    expect(onRetryCalendar).toHaveBeenCalledOnce()
+  })
+
   it('orders overrides newest first and delegates cancellation', async () => {
     const onCancelOverride = vi.fn()
     const older = {

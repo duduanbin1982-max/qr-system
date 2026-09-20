@@ -133,8 +133,14 @@ async function submit() {
           >重试</button>
         </div>
         <template v-else>
-          <div v-if="calendarError" class="node-calendar-panel__notice node-calendar-panel__notice--error" role="status">
-            {{ calendarError }}，显示最近一次工作日历。
+          <div v-if="calendarError" class="node-calendar-panel__notice node-calendar-panel__notice--error" role="alert">
+            <span>{{ calendarError }}，显示最近一次工作日历。</span>
+            <button
+              data-test="base-calendar-retry"
+              type="button"
+              class="btn btn-default"
+              @click="onRetryCalendar"
+            >重试</button>
           </div>
           <dl class="node-calendar-panel__summary">
             <div><dt>日历名称</dt><dd>{{ calendarName }}</dd></div>
