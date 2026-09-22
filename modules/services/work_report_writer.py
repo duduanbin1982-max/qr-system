@@ -80,6 +80,33 @@ class WorkReportWriter:
         return cls.unit_of_work or BaseService
 
     @staticmethod
+    def _mark_schedule_replan(
+        order_id, process_id, trigger_type, source_type, source_id,
+        reason, quantity, actor_id, db,
+    ):
+        from modules.repositories.schedule_capacity_repository import (
+            ScheduleCapacityRepository,
+        )
+
+        operation = WorkReportWriter._scan_helper_service().get_order_process(
+            order_id, process_id, db=db
+        )
+        ScheduleCapacityRepository.record_replan_trigger(
+            order_id,
+            trigger_type,
+            source_type,
+            source_id,
+            reason,
+            order_process_id=operation["id"] if operation else None,
+            details={
+                "process_id": int(process_id),
+                "quantity": int(quantity or 0),
+            },
+            created_by=actor_id,
+            db=db,
+        )
+
+    @staticmethod
     def execute_report_write(command):
         """共享报工写入逻辑。整个方法在事务中执行，全部成功或全部回滚。"""
         scan_helper_service = WorkReportWriter._scan_helper_service()
@@ -353,6 +380,17 @@ class WorkReportWriter:
             actor_id=command.user_id,
             db=db,
         )
+        WorkReportWriter._mark_schedule_replan(
+            command.order_id,
+            command.process_id,
+            "work_report",
+            "work_record",
+            work_record_id,
+            "实际报工进度发生变化",
+            command.effective_quantity,
+            command.user_id,
+            db,
+        )
 
     @staticmethod
     def _apply_approved_normal_effects(helper, order_id, process_id, user_id, user_name,
@@ -467,6 +505,17 @@ class WorkReportWriter:
             new_scrapped = (op["scrapped"] or 0) + quantity
             helper.update_order_process_scrapped(order_id, process_id, new_scrapped, db=db)
         helper.update_order_scrapped(order_id, db=db)
+        WorkReportWriter._mark_schedule_replan(
+            order_id,
+            process_id,
+            "scrap",
+            "scrap_record",
+            scrap_id,
+            "报废数量发生变化",
+            quantity,
+            user_id,
+            db,
+        )
 
     @staticmethod
     def _write_rework_report(order_id, process_id, user_id, quantity, remark, db):

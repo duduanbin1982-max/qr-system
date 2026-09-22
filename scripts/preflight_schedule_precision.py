@@ -24,6 +24,130 @@ from modules.repositories.schedule_capacity_repository import ScheduleCapacityRe
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
+WORK_TIME_MATCH_TIERS = {
+    "route_version:product": "exact_product_route_process_version",
+    "route_version:generic": "exact_route_process_version_generic",
+    "route:product": "route_product_fallback",
+    "route:generic": "route_generic_fallback",
+    "process:product": "process_product_fallback",
+    "process:generic": "process_generic_fallback",
+    "execution_policy": "non_scheduled",
+}
+VERSION_BOUND_MATCH_TIERS = {
+    "exact_product_route_process_version",
+    "exact_route_process_version_generic",
+}
+
+
+def classify_work_time_operation(order, operation):
+    """Normalize one generated operation for the work-time coverage audit.
+
+    The scheduler remains the source of truth for matching.  This helper only
+    labels the result so reports can distinguish exact version matches,
+    deliberate non-scheduled work, fallback standards and real gaps.
+    """
+
+    status = str(operation.get("status") or "").strip() or "unknown"
+    execution_mode = str(operation.get("execution_mode") or "internal").strip()
+    scope = str(operation.get("standard_match_scope") or "").strip()
+    blocked_code = str(operation.get("blocked_code") or "").strip()
+    if execution_mode in {"outsourced", "non_scheduled"} or scope == "execution_policy":
+        tier = "non_scheduled"
+    elif status == "completed":
+        tier = "completed_fact"
+    elif blocked_code == "MISSING_WORK_TIME_STANDARD":
+        tier = "missing_standard"
+    elif status == "blocked":
+        tier = {
+            "UPSTREAM_BLOCKED": "blocked_upstream",
+            "NO_COMPATIBLE_NODE": "blocked_no_compatible_node",
+            "NODE_CALENDAR_UNAVAILABLE": "blocked_calendar",
+        }.get(blocked_code, "blocked_other")
+    else:
+        tier = WORK_TIME_MATCH_TIERS.get(scope, "matched_unclassified")
+
+    return {
+        "order_id": order.get("id"),
+        "order_no": order.get("order_no") or "",
+        "product_id": order.get("product_id"),
+        "product_code": order.get("product_code") or "",
+        "product_name": order.get("product_name") or "",
+        "order_process_id": operation.get("order_process_id"),
+        "process_id": operation.get("process_id"),
+        "process_name": operation.get("process_name_snapshot")
+        or operation.get("process_name")
+        or "",
+        "route_version_id": operation.get("route_version_id"),
+        "process_version_id": operation.get("process_version_id"),
+        "status": status,
+        "execution_mode": execution_mode,
+        "standard_match_scope": scope,
+        "match_tier": tier,
+        "standard_id": operation.get("standard_id"),
+        "standard_version": operation.get("standard_version"),
+        "standard_minutes_per_unit": operation.get("standard_minutes_per_unit"),
+        "setup_minutes": operation.get("setup_minutes"),
+        "difficulty_factor": operation.get("difficulty_factor"),
+        "blocked_code": blocked_code,
+        "blocked_reason": operation.get("blocked_reason")
+        or operation.get("reason")
+        or "",
+    }
+
+
+def summarize_work_time_coverage(rows):
+    """Return auditable coverage metrics for normalized operation rows."""
+
+    tier_counts = Counter(row.get("match_tier") or "unknown" for row in rows)
+    # Completed facts and approved external/non-scheduled work do not require
+    # an internal standard.  They are reported separately, not counted as
+    # missing coverage.
+    evaluable = [
+        row
+        for row in rows
+        if row.get("match_tier") not in {"completed_fact", "non_scheduled"}
+    ]
+    missing = [row for row in evaluable if row.get("match_tier") == "missing_standard"]
+    matched = [
+        row
+        for row in evaluable
+        if row.get("status") == "planned"
+        and row.get("standard_id") is not None
+    ]
+    version_bound = [
+        row for row in matched if row.get("match_tier") in VERSION_BOUND_MATCH_TIERS
+    ]
+    blocked = [row for row in evaluable if str(row.get("status")) == "blocked"]
+    return {
+        "operation_count": len(rows),
+        "evaluable_internal_operation_count": len(evaluable),
+        "matched_operation_count": len(matched),
+        "version_bound_match_count": len(version_bound),
+        "missing_standard_operation_count": len(missing),
+        "blocked_operation_count": len(blocked),
+        "completed_fact_count": tier_counts.get("completed_fact", 0),
+        "non_scheduled_count": tier_counts.get("non_scheduled", 0),
+        "coverage_percent": round(
+            len(matched) / len(evaluable) * 100, 2
+        )
+        if evaluable
+        else 100.0,
+        "version_bound_coverage_percent": round(
+            len(version_bound) / len(evaluable) * 100, 2
+        )
+        if evaluable
+        else 100.0,
+        "tier_counts": dict(sorted(tier_counts.items())),
+        "missing_standard_details": missing,
+        "blocked_details": blocked,
+        "fallback_details": [
+            row
+            for row in evaluable
+            if str(row.get("match_tier") or "").endswith("_fallback")
+        ],
+    }
+
+
 def _copy_database(source_path):
     source_uri = f"file:{os.path.abspath(source_path)}?mode=ro"
     source = sqlite3.connect(source_uri, uri=True)
@@ -57,6 +181,7 @@ def run_preflight(source_path, limit=1000):
         product_stats = {}
         blocked_reasons = Counter()
         missing_standard_details = []
+        work_time_audit_rows = []
         for order in orders:
             run_key = f"preflight-{order['id']}-{order['plan_start'] or 'no-date'}"
             product_key = (
@@ -91,6 +216,8 @@ def run_preflight(source_path, limit=1000):
             operations = result.get("operations", [])
             totals["operations"] += len(operations)
             for operation in operations:
+                audit_row = classify_work_time_operation(order, operation)
+                work_time_audit_rows.append(audit_row)
                 process_key = str(operation.get("process_id"))
                 process_stats.setdefault(process_key, {
                     "process_id": operation.get("process_id"),
@@ -156,6 +283,8 @@ def run_preflight(source_path, limit=1000):
         totals["line_loads"] = line_loads
         totals["blocked_reason_counts"] = dict(sorted(blocked_reasons.items()))
         totals["missing_standard_details"] = missing_standard_details
+        totals["work_time_coverage"] = summarize_work_time_coverage(work_time_audit_rows)
+        totals["work_time_audit_rows"] = work_time_audit_rows
 
         def finalize_stats(stats):
             result = []

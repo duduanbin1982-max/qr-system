@@ -456,20 +456,20 @@ def test_v086_catalog_failure_keeps_version_85_and_leaves_no_partial_schema(
     assert _v086_tables(migrated_v085_db) == set()
 
 
-def test_test_template_reaches_v087_with_the_approved_21_node_baseline(tmp_path):
+def test_test_template_reaches_latest_with_the_approved_21_node_baseline(tmp_path):
     from conftest import _create_schema_database
 
     database = tmp_path / "v086-template.db"
     _create_schema_database(str(database))
     db = sqlite3.connect(database)
     try:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 90
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
     finally:
         db.close()
 
 
-def test_v070_replica_reaches_v087_with_complete_approved_process_versions():
+def test_v070_replica_reaches_latest_with_complete_approved_process_versions():
     from modules import migrations
 
     db = sqlite3.connect(":memory:")
@@ -507,9 +507,60 @@ def test_v070_replica_reaches_v087_with_complete_approved_process_versions():
             "WHERE p.name IN ('下料','铆接','焊接','抛丸','打磨','镗孔','喷漆') "
             "AND e.event_type='legacy_baseline_created'"
         ).fetchone()[0] == 7
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 90
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        db.close()
+
+
+def test_v091_allows_node_native_segments_and_preserves_legacy_allocations(tmp_path):
+    from conftest import _create_schema_database
+
+    database = tmp_path / "v091-node-native-segments.db"
+    _create_schema_database(str(database))
+    db = sqlite3.connect(database)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        segment_columns = {
+            row["name"]: row
+            for row in db.execute(
+                "PRAGMA table_info(order_process_schedule_segments)"
+            ).fetchall()
+        }
+        assert segment_columns["process_line_id"]["notnull"] == 0
+        assert segment_columns["production_node_id"]["notnull"] == 0
+
+        line = db.execute(
+            "SELECT id,process_id,calendar_id FROM process_production_lines "
+            "WHERE status='active' ORDER BY id LIMIT 1"
+        ).fetchone()
+        ids = _seed_v087_fact_set(
+            db, suffix="v091-native", process_line_id=line["id"]
+        )
+        node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,calendar_id,legacy_process_line_id) "
+            "VALUES (?,?,?, ?,NULL)",
+            (line["process_id"], "V091-NATIVE", "V091节点", line["calendar_id"]),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO order_process_schedule_segments "
+            "(schedule_id,process_line_id,production_node_id,segment_start_at,"
+            "segment_end_at,occupied_minutes,quantity) "
+            "VALUES (?,NULL,?,'2026-09-21 10:00','2026-09-21 11:00',60,1)",
+            (ids["schedule"], node_id),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO order_process_schedule_segments "
+                "(schedule_id,process_line_id,production_node_id,segment_start_at,"
+                "segment_end_at,occupied_minutes,quantity) "
+                "VALUES (?,NULL,NULL,'2026-09-21 11:00','2026-09-21 12:00',60,1)",
+                (ids["schedule"],),
+            )
+        db.rollback()
     finally:
         db.close()
 

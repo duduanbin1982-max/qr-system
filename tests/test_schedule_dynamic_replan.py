@@ -5,6 +5,7 @@ import pytest
 from factories import create_process_route
 from modules import config
 from modules.db import get_db
+from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -42,6 +43,18 @@ def _seed_order(db, process_id, quantity=10):
     )
     db.commit()
     return order_id, route_id
+
+
+def _publish_revision(revision_id, actor_id, key_prefix):
+    ScheduleCapacityService.submit_revision(
+        revision_id, "提交测试排程", f"{key_prefix}-submit", actor_id
+    )
+    ScheduleCapacityService.approve_revision(
+        revision_id, "批准测试排程", f"{key_prefix}-approve", actor_id
+    )
+    ScheduleCapacityService.publish_revision(
+        revision_id, "发布测试排程", f"{key_prefix}-publish", actor_id
+    )
 
 
 def test_dynamic_replan_uses_completed_and_open_rework_quantities(client):
@@ -145,6 +158,133 @@ def test_dynamic_replan_keeps_the_previous_revision_and_carries_completed_fact(c
         assert db.execute(
             "SELECT COUNT(*) FROM schedule_revision_items WHERE revision_id=?", (initial["schedule_revision_id"],)
         ).fetchone()[0] == 1
+
+
+def test_dynamic_replan_keeps_formal_projection_and_records_immutable_difference(client):
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        order_id, _ = _seed_order(db, process_id, quantity=5)
+        initial = ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            start_date="2026-09-01",
+            schedule_run_key="dynamic-formal-baseline",
+        )
+        user_id = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()[0]
+        _publish_revision(initial["schedule_revision_id"], user_id, "dynamic-formal")
+        formal_before = [
+            tuple(row) for row in db.execute(
+                "SELECT id,quantity,planned_start_at,planned_end_at,production_node_id,process_line_id "
+                "FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        ]
+        operation = db.execute(
+            "SELECT id FROM order_processes WHERE order_id=? AND process_id=?",
+            (order_id, process_id),
+        ).fetchone()
+        db.execute(
+            "UPDATE order_processes SET completed=2,status='in_progress' WHERE id=?",
+            (operation["id"],),
+        )
+        work_record_id = db.execute(
+            "INSERT INTO work_records (order_id,process_id,user_id,type,status,quantity) "
+            "VALUES (?,?,?,'normal','approved',2)",
+            (order_id, process_id, user_id),
+        ).lastrowid
+        ScheduleCapacityRepository.record_replan_trigger(
+            order_id,
+            "work_report",
+            "work_record",
+            work_record_id,
+            "实际报工进度发生变化",
+            order_process_id=operation["id"],
+            details={"quantity": 2, "process_id": process_id},
+            created_by=user_id,
+            db=db,
+        )
+        db.commit()
+
+        result = ScheduleCapacityService.dynamic_replan_order(
+            order_id,
+            start_at="2026-09-02 08:00",
+            schedule_run_key="dynamic-formal-replan",
+            reason="报工进度变化",
+            actor_id=user_id,
+        )
+
+        formal_after = [
+            tuple(row) for row in db.execute(
+                "SELECT id,quantity,planned_start_at,planned_end_at,production_node_id,process_line_id "
+                "FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        ]
+        assert formal_after == formal_before
+        assert result["revision_status"] == "draft"
+        assert result["operations"][0]["quantity"] == 3
+        assert result["replan_summary"]["changed_operation_count"] == 1
+        assert result["replan_summary"]["trigger_reasons"] == ["实际报工进度发生变化"]
+        difference = result["differences"][0]
+        assert difference["quantity_delta"] == -2
+        assert difference["after"]["completed_quantity_snapshot"] == 2
+        order = db.execute(
+            "SELECT schedule_replan_required,schedule_replan_reason,current_schedule_revision_id "
+            "FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()
+        assert order["schedule_replan_required"] == 1
+        assert order["current_schedule_revision_id"] == initial["schedule_revision_id"]
+        summary = db.execute(
+            "SELECT * FROM schedule_replan_summaries WHERE revision_id=?",
+            (result["schedule_revision_id"],),
+        ).fetchone()
+        assert summary["changed_operation_count"] == 1
+        with pytest.raises(Exception, match="immutable"):
+            db.execute(
+                "UPDATE schedule_replan_summaries SET risk_change='worsened' WHERE id=?",
+                (summary["id"],),
+            )
+
+
+def test_node_downtime_marks_overlapping_formal_order_for_replan(client, monkeypatch):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", True)
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
+        order_id, _ = _seed_order(db, process_id, quantity=1)
+        initial = ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            start_date="2026-09-01",
+            schedule_run_key="dynamic-downtime-formal",
+        )
+        user_id = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()[0]
+        _publish_revision(initial["schedule_revision_id"], user_id, "dynamic-downtime")
+        schedule = db.execute(
+            "SELECT production_node_id,planned_start_at,planned_end_at "
+            "FROM order_process_schedules WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        db.commit()
+
+        created = ScheduleCapacityService.create_downtime_event(
+            schedule["production_node_id"],
+            schedule["planned_start_at"],
+            schedule["planned_end_at"],
+            "设备故障",
+            created_by=user_id,
+        )
+        assert created["affected_order_ids"] == [order_id]
+        order = db.execute(
+            "SELECT schedule_replan_required,schedule_replan_reason FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()
+        assert tuple(order) == (1, "生产节点新增停机时段")
+        trigger = db.execute(
+            "SELECT trigger_type,source_id FROM schedule_replan_triggers WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        assert tuple(trigger) == ("downtime_created", created["event"]["id"])
 
 
 @pytest.mark.parametrize("start_at", ["bad timestamp", "2026/09/01"])

@@ -75,6 +75,7 @@ function createState() {
   return {
     stats: { total: 1, producing: 1, pending: 0, completed: 0 },
     riskSummary: { overdue: 0, high: 0, medium: 0, delayed: 0, totalDelayMinutes: 0 },
+    riskFilter: 'all',
     viewMode: 'operations',
     scheduleScope: 'active',
     canViewNodes: true,
@@ -98,17 +99,21 @@ function createState() {
     exportImage: fn(),
     capacityProcessFilter: '',
     capacityNodeFilter: '',
+    capacityRiskFilter: 'all',
     processOptions: [{ id: 7, name: '焊接' }],
     capacityNodes: [node],
-    capacitySummary: { total: 1, planned: 0, blocked: 1, minutes: 0 },
+    capacitySummary: { total: 1, planned: 0, blocked: 1, conflicts: 0, minutes: 0 },
+    conflictAudit: { line_conflicts: 0, conflicts: [], risk_counts: {}, risk_orders: [] },
     generationOrderId: '',
     generationStartDate: '2026-09-19',
     capacityOrders: [],
+    selectedReplanOrder: null,
     prepareGeneration: fn(),
     generateSchedule: fn(),
     replanOrderId: '',
     replanStartAt: '2026-09-19T08:00',
     replanReason: '',
+    replanResult: null,
     prepareDynamicReplan: fn(),
     dynamicReplanSchedule: fn(),
     prepareAutoPlan: fn(),
@@ -142,6 +147,7 @@ function createState() {
       revision_item_id: 901,
       schedule_revision_id: 77,
       revision_status: 'draft',
+      revision_approval_status: 'draft',
       allocations: [],
     }],
     nodeLabel: row => `${row.node_code} · ${row.node_name}`,
@@ -162,6 +168,14 @@ function createState() {
     approveRevision: fn(),
     rejectRevision: fn(),
     publishRevision: fn(),
+    revisionState: row => {
+      if (row.revision_status === 'published') return 'published'
+      if (row.revision_approval_status === 'submitted') return 'pending_approval'
+      if (row.revision_approval_status === 'approved') return 'approved'
+      if (row.revision_approval_status === 'rejected') return 'rejected'
+      return row.revision_status || 'draft'
+    },
+    revisionStatusLabel: () => '草稿',
     loading: false,
     filteredOrders: [],
     selectedOrderIds: [],

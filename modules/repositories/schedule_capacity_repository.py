@@ -228,7 +228,8 @@ class ScheduleCapacityRepository:
         single route/process topology can prove the binding.
         """
         order = db.execute(
-            "SELECT id,route_id,route_version_id,route_name_snapshot FROM orders "
+            "SELECT id,route_id,route_version_id,route_name_snapshot,"
+            "current_schedule_revision_id FROM orders "
             "WHERE id=? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
         if not order:
@@ -310,7 +311,7 @@ class ScheduleCapacityRepository:
         )
         return db.execute(
             "SELECT id,quantity,completed,status,plan_start,plan_end,deadline,product_id,product_code,product_name,"
-            "route_id,route_version_id,route_name_snapshot "
+            "route_id,route_version_id,route_name_snapshot,current_schedule_revision_id "
             "FROM orders WHERE id=? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
 
@@ -513,6 +514,148 @@ class ScheduleCapacityRepository:
         )
 
     @staticmethod
+    def record_replan_trigger(
+        order_id, trigger_type, source_type, source_id, reason, *,
+        order_process_id=None, details=None, created_by=None, db=None,
+    ):
+        """Append immutable evidence and mark the order pending replan."""
+        db = resolve_db(db)
+        payload = details if isinstance(details, dict) else {}
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        digest_input = json.dumps(
+            {
+                "order_id": int(order_id),
+                "order_process_id": int(order_process_id) if order_process_id else None,
+                "trigger_type": str(trigger_type or "manual"),
+                "source_type": str(source_type or "manual"),
+                "source_id": int(source_id) if source_id is not None else None,
+                "reason": str(reason or ""),
+                "details": payload,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
+        cursor = db.execute(
+            "INSERT OR IGNORE INTO schedule_replan_triggers "
+            "(order_id,order_process_id,trigger_type,source_type,source_id,reason,"
+            "fact_digest,details_json,created_by) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                int(order_id), int(order_process_id) if order_process_id else None,
+                str(trigger_type or "manual"), str(source_type or "manual"),
+                int(source_id) if source_id is not None else None,
+                str(reason or "").strip() or "生产事实发生变化",
+                digest, encoded, created_by,
+            ),
+        )
+        db.execute(
+            "UPDATE orders SET schedule_replan_required=1,schedule_replan_reason=?,"
+            "updated_at=datetime('now','localtime') WHERE id=? AND deleted_at IS NULL",
+            (str(reason or "").strip() or "生产事实发生变化", int(order_id)),
+        )
+        if cursor.rowcount:
+            return cursor.lastrowid
+        row = db.execute(
+            "SELECT id FROM schedule_replan_triggers WHERE order_id=? "
+            "AND trigger_type=? AND source_type=? AND source_id IS ? AND fact_digest=?",
+            (int(order_id), trigger_type, source_type, source_id, digest),
+        ).fetchone()
+        return row["id"] if row else None
+
+    @staticmethod
+    def list_replan_triggers(order_id, limit=200, db=None):
+        db = resolve_db(db)
+        limit = min(max(int(limit or 200), 1), 1000)
+        return db.execute(
+            "SELECT * FROM schedule_replan_triggers WHERE order_id=? "
+            "ORDER BY created_at DESC,id DESC LIMIT ?",
+            (int(order_id), limit),
+        ).fetchall()
+
+    @staticmethod
+    def affected_order_ids_for_downtime(
+        production_node_id, start_at, end_at, db=None,
+    ):
+        db = resolve_db(db)
+        rows = db.execute(
+            "SELECT DISTINCT interval.order_id FROM schedule_effective_capacity_intervals interval "
+            "JOIN orders o ON o.id=interval.order_id "
+            "WHERE interval.production_node_id=? AND interval.start_at<? "
+            "AND interval.end_at>? AND o.deleted_at IS NULL "
+            "AND o.status IN ('pending','producing') ORDER BY interval.order_id",
+            (int(production_node_id), str(end_at), str(start_at)),
+        ).fetchall()
+        return [int(row["order_id"]) for row in rows]
+
+    @staticmethod
+    def save_replan_evidence(
+        revision_id, prior_revision_id, order_id, differences, summary, db=None,
+    ):
+        db = resolve_db(db)
+        for item in differences:
+            db.execute(
+                "INSERT INTO schedule_replan_differences "
+                "(revision_id,prior_revision_id,order_id,order_process_id,process_id,"
+                "change_type,node_changed,quantity_delta,occupied_minutes_delta,"
+                "start_delta_minutes,end_delta_minutes,before_json,after_json,evidence_digest) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    int(revision_id), prior_revision_id, int(order_id),
+                    int(item["order_process_id"]), int(item["process_id"]),
+                    item["change_type"], int(item["node_changed"]),
+                    int(item["quantity_delta"]), float(item["occupied_minutes_delta"]),
+                    int(item["start_delta_minutes"]), int(item["end_delta_minutes"]),
+                    json.dumps(item["before"], ensure_ascii=False, sort_keys=True),
+                    json.dumps(item["after"], ensure_ascii=False, sort_keys=True),
+                    item["evidence_digest"],
+                ),
+            )
+        encoded = json.dumps(
+            summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        evidence_digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        db.execute(
+            "INSERT INTO schedule_replan_summaries "
+            "(revision_id,prior_revision_id,order_id,trigger_count,changed_operation_count,"
+            "node_change_count,delayed_operation_count,advanced_operation_count,"
+            "before_risk_level,after_risk_level,before_delay_minutes,after_delay_minutes,"
+            "risk_change,summary_json,evidence_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                int(revision_id), prior_revision_id, int(order_id),
+                int(summary.get("trigger_count") or 0),
+                int(summary.get("changed_operation_count") or 0),
+                int(summary.get("node_change_count") or 0),
+                int(summary.get("delayed_operation_count") or 0),
+                int(summary.get("advanced_operation_count") or 0),
+                summary.get("before_risk_level") or "none",
+                summary.get("after_risk_level") or "none",
+                int(summary.get("before_delay_minutes") or 0),
+                int(summary.get("after_delay_minutes") or 0),
+                summary.get("risk_change") or "unchanged",
+                encoded, evidence_digest,
+            ),
+        )
+        return evidence_digest
+
+    @staticmethod
+    def get_replan_evidence(revision_id, db=None):
+        db = resolve_db(db)
+        summary = db.execute(
+            "SELECT * FROM schedule_replan_summaries WHERE revision_id=?",
+            (int(revision_id),),
+        ).fetchone()
+        differences = db.execute(
+            "SELECT d.*,p.name AS process_name FROM schedule_replan_differences d "
+            "JOIN processes p ON p.id=d.process_id WHERE d.revision_id=? "
+            "ORDER BY d.order_process_id,d.id",
+            (int(revision_id),),
+        ).fetchall()
+        return summary, differences
+
+    @staticmethod
     def list_process_lines(process_id=None, db=None, limit=1000):
         db = resolve_db(db)
         limit = min(max(int(limit or 1000), 1), 1000)
@@ -561,12 +704,27 @@ class ScheduleCapacityRepository:
 
     @staticmethod
     def clear_order_schedules(order_id, db):
-        """Clear the mutable compatibility projection only.
+        """Clear only an unpublished compatibility projection.
 
-        Immutable revision items are written before this projection is cleared,
-        so regeneration never destroys the historical schedule result.
+        Once an order has a published current revision, its materialized rows
+        are the formal execution projection and must survive draft generation.
         """
-        db.execute("DELETE FROM order_process_schedules WHERE order_id=?", (order_id,))
+        current = db.execute(
+            "SELECT current_schedule_revision_id FROM orders WHERE id=?",
+            (int(order_id),),
+        ).fetchone()
+        current_id = current["current_schedule_revision_id"] if current else None
+        if current_id is None:
+            db.execute(
+                "DELETE FROM order_process_schedules WHERE order_id=?",
+                (int(order_id),),
+            )
+            return
+        # Older releases could leave a draft compatibility projection beside
+        # an unchanged published pointer. Preserve that evidence during draft
+        # generation; the controlled publish transaction will rebuild the
+        # projection from the approved immutable revision.
+        return
 
     @staticmethod
     def create_revision(order_id, schedule_run_id, source_run_key, db, created_by=None,
@@ -599,39 +757,138 @@ class ScheduleCapacityRepository:
         return cur.lastrowid
 
     @staticmethod
-    def publish_revision(revision_id, db, published_by=None):
+    def compute_revision_content_digest(revision_id, db=None):
+        """Return the canonical digest for the immutable revision item set."""
+        db = resolve_db(db)
+        items = [
+            {
+                "order_process_id": int(row["order_process_id"]),
+                "process_id": int(row["process_id"]),
+                "seq_order": int(row["seq_order"] or 0),
+                "payload_digest": row["payload_digest"] or "",
+            }
+            for row in db.execute(
+                "SELECT order_process_id,process_id,seq_order,payload_digest "
+                "FROM schedule_revision_items WHERE revision_id=? "
+                "ORDER BY seq_order,order_process_id,id",
+                (int(revision_id),),
+            ).fetchall()
+        ]
+        encoded = json.dumps(
+            items, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def finalize_revision_content_digest(revision_id, db=None):
+        db = resolve_db(db)
+        digest = ScheduleCapacityRepository.compute_revision_content_digest(
+            revision_id, db=db
+        )
+        cursor = db.execute(
+            "UPDATE schedule_revisions SET content_digest=? "
+            "WHERE id=? AND status='draft' AND approval_status IN ('draft','rejected')",
+            (digest, int(revision_id)),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("排程版本内容摘要已冻结")
+        return digest
+
+    @staticmethod
+    def assert_revision_integrity(revision_id, db=None):
+        """Verify item payloads, order ownership and the frozen content digest."""
+        db = resolve_db(db)
+        revision = db.execute(
+            "SELECT id,order_id,content_digest FROM schedule_revisions WHERE id=?",
+            (int(revision_id),),
+        ).fetchone()
+        if revision is None:
+            raise ValueError("排程版本不存在")
+        items = db.execute(
+            "SELECT * FROM schedule_revision_items WHERE revision_id=? "
+            "ORDER BY seq_order,order_process_id,id",
+            (int(revision_id),),
+        ).fetchall()
+        if not items:
+            raise ValueError("排程版本没有不可变条目，不能进入审批或发布")
+
+        expected = {
+            int(row["id"]): dict(row)
+            for row in db.execute(
+                "SELECT id,order_id,process_id,process_version_id FROM order_processes "
+                "WHERE order_id=?",
+                (revision["order_id"],),
+            ).fetchall()
+        }
+        actual_ids = [int(item["order_process_id"]) for item in items]
+        if len(actual_ids) != len(expected) or set(actual_ids) != set(expected):
+            raise ValueError("排程版本条目与订单工序集合不一致")
+
+        order = db.execute(
+            "SELECT route_version_id FROM orders WHERE id=? AND deleted_at IS NULL",
+            (revision["order_id"],),
+        ).fetchone()
+        if order is None:
+            raise ValueError("排程版本所属订单不存在或已删除")
+        for item in items:
+            payload_json = item["payload_json"] or "{}"
+            actual_payload_digest = hashlib.sha256(
+                payload_json.encode("utf-8")
+            ).hexdigest()
+            if actual_payload_digest != (item["payload_digest"] or ""):
+                raise ValueError(
+                    f"排程版本条目 {item['id']} 内容摘要不一致"
+                )
+            operation = expected[int(item["order_process_id"])]
+            if int(item["process_id"]) != int(operation["process_id"]):
+                raise ValueError("排程版本条目的订单工序归属不一致")
+            try:
+                payload = json.loads(payload_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"排程版本条目 {item['id']} 内容不是有效 JSON"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise ValueError(f"排程版本条目 {item['id']} 内容格式不正确")
+            identity_checks = {
+                "order_id": revision["order_id"],
+                "order_process_id": item["order_process_id"],
+                "process_id": item["process_id"],
+                "route_version_id": order["route_version_id"],
+                "process_version_id": operation["process_version_id"],
+            }
+            for field, expected_value in identity_checks.items():
+                if payload.get(field) != expected_value:
+                    raise ValueError(
+                        f"排程版本条目 {item['id']} 的 {field} 快照不一致"
+                    )
+
+        computed = ScheduleCapacityRepository.compute_revision_content_digest(
+            revision_id, db=db
+        )
+        if not revision["content_digest"] or revision["content_digest"] != computed:
+            raise ValueError("排程版本内容摘要不一致，禁止审批或发布")
+        return computed
+
+    @staticmethod
+    def publish_revision(revision_id, db, published_by, reason, idempotency_key):
         revision = db.execute(
             "SELECT id,order_id,status,approval_status FROM schedule_revisions WHERE id=?", (revision_id,)
         ).fetchone()
         if revision is None:
             raise ValueError("排程版本不存在")
-        if revision["status"] not in ("draft", "published"):
+        if revision["status"] != "draft":
             raise ValueError("排程版本当前状态不可发布")
         if revision["approval_status"] != "approved":
             raise ValueError("排程版本必须先经独立审批后才能发布")
-        expected_operation_ids = {
-            row["id"] for row in db.execute(
-                "SELECT id FROM order_processes WHERE order_id=?",
-                (revision["order_id"],),
-            ).fetchall()
-        }
-        item_operation_ids = [
-            row["order_process_id"] for row in db.execute(
-                "SELECT order_process_id FROM schedule_revision_items WHERE revision_id=?",
-                (revision_id,),
-            ).fetchall()
-        ]
-        if len(item_operation_ids) != len(expected_operation_ids) or set(item_operation_ids) != expected_operation_ids:
-            raise ValueError("排程版本条目不完整，不能发布")
         current = db.execute(
             "SELECT current_schedule_revision_id FROM orders WHERE id=?",
             (revision["order_id"],),
         ).fetchone()
         current_id = current["current_schedule_revision_id"] if current else None
-        # Replaying an already-current published revision is a true no-op.  In
-        # particular, do not rewrite published_at or published_by on retries.
-        if revision["status"] == "published" and current_id == revision_id:
-            return
+        ScheduleCapacityRepository.materialize_revision_projection(
+            revision_id, db=db
+        )
         if current_id and current_id != revision_id:
             db.execute(
                 "UPDATE schedule_revisions SET status='superseded',superseded_by=?,"
@@ -640,13 +897,99 @@ class ScheduleCapacityRepository:
             )
         db.execute(
             "UPDATE schedule_revisions SET status='published',published_by=?,"
-            "published_at=datetime('now','localtime') WHERE id=?",
-            (published_by, revision_id),
+            "published_at=datetime('now','localtime'),publication_reason=?,"
+            "publication_idempotency_key=? WHERE id=?",
+            (published_by, reason, idempotency_key, revision_id),
         )
         db.execute(
             "UPDATE orders SET current_schedule_revision_id=? WHERE id=?",
             (revision_id, revision["order_id"]),
         )
+        projected = db.execute(
+            "SELECT MIN(NULLIF(plan_start,'')) AS plan_start,"
+            "MAX(NULLIF(plan_end,'')) AS plan_end "
+            "FROM order_process_schedules WHERE order_id=? AND status<>'blocked'",
+            (revision["order_id"],),
+        ).fetchone()
+        if projected and projected["plan_start"] and projected["plan_end"]:
+            db.execute(
+                "UPDATE orders SET plan_start=?,plan_end=?,"
+                "schedule_version=COALESCE(schedule_version,1)+1,"
+                "schedule_replan_required=0,schedule_replan_reason='',"
+                "updated_at=datetime('now','localtime') WHERE id=?",
+                (
+                    projected["plan_start"],
+                    projected["plan_end"],
+                    revision["order_id"],
+                ),
+            )
+
+    @staticmethod
+    def materialize_revision_projection(revision_id, db=None):
+        """Atomically rebuild the mutable execution projection from a revision."""
+        db = resolve_db(db)
+        revision = db.execute(
+            "SELECT id,order_id FROM schedule_revisions WHERE id=?",
+            (int(revision_id),),
+        ).fetchone()
+        if revision is None:
+            raise ValueError("排程版本不存在")
+        items = db.execute(
+            "SELECT * FROM schedule_revision_items WHERE revision_id=? "
+            "ORDER BY seq_order,id",
+            (int(revision_id),),
+        ).fetchall()
+        if not items:
+            raise ValueError("排程版本没有可发布条目")
+        db.execute(
+            "DELETE FROM order_process_schedules WHERE order_id=?",
+            (revision["order_id"],),
+        )
+        for item in items:
+            try:
+                payload = json.loads(item["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("排程版本条目内容不是有效 JSON") from exc
+            if not isinstance(payload, dict):
+                raise ValueError("排程版本条目内容格式不正确")
+            payload = dict(payload)
+            payload.pop("id", None)
+            payload.pop("created_at", None)
+            payload.pop("updated_at", None)
+            payload["order_id"] = revision["order_id"]
+            payload["order_process_id"] = item["order_process_id"]
+            payload["process_id"] = item["process_id"]
+            payload["schedule_revision_id"] = int(revision_id)
+            payload["segments"] = [
+                {
+                    **segment,
+                    "start_at": segment.get("start_at")
+                    or segment.get("segment_start_at")
+                    or "",
+                    "end_at": segment.get("end_at")
+                    or segment.get("segment_end_at")
+                    or "",
+                }
+                for segment in (payload.get("segments") or [])
+            ]
+            payload["allocations"] = [
+                {
+                    **allocation,
+                    "segment_start_at": allocation.get("segment_start_at")
+                    or allocation.get("allocation_start_at")
+                    or "",
+                    "segment_end_at": allocation.get("segment_end_at")
+                    or allocation.get("allocation_end_at")
+                    or "",
+                }
+                for allocation in (payload.get("allocations") or [])
+            ]
+            ScheduleCapacityRepository.insert_operation_schedule(
+                payload,
+                db,
+                force_projection=True,
+                snapshot_revision=False,
+            )
 
     @staticmethod
     def find_revision_item(revision_item_id, db=None):
@@ -656,6 +999,18 @@ class ScheduleCapacityRepository:
             "r.created_by,r.revision_no FROM schedule_revision_items i "
             "JOIN schedule_revisions r ON r.id=i.revision_id WHERE i.id=?",
             (revision_item_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_revision_order(revision_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT r.id AS revision_id,r.order_id,r.status AS revision_status,"
+            "r.approval_status,o.order_no,o.deadline,o.plan_end,o.status AS order_status,"
+            "o.quantity,o.completed,o.current_schedule_revision_id "
+            "FROM schedule_revisions r JOIN orders o ON o.id=r.order_id "
+            "WHERE r.id=? AND o.deleted_at IS NULL",
+            (int(revision_id),),
         ).fetchone()
 
     @staticmethod
@@ -812,6 +1167,12 @@ class ScheduleCapacityRepository:
                 if 'replan_reason' in rev_columns else reason or ''
             ),
         })
+        if 'content_digest' in rev_columns:
+            values['content_digest'] = ''
+        if 'publication_reason' in rev_columns:
+            values['publication_reason'] = ''
+        if 'publication_idempotency_key' in rev_columns:
+            values['publication_idempotency_key'] = ''
         for timestamp_column in ('submitted_at', 'approved_at', 'rejected_at'):
             if timestamp_column in rev_columns:
                 values[timestamp_column] = ''
@@ -862,6 +1223,10 @@ class ScheduleCapacityRepository:
                     "(revision_item_id,production_node_id,locked_by,reason) VALUES (?,?,?,?)",
                     (target_item_id, lock['production_node_id'], lock['locked_by'], lock['reason']),
                 )
+        if 'content_digest' in rev_columns:
+            ScheduleCapacityRepository.finalize_revision_content_digest(
+                new_revision_id, db=db
+            )
         return new_revision_id, item_id_map
 
     @staticmethod
@@ -880,6 +1245,33 @@ class ScheduleCapacityRepository:
         return db.execute(
             "SELECT * FROM schedule_revision_items WHERE revision_id=? ORDER BY seq_order,id LIMIT ?",
             (revision_id, limit),
+        ).fetchall()
+
+    @staticmethod
+    def list_latest_candidate_revision_items(limit=1000, db=None):
+        db = resolve_db(db)
+        limit = min(max(int(limit or 1000), 1), 1000)
+        return db.execute(
+            "SELECT i.*,r.order_id,r.status AS revision_status,"
+            "r.approval_status AS revision_approval_status,r.revision_no,"
+            "r.risk_level AS revision_risk_level,r.delay_minutes AS revision_delay_minutes,"
+            "r.risk_reason AS revision_risk_reason,"
+            "o.order_no,o.product_name,p.name AS process_name,"
+            "CASE WHEN l.id IS NULL THEN 0 ELSE 1 END AS locked,"
+            "l.id AS task_lock_id "
+            "FROM schedule_revision_items i "
+            "JOIN schedule_revisions r ON r.id=i.revision_id "
+            "JOIN orders o ON o.id=r.order_id "
+            "JOIN processes p ON p.id=i.process_id "
+            "LEFT JOIN schedule_node_task_locks l "
+            "ON l.revision_item_id=i.id AND l.status='active' "
+            "WHERE r.status='draft' AND o.deleted_at IS NULL "
+            "AND r.id=(SELECT candidate.id FROM schedule_revisions candidate "
+            "WHERE candidate.order_id=r.order_id AND candidate.status='draft' "
+            "ORDER BY candidate.revision_no DESC,candidate.id DESC LIMIT 1) "
+            "AND COALESCE(o.current_schedule_revision_id,0)<>r.id "
+            "ORDER BY r.order_id,i.seq_order,i.id LIMIT ?",
+            (limit,),
         ).fetchall()
 
     @staticmethod
@@ -1088,7 +1480,8 @@ class ScheduleCapacityRepository:
         db = resolve_db(db)
         order = db.execute(
             "SELECT id,order_no,quantity,completed,status,plan_start,plan_end,deadline,product_id,product_code,"
-            "product_name,route_id,route_version_id,route_name_snapshot "
+            "product_name,route_id,route_version_id,route_name_snapshot,"
+            "current_schedule_revision_id,schedule_replan_required,schedule_replan_reason "
             "FROM orders WHERE id=? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
         if not order:
@@ -1103,21 +1496,56 @@ class ScheduleCapacityRepository:
             "JOIN processes p ON p.id=op.process_id WHERE op.order_id=? "
             "ORDER BY op.seq_order,op.id", (order_id,)
         ).fetchall()
+        work_reports = [dict(row) for row in db.execute(
+            "SELECT wr.id,op.id AS order_process_id,wr.process_id,wr.type,wr.status,"
+            "wr.quantity,wr.serial_no,wr.actual_completed_at,wr.created_at "
+            "FROM work_records wr JOIN order_processes op "
+            "ON op.order_id=wr.order_id AND op.process_id=wr.process_id "
+            "WHERE wr.order_id=? ORDER BY wr.id",
+            (order_id,),
+        ).fetchall()]
+        scrap_records = [dict(row) for row in db.execute(
+            "SELECT sr.id,op.id AS order_process_id,sr.process_id,sr.quantity,"
+            "'recorded' AS status,sr.created_at FROM scrap_records sr "
+            "JOIN order_processes op ON op.order_id=sr.order_id AND op.process_id=sr.process_id "
+            "WHERE sr.order_id=? ORDER BY sr.id",
+            (order_id,),
+        ).fetchall()]
+        rework_records = [dict(row) for row in db.execute(
+            "SELECT rw.id,op.id AS order_process_id,rw.process_id,rw.quantity,rw.status,"
+            "rw.source_ncr_id,rw.result,rw.completed_at,rw.created_at "
+            "FROM rework_records rw JOIN order_processes op "
+            "ON op.order_id=rw.order_id AND op.process_id=rw.process_id "
+            "WHERE rw.order_id=? ORDER BY rw.id",
+            (order_id,),
+        ).fetchall()]
+        approved_by_operation = {}
+        for report in work_reports:
+            if report["type"] == "normal" and report["status"] == "approved":
+                approved_by_operation[report["order_process_id"]] = (
+                    approved_by_operation.get(report["order_process_id"], 0)
+                    + int(report["quantity"] or 0)
+                )
+        pending_rework_by_operation = {}
+        for record in rework_records:
+            if record["status"] == "pending":
+                pending_rework_by_operation[record["order_process_id"]] = (
+                    pending_rework_by_operation.get(record["order_process_id"], 0)
+                    + int(record["quantity"] or 0)
+                )
         enriched = []
         for operation in operations:
-            pending = db.execute(
-                "SELECT COALESCE(SUM(quantity),0) FROM rework_records "
-                "WHERE order_id=? AND process_id=? AND status='pending'",
-                (order_id, operation["process_id"]),
-            ).fetchone()[0]
-            approved = db.execute(
-                "SELECT COALESCE(SUM(quantity),0) FROM work_records "
-                "WHERE order_id=? AND process_id=? AND type='normal' AND status='approved'",
-                (order_id, operation["process_id"]),
-            ).fetchone()[0]
-            enriched.append({**dict(operation),
-                             "completed_quantity": max(int(operation["completed_quantity"] or 0), int(approved or 0)),
-                             "rework_quantity": int(pending or 0)})
+            operation_id = int(operation["order_process_id"])
+            approved = int(approved_by_operation.get(operation_id, 0))
+            pending = int(pending_rework_by_operation.get(operation_id, 0))
+            enriched.append({
+                **dict(operation),
+                "approved_report_quantity": approved,
+                "completed_quantity": max(
+                    int(operation["completed_quantity"] or 0), approved
+                ),
+                "rework_quantity": pending,
+            })
         if use_nodes:
             occupancy = [dict(row) for row in db.execute(
                 "SELECT ss.production_node_id,ss.process_line_id,"
@@ -1143,8 +1571,29 @@ class ScheduleCapacityRepository:
         prior = db.execute(
             "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY seq_order,id", (order_id,)
         ).fetchall()
+        current_revision = None
+        current_revision_items = []
+        current_revision_id = order["current_schedule_revision_id"]
+        if current_revision_id:
+            current_revision = db.execute(
+                "SELECT * FROM schedule_revisions WHERE id=? AND order_id=?",
+                (current_revision_id, order_id),
+            ).fetchone()
+            current_revision_items = db.execute(
+                "SELECT * FROM schedule_revision_items WHERE revision_id=? "
+                "ORDER BY seq_order,id",
+                (current_revision_id,),
+            ).fetchall()
+        replan_triggers = ScheduleCapacityRepository.list_replan_triggers(
+            order_id, db=db
+        )
         return {"order": dict(order), "operations": enriched, "occupancy": occupancy,
-                "downtime": downtime, "prior_schedules": [dict(row) for row in prior]}
+                "downtime": downtime, "prior_schedules": [dict(row) for row in prior],
+                "work_reports": work_reports, "scrap_records": scrap_records,
+                "rework_records": rework_records,
+                "current_revision": dict(current_revision) if current_revision else None,
+                "current_revision_items": [dict(row) for row in current_revision_items],
+                "replan_triggers": [dict(row) for row in replan_triggers]}
 
     @staticmethod
     def complete_run(run_id, status, result, error_message="", db=None):
@@ -1300,34 +1749,267 @@ class ScheduleCapacityRepository:
         return result
 
     @staticmethod
+    def list_effective_capacity_intervals(exclude_order_id=None, db=None):
+        """Return the published node-native capacity projection.
+
+        V093's view enforces segment-first fallback, filters blocked/external
+        work and ignores unpublished candidate projections.  Production-node
+        identity is retained when present; legacy lines are only a fallback.
+        """
+        db = resolve_db(db)
+        where = ""
+        params = []
+        if exclude_order_id not in (None, ""):
+            where = " WHERE fact.order_id<>?"
+            params.append(int(exclude_order_id))
+        try:
+            return db.execute(
+                "SELECT fact.* FROM schedule_effective_capacity_intervals fact"
+                + where
+                + " ORDER BY fact.start_at,fact.end_at,fact.fact_key",
+                params,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
+    def list_capacity_unavailability(db=None):
+        """Return active downtime and non-overtime node calendar overrides."""
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                "SELECT d.id,d.production_node_id,d.process_line_id,d.start_at,d.end_at,"
+                "'downtime' AS unavailable_type,d.reason "
+                "FROM schedule_downtime_events d WHERE d.status='active' "
+                "UNION ALL "
+                "SELECT o.id,o.production_node_id,NULL,o.start_at,o.end_at,"
+                "o.override_type,o.reason FROM production_node_calendar_overrides o "
+                "WHERE o.status='active' AND o.override_type<>'overtime' "
+                "ORDER BY start_at,end_at,id"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
+    def list_revision_conflict_items(revision_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT i.*,r.order_id,p.name AS process_name,"
+            "CASE WHEN l.id IS NULL THEN 0 ELSE 1 END AS locked "
+            "FROM schedule_revision_items i "
+            "JOIN schedule_revisions r ON r.id=i.revision_id "
+            "JOIN processes p ON p.id=i.process_id "
+            "LEFT JOIN schedule_node_task_locks l "
+            "ON l.revision_item_id=i.id AND l.status='active' "
+            "WHERE i.revision_id=? ORDER BY i.seq_order,i.id",
+            (int(revision_id),),
+        ).fetchall()
+
+    @staticmethod
+    def record_revision_conflict_check(
+        revision_id, check_stage, input_digest, summary, conflicts, db=None
+    ):
+        db = resolve_db(db)
+        existing = db.execute(
+            "SELECT * FROM schedule_revision_conflict_checks "
+            "WHERE revision_id=? AND check_stage=? AND input_digest=?",
+            (int(revision_id), str(check_stage), str(input_digest)),
+        ).fetchone()
+        if existing is not None:
+            return existing
+        conflict_rows = list(conflicts or ())
+        encoded = json.dumps(
+            conflict_rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        result_digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        cursor = db.execute(
+            "INSERT INTO schedule_revision_conflict_checks "
+            "(revision_id,check_stage,input_digest,blocking_count,warning_count,"
+            "summary_json,result_digest) VALUES (?,?,?,?,?,?,?)",
+            (
+                int(revision_id), str(check_stage), str(input_digest),
+                int(summary.get("blocking_count") or 0),
+                int(summary.get("warning_count") or 0),
+                json.dumps(summary, ensure_ascii=False, sort_keys=True),
+                result_digest,
+            ),
+        )
+        check_id = cursor.lastrowid
+        for conflict in conflict_rows:
+            first = conflict.get("first") or {}
+            second = conflict.get("second") or {}
+            production_node_id = (
+                first.get("production_node_id")
+                or second.get("production_node_id")
+            )
+            process_line_id = (
+                first.get("process_line_id") or second.get("process_line_id")
+            )
+            db.execute(
+                "INSERT INTO schedule_revision_conflicts "
+                "(check_id,revision_id,conflict_type,severity,production_node_id,"
+                "process_line_id,first_order_id,second_order_id,"
+                "first_order_process_id,second_order_process_id,"
+                "first_revision_item_id,second_revision_item_id,"
+                "first_schedule_id,second_schedule_id,overlap_start_at,"
+                "overlap_end_at,overlap_minutes,first_locked,second_locked,"
+                "reason,details_json,evidence_digest) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    check_id, int(revision_id), conflict.get("conflict_type") or "unknown",
+                    conflict.get("severity") or "blocking", production_node_id,
+                    process_line_id, first.get("order_id"), second.get("order_id"),
+                    first.get("order_process_id"), second.get("order_process_id"),
+                    first.get("revision_item_id"), second.get("revision_item_id"),
+                    first.get("schedule_id"), second.get("schedule_id"),
+                    conflict.get("overlap_start_at") or "",
+                    conflict.get("overlap_end_at") or "",
+                    max(int(conflict.get("overlap_minutes") or 0), 0),
+                    int(bool(conflict.get("first_locked"))),
+                    int(bool(conflict.get("second_locked"))),
+                    conflict.get("reason") or "排程冲突",
+                    json.dumps(
+                        conflict.get("details") or {},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    conflict.get("evidence_digest") or "",
+                ),
+            )
+        return db.execute(
+            "SELECT * FROM schedule_revision_conflict_checks WHERE id=?",
+            (check_id,),
+        ).fetchone()
+
+    @staticmethod
+    def record_revision_risk_assessment(
+        revision_id, assessment_stage, risk, details, evidence_digest, db=None
+    ):
+        db = resolve_db(db)
+        existing = db.execute(
+            "SELECT * FROM schedule_revision_risk_assessments "
+            "WHERE revision_id=? AND assessment_stage=?",
+            (int(revision_id), str(assessment_stage)),
+        ).fetchone()
+        if existing is not None:
+            return existing
+        db.execute(
+            "INSERT INTO schedule_revision_risk_assessments "
+            "(revision_id,assessment_stage,deadline_snapshot,"
+            "projected_completion_at_snapshot,risk_level,delay_minutes,"
+            "slack_minutes,blocked_count,conflict_count,primary_risk_source,"
+            "bottleneck_process,bottleneck_node,risk_reason,"
+            "suggested_actions_json,details_json,evidence_digest) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                int(revision_id), str(assessment_stage), risk.get("deadline") or "",
+                risk.get("projected_completion_at") or "", risk.get("level") or "none",
+                max(int(risk.get("delay_minutes") or 0), 0),
+                risk.get("slack_minutes"), max(int(risk.get("blocked_count") or 0), 0),
+                max(int(risk.get("conflict_count") or 0), 0),
+                risk.get("primary_source") or "", risk.get("bottleneck_process") or "",
+                risk.get("bottleneck_node") or "", risk.get("reason") or "",
+                json.dumps(
+                    risk.get("suggested_actions") or [],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                json.dumps(details or {}, ensure_ascii=False, sort_keys=True),
+                str(evidence_digest),
+            ),
+        )
+        return db.execute(
+            "SELECT * FROM schedule_revision_risk_assessments "
+            "WHERE revision_id=? AND assessment_stage=?",
+            (int(revision_id), str(assessment_stage)),
+        ).fetchone()
+
+    @staticmethod
+    def list_revision_conflicts(revision_id, check_stage=None, db=None):
+        db = resolve_db(db)
+        params = [int(revision_id)]
+        stage_clause = ""
+        if check_stage:
+            stage_clause = " AND check_row.check_stage=?"
+            params.append(str(check_stage))
+        else:
+            stage_clause = (
+                " AND check_row.id=(SELECT latest.id "
+                "FROM schedule_revision_conflict_checks latest "
+                "WHERE latest.revision_id=? ORDER BY latest.id DESC LIMIT 1)"
+            )
+            params.append(int(revision_id))
+        return db.execute(
+            "SELECT conflict.*,check_row.check_stage,check_row.blocking_count,"
+            "check_row.warning_count,check_row.result_digest AS check_digest "
+            "FROM schedule_revision_conflicts conflict "
+            "JOIN schedule_revision_conflict_checks check_row "
+            "ON check_row.id=conflict.check_id "
+            "WHERE conflict.revision_id=?" + stage_clause
+            + " ORDER BY conflict.severity DESC,conflict.id",
+            params,
+        ).fetchall()
+
+    @staticmethod
+    def find_revision_risk_assessment(revision_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM schedule_revision_risk_assessments "
+            "WHERE revision_id=? ORDER BY id DESC LIMIT 1",
+            (int(revision_id),),
+        ).fetchone()
+
+    @staticmethod
     def list_schedule_conflicts(db=None):
-        """Find overlapping precision segments on the same production line."""
+        """Find published overlaps using node-native, segment-first facts."""
         db = resolve_db(db)
         try:
             return db.execute(
                 """
-                SELECT a.process_line_id, a.schedule_id AS first_schedule_id,
-                       b.schedule_id AS second_schedule_id,
-                       a.segment_start_at AS first_start_at,
-                       a.segment_end_at AS first_end_at,
-                       b.segment_start_at AS second_start_at,
-                       b.segment_end_at AS second_end_at
-                FROM order_process_schedule_segments a
-                JOIN order_process_schedule_segments b
-                  ON a.process_line_id=b.process_line_id
-                 AND a.id < b.id
-                 AND a.segment_start_at < b.segment_end_at
-                 AND b.segment_start_at < a.segment_end_at
-                JOIN order_process_schedules sa ON sa.id=a.schedule_id
-                JOIN order_process_schedules sb ON sb.id=b.schedule_id
-                JOIN orders oa ON oa.id=sa.order_id AND oa.deleted_at IS NULL
-                JOIN orders ob ON ob.id=sb.order_id AND ob.deleted_at IS NULL
-                WHERE sa.status != 'blocked' AND sb.status != 'blocked'
-                ORDER BY a.process_line_id,a.segment_start_at
+                SELECT
+                    CASE WHEN a.production_node_id IS NOT NULL THEN 'production_node'
+                         ELSE 'legacy_line' END AS resource_type,
+                    COALESCE(a.production_node_id,a.process_line_id) AS resource_id,
+                    a.production_node_id,a.process_line_id,
+                    COALESCE(NULLIF(a.node_name,''),NULLIF(b.node_name,''),'') AS node_name,
+                    a.order_id AS first_order_id,b.order_id AS second_order_id,
+                    a.order_process_id AS first_order_process_id,
+                    b.order_process_id AS second_order_process_id,
+                    a.schedule_id AS first_schedule_id,b.schedule_id AS second_schedule_id,
+                    a.start_at AS first_start_at,a.end_at AS first_end_at,
+                    b.start_at AS second_start_at,b.end_at AS second_end_at,
+                    CAST((julianday(MIN(a.end_at,b.end_at))-
+                          julianday(MAX(a.start_at,b.start_at)))*1440 AS INTEGER)
+                        AS overlap_minutes,
+                    CASE WHEN a.locked=1 OR b.locked=1 THEN 1 ELSE 0 END AS locked
+                FROM schedule_effective_capacity_intervals a
+                JOIN schedule_effective_capacity_intervals b
+                  ON a.fact_key < b.fact_key
+                 AND ((a.production_node_id IS NOT NULL
+                       AND a.production_node_id=b.production_node_id)
+                      OR (a.production_node_id IS NULL
+                          AND b.production_node_id IS NULL
+                          AND a.process_line_id=b.process_line_id))
+                 AND a.start_at < b.end_at
+                 AND b.start_at < a.end_at
+                WHERE a.capacity_mode='exclusive' OR b.capacity_mode='exclusive'
+                ORDER BY resource_type,resource_id,a.start_at,a.fact_key
                 """
             ).fetchall()
         except sqlite3.OperationalError:
             return []
+
+    @staticmethod
+    def list_schedule_conflicts_by_order(db=None):
+        rows = [dict(row) for row in ScheduleCapacityRepository.list_schedule_conflicts(db=db)]
+        result = {}
+        for row in rows:
+            for key in ("first_order_id", "second_order_id"):
+                order_id = row.get(key)
+                if order_id in (None, ""):
+                    continue
+                result.setdefault(int(order_id), []).append(row)
+        return result
 
     @staticmethod
     def list_schedule_risk_inputs(limit=1000, db=None):
@@ -1349,26 +2031,22 @@ class ScheduleCapacityRepository:
                            AS blocked_reasons,
                        COALESCE((
                            SELECT COUNT(DISTINCT CASE
-                               WHEN first_schedule.order_id=o.id THEN first_schedule.id
-                               ELSE second_schedule.id
+                               WHEN first_fact.order_id=o.id THEN first_fact.fact_key
+                               ELSE second_fact.fact_key
                            END)
-                           FROM order_process_schedule_segments first_segment
-                           JOIN order_process_schedule_segments second_segment
-                             ON first_segment.process_line_id=second_segment.process_line_id
-                            AND first_segment.id < second_segment.id
-                            AND first_segment.segment_start_at < second_segment.segment_end_at
-                            AND second_segment.segment_start_at < first_segment.segment_end_at
-                           JOIN order_process_schedules first_schedule
-                             ON first_schedule.id=first_segment.schedule_id
-                           JOIN order_process_schedules second_schedule
-                             ON second_schedule.id=second_segment.schedule_id
-                           JOIN orders first_order ON first_order.id=first_schedule.order_id
-                           JOIN orders second_order ON second_order.id=second_schedule.order_id
-                           WHERE first_schedule.status != 'blocked'
-                             AND second_schedule.status != 'blocked'
-                             AND first_order.deleted_at IS NULL
-                             AND second_order.deleted_at IS NULL
-                             AND (first_schedule.order_id=o.id OR second_schedule.order_id=o.id)
+                           FROM schedule_effective_capacity_intervals first_fact
+                           JOIN schedule_effective_capacity_intervals second_fact
+                             ON first_fact.fact_key < second_fact.fact_key
+                            AND ((first_fact.production_node_id IS NOT NULL
+                                  AND first_fact.production_node_id=second_fact.production_node_id)
+                                 OR (first_fact.production_node_id IS NULL
+                                     AND second_fact.production_node_id IS NULL
+                                     AND first_fact.process_line_id=second_fact.process_line_id))
+                            AND first_fact.start_at < second_fact.end_at
+                            AND second_fact.start_at < first_fact.end_at
+                           WHERE (first_fact.capacity_mode='exclusive'
+                                  OR second_fact.capacity_mode='exclusive')
+                             AND (first_fact.order_id=o.id OR second_fact.order_id=o.id)
                        ),0) AS conflict_count
                 FROM orders o
                 JOIN order_process_schedules s ON s.order_id=o.id
@@ -1401,26 +2079,22 @@ class ScheduleCapacityRepository:
                            AS blocked_reasons,
                        COALESCE((
                            SELECT COUNT(DISTINCT CASE
-                               WHEN first_schedule.order_id=o.id THEN first_schedule.id
-                               ELSE second_schedule.id
+                               WHEN first_fact.order_id=o.id THEN first_fact.fact_key
+                               ELSE second_fact.fact_key
                            END)
-                           FROM order_process_schedule_segments first_segment
-                           JOIN order_process_schedule_segments second_segment
-                             ON first_segment.process_line_id=second_segment.process_line_id
-                            AND first_segment.id < second_segment.id
-                            AND first_segment.segment_start_at < second_segment.segment_end_at
-                            AND second_segment.segment_start_at < first_segment.segment_end_at
-                           JOIN order_process_schedules first_schedule
-                             ON first_schedule.id=first_segment.schedule_id
-                           JOIN order_process_schedules second_schedule
-                             ON second_schedule.id=second_segment.schedule_id
-                           JOIN orders first_order ON first_order.id=first_schedule.order_id
-                           JOIN orders second_order ON second_order.id=second_schedule.order_id
-                           WHERE first_schedule.status != 'blocked'
-                             AND second_schedule.status != 'blocked'
-                             AND first_order.deleted_at IS NULL
-                             AND second_order.deleted_at IS NULL
-                             AND (first_schedule.order_id=o.id OR second_schedule.order_id=o.id)
+                           FROM schedule_effective_capacity_intervals first_fact
+                           JOIN schedule_effective_capacity_intervals second_fact
+                             ON first_fact.fact_key < second_fact.fact_key
+                            AND ((first_fact.production_node_id IS NOT NULL
+                                  AND first_fact.production_node_id=second_fact.production_node_id)
+                                 OR (first_fact.production_node_id IS NULL
+                                     AND second_fact.production_node_id IS NULL
+                                     AND first_fact.process_line_id=second_fact.process_line_id))
+                            AND first_fact.start_at < second_fact.end_at
+                            AND second_fact.start_at < first_fact.end_at
+                           WHERE (first_fact.capacity_mode='exclusive'
+                                  OR second_fact.capacity_mode='exclusive')
+                             AND (first_fact.order_id=o.id OR second_fact.order_id=o.id)
                        ),0) AS conflict_count
                 FROM orders o
                 JOIN order_process_schedules s ON s.order_id=o.id
@@ -1490,9 +2164,12 @@ class ScheduleCapacityRepository:
             return []
 
     @staticmethod
-    def insert_operation_schedule(data, db):
+    def insert_operation_schedule(
+        data, db, *, force_projection=False, snapshot_revision=True
+    ):
         binding = db.execute(
-            "SELECT o.route_id,o.route_version_id,op.process_id,op.process_version_id "
+            "SELECT o.route_id,o.route_version_id,o.current_schedule_revision_id,"
+            "op.process_id,op.process_version_id "
             "FROM orders o JOIN order_processes op ON op.order_id=o.id AND op.id=? "
             "WHERE o.id=? AND o.deleted_at IS NULL",
             (data["order_process_id"], data["order_id"]),
@@ -1501,6 +2178,18 @@ class ScheduleCapacityRepository:
             raise ValueError("订单、订单工序和工序归属关系不一致")
         if data.get("route_version_id") != binding["route_version_id"] or data.get("process_version_id") != binding["process_version_id"]:
             raise ValueError("订单—路线—工序版本绑定不一致")
+        revision_id = data.get("schedule_revision_id")
+        current_revision_id = binding["current_schedule_revision_id"]
+        if (
+            revision_id
+            and current_revision_id
+            and int(current_revision_id) != int(revision_id)
+            and not force_projection
+        ):
+            ScheduleCapacityRepository.snapshot_revision_payload(
+                data, int(revision_id), db
+            )
+            return None
         cur = db.execute(
             "INSERT INTO order_process_schedules (order_id,order_process_id,process_id,process_line_id,production_node_id,"
             "node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,"
@@ -1579,9 +2268,51 @@ class ScheduleCapacityRepository:
             except sqlite3.OperationalError:
                 # V088 is additive; keep read-only V087 clones compatible.
                 pass
-        if data.get("schedule_revision_id"):
+        if data.get("schedule_revision_id") and snapshot_revision:
             ScheduleCapacityRepository.snapshot_revision_item(cur.lastrowid, data["schedule_revision_id"], db)
         return cur.lastrowid
+
+    @staticmethod
+    def snapshot_revision_payload(data, revision_id, db):
+        """Persist a draft candidate without touching the formal projection."""
+        payload = dict(data)
+        payload.pop("id", None)
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        db.execute(
+            "INSERT OR IGNORE INTO schedule_revision_items "
+            "(revision_id,source_schedule_id,order_process_id,process_id,process_line_id,"
+            "production_node_id,node_code_snapshot,node_name_snapshot,capacity_mode_snapshot,"
+            "seq_order,quantity,status,planned_start_at,planned_end_at,occupied_minutes,"
+            "payload_json,payload_digest,execution_mode,completed_quantity_snapshot,"
+            "rework_quantity_snapshot,remaining_quantity_snapshot,source_fact_digest) "
+            "VALUES (?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                int(revision_id),
+                data["order_process_id"],
+                data["process_id"],
+                data.get("process_line_id"),
+                data.get("production_node_id"),
+                data.get("node_code_snapshot", ""),
+                data.get("node_name_snapshot", ""),
+                data.get("capacity_mode_snapshot", ""),
+                data.get("seq_order", 0),
+                data.get("quantity", 0),
+                data.get("status", "planned"),
+                data.get("planned_start_at", ""),
+                data.get("planned_end_at", ""),
+                data.get("occupied_minutes", 0),
+                encoded,
+                digest,
+                data.get("execution_mode", "internal"),
+                data.get("completed_quantity_snapshot", 0),
+                data.get("rework_quantity_snapshot", 0),
+                data.get("remaining_quantity_snapshot", data.get("quantity", 0)),
+                data.get("source_fact_digest", ""),
+            ),
+        )
 
     @staticmethod
     def snapshot_revision_item(schedule_id, revision_id, db):
@@ -1652,7 +2383,7 @@ class ScheduleCapacityRepository:
                 "LEFT JOIN process_production_lines pl ON pl.id=s.process_line_id "
                 "LEFT JOIN schedule_revision_items ri "
                 "ON ri.revision_id=s.schedule_revision_id "
-                "AND ri.source_schedule_id=s.id "
+                "AND ri.order_process_id=s.order_process_id "
                 "LEFT JOIN schedule_revisions r ON r.id=ri.revision_id "
                 "LEFT JOIN schedule_node_task_locks l "
                 "ON l.revision_item_id=ri.id AND l.status='active' "
@@ -1704,4 +2435,46 @@ class ScheduleCapacityRepository:
         except sqlite3.OperationalError:
             # V088 is additive; old read-only database copies have no split
             # allocation table and should expose an empty detail list.
+            return []
+
+    @staticmethod
+    def list_schedule_segments(schedule_ids, db=None):
+        """Return minute-level execution intervals for formal schedule rows."""
+        db = resolve_db(db)
+        normalized = sorted({
+            int(schedule_id)
+            for schedule_id in (schedule_ids or [])
+            if str(schedule_id or "").isdigit() and int(schedule_id) > 0
+        })
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        try:
+            return db.execute(
+                "SELECT ss.id,ss.schedule_id,ss.process_line_id,"
+                "ss.production_node_id,ss.segment_start_at,ss.segment_end_at,"
+                "ss.occupied_minutes,ss.shift_id,ss.quantity,"
+                "n.node_code,n.node_name "
+                "FROM order_process_schedule_segments ss "
+                "LEFT JOIN production_nodes n ON n.id=ss.production_node_id "
+                f"WHERE ss.schedule_id IN ({placeholders}) "
+                "ORDER BY ss.schedule_id,ss.segment_start_at,ss.id",
+                normalized,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    @staticmethod
+    def list_capacity_overrides(db=None):
+        """Return active node calendar overrides, including additive overtime."""
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                "SELECT o.id,o.production_node_id,o.start_at,o.end_at,"
+                "o.override_type,o.reason,o.status,n.node_code,n.node_name "
+                "FROM production_node_calendar_overrides o "
+                "LEFT JOIN production_nodes n ON n.id=o.production_node_id "
+                "WHERE o.status='active' ORDER BY o.start_at,o.end_at,o.id"
+            ).fetchall()
+        except sqlite3.OperationalError:
             return []

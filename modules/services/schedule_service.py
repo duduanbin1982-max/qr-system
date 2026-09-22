@@ -8,6 +8,7 @@ from modules.services import BaseService
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.repositories.production_line_repository import ProductionLineRepository
 from modules.repositories.schedule_repository import ScheduleRepository
+from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
 
 
 class ScheduleNotFoundError(ValueError):
@@ -112,6 +113,7 @@ class ScheduleService:
         )
         summary = ScheduleRepository.get_schedule_summary(schedule_scope=schedule_scope)
         total = summary["total"]
+        conflict_by_order = ScheduleCapacityRepository.list_schedule_conflicts_by_order()
 
         orders = []
         now = datetime.now()
@@ -137,6 +139,7 @@ class ScheduleService:
                 blocked_count=r["schedule_blocked_count"] or 0,
                 blocked_reasons=blocked_reasons,
                 conflict_count=r["schedule_conflict_count"] or 0,
+                conflict_details=conflict_by_order.get(int(r["id"]), ()),
             )
             risk_level = deadline_risk["level"]
             risk = "overdue" if risk_level == "overdue" else (
@@ -165,6 +168,8 @@ class ScheduleService:
                 "projected_completion_at": deadline_risk["projected_completion_at"],
                 "schedule_blocked_count": deadline_risk["blocked_count"],
                 "schedule_conflict_count": deadline_risk["conflict_count"],
+                "risk_primary_source": deadline_risk.get("primary_source", ""),
+                "risk_suggested_actions": deadline_risk.get("suggested_actions", []),
                 "production_line": r["production_line"],
                 "production_line_id": r["production_line_id"],
                 "line_capacity": r["line_capacity"],

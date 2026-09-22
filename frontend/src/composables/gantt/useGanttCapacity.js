@@ -51,6 +51,8 @@ export function useGanttCapacity({
   const capacityLoading = ref(false)
   const capacityProcessFilter = ref('')
   const capacityNodeFilter = ref('')
+  const capacityOrderFilter = ref('')
+  const capacityRiskFilter = ref('all')
   const generationOrderId = ref('')
   const generationStartDate = ref('')
   const generationRunKey = ref('')
@@ -58,6 +60,7 @@ export function useGanttCapacity({
   const replanStartAt = ref('')
   const replanReason = ref('根据实际报工、返工和停机动态重排')
   const replanRunKey = ref('')
+  const replanResult = ref(null)
   const autoPlanVisible = ref(false)
   const autoPlanStartDate = ref(new Date().toISOString().slice(0, 10))
   const autoPlanLimit = ref(100)
@@ -66,6 +69,14 @@ export function useGanttCapacity({
   const autoPlanResult = ref(null)
   const downtimeEvents = ref([])
   const downtimeLoading = ref(false)
+  const conflictAudit = ref({
+    line_conflicts: 0,
+    conflicts: [],
+    risk_counts: {},
+    risk_orders: [],
+    delayed_order_count: 0,
+    total_delay_minutes: 0,
+  })
   const downtimeForm = ref({
     production_node_id: '',
     start_at: '',
@@ -83,6 +94,11 @@ export function useGanttCapacity({
   })
 
   const capacityNodes = computed(() => productionNodes?.value || [])
+  const selectedReplanOrder = computed(() => capacityOrders.value.find(
+    item => String(item.id) === String(replanOrderId.value),
+  ) || orders.value.find(
+    item => String(item.id) === String(replanOrderId.value),
+  ) || null)
 
   const processOptions = computed(() => {
     const seen = new Map()
@@ -97,6 +113,10 @@ export function useGanttCapacity({
 
   const filteredOperations = computed(() => operationSchedules.value.filter((row) => {
     if (
+      capacityOrderFilter.value
+      && String(row.order_id) !== String(capacityOrderFilter.value)
+    ) return false
+    if (
       capacityProcessFilter.value
       && String(row.process_id) !== String(capacityProcessFilter.value)
     ) return false
@@ -107,6 +127,13 @@ export function useGanttCapacity({
       )
       if (!directMatch && !allocationMatch) return false
     }
+    if (capacityRiskFilter.value === 'conflict' && !Number(row.conflict_count || 0)) return false
+    if (capacityRiskFilter.value === 'blocked' && !(
+      row.schedule_status === 'blocked' || row.status === 'blocked'
+    )) return false
+    if (capacityRiskFilter.value === 'critical' && ![
+      'overdue', 'high',
+    ].includes(operationRiskLevel(row))) return false
     return true
   }))
 
@@ -116,6 +143,7 @@ export function useGanttCapacity({
       total: rows.length,
       planned: rows.filter(row => row.schedule_status === 'planned' || row.status === 'planned').length,
       blocked: rows.filter(row => row.schedule_status === 'blocked' || row.status === 'blocked').length,
+      conflicts: rows.reduce((sum, row) => sum + Number(row.conflict_count || 0), 0),
       minutes: rows.reduce(
         (sum, row) => sum + Number(row.occupied_minutes ?? row.planned_minutes ?? 0),
         0,
@@ -126,12 +154,14 @@ export function useGanttCapacity({
   async function loadCapacity() {
     capacityLoading.value = true
     try {
-      const [scheduleData, orderData] = await Promise.all([
+      const [scheduleData, orderData, auditData] = await Promise.all([
         api.domains.production.listOperationSchedules({ limit: 1000 }),
         api.domains.production.listCapacityOrders({ limit: 1000 }),
+        api.domains.production.auditScheduleCapacity({ limit: 1000 }),
       ])
       operationSchedules.value = scheduleData.operations || []
       capacityOrders.value = orderData.orders || orders.value || []
+      conflictAudit.value = auditData || conflictAudit.value
       if (!downtimeForm.value.production_node_id && capacityNodes.value.length) {
         downtimeForm.value.production_node_id = capacityNodes.value[0].id
       }
@@ -256,6 +286,7 @@ export function useGanttCapacity({
     const pad = value => String(value).padStart(2, '0')
     replanStartAt.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
     replanRunKey.value = commandKey('dynamic-replan', order?.id || 'order')
+    replanResult.value = null
   }
 
   function prepareDynamicReplan(orderId) {
@@ -280,6 +311,7 @@ export function useGanttCapacity({
         schedule_run_key: replanRunKey.value,
         reason: String(replanReason.value).trim(),
       })
+      replanResult.value = result
       showToast('已按实际生产事实生成动态重排草稿')
       await loadCapacity()
       return result
@@ -368,6 +400,13 @@ export function useGanttCapacity({
   }
 
   function operationRisk(row) {
+    if (row?.candidate_revision && row?.risk_level) {
+      return {
+        risk_level: row.risk_level,
+        risk_reason: row.risk_reason || '候选排程版本风险快照',
+        delay_minutes: Number(row.delay_minutes || 0),
+      }
+    }
     const order = orders.value.find(item => String(item.id) === String(row.order_id))
       || capacityOrders.value.find(item => String(item.id) === String(row.order_id))
     return order || { risk_level: 'none', risk_reason: '订单交期风险信息尚未加载' }
@@ -485,19 +524,16 @@ export function useGanttCapacity({
       reject: api.domains.production.rejectScheduleRevision,
       publish: api.domains.production.publishScheduleRevision,
     }
-    let payload = {}
-    if (action !== 'publish') {
-      const actionReason = String(
-        reason || window.prompt('请输入本次排程版本操作原因：', '') || '',
-      ).trim()
-      if (!actionReason) {
-        showToast('排程版本操作原因必填', 'error')
-        return null
-      }
-      payload = {
-        reason: actionReason,
-        idempotency_key: commandKey(`schedule-${action}`, revisionId),
-      }
+    const actionReason = String(
+      reason || window.prompt('请输入本次排程版本操作原因：', '') || '',
+    ).trim()
+    if (!actionReason) {
+      showToast('排程版本操作原因必填', 'error')
+      return null
+    }
+    const payload = {
+      reason: actionReason,
+      idempotency_key: commandKey(`schedule-${action}`, revisionId),
     }
     try {
       const result = await methods[action](revisionId, payload)
@@ -511,14 +547,41 @@ export function useGanttCapacity({
     }
   }
 
+  function revisionState(row) {
+    const lifecycle = String(row?.revision_status || '').trim()
+    const approval = String(row?.revision_approval_status || 'draft').trim()
+    if (lifecycle === 'published') return 'published'
+    if (lifecycle === 'superseded') return 'superseded'
+    if (lifecycle === 'cancelled') return 'cancelled'
+    if (approval === 'submitted') return 'pending_approval'
+    if (approval === 'approved') return 'approved'
+    if (approval === 'rejected') return 'rejected'
+    return 'draft'
+  }
+
+  function revisionStatusLabel(row) {
+    return {
+      draft: '草稿',
+      pending_approval: '待审批',
+      approved: '已批准待发布',
+      rejected: '已驳回',
+      published: '已发布',
+      superseded: '已取代',
+      cancelled: '已取消',
+    }[revisionState(row)] || '已排程'
+  }
+
   return {
     viewMode,
     capacityNodes,
     capacityOrders,
+    selectedReplanOrder,
     operationSchedules,
     capacityLoading,
     capacityProcessFilter,
     capacityNodeFilter,
+    capacityOrderFilter,
+    capacityRiskFilter,
     processOptions,
     filteredOperations,
     capacitySummary,
@@ -534,6 +597,7 @@ export function useGanttCapacity({
     replanStartAt,
     replanReason,
     replanRunKey,
+    replanResult,
     startDynamicReplan,
     prepareDynamicReplan,
     dynamicReplanSchedule,
@@ -547,6 +611,7 @@ export function useGanttCapacity({
     runAutoPlan,
     downtimeEvents,
     downtimeLoading,
+    conflictAudit,
     downtimeForm,
     loadDowntime,
     createDowntime,
@@ -560,7 +625,9 @@ export function useGanttCapacity({
     submitRevision: (row, reason = '') => runRevisionCommand(row, 'submit', reason),
     approveRevision: (row, reason = '') => runRevisionCommand(row, 'approve', reason),
     rejectRevision: (row, reason = '') => runRevisionCommand(row, 'reject', reason),
-    publishRevision: row => runRevisionCommand(row, 'publish'),
+    publishRevision: (row, reason = '') => runRevisionCommand(row, 'publish', reason),
+    revisionState,
+    revisionStatusLabel,
     nodeLabel,
     allocationLabel,
     blockedCode,

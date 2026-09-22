@@ -159,16 +159,11 @@ def test_v089_adds_workflow_schema_and_backfills_published_revisions(
         revision_id = result["schedule_revision_id"]
         _approve(revision_id, creator_id, reviewer_id, "workflow-schema")
         ScheduleCapacityService.publish_revision(
-            revision_id, published_by=creator_id
+            revision_id,
+            "publish workflow schema fixture",
+            "workflow-schema-publish",
+            creator_id,
         )
-        db.execute(
-            "UPDATE schedule_revisions SET approval_status='draft' WHERE id=?",
-            (revision_id,),
-        )
-        db.commit()
-
-        m089_schedule_revision_workflow(db)
-        db.commit()
 
         revision_columns = {
             row["name"] for row in db.execute("PRAGMA table_info(schedule_revisions)")
@@ -184,7 +179,7 @@ def test_v089_adds_workflow_schema_and_backfills_published_revisions(
             "rejected_by",
         }.issubset(revision_columns)
         assert "row_version" in item_columns
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 90
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
         assert db.execute(
             "SELECT approval_status FROM schedule_revisions WHERE id=?",
             (revision_id,),
@@ -474,7 +469,10 @@ def test_submit_reject_resubmit_approve_publish_and_immutable_events(
 
         with pytest.raises(NodeSchedulingError) as unapproved:
             ScheduleCapacityService.publish_revision(
-                revision_id, published_by=creator_id
+                revision_id,
+                "publish before approval",
+                "workflow-unapproved-publish",
+                creator_id,
             )
         assert unapproved.value.code == "REVISION_STATE_CONFLICT"
         submitted = ScheduleCapacityService.submit_revision(
@@ -520,9 +518,12 @@ def test_submit_reject_resubmit_approve_publish_and_immutable_events(
         )
         assert approved["result"]["approval_status"] == "approved"
         published = ScheduleCapacityService.publish_revision(
-            revision_id, published_by=creator_id
+            revision_id,
+            "publish independently approved revision",
+            "workflow-publish-001",
+            creator_id,
         )
-        assert published["revision"]["status"] == "published"
+        assert published["result"]["status"] == "published"
 
         event_id = approved["event"]["id"]
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
@@ -534,6 +535,126 @@ def test_submit_reject_resubmit_approve_publish_and_immutable_events(
             db.execute(
                 "DELETE FROM schedule_node_workflow_events WHERE id=?", (event_id,)
             )
+
+
+def test_v092_freezes_revision_content_and_controls_current_pointer(
+    client, monkeypatch
+):
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        creator_id, reviewer_id = _actors(db)
+        result, _ = _seed_schedule(
+            db, actor_id=creator_id, route_name="V092 immutable publication"
+        )
+        revision_id = result["schedule_revision_id"]
+        revision = db.execute(
+            "SELECT * FROM schedule_revisions WHERE id=?", (revision_id,)
+        ).fetchone()
+        assert len(revision["content_digest"]) == 64
+        assert revision["content_digest"] == (
+            ScheduleCapacityRepository.compute_revision_content_digest(
+                revision_id, db=db
+            )
+        )
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='uq_schedule_revision_published_order'"
+        ).fetchone()
+
+        db.execute(
+            "UPDATE schedule_revisions SET content_digest='tampered' WHERE id=?",
+            (revision_id,),
+        )
+        db.commit()
+        with pytest.raises(NodeSchedulingError) as corrupt:
+            ScheduleCapacityService.submit_revision(
+                revision_id,
+                "submit tampered digest",
+                "v092-submit-tampered",
+                creator_id,
+            )
+        assert corrupt.value.code == "REVISION_INTEGRITY_FAILED"
+        ScheduleCapacityRepository.finalize_revision_content_digest(
+            revision_id, db=db
+        )
+        db.commit()
+
+        _approve(revision_id, creator_id, reviewer_id, "v092-freeze")
+        published = ScheduleCapacityService.publish_revision(
+            revision_id,
+            "publish immutable schedule",
+            "v092-publish-immutable",
+            creator_id,
+        )
+        assert published["result"]["status"] == "published"
+        assert published["event"]["event_type"] == "publish"
+        assert published["result"]["publication_reason"] == "publish immutable schedule"
+
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE schedule_revisions SET risk_reason='tampered' WHERE id=?",
+                (revision_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute("DELETE FROM schedule_revisions WHERE id=?", (revision_id,))
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="current schedule revision cannot be cleared directly",
+        ):
+            db.execute(
+                "UPDATE orders SET current_schedule_revision_id=NULL WHERE id=?",
+                (result["order_id"],),
+            )
+
+        other_result, _ = _seed_schedule(
+            db, actor_id=creator_id, route_name="V092 other order"
+        )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="current schedule revision must be approved and published",
+        ):
+            db.execute(
+                "UPDATE orders SET current_schedule_revision_id=? WHERE id=?",
+                (other_result["schedule_revision_id"], result["order_id"]),
+            )
+
+
+def test_publish_revision_is_idempotent_and_rejects_key_reuse(
+    client, monkeypatch
+):
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        creator_id, reviewer_id = _actors(db)
+        result, _ = _seed_schedule(
+            db, actor_id=creator_id, route_name="V092 idempotent publication"
+        )
+        revision_id = result["schedule_revision_id"]
+        _approve(revision_id, creator_id, reviewer_id, "v092-idempotent")
+        first = ScheduleCapacityService.publish_revision(
+            revision_id,
+            "publish once",
+            "v092-publish-idempotent",
+            creator_id,
+        )
+        published_at = first["result"]["published_at"]
+        replay = ScheduleCapacityService.publish_revision(
+            revision_id,
+            "publish once",
+            "v092-publish-idempotent",
+            creator_id,
+        )
+        assert replay["idempotent_replay"] is True
+        assert replay["result"]["published_at"] == published_at
+        with pytest.raises(NodeSchedulingError) as reused:
+            ScheduleCapacityService.publish_revision(
+                revision_id,
+                "different publication input",
+                "v092-publish-idempotent",
+                creator_id,
+            )
+        assert reused.value.code == "IDEMPOTENCY_CONFLICT"
 
 
 def test_workflow_api_returns_400_403_404_and_409(client, monkeypatch):
@@ -555,7 +676,10 @@ def test_workflow_api_returns_400_403_404_and_409(client, monkeypatch):
     unapproved = client.post(
         f"/api/schedule/revisions/{result['schedule_revision_id']}/publish",
         headers=allowed_headers,
-        json={},
+        json={
+            "reason": "publish before approval",
+            "idempotency_key": "workflow-api-unapproved-publish",
+        },
     )
     assert unapproved.status_code == 409
     assert unapproved.get_json()["code"] == "REVISION_STATE_CONFLICT"
@@ -594,3 +718,45 @@ def test_workflow_api_returns_400_403_404_and_409(client, monkeypatch):
     )
     assert conflict.status_code == 409
     assert conflict.get_json()["code"] == "LOCKED_TASK_CONFLICT"
+
+
+def test_v093_freezes_candidate_conflict_and_risk_evidence(client, monkeypatch):
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        creator_id, _reviewer_id = _actors(db)
+        result, _order_id = _seed_schedule(db, actor_id=creator_id)
+        revision_id = result["schedule_revision_id"]
+
+        check = db.execute(
+            "SELECT * FROM schedule_revision_conflict_checks "
+            "WHERE revision_id=? AND check_stage='generation'",
+            (revision_id,),
+        ).fetchone()
+        risk = db.execute(
+            "SELECT * FROM schedule_revision_risk_assessments "
+            "WHERE revision_id=? AND assessment_stage='generation'",
+            (revision_id,),
+        ).fetchone()
+        expected_end = db.execute(
+            "SELECT MAX(NULLIF(planned_end_at,'')) FROM schedule_revision_items "
+            "WHERE revision_id=? AND status<>'blocked'",
+            (revision_id,),
+        ).fetchone()[0]
+
+        assert check is not None
+        assert check["blocking_count"] == 0
+        assert risk is not None
+        assert risk["projected_completion_at_snapshot"] == expected_end
+        assert risk["evidence_digest"]
+
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE schedule_revision_conflict_checks SET blocking_count=99 WHERE id=?",
+                (check["id"],),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "DELETE FROM schedule_revision_risk_assessments WHERE id=?",
+                (risk["id"],),
+            )

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listScheduleCalendars: vi.fn(),
   listOperationSchedules: vi.fn(),
   listCapacityOrders: vi.fn(),
+  auditScheduleCapacity: vi.fn(),
   generateOrderOperationSchedule: vi.fn(),
   dynamicReplanOrderSchedule: vi.fn(),
   autoPlanSchedule: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/lib/api.js', () => ({
         listScheduleCalendars: mocks.listScheduleCalendars,
         listOperationSchedules: mocks.listOperationSchedules,
         listCapacityOrders: mocks.listCapacityOrders,
+        auditScheduleCapacity: mocks.auditScheduleCapacity,
         generateOrderOperationSchedule: mocks.generateOrderOperationSchedule,
         dynamicReplanOrderSchedule: mocks.dynamicReplanOrderSchedule,
         autoPlanSchedule: mocks.autoPlanSchedule,
@@ -104,9 +106,15 @@ describe('useGantt', () => {
     mocks.listScheduleCalendars.mockResolvedValue({ calendars: [{ id: 3, calendar_name: '九小时工作日历' }] })
     mocks.listOperationSchedules.mockResolvedValue({ operations: [] })
     mocks.listCapacityOrders.mockResolvedValue({ orders: [] })
+    mocks.auditScheduleCapacity.mockResolvedValue({ line_conflicts: 0, conflicts: [], risk_counts: {}, risk_orders: [] })
     mocks.listScheduleDowntime.mockResolvedValue({ events: [] })
     mocks.createScheduleNodeDowntime.mockResolvedValue({ ok: true, event: { id: 1 } })
     mocks.cancelScheduleDowntime.mockResolvedValue({ ok: true, status: 'cancelled' })
+    mocks.dynamicReplanOrderSchedule.mockResolvedValue({
+      ok: true,
+      replan_summary: { changed_operation_count: 1, node_change_count: 1, risk_change: 'improved' },
+      differences: [{ order_process_id: 9, change_type: 'node', node_changed: 1 }],
+    })
     mocks.updateScheduleOrder.mockResolvedValue({ ok: true })
     mocks.autoPlanSchedule.mockResolvedValue({ ok: true, status: 'completed', queue_count: 2, failed_count: 0, orders: [] })
     mocks.adjustScheduleItem.mockResolvedValue({ ok: true })
@@ -186,7 +194,7 @@ describe('useGantt', () => {
     await flushPromises()
 
     expect(harness.gantt.processOptions.value).toEqual([{ id: 7, name: '焊接' }])
-    expect(harness.gantt.capacitySummary.value).toEqual({ total: 2, planned: 1, blocked: 1, minutes: 90 })
+    expect(harness.gantt.capacitySummary.value).toEqual({ total: 2, planned: 1, blocked: 1, conflicts: 0, minutes: 90 })
     expect(harness.gantt.nodeLabel(harness.gantt.operationSchedules.value[0])).toBe('WELD-01 · 焊接-01')
     expect(harness.gantt.allocationLabel(harness.gantt.operationSchedules.value[1].allocations[0])).toBe('WELD-02 · 焊接-02 × 3')
     expect(harness.gantt.blockedMessage({ blocked_code: 'NO_COMPATIBLE_NODE' })).toBe('没有满足能力要求的生产节点')
@@ -223,6 +231,24 @@ describe('useGantt', () => {
 
     await harness.gantt.cancelDowntime({ id: 12 })
     expect(mocks.cancelScheduleDowntime).toHaveBeenCalledWith(12)
+    harness.wrapper.unmount()
+  })
+
+  it('keeps dynamic replan evidence for operator review before publication', async () => {
+    mocks.listCapacityOrders.mockResolvedValue({ orders: [{ id: 7, order_no: 'DYN-7' }] })
+    const harness = mountHarness()
+    await flushPromises()
+    await harness.gantt.setViewMode('operations')
+    await flushPromises()
+    harness.gantt.prepareDynamicReplan(7)
+    harness.gantt.replanReason.value = '报工与停机变化'
+    const result = await harness.gantt.dynamicReplanSchedule()
+
+    expect(mocks.dynamicReplanOrderSchedule).toHaveBeenCalledWith(7, expect.objectContaining({
+      reason: '报工与停机变化',
+    }))
+    expect(result.replan_summary.risk_change).toBe('improved')
+    expect(harness.gantt.replanResult.value).toEqual(result)
     harness.wrapper.unmount()
   })
 
@@ -267,12 +293,15 @@ describe('useGantt', () => {
     await harness.gantt.submitRevision(row, '提交复核')
     await harness.gantt.approveRevision(row, '独立批准')
     await harness.gantt.rejectRevision(row, '节点冲突')
-    await harness.gantt.publishRevision(row)
+    await harness.gantt.publishRevision(row, '批准后正式发布')
 
     expect(mocks.submitScheduleRevision).toHaveBeenCalledWith(77, expect.objectContaining({ reason: '提交复核' }))
     expect(mocks.approveScheduleRevision).toHaveBeenCalledWith(77, expect.objectContaining({ reason: '独立批准' }))
     expect(mocks.rejectScheduleRevision).toHaveBeenCalledWith(77, expect.objectContaining({ reason: '节点冲突' }))
-    expect(mocks.publishScheduleRevision).toHaveBeenCalledWith(77, {})
+    expect(mocks.publishScheduleRevision).toHaveBeenCalledWith(77, expect.objectContaining({ reason: '批准后正式发布' }))
+    expect(harness.gantt.revisionState({ revision_status: 'draft', revision_approval_status: 'submitted' })).toBe('pending_approval')
+    expect(harness.gantt.revisionState({ revision_status: 'draft', revision_approval_status: 'approved' })).toBe('approved')
+    expect(harness.gantt.revisionStatusLabel({ revision_status: 'published', revision_approval_status: 'approved' })).toBe('已发布')
     harness.wrapper.unmount()
   })
 
@@ -287,6 +316,8 @@ describe('useGantt', () => {
 
     expect(harness.gantt.riskSummary.value).toMatchObject({ high: 1, overdue: 1, none: 1, delayed: 2, totalDelayMinutes: 210 })
     expect(harness.gantt.formatRiskMinutes(150)).toBe('2 小时 30 分钟')
+    harness.gantt.riskFilter.value = 'critical'
+    expect(harness.gantt.filteredOrders.value.map(order => order.id)).toEqual([11, 12])
     harness.wrapper.unmount()
   })
 

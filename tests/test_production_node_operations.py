@@ -163,6 +163,107 @@ def test_preflight_allows_additional_node_only_capacity(node_database):
     assert report["counts"]["node_only_count"] == 2
 
 
+def _add_complete_node_master_data(db):
+    db.executescript(
+        """
+        CREATE TABLE processes (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        );
+        CREATE TABLE schedule_calendars (
+            id INTEGER PRIMARY KEY,
+            calendar_code TEXT NOT NULL,
+            calendar_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        );
+        CREATE TABLE schedule_shifts (
+            id INTEGER PRIMARY KEY,
+            calendar_id INTEGER NOT NULL,
+            start_minute INTEGER NOT NULL,
+            end_minute INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        );
+        """
+    )
+    process_counts = {
+        "下料": 1,
+        "铆接": 4,
+        "焊接": 10,
+        "抛丸": 1,
+        "打磨": 1,
+        "镗孔": 2,
+        "喷漆": 2,
+    }
+    process_ids = {}
+    for process_id, name in enumerate(process_counts, start=1):
+        process_ids[name] = process_id
+        db.execute("INSERT INTO processes(id,name) VALUES (?,?)", (process_id, name))
+    db.execute(
+        "INSERT INTO schedule_calendars(id,calendar_code,calendar_name) "
+        "VALUES (1,'DEFAULT','默认生产日历')"
+    )
+    db.executemany(
+        "INSERT INTO schedule_shifts(id,calendar_id,start_minute,end_minute) "
+        "VALUES (?,?,?,?)",
+        [(1, 1, 480, 720), (2, 1, 780, 1080)],
+    )
+    line_id = 1
+    node_id = 1
+    for name, count in process_counts.items():
+        process_id = process_ids[name]
+        for index in range(count):
+            db.execute(
+                "UPDATE process_production_lines SET process_id=? WHERE id=?",
+                (process_id, line_id),
+            )
+            db.execute(
+                "UPDATE production_nodes SET process_id=? WHERE id=?",
+                (process_id, node_id),
+            )
+            line_id += 1
+            node_id += 1
+
+
+def test_preflight_reports_node_distribution_and_540_minute_calendar(node_database):
+    with sqlite3.connect(node_database) as db:
+        _add_complete_node_master_data(db)
+
+    report = production_node_operations.run_preflight(
+        node_database, expected_commit=COMMIT, actual_commit=COMMIT
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["active_node_calendar_valid"] is True
+    assert report["checks"]["active_node_daily_capacity_exact"] is True
+    assert report["checks"]["target_node_distribution_covered"] is True
+    assert report["checks"]["target_node_distribution_exact"] is True
+    assert report["counts"]["daily_minutes_target"] == 540
+    assert report["counts"]["active_node_distribution"] == {
+        "下料": 1,
+        "铆接": 4,
+        "焊接": 10,
+        "抛丸": 1,
+        "打磨": 1,
+        "镗孔": 2,
+        "喷漆": 2,
+    }
+
+
+def test_preflight_blocks_inactive_node_calendar(node_database):
+    with sqlite3.connect(node_database) as db:
+        _add_complete_node_master_data(db)
+        db.execute("UPDATE schedule_calendars SET status='inactive' WHERE id=1")
+
+    report = production_node_operations.run_preflight(
+        node_database, expected_commit=COMMIT, actual_commit=COMMIT
+    )
+
+    assert report["ok"] is False
+    assert report["checks"]["active_node_calendar_valid"] is False
+    assert len(report["counts"]["invalid_calendar_nodes"]) == 21
+
+
 def test_preflight_accepts_v085_segments_without_production_node_column(tmp_path):
     path = tmp_path / "v085.db"
     with sqlite3.connect(path) as db:
