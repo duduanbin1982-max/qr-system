@@ -36,11 +36,24 @@ export function useGanttData() {
   const loading = ref(true)
   const dayWidth = ref(38)
   const scheduleScope = ref('active')
+  const riskFilter = ref('all')
   const serverStats = ref({ total: 0, producing: 0, pending: 0, completed: 0 })
   const dateRange = ref({ minDate: '', maxDate: '' })
 
   const stats = computed(() => serverStats.value)
-  const filteredOrders = computed(() => orders.value)
+  const filteredOrders = computed(() => orders.value.filter((order) => {
+    if (riskFilter.value === 'all') return true
+    if (riskFilter.value === 'critical') {
+      return ['overdue', 'high'].includes(riskLevel(order))
+    }
+    if (riskFilter.value === 'conflict') {
+      return Number(order.schedule_conflict_count || 0) > 0
+    }
+    if (riskFilter.value === 'blocked') {
+      return Number(order.schedule_blocked_count || 0) > 0
+    }
+    return riskLevel(order) === riskFilter.value
+  }))
   const ganttData = computed(() => buildGanttData(filteredOrders.value, dateRange.value))
   const riskSummary = computed(() => {
     const summary = {
@@ -134,6 +147,9 @@ export function useGanttData() {
       order?.deadline_at ? `交期：${order.deadline_at}` : '',
       order?.projected_completion_at ? `预计完成：${order.projected_completion_at}` : '',
       Number(order?.delay_minutes) > 0 ? `预计延期：${formatRiskMinutes(order.delay_minutes)}` : '',
+      Number(order?.slack_minutes) >= 0 ? `剩余缓冲：${formatRiskMinutes(order.slack_minutes)}` : '',
+      Number(order?.schedule_conflict_count) > 0 ? `生产节点冲突：${order.schedule_conflict_count} 处` : '',
+      ...(order?.risk_suggested_actions || []).map(action => `建议：${action}`),
     ]
     return parts.filter(Boolean).join(' | ')
   }
@@ -215,6 +231,7 @@ export function useGanttData() {
     loading,
     dayWidth,
     scheduleScope,
+    riskFilter,
     filteredOrders,
     ganttData,
     riskSummary,

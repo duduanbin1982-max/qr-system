@@ -135,8 +135,8 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 90
-    assert [item["version"] for item in report["pending"]] == list(range(71, 91))
+    assert report["target_version"] == 94
+    assert [item["version"] for item in report["pending"]] == list(range(71, 95))
     assert database.read_bytes() == before
 
 
@@ -294,7 +294,13 @@ def test_schedule_capacity_migration_creates_configured_parallel_line_pools():
         }
         assert {"schedule_calendars", "schedule_shifts", "schedule_calendar_exceptions",
                 "order_process_schedule_segments", "schedule_revisions",
-                "schedule_revision_items"}.issubset(table_names)
+                "schedule_revision_items", "schedule_revision_conflict_checks",
+                "schedule_revision_conflicts",
+                "schedule_revision_risk_assessments"}.issubset(table_names)
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='view' "
+            "AND name='schedule_effective_capacity_intervals'"
+        ).fetchone() is not None
         revision_columns = {
             row["name"] for row in db.execute(
                 "PRAGMA table_info(schedule_revisions)"
@@ -361,7 +367,7 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[88] == "modules.migration_production_nodes"
     assert by_version[89] == "modules.migration_production_nodes"
     assert by_version[90] == "modules.migration_production_nodes"
-    assert migrations.LATEST_VERSION == 90
+    assert migrations.LATEST_VERSION == 94
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():

@@ -43,6 +43,7 @@ class ProductionNodePolicy:
             "ROW_VERSION_CONFLICT",
             "REVISION_STATE_CONFLICT",
             "INDEPENDENT_APPROVER_REQUIRED",
+            "SCHEDULE_CONFLICT_GATE_FAILED",
         }
     )
     CAPABILITY_FIELDS = (

@@ -78,6 +78,76 @@ def test_exclusive_node_schedule_uses_node_id_and_deprecated_line_projection(cli
         assert operation["segments"][0]["production_node_id"] == node_id
 
 
+def test_completed_operation_does_not_enter_empty_node_allocation(client, monkeypatch):
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        order_id, _, _ = _seed_node_order(
+            db, quantity=3, route_name="Completed node operation"
+        )
+        db.execute(
+            "UPDATE order_processes SET completed=3,status='completed' WHERE order_id=?",
+            (order_id,),
+        )
+        db.commit()
+
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            start_date="2026-09-18",
+            schedule_run_key="node-completed-no-empty-min-001",
+        )
+
+        operation = result["operations"][0]
+        assert operation["status"] == "completed"
+        assert operation["blocked_code"] == ""
+        assert operation["quantity"] == 0
+        assert operation["segments"] == []
+        assert operation["reason"] == "已完成，无剩余排程量"
+
+
+def test_unmapped_node_persists_node_native_segment_without_legacy_line(
+    client, monkeypatch,
+):
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        order_id, mapped_node_id, _ = _seed_node_order(
+            db, quantity=2, route_name="Node native segment"
+        )
+        mapped = db.execute(
+            "SELECT process_id,calendar_id FROM production_nodes WHERE id=?",
+            (mapped_node_id,),
+        ).fetchone()
+        db.execute(
+            "UPDATE production_nodes SET status='inactive' WHERE process_id=?",
+            (mapped["process_id"],),
+        )
+        node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id,"
+            "legacy_process_line_id) VALUES (?,?,?,'exclusive','active',?,NULL)",
+            (mapped["process_id"], "NODE-NATIVE-01", "节点原生01", mapped["calendar_id"]),
+        ).lastrowid
+        db.commit()
+
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            start_date="2026-09-18",
+            schedule_run_key="node-native-segment-001",
+        )
+
+        operation = result["operations"][0]
+        assert operation["production_node_id"] == node_id
+        assert operation["process_line_id"] is None
+        assert operation["status"] == "planned"
+        segment = db.execute(
+            "SELECT process_line_id,production_node_id "
+            "FROM order_process_schedule_segments WHERE schedule_id=?",
+            (operation["id"],),
+        ).fetchone()
+        assert tuple(segment) == (None, node_id)
+
+
 def test_node_schedule_filters_capabilities_and_blocks_without_match(client, monkeypatch):
     _enable_node_engine(monkeypatch)
     with client.application.app_context():

@@ -187,15 +187,15 @@ def schedule_revision_detail(revision_id):
 @app.route("/api/schedule/revisions/<int:revision_id>/publish", methods=["POST"])
 @check_auth
 @check_permission("schedules:approve")
+@validate_json("schedule_workflow_action")
 def schedule_revision_publish(revision_id):
-    try:
-        return jsonify(ScheduleCapacityService.publish_revision(
-            revision_id, published_by=g.current_user.get("id")
-        ))
-    except NodeSchedulingError as exc:
-        return jsonify(exc.to_payload()), 409
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    data = get_json_body()
+    return _schedule_workflow_response(lambda: ScheduleCapacityService.publish_revision(
+        revision_id,
+        data["reason"],
+        data["idempotency_key"],
+        g.current_user.get("id"),
+    ))
 
 
 @app.route("/api/schedule/revision-items/<int:revision_item_id>/lock", methods=["POST"])
@@ -392,7 +392,10 @@ def schedule_downtime_create():
 @require_production_node_write
 def schedule_downtime_cancel(event_id):
     try:
-        result = ScheduleCapacityService.cancel_downtime_event(event_id)
+        result = ScheduleCapacityService.cancel_downtime_event(
+            event_id,
+            actor_id=g.current_user.get("id") if g.current_user else None,
+        )
         safe_audit_log("cancel_schedule_downtime", "schedule_downtime", event_id, "status=cancelled")
         return jsonify(result)
     except ValueError as exc:

@@ -23,6 +23,10 @@ import tempfile
 from typing import Any, Mapping, Sequence
 
 from modules import migrations
+from modules.schedule_capacity_config import (
+    DEFAULT_DAILY_MINUTES,
+    DEFAULT_PROCESS_LINE_COUNTS,
+)
 from scripts import production_operations
 
 
@@ -223,6 +227,104 @@ def _mapping_metrics(db: sqlite3.Connection) -> tuple[Any, int, int]:
     )
 
 
+def _node_master_data_metrics(db: sqlite3.Connection) -> dict[str, Any] | None:
+    """Validate active node coverage and calendar capacity without writing.
+
+    The production-node cutover must be able to explain three independent
+    facts before scheduling is enabled: every active node has an active
+    calendar, that calendar exposes positive working minutes, and the active
+    node pool covers the approved per-process capacity.  Extra node-only
+    records are reported separately so they can be retired with an audited
+    decision instead of being silently deleted.
+    """
+
+    required = {
+        "production_nodes",
+        "processes",
+        "schedule_calendars",
+        "schedule_shifts",
+    }
+    if not required <= {
+        row[0]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }:
+        return None
+
+    rows = db.execute(
+        "SELECT n.id,n.process_id,n.node_code,n.node_name,n.status,n.calendar_id,"
+        "p.name AS process_name,c.status AS calendar_status "
+        "FROM production_nodes n "
+        "LEFT JOIN processes p ON p.id=n.process_id "
+        "LEFT JOIN schedule_calendars c ON c.id=n.calendar_id "
+        "WHERE n.status='active' ORDER BY n.id"
+    ).fetchall()
+    distribution: dict[str, int] = {}
+    invalid_calendar_nodes: list[dict[str, Any]] = []
+    calendar_minutes: dict[int, int] = {}
+    for row in rows:
+        process_name = str(row["process_name"] or f"process_id:{row['process_id']}")
+        distribution[process_name] = distribution.get(process_name, 0) + 1
+        shifts = db.execute(
+            "SELECT start_minute,end_minute FROM schedule_shifts "
+            "WHERE calendar_id=? AND status='active' ORDER BY start_minute,id",
+            (row["calendar_id"],),
+        ).fetchall()
+        minutes = sum(
+            max(int(shift["end_minute"]) - int(shift["start_minute"]), 0)
+            for shift in shifts
+        )
+        calendar_minutes[int(row["calendar_id"])] = minutes
+        if row["calendar_status"] != "active" or not shifts or minutes <= 0:
+            invalid_calendar_nodes.append(
+                {
+                    "production_node_id": int(row["id"]),
+                    "node_code": row["node_code"] or "",
+                    "node_name": row["node_name"] or "",
+                    "process_name": process_name,
+                    "calendar_id": row["calendar_id"],
+                    "calendar_status": row["calendar_status"] or "missing",
+                    "daily_minutes": minutes,
+                }
+            )
+
+    missing = {
+        name: expected - distribution.get(name, 0)
+        for name, expected in DEFAULT_PROCESS_LINE_COUNTS.items()
+        if distribution.get(name, 0) < expected
+    }
+    extra = {
+        name: distribution.get(name, 0) - expected
+        for name, expected in DEFAULT_PROCESS_LINE_COUNTS.items()
+        if distribution.get(name, 0) > expected
+    }
+    unknown = {
+        name: count
+        for name, count in distribution.items()
+        if name not in DEFAULT_PROCESS_LINE_COUNTS
+    }
+    return {
+        "active_node_count": len(rows),
+        "active_node_distribution": dict(sorted(distribution.items())),
+        "target_node_distribution": dict(DEFAULT_PROCESS_LINE_COUNTS),
+        "missing_node_distribution": missing,
+        "extra_node_distribution": extra,
+        "unknown_process_node_distribution": unknown,
+        "invalid_calendar_nodes": invalid_calendar_nodes,
+        "calendar_daily_minutes": {
+            str(calendar_id): minutes
+            for calendar_id, minutes in sorted(calendar_minutes.items())
+        },
+        "daily_minutes_target": DEFAULT_DAILY_MINUTES,
+        "active_calendar_valid": not invalid_calendar_nodes,
+        "active_calendar_daily_capacity_exact": bool(rows)
+        and all(minutes == DEFAULT_DAILY_MINUTES for minutes in calendar_minutes.values()),
+        "target_node_distribution_covered": not missing,
+        "target_node_distribution_exact": not missing and not extra and not unknown,
+    }
+
+
 def _historical_missing_count(db: sqlite3.Connection) -> int | None:
     if not _table_exists(db, "production_node_migration_differences"):
         return None
@@ -372,6 +474,45 @@ def run_preflight(
                 node_count >= legacy_count
             )
             report["checks"]["legacy_mapping_complete"] = mapping_missing == 0
+        node_master = _node_master_data_metrics(connection)
+        if node_master is None:
+            report["checks"]["active_node_calendar_valid"] = None
+            report["checks"]["active_node_daily_capacity_exact"] = None
+            report["checks"]["target_node_distribution_covered"] = None
+            report["checks"]["target_node_distribution_exact"] = None
+        else:
+            report["counts"].update(
+                {
+                    "active_node_count": node_master["active_node_count"],
+                    "active_node_distribution": node_master["active_node_distribution"],
+                    "target_node_distribution": node_master["target_node_distribution"],
+                    "missing_node_distribution": node_master["missing_node_distribution"],
+                    "extra_node_distribution": node_master["extra_node_distribution"],
+                    "unknown_process_node_distribution": node_master[
+                        "unknown_process_node_distribution"
+                    ],
+                    "invalid_calendar_nodes": node_master["invalid_calendar_nodes"],
+                    "calendar_daily_minutes": node_master["calendar_daily_minutes"],
+                    "daily_minutes_target": node_master["daily_minutes_target"],
+                }
+            )
+            report["checks"].update(
+                {
+                    "active_node_calendar_valid": node_master["active_calendar_valid"],
+                    "active_node_daily_capacity_exact": node_master[
+                        "active_calendar_daily_capacity_exact"
+                    ],
+                    "target_node_distribution_covered": node_master[
+                        "target_node_distribution_covered"
+                    ],
+                    # Extra node-only records are not a readiness failure by
+                    # themselves; they require an explicit audited retirement
+                    # decision and remain visible in the report.
+                    "target_node_distribution_exact": node_master[
+                        "target_node_distribution_exact"
+                    ],
+                }
+            )
         historical_missing = _historical_missing_count(connection)
         if historical_missing is None:
             report["checks"]["unmapped_historical_facts"] = None

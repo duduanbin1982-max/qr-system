@@ -10,8 +10,13 @@ from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.process_service import ProcessService
 from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.migrations import run_migrations
-from scripts.preflight_schedule_precision import run_preflight
+from scripts.preflight_schedule_precision import (
+    classify_work_time_operation,
+    run_preflight,
+    summarize_work_time_coverage,
+)
 
 
 def _seed_capacity_order(db, process_ids, quantity=10, route_id=None, plan_start="2026-09-01"):
@@ -529,12 +534,13 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
         db.close()
 
     report = run_preflight(source, limit=10)
-    assert report["database_user_version"] == before == 90
+    assert report["database_user_version"] == before == 94
     assert report["operations"] == 0
     assert report["coverage_percent"] == 100.0
     assert report["process_statistics"] == []
     assert report["product_statistics"] == []
     assert report["line_loads"]
+    assert report["work_time_coverage"]["coverage_percent"] == 100.0
 
     check = sqlite3.connect(source)
     try:
@@ -542,6 +548,81 @@ def test_precision_preflight_returns_structured_breakdowns_without_source_mutati
     finally:
         check.close()
 
+
+def test_work_time_coverage_audit_distinguishes_exact_fallback_external_and_missing():
+    order = {
+        "id": 7,
+        "order_no": "AUDIT-7",
+        "product_id": 9,
+        "product_code": "AUDIT-P9",
+        "product_name": "审计产品",
+    }
+    operations = [
+        {
+            "order_process_id": 1,
+            "process_id": 101,
+            "process_name_snapshot": "焊接",
+            "route_version_id": 11,
+            "process_version_id": 111,
+            "status": "planned",
+            "execution_mode": "internal",
+            "standard_match_scope": "route_version:product",
+            "standard_id": 1001,
+            "standard_version": 2,
+        },
+        {
+            "order_process_id": 2,
+            "process_id": 102,
+            "process_name_snapshot": "打磨",
+            "route_version_id": 11,
+            "process_version_id": 112,
+            "status": "planned",
+            "execution_mode": "internal",
+            "standard_match_scope": "process:generic",
+            "standard_id": 1002,
+            "standard_version": 1,
+        },
+        {
+            "order_process_id": 3,
+            "process_id": 103,
+            "process_name_snapshot": "外协",
+            "route_version_id": 11,
+            "process_version_id": 113,
+            "status": "planned",
+            "execution_mode": "non_scheduled",
+            "standard_match_scope": "execution_policy",
+        },
+        {
+            "order_process_id": 4,
+            "process_id": 104,
+            "process_name_snapshot": "喷漆",
+            "route_version_id": 11,
+            "process_version_id": 114,
+            "status": "blocked",
+            "execution_mode": "internal",
+            "blocked_code": "MISSING_WORK_TIME_STANDARD",
+            "blocked_reason": "未配置标准工时",
+        },
+    ]
+    rows = [classify_work_time_operation(order, operation) for operation in operations]
+    summary = summarize_work_time_coverage(rows)
+
+    assert [row["match_tier"] for row in rows] == [
+        "exact_product_route_process_version",
+        "process_generic_fallback",
+        "non_scheduled",
+        "missing_standard",
+    ]
+    assert summary["operation_count"] == 4
+    assert summary["evaluable_internal_operation_count"] == 3
+    assert summary["matched_operation_count"] == 2
+    assert summary["missing_standard_operation_count"] == 1
+    assert summary["non_scheduled_count"] == 1
+    assert summary["coverage_percent"] == pytest.approx(66.67)
+    assert summary["version_bound_match_count"] == 1
+    assert summary["version_bound_coverage_percent"] == pytest.approx(33.33)
+    assert summary["tier_counts"]["process_generic_fallback"] == 1
+    assert summary["missing_standard_details"][0]["process_name"] == "喷漆"
 
 def test_precision_schedule_spans_shifts_and_preserves_snapshot(client):
     with client.application.app_context():
@@ -737,23 +818,69 @@ def test_regeneration_keeps_history_and_publish_supersedes_previous_revision(cli
         )
         first_id = first["schedule_revision_id"]
         _approve_revision(first_id, creator_id, reviewer_id, "revision-history-v1")
-        ScheduleCapacityService.publish_revision(first_id, published_by=creator_id)
+        ScheduleCapacityService.publish_revision(
+            first_id,
+            "publish first revision",
+            "revision-history-v1-publish",
+            creator_id,
+        )
         first_published_at = db.execute(
             "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
         ).fetchone()[0]
         # Publishing the same revision again is a no-op, including timestamps.
-        ScheduleCapacityService.publish_revision(first_id, published_by=creator_id)
+        replay = ScheduleCapacityService.publish_revision(
+            first_id,
+            "publish first revision",
+            "revision-history-v1-publish",
+            creator_id,
+        )
+        assert replay["idempotent_replay"] is True
         assert db.execute(
             "SELECT published_at FROM schedule_revisions WHERE id=?", (first_id,)
         ).fetchone()[0] == first_published_at
+        formal_before = [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        ]
+        current_before = db.execute(
+            "SELECT current_schedule_revision_id FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()[0]
 
         second = ScheduleCapacityService.generate_order_schedule(
             order_id, schedule_run_key="capacity-revision-history-v2",
             actor_id=creator_id,
         )
         second_id = second["schedule_revision_id"]
+        assert db.execute(
+            "SELECT current_schedule_revision_id FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()[0] == current_before == first_id
+        assert [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        ] == formal_before
+        candidate_rows = [
+            row
+            for row in ScheduleCapacityService.list_schedules(limit=500)["operations"]
+            if row["order_id"] == order_id
+        ]
+        assert candidate_rows
+        assert {row["schedule_revision_id"] for row in candidate_rows} == {second_id}
+        assert all(row["candidate_revision"] is True for row in candidate_rows)
         _approve_revision(second_id, creator_id, reviewer_id, "revision-history-v2")
-        ScheduleCapacityService.publish_revision(second_id, published_by=creator_id)
+        ScheduleCapacityService.publish_revision(
+            second_id,
+            "publish replacement revision",
+            "revision-history-v2-publish",
+            creator_id,
+        )
         rows = db.execute(
             "SELECT id,status,superseded_by FROM schedule_revisions "
             "WHERE order_id=? ORDER BY revision_no", (order_id,)
@@ -762,6 +889,18 @@ def test_regeneration_keeps_history_and_publish_supersedes_previous_revision(cli
         assert rows[0]["status"] == "superseded"
         assert rows[0]["superseded_by"] == second_id
         assert rows[1]["status"] == "published"
+        assert db.execute(
+            "SELECT current_schedule_revision_id FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()[0] == second_id
+        assert {
+            row["schedule_revision_id"]
+            for row in db.execute(
+                "SELECT schedule_revision_id FROM order_process_schedules "
+                "WHERE order_id=?",
+                (order_id,),
+            ).fetchall()
+        } == {second_id}
 
 
 def test_revision_publish_requires_exact_operation_set(client):
@@ -798,16 +937,14 @@ def test_revision_publish_requires_exact_operation_set(client):
             (malformed, other_op_id, process, 1),
         )
         db.commit()
-        _approve_revision(
-            malformed,
-            creator_id,
-            reviewer_id,
-            "revision-completeness-malformed",
-        )
-        with pytest.raises(ValueError, match="条目不完整"):
-            ScheduleCapacityService.publish_revision(
-                malformed, published_by=creator_id
+        with pytest.raises(NodeSchedulingError) as invalid:
+            ScheduleCapacityService.submit_revision(
+                malformed,
+                "submit malformed revision",
+                "revision-completeness-malformed-submit",
+                creator_id,
             )
+        assert invalid.value.code == "REVISION_INTEGRITY_FAILED"
 
 
 def test_revision_api_contracts_and_permissions(client, auth_headers, worker_auth_headers):
@@ -850,12 +987,104 @@ def test_revision_api_contracts_and_permissions(client, auth_headers, worker_aut
     assert "limit" in malformed_limit.get_json()["error"]
 
     publish = client.post(
-        f"/api/schedule/revisions/{revision_id}/publish", headers=auth_headers
+        f"/api/schedule/revisions/{revision_id}/publish",
+        headers=auth_headers,
+        json={
+            "reason": "publish approved API revision",
+            "idempotency_key": "revision-api-publish-001",
+        },
     )
     assert publish.status_code == 200
-    assert publish.get_json()["revision"]["status"] == "published"
+    assert publish.get_json()["result"]["status"] == "published"
 
     forbidden = client.post(
         f"/api/schedule/revisions/{revision_id}/publish", headers=worker_auth_headers
     )
     assert forbidden.status_code == 403
+
+
+def test_capacity_dashboard_exposes_minute_segments_and_calendar_evidence(client):
+    with client.application.app_context():
+        db = get_db()
+        process = db.execute(
+            "SELECT id FROM processes WHERE name='下料'"
+        ).fetchone()["id"]
+        route_id = create_process_route(db, [process], name="Capacity Dashboard")
+        order_id, _ = _seed_capacity_order(
+            db, [process], quantity=2, route_id=route_id,
+        )
+        _seed_standard(db, route_id, process, unit=30, setup=10)
+        creator_id, reviewer_id = _workflow_actor_ids(db)
+        result = ScheduleCapacityService.generate_order_schedule(
+            order_id,
+            schedule_run_key="capacity-dashboard-segments-v1",
+            actor_id=creator_id,
+        )
+        revision_id = result["schedule_revision_id"]
+        _approve_revision(
+            revision_id, creator_id, reviewer_id, "capacity-dashboard-segments-v1"
+        )
+        ScheduleCapacityService.publish_revision(
+            revision_id,
+            "publish dashboard schedule",
+            "capacity-dashboard-segments-publish-v1",
+            reviewer_id,
+        )
+
+        operation = next(
+            row
+            for row in ScheduleCapacityService.list_schedules(limit=500)["operations"]
+            if row["order_id"] == order_id
+        )
+        assert operation["candidate_revision"] is False
+        assert operation["segments"]
+        assert operation["segments"][0]["segment_start_at"]
+        assert operation["segments"][0]["segment_end_at"]
+
+        node_id = (
+            operation["production_node_id"]
+            or operation["segments"][0]["production_node_id"]
+            or db.execute(
+                "SELECT id FROM production_nodes WHERE process_id=? ORDER BY id LIMIT 1",
+                (process,),
+            ).fetchone()["id"]
+        )
+        db.execute(
+            "INSERT INTO production_node_calendar_overrides "
+            "(production_node_id,start_at,end_at,override_type,reason,status,created_by) "
+            "VALUES (?,?,?,?,?,'active',?)",
+            (
+                node_id,
+                "2026-09-23 18:00:00",
+                "2026-09-23 19:00:00",
+                "overtime",
+                "dashboard overtime evidence",
+                creator_id,
+            ),
+        )
+        db.execute(
+            "INSERT INTO production_node_calendar_overrides "
+            "(production_node_id,start_at,end_at,override_type,reason,status,created_by) "
+            "VALUES (?,?,?,?,?,'active',?)",
+            (
+                node_id,
+                "2026-09-24 08:00:00",
+                "2026-09-24 09:00:00",
+                "maintenance",
+                "dashboard maintenance evidence",
+                creator_id,
+            ),
+        )
+        db.commit()
+
+        audit = ScheduleCapacityService.audit_schedule_capacity(limit=1000)
+        assert any(
+            row["production_node_id"] == node_id
+            and row["override_type"] == "overtime"
+            for row in audit["capacity_overrides"]
+        )
+        assert any(
+            row["production_node_id"] == node_id
+            and row["unavailable_type"] == "maintenance"
+            for row in audit["capacity_unavailability"]
+        )

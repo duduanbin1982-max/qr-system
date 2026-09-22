@@ -32,6 +32,14 @@
             :style="{padding:'4px 12px',borderRadius:'999px',background:scheduleScope===tab.key?'var(--primary)':'transparent',color:scheduleScope===tab.key?'#fff':'var(--text-secondary)',boxShadow:'none'}"
             @click="setScheduleScope(tab.key)">{{ tab.label }}</button>
         </div>
+        <select v-if="viewMode==='orders'" v-model="riskFilter" class="form-input" style="width:150px;padding:5px 9px;font-size:var(--text-xs)" aria-label="交期风险筛选">
+          <option value="all">全部风险</option>
+          <option value="critical">逾期 / 高风险</option>
+          <option value="medium">中风险</option>
+          <option value="low">低风险</option>
+          <option value="conflict">存在节点冲突</option>
+          <option value="blocked">存在排程阻断</option>
+        </select>
         <button v-if="canViewNodes" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="showNodeMgr=true">⚙️ 生产节点管理</button>
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
         <button @click="zoomIn" title="放大" class="btn-default btn-sm">+</button>
@@ -66,7 +74,17 @@
           <option value="">全部生产节点</option>
           <option v-for="node in capacityNodes" :key="node.id" :value="String(node.id)">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
         </select>
-        <span style="font-size:var(--text-xs);color:var(--text-secondary)">共 {{ capacitySummary.total }} 道工序 · 已排 {{ capacitySummary.planned }} · 阻断 {{ capacitySummary.blocked }} · {{ Math.round(capacitySummary.minutes) }} 分钟</span>
+        <select v-model="capacityOrderFilter" class="form-input" style="width:170px;padding:6px 10px;font-size:var(--text-sm)">
+          <option value="">全部订单</option>
+          <option v-for="order in capacityOrders" :key="`capacity-order-${order.id}`" :value="String(order.id)">{{ order.order_no }}</option>
+        </select>
+        <select v-model="capacityRiskFilter" class="form-input" style="width:150px;padding:6px 10px;font-size:var(--text-sm)" aria-label="工序冲突风险筛选">
+          <option value="all">全部状态</option>
+          <option value="conflict">存在节点冲突</option>
+          <option value="blocked">存在排程阻断</option>
+          <option value="critical">逾期 / 高风险</option>
+        </select>
+        <span style="font-size:var(--text-xs);color:var(--text-secondary)">共 {{ capacitySummary.total }} 道工序 · 已排 {{ capacitySummary.planned }} · 阻断 {{ capacitySummary.blocked }} · 冲突 {{ capacitySummary.conflicts || 0 }} · {{ Math.round(capacitySummary.minutes) }} 分钟</span>
         <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
           <select v-model="generationOrderId" @change="prepareGeneration(generationOrderId)" class="form-input" style="width:180px;padding:6px 10px;font-size:var(--text-sm)">
             <option value="">选择订单生成排程</option>
@@ -83,6 +101,52 @@
           <button v-if="canGenerateSchedules" type="button" class="btn btn-sm" style="background:var(--warning);color:#fff" @click="dynamicReplanSchedule">按实际进度重排</button>
           <button v-if="canGenerateSchedules" type="button" class="btn btn-sm" style="background:var(--teal);color:#fff" @click="prepareAutoPlan">⚡ 自动排程</button>
           <button type="button" class="btn-default btn-sm" @click="loadCapacity">刷新</button>
+        </div>
+      </div>
+      <ScheduleCapacityDashboard
+        :operations="operationSchedules"
+        :nodes="capacityNodes"
+        :orders="capacityOrders"
+        :audit="conflictAudit"
+        :downtime="downtimeEvents"
+        @filter-node="capacityNodeFilter=String($event)"
+        @filter-order="capacityOrderFilter=String($event)"
+        @refresh="loadCapacity"
+      />
+      <div v-if="selectedReplanOrder?.schedule_replan_required && !replanResult" data-test="pending-replan-reason" style="margin:-6px 0 14px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:var(--radius-sm);font-size:var(--text-xs);color:#9a3412">
+        <b>{{ selectedReplanOrder.order_no }} 待重排：</b>{{ selectedReplanOrder.schedule_replan_reason || '生产事实发生变化' }}
+      </div>
+      <div v-if="replanResult" data-test="dynamic-replan-evidence" class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid #fde68a;background:#fffbeb">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <strong style="color:#92400e">🔄 动态重排已生成草稿</strong>
+          <span style="font-size:var(--text-xs);color:var(--text-secondary)">正式排程与报工事实未改变，必须审批并发布后才生效</span>
+          <span v-if="replanResult.replan_summary" style="margin-left:auto;font-size:var(--text-xs)">变化 <b>{{ replanResult.replan_summary.changed_operation_count || 0 }}</b> 道 · 换节点 <b>{{ replanResult.replan_summary.node_change_count || 0 }}</b> 道 · 风险 <b>{{ replanResult.replan_summary.risk_change || 'unchanged' }}</b></span>
+        </div>
+        <div v-if="replanResult.replan_summary?.trigger_reasons?.length" style="margin-top:8px;font-size:var(--text-xs);color:#78350f">
+          <b>为什么需要重排：</b>{{ replanResult.replan_summary.trigger_reasons.join('；') }}
+        </div>
+        <div v-if="replanResult.differences?.length" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px;margin-top:8px">
+          <div v-for="difference in replanResult.differences.filter(item => item.change_type !== 'unchanged').slice(0,8)" :key="`replan-diff-${difference.order_process_id}`" style="padding:7px 9px;background:#fff;border:1px solid #fef3c7;border-radius:var(--radius-sm);font-size:var(--text-xs)">
+            <b>{{ difference.after?.process_id || difference.before?.process_id ? `订单工序 #${difference.order_process_id}` : '工序变化' }}</b>
+            <span style="display:block;margin-top:2px">类型 {{ difference.change_type }} · 数量 {{ Number(difference.quantity_delta || 0) >= 0 ? '+' : '' }}{{ difference.quantity_delta || 0 }} · 占用 {{ Number(difference.occupied_minutes_delta || 0) >= 0 ? '+' : '' }}{{ Math.round(difference.occupied_minutes_delta || 0) }} 分钟</span>
+            <span v-if="difference.node_changed" style="display:block;color:#b45309">生产节点已变更</span>
+            <span v-if="difference.end_delta_minutes" :style="{display:'block',color:Number(difference.end_delta_minutes)>0?'var(--danger)':'var(--success)'}">预计结束 {{ Number(difference.end_delta_minutes)>0?'延后':'提前' }} {{ Math.abs(difference.end_delta_minutes) }} 分钟</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="Number(conflictAudit.line_conflicts || 0)" class="card" data-test="schedule-conflict-workbench" style="margin:0 0 14px;padding:12px 14px;border:1px solid #fecaca;background:#fff7f7">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <strong style="color:var(--danger)">⛔ 生产节点冲突 {{ conflictAudit.line_conflicts }} 处</strong>
+          <span style="font-size:var(--text-xs);color:var(--text-secondary)">发布前必须完成换节点、错峰或停机避让；冲突版本将被门禁阻断</span>
+          <button type="button" class="btn-default btn-sm" style="margin-left:auto" @click="capacityRiskFilter='conflict'">只看冲突工序</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px">
+          <div v-for="(conflict,index) in (conflictAudit.conflicts || []).slice(0,6)" :key="`conflict-${index}`" style="padding:8px 10px;background:#fff;border-radius:var(--radius-sm);font-size:var(--text-xs);border:1px solid #fee2e2">
+            <b>{{ conflict.node_name || `生产资源 #${conflict.resource_id || '-'}` }}</b>
+            <span style="display:block;margin-top:3px">{{ conflict.first_start_at }} ~ {{ conflict.first_end_at }}</span>
+            <span style="display:block;color:var(--danger)">与 {{ conflict.second_start_at }} ~ {{ conflict.second_end_at }} 重叠 {{ conflict.overlap_minutes || 0 }} 分钟</span>
+            <span v-if="conflict.locked" style="display:block;color:#a16207">涉及已锁定任务，需授权复核</span>
+          </div>
         </div>
       </div>
       <div v-if="autoPlanVisible" class="card" style="margin:0 0 14px;padding:12px 14px;border:1px solid var(--teal);background:var(--bg-surface)">
@@ -162,10 +226,10 @@
             <td style="padding:8px 10px;white-space:nowrap">{{ standardScopeLabel(row.standard_match_scope) }}</td>
             <td style="padding:8px 10px">{{ row.difficulty_factor || 1 }}</td>
             <td style="padding:8px 10px">{{ Math.round(row.occupied_minutes || row.planned_minutes || 0) }}</td>
-            <td style="padding:8px 10px;white-space:nowrap"><span :style="{color:riskColor(operationRiskLevel(row)),fontWeight:700}" :title="operationRisk(row).risk_reason || ''">{{ riskIcon(operationRiskLevel(row)) }} {{ riskLabel(operationRiskLevel(row)) }}</span><span v-if="Number(operationRisk(row).delay_minutes)>0" style="display:block;font-size:10px;color:var(--danger)">+{{ formatRiskMinutes(operationRisk(row).delay_minutes) }}</span></td>
+            <td style="padding:8px 10px;white-space:nowrap"><span :style="{color:riskColor(operationRiskLevel(row)),fontWeight:700}" :title="operationRisk(row).risk_reason || ''">{{ riskIcon(operationRiskLevel(row)) }} {{ riskLabel(operationRiskLevel(row)) }}</span><span v-if="Number(operationRisk(row).delay_minutes)>0" style="display:block;font-size:10px;color:var(--danger)">+{{ formatRiskMinutes(operationRisk(row).delay_minutes) }}</span><span v-if="Number(row.conflict_count)>0" data-test="operation-conflict-badge" style="display:block;font-size:10px;color:var(--danger)" :title="row.conflict_reason || ''">⛔ 节点冲突 {{ row.conflict_count }} 处</span></td>
             <td style="padding:8px 10px;min-width:180px">
               <span v-if="row.schedule_status==='blocked'||row.status==='blocked'" :data-test="`blocked-code-${blockedCode(row) || 'UNKNOWN'}`" style="color:var(--danger);font-weight:600">阻断：{{ blockedMessage(row) }}</span>
-              <span v-else style="color:var(--success);font-weight:600">{{ row.revision_status || '已排程' }}</span>
+              <span v-else style="color:var(--success);font-weight:600">{{ revisionStatusLabel(row) }}</span>
               <span v-if="row.locked" data-test="locked-task" style="display:block;margin-top:3px;color:var(--warning);font-size:var(--text-xs)">🔒 已锁定</span>
             </td>
             <td style="padding:8px 10px;min-width:250px">
@@ -173,10 +237,10 @@
                 <button v-if="canAdjustSchedules && row.revision_item_id" type="button" class="btn-default btn-sm" @click="prepareAdjustment(row)">调整</button>
                 <button v-if="canLockSchedules && row.revision_item_id && !row.locked" type="button" class="btn-default btn-sm" @click="lockOperation(row)">锁定</button>
                 <button v-if="canUnlockSchedules && row.revision_item_id && row.locked" type="button" class="btn-default btn-sm" @click="unlockOperation(row)">解锁</button>
-                <button v-if="canSubmitSchedules && row.schedule_revision_id && (!row.revision_status || row.revision_status==='draft')" type="button" class="btn-default btn-sm" @click="submitRevision(row)">提交</button>
-                <button v-if="canApproveSchedules && row.schedule_revision_id && row.revision_status==='pending_approval'" type="button" class="btn-default btn-sm" @click="approveRevision(row)">批准</button>
-                <button v-if="canRejectSchedules && row.schedule_revision_id && row.revision_status==='pending_approval'" type="button" class="btn-default btn-sm" style="color:var(--danger)" @click="rejectRevision(row)">驳回</button>
-                <button v-if="canPublishSchedules && row.schedule_revision_id && row.revision_status==='approved'" type="button" class="btn-default btn-sm" style="color:var(--success)" @click="publishRevision(row)">发布</button>
+                <button v-if="canSubmitSchedules && row.schedule_revision_id && ['draft','rejected'].includes(revisionState(row))" type="button" class="btn-default btn-sm" @click="submitRevision(row)">提交</button>
+                <button v-if="canApproveSchedules && row.schedule_revision_id && revisionState(row)==='pending_approval'" type="button" class="btn-default btn-sm" @click="approveRevision(row)">批准</button>
+                <button v-if="canRejectSchedules && row.schedule_revision_id && revisionState(row)==='pending_approval'" type="button" class="btn-default btn-sm" style="color:var(--danger)" @click="rejectRevision(row)">驳回</button>
+                <button v-if="canPublishSchedules && row.schedule_revision_id && revisionState(row)==='approved'" type="button" class="btn-default btn-sm" style="color:var(--success)" @click="publishRevision(row)">发布</button>
               </div>
             </td>
           </tr></tbody>
@@ -313,10 +377,11 @@
 
 <script>
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
+import ScheduleCapacityDashboard from '@/components/schedule/ScheduleCapacityDashboard.vue'
 import { useGantt } from '@/composables/useGantt.js'
 
 export default {
-  components: { ProductionNodeWorkbench },
+  components: { ProductionNodeWorkbench, ScheduleCapacityDashboard },
   setup() {
     return { ...useGantt() }
   }

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from modules.services import BaseService
 from modules import config
+from modules.domain.schedule_conflict import ScheduleConflictPolicy
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
@@ -243,6 +244,231 @@ class ScheduleCapacityService:
         if getattr(value, "second", 0) or getattr(value, "microsecond", 0):
             return value.strftime("%Y-%m-%d %H:%M:%S")
         return value.strftime("%Y-%m-%d %H:%M")
+
+    @staticmethod
+    def _revision_operations(revision_id, db):
+        operations = []
+        for row in ScheduleCapacityRepository.list_revision_conflict_items(
+            revision_id, db=db
+        ):
+            item = dict(row)
+            try:
+                payload = json.loads(item.get("payload_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            operation = dict(payload)
+            operation.update({
+                "revision_item_id": item["id"],
+                "order_id": item["order_id"],
+                "order_process_id": item["order_process_id"],
+                "process_id": item["process_id"],
+                "process_name": item.get("process_name") or payload.get("process_name") or "",
+                "seq_order": item.get("seq_order") or payload.get("seq_order") or 0,
+                "status": item.get("status") or payload.get("status") or "blocked",
+                "production_node_id": item.get("production_node_id") or payload.get("production_node_id"),
+                "process_line_id": item.get("process_line_id") or payload.get("process_line_id"),
+                "planned_start_at": item.get("planned_start_at") or payload.get("planned_start_at") or "",
+                "planned_end_at": item.get("planned_end_at") or payload.get("planned_end_at") or "",
+                "occupied_minutes": item.get("occupied_minutes") or payload.get("occupied_minutes") or 0,
+                "execution_mode": item.get("execution_mode") or payload.get("execution_mode") or "internal",
+                "locked": bool(item.get("locked")),
+            })
+            operations.append(operation)
+        return operations
+
+    @staticmethod
+    def _candidate_capacity_intervals(operations):
+        intervals = []
+        for operation in operations:
+            if operation.get("status") == "blocked":
+                continue
+            if operation.get("execution_mode", "internal") in {
+                "outsourced", "non_scheduled",
+            }:
+                continue
+            segments = operation.get("segments") or []
+            if not segments:
+                segments = [{
+                    "production_node_id": operation.get("production_node_id"),
+                    "process_line_id": operation.get("process_line_id"),
+                    "start_at": operation.get("planned_start_at"),
+                    "end_at": operation.get("planned_end_at"),
+                }]
+            for segment in segments:
+                intervals.append({
+                    "order_id": operation.get("order_id"),
+                    "order_process_id": operation.get("order_process_id"),
+                    "process_id": operation.get("process_id"),
+                    "process_name": operation.get("process_name") or "",
+                    "revision_item_id": operation.get("revision_item_id"),
+                    "schedule_id": operation.get("id"),
+                    "production_node_id": segment.get("production_node_id") or operation.get("production_node_id"),
+                    "process_line_id": segment.get("process_line_id") or operation.get("process_line_id"),
+                    "node_name": operation.get("node_name") or operation.get("node_name_snapshot") or "",
+                    "capacity_mode": operation.get("capacity_mode") or operation.get("capacity_mode_snapshot") or "exclusive",
+                    "start_at": segment.get("start_at") or segment.get("segment_start_at") or operation.get("planned_start_at"),
+                    "end_at": segment.get("end_at") or segment.get("segment_end_at") or operation.get("planned_end_at"),
+                    "locked": bool(operation.get("locked")),
+                })
+        return intervals
+
+    @staticmethod
+    def _revision_conflict_input(revision_id, db):
+        order = ScheduleCapacityRepository.find_revision_order(revision_id, db=db)
+        if order is None:
+            raise ValueError("排程版本所属订单不存在")
+        operations = ScheduleCapacityService._revision_operations(revision_id, db)
+        candidate = ScheduleCapacityService._candidate_capacity_intervals(operations)
+        occupied = [
+            dict(row)
+            for row in ScheduleCapacityRepository.list_effective_capacity_intervals(
+                exclude_order_id=order["order_id"], db=db
+            )
+        ]
+        unavailable = [
+            dict(row)
+            for row in ScheduleCapacityRepository.list_capacity_unavailability(db=db)
+        ]
+        snapshot = {
+            "revision_id": int(revision_id),
+            "order_id": int(order["order_id"]),
+            "operations": operations,
+            "candidate_intervals": candidate,
+            "occupied_intervals": occupied,
+            "unavailable_intervals": unavailable,
+        }
+        encoded = json.dumps(
+            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return (
+            dict(order), operations, candidate, occupied, unavailable,
+            hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        )
+
+    @staticmethod
+    def _assess_revision_conflicts(
+        revision_id, check_stage, db, *, freeze_risk=False, persist=True
+    ):
+        (
+            order, operations, candidate, occupied, unavailable, input_digest,
+        ) = ScheduleCapacityService._revision_conflict_input(revision_id, db)
+        conflicts = ScheduleConflictPolicy.detect(
+            candidate_intervals=candidate,
+            occupied_intervals=occupied,
+            unavailable_intervals=unavailable,
+            operations=operations,
+        )
+        summary = ScheduleConflictPolicy.summarize(conflicts)
+        check = None
+        if persist:
+            check = ScheduleCapacityRepository.record_revision_conflict_check(
+                revision_id, check_stage, input_digest, summary, conflicts, db=db
+            )
+
+        risk = None
+        if freeze_risk:
+            planned = [
+                operation for operation in operations
+                if operation.get("status") != "blocked"
+            ]
+            projected_values = [
+                str(operation.get("planned_end_at") or "").strip()
+                for operation in planned
+                if str(operation.get("planned_end_at") or "").strip()
+            ]
+            projected_completion = max(projected_values, default="")
+            blocked = [
+                operation for operation in operations
+                if operation.get("status") == "blocked"
+            ]
+            blocked_reasons = tuple(
+                str(
+                    operation.get("blocked_reason")
+                    or operation.get("reason")
+                    or "前置条件不满足"
+                ).strip()
+                for operation in blocked
+            )
+            bottleneck = max(
+                planned,
+                key=lambda operation: float(operation.get("occupied_minutes") or 0),
+                default={},
+            )
+            quantity = int(order.get("quantity") or 0)
+            completed = int(order.get("completed") or 0)
+            is_completed = order.get("order_status") == "completed" or (
+                quantity > 0 and completed >= quantity
+            )
+            risk = ScheduleDeadlineRiskPolicy.evaluate(
+                deadline_text=order.get("deadline") or "",
+                projected_completion_at=projected_completion,
+                plan_end=order.get("plan_end") or "",
+                now=datetime.now(),
+                completed=is_completed,
+                blocked_count=len(blocked),
+                blocked_reasons=blocked_reasons,
+                conflict_count=summary["blocking_count"],
+                conflict_details=conflicts,
+                bottleneck_process=bottleneck.get("process_name") or "",
+                bottleneck_node=(
+                    bottleneck.get("node_name")
+                    or bottleneck.get("node_name_snapshot")
+                    or ""
+                ),
+            )
+            assessed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ScheduleCapacityRepository.set_revision_risk_snapshot(
+                revision_id, risk, assessed_at, db
+            )
+            evidence_payload = {
+                "risk": risk,
+                "conflict_check_digest": check["result_digest"] if check else "",
+                "input_digest": input_digest,
+            }
+            evidence_json = json.dumps(
+                evidence_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            ScheduleCapacityRepository.record_revision_risk_assessment(
+                revision_id,
+                "generation",
+                risk,
+                {
+                    "conflict_summary": summary,
+                    "conflicts": conflicts,
+                    "projected_operation_count": len(planned),
+                },
+                hashlib.sha256(evidence_json.encode("utf-8")).hexdigest(),
+                db=db,
+            )
+        return {
+            "check": dict(check) if check else None,
+            "summary": summary,
+            "conflicts": conflicts,
+            "risk": risk,
+        }
+
+    @staticmethod
+    def _assert_revision_conflict_gate(revision_id, check_stage, db):
+        assessment = ScheduleCapacityService._assess_revision_conflicts(
+            revision_id, check_stage, db, freeze_risk=False
+        )
+        if assessment["summary"]["blocking_count"]:
+            raise NodeSchedulingError(
+                "SCHEDULE_CONFLICT_GATE_FAILED",
+                "排程版本存在生产节点冲突，禁止进入下一审批或发布状态",
+                {
+                    "revision_id": int(revision_id),
+                    "check_stage": check_stage,
+                    **assessment["summary"],
+                    "conflicts": assessment["conflicts"][:20],
+                },
+            )
+        return assessment
 
     @staticmethod
     def _merge_intervals(intervals):
@@ -772,6 +998,39 @@ class ScheduleCapacityService:
                               "process_version_id": process_version_id, "process_name_snapshot": process_snapshot,
                               "route_name_snapshot": route_snapshot, "schedule_run_key": run_key,
                               "schedule_run_id": run_id, "schedule_revision_id": revision_id}
+                    if remaining <= 0:
+                        payload = {
+                            **common,
+                            "process_line_id": None,
+                            "production_node_id": None,
+                            "standard_id": None,
+                            "standard_version": None,
+                            "standard_minutes_per_unit": 0,
+                            "setup_minutes": 0,
+                            "difficulty_factor": 1,
+                            "planned_minutes": 0,
+                            "occupied_minutes": 0,
+                            "plan_start": cursor.strftime("%Y-%m-%d"),
+                            "plan_end": cursor.strftime("%Y-%m-%d"),
+                            "planned_start_at": "",
+                            "planned_end_at": "",
+                            "status": "completed",
+                            "blocked_reason": "",
+                            "blocked_code": "",
+                            "line_name_snapshot": "",
+                            "segments": [],
+                            "allocations": [],
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(
+                            payload, txn
+                        )
+                        result.append({
+                            **payload,
+                            "line_name": None,
+                            "process_name": process_snapshot,
+                            "reason": "已完成，无剩余排程量",
+                        })
+                        continue
                     if blocked:
                         payload = {**common, "process_line_id": None, "standard_id": None, "standard_version": None,
                                    "standard_minutes_per_unit": 0, "setup_minutes": 0, "difficulty_factor": 1,
@@ -924,6 +1183,40 @@ class ScheduleCapacityService:
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": payload["blocked_reason"]})
                         continue
+                    if not segments:
+                        blocked = True
+                        payload = {
+                            **common,
+                            "process_line_id": None,
+                            "production_node_id": None,
+                            "standard_id": standard["id"],
+                            "standard_version": standard["version"],
+                            "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
+                            "setup_minutes": standard["setup_minutes"],
+                            "difficulty_factor": standard["difficulty_factor"],
+                            "planned_minutes": 0,
+                            "occupied_minutes": 0,
+                            "plan_start": cursor.strftime("%Y-%m-%d"),
+                            "plan_end": cursor.strftime("%Y-%m-%d"),
+                            "planned_start_at": "",
+                            "planned_end_at": "",
+                            "status": "blocked",
+                            "blocked_reason": "生产节点未生成可用排程分段",
+                            "blocked_code": "NODE_CALENDAR_UNAVAILABLE",
+                            "line_name_snapshot": "",
+                            "segments": [],
+                            "allocations": [],
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(
+                            payload, txn
+                        )
+                        result.append({
+                            **payload,
+                            "line_name": None,
+                            "process_name": process_snapshot,
+                            "reason": payload["blocked_reason"],
+                        })
+                        continue
                     begin = min(
                         ScheduleCapacityService._parse_timestamp(segment["start_at"])
                         for segment in segments
@@ -1022,7 +1315,7 @@ class ScheduleCapacityService:
                     if row.get("status") == "planned"
                     and (row.get("process_line_id") or row.get("production_node_id"))
                 ]
-                if planned:
+                if planned and not order["current_schedule_revision_id"]:
                     first_start = min(row["plan_start"] for row in planned)
                     last_end = max(row["plan_end"] for row in planned)
                     ScheduleCapacityRepository.update_order_summary(order_id, first_start, last_end, txn)
@@ -1031,45 +1324,23 @@ class ScheduleCapacityService:
                 ScheduleCapacityRepository.set_revision_digest(
                     revision_id, revision_digest, txn
                 )
-                risk_input = ScheduleCapacityRepository.find_schedule_risk_input(
-                    order_id, db=txn
+                ScheduleCapacityRepository.finalize_revision_content_digest(
+                    revision_id, db=txn
                 )
-                if risk_input is not None:
-                    risk_row = dict(risk_input)
-                    quantity = int(risk_row.get("quantity") or 0)
-                    completed = int(risk_row.get("completed") or 0)
-                    is_completed = risk_row.get("order_status") == "completed" or (
-                        quantity > 0 and completed >= quantity
-                    )
-                    blocked_reasons = tuple(
-                        reason.strip()
-                        for reason in str(risk_row.get("blocked_reasons") or "").split("；")
-                        if reason.strip()
-                    )
-                    risk_snapshot = ScheduleDeadlineRiskPolicy.evaluate(
-                        deadline_text=risk_row.get("deadline") or "",
-                        projected_completion_at=risk_row.get("projected_completion_at") or "",
-                        plan_end=risk_row.get("plan_end") or "",
-                        now=datetime.now(),
-                        completed=is_completed,
-                        blocked_count=risk_row.get("blocked_count") or 0,
-                        blocked_reasons=blocked_reasons,
-                        conflict_count=risk_row.get("conflict_count") or 0,
-                    )
-                    ScheduleCapacityRepository.set_revision_risk_snapshot(
-                        revision_id,
-                        risk_snapshot,
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        txn,
-                    )
-                if not blocked:
+                conflict_assessment = ScheduleCapacityService._assess_revision_conflicts(
+                    revision_id, "generation", txn, freeze_risk=True
+                )
+                if not blocked and not order["current_schedule_revision_id"]:
                     ScheduleCapacityRepository.clear_schedule_replan_flag(order_id, txn)
                 ScheduleCapacityRepository.complete_run(run_id, "completed", result, db=txn)
                 txn.execute("RELEASE SAVEPOINT schedule_generation")
                 response = {"ok": True, "order_id": order_id, "schedule_run_key": run_key,
                             "idempotent_replay": False, "status": "completed",
                             "schedule_revision_id": revision_id, "revision_status": "draft",
-                            "operations": result}
+                            "operations": result,
+                            "conflicts": conflict_assessment["conflicts"],
+                            "risk": conflict_assessment["risk"],
+                        }
             except Exception as exc:
                 txn.execute("ROLLBACK TO SAVEPOINT schedule_generation")
                 txn.execute("RELEASE SAVEPOINT schedule_generation")
@@ -1530,6 +1801,16 @@ class ScheduleCapacityService:
                     raise ValueError("排程幂等键已被其他订单使用")
                 revision = ScheduleCapacityRepository.find_revision_by_run(prior_run["id"], db=txn)
                 replay_operations = ScheduleCapacityRepository.run_result(prior_run)
+                evidence_summary = None
+                evidence_differences = []
+                if revision:
+                    stored_summary, stored_differences = (
+                        ScheduleCapacityRepository.get_replan_evidence(
+                            revision["id"], db=txn
+                        )
+                    )
+                    evidence_summary = dict(stored_summary) if stored_summary else None
+                    evidence_differences = [dict(item) for item in stored_differences]
                 return {
                     "ok": prior_run["status"] == "completed",
                     "order_id": order_id,
@@ -1555,6 +1836,8 @@ class ScheduleCapacityService:
                         for item in replay_operations
                         if item.get("code") == "LOCKED_TASK_CONFLICT"
                     ],
+                    "replan_summary": evidence_summary,
+                    "differences": evidence_differences,
                 }
 
             snapshot, input_digest = ScheduleDynamicReplanPolicy.build_input_snapshot(
@@ -1562,6 +1845,12 @@ class ScheduleCapacityService:
                 occupancy=context["occupancy"], reason=reason,
                 as_of=ScheduleCapacityService._format_timestamp(start),
                 locked_tasks=list(active_locks.values()),
+                work_reports=context["work_reports"],
+                scrap_records=context["scrap_records"],
+                rework_records=context["rework_records"],
+                current_revision=context["current_revision"],
+                current_revision_items=context["current_revision_items"],
+                replan_triggers=context["replan_triggers"],
             )
             run_id = ScheduleCapacityRepository.create_run(
                 order_id, run_key, start.strftime("%Y-%m-%d"), txn,
@@ -1919,6 +2208,41 @@ class ScheduleCapacityService:
                         result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                        "reason": block_reason})
                         continue
+                    if not segments:
+                        blocked = True
+                        block_reason = "生产节点未生成可用排程分段"
+                        payload = {
+                            **common,
+                            "process_line_id": None,
+                            "production_node_id": None,
+                            "standard_id": standard["id"],
+                            "standard_version": standard["version"],
+                            "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
+                            "setup_minutes": standard["setup_minutes"],
+                            "difficulty_factor": standard["difficulty_factor"],
+                            "planned_minutes": 0,
+                            "occupied_minutes": 0,
+                            "plan_start": cursor.strftime("%Y-%m-%d"),
+                            "plan_end": cursor.strftime("%Y-%m-%d"),
+                            "planned_start_at": "",
+                            "planned_end_at": "",
+                            "status": "blocked",
+                            "blocked_reason": block_reason,
+                            "blocked_code": "NODE_CALENDAR_UNAVAILABLE",
+                            "line_name_snapshot": "",
+                            "segments": [],
+                            "allocations": [],
+                        }
+                        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(
+                            payload, txn
+                        )
+                        result.append({
+                            **payload,
+                            "line_name": None,
+                            "process_name": process_snapshot,
+                            "reason": block_reason,
+                        })
+                        continue
                     begin = min(ScheduleCapacityService._parse_timestamp(item["start_at"]) for item in segments)
                     end = max(ScheduleCapacityService._parse_timestamp(item["end_at"]) for item in segments)
                     resource_key = "production_node_id" if use_node_engine else "process_line_id"
@@ -1987,7 +2311,7 @@ class ScheduleCapacityService:
                                    "lines": snapshots, "process_name": process_snapshot})
 
                 planned = [item for item in result if item.get("status") == "planned" and (item.get("process_line_id") or item.get("production_node_id"))]
-                if planned:
+                if planned and not order.get("current_schedule_revision_id"):
                     ScheduleCapacityRepository.update_order_summary(
                         order_id, min(item["plan_start"] for item in planned), max(item["plan_end"] for item in planned), txn
                     )
@@ -1995,8 +2319,59 @@ class ScheduleCapacityService:
                 ScheduleCapacityRepository.set_revision_digest(
                     revision_id, hashlib.sha256(result_json.encode("utf-8")).hexdigest(), txn
                 )
-                if not blocked:
-                    ScheduleCapacityRepository.clear_schedule_replan_flag(order_id, txn)
+                ScheduleCapacityRepository.finalize_revision_content_digest(
+                    revision_id, db=txn
+                )
+                conflict_assessment = ScheduleCapacityService._assess_revision_conflicts(
+                    revision_id, "replan", txn, freeze_risk=True
+                )
+                after_items = [
+                    dict(item) for item in ScheduleCapacityRepository.list_revision_items(
+                        revision_id, db=txn
+                    )
+                ]
+                differences = ScheduleDynamicReplanPolicy.build_differences(
+                    context["current_revision_items"], after_items
+                )
+                before_risk = context["current_revision"] or {}
+                after_risk = conflict_assessment["risk"] or {}
+                changed = [
+                    item for item in differences
+                    if item["change_type"] != "unchanged"
+                ]
+                replan_summary = {
+                    "prior_revision_id": order.get("current_schedule_revision_id"),
+                    "revision_id": revision_id,
+                    "trigger_count": len(context["replan_triggers"]),
+                    "changed_operation_count": len(changed),
+                    "node_change_count": sum(item["node_changed"] for item in changed),
+                    "delayed_operation_count": sum(
+                        1 for item in changed if item["end_delta_minutes"] > 0
+                    ),
+                    "advanced_operation_count": sum(
+                        1 for item in changed if item["end_delta_minutes"] < 0
+                    ),
+                    "before_risk_level": before_risk.get("risk_level") or "none",
+                    "after_risk_level": after_risk.get("risk_level") or "none",
+                    "before_delay_minutes": int(before_risk.get("delay_minutes") or 0),
+                    "after_delay_minutes": int(after_risk.get("delay_minutes") or 0),
+                    "risk_change": ScheduleDynamicReplanPolicy.risk_change(
+                        before_risk, after_risk
+                    ),
+                    "blocked": bool(blocked),
+                    "trigger_reasons": list(dict.fromkeys(
+                        item.get("reason") or "生产事实发生变化"
+                        for item in context["replan_triggers"][:20]
+                    )),
+                }
+                ScheduleCapacityRepository.save_replan_evidence(
+                    revision_id,
+                    order.get("current_schedule_revision_id"),
+                    order_id,
+                    differences,
+                    replan_summary,
+                    db=txn,
+                )
                 ScheduleCapacityRepository.complete_run(run_id, "completed", result, db=txn)
                 txn.execute("RELEASE SAVEPOINT dynamic_schedule_replan")
                 response = {
@@ -2005,6 +2380,10 @@ class ScheduleCapacityService:
                     "schedule_revision_id": revision_id, "revision_status": "draft",
                     "replan_reason": reason, "input_snapshot": snapshot, "operations": result,
                     "conflicts": conflicts,
+                    "revision_conflicts": conflict_assessment["conflicts"],
+                    "risk": conflict_assessment["risk"],
+                    "replan_summary": replan_summary,
+                    "differences": differences,
                 }
             except Exception as exc:
                 txn.execute("ROLLBACK TO SAVEPOINT dynamic_schedule_replan")
@@ -2122,19 +2501,63 @@ class ScheduleCapacityService:
                 production_node_id=node["id"], db=txn,
             )
             row = ScheduleCapacityRepository.find_downtime_event(event_id, db=txn)
-        return {"ok": True, "event": dict(row)}
+            affected_order_ids = ScheduleCapacityRepository.affected_order_ids_for_downtime(
+                node["id"],
+                ScheduleCapacityService._format_timestamp(start),
+                ScheduleCapacityService._format_timestamp(end),
+                db=txn,
+            )
+            for order_id in affected_order_ids:
+                ScheduleCapacityRepository.record_replan_trigger(
+                    order_id,
+                    "downtime_created",
+                    "schedule_downtime_event",
+                    event_id,
+                    "生产节点新增停机时段",
+                    details={
+                        "production_node_id": int(node["id"]),
+                        "start_at": ScheduleCapacityService._format_timestamp(start),
+                        "end_at": ScheduleCapacityService._format_timestamp(end),
+                        "reason": reason,
+                    },
+                    created_by=created_by,
+                    db=txn,
+                )
+        return {"ok": True, "event": dict(row), "affected_order_ids": affected_order_ids}
 
     @staticmethod
-    def cancel_downtime_event(event_id):
+    def cancel_downtime_event(event_id, actor_id=None):
         ScheduleCapacityService._assert_node_write_enabled()
         try:
             event_id = int(event_id)
         except (TypeError, ValueError) as exc:
             raise ValueError("停机事件 ID 不正确") from exc
         with BaseService.transaction() as txn:
+            event = ScheduleCapacityRepository.find_downtime_event(event_id, db=txn)
+            if event is None or event["status"] != "active":
+                raise ValueError("停机事件不存在或已取消")
+            affected_order_ids = ScheduleCapacityRepository.affected_order_ids_for_downtime(
+                event["production_node_id"], event["start_at"], event["end_at"], db=txn
+            )
             if ScheduleCapacityRepository.cancel_downtime_event(event_id, db=txn) != 1:
                 raise ValueError("停机事件不存在或已取消")
-        return {"ok": True, "event_id": event_id, "status": "cancelled"}
+            for order_id in affected_order_ids:
+                ScheduleCapacityRepository.record_replan_trigger(
+                    order_id,
+                    "downtime_cancelled",
+                    "schedule_downtime_event",
+                    event_id,
+                    "生产节点停机时段已取消",
+                    details={
+                        "production_node_id": int(event["production_node_id"]),
+                        "start_at": event["start_at"],
+                        "end_at": event["end_at"],
+                    },
+                    created_by=actor_id,
+                    db=txn,
+                )
+        return {"ok": True, "event_id": event_id, "status": "cancelled",
+                "affected_order_ids": affected_order_ids}
 
     @staticmethod
     def list_order_schedule(order_id, limit=500):
@@ -2156,10 +2579,35 @@ class ScheduleCapacityService:
         revision = ScheduleCapacityRepository.find_revision(revision_id)
         if revision is None:
             raise ValueError("排程版本不存在")
+        conflict_assessment = ScheduleCapacityService._assess_revision_conflicts(
+            revision_id, "detail", BaseService.db(), freeze_risk=False, persist=False
+        )
+        risk_assessment = ScheduleCapacityRepository.find_revision_risk_assessment(
+            revision_id
+        )
+        replan_summary, replan_differences = (
+            ScheduleCapacityRepository.get_replan_evidence(revision_id)
+        )
+        normalized_differences = []
+        for row in replan_differences:
+            item = dict(row)
+            for field in ("before_json", "after_json"):
+                try:
+                    item[field.removesuffix("_json")] = json.loads(
+                        item.get(field) or "{}"
+                    )
+                except (TypeError, json.JSONDecodeError):
+                    item[field.removesuffix("_json")] = {}
+            normalized_differences.append(item)
         return {
             "ok": True,
             "revision": dict(revision),
             "items": [dict(row) for row in ScheduleCapacityRepository.list_revision_items(revision_id, limit=limit)],
+            "conflict_summary": conflict_assessment["summary"],
+            "conflicts": conflict_assessment["conflicts"][:limit],
+            "risk_assessment": dict(risk_assessment) if risk_assessment else None,
+            "replan_summary": dict(replan_summary) if replan_summary else None,
+            "replan_differences": normalized_differences[:limit],
         }
 
     @staticmethod
@@ -2347,9 +2795,17 @@ class ScheduleCapacityService:
                 item["source_schedule_id"], db=txn
             )
             order = ScheduleCapacityRepository.find_order(item["order_id"], txn)
-            if source_schedule is None or order is None:
-                raise ValueError("排程来源事实不存在")
-            operation = dict(source_schedule)
+            if order is None:
+                raise ValueError("排程所属订单不存在")
+            if source_schedule is None:
+                try:
+                    operation = json.loads(item["payload_json"] or "{}")
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise ValueError("排程候选来源内容不完整") from exc
+                if not isinstance(operation, dict):
+                    raise ValueError("排程候选来源内容不完整")
+            else:
+                operation = dict(source_schedule)
             policy_order = dict(order)
             policy_order["process_version_id"] = operation.get("process_version_id")
             standard = ScheduleCapacityRepository.find_standard(
@@ -2451,6 +2907,9 @@ class ScheduleCapacityService:
                 },
                 created_by=actor, reason=reason, db=txn,
             )
+            ScheduleCapacityService._assess_revision_conflicts(
+                new_revision_id, "generation", txn, freeze_risk=True
+            )
             new_item_id = item_map[revision_item_id]
             after = {
                 "source_revision_id": item["revision_id"],
@@ -2505,6 +2964,20 @@ class ScheduleCapacityService:
                     "REVISION_STATE_CONFLICT", "排程版本审批状态不允许当前操作",
                     {"approval_status": current, "target_status": target_status},
                 )
+            if target_status in ("submitted", "approved"):
+                try:
+                    ScheduleCapacityRepository.assert_revision_integrity(
+                        revision_id, db=txn
+                    )
+                except ValueError as exc:
+                    raise NodeSchedulingError(
+                        "REVISION_INTEGRITY_FAILED", str(exc)
+                    ) from exc
+                ScheduleCapacityService._assert_revision_conflict_gate(
+                    revision_id,
+                    "submit" if target_status == "submitted" else "approve",
+                    txn,
+                )
             if target_status == "approved" and revision["created_by"] == actor:
                 raise NodeSchedulingError(
                     "INDEPENDENT_APPROVER_REQUIRED", "排程版本创建人不能批准自己的版本"
@@ -2542,8 +3015,25 @@ class ScheduleCapacityService:
         )
 
     @staticmethod
-    def publish_revision(revision_id, published_by=None, db=None):
+    def publish_revision(revision_id, reason, idempotency_key, actor_id, db=None):
+        reason, key, actor = ScheduleCapacityService._workflow_input(
+            reason, idempotency_key, actor_id
+        )
+        try:
+            revision_id = int(revision_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("排程版本 ID 不正确") from exc
+        payload = {
+            "action": "publish",
+            "revision_id": revision_id,
+            "reason": reason,
+            "actor_id": actor,
+        }
+        digest = ScheduleCapacityService._workflow_digest(payload)
         with ScheduleCapacityService._transaction(db) as txn:
+            replay = ScheduleCapacityService._workflow_replay(txn, key, digest)
+            if replay:
+                return replay
             revision = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
             if revision is None:
                 raise ValueError("排程版本不存在")
@@ -2551,7 +3041,7 @@ class ScheduleCapacityService:
                 revision_id, db=txn
             ):
                 ScheduleCapacityService._assert_node_write_enabled()
-            if revision["status"] not in ("draft", "published"):
+            if revision["status"] != "draft":
                 raise NodeSchedulingError(
                     "REVISION_STATE_CONFLICT",
                     "排程版本当前状态不可发布",
@@ -2569,9 +3059,38 @@ class ScheduleCapacityService:
                         "approval_status": revision["approval_status"],
                     },
                 )
-            ScheduleCapacityRepository.publish_revision(revision_id, txn, published_by=published_by)
+            try:
+                ScheduleCapacityRepository.assert_revision_integrity(
+                    revision_id, db=txn
+                )
+            except ValueError as exc:
+                raise NodeSchedulingError(
+                    "REVISION_INTEGRITY_FAILED", str(exc)
+                ) from exc
+            ScheduleCapacityService._assert_revision_conflict_gate(
+                revision_id, "publish", txn
+            )
+            before = dict(revision)
+            ScheduleCapacityRepository.publish_revision(
+                revision_id,
+                txn,
+                published_by=actor,
+                reason=reason,
+                idempotency_key=key,
+            )
             published = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
-            return {"ok": True, "revision": dict(published)}
+            return ScheduleCapacityService._record_workflow_event(
+                txn,
+                revision_id=revision_id,
+                revision_item_id=None,
+                event_type="publish",
+                actor_id=actor,
+                reason=reason,
+                before=before,
+                after=dict(published),
+                digest=digest,
+                key=key,
+            )
 
     @staticmethod
     def list_schedules(limit=500):
@@ -2580,6 +3099,54 @@ class ScheduleCapacityService:
             dict(row)
             for row in ScheduleCapacityRepository.list_scheduled_operations(limit)
         ]
+        for operation in operations:
+            operation["candidate_revision"] = False
+        candidate_operations = []
+        for item in ScheduleCapacityRepository.list_latest_candidate_revision_items(
+            limit=limit
+        ):
+            try:
+                payload = json.loads(item["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            candidate = dict(payload)
+            candidate.update({
+                "id": None,
+                "order_id": item["order_id"],
+                "order_no": item["order_no"],
+                "product_name": item["product_name"],
+                "process_name": item["process_name"],
+                "schedule_revision_id": item["revision_id"],
+                "revision_item_id": item["id"],
+                "revision_item_row_version": item["row_version"],
+                "revision_status": item["revision_status"],
+                "revision_approval_status": item["revision_approval_status"],
+                "risk_level": item["revision_risk_level"],
+                "delay_minutes": item["revision_delay_minutes"],
+                "risk_reason": item["revision_risk_reason"],
+                "locked": bool(item["locked"]),
+                "task_lock_id": item["task_lock_id"],
+                "candidate_revision": True,
+                "node_code": payload.get("node_code")
+                or payload.get("node_code_snapshot")
+                or "",
+                "node_name": payload.get("node_name")
+                or payload.get("node_name_snapshot")
+                or "",
+            })
+            candidate_operations.append(candidate)
+        if candidate_operations:
+            candidate_keys = {
+                (item.get("order_id"), item.get("order_process_id"))
+                for item in candidate_operations
+            }
+            operations = [
+                item for item in operations
+                if (item.get("order_id"), item.get("order_process_id"))
+                not in candidate_keys
+            ] + candidate_operations
         allocations_by_schedule = {}
         for row in ScheduleCapacityRepository.list_schedule_allocations(
             [operation.get("id") for operation in operations]
@@ -2588,6 +3155,12 @@ class ScheduleCapacityService:
             allocations_by_schedule.setdefault(allocation["schedule_id"], []).append(
                 allocation
             )
+        segments_by_schedule = {}
+        for row in ScheduleCapacityRepository.list_schedule_segments(
+            [operation.get("id") for operation in operations]
+        ):
+            segment = dict(row)
+            segments_by_schedule.setdefault(segment["schedule_id"], []).append(segment)
         for operation in operations:
             # V089 stores a legacy schedule-level ``locked`` flag and also
             # exposes the active revision-item lock through ``task_lock_id``.
@@ -2596,8 +3169,53 @@ class ScheduleCapacityService:
             operation["locked"] = bool(
                 operation.get("locked") or operation.get("task_lock_id")
             )
-            operation["allocations"] = allocations_by_schedule.get(
-                operation.get("id"), []
+            if not operation.get("candidate_revision"):
+                operation["allocations"] = allocations_by_schedule.get(
+                    operation.get("id"), []
+                )
+                operation["segments"] = segments_by_schedule.get(
+                    operation.get("id"), []
+                )
+        formal_conflicts = [
+            dict(row) for row in ScheduleCapacityRepository.list_schedule_conflicts()
+        ]
+        formal_by_schedule = {}
+        for conflict in formal_conflicts:
+            for key in ("first_schedule_id", "second_schedule_id"):
+                schedule_id = conflict.get(key)
+                if schedule_id not in (None, ""):
+                    formal_by_schedule.setdefault(int(schedule_id), []).append(conflict)
+        revision_conflicts = {}
+        for revision_id in {
+            int(operation["schedule_revision_id"])
+            for operation in operations
+            if operation.get("candidate_revision")
+            and operation.get("schedule_revision_id") not in (None, "")
+        }:
+            revision_conflicts[revision_id] = [
+                dict(row)
+                for row in ScheduleCapacityRepository.list_revision_conflicts(
+                    revision_id
+                )
+            ]
+        for operation in operations:
+            if operation.get("candidate_revision"):
+                conflicts = [
+                    conflict
+                    for conflict in revision_conflicts.get(
+                        int(operation.get("schedule_revision_id") or 0), []
+                    )
+                    if operation.get("order_process_id") in {
+                        conflict.get("first_order_process_id"),
+                        conflict.get("second_order_process_id"),
+                    }
+                ]
+            else:
+                conflicts = formal_by_schedule.get(int(operation.get("id") or 0), [])
+            operation["conflicts"] = conflicts
+            operation["conflict_count"] = len(conflicts)
+            operation["conflict_reason"] = (
+                conflicts[0].get("reason") if conflicts else ""
             )
         return {"ok": True, "operations": operations}
 
@@ -2609,6 +3227,12 @@ class ScheduleCapacityService:
         planned = [row for row in rows if row.get("status") == "planned"]
         blocked = [row for row in rows if row.get("status") == "blocked"]
         conflicts = [dict(row) for row in ScheduleCapacityRepository.list_schedule_conflicts()]
+        conflicts_by_order = {}
+        for conflict in conflicts:
+            for key in ("first_order_id", "second_order_id"):
+                order_id = conflict.get(key)
+                if order_id not in (None, ""):
+                    conflicts_by_order.setdefault(int(order_id), []).append(conflict)
         line_loads = [dict(row) for row in ScheduleCapacityRepository.list_line_loads()]
         conflict_counts = Counter(row.get("process_line_id") for row in conflicts)
         for line in line_loads:
@@ -2636,6 +3260,7 @@ class ScheduleCapacityService:
                 blocked_count=row.get("blocked_count") or 0,
                 blocked_reasons=blocked_reasons,
                 conflict_count=row.get("conflict_count") or 0,
+                conflict_details=conflicts_by_order.get(int(row["order_id"]), ()),
             )
             risk_counts[risk["level"]] += 1
             if risk["level"] in ("high", "overdue"):
@@ -2648,6 +3273,8 @@ class ScheduleCapacityService:
                     "slack_minutes": risk["slack_minutes"],
                     "deadline_at": risk["deadline_at"],
                     "projected_completion_at": risk["projected_completion_at"],
+                    "primary_risk_source": risk.get("primary_source", ""),
+                    "suggested_actions": risk.get("suggested_actions", []),
                 })
         risk_orders.sort(
             key=lambda item: (
@@ -2682,7 +3309,16 @@ class ScheduleCapacityService:
             "total_delay_minutes": sum(delay_values),
             "max_delay_minutes": max(delay_values, default=0),
             "line_conflicts": len(conflicts),
+            "node_conflicts": len(conflicts),
             "conflicts": conflicts[:limit],
             "line_loads": line_loads,
             "calendars": ScheduleCapacityRepository.list_calendars(),
+            "capacity_unavailability": [
+                dict(row)
+                for row in ScheduleCapacityRepository.list_capacity_unavailability()
+            ],
+            "capacity_overrides": [
+                dict(row)
+                for row in ScheduleCapacityRepository.list_capacity_overrides()
+            ],
         }

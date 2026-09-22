@@ -57,26 +57,22 @@ class ScheduleRepository:
                    ), '') AS schedule_blocked_reasons,
                    COALESCE((
                        SELECT COUNT(DISTINCT CASE
-                           WHEN first_schedule.order_id=o.id THEN first_schedule.id
-                           ELSE second_schedule.id
+                           WHEN first_fact.order_id=o.id THEN first_fact.fact_key
+                           ELSE second_fact.fact_key
                        END)
-                       FROM order_process_schedule_segments first_segment
-                       JOIN order_process_schedule_segments second_segment
-                         ON first_segment.process_line_id=second_segment.process_line_id
-                        AND first_segment.id < second_segment.id
-                        AND first_segment.segment_start_at < second_segment.segment_end_at
-                        AND second_segment.segment_start_at < first_segment.segment_end_at
-                       JOIN order_process_schedules first_schedule
-                         ON first_schedule.id=first_segment.schedule_id
-                       JOIN order_process_schedules second_schedule
-                         ON second_schedule.id=second_segment.schedule_id
-                       JOIN orders first_order ON first_order.id=first_schedule.order_id
-                       JOIN orders second_order ON second_order.id=second_schedule.order_id
-                       WHERE first_schedule.status != 'blocked'
-                         AND second_schedule.status != 'blocked'
-                         AND first_order.deleted_at IS NULL
-                         AND second_order.deleted_at IS NULL
-                         AND (first_schedule.order_id=o.id OR second_schedule.order_id=o.id)
+                       FROM schedule_effective_capacity_intervals first_fact
+                       JOIN schedule_effective_capacity_intervals second_fact
+                         ON first_fact.fact_key < second_fact.fact_key
+                        AND ((first_fact.production_node_id IS NOT NULL
+                              AND first_fact.production_node_id=second_fact.production_node_id)
+                             OR (first_fact.production_node_id IS NULL
+                                 AND second_fact.production_node_id IS NULL
+                                 AND first_fact.process_line_id=second_fact.process_line_id))
+                        AND first_fact.start_at < second_fact.end_at
+                        AND second_fact.start_at < first_fact.end_at
+                       WHERE (first_fact.capacity_mode='exclusive'
+                              OR second_fact.capacity_mode='exclusive')
+                         AND (first_fact.order_id=o.id OR second_fact.order_id=o.id)
                    ), 0) AS schedule_conflict_count
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id

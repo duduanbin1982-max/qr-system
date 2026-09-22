@@ -210,6 +210,25 @@ class ReworkService:
             snapshot={"reason": reason, "source_ncr_id": source_ncr_id},
             db=db,
         )
+        from modules.repositories.schedule_capacity_repository import (
+            ScheduleCapacityRepository,
+        )
+        ScheduleCapacityRepository.record_replan_trigger(
+            order_id,
+            "rework_created",
+            "rework_record",
+            rework_id,
+            "新增待返工数量",
+            order_process_id=context_row["order_process_id"],
+            details={
+                "process_id": process_id,
+                "quantity": quantity,
+                "status": "pending",
+                "source_ncr_id": source_ncr_id,
+            },
+            created_by=user_id,
+            db=db,
+        )
         return rework_id
 
     @staticmethod
@@ -316,6 +335,28 @@ class ReworkService:
             raise ConflictError("返工记录状态已变化，请刷新后重试")
         from modules.services.quality_management.tasks import QualityTaskService
         QualityTaskService.generate_for_rework(rework["id"], user_id, db)
+        context = ReworkRepository.find_order_process_context(
+            rework["order_id"], rework["process_id"], db=db
+        )
+        from modules.repositories.schedule_capacity_repository import (
+            ScheduleCapacityRepository,
+        )
+        ScheduleCapacityRepository.record_replan_trigger(
+            rework["order_id"],
+            "rework_completed",
+            "rework_record",
+            rework["id"],
+            "返工状态已完成，待返工容量发生变化",
+            order_process_id=context["order_process_id"] if context else None,
+            details={
+                "process_id": int(rework["process_id"]),
+                "quantity": int(rework.get("quantity") or 0),
+                "result": result,
+                "status": "completed",
+            },
+            created_by=user_id,
+            db=db,
+        )
 
     # ============ Analytics ============
 

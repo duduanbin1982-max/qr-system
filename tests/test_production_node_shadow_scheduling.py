@@ -169,6 +169,63 @@ def test_shadow_plan_uses_node_engine_and_preserves_formal_schedule(
         assert config.PRODUCTION_NODE_ENGINE_ENABLED is False
 
 
+def test_shadow_plan_accepts_node_without_legacy_line_and_keeps_formal_facts(
+    client, monkeypatch,
+):
+    monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_WRITE_ENABLED", True)
+    monkeypatch.setattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False)
+    with client.application.app_context():
+        db = get_db()
+        order_id, mapped_node_id = _seed_order(db, quantity=2)
+        mapped = db.execute(
+            "SELECT process_id,calendar_id FROM production_nodes WHERE id=?",
+            (mapped_node_id,),
+        ).fetchone()
+        db.execute(
+            "UPDATE production_nodes SET status='inactive' WHERE process_id=?",
+            (mapped["process_id"],),
+        )
+        node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id,"
+            "legacy_process_line_id) VALUES (?,?,?,'exclusive','active',?,NULL)",
+            (
+                mapped["process_id"],
+                "SHADOW-NATIVE-01",
+                "影子节点原生01",
+                mapped["calendar_id"],
+            ),
+        ).lastrowid
+        db.commit()
+        before = ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db)
+
+        result = ScheduleCapacityService.generate_shadow_order_schedule(
+            order_id,
+            "shadow-node-native-001",
+            start_date="2026-09-19",
+            actor_id=_actor_id(db),
+            db=db,
+        )
+
+        operation = result["operations"][0]
+        assert operation["production_node_id"] == node_id
+        assert operation["process_line_id"] is None
+        assert all(
+            segment["production_node_id"] == node_id
+            and segment["process_line_id"] is None
+            for segment in operation["segments"]
+        )
+        assert ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db) == before
+        assert db.execute(
+            "SELECT COUNT(*) FROM production_node_shadow_segments segment "
+            "JOIN production_node_shadow_items item ON item.id=segment.shadow_item_id "
+            "WHERE item.shadow_run_id=? AND segment.production_node_id=?",
+            (result["shadow_run_id"], node_id),
+        ).fetchone()[0] > 0
+
+
 def test_shadow_plan_is_idempotent_and_rejects_changed_input(client, monkeypatch):
     monkeypatch.setattr(config, "PRODUCTION_NODE_QUERY_ENABLED", True)
     monkeypatch.setattr(config, "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", True)

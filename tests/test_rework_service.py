@@ -41,6 +41,16 @@ def test_create_rework_updates_process_and_order_totals(client):
             (rework_id,),
         ).fetchone()
         assert tuple(event) == ("rework", 3, user_id)
+        order_replan = db.execute(
+            "SELECT schedule_replan_required,schedule_replan_reason FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()
+        assert tuple(order_replan) == (1, "新增待返工数量")
+        trigger = db.execute(
+            "SELECT trigger_type,source_id FROM schedule_replan_triggers WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        assert tuple(trigger) == ("rework_created", rework_id)
 
 
 @pytest.mark.parametrize("quantity", [0, -1])
@@ -86,6 +96,13 @@ def test_complete_rework_persists_result_and_rejects_repeat(client):
         assert record["completed_by"] == user_id
         assert record["result"] == "ok"
         assert record["result_remark"] == "复检合格"
+        triggers = db.execute(
+            "SELECT trigger_type FROM schedule_replan_triggers WHERE order_id=? ORDER BY id",
+            (order_id,),
+        ).fetchall()
+        assert [row["trigger_type"] for row in triggers] == [
+            "rework_created", "rework_completed",
+        ]
         with pytest.raises(ConflictError, match="已完成"):
             ReworkService.complete_rework(rework_id, "", user_id, "ok")
 
