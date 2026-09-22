@@ -7,6 +7,7 @@ import { useGanttEditor } from '@/composables/gantt/useGanttEditor.js'
 import { useGanttExport } from '@/composables/gantt/useGanttExport.js'
 import { useProductionNodes } from '@/composables/gantt/useProductionNodes.js'
 import { useGanttCapacity } from '@/composables/gantt/useGanttCapacity.js'
+import { useScheduleOrderDrawer } from '@/composables/gantt/useScheduleOrderDrawer.js'
 
 
 export function useGantt() {
@@ -64,6 +65,7 @@ export function useGantt() {
     reload: data.load,
   })
   const imageExport = useGanttExport()
+  const orderDrawer = useScheduleOrderDrawer()
 
   async function setScheduleScope(scope) {
     if (data.scheduleScope.value === scope) return
@@ -93,6 +95,7 @@ export function useGantt() {
     ...capacity,
     ...batch,
     ...imageExport,
+    ...orderDrawer,
     productionNodeManager: nodes.nodeManager,
     processOptions: capacity.processOptions,
     setScheduleScope,

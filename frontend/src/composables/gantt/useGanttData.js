@@ -19,6 +19,8 @@ const RISK_COLORS = Object.freeze({
   overdue: 'var(--danger)',
 })
 
+const SAVED_FILTERS_STORAGE_KEY = 'schedule-gantt-saved-filters-v1'
+
 
 export function isCompletedOrder(order) {
   if (!order) return false
@@ -37,11 +39,37 @@ export function useGanttData() {
   const dayWidth = ref(38)
   const scheduleScope = ref('active')
   const riskFilter = ref('all')
+  const orderKeyword = ref('')
+  const productKeyword = ref('')
+  const priorityFilter = ref('all')
+  const statusFilter = ref('all')
+  const deadlineFrom = ref('')
+  const deadlineTo = ref('')
+  const lockedFilter = ref('all')
+  const savedFilters = ref(loadSavedFilters())
   const serverStats = ref({ total: 0, producing: 0, pending: 0, completed: 0 })
   const dateRange = ref({ minDate: '', maxDate: '' })
 
   const stats = computed(() => serverStats.value)
   const filteredOrders = computed(() => orders.value.filter((order) => {
+    const keyword = String(orderKeyword.value || '').trim().toLowerCase()
+    if (keyword && ![order.order_no, order.id].some(value => String(value ?? '').toLowerCase().includes(keyword))) return false
+    const productKeywordValue = String(productKeyword.value || '').trim().toLowerCase()
+    if (productKeywordValue && ![order.product_code, order.product_name].some(value => String(value ?? '').toLowerCase().includes(productKeywordValue))) return false
+    if (priorityFilter.value !== 'all') {
+      const rawPriority = String(order.priority_level ?? order.priority ?? '')
+      const selectedPriority = String(priorityFilter.value).replace(/^P/i, '')
+      if (rawPriority !== selectedPriority) return false
+    }
+    if (statusFilter.value !== 'all' && String(order.status || '') !== String(statusFilter.value)) return false
+    const deadline = String(order.deadline || order.deadline_at || '').slice(0, 10)
+    if (deadlineFrom.value && (!deadline || deadline < deadlineFrom.value)) return false
+    if (deadlineTo.value && (!deadline || deadline > deadlineTo.value)) return false
+    if (lockedFilter.value !== 'all') {
+      const locked = Boolean(order.locked || order.is_locked || Number(order.locked_task_count || 0) > 0)
+      if (lockedFilter.value === 'locked' && !locked) return false
+      if (lockedFilter.value === 'unlocked' && locked) return false
+    }
     if (riskFilter.value === 'all') return true
     if (riskFilter.value === 'critical') {
       return ['overdue', 'high'].includes(riskLevel(order))
@@ -88,6 +116,21 @@ export function useGanttData() {
       (new Date(order.plan_end) - new Date(order.plan_start)) / 86400000 + 1,
     )
     return days * dayWidth.value
+  }
+
+  function actualBarLeft(order) {
+    const min = ganttData.value.minDate
+    const startValue = order.actual_start_at || order.actual_start
+    if (!min || !startValue) return 0
+    return Math.max(0, (new Date(startValue) - new Date(min)) / 86400000) * dayWidth.value
+  }
+
+  function actualBarWidth(order) {
+    const startValue = order.actual_start_at || order.actual_start
+    const endValue = order.actual_end_at || order.actual_end || startValue
+    if (!startValue || !endValue) return 4
+    const days = Math.max(1 / 24, (new Date(endValue) - new Date(startValue)) / 86400000)
+    return Math.max(4, days * dayWidth.value)
   }
 
   function barColor(status) {
@@ -225,6 +268,56 @@ export function useGanttData() {
     await load()
   }
 
+  function currentFilterSnapshot() {
+    return {
+      orderKeyword: orderKeyword.value,
+      productKeyword: productKeyword.value,
+      priorityFilter: priorityFilter.value,
+      statusFilter: statusFilter.value,
+      deadlineFrom: deadlineFrom.value,
+      deadlineTo: deadlineTo.value,
+      riskFilter: riskFilter.value,
+      lockedFilter: lockedFilter.value,
+    }
+  }
+
+  function applyFilterSnapshot(snapshot = {}) {
+    orderKeyword.value = snapshot.orderKeyword || ''
+    productKeyword.value = snapshot.productKeyword || ''
+    priorityFilter.value = snapshot.priorityFilter || 'all'
+    statusFilter.value = snapshot.statusFilter || 'all'
+    deadlineFrom.value = snapshot.deadlineFrom || ''
+    deadlineTo.value = snapshot.deadlineTo || ''
+    riskFilter.value = snapshot.riskFilter || 'all'
+    lockedFilter.value = snapshot.lockedFilter || 'all'
+  }
+
+  function resetFilters() {
+    applyFilterSnapshot()
+  }
+
+  function saveFilter(name) {
+    const label = String(name || '').trim()
+    if (!label) return false
+    const next = savedFilters.value.filter(item => item.name !== label)
+    next.unshift({ name: label, filters: currentFilterSnapshot(), updatedAt: new Date().toISOString() })
+    savedFilters.value = next.slice(0, 20)
+    persistSavedFilters(savedFilters.value)
+    return true
+  }
+
+  function applySavedFilter(name) {
+    const item = savedFilters.value.find(filter => filter.name === name)
+    if (!item) return false
+    applyFilterSnapshot(item.filters)
+    return true
+  }
+
+  function deleteSavedFilter(name) {
+    savedFilters.value = savedFilters.value.filter(item => item.name !== name)
+    persistSavedFilters(savedFilters.value)
+  }
+
   return {
     orders,
     stats,
@@ -232,11 +325,21 @@ export function useGanttData() {
     dayWidth,
     scheduleScope,
     riskFilter,
+    orderKeyword,
+    productKeyword,
+    priorityFilter,
+    statusFilter,
+    deadlineFrom,
+    deadlineTo,
+    lockedFilter,
+    savedFilters,
     filteredOrders,
     ganttData,
     riskSummary,
     barLeft,
     barWidth,
+    actualBarLeft,
+    actualBarWidth,
     barColor,
     statusLabel,
     riskLevel,
@@ -250,6 +353,31 @@ export function useGanttData() {
     zoomOut,
     load,
     setScheduleScope,
+    currentFilterSnapshot,
+    applyFilterSnapshot,
+    resetFilters,
+    saveFilter,
+    applySavedFilter,
+    deleteSavedFilter,
+  }
+}
+
+function loadSavedFilters() {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const value = JSON.parse(localStorage.getItem(SAVED_FILTERS_STORAGE_KEY) || '[]')
+    return Array.isArray(value) ? value.filter(item => item && item.name && item.filters) : []
+  } catch {
+    return []
+  }
+}
+
+function persistSavedFilters(filters) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(SAVED_FILTERS_STORAGE_KEY, JSON.stringify(filters))
+  } catch {
+    // 本地存储不可用时筛选仍可正常使用，只是不持久化保存方案。
   }
 }
 
