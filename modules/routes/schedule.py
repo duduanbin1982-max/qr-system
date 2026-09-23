@@ -19,6 +19,7 @@ from modules.services.schedule_service import (
 )
 from modules.services.production_line_service import ProductionLineService
 from modules.services.schedule_capacity_service import ScheduleCapacityService
+from modules.services.order_service import OrderService
 from modules.domain.errors import DomainError, LegacyProcessLineWriteBlockedError
 from modules.domain.production_node_scheduling import NodeSchedulingError
 
@@ -74,6 +75,38 @@ def schedule_update_order(order_id):
         return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/schedule/order/<int:order_id>/priority", methods=["PATCH"])
+@check_auth
+@check_permission("schedules:adjust")
+@validate_json("schedule_order_priority_adjust")
+def schedule_update_order_priority(order_id):
+    """Adjust scheduling intent without granting broad order-edit access."""
+    data = get_json_body()
+    try:
+        actor_name = g.current_user.get("name", g.current_user.get("username", ""))
+        result = OrderService.update_schedule_priority(
+            order_id,
+            data,
+            user_id=g.current_user.get("id"),
+            user_name=actor_name,
+        )
+        if result.get("changed"):
+            safe_audit_log(
+                "adjust_schedule_priority",
+                "order",
+                order_id,
+                f"priority=P{result['priority_level']}; "
+                f"expedited={int(result['is_expedited'])}; "
+                f"version={result['priority_version']}; "
+                f"reason={data['schedule_change_reason']}",
+            )
+        return jsonify(result)
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/schedule/batch-shift", methods=["POST"])

@@ -16,6 +16,7 @@ export const productionApi = {
   listProductionLines: ()     => request('GET', '/api/production-lines'),
   getScheduleGantt:   (params) => request('GET', '/api/schedule/gantt' + buildQuery(params)),
   updateScheduleOrder:(id,data)=> request('PATCH', '/api/schedule/order/' + id, data),
+  updateScheduleOrderPriority:(id,data)=> request('PATCH', `/api/schedule/order/${id}/priority`, data),
   batchShiftSchedule: (data)   => request('POST', '/api/schedule/batch-shift', data),
   createProductionLine:(data)  => request('POST', '/api/production-lines', data),
   updateProductionLine:(id,data)=>request('PUT', '/api/production-lines/' + id, data),

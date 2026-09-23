@@ -147,7 +147,7 @@ describe('ScheduleCapacityDashboard', () => {
 
   it('shows bottleneck, risk, replan and locked-task work queues', async () => {
     const wrapper = mountDashboard()
-    await wrapper.findAll('.schedule-dashboard__tabs button')[1].trigger('click')
+    await wrapper.findAll('.schedule-dashboard__tabs button').find(button => button.text() === '风险工作台').trigger('click')
 
     expect(wrapper.text()).toContain('瓶颈生产节点')
     expect(wrapper.text()).toContain('交期风险订单')
@@ -158,7 +158,7 @@ describe('ScheduleCapacityDashboard', () => {
 
   it('loads immutable revision history and compares the selected version', async () => {
     const wrapper = mountDashboard()
-    await wrapper.findAll('.schedule-dashboard__tabs button')[2].trigger('click')
+    await wrapper.findAll('.schedule-dashboard__tabs button').find(button => button.text() === '版本与差异').trigger('click')
     await wrapper.get('.schedule-dashboard__revision-grid button').trigger('click')
     await flushPromises()
 

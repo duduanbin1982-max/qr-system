@@ -158,6 +158,22 @@ class ScheduleService:
                 "quantity": quantity,
                 "completed": completed,
                 "is_completed": is_completed,
+                "priority_level": r["priority_level"],
+                "is_expedited": bool(r["is_expedited"]),
+                "priority_reason": r["priority_reason"] or "",
+                "priority_effective_at": r["priority_effective_at"] or "",
+                "priority_version": r["priority_version"] or 1,
+                "schedule_policy": r["schedule_policy"] or "auto",
+                "schedule_revision_id": r["schedule_revision_id"],
+                "locked_task_count": int(r["locked_task_count"] or 0),
+                "actual_completed_qty": int(r["actual_completed_qty"] or 0),
+                "actual_start_at": r["actual_start_at"] or "",
+                "actual_last_report_at": r["actual_last_report_at"] or "",
+                "actual_end_at": r["actual_end_at"] or "",
+                "actual_status": (
+                    "completed" if is_completed else
+                    ("in_progress" if r["actual_start_at"] else "not_started")
+                ),
                 "progress": progress,
                 "risk": risk,
                 "risk_level": risk_level,

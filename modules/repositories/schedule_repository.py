@@ -35,7 +35,9 @@ class ScheduleRepository:
         return db.execute(f"""
             SELECT o.id, o.order_no, o.product_name, o.product_code, o.plan_start,
                    o.plan_end, o.production_line_id, o.deadline, o.status, o.quantity,
-                   o.completed,
+                   o.completed, o.priority_level, o.is_expedited, o.priority_reason,
+                   o.priority_effective_at, o.priority_version, o.schedule_policy,
+                   o.current_schedule_revision_id AS schedule_revision_id,
                    CASE WHEN {completed_expr} THEN 1 ELSE 0 END as is_completed,
                    COALESCE(c.name, o.customer) as customer_name,
                    COALESCE(pl.name, '') as production_line,
@@ -50,6 +52,30 @@ class ScheduleRepository:
                        FROM order_process_schedules s
                        WHERE s.order_id=o.id AND s.status='blocked'
                    ), 0) AS schedule_blocked_count,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM schedule_node_task_locks l
+                       JOIN schedule_revision_items ri ON ri.id=l.revision_item_id
+                       JOIN schedule_revisions sr ON sr.id=ri.revision_id
+                       WHERE sr.order_id=o.id AND sr.id=o.current_schedule_revision_id
+                         AND l.status='active'
+                   ), 0) AS locked_task_count,
+                   COALESCE(o.completed, 0) AS actual_completed_qty,
+                   COALESCE((
+                       SELECT MIN(COALESCE(NULLIF(wr.actual_completed_at,''), wr.created_at))
+                       FROM work_records wr
+                       WHERE wr.order_id=o.id AND wr.status='approved'
+                   ), '') AS actual_start_at,
+                   COALESCE((
+                       SELECT MAX(COALESCE(NULLIF(wr.actual_completed_at,''), wr.created_at))
+                       FROM work_records wr
+                       WHERE wr.order_id=o.id AND wr.status='approved'
+                   ), '') AS actual_last_report_at,
+                   CASE WHEN {completed_expr} THEN COALESCE((
+                       SELECT MAX(COALESCE(NULLIF(wr.actual_completed_at,''), wr.created_at))
+                       FROM work_records wr
+                       WHERE wr.order_id=o.id AND wr.status='approved'
+                   ), '') ELSE '' END AS actual_end_at,
                    COALESCE((
                        SELECT GROUP_CONCAT(NULLIF(s.blocked_reason,''), '；')
                        FROM order_process_schedules s

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import ProductionNodeQueueBoard from '@/components/schedule/ProductionNodeQueueBoard.vue'
 
 const props = defineProps({
   operations: { type: Array, default: () => [] },
@@ -12,7 +13,7 @@ const props = defineProps({
   downtime: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['filterNode', 'filterOrder', 'refresh'])
+const emit = defineEmits(['filterNode', 'filterOrder', 'openOrder', 'refresh'])
 
 const groupMode = ref('node')
 const capacityPeriod = ref('day')
@@ -27,7 +28,15 @@ const previousRevisionDetail = ref(null)
 
 function parseDate(value) {
   if (!value) return null
-  const parsed = new Date(String(value).replace(' ', 'T'))
+  if (value instanceof Date) {
+    const cloned = new Date(value.getTime())
+    return Number.isNaN(cloned.getTime()) ? null : cloned
+  }
+  const text = String(value).trim()
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  const parsed = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(text.replace(' ', 'T'))
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
@@ -294,6 +303,9 @@ const bottleneckRows = computed(() => [...utilizationRows.value]
 const pendingReplanOrders = computed(() => props.orders.filter(order => order.schedule_replan_required))
 const lockedTasks = computed(() => props.operations.filter(operation => operation.locked))
 const riskOrders = computed(() => props.audit.risk_orders || [])
+const blockedOperations = computed(() => props.operations.filter(operation => (
+  operation.status === 'blocked' || operation.schedule_status === 'blocked'
+)))
 
 const revisionCards = computed(() => {
   const groups = new Map()
@@ -435,6 +447,8 @@ async function openRevision(card) {
     <nav class="schedule-dashboard__tabs" aria-label="排程看板">
       <button v-for="tab in [
         { key: 'capacity', label: '分钟甘特图' },
+        { key: 'queue', label: '节点排队' },
+        { key: 'blocked', label: '阻断任务' },
         { key: 'workbench', label: '风险工作台' },
         { key: 'revisions', label: '版本与差异' },
       ]" :key="tab.key" type="button" :class="{ active: activeWorkbench === tab.key }" @click="activeWorkbench = tab.key">
@@ -536,6 +550,32 @@ async function openRevision(card) {
       </article>
     </div>
 
+    <div v-else-if="activeWorkbench === 'queue'" class="schedule-dashboard__body">
+      <ProductionNodeQueueBoard
+        :operations="operations"
+        :nodes="nodes"
+        :orders="orders"
+        @open-order="emit('openOrder', $event)"
+        @filter-node="emit('filterNode', $event)"
+      />
+    </div>
+
+    <div v-else-if="activeWorkbench === 'blocked'" class="schedule-dashboard__body">
+      <div class="schedule-blocked-center" data-test="schedule-blocked-center">
+        <header><div><h5>阻断任务中心</h5><p>每条阻断都必须说明原因和下一步处理入口，不能只显示服务器错误。</p></div><span>{{ blockedOperations.length }} 条</span></header>
+        <div v-if="!blockedOperations.length" class="schedule-dashboard__empty">当前没有阻断任务</div>
+        <article v-for="operation in blockedOperations" :key="operation.id || operation.order_process_id" class="schedule-blocked-item">
+          <div><strong>{{ operation.order_no || `订单 #${operation.order_id}` }}</strong><span>{{ operation.process_name || `工序 #${operation.process_id}` }}</span></div>
+          <p>{{ operation.blocked_reason || operation.reason || operation.error_message || '前置条件不满足' }}</p>
+          <div class="schedule-blocked-item__actions">
+            <button type="button" class="btn-default btn-sm" @click="emit('openOrder', orders.find(order => String(order.id) === String(operation.order_id)) || { id: operation.order_id, order_no: operation.order_no })">查看订单详情</button>
+            <button type="button" class="btn-default btn-sm" @click="emit('filterNode', operation.production_node_id)">查看节点</button>
+            <button type="button" class="btn-default btn-sm" @click="emit('filterOrder', operation.order_id)">重新试排</button>
+          </div>
+        </article>
+      </div>
+    </div>
+
     <div v-else class="schedule-dashboard__body">
       <div class="schedule-dashboard__revision-help">
         <strong>排程版本不会自动覆盖生产执行</strong>
@@ -618,6 +658,15 @@ async function openRevision(card) {
 .schedule-dashboard__bar { position:absolute; top:10px; z-index:1; height:26px; min-width:4px; overflow:hidden; border:0; border-radius:4px; padding:0 5px; color:#fff; text-overflow:ellipsis; white-space:nowrap; font-size:10px; cursor:pointer; box-shadow:0 1px 3px rgba(15,23,42,.24); }
 .schedule-dashboard__bar.candidate { border:2px dashed #fff; }
 .schedule-dashboard__bar.locked::after { content:' 🔒'; }
+.schedule-blocked-center { display:grid; gap:10px; }
+.schedule-blocked-center > header { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:12px 14px; border:1px solid #fecaca; border-radius:var(--radius-sm); background:#fff7f7; }
+.schedule-blocked-center h5 { margin:0; font-size:var(--text-sm); color:var(--danger); }
+.schedule-blocked-center header p { margin:4px 0 0; color:var(--text-secondary); font-size:var(--text-xs); }
+.schedule-blocked-item { display:grid; gap:7px; padding:12px 14px; border:1px solid #fecaca; border-radius:var(--radius-sm); background:var(--bg-surface); }
+.schedule-blocked-item > div:first-child { display:flex; gap:10px; align-items:center; }
+.schedule-blocked-item > div:first-child span { color:var(--text-secondary); font-size:var(--text-xs); }
+.schedule-blocked-item p { margin:0; color:var(--danger); font-size:var(--text-sm); }
+.schedule-blocked-item__actions { display:flex; gap:8px; flex-wrap:wrap; }
 .schedule-dashboard__capacity-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:16px 0 10px; }
 .schedule-dashboard__capacity-heading > div:first-child { display:flex; flex-direction:column; }
 .schedule-dashboard__capacity-heading span { color:var(--text-secondary); font-size:var(--text-xs); }
@@ -647,8 +696,8 @@ async function openRevision(card) {
 .schedule-dashboard__revision-grid article > b.candidate { color:#b45309; }
 .schedule-dashboard__revision-grid p { margin:5px 0 9px; color:var(--text-secondary); font-size:var(--text-xs); }
 .schedule-dashboard__empty { padding:18px; text-align:center; color:var(--text-placeholder); font-size:var(--text-xs); }
-.schedule-revision-dialog__overlay { position:fixed; inset:0; z-index:1100; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.52); }
-.schedule-revision-dialog { display:flex; flex-direction:column; width:min(1120px,100%); max-height:92vh; border-radius:var(--radius-lg); background:var(--bg-surface); box-shadow:0 24px 80px rgba(15,23,42,.32); overflow:hidden; }
+.schedule-revision-dialog__overlay { position:fixed; inset:0; z-index:1100; display:flex; justify-content:flex-end; background:rgba(15,23,42,.52); }
+.schedule-revision-dialog { display:flex; flex-direction:column; width:min(860px,96vw); height:100%; background:var(--bg-surface); box-shadow:-20px 0 60px rgba(15,23,42,.32); overflow:hidden; }
 .schedule-revision-dialog > header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:16px 18px; border-bottom:1px solid var(--border-light); }
 .schedule-revision-dialog h3,.schedule-revision-dialog p { margin:0; }
 .schedule-revision-dialog header p { margin-top:4px; color:var(--text-secondary); font-size:var(--text-xs); }

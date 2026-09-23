@@ -44,6 +44,8 @@
         <button @click="zoomOut" title="缩小" class="btn-default btn-sm">−</button>
         <button @click="zoomIn" title="放大" class="btn-default btn-sm">+</button>
         <button class="btn btn-sm" style="background:var(--success);color:#fff" @click="exportImage" title="导出PNG">📥 导出</button>
+        <button class="btn-default btn-sm" @click="exportScheduleCsv(viewMode==='operations' ? filteredOperations : filteredOrders, viewMode==='operations' ? 'operations' : 'orders')" title="导出当前筛选结果 CSV">CSV</button>
+        <span class="schedule-plan-actual-legend" title="甘特图同时显示计划和实际报工时间"><i class="plan"></i>计划 <i class="actual"></i>实际</span>
       </div>
     </div>
 
@@ -55,6 +57,47 @@
       <button class="btn-default btn-sm" @click="batchShift('right')" style="font-size:var(--text-xs)">右移 ▶</button>
       <span style="font-size:10px;color:var(--text-placeholder);margin-left:8px">提示: ← → 微调1天, Shift+← → 微调7天</span>
     </div>
+
+    <section v-if="viewMode==='orders'" class="schedule-filter-workbench" data-test="schedule-filter-workbench" aria-label="排程筛选">
+      <div class="schedule-filter-workbench__row">
+        <label>订单号 <input v-model="orderKeyword" class="form-input" type="search" placeholder="订单号或 ID" aria-label="订单号筛选"></label>
+        <label>产品 <input v-model="productKeyword" class="form-input" type="search" placeholder="产品编码/名称" aria-label="产品筛选"></label>
+        <label>优先级
+          <select v-model="priorityFilter" class="form-input" aria-label="优先级筛选">
+            <option value="all">全部优先级</option><option value="1">P1</option><option value="2">P2</option><option value="3">P3</option><option value="4">P4</option><option value="5">P5</option>
+          </select>
+        </label>
+        <label>状态
+          <select v-model="statusFilter" class="form-input" aria-label="订单状态筛选">
+            <option value="all">全部状态</option><option value="pending">待生产</option><option value="producing">生产中</option><option value="completed">已完成</option>
+          </select>
+        </label>
+        <label>风险
+          <select v-model="riskFilter" class="form-input" aria-label="交期风险筛选">
+            <option value="all">全部风险</option><option value="critical">逾期 / 高风险</option><option value="medium">中风险</option><option value="low">低风险</option><option value="conflict">节点冲突</option><option value="blocked">排程阻断</option>
+          </select>
+        </label>
+        <label>锁定
+          <select v-model="lockedFilter" class="form-input" aria-label="锁定状态筛选">
+            <option value="all">全部任务</option><option value="locked">含锁定任务</option><option value="unlocked">未锁定任务</option>
+          </select>
+        </label>
+      </div>
+      <div class="schedule-filter-workbench__row schedule-filter-workbench__row--secondary">
+        <label>交期从 <input v-model="deadlineFrom" class="form-input" type="date" aria-label="交期起始筛选"></label>
+        <label>交期至 <input v-model="deadlineTo" class="form-input" type="date" aria-label="交期结束筛选"></label>
+        <button type="button" class="btn-default btn-sm" @click="resetFilters">清空筛选</button>
+        <span class="schedule-filter-workbench__count">当前显示 {{ filteredOrders.length }} / {{ orders.length }} 单</span>
+        <span class="schedule-filter-workbench__divider"></span>
+        <select v-model="activeSavedFilter" class="form-input" aria-label="已保存筛选" @change="applySavedFilterFromUi">
+          <option value="">选择已保存筛选</option>
+          <option v-for="item in savedFilters" :key="item.name" :value="item.name">{{ item.name }}</option>
+        </select>
+        <input v-model="savedFilterName" class="form-input" type="text" maxlength="40" placeholder="保存为…" aria-label="保存筛选名称" @keyup.enter="saveCurrentFilter">
+        <button type="button" class="btn-default btn-sm" :disabled="!savedFilterName.trim()" @click="saveCurrentFilter">保存筛选</button>
+        <button v-if="activeSavedFilter" type="button" class="btn-default btn-sm" title="删除当前保存的筛选" @click="removeSavedFilter">删除方案</button>
+      </div>
+    </section>
 
     <div v-if="viewMode==='orders' && (riskSummary.overdue || riskSummary.high || riskSummary.medium)" style="padding:7px 20px;background:linear-gradient(90deg,#fff7ed,#fff1f2);border-bottom:1px solid #fed7aa;font-size:var(--text-xs);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <span style="font-weight:700;color:#c2410c">⚠️ 交期预警</span>
@@ -111,6 +154,7 @@
         :downtime="downtimeEvents"
         @filter-node="capacityNodeFilter=String($event)"
         @filter-order="capacityOrderFilter=String($event)"
+        @open-order="openOrderDrawer"
         @refresh="loadCapacity"
       />
       <div v-if="selectedReplanOrder?.schedule_replan_required && !replanResult" data-test="pending-replan-reason" style="margin:-6px 0 14px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:var(--radius-sm);font-size:var(--text-xs);color:#9a3412">
@@ -208,19 +252,20 @@
       <div v-else style="overflow:auto;border:1px solid var(--border-light)">
         <table style="width:100%;border-collapse:collapse;min-width:1540px;font-size:var(--text-sm)">
           <thead><tr style="background:var(--bg-hover);text-align:left">
-            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">生产节点</th><th style="padding:9px 10px">拆分明细</th><th style="padding:9px 10px">预计时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">交期风险</th><th style="padding:9px 10px">状态</th><th style="padding:9px 10px">操作</th>
+            <th style="padding:9px 10px">订单</th><th style="padding:9px 10px">工序</th><th style="padding:9px 10px">生产节点</th><th style="padding:9px 10px">拆分明细</th><th style="padding:9px 10px">计划时间</th><th style="padding:9px 10px">实际时间</th><th style="padding:9px 10px">数量</th><th style="padding:9px 10px">标准工时</th><th style="padding:9px 10px">来源</th><th style="padding:9px 10px">难度系数</th><th style="padding:9px 10px">占用分钟</th><th style="padding:9px 10px">交期风险</th><th style="padding:9px 10px">状态</th><th style="padding:9px 10px">操作</th>
           </tr></thead>
           <tbody><tr v-for="row in filteredOperations" :key="row.id || `${row.order_id}-${row.order_process_id}`" style="border-top:1px solid var(--bg-hover)">
             <td style="padding:8px 10px;font-weight:600;color:var(--primary)">{{ row.order_no || row.order_id }}</td>
             <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
             <td style="padding:8px 10px">{{ nodeLabel(row) }}</td>
             <td style="padding:8px 10px;min-width:180px">
-              <div v-if="row.allocations && row.allocations.length" style="display:flex;flex-direction:column;gap:3px">
-                <span v-for="allocation in row.allocations" :key="allocation.id || `${allocation.production_node_id}-${allocation.quantity}`" style="font-size:var(--text-xs)">{{ allocationLabel(allocation) }}</span>
+              <div v-if="(row.segments && row.segments.length) || (row.allocations && row.allocations.length)" style="display:flex;flex-direction:column;gap:3px">
+                <span v-for="segment in operationSegments(row)" :key="segment.key" style="font-size:var(--text-xs)">{{ [segment.node_code, segment.node_name].filter(Boolean).join(' · ') || `生产节点 #${segment.production_node_id || '-'}` }} × {{ segment.quantity || 0 }} · {{ segment.planned_start_at || '-' }} ~ {{ segment.planned_end_at || '-' }}</span>
               </div>
               <span v-else style="color:var(--text-placeholder)">未拆分</span>
             </td>
             <td style="padding:8px 10px;white-space:nowrap">{{ row.planned_start_at || row.plan_start || '-' }}<span v-if="row.planned_end_at"> ~ {{ row.planned_end_at }}</span><span v-else-if="row.plan_end"> ~ {{ row.plan_end }}</span></td>
+            <td style="padding:8px 10px;white-space:nowrap"><span v-if="row.actual_start_at || row.actual_start">{{ row.actual_start_at || row.actual_start }}</span><span v-if="row.actual_end_at || row.actual_end"> ~ {{ row.actual_end_at || row.actual_end }}（完成）</span><span v-else-if="row.actual_last_report_at"> ~ {{ row.actual_last_report_at }}（最近报工）</span><span v-if="!row.actual_start_at && !row.actual_start && !row.actual_last_report_at && !row.actual_end_at && !row.actual_end" style="color:var(--text-placeholder)">未报工</span></td>
             <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
             <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
             <td style="padding:8px 10px;white-space:nowrap">{{ standardScopeLabel(row.standard_match_scope) }}</td>
@@ -268,13 +313,13 @@
 
         <!-- Order Rows -->
         <div v-for="(order, i) in filteredOrders" :key="order.id" style="position:relative;border-bottom:1px solid var(--bg-hover)" :style="{background:i%2===0?'#fff':'var(--bg-table-stripe)'}">
-          <div style="display:flex;min-height:52px;align-items:stretch">
+          <div style="display:flex;min-height:60px;align-items:stretch">
             <!-- Order Info Card -->
             <div style="min-width:360px;max-width:360px;padding:6px 14px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;justify-content:center;gap:4px">
               <!-- 第一行：复选框 + 订单号 + 客户 + 状态 + 交期 -->
               <div style="display:flex;align-items:center;gap:10px">
                 <input v-if="canEdit" type="checkbox" :checked="selectedOrderIds.includes(order.id)" :disabled="isCompleted(order)" @change="toggleOrder(order)" style="width:18px;flex-shrink:0" :title="isCompleted(order) ? '已完成订单只读，不参与批量调整' : ''"><span v-else style="width:18px;flex-shrink:0"></span>
-                <span style="font-size:var(--text-sm);font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:85px;text-align:left" :title="order.order_no">{{ order.order_no }}</span>
+              <button type="button" class="gantt-order-link" :title="`打开 ${order.order_no} 详情`" @click.stop="openOrderDrawer(order)">{{ order.order_no }}</button>
                 <span style="flex-shrink:0;font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80px;text-align:left" :title="order.customer_name||''">{{ order.customer_name || '-' }}</span>
                 <span :style="{flexShrink:0,fontSize:'12px',padding:'1px 6px',borderRadius:'3px',textAlign:'left',minWidth:'56px',background:order.status==='producing'?'var(--primary-light)':order.status==='completed'?'var(--success-light)':'var(--bg-hover)',color:order.status==='producing'?'var(--primary)':order.status==='completed'?'var(--success)':'var(--text-placeholder)'}">{{ statusLabel(order.status) }}</span>
                 <span :style="{flexShrink:0,fontSize:'10px',textAlign:'left',color:riskColor(order)}" :title="riskTooltip(order)">{{ riskIcon(order) }}</span>
@@ -284,6 +329,7 @@
               <!-- 第二行：产品编码 + 进度条 -->
               <div style="display:flex;align-items:center;gap:10px">
                 <span style="font-size:9px;color:var(--text-secondary);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.product_code||order.product_name||''">{{ order.product_code || order.product_name || '-' }}</span>
+                <span v-if="order.actual_start_at || order.actual_start || order.actual_last_report_at || order.actual_end_at || order.actual_end" style="font-size:9px;color:var(--text-secondary);white-space:nowrap" :title="`实际：${order.actual_start_at || order.actual_start || '-'} ~ ${order.actual_end_at || order.actual_end || order.actual_last_report_at || '-'}`">实际 {{ order.actual_end_at || order.actual_end ? '已完成' : '进行中' }}</span>
                 <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:60px">
                   <span style="display:inline-block;width:40px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
@@ -293,7 +339,7 @@
               </div>
             </div>
             <!-- Gantt Bar Area -->
-            <div :style="{flex:1,position:'relative',minHeight:'52px'}">
+            <div :style="{flex:1,position:'relative',minHeight:'60px'}">
               <div v-for="d in ganttData.days" :key="'bg'+d.date"
                 :style="{position:'absolute',left:(ganttData.days.indexOf(d)*dayWidth)+'px',top:0,width:dayWidth+'px',height:'100%',background:d.isWeekend?'rgba(0,0,0,0.03)':'transparent'}">
               </div>
@@ -312,6 +358,7 @@
                   userSelect:'none'
                 }"
                 @mousedown="onBarMouseDown($event, order)"
+                @click.stop="openOrderDrawer(order)"
                 @dblclick="editOrderDates(order)"
                 :title="order.plan_start + ' ~ ' + order.plan_end + ' | 产量: ' + (order.completed_qty||0) + '/' + (order.quantity||0) + (riskTooltip(order) ? ' | ' + riskTooltip(order) : '') + (isCompleted(order) ? ' | 已完成订单只读' : '')" >
                 <span v-if="order.quantity" style="margin-right:4px">{{ order.completed_qty||0 }}/{{ order.quantity }}</span>
@@ -320,26 +367,21 @@
               <div v-if="dragTarget===order"
                 :style="{position:'absolute',left:dragPreviewLeft+'px',top:'12px',width:dragPreviewWidth+'px',height:'28px',background:'rgba(37,99,235,0.3)',border:'2px dashed #2563eb',borderRadius:'6px',zIndex:3,pointerEvents:'none'}">
               </div>
+              <div v-if="order.actual_start_at || order.actual_start" class="gantt-actual-bar" :style="{left:actualBarLeft(order)+'px',width:actualBarWidth(order)+'px'}" :title="`实际：${order.actual_start_at || order.actual_start} ~ ${order.actual_end_at || order.actual_end || order.actual_last_report_at || '进行中'}`"></div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Edit Modal -->
-    <div v-if="showEditModal" class="modal-overlay" @click.self="undoLastDrag">
-      <div class="modal" style="max-width:420px">
-        <div class="modal-header"><h3>✏️ 编辑排程</h3></div>
-        <div class="modal-body">
-          <div class="form-group"><label>开始日期</label><input v-model="editForm.plan_start" type="date" class="form-input"></div>
-          <div class="form-group"><label>结束日期</label><input v-model="editForm.plan_end" type="date" class="form-input"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-default" @click="undoLastDrag">取消</button>
-          <button class="btn btn-primary" @click="saveEditDates">保存</button>
-        </div>
-      </div>
-    </div>
+    <ScheduleCommandDrawer
+      :open="showEditModal"
+      mode="edit"
+      :form="editForm"
+      :nodes="capacityNodes"
+      @close="undoLastDrag"
+      @save="saveEditDates"
+    />
 
     <ProductionNodeWorkbench
       v-model="showNodeMgr"
@@ -348,42 +390,127 @@
       @closed="loadCapacity"
     />
 
-    <!-- Schedule Adjustment Modal -->
-    <div v-if="showAdjustmentModal" class="modal-overlay" @click.self="showAdjustmentModal=false">
-      <div class="modal" style="max-width:520px">
-        <div class="modal-header"><h3>✏️ 调整生产节点排程</h3></div>
-        <form @submit.prevent="saveOperationAdjustment">
-          <div class="modal-body">
-            <div class="form-group"><label>生产节点</label>
-              <select v-model="adjustmentForm.production_node_id" class="form-input" required>
-                <option value="">选择生产节点</option>
-                <option v-for="node in capacityNodes" :key="`adjust-node-${node.id}`" :value="node.id">{{ node.process_name }} · {{ node.node_code }} · {{ node.node_name }}</option>
-              </select>
-            </div>
-            <div class="form-group"><label>计划开始时间</label><input v-model="adjustmentForm.planned_start_at" type="datetime-local" class="form-input" required></div>
-            <div class="form-group"><label>调整原因</label><input v-model="adjustmentForm.reason" class="form-input" required></div>
-            <div class="form-group"><label>幂等键</label><input v-model="adjustmentForm.idempotency_key" class="form-input" required></div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-default" @click="showAdjustmentModal=false">取消</button>
-            <button type="submit" class="btn btn-primary">生成新草稿修订版</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ScheduleCommandDrawer
+      :open="showAdjustmentModal"
+      mode="adjust"
+      :form="adjustmentForm"
+      :nodes="capacityNodes"
+      @close="showAdjustmentModal=false"
+      @save="saveOperationAdjustment"
+    />
+
+    <OrderScheduleDrawer
+      :open="orderDrawerOpen"
+      :order="selectedScheduleOrder"
+      :operations="selectedOrderOperations"
+      :revisions="selectedOrderRevisions"
+      :loading="orderDrawerLoading"
+      :error="orderDrawerError"
+      :can-adjust-priority="canAdjustSchedules"
+      @close="closeOrderDrawer"
+      @retry="openOrderDrawer(selectedScheduleOrder)"
+      @action="handleOrderDrawerAction"
+    />
+
+    <SchedulePriorityDrawer
+      :open="priorityDrawerOpen"
+      :order="priorityOrder"
+      :saving="prioritySaving"
+      @close="priorityDrawerOpen=false"
+      @save="savePriorityChange"
+    />
   </div>
 </div>
 </template>
 
 <script>
+import { ref } from 'vue'
 import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNodeWorkbench.vue'
 import ScheduleCapacityDashboard from '@/components/schedule/ScheduleCapacityDashboard.vue'
+import OrderScheduleDrawer from '@/components/schedule/OrderScheduleDrawer.vue'
+import ScheduleCommandDrawer from '@/components/schedule/ScheduleCommandDrawer.vue'
+import SchedulePriorityDrawer from '@/components/schedule/SchedulePriorityDrawer.vue'
 import { useGantt } from '@/composables/useGantt.js'
+import { api } from '@/lib/api.js'
+import { showToast } from '@/lib/store.js'
 
 export default {
-  components: { ProductionNodeWorkbench, ScheduleCapacityDashboard },
+  components: { ProductionNodeWorkbench, ScheduleCapacityDashboard, OrderScheduleDrawer, ScheduleCommandDrawer, SchedulePriorityDrawer },
   setup() {
-    return { ...useGantt() }
+    const gantt = useGantt()
+    const savedFilterName = ref('')
+    const activeSavedFilter = ref('')
+    const priorityDrawerOpen = ref(false)
+    const priorityOrder = ref(null)
+    const prioritySaving = ref(false)
+    function saveCurrentFilter() {
+      if (gantt.saveFilter?.(savedFilterName.value)) {
+        activeSavedFilter.value = savedFilterName.value.trim()
+        savedFilterName.value = ''
+      }
+    }
+    function applySavedFilterFromUi() {
+      if (activeSavedFilter.value) gantt.applySavedFilter?.(activeSavedFilter.value)
+    }
+    function removeSavedFilter() {
+      if (!activeSavedFilter.value) return
+      gantt.deleteSavedFilter?.(activeSavedFilter.value)
+      activeSavedFilter.value = ''
+    }
+    function handleOrderDrawerAction(event) {
+      if (event?.action === 'replan' && event.order?.id) {
+        gantt.replanOrderId.value = event.order.id
+        gantt.prepareDynamicReplan(event.order.id)
+      }
+      if (event?.action === 'operation') gantt.viewMode.value = 'operations'
+      if (event?.action === 'priority' && event.order?.id) {
+        priorityOrder.value = event.order
+        gantt.closeOrderDrawer?.()
+        priorityDrawerOpen.value = true
+      }
+    }
+    async function savePriorityChange(payload) {
+      if (!priorityOrder.value?.id || prioritySaving.value) return
+      prioritySaving.value = true
+      try {
+        await api.domains.production.updateScheduleOrderPriority(priorityOrder.value.id, {
+          ...payload,
+          expected_priority_version: Number(priorityOrder.value.priority_version || 1),
+        })
+        priorityDrawerOpen.value = false
+        showToast('订单优先级已更新，已标记为待重新排程')
+        await Promise.all([gantt.load(), gantt.loadCapacity?.()])
+      } catch (error) {
+        showToast(error.message || '调整优先级失败', 'error')
+      } finally {
+        prioritySaving.value = false
+      }
+    }
+    return { ...gantt, handleOrderDrawerAction, savePriorityChange, priorityDrawerOpen, priorityOrder, prioritySaving, savedFilterName, activeSavedFilter, saveCurrentFilter, applySavedFilterFromUi, removeSavedFilter }
   }
 }
 </script>
+
+<style scoped>
+.gantt-order-link { width:85px; flex-shrink:0; overflow:hidden; border:0; padding:0; background:transparent; color:var(--primary); font-size:var(--text-sm); font-weight:600; text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.gantt-order-link:hover { text-decoration:underline; }
+.schedule-filter-workbench { display:grid; gap:8px; padding:10px 20px; border-bottom:1px solid var(--border-light); background:var(--bg-surface); }
+.schedule-filter-workbench__row { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
+.schedule-filter-workbench__row label { display:flex; flex-direction:column; gap:4px; color:var(--text-secondary); font-size:var(--text-xs); }
+.schedule-filter-workbench__row .form-input { min-width:116px; padding:5px 8px; font-size:var(--text-xs); }
+.schedule-filter-workbench__row label:first-child .form-input { min-width:150px; }
+.schedule-filter-workbench__row--secondary { align-items:center; }
+.schedule-filter-workbench__count { color:var(--text-secondary); font-size:var(--text-xs); }
+.schedule-filter-workbench__divider { width:1px; height:22px; background:var(--border-light); }
+.schedule-plan-actual-legend { display:inline-flex; align-items:center; gap:4px; color:var(--text-secondary); font-size:10px; white-space:nowrap; }
+.schedule-plan-actual-legend i { display:inline-block; width:12px; height:5px; border-radius:3px; }
+.schedule-plan-actual-legend i.plan { background:#2563eb; }
+.schedule-plan-actual-legend i.actual { background:#0f766e; }
+.gantt-actual-bar { position:absolute; top:45px; z-index:2; height:7px; min-width:4px; border-radius:4px; background:#0f766e; box-shadow:0 1px 2px rgb(15 118 110 / 30%); pointer-events:none; }
+@media (max-width: 700px) {
+  .schedule-filter-workbench { padding:10px 12px; }
+  .schedule-filter-workbench__row > label { flex:1 1 135px; }
+  .schedule-filter-workbench__row .form-input { width:100%; min-width:0; }
+  .schedule-filter-workbench__divider { display:none; }
+}
+</style>

@@ -179,6 +179,81 @@ def test_schedule_view_permission_cannot_modify_orders(client):
     assert batch.status_code == 403, batch.get_json()
 
 
+def test_schedule_adjust_permission_updates_priority_idempotently(client):
+    order_id, _ = _seed_scheduled_order_with_line(client)
+    headers = _permission_headers(
+        client,
+        [
+            "page:production",
+            "page:production.schedule",
+            "schedule:view",
+            "schedules:adjust",
+        ],
+    )
+    payload = {
+        "priority_level": 1,
+        "is_expedited": True,
+        "schedule_change_reason": "客户交期提前",
+        "expected_priority_version": 1,
+    }
+
+    first = client.patch(
+        f"/api/schedule/order/{order_id}/priority",
+        json=payload,
+        headers=headers,
+    )
+    replay = client.patch(
+        f"/api/schedule/order/{order_id}/priority",
+        json=payload,
+        headers=headers,
+    )
+    conflict = client.patch(
+        f"/api/schedule/order/{order_id}/priority",
+        json={**payload, "priority_level": 2},
+        headers=headers,
+    )
+
+    assert first.status_code == 200, first.get_json()
+    assert first.get_json()["changed"] is True
+    assert first.get_json()["priority_version"] == 2
+    assert replay.status_code == 200, replay.get_json()
+    assert replay.get_json()["idempotent_replay"] is True
+    assert replay.get_json()["priority_version"] == 2
+    assert conflict.status_code == 409, conflict.get_json()
+    with client.application.app_context():
+        db = get_db()
+        order = db.execute(
+            "SELECT priority_level,is_expedited,priority_version,schedule_replan_required "
+            "FROM orders WHERE id=?",
+            (order_id,),
+        ).fetchone()
+        history_count = db.execute(
+            "SELECT COUNT(*) FROM order_priority_history WHERE order_id=? AND event_type='updated'",
+            (order_id,),
+        ).fetchone()[0]
+    assert tuple(order) == (1, 1, 2, 1)
+    assert history_count == 1
+
+
+def test_schedule_priority_endpoint_rejects_view_only_user(client):
+    order_id, _ = _seed_scheduled_order_with_line(client)
+    headers = _permission_headers(
+        client,
+        ["page:production", "page:production.schedule", "schedule:view"],
+    )
+    response = client.patch(
+        f"/api/schedule/order/{order_id}/priority",
+        json={
+            "priority_level": 1,
+            "is_expedited": True,
+            "schedule_change_reason": "无写权限",
+            "expected_priority_version": 1,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 403, response.get_json()
+
+
 def test_schedule_edit_preserves_legacy_line_when_field_is_omitted(client):
     order_id, line_id = _seed_scheduled_order_with_line(client)
     headers = _permission_headers(
@@ -312,3 +387,35 @@ def test_schedule_gantt_returns_full_summary_and_bounded_pages(client, auth_head
     }
     assert set(order_nos).issubset(visible)
     assert bounded.get_json()["limit"] == 500
+
+
+def test_schedule_gantt_exposes_priority_revision_lock_and_actual_fact_contract(client, auth_headers):
+    order_id, _ = _seed_scheduled_order_with_line(client)
+    with client.application.app_context():
+        db = get_db()
+        process_id = db.execute("SELECT id FROM processes ORDER BY id LIMIT 1").fetchone()[0]
+        user_id = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()[0]
+        db.execute(
+            "UPDATE orders SET priority_level=2,is_expedited=1,completed=2 WHERE id=?",
+            (order_id,),
+        )
+        db.execute(
+            "INSERT INTO work_records "
+            "(order_id,process_id,user_id,type,quantity,status,created_at) "
+            "VALUES (?,?,?,'normal',7,'approved','2026-09-22 08:30:00')",
+            (order_id, process_id, user_id),
+        )
+        db.commit()
+
+    response = client.get("/api/schedule/gantt?limit=500", headers=auth_headers)
+    assert response.status_code == 200, response.get_json()
+    row = next(item for item in response.get_json()["orders"] if item["id"] == order_id)
+    assert row["priority_level"] == 2
+    assert row["is_expedited"] is True
+    assert "schedule_revision_id" in row
+    assert row["locked_task_count"] == 0
+    assert row["actual_completed_qty"] == 2
+    assert row["actual_start_at"] == "2026-09-22 08:30:00"
+    assert row["actual_last_report_at"] == "2026-09-22 08:30:00"
+    assert row["actual_end_at"] == ""
+    assert row["actual_status"] == "in_progress"
