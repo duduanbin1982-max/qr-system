@@ -28,7 +28,15 @@ const previousRevisionDetail = ref(null)
 
 function parseDate(value) {
   if (!value) return null
-  const parsed = new Date(String(value).replace(' ', 'T'))
+  if (value instanceof Date) {
+    const cloned = new Date(value.getTime())
+    return Number.isNaN(cloned.getTime()) ? null : cloned
+  }
+  const text = String(value).trim()
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  const parsed = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(text.replace(' ', 'T'))
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 

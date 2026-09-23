@@ -127,7 +127,7 @@ export function useGanttData() {
 
   function actualBarWidth(order) {
     const startValue = order.actual_start_at || order.actual_start
-    const endValue = order.actual_end_at || order.actual_end || startValue
+    const endValue = order.actual_end_at || order.actual_end || order.actual_last_report_at || startValue
     if (!startValue || !endValue) return 4
     const days = Math.max(1 / 24, (new Date(endValue) - new Date(startValue)) / 86400000)
     return Math.max(4, days * dayWidth.value)

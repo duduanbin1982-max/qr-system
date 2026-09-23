@@ -734,6 +734,70 @@ class OrderService:
                 oid, data, user_id, user_name, txn
             )
 
+    @staticmethod
+    def update_schedule_priority(oid, data, user_id=None, user_name=None):
+        """Update only scheduling priority fields under optimistic concurrency.
+
+        Repeating the same requested values is a safe idempotent replay and
+        does not append another immutable priority-history row or increment
+        ``priority_version``.
+        """
+        normalized = OrderService._normalize_priority_data({
+            'priority_level': data.get('priority_level'),
+            'is_expedited': data.get('is_expedited'),
+            'schedule_change_reason': data.get('schedule_change_reason'),
+        })
+        reason = normalized.get('schedule_change_reason', '')
+        if not reason:
+            raise ValidationError('调整优先级或加急状态时必须填写变更原因')
+        try:
+            expected_version = int(data.get('expected_priority_version'))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError('优先级版本参数不正确') from exc
+        if expected_version < 1:
+            raise ValidationError('优先级版本参数不正确')
+
+        repository = OrderService._repository()
+        with OrderService._unit_of_work().transaction() as txn:
+            current = repository.find_by_id(oid, db=txn)
+            if not current:
+                raise NotFoundError('订单不存在')
+            current_version = int(
+                OrderService._priority_value(current, 'priority_version', 1) or 1
+            )
+            unchanged = (
+                int(OrderService._priority_value(current, 'priority_level', 3) or 3)
+                == int(normalized['priority_level'])
+                and int(OrderService._priority_value(current, 'is_expedited', 0) or 0)
+                == int(normalized['is_expedited'])
+            )
+            if expected_version != current_version and not unchanged:
+                raise ConflictError('订单优先级已被其他用户更新，请刷新后重试')
+            if unchanged:
+                return {
+                    'ok': True,
+                    'changed': False,
+                    'idempotent_replay': True,
+                    'order_id': int(oid),
+                    'priority_level': int(normalized['priority_level']),
+                    'is_expedited': bool(normalized['is_expedited']),
+                    'priority_version': current_version,
+                }
+
+            OrderService._update_order_transaction(
+                oid, normalized, user_id, user_name, txn
+            )
+            updated = repository.find_by_id(oid, db=txn)
+            return {
+                'ok': True,
+                'changed': True,
+                'idempotent_replay': False,
+                'order_id': int(oid),
+                'priority_level': int(updated['priority_level']),
+                'is_expedited': bool(updated['is_expedited']),
+                'priority_version': int(updated['priority_version']),
+            }
+
     # ============================================================
     # 删除（级联清理子表）
     # ============================================================

@@ -1,4 +1,5 @@
 <script setup>
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   open: { type: Boolean, default: false },
   mode: { type: String, default: 'edit' },
@@ -7,14 +8,60 @@ const props = defineProps({
   saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save'])
+const drawerRef = ref(null)
+const previousFocus = ref(null)
 
 const title = props.mode === 'adjust' ? '调整生产节点排程' : '编辑订单排程'
+
+function onKeydown(event) {
+  if (!props.open) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    emit('close')
+    return
+  }
+  if (event.key !== 'Tab' || !drawerRef.value) return
+  const focusable = [...drawerRef.value.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(node => !node.disabled && node.offsetParent !== null)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function onOpen() {
+  previousFocus.value = document.activeElement
+  document.body.style.overflow = 'hidden'
+  nextTick(() => drawerRef.value?.querySelector('input, select, button')?.focus())
+}
+
+function onClose() {
+  document.body.style.overflow = ''
+  previousFocus.value?.focus?.()
+  previousFocus.value = null
+}
+
+onMounted(() => document.addEventListener('keydown', onKeydown))
+watch(() => props.open, (open, wasOpen) => {
+  if (open && !wasOpen) onOpen()
+  if (!open && wasOpen) onClose()
+}, { immediate: true })
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  document.body.style.overflow = ''
+})
 </script>
 
 <template>
   <Teleport to="body">
     <div v-if="open" class="schedule-command-drawer__overlay" @click.self="emit('close')">
-      <aside class="schedule-command-drawer" role="dialog" aria-modal="true" :aria-label="title">
+      <aside ref="drawerRef" class="schedule-command-drawer" role="dialog" aria-modal="true" :aria-label="title">
         <header><div><div class="eyebrow">生产排程操作</div><h2>{{ title }}</h2></div><button type="button" class="btn-default" aria-label="关闭" @click="emit('close')">×</button></header>
         <form class="schedule-command-drawer__body" @submit.prevent="emit('save')">
           <template v-if="mode === 'adjust'">

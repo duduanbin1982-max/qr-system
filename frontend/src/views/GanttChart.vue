@@ -259,13 +259,13 @@
             <td style="padding:8px 10px">{{ row.process_name || '-' }}</td>
             <td style="padding:8px 10px">{{ nodeLabel(row) }}</td>
             <td style="padding:8px 10px;min-width:180px">
-              <div v-if="row.allocations && row.allocations.length" style="display:flex;flex-direction:column;gap:3px">
-                <span v-for="allocation in row.allocations" :key="allocation.id || `${allocation.production_node_id}-${allocation.quantity}`" style="font-size:var(--text-xs)">{{ allocationLabel(allocation) }}</span>
+              <div v-if="(row.segments && row.segments.length) || (row.allocations && row.allocations.length)" style="display:flex;flex-direction:column;gap:3px">
+                <span v-for="segment in operationSegments(row)" :key="segment.key" style="font-size:var(--text-xs)">{{ [segment.node_code, segment.node_name].filter(Boolean).join(' · ') || `生产节点 #${segment.production_node_id || '-'}` }} × {{ segment.quantity || 0 }} · {{ segment.planned_start_at || '-' }} ~ {{ segment.planned_end_at || '-' }}</span>
               </div>
               <span v-else style="color:var(--text-placeholder)">未拆分</span>
             </td>
             <td style="padding:8px 10px;white-space:nowrap">{{ row.planned_start_at || row.plan_start || '-' }}<span v-if="row.planned_end_at"> ~ {{ row.planned_end_at }}</span><span v-else-if="row.plan_end"> ~ {{ row.plan_end }}</span></td>
-            <td style="padding:8px 10px;white-space:nowrap"><span v-if="row.actual_start_at || row.actual_start">{{ row.actual_start_at || row.actual_start }}</span><span v-if="row.actual_end_at || row.actual_end"> ~ {{ row.actual_end_at || row.actual_end }}</span><span v-if="!row.actual_start_at && !row.actual_start && !row.actual_end_at && !row.actual_end" style="color:var(--text-placeholder)">未报工</span></td>
+            <td style="padding:8px 10px;white-space:nowrap"><span v-if="row.actual_start_at || row.actual_start">{{ row.actual_start_at || row.actual_start }}</span><span v-if="row.actual_end_at || row.actual_end"> ~ {{ row.actual_end_at || row.actual_end }}（完成）</span><span v-else-if="row.actual_last_report_at"> ~ {{ row.actual_last_report_at }}（最近报工）</span><span v-if="!row.actual_start_at && !row.actual_start && !row.actual_last_report_at && !row.actual_end_at && !row.actual_end" style="color:var(--text-placeholder)">未报工</span></td>
             <td style="padding:8px 10px">{{ row.quantity || row.scheduled_quantity || 0 }}</td>
             <td style="padding:8px 10px">{{ row.standard_minutes_per_unit || 0 }} / 件</td>
             <td style="padding:8px 10px;white-space:nowrap">{{ standardScopeLabel(row.standard_match_scope) }}</td>
@@ -329,7 +329,7 @@
               <!-- 第二行：产品编码 + 进度条 -->
               <div style="display:flex;align-items:center;gap:10px">
                 <span style="font-size:9px;color:var(--text-secondary);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1" :title="order.product_code||order.product_name||''">{{ order.product_code || order.product_name || '-' }}</span>
-                <span v-if="order.actual_start_at || order.actual_start || order.actual_end_at || order.actual_end" style="font-size:9px;color:var(--text-secondary);white-space:nowrap" :title="`实际：${order.actual_start_at || order.actual_start || '-'} ~ ${order.actual_end_at || order.actual_end || '-'}`">实际 {{ order.actual_end_at || order.actual_end ? '已结束' : '进行中' }}</span>
+                <span v-if="order.actual_start_at || order.actual_start || order.actual_last_report_at || order.actual_end_at || order.actual_end" style="font-size:9px;color:var(--text-secondary);white-space:nowrap" :title="`实际：${order.actual_start_at || order.actual_start || '-'} ~ ${order.actual_end_at || order.actual_end || order.actual_last_report_at || '-'}`">实际 {{ order.actual_end_at || order.actual_end ? '已完成' : '进行中' }}</span>
                 <span style="flex-shrink:0;display:flex;align-items:center;gap:4px;min-width:60px">
                   <span style="display:inline-block;width:40px;height:4px;background:var(--bg-hover);border-radius:2px">
                     <span :style="{display:'inline-block',height:'100%',borderRadius:'2px',background:order.progress>=100?'var(--success)':order.progress>=60?'var(--primary)':order.progress>=30?'var(--warning)':'var(--danger)',width:Math.min(order.progress,100)+'%'}"></span>
@@ -367,7 +367,7 @@
               <div v-if="dragTarget===order"
                 :style="{position:'absolute',left:dragPreviewLeft+'px',top:'12px',width:dragPreviewWidth+'px',height:'28px',background:'rgba(37,99,235,0.3)',border:'2px dashed #2563eb',borderRadius:'6px',zIndex:3,pointerEvents:'none'}">
               </div>
-              <div v-if="order.actual_start_at || order.actual_start" class="gantt-actual-bar" :style="{left:actualBarLeft(order)+'px',width:actualBarWidth(order)+'px'}" :title="`实际：${order.actual_start_at || order.actual_start} ~ ${order.actual_end_at || order.actual_end || '进行中'}`"></div>
+              <div v-if="order.actual_start_at || order.actual_start" class="gantt-actual-bar" :style="{left:actualBarLeft(order)+'px',width:actualBarWidth(order)+'px'}" :title="`实际：${order.actual_start_at || order.actual_start} ~ ${order.actual_end_at || order.actual_end || order.actual_last_report_at || '进行中'}`"></div>
             </div>
           </div>
         </div>
@@ -406,9 +406,18 @@
       :revisions="selectedOrderRevisions"
       :loading="orderDrawerLoading"
       :error="orderDrawerError"
+      :can-adjust-priority="canAdjustSchedules"
       @close="closeOrderDrawer"
       @retry="openOrderDrawer(selectedScheduleOrder)"
       @action="handleOrderDrawerAction"
+    />
+
+    <SchedulePriorityDrawer
+      :open="priorityDrawerOpen"
+      :order="priorityOrder"
+      :saving="prioritySaving"
+      @close="priorityDrawerOpen=false"
+      @save="savePriorityChange"
     />
   </div>
 </div>
@@ -420,14 +429,20 @@ import ProductionNodeWorkbench from '@/components/production-nodes/ProductionNod
 import ScheduleCapacityDashboard from '@/components/schedule/ScheduleCapacityDashboard.vue'
 import OrderScheduleDrawer from '@/components/schedule/OrderScheduleDrawer.vue'
 import ScheduleCommandDrawer from '@/components/schedule/ScheduleCommandDrawer.vue'
+import SchedulePriorityDrawer from '@/components/schedule/SchedulePriorityDrawer.vue'
 import { useGantt } from '@/composables/useGantt.js'
+import { api } from '@/lib/api.js'
+import { showToast } from '@/lib/store.js'
 
 export default {
-  components: { ProductionNodeWorkbench, ScheduleCapacityDashboard, OrderScheduleDrawer, ScheduleCommandDrawer },
+  components: { ProductionNodeWorkbench, ScheduleCapacityDashboard, OrderScheduleDrawer, ScheduleCommandDrawer, SchedulePriorityDrawer },
   setup() {
     const gantt = useGantt()
     const savedFilterName = ref('')
     const activeSavedFilter = ref('')
+    const priorityDrawerOpen = ref(false)
+    const priorityOrder = ref(null)
+    const prioritySaving = ref(false)
     function saveCurrentFilter() {
       if (gantt.saveFilter?.(savedFilterName.value)) {
         activeSavedFilter.value = savedFilterName.value.trim()
@@ -448,8 +463,30 @@ export default {
         gantt.prepareDynamicReplan(event.order.id)
       }
       if (event?.action === 'operation') gantt.viewMode.value = 'operations'
+      if (event?.action === 'priority' && event.order?.id) {
+        priorityOrder.value = event.order
+        gantt.closeOrderDrawer?.()
+        priorityDrawerOpen.value = true
+      }
     }
-    return { ...gantt, handleOrderDrawerAction, savedFilterName, activeSavedFilter, saveCurrentFilter, applySavedFilterFromUi, removeSavedFilter }
+    async function savePriorityChange(payload) {
+      if (!priorityOrder.value?.id || prioritySaving.value) return
+      prioritySaving.value = true
+      try {
+        await api.domains.production.updateScheduleOrderPriority(priorityOrder.value.id, {
+          ...payload,
+          expected_priority_version: Number(priorityOrder.value.priority_version || 1),
+        })
+        priorityDrawerOpen.value = false
+        showToast('订单优先级已更新，已标记为待重新排程')
+        await Promise.all([gantt.load(), gantt.loadCapacity?.()])
+      } catch (error) {
+        showToast(error.message || '调整优先级失败', 'error')
+      } finally {
+        prioritySaving.value = false
+      }
+    }
+    return { ...gantt, handleOrderDrawerAction, savePriorityChange, priorityDrawerOpen, priorityOrder, prioritySaving, savedFilterName, activeSavedFilter, saveCurrentFilter, applySavedFilterFromUi, removeSavedFilter }
   }
 }
 </script>

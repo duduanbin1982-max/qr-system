@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { scheduleSegments, sortScheduleSegments } from '@/composables/gantt/useScheduleSegments.js'
 
 const props = defineProps({
   operations: { type: Array, default: () => [] },
@@ -32,11 +33,9 @@ watch(activeNodes, (nodes) => {
 }, { immediate: true })
 
 function nodeOperations(node) {
-  return props.operations.filter(operation => (
-    String(operation.production_node_id || '') === String(node.id)
-    || (operation.allocations || []).some(item => String(item.production_node_id || '') === String(node.id))
-    || (operation.segments || []).some(item => String(item.production_node_id || '') === String(node.id))
-  )).sort((a, b) => String(a.planned_start_at || a.plan_start || '').localeCompare(String(b.planned_start_at || b.plan_start || '')))
+  return sortScheduleSegments(props.operations
+    .flatMap(operation => scheduleSegments(operation))
+    .filter(segment => String(segment.production_node_id || '') === String(node.id)))
 }
 
 function orderLabel(operation) {
@@ -75,10 +74,10 @@ function selectNode(node) {
       <aside class="queue-timeline" aria-label="节点时间轴">
         <div class="queue-column-title">时间轴 · {{ activeNode?.node_code || '未选择节点' }}</div>
         <div v-if="activeNode && nodeOperations(activeNode).length" class="queue-node-tasks">
-          <button v-for="(operation, index) in nodeOperations(activeNode)" :key="operation.id || operation.order_process_id" type="button" class="queue-task" @click="emit('open-order', orderFor(operation))">
+          <button v-for="(operation, index) in nodeOperations(activeNode)" :key="operation.key" type="button" class="queue-task" @click="emit('open-order', orderFor(operation))">
             <span class="queue-task-index">{{ index === 0 ? '当前' : index === 1 ? '下一' : '后续' }}</span>
             <strong>{{ orderLabel(operation) }}</strong>
-            <small>{{ operation.process_name || activeProcessGroup?.name }} · {{ operation.planned_start_at || operation.plan_start || '待定' }} ~ {{ operation.planned_end_at || operation.plan_end || '待定' }}</small>
+            <small>{{ operation.process_name || activeProcessGroup?.name }} · {{ operation.planned_start_at || '待定' }} ~ {{ operation.planned_end_at || '待定' }} · {{ operation.quantity || 0 }} 件 · {{ Math.round(operation.occupied_minutes || 0) }} 分钟</small>
             <small v-if="operation.status === 'blocked' || operation.schedule_status === 'blocked'" class="danger">阻断：{{ operation.blocked_reason || operation.reason || '前置条件不满足' }}</small>
           </button>
         </div>

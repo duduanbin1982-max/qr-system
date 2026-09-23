@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { scheduleSegments } from '@/composables/gantt/useScheduleSegments.js'
 
 const STANDARD_SCOPE_LABELS = Object.freeze({
   'route_version:product': '路线版本 · 产品专用',
@@ -125,7 +126,10 @@ export function useGanttCapacity({
       const allocationMatch = (row.allocations || []).some(
         allocation => String(allocation.production_node_id || '') === String(capacityNodeFilter.value),
       )
-      if (!directMatch && !allocationMatch) return false
+      const segmentMatch = (row.segments || []).some(
+        segment => String(segment.production_node_id || '') === String(capacityNodeFilter.value),
+      )
+      if (!directMatch && !allocationMatch && !segmentMatch) return false
     }
     if (capacityRiskFilter.value === 'conflict' && !Number(row.conflict_count || 0)) return false
     if (capacityRiskFilter.value === 'blocked' && !(
@@ -385,6 +389,10 @@ export function useGanttCapacity({
     return `${node} × ${quantity}`
   }
 
+  function operationSegments(row) {
+    return scheduleSegments(row)
+  }
+
   function blockedCode(row) {
     return String(row.blocked_code || row.error_code || '').trim()
   }
@@ -630,6 +638,7 @@ export function useGanttCapacity({
     revisionStatusLabel,
     nodeLabel,
     allocationLabel,
+    operationSegments,
     blockedCode,
     blockedMessage,
     standardScopeLabel,

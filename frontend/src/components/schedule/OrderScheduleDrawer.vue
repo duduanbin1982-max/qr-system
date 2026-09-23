@@ -8,6 +8,7 @@ const props = defineProps({
   revisions: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
+  canAdjustPriority: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'retry', 'action'])
@@ -33,7 +34,31 @@ function operationRisk(operation) {
 }
 
 function sourceLabel(operation) {
-  return ({ product: '产品级标准', route: '路线版本通用标准', generic: '通用标准', outsourced: '外协/非排程' })[operation.standard_match_scope] || operation.standard_match_scope || '未记录'
+  return ({
+    product: '产品级标准',
+    route: '路线版本通用标准',
+    generic: '通用标准',
+    outsourced: '外协/非排程',
+    'route_version:product': '路线版本 · 产品专用',
+    'route:product': '路线 · 产品专用',
+    'process:product': '工序 · 产品专用',
+    'route_version:generic': '路线版本 · 通用',
+    'route:generic': '路线 · 通用',
+    'process:generic': '工序 · 通用',
+    execution_policy: '执行策略（外协/非排程）',
+  })[operation.standard_match_scope] || operation.standard_match_scope || '未记录'
+}
+
+function priorityLabel(order) {
+  const level = Number(order?.priority_level ?? order?.priority ?? 0)
+  const label = level >= 1 && level <= 5 ? `P${level}` : '未设置'
+  return order?.is_expedited ? `${label} · 加急` : label
+}
+
+function nodeLabel(operation) {
+  const code = operation.node_code || operation.node_code_snapshot || ''
+  const name = operation.node_name || operation.node_name_snapshot || ''
+  return [code, name].filter(Boolean).join(' · ') || operation.production_node_id || '未分配'
 }
 
 function blockedReason(operation) {
@@ -45,9 +70,24 @@ function focusFirst() {
 }
 
 function onKeydown(event) {
-  if (event.key === 'Escape' && props.open) {
+  if (!props.open) return
+  if (event.key === 'Escape') {
     event.preventDefault()
     emit('close')
+    return
+  }
+  if (event.key !== 'Tab' || !drawerRef.value) return
+  const focusable = [...drawerRef.value.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(node => !node.disabled && node.offsetParent !== null)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -110,7 +150,7 @@ onBeforeUnmount(() => {
                 <div><span>订单状态</span><strong>{{ order.status || '-' }}</strong></div>
                 <div><span>订单数量</span><strong>{{ order.quantity || 0 }}</strong></div>
                 <div><span>已完成</span><strong>{{ order.completed_qty || order.completed || 0 }}</strong></div>
-                <div><span>优先级</span><strong>{{ order.priority || order.schedule_priority || '-' }}</strong></div>
+                <div><span>优先级</span><strong>{{ priorityLabel(order) }}</strong></div>
                 <div><span>交期</span><strong>{{ order.deadline || order.deadline_at || '-' }}</strong></div>
                 <div><span>风险</span><strong :class="`risk-${order.risk_level || 'none'}`">{{ riskLabel }}</strong></div>
               </div>
@@ -121,7 +161,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="schedule-order-drawer__actions">
                 <button type="button" class="btn btn-primary" @click="triggerAction('replan')">模拟重排</button>
-                <button type="button" class="btn-default" @click="triggerAction('priority')">调整优先级</button>
+                <button v-if="canAdjustPriority" type="button" class="btn-default" @click="triggerAction('priority')">调整优先级</button>
                 <button type="button" class="btn-default" @click="activeTab = 'operations'">查看工序进度</button>
               </div>
             </section>
@@ -137,9 +177,9 @@ onBeforeUnmount(() => {
                   <div><dt>路线/工序版本</dt><dd>{{ operation.route_version_id || '-' }} / {{ operation.process_version_id || '-' }}</dd></div>
                   <div><dt>标准工时</dt><dd>{{ operation.standard_minutes_per_unit || 0 }} 分钟/件 · 准备 {{ operation.setup_minutes || 0 }} 分钟</dd></div>
                   <div><dt>工时来源</dt><dd>{{ sourceLabel(operation) }}</dd></div>
-                  <div><dt>生产节点</dt><dd>{{ operation.node_name || operation.node_code || operation.production_node_id || '未分配' }}</dd></div>
+                  <div><dt>生产节点</dt><dd>{{ nodeLabel(operation) }}</dd></div>
                   <div><dt>预计时间</dt><dd>{{ operation.planned_start_at || operation.plan_start || '-' }} ~ {{ operation.planned_end_at || operation.plan_end || '-' }}</dd></div>
-                  <div><dt>实际时间</dt><dd>{{ operation.actual_start_at || operation.actual_start || '未开始' }}<template v-if="operation.actual_end_at || operation.actual_end"> ~ {{ operation.actual_end_at || operation.actual_end }}</template></dd></div>
+                  <div><dt>实际时间</dt><dd>{{ operation.actual_start_at || operation.actual_start || '未开始' }}<template v-if="operation.actual_end_at || operation.actual_end"> ~ {{ operation.actual_end_at || operation.actual_end }}（已完成）</template><template v-else-if="operation.actual_last_report_at"> ~ {{ operation.actual_last_report_at }}（最近报工）</template></dd></div>
                   <div><dt>状态</dt><dd :class="{ blocked: operation.status === 'blocked' || operation.schedule_status === 'blocked' }">{{ operationStatus(operation) }}<template v-if="operation.status === 'blocked' || operation.schedule_status === 'blocked'">：{{ blockedReason(operation) }}</template></dd></div>
                 </dl>
                 <div class="schedule-order-drawer__operation-actions">
