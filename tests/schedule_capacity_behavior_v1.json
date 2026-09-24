@@ -1,0 +1,289 @@
+{
+  "multi_node_cross_day": {
+    "summary": {
+      "first": {
+        "idempotent_replay": false,
+        "ok": true,
+        "operations": [
+          {
+            "allocated_quantity": 8,
+            "allocation_count": 4,
+            "blocked_code": "",
+            "blocked_reason": "",
+            "completed_quantity": 0,
+            "difficulty_factor": 1,
+            "execution_mode": "internal",
+            "locked": false,
+            "occupied_minutes": 2400,
+            "plan_end": "2030-01-09",
+            "plan_start": "2030-01-07",
+            "planned_end_at": "2030-01-09 10:00",
+            "planned_minutes": 2400,
+            "planned_start_at": "2030-01-07 08:00",
+            "primary_resource": "resource-1",
+            "process_name": "焊接",
+            "process_version_bound": true,
+            "quantity": 8,
+            "remaining_quantity": 8,
+            "resource_count": 2,
+            "resource_rollups": [
+              {
+                "allocated_quantity": 4,
+                "allocation_count": 1,
+                "calendar_days": [
+                  "2030-01-07",
+                  "2030-01-08",
+                  "2030-01-09"
+                ],
+                "first_start_at": "2030-01-07 08:00",
+                "has_batch_keys": true,
+                "last_end_at": "2030-01-09 10:00",
+                "occupied_minutes": 1200,
+                "resource": "resource-1",
+                "segment_count": 5,
+                "segment_quantity": 4,
+                "serial_ids": []
+              },
+              {
+                "allocated_quantity": 4,
+                "allocation_count": 3,
+                "calendar_days": [
+                  "2030-01-07",
+                  "2030-01-08",
+                  "2030-01-09"
+                ],
+                "first_start_at": "2030-01-07 08:00",
+                "has_batch_keys": true,
+                "last_end_at": "2030-01-09 10:00",
+                "occupied_minutes": 1200,
+                "resource": "resource-2",
+                "segment_count": 7,
+                "segment_quantity": 4,
+                "serial_ids": []
+              }
+            ],
+            "rework_quantity": 0,
+            "route_version_bound": true,
+            "segment_count": 12,
+            "segment_quantity": 8,
+            "seq_order": 1,
+            "setup_minutes": 0,
+            "standard_bound": true,
+            "standard_match_scope": "route_version:generic",
+            "standard_version": 1,
+            "status": "planned",
+            "unit_minutes": 300
+          }
+        ],
+        "revision_status": "draft",
+        "risk": {
+          "delay_minutes": 600,
+          "level": "high",
+          "reason": "按当前精确排程，预计完成时间晚于交期"
+        },
+        "status": "completed"
+      },
+      "quantity_conserved": true,
+      "replay": {
+        "idempotent_replay": true,
+        "operations_unchanged": true,
+        "status": "completed"
+      }
+    },
+    "sha256": "bd30c8260e092031e383fc83544d56e1b06bc1863ee9dcb4490adbf1ff352c1c"
+  },
+  "missing_work_time": {
+    "summary": {
+      "idempotent_replay": false,
+      "ok": true,
+      "operations": [
+        {
+          "allocated_quantity": 0,
+          "allocation_count": 0,
+          "blocked_code": "MISSING_WORK_TIME_STANDARD",
+          "blocked_reason": "未配置标准工时",
+          "completed_quantity": 0,
+          "difficulty_factor": 1,
+          "execution_mode": "internal",
+          "locked": false,
+          "occupied_minutes": 0,
+          "plan_end": "2030-01-07",
+          "plan_start": "2030-01-07",
+          "planned_end_at": "",
+          "planned_minutes": 0,
+          "planned_start_at": "",
+          "primary_resource": null,
+          "process_name": "下料",
+          "process_version_bound": true,
+          "quantity": 2,
+          "remaining_quantity": 2,
+          "resource_count": 0,
+          "resource_rollups": [],
+          "rework_quantity": 0,
+          "route_version_bound": true,
+          "segment_count": 0,
+          "segment_quantity": 0,
+          "seq_order": 1,
+          "setup_minutes": 0,
+          "standard_bound": false,
+          "standard_match_scope": "",
+          "standard_version": 0,
+          "status": "blocked",
+          "unit_minutes": 0
+        },
+        {
+          "allocated_quantity": 0,
+          "allocation_count": 0,
+          "blocked_code": "UPSTREAM_BLOCKED",
+          "blocked_reason": "前序工序无法排程",
+          "completed_quantity": 0,
+          "difficulty_factor": 1,
+          "execution_mode": "internal",
+          "locked": false,
+          "occupied_minutes": 0,
+          "plan_end": "2030-01-07",
+          "plan_start": "2030-01-07",
+          "planned_end_at": "",
+          "planned_minutes": 0,
+          "planned_start_at": "",
+          "primary_resource": null,
+          "process_name": "焊接",
+          "process_version_bound": true,
+          "quantity": 2,
+          "remaining_quantity": 2,
+          "resource_count": 0,
+          "resource_rollups": [],
+          "rework_quantity": 0,
+          "route_version_bound": true,
+          "segment_count": 0,
+          "segment_quantity": 0,
+          "seq_order": 2,
+          "setup_minutes": 0,
+          "standard_bound": false,
+          "standard_match_scope": "",
+          "standard_version": 0,
+          "status": "blocked",
+          "unit_minutes": 0
+        }
+      ],
+      "revision_status": "draft",
+      "risk": {
+        "delay_minutes": 0,
+        "level": "high",
+        "reason": "排程被阻断：未配置标准工时"
+      },
+      "status": "completed"
+    },
+    "sha256": "6db1c794bed787b8796e49bec91c7959dd21359f342397760cb8adcf2ce62b44"
+  },
+  "dynamic_replan": {
+    "summary": {
+      "first": {
+        "idempotent_replay": false,
+        "ok": true,
+        "operations": [
+          {
+            "allocated_quantity": 10,
+            "allocation_count": 1,
+            "blocked_code": "",
+            "blocked_reason": "锁定任务保留原生产节点和计划时间",
+            "completed_quantity": 4,
+            "difficulty_factor": 1,
+            "execution_mode": "internal",
+            "locked": true,
+            "occupied_minutes": 100,
+            "plan_end": "2030-01-07",
+            "plan_start": "2030-01-07",
+            "planned_end_at": "2030-01-07 09:40",
+            "planned_minutes": 100,
+            "planned_start_at": "2030-01-07 08:00",
+            "primary_resource": "resource-1",
+            "process_name": "下料",
+            "process_version_bound": true,
+            "quantity": 8,
+            "remaining_quantity": 8,
+            "resource_count": 1,
+            "resource_rollups": [
+              {
+                "allocated_quantity": 10,
+                "allocation_count": 1,
+                "calendar_days": [
+                  "2030-01-07"
+                ],
+                "first_start_at": "2030-01-07 08:00",
+                "has_batch_keys": true,
+                "last_end_at": "2030-01-07 09:40",
+                "occupied_minutes": 100,
+                "resource": "resource-1",
+                "segment_count": 1,
+                "segment_quantity": 10,
+                "serial_ids": []
+              }
+            ],
+            "rework_quantity": 2,
+            "route_version_bound": true,
+            "segment_count": 1,
+            "segment_quantity": 10,
+            "seq_order": 1,
+            "setup_minutes": 0,
+            "standard_bound": true,
+            "standard_match_scope": "route_version:generic",
+            "standard_version": 1,
+            "status": "planned",
+            "unit_minutes": 10
+          }
+        ],
+        "replan": {
+          "advanced_operation_count": 0,
+          "after_risk_level": "none",
+          "before_risk_level": "none",
+          "blocked": false,
+          "changed_operation_count": 1,
+          "delayed_operation_count": 0,
+          "node_change_count": 1,
+          "risk_change": "unchanged",
+          "trigger_count": 0,
+          "trigger_reasons": []
+        },
+        "revision_status": "draft",
+        "risk": {
+          "delay_minutes": 0,
+          "level": "none",
+          "reason": "未设置交期，暂无法进行交期风险评估"
+        },
+        "status": "completed"
+      },
+      "replay": {
+        "idempotent_replay": true,
+        "operations_unchanged": true,
+        "status": "completed"
+      }
+    },
+    "sha256": "0b0aaf4b167c762ec3e4380e0776f7a9a26d9f4e55dc08e54df2a6bee839cbdf"
+  },
+  "failure_and_publication": {
+    "summary": {
+      "failed": {
+        "error": "characterization persistence failure",
+        "revision_status": "cancelled",
+        "run_status": "failed"
+      },
+      "published": {
+        "approval_status": "approved",
+        "content_digest_present": true,
+        "current_pointer_matches": true,
+        "event_types": [
+          "submit",
+          "approve",
+          "publish"
+        ],
+        "immutable_items": true,
+        "publish_replay": true,
+        "revision_approval_status": "approved",
+        "revision_status": "published",
+        "service_status": "published"
+      }
+    },
+    "sha256": "eaceb12628ac84c56bd594834196bd7daa77fdf64bdd4a48dd854e012a7ddbb1"
+  }
+}
