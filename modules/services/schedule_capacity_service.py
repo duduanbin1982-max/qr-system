@@ -2304,6 +2304,76 @@ class ScheduleCapacityService:
                 key=key,
             )
 
+    # Compatibility facade: the revision workflow now lives in
+    # ScheduleRevisionService. Keep historical callers stable while ensuring
+    # runtime behavior is implemented by the extracted workflow service.
+    @staticmethod
+    def lock_schedule_item(revision_item_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.lock_schedule_item(
+            revision_item_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def unlock_schedule_item(revision_item_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.unlock_schedule_item(
+            revision_item_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def adjust_schedule_item(
+        revision_item_id, production_node_id, planned_start_at,
+        reason, row_version, idempotency_key, actor_id, db=None,
+    ):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.adjust_schedule_item(
+            revision_item_id, production_node_id, planned_start_at,
+            reason, row_version, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def submit_revision(revision_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.submit_revision(
+            revision_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def approve_revision(revision_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.approve_revision(
+            revision_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def reject_revision(revision_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.reject_revision(
+            revision_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
+    @staticmethod
+    def publish_revision(revision_id, reason, idempotency_key, actor_id, db=None):
+        from modules.services.schedule_revision_service import ScheduleRevisionService
+
+        return ScheduleRevisionService.publish_revision(
+            revision_id, reason, idempotency_key, actor_id, db=db,
+            capacity_service=ScheduleCapacityService,
+        )
+
     @staticmethod
     def list_schedules(limit=500):
         limit = ScheduleCapacityService._limit(limit)

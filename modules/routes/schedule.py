@@ -19,6 +19,7 @@ from modules.services.schedule_service import (
 )
 from modules.services.production_line_service import ProductionLineService
 from modules.services.schedule_capacity_service import ScheduleCapacityService
+from modules.services.schedule_revision_service import ScheduleRevisionService
 from modules.services.order_service import OrderService
 from modules.domain.errors import DomainError, LegacyProcessLineWriteBlockedError
 from modules.domain.production_node_scheduling import NodeSchedulingError
@@ -223,11 +224,12 @@ def schedule_revision_detail(revision_id):
 @validate_json("schedule_workflow_action")
 def schedule_revision_publish(revision_id):
     data = get_json_body()
-    return _schedule_workflow_response(lambda: ScheduleCapacityService.publish_revision(
+    return _schedule_workflow_response(lambda: ScheduleRevisionService.publish_revision(
         revision_id,
         data["reason"],
         data["idempotency_key"],
         g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
@@ -238,8 +240,9 @@ def schedule_revision_publish(revision_id):
 @validate_json("schedule_workflow_action")
 def schedule_revision_item_lock(revision_item_id):
     data = get_json_body()
-    return _schedule_workflow_response(lambda: ScheduleCapacityService.lock_schedule_item(
-        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+    return _schedule_workflow_response(lambda: ScheduleRevisionService.lock_schedule_item(
+        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
@@ -250,8 +253,9 @@ def schedule_revision_item_lock(revision_item_id):
 @validate_json("schedule_workflow_action")
 def schedule_revision_item_unlock(revision_item_id):
     data = get_json_body()
-    return _schedule_workflow_response(lambda: ScheduleCapacityService.unlock_schedule_item(
-        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+    return _schedule_workflow_response(lambda: ScheduleRevisionService.unlock_schedule_item(
+        revision_item_id, data["reason"], data["idempotency_key"], g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
@@ -262,18 +266,19 @@ def schedule_revision_item_unlock(revision_item_id):
 @validate_json("schedule_revision_item_adjust")
 def schedule_revision_item_adjust(revision_item_id):
     data = get_json_body()
-    return _schedule_workflow_response(lambda: ScheduleCapacityService.adjust_schedule_item(
+    return _schedule_workflow_response(lambda: ScheduleRevisionService.adjust_schedule_item(
         revision_item_id, data["production_node_id"], data["planned_start_at"],
         data["reason"], data["row_version"], data["idempotency_key"],
-        g.current_user.get("id"),
+        g.current_user.get("id"), capacity_service=ScheduleCapacityService,
     ))
 
 
 def _revision_workflow(revision_id, operation):
     data = get_json_body()
-    method = getattr(ScheduleCapacityService, f"{operation}_revision")
+    method = getattr(ScheduleRevisionService, f"{operation}_revision")
     return _schedule_workflow_response(lambda: method(
-        revision_id, data["reason"], data["idempotency_key"], g.current_user.get("id")
+        revision_id, data["reason"], data["idempotency_key"], g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
