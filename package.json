@@ -11,7 +11,7 @@
     "dev": "vite",
     "check:api": "node frontend/scripts/check-api-facade.mjs",
     "check:imports": "node frontend/scripts/check-import-cycles.mjs",
-    "check:architecture": "npm run check:api && npm run check:imports",
+    "check:architecture": "python -m pytest -q tests/test_architecture_imports.py && npm run check:api && npm run check:imports",
     "test:unit": "vitest run --config vitest.config.js",
     "test:unit:coverage": "vitest run --config vitest.config.js --coverage",
     "test:e2e": "bash scripts/test-e2e.sh",
