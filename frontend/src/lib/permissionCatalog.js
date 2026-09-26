@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { request } from './api/client.js'
+import { api } from './api.js'
 import {
   applyPermissionCatalog,
   resetPermissionCatalog,
@@ -17,7 +17,7 @@ export async function loadPageAccessCatalog(force = false) {
   catalogLoading.value = true
   catalogLoadPromise = (async () => {
     try {
-      const payload = await request('GET', '/api/permissions')
+      const payload = await api.domains.roles.getPermissions()
       applyPermissionCatalog(payload)
       catalogLoaded.value = true
       catalogVersion.value += 1

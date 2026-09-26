@@ -1,6 +1,5 @@
 // ===== QR-System API Layer =====
 // Domain API facade: callers use api.domains.<domain>.<method>().
-export { request, handleApiError, buildQuery, uploadFile } from './api/client.js'
 import { authApi } from './api/auth.js'
 import { dashboardApi } from './api/dashboard.js'
 import { ordersApi } from './api/orders.js'

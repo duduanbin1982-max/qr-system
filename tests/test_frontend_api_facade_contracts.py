@@ -20,6 +20,19 @@ def test_api_facade_has_unique_domain_methods_and_no_flat_calls():
     assert "unique domain methods" in result.stdout
 
 
+def test_frontend_source_graph_has_no_import_cycles():
+    result = subprocess.run(
+        ["node", "frontend/scripts/check-import-cycles.mjs"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "import cycle check passed" in result.stdout
+
+
 def test_frontend_build_runs_api_facade_gate_first():
     root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
 

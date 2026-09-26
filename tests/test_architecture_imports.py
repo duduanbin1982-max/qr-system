@@ -1,10 +1,12 @@
 import ast
+import json
 import re
 from collections import defaultdict
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET = 413
 IGNORED_PARTS = {
     ".git",
     ".pytest_cache",
@@ -157,21 +159,52 @@ def test_repositories_do_not_depend_on_service_db_helper():
     assert violations == [], f"repositories must depend on repository/context seams, not services: {violations}"
 
 
-def _imported_modules(path):
-    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+def _expanded_imports(tree, package_parts):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield node.lineno, alias.name
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            yield node.lineno, node.module
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base_parts = package_parts[: max(0, len(package_parts) - node.level + 1)]
+                if node.module:
+                    base_parts = [*base_parts, *node.module.split(".")]
+                base_module = ".".join(base_parts)
+            else:
+                base_module = node.module or ""
+
+            if base_module:
+                yield node.lineno, base_module
+            for alias in node.names:
+                if alias.name != "*":
+                    imported_module = ".".join(
+                        part for part in (base_module, alias.name) if part
+                    )
+                    if imported_module:
+                        yield node.lineno, imported_module
+
+
+def _imported_modules(path):
+    relative = path.relative_to(PROJECT_ROOT).with_suffix("")
+    package_parts = list(relative.parts[:-1])
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    yield from _expanded_imports(tree, package_parts)
+
+
+def _matches_module_prefix(module_name, prefixes):
+    return any(
+        module_name == prefix or module_name.startswith(prefix + ".")
+        for prefix in prefixes
+    )
 
 
 def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
     forbidden_prefixes = (
         "flask",
+        "flask_sqlalchemy",
         "modules.app",
         "modules.db",
+        "modules.db_unit_of_work",
         "modules.repositories",
         "modules.routes",
         "modules.services",
@@ -179,7 +212,7 @@ def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
     violations = []
     for path in sorted((PROJECT_ROOT / "modules" / "domain").rglob("*.py")):
         for lineno, module_name in _imported_modules(path):
-            if module_name.startswith(forbidden_prefixes):
+            if _matches_module_prefix(module_name, forbidden_prefixes):
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
                 )
@@ -191,11 +224,15 @@ def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
 
 
 def test_routes_do_not_depend_on_database_or_repositories():
-    forbidden_prefixes = ("modules.db", "modules.repositories")
+    forbidden_prefixes = (
+        "modules.db",
+        "modules.db_unit_of_work",
+        "modules.repositories",
+    )
     violations = []
     for path in sorted((PROJECT_ROOT / "modules" / "routes").rglob("*.py")):
         for lineno, module_name in _imported_modules(path):
-            if module_name.startswith(forbidden_prefixes):
+            if _matches_module_prefix(module_name, forbidden_prefixes):
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
                 )
@@ -204,6 +241,134 @@ def test_routes_do_not_depend_on_database_or_repositories():
         "routes must call application services instead of persistence details: "
         f"{violations}"
     )
+
+
+def test_import_expansion_detects_repository_reexports_and_relative_imports():
+    fixtures = (
+        ("from modules import repositories as persistence", ["tests"], "modules.repositories"),
+        ("from ..repositories import schedule_capacity_repository", ["modules", "routes"], "modules.repositories"),
+        ("import modules.repositories.schedule_capacity_repository as repo", ["modules", "routes"], "modules.repositories"),
+    )
+
+    for source, package_parts, forbidden_prefix in fixtures:
+        imported_modules = [
+            module_name
+            for _, module_name in _expanded_imports(ast.parse(source), package_parts)
+        ]
+        assert any(
+            _matches_module_prefix(module_name, (forbidden_prefix,))
+            for module_name in imported_modules
+        ), f"import form escaped the architecture check: {source}"
+
+
+def test_schedule_capacity_allocator_is_database_independent():
+    path = PROJECT_ROOT / "modules" / "domain" / "schedule_capacity_allocation.py"
+    forbidden_imports = (
+        "flask",
+        "sqlite3",
+        "modules.app",
+        "modules.db",
+        "modules.db_unit_of_work",
+        "modules.repositories",
+        "modules.routes",
+        "modules.services",
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    violations = [
+        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
+        for lineno, module_name in _expanded_imports(tree, ["modules", "domain"])
+        if _matches_module_prefix(module_name, forbidden_imports)
+    ]
+
+    database_methods = {"execute", "executemany", "executescript", "cursor", "commit", "rollback"}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in database_methods
+        ):
+            violations.append(
+                f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno} -> .{node.func.attr}()"
+            )
+
+    assert violations == [], (
+        "capacity allocation must remain a pure policy with no database/framework access: "
+        f"{violations}"
+    )
+
+
+def test_schedule_services_only_execute_transaction_control_sql():
+    transaction_control = re.compile(
+        r"^(?:BEGIN(?:\s+(?:IMMEDIATE|EXCLUSIVE))?|COMMIT|ROLLBACK|"
+        r"SAVEPOINT\s+[A-Za-z_]\w*|ROLLBACK\s+TO(?:\s+SAVEPOINT)?\s+[A-Za-z_]\w*|"
+        r"RELEASE(?:\s+SAVEPOINT)?\s+[A-Za-z_]\w*)\s*;?$",
+        re.IGNORECASE,
+    )
+    database_methods = {"execute", "executemany", "executescript", "cursor"}
+    violations = []
+
+    for path in sorted((PROJECT_ROOT / "modules" / "services").rglob("schedule_*service.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in database_methods
+            ):
+                continue
+
+            if node.func.attr == "execute" and node.args:
+                statement = node.args[0]
+                if (
+                    isinstance(statement, ast.Constant)
+                    and isinstance(statement.value, str)
+                    and transaction_control.fullmatch(statement.value.strip())
+                ):
+                    continue
+            violations.append(f"{relative_path}:{node.lineno} -> .{node.func.attr}()")
+
+    assert violations == [], (
+        "schedule services must use repositories for data access; only explicit transaction "
+        f"control is allowed: {violations}"
+    )
+
+
+def test_schedule_capacity_service_does_not_accumulate_new_rule_branches():
+    path = PROJECT_ROOT / "modules" / "services" / "schedule_capacity_service.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    decision_points = sum(
+        isinstance(node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor, ast.While, ast.Match))
+        for node in ast.walk(tree)
+    )
+    decision_points += sum(
+        max(0, len(node.values) - 1)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BoolOp)
+    )
+    decision_points += sum(
+        len(node.ifs)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.comprehension)
+    )
+
+    assert decision_points <= SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET, (
+        "schedule_capacity_service.py exceeded its Task 7 complexity budget "
+        f"({decision_points}/{SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET}). "
+        "Put new scheduling decisions in a domain policy or allocator, and keep the service "
+        "as orchestration/delegation."
+    )
+
+
+def test_architecture_gate_runs_backend_and_frontend_boundary_checks():
+    package = json.loads(
+        (PROJECT_ROOT / "package.json").read_text(encoding="utf-8")
+    )
+    architecture_command = package["scripts"]["check:architecture"]
+
+    assert "pytest -q tests/test_architecture_imports.py" in architecture_command
+    assert "npm run check:api" in architecture_command
+    assert "npm run check:imports" in architecture_command
 
 
 def test_repositories_do_not_depend_on_other_repositories():
