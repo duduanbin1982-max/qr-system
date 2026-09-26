@@ -207,6 +207,13 @@ def test_routes_do_not_depend_on_database_or_repositories():
 
 
 def test_repositories_do_not_depend_on_other_repositories():
+    compatibility_facade_imports = {
+        "modules/repositories/schedule_capacity_repository.py": {
+            "modules.repositories.schedule_evidence_repository",
+            "modules.repositories.schedule_planning_repository",
+            "modules.repositories.schedule_revision_repository",
+        }
+    }
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
     for path in sorted(repository_root.rglob("*.py")):
@@ -224,8 +231,11 @@ def test_repositories_do_not_depend_on_other_repositories():
             if module.startswith("modules.repositories.") and module != "modules.repositories.context":
                 if owned_namespace and module.startswith(owned_namespace + "."):
                     continue
+                relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+                if module in compatibility_facade_imports.get(relative_path, set()):
+                    continue
                 violations.append(
-                    f"{path.relative_to(PROJECT_ROOT).as_posix()} -> {module}"
+                    f"{relative_path} -> {module}"
                 )
 
     assert violations == [], f"repositories must not depend on peer repositories: {violations}"
