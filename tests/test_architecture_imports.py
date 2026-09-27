@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET = 413
+SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET = 353
 IGNORED_PARTS = {
     ".git",
     ".pytest_cache",
@@ -138,6 +138,54 @@ def test_source_files_do_not_have_utf8_bom():
     ]
 
     assert bom_files == [], f"source files must be plain UTF-8 without BOM: {bom_files}"
+
+
+def _property_accessor_kind(function):
+    for decorator in function.decorator_list:
+        if isinstance(decorator, ast.Name) and decorator.id == "property":
+            return "getter"
+        if (
+            isinstance(decorator, ast.Attribute)
+            and isinstance(decorator.value, ast.Name)
+            and decorator.value.id == function.name
+            and decorator.attr in {"setter", "deleter"}
+        ):
+            return decorator.attr
+    return None
+
+
+def test_source_classes_do_not_shadow_methods_with_later_definitions():
+    violations = []
+    for path in _source_files():
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        for class_node in (
+            node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+        ):
+            definitions = defaultdict(list)
+            for node in class_node.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    definitions[node.name].append(node)
+
+            for method_name, methods in definitions.items():
+                if len(methods) < 2:
+                    continue
+                accessor_kinds = [_property_accessor_kind(method) for method in methods]
+                if (
+                    accessor_kinds[0] == "getter"
+                    and all(kind in {"setter", "deleter"} for kind in accessor_kinds[1:])
+                    and len(accessor_kinds) == len(set(accessor_kinds))
+                ):
+                    continue
+                lines = ",".join(str(method.lineno) for method in methods)
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT).as_posix()}:"
+                    f"{class_node.name}.{method_name} -> lines {lines}"
+                )
+
+    assert violations == [], (
+        "later class method definitions silently replace earlier implementations: "
+        f"{violations}"
+    )
 
 
 def test_repositories_do_not_depend_on_service_db_helper():
