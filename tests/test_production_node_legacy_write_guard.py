@@ -26,17 +26,11 @@ def _order_payload(prefix="LEGACY-GUARD"):
     }
 
 
-def test_legacy_line_crud_is_available_before_cutover_and_blocked_afterward(
+def test_legacy_line_api_is_read_only_regardless_of_cutover_flag(
     client, auth_headers, monkeypatch
 ):
     monkeypatch.setattr(config, "LEGACY_PROCESS_LINE_WRITE_BLOCKED", False)
     line_name = f"Legacy Guard {uuid.uuid4().hex[:8]}"
-    created = client.post(
-        "/api/production-lines",
-        headers=auth_headers,
-        json={"name": line_name, "capacity_per_day": 9, "remark": "before cutover"},
-    )
-    assert created.status_code == 200, created.get_json()
     with client.application.app_context():
         db = get_db()
         line_id = db.execute(
@@ -45,8 +39,6 @@ def test_legacy_line_crud_is_available_before_cutover_and_blocked_afterward(
             (f"{line_name} persisted",),
         ).lastrowid
         db.commit()
-
-    monkeypatch.setattr(config, "LEGACY_PROCESS_LINE_WRITE_BLOCKED", True)
 
     listed = client.get("/api/production-lines", headers=auth_headers)
     assert listed.status_code == 200, listed.get_json()
@@ -163,7 +155,7 @@ def test_order_and_schedule_legacy_line_inputs_return_stable_409(
     assert date_only.status_code == 200, date_only.get_json()
 
 
-def test_node_native_write_keeps_required_legacy_projection(
+def test_node_native_write_keeps_optional_legacy_projection_when_available(
     client, auth_headers, monkeypatch
 ):
     monkeypatch.setattr(config, "PRODUCTION_NODE_WRITE_ENABLED", True)

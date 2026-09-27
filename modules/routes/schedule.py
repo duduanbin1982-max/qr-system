@@ -7,7 +7,6 @@ from modules.route_decorators import (
     check_auth,
     check_permission,
     get_json_body,
-    require_legacy_process_line_write,
     require_production_node_write,
     safe_audit_log,
     validate_json,
@@ -469,56 +468,27 @@ def schedule_capacity_audit():
 @app.route("/api/production-lines", methods=["GET"])
 @check_auth
 def list_production_lines():
-    """List all production lines"""
+    """List the read-only Legacy production-line compatibility projection."""
     return jsonify(ProductionLineService.list_all())
+
+
+def _legacy_production_line_write_removed():
+    error = LegacyProcessLineWriteBlockedError(
+        "Legacy 产线已转为只读兼容数据，请使用生产节点接口"
+    )
+    return jsonify(error.to_payload()), error.status_code
 
 
 @app.route("/api/production-lines", methods=["POST"])
 @check_auth
 @check_permission("settings:edit")
-@require_legacy_process_line_write
-def create_production_line():
-    """Create a production line"""
-    try:
-        data = get_json_body()
-        result = ProductionLineService.create(
-            name=data.get("name", ""),
-            capacity_per_day=data.get("capacity_per_day", 10),
-            remark=data.get("remark", "")
-        )
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+def create_production_line_compatibility_tombstone():
+    return _legacy_production_line_write_removed()
 
 
-@app.route("/api/production-lines/<int:line_id>", methods=["PUT"])
+@app.route("/api/production-lines/<int:line_id>", methods=["PUT", "DELETE"])
 @check_auth
 @check_permission("settings:edit")
-@require_legacy_process_line_write
-def update_production_line(line_id):
-    """Update a production line"""
-    try:
-        data = get_json_body()
-        result = ProductionLineService.update(
-            line_id=line_id,
-            name=data.get("name", ""),
-            capacity_per_day=data.get("capacity_per_day", 10),
-            remark=data.get("remark", ""),
-            status=data.get("status", "active")
-        )
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
-
-
-@app.route("/api/production-lines/<int:line_id>", methods=["DELETE"])
-@check_auth
-@check_permission("settings:edit")
-@require_legacy_process_line_write
-def delete_production_line(line_id):
-    """Delete a production line (only if no orders reference it)"""
-    try:
-        result = ProductionLineService.delete(line_id)
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+def mutate_production_line_compatibility_tombstone(line_id):
+    del line_id
+    return _legacy_production_line_write_removed()

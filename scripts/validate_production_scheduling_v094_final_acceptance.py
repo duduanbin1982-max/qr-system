@@ -50,6 +50,12 @@ def _parse_args(argv=None):
     parser.add_argument("--planning-now", required=True)
     parser.add_argument("--auto-plan-key", required=True)
     parser.add_argument("--historical-limit", type=int, default=20)
+    parser.add_argument(
+        "--expected-version",
+        type=int,
+        default=LATEST_VERSION,
+        help="Expected migrated schema version; defaults to the current latest version",
+    )
     return parser.parse_args(argv)
 
 
@@ -313,14 +319,15 @@ def build_acceptance(
     execution_facts_unchanged,
     historical_metrics,
     latest_compat_mismatches,
+    expected_version=94,
 ):
     """Return the explicit Task 8 production-acceptance gates."""
 
-    return {
+    acceptance = {
         "source_replica_unchanged": bool(source_replica_unchanged),
         "database_integrity_ok": quick_check == "ok",
         "foreign_keys_ok": int(foreign_key_violations) == 0,
-        "schema_is_v094": int(after_version) == 94,
+        "schema_version_expected": int(after_version) == int(expected_version),
         "all_active_orders_in_queue": (
             int(queue_count) == int(active_count) == int(batch_queue_count)
         ),
@@ -369,6 +376,9 @@ def build_acceptance(
         "historical_conflicts_zero": historical_metrics["conflict_count"] == 0,
         "compatibility_mismatches_zero": int(latest_compat_mismatches) == 0,
     }
+    if int(expected_version) == 94:
+        acceptance["schema_is_v094"] = int(after_version) == 94
+    return acceptance
 
 
 def run(args):
@@ -391,8 +401,10 @@ def run(args):
         before_version = int(db.execute("PRAGMA user_version").fetchone()[0])
         run_migrations(db)
         after_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        if after_version != LATEST_VERSION or after_version != 94:
-            raise RuntimeError(f"V094 required; observed V{after_version}")
+        if after_version != LATEST_VERSION or after_version != args.expected_version:
+            raise RuntimeError(
+                f"V{args.expected_version:03d} required; observed V{after_version}"
+            )
 
         actor = _actor(db, args.actor_username)
         queue_before = ScheduleCapacityRepository.list_schedulable_orders(
@@ -491,9 +503,12 @@ def run(args):
             execution_facts_unchanged=execution_before == execution_after,
             historical_metrics=historical_metrics,
             latest_compat_mismatches=latest_compat_mismatches,
+            expected_version=args.expected_version,
         )
         report = {
-            "schema": "qr-system-v094-final-scheduling-acceptance/v1",
+            "schema": (
+                f"qr-system-v{args.expected_version:03d}-final-scheduling-acceptance/v1"
+            ),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "ok": all(acceptance.values()),
             "replica_only": True,
@@ -502,6 +517,7 @@ def run(args):
             "source_sha256": source_before_digest,
             "before_version": before_version,
             "after_version": after_version,
+            "expected_version": args.expected_version,
             "planning_now": args.planning_now,
             "start_date": args.start_date,
             "auto_plan_key": args.auto_plan_key,

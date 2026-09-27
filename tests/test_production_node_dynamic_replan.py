@@ -150,7 +150,7 @@ def test_node_downtime_api_and_legacy_filter_compatibility_observation(
         assert difference["production_node_id"] == node_id
 
 
-def test_unmapped_node_cannot_create_downtime(client, monkeypatch):
+def test_unmapped_node_can_create_node_native_downtime(client, monkeypatch):
     _enable_node_engine(monkeypatch)
     with client.application.app_context():
         db = get_db()
@@ -169,19 +169,17 @@ def test_unmapped_node_cannot_create_downtime(client, monkeypatch):
             ),
         ).lastrowid
         db.commit()
-        with pytest.raises(ValueError, match="Legacy 产线映射"):
-            ScheduleCapacityService.create_downtime_event(
-                node_id,
-                "2026-09-21 08:00",
-                "2026-09-21 09:00",
-                "不应写入",
-                created_by=_actor_id(db),
-            )
-        assert db.execute(
-            "SELECT COUNT(*) FROM schedule_downtime_events "
-            "WHERE production_node_id=?",
-            (node_id,),
-        ).fetchone()[0] == 0
+        result = ScheduleCapacityService.create_downtime_event(
+            node_id,
+            "2026-09-21 08:00",
+            "2026-09-21 09:00",
+            "节点原生停机",
+            created_by=_actor_id(db),
+        )
+        event = result["event"]
+        assert event["production_node_id"] == node_id
+        assert event["process_line_id"] is None
+        assert event["node_name"] == "未映射节点"
 
 
 def test_dynamic_replan_preserves_completed_rework_and_locked_task(

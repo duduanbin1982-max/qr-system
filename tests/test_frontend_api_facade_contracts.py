@@ -33,6 +33,17 @@ def test_frontend_source_graph_has_no_import_cycles():
     assert "import cycle check passed" in result.stdout
 
 
+def test_production_facade_exposes_legacy_lines_as_read_only_compatibility():
+    production_api = (
+        PROJECT_ROOT / "frontend" / "src" / "lib" / "api" / "production.js"
+    ).read_text(encoding="utf-8")
+
+    assert "listProductionLines" in production_api
+    assert "createProductionLine" not in production_api
+    assert "updateProductionLine" not in production_api
+    assert "deleteProductionLine" not in production_api
+
+
 def test_frontend_build_runs_api_facade_gate_first():
     root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
 

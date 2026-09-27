@@ -1,7 +1,9 @@
 import sqlite3
 
+from modules.migrations import LATEST_VERSION
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from scripts.validate_production_scheduling_v094_final_acceptance import (
+    _parse_args,
     _historical_replay,
     build_acceptance,
     summarize_historical_replays,
@@ -107,6 +109,31 @@ def test_acceptance_rejects_blocked_orders_and_conflicts():
     assert acceptance["active_orders_all_succeeded"] is False
     assert acceptance["active_orders_blocked_zero"] is False
     assert acceptance["node_conflicts_zero"] is False
+
+
+def test_acceptance_supports_a_newer_explicit_schema_gate():
+    inputs = _passing_acceptance_inputs()
+    inputs["after_version"] = 95
+    inputs["expected_version"] = 95
+
+    acceptance = build_acceptance(**inputs)
+
+    assert all(acceptance.values())
+    assert acceptance["schema_version_expected"] is True
+    assert "schema_is_v094" not in acceptance
+
+
+def test_cli_schema_gate_defaults_to_current_latest_version():
+    args = _parse_args([
+        "--source-db", "source.db",
+        "--output-db", "output.db",
+        "--report", "report.json",
+        "--start-date", "2026-09-27",
+        "--planning-now", "2026-09-27 08:00:00",
+        "--auto-plan-key", "task2-default-version-gate",
+    ])
+
+    assert args.expected_version == LATEST_VERSION == 95
 
 
 def test_historical_replay_rolls_back_temporary_order_state(monkeypatch):
