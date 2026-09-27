@@ -45,6 +45,18 @@ def _build_v085_db(*, include_approved_processes):
     return db
 
 
+def _build_v094_db():
+    from modules.migrations import MIGRATIONS
+
+    db = _build_v085_db(include_approved_processes=True)
+    for version, _, migrate in MIGRATIONS:
+        if 86 <= version <= 94:
+            migrate(db)
+            db.execute(f"PRAGMA user_version={version}")
+            db.commit()
+    return db
+
+
 def _v086_tables(db):
     return {
         row["name"]
@@ -252,20 +264,48 @@ def _seed_v087_fact_set(db, *, suffix, process_line_id):
             "internal",
         ),
     ).lastrowid
-    downtime_id = db.execute(
-        "INSERT INTO schedule_downtime_events "
-        "(process_line_id,start_at,end_at,reason,status,source_type,source_id) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (
-            process_line_id,
-            "2026-09-18 10:00:00",
-            "2026-09-18 10:30:00",
-            f"旧停机-{suffix}",
-            "completed",
-            "manual",
-            order_id,
-        ),
-    ).lastrowid
+    downtime_columns = {
+        row["name"]: row
+        for row in db.execute("PRAGMA table_info(schedule_downtime_events)").fetchall()
+    }
+    if (
+        "production_node_id" in downtime_columns
+        and downtime_columns["production_node_id"]["notnull"] == 1
+    ):
+        node_id = db.execute(
+            "SELECT id FROM production_nodes WHERE legacy_process_line_id=?",
+            (process_line_id,),
+        ).fetchone()[0]
+        downtime_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason,status,source_type,source_id) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                process_line_id,
+                node_id,
+                "2026-09-18 10:00:00",
+                "2026-09-18 10:30:00",
+                f"旧停机-{suffix}",
+                "completed",
+                "manual",
+                order_id,
+            ),
+        ).lastrowid
+    else:
+        downtime_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,start_at,end_at,reason,status,source_type,source_id) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                process_line_id,
+                "2026-09-18 10:00:00",
+                "2026-09-18 10:30:00",
+                f"旧停机-{suffix}",
+                "completed",
+                "manual",
+                order_id,
+            ),
+        ).lastrowid
     db.commit()
     return {
         "schedule": schedule_id,
@@ -463,7 +503,7 @@ def test_test_template_reaches_latest_with_the_approved_21_node_baseline(tmp_pat
     _create_schema_database(str(database))
     db = sqlite3.connect(database)
     try:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
     finally:
         db.close()
@@ -507,9 +547,265 @@ def test_v070_replica_reaches_latest_with_complete_approved_process_versions():
             "WHERE p.name IN ('下料','铆接','焊接','抛丸','打磨','镗孔','喷漆') "
             "AND e.event_type='legacy_baseline_created'"
         ).fetchone()[0] == 7
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        db.close()
+
+
+def test_v095_makes_downtime_node_native_and_preserves_legacy_evidence():
+    from modules.migration_production_nodes import m095_production_node_native_downtime
+
+    db = _build_v094_db()
+    try:
+        mapped = db.execute(
+            "SELECT id,process_id,calendar_id,legacy_process_line_id "
+            "FROM production_nodes WHERE legacy_process_line_id IS NOT NULL "
+            "ORDER BY id LIMIT 1"
+        ).fetchone()
+        event_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason,status,"
+            "source_type,source_id,created_at,updated_at) "
+            "VALUES (?,NULL,?,?,?,?,?,?,?,?)",
+            (
+                mapped["legacy_process_line_id"],
+                "2026-09-27 08:00:00",
+                "2026-09-27 09:00:00",
+                "历史停机证据",
+                "completed",
+                "imported",
+                77,
+                "2026-09-26 10:00:00",
+                "2026-09-26 11:00:00",
+            ),
+        ).lastrowid
+        db.commit()
+
+        m095_production_node_native_downtime(db)
+        db.execute("PRAGMA user_version=95")
+        db.commit()
+
+        columns = {
+            row["name"]: row
+            for row in db.execute(
+                "PRAGMA table_info(schedule_downtime_events)"
+            ).fetchall()
+        }
+        assert columns["process_line_id"]["notnull"] == 0
+        assert columns["production_node_id"]["notnull"] == 1
+        historical = db.execute(
+            "SELECT * FROM schedule_downtime_events WHERE id=?", (event_id,)
+        ).fetchone()
+        assert historical["process_line_id"] == mapped["legacy_process_line_id"]
+        assert historical["production_node_id"] == mapped["id"]
+        assert historical["reason"] == "历史停机证据"
+        assert historical["status"] == "completed"
+        assert historical["source_type"] == "imported"
+        assert historical["source_id"] == 77
+        assert historical["created_at"] == "2026-09-26 10:00:00"
+        assert historical["updated_at"] == "2026-09-26 11:00:00"
+
+        node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id) "
+            "VALUES (?,?,?,'exclusive','active',?)",
+            (
+                mapped["process_id"],
+                "V095-NATIVE-ONLY",
+                "V095 节点原生停机",
+                mapped["calendar_id"],
+            ),
+        ).lastrowid
+        native_event_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason) "
+            "VALUES (NULL,?,?,?,?)",
+            (
+                node_id,
+                "2026-09-27 10:00:00",
+                "2026-09-27 11:00:00",
+                "无 Legacy 投影",
+            ),
+        ).lastrowid
+        native = db.execute(
+            "SELECT process_line_id,production_node_id FROM schedule_downtime_events "
+            "WHERE id=?",
+            (native_event_id,),
+        ).fetchone()
+        assert native["process_line_id"] is None
+        assert native["production_node_id"] == node_id
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        db.close()
+
+
+def test_v095_blocks_unresolved_historical_downtime_mapping():
+    from modules import migrations
+
+    db = _build_v094_db()
+    try:
+        mapped = db.execute(
+            "SELECT id,legacy_process_line_id FROM production_nodes "
+            "WHERE legacy_process_line_id IS NOT NULL ORDER BY id LIMIT 1"
+        ).fetchone()
+        db.execute(
+            "UPDATE production_nodes SET legacy_process_line_id=NULL WHERE id=?",
+            (mapped["id"],),
+        )
+        event_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason) "
+            "VALUES (?,NULL,?,?,?)",
+            (
+                mapped["legacy_process_line_id"],
+                "2026-09-27 08:00:00",
+                "2026-09-27 09:00:00",
+                "无法映射",
+            ),
+        ).lastrowid
+        db.commit()
+
+        with pytest.raises(RuntimeError, match=rf"unresolved event ids=\[{event_id}\]"):
+            migrations.run_migrations(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
+        assert db.execute(
+            "SELECT production_node_id FROM schedule_downtime_events WHERE id=?",
+            (event_id,),
+        ).fetchone()[0] is None
+    finally:
+        db.close()
+
+
+def test_v095_blocks_contradictory_legacy_projection():
+    from modules import migrations
+
+    db = _build_v094_db()
+    try:
+        nodes = db.execute(
+            "SELECT id,legacy_process_line_id FROM production_nodes "
+            "WHERE legacy_process_line_id IS NOT NULL ORDER BY id LIMIT 2"
+        ).fetchall()
+        event_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason) "
+            "VALUES (?,?,?,?,?)",
+            (
+                nodes[0]["legacy_process_line_id"],
+                nodes[1]["id"],
+                "2026-09-27 08:00:00",
+                "2026-09-27 09:00:00",
+                "错误投影",
+            ),
+        ).lastrowid
+        db.commit()
+
+        with pytest.raises(RuntimeError, match=rf"mismatched event ids=\[{event_id}\]"):
+            migrations.run_migrations(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
+    finally:
+        db.close()
+
+
+def test_v095_blocks_orphaned_node_reference_with_foreign_keys_disabled():
+    from modules import migrations
+
+    db = _build_v094_db()
+    try:
+        db.execute("PRAGMA foreign_keys=OFF")
+        process_line_id = db.execute(
+            "SELECT id FROM process_production_lines ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+        event_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason) "
+            "VALUES (?,?,?,?,?)",
+            (
+                process_line_id,
+                999999,
+                "2026-09-27 08:00:00",
+                "2026-09-27 09:00:00",
+                "孤立生产节点引用",
+            ),
+        ).lastrowid
+        db.commit()
+
+        with pytest.raises(
+            RuntimeError,
+            match=rf"orphaned node event ids=\[{event_id}\]",
+        ):
+            migrations.run_migrations(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 94
+        assert db.execute(
+            "SELECT production_node_id FROM schedule_downtime_events WHERE id=?",
+            (event_id,),
+        ).fetchone()[0] == 999999
+        columns = {
+            row["name"]: row
+            for row in db.execute(
+                "PRAGMA table_info(schedule_downtime_events)"
+            ).fetchall()
+        }
+        assert columns["process_line_id"]["notnull"] == 1
+        assert columns["production_node_id"]["notnull"] == 0
+    finally:
+        db.close()
+
+
+def test_v095_preserves_downtime_autoincrement_high_watermark():
+    from modules import migrations
+
+    db = _build_v094_db()
+    try:
+        mapped = db.execute(
+            "SELECT id,legacy_process_line_id FROM production_nodes "
+            "WHERE legacy_process_line_id IS NOT NULL ORDER BY id LIMIT 1"
+        ).fetchone()
+        for index in range(3):
+            db.execute(
+                "INSERT INTO schedule_downtime_events "
+                "(process_line_id,production_node_id,start_at,end_at,reason) "
+                "VALUES (?,?,?,?,?)",
+                (
+                    mapped["legacy_process_line_id"],
+                    mapped["id"],
+                    f"2026-09-27 {8 + index:02d}:00:00",
+                    f"2026-09-27 {9 + index:02d}:00:00",
+                    f"序列保真-{index}",
+                ),
+            )
+        legacy_sequence = db.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='schedule_downtime_events'"
+        ).fetchone()[0]
+        db.execute(
+            "DELETE FROM schedule_downtime_events WHERE id=?",
+            (legacy_sequence,),
+        )
+        db.commit()
+
+        migrations.run_migrations(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
+        assert db.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='schedule_downtime_events'"
+        ).fetchone()[0] == legacy_sequence
+        next_id = db.execute(
+            "INSERT INTO schedule_downtime_events "
+            "(process_line_id,production_node_id,start_at,end_at,reason) "
+            "VALUES (?,?,?,?,?)",
+            (
+                mapped["legacy_process_line_id"],
+                mapped["id"],
+                "2026-09-27 12:00:00",
+                "2026-09-27 13:00:00",
+                "迁移后新事件",
+            ),
+        ).lastrowid
+        assert next_id == legacy_sequence + 1
     finally:
         db.close()
 

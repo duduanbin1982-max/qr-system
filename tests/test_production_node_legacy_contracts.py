@@ -12,11 +12,27 @@ def seed_legacy_line_schedule(client):
             "SELECT current_effective_version_id FROM processes WHERE id=?",
             (process_id,),
         ).fetchone()[0]
+        calendar_id = db.execute(
+            "SELECT id FROM schedule_calendars WHERE status='active' ORDER BY id LIMIT 1"
+        ).fetchone()[0]
         line_id = db.execute(
             "INSERT INTO process_production_lines "
-            "(process_id,line_code,line_name,daily_minutes,status,remark) "
-            "VALUES (?,?,?,?,'active',?)",
-            (process_id, "LEGACY-WELD-01", "焊接1线", 540, "legacy contract fixture"),
+            "(process_id,line_code,line_name,daily_minutes,status,remark,calendar_id) "
+            "VALUES (?,?,?,?,'active',?,?)",
+            (
+                process_id,
+                "LEGACY-WELD-01",
+                "焊接1线",
+                540,
+                "legacy contract fixture",
+                calendar_id,
+            ),
+        ).lastrowid
+        node_id = db.execute(
+            "INSERT INTO production_nodes "
+            "(process_id,node_code,node_name,capacity_mode,status,calendar_id,legacy_process_line_id) "
+            "VALUES (?,?,?,'exclusive','active',?,?)",
+            (process_id, "LEGACY-WELD-01", "焊接1线", calendar_id, line_id),
         ).lastrowid
         order_id = create_order(db, [process_id], quantity=12, product_code="LEGACY-NODE-001")
         operation_id = db.execute(
@@ -113,10 +129,11 @@ def seed_legacy_line_schedule(client):
         )
         downtime_id = db.execute(
             "INSERT INTO schedule_downtime_events "
-            "(process_line_id,start_at,end_at,reason,status,source_type) "
-            "VALUES (?,?,?,?,'active','manual')",
+            "(process_line_id,production_node_id,start_at,end_at,reason,status,source_type) "
+            "VALUES (?,?,?,?,?,'active','manual')",
             (
                 line_id,
+                node_id,
                 "2026-09-14 12:00",
                 "2026-09-14 13:00",
                 "legacy maintenance window",
@@ -135,6 +152,7 @@ def seed_legacy_line_schedule(client):
         "process_id": process_id,
         "process_version_id": process_version_id,
         "line_id": line_id,
+        "node_id": node_id,
         "run_id": run_id,
         "schedule_id": schedule_id,
         "segment_id": segment_id,

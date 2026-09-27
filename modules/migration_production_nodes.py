@@ -1,4 +1,4 @@
-"""V086-V087 production-node master data and exact legacy fact mappings."""
+"""V086-V095 production-node master data, scheduling facts and cutover."""
 
 import hashlib
 import json
@@ -1381,6 +1381,126 @@ def m094_dynamic_replan_evidence(db):
     )
 
 
+def _validate_downtime_node_mappings(db):
+    """Reject ambiguous or contradictory historical downtime ownership."""
+    orphaned = [
+        int(row[0])
+        for row in db.execute(
+            "SELECT d.id FROM schedule_downtime_events d "
+            "LEFT JOIN production_nodes n ON n.id=d.production_node_id "
+            "WHERE d.production_node_id IS NOT NULL AND n.id IS NULL "
+            "ORDER BY d.id"
+        ).fetchall()
+    ]
+    unresolved = [
+        int(row[0])
+        for row in db.execute(
+            "SELECT d.id FROM schedule_downtime_events d "
+            "LEFT JOIN production_nodes n ON n.legacy_process_line_id=d.process_line_id "
+            "WHERE d.production_node_id IS NULL "
+            "GROUP BY d.id HAVING COUNT(n.id)<>1 ORDER BY d.id"
+        ).fetchall()
+    ]
+    mismatched = [
+        int(row[0])
+        for row in db.execute(
+            "SELECT d.id FROM schedule_downtime_events d "
+            "JOIN production_nodes n ON n.id=d.production_node_id "
+            "WHERE d.process_line_id IS NOT NULL AND "
+            "(n.legacy_process_line_id IS NULL OR n.legacy_process_line_id<>d.process_line_id) "
+            "ORDER BY d.id"
+        ).fetchall()
+    ]
+    if orphaned or unresolved or mismatched:
+        raise RuntimeError(
+            "V095 downtime node mapping invalid: "
+            f"orphaned node event ids={orphaned}; "
+            f"unresolved event ids={unresolved}; mismatched event ids={mismatched}"
+        )
+
+
+def m095_production_node_native_downtime(db):
+    """Make production_node_id authoritative while retaining Legacy evidence."""
+    if not db.in_transaction:
+        db.execute("BEGIN")
+
+    _validate_downtime_node_mappings(db)
+    sequence_row = db.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name='schedule_downtime_events'"
+    ).fetchone()
+    legacy_sequence = int(sequence_row[0]) if sequence_row else 0
+    db.execute(
+        "UPDATE schedule_downtime_events SET production_node_id=("
+        "SELECT n.id FROM production_nodes n "
+        "WHERE n.legacy_process_line_id=schedule_downtime_events.process_line_id"
+        ") WHERE production_node_id IS NULL"
+    )
+    if db.execute(
+        "SELECT 1 FROM schedule_downtime_events "
+        "WHERE production_node_id IS NULL LIMIT 1"
+    ).fetchone():
+        raise RuntimeError("V095 downtime node backfill incomplete")
+
+    db.execute("DROP TABLE IF EXISTS schedule_downtime_events_v095")
+    db.execute(
+        """
+        CREATE TABLE schedule_downtime_events_v095 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            process_line_id INTEGER,
+            production_node_id INTEGER NOT NULL,
+            start_at TEXT NOT NULL,
+            end_at TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active','cancelled','completed')),
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id INTEGER,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            CHECK(end_at > start_at),
+            FOREIGN KEY(process_line_id) REFERENCES process_production_lines(id) ON DELETE RESTRICT,
+            FOREIGN KEY(production_node_id) REFERENCES production_nodes(id) ON DELETE RESTRICT,
+            FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    db.execute(
+        "INSERT INTO schedule_downtime_events_v095 "
+        "(id,process_line_id,production_node_id,start_at,end_at,reason,status,"
+        "source_type,source_id,created_by,created_at,updated_at) "
+        "SELECT id,process_line_id,production_node_id,start_at,end_at,reason,status,"
+        "source_type,source_id,created_by,created_at,updated_at "
+        "FROM schedule_downtime_events ORDER BY id"
+    )
+    db.execute("DROP TABLE schedule_downtime_events")
+    db.execute(
+        "ALTER TABLE schedule_downtime_events_v095 RENAME TO schedule_downtime_events"
+    )
+    current_max_id = int(db.execute(
+        "SELECT COALESCE(MAX(id),0) FROM schedule_downtime_events"
+    ).fetchone()[0])
+    db.execute(
+        "DELETE FROM sqlite_sequence WHERE name='schedule_downtime_events'"
+    )
+    db.execute(
+        "INSERT INTO sqlite_sequence(name,seq) VALUES ('schedule_downtime_events',?)",
+        (max(legacy_sequence, current_max_id),),
+    )
+    db.execute(
+        "CREATE INDEX idx_schedule_downtime_line_time "
+        "ON schedule_downtime_events(process_line_id,start_at,end_at,status)"
+    )
+    db.execute(
+        "CREATE INDEX idx_schedule_downtime_node_time "
+        "ON schedule_downtime_events(production_node_id,start_at,end_at,status)"
+    )
+    db.execute(
+        "CREATE INDEX idx_schedule_downtime_source "
+        "ON schedule_downtime_events(source_type,source_id)"
+    )
+
+
 MIGRATIONS = [
     (86, "Add stable production-node master data", m086_production_node_master),
     (87, "Add production-node scheduling facts", m087_production_node_schedule_facts),
@@ -1391,4 +1511,5 @@ MIGRATIONS = [
     (92, "Freeze and audit schedule revision publication", m092_immutable_schedule_publication),
     (93, "Add schedule conflict and delivery-risk evidence", m093_schedule_conflict_risk_evidence),
     (94, "Add dynamic replan trigger and difference evidence", m094_dynamic_replan_evidence),
+    (95, "Make downtime facts production-node native", m095_production_node_native_downtime),
 ]

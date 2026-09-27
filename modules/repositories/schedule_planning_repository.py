@@ -500,24 +500,29 @@ class SchedulePlanningRepository:
             "SELECT d.*,pl.line_code,pl.line_name,n.node_code,n.node_name,"
             "COALESCE(np.name,p.name) AS process_name "
             "FROM schedule_downtime_events d "
-            "JOIN process_production_lines pl ON pl.id=d.process_line_id "
-            "JOIN processes p ON p.id=pl.process_id "
-            "LEFT JOIN production_nodes n ON n.id=d.production_node_id "
-            "LEFT JOIN processes np ON np.id=n.process_id "
+            "JOIN production_nodes n ON n.id=d.production_node_id "
+            "JOIN processes np ON np.id=n.process_id "
+            "LEFT JOIN process_production_lines pl ON pl.id=d.process_line_id "
+            "LEFT JOIN processes p ON p.id=pl.process_id "
             "WHERE " + " AND ".join(where) + " ORDER BY d.start_at,d.id LIMIT ?",
             params + [limit],
         ).fetchall()
     @staticmethod
-    def create_downtime_event(process_line_id, start_at, end_at, reason, created_by=None,
-                              production_node_id=None, db=None):
+    def create_downtime_event(production_node_id, start_at, end_at, reason,
+                              created_by=None, process_line_id=None, db=None):
         db = resolve_db(db)
-        line = db.execute(
-            "SELECT id,status FROM process_production_lines WHERE id=?", (process_line_id,)
+        node = db.execute(
+            "SELECT id,status,legacy_process_line_id FROM production_nodes WHERE id=?",
+            (production_node_id,),
         ).fetchone()
-        if not line:
-            raise ValueError("产线不存在")
-        if line["status"] != "active":
-            raise ValueError("产线已停用")
+        if not node:
+            raise ValueError("生产节点不存在")
+        if node["status"] != "active":
+            raise ValueError("生产节点已停用")
+        if process_line_id in (None, ""):
+            process_line_id = node["legacy_process_line_id"]
+        elif node["legacy_process_line_id"] != process_line_id:
+            raise ValueError("Legacy 产线投影与生产节点不一致")
         cur = db.execute(
             "INSERT INTO schedule_downtime_events "
             "(process_line_id,production_node_id,start_at,end_at,reason,status,source_type,created_by) "
@@ -533,10 +538,10 @@ class SchedulePlanningRepository:
             "SELECT d.*,pl.line_code,pl.line_name,n.node_code,n.node_name,"
             "COALESCE(np.name,p.name) AS process_name "
             "FROM schedule_downtime_events d "
-            "JOIN process_production_lines pl ON pl.id=d.process_line_id "
-            "JOIN processes p ON p.id=pl.process_id "
-            "LEFT JOIN production_nodes n ON n.id=d.production_node_id "
-            "LEFT JOIN processes np ON np.id=n.process_id WHERE d.id=?",
+            "JOIN production_nodes n ON n.id=d.production_node_id "
+            "JOIN processes np ON np.id=n.process_id "
+            "LEFT JOIN process_production_lines pl ON pl.id=d.process_line_id "
+            "LEFT JOIN processes p ON p.id=pl.process_id WHERE d.id=?",
             (event_id,),
         ).fetchone()
     @staticmethod

@@ -1707,10 +1707,10 @@ class ScheduleCapacityService:
                 production_node_id, txn
             )
             event_id = ScheduleCapacityRepository.create_downtime_event(
-                node["legacy_process_line_id"],
+                node["id"],
                 ScheduleCapacityService._format_timestamp(start),
                 ScheduleCapacityService._format_timestamp(end), reason, created_by,
-                production_node_id=node["id"], db=txn,
+                process_line_id=node.get("legacy_process_line_id"), db=txn,
             )
             row = ScheduleCapacityRepository.find_downtime_event(event_id, db=txn)
             affected_order_ids = ScheduleCapacityRepository.affected_order_ids_for_downtime(
