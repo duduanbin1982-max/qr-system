@@ -133,7 +133,7 @@ def test_cli_schema_gate_defaults_to_current_latest_version():
         "--auto-plan-key", "task2-default-version-gate",
     ])
 
-    assert args.expected_version == LATEST_VERSION == 95
+    assert args.expected_version == LATEST_VERSION == 96
 
 
 def test_historical_replay_rolls_back_temporary_order_state(monkeypatch):

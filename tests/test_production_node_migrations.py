@@ -503,7 +503,7 @@ def test_test_template_reaches_latest_with_the_approved_21_node_baseline(tmp_pat
     _create_schema_database(str(database))
     db = sqlite3.connect(database)
     try:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 96
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
     finally:
         db.close()
@@ -547,7 +547,7 @@ def test_v070_replica_reaches_latest_with_complete_approved_process_versions():
             "WHERE p.name IN ('下料','铆接','焊接','抛丸','打磨','镗孔','喷漆') "
             "AND e.event_type='legacy_baseline_created'"
         ).fetchone()[0] == 7
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 96
         assert db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0] == 21
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
@@ -789,7 +789,7 @@ def test_v095_preserves_downtime_autoincrement_high_watermark():
 
         migrations.run_migrations(db)
 
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 95
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 96
         assert db.execute(
             "SELECT seq FROM sqlite_sequence WHERE name='schedule_downtime_events'"
         ).fetchone()[0] == legacy_sequence

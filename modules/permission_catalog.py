@@ -58,6 +58,11 @@ ACTION_LABELS = {
     "adjust": "调整排程",
     "lock": "锁定",
     "unlock": "解锁",
+    "inbound": "入库",
+    "outbound": "出库",
+    "allocate": "分配",
+    "reserve": "预留",
+    "manage_threshold": "安全库存管理",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -103,7 +108,23 @@ ACTION_PERMISSION_DEFS = {
             "reactivate",
         ],
     ),
-    "inventory": ("库存", ["view", "create", "edit", "delete"]),
+    "inventory": (
+        "库存",
+        [
+            "view",
+            "create",
+            "edit",
+            "delete",
+            "export",
+            "inbound",
+            "outbound",
+            "allocate",
+            "reserve",
+            "adjust",
+            "audit",
+            "manage_threshold",
+        ],
+    ),
     "shipments": (
         "发货",
         [
