@@ -20,7 +20,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from modules.migrations import run_migrations
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -167,7 +168,7 @@ def run_preflight(source_path, limit=1000):
     db, copied_path = _copy_database(source_path)
     try:
         run_migrations(db)
-        orders = ScheduleCapacityRepository.list_schedulable_orders(limit, db=db)
+        orders = SchedulePlanningRepository.list_schedulable_orders(limit, db=db)
         totals = {
             "orders": len(orders),
             "operations": 0,
@@ -267,16 +268,16 @@ def run_preflight(source_path, limit=1000):
                         })
                     if "工作日历" in reason or "班次" in reason:
                         totals["blocked_missing_calendar"] += 1
-        conflicts = [dict(row) for row in ScheduleCapacityRepository.list_schedule_conflicts(db=db)]
+        conflicts = [dict(row) for row in ScheduleEvidenceRepository.list_schedule_conflicts(db=db)]
         totals["coverage_percent"] = round(
             totals["planned_operations"] / totals["operations"] * 100, 2
         ) if totals["operations"] else 100.0
         totals["line_conflicts"] = len(conflicts)
         totals["schedule_runs"] = db.execute("SELECT COUNT(*) FROM schedule_runs").fetchone()[0]
         totals["database_user_version"] = db.execute("PRAGMA user_version").fetchone()[0]
-        totals["calendars"] = ScheduleCapacityRepository.list_calendars(db=db)
+        totals["calendars"] = SchedulePlanningRepository.list_calendars(db=db)
         totals["conflicts"] = conflicts
-        line_loads = [dict(row) for row in ScheduleCapacityRepository.list_line_loads(db=db)]
+        line_loads = [dict(row) for row in SchedulePlanningRepository.list_line_loads(db=db)]
         conflict_counts = Counter(row.get("process_line_id") for row in conflicts)
         for line in line_loads:
             line["conflict_count"] = conflict_counts.get(line.get("process_line_id"), 0)

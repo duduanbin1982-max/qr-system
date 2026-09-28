@@ -10,7 +10,7 @@ from modules.db import get_db
 from modules.domain.errors import ProductionNodeWriteDisabledError
 from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.migration_production_nodes import m090_production_node_shadow_ledger
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -94,7 +94,7 @@ def test_disabled_flag_rejects_node_api_and_shadow_service_without_writes(
         actor_id = _actor_id(db)
         payload = _node_create_payload(db)
         node_count = db.execute("SELECT COUNT(*) FROM production_nodes").fetchone()[0]
-        digest = ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db)
+        digest = SchedulePlanningRepository.formal_schedule_digest(order_id, db=db)
 
     response = client.post("/api/production-nodes", headers=auth_headers, json=payload)
     assert response.status_code == 409
@@ -110,7 +110,7 @@ def test_disabled_flag_rejects_node_api_and_shadow_service_without_writes(
         assert db.execute(
             "SELECT COUNT(*) FROM production_node_shadow_runs"
         ).fetchone()[0] == 0
-        assert ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db) == digest
+        assert SchedulePlanningRepository.formal_schedule_digest(order_id, db=db) == digest
 
 
 def test_shadow_plan_uses_node_engine_and_preserves_formal_schedule(
@@ -132,7 +132,7 @@ def test_shadow_plan_uses_node_engine_and_preserves_formal_schedule(
             db=db,
         )
         assert formal["operations"][0]["production_node_id"] is None
-        before = ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db)
+        before = SchedulePlanningRepository.formal_schedule_digest(order_id, db=db)
         formal_run_count = db.execute(
             "SELECT COUNT(*) FROM schedule_runs WHERE order_id=?", (order_id,)
         ).fetchone()[0]
@@ -148,7 +148,7 @@ def test_shadow_plan_uses_node_engine_and_preserves_formal_schedule(
         assert result["shadow_only"] is True
         assert result["engine"] == "production_node"
         assert result["operations"][0]["production_node_id"] == node_id
-        assert ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db) == before
+        assert SchedulePlanningRepository.formal_schedule_digest(order_id, db=db) == before
         assert db.execute(
             "SELECT COUNT(*) FROM schedule_runs WHERE order_id=?", (order_id,)
         ).fetchone()[0] == formal_run_count
@@ -199,7 +199,7 @@ def test_shadow_plan_accepts_node_without_legacy_line_and_keeps_formal_facts(
             ),
         ).lastrowid
         db.commit()
-        before = ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db)
+        before = SchedulePlanningRepository.formal_schedule_digest(order_id, db=db)
 
         result = ScheduleCapacityService.generate_shadow_order_schedule(
             order_id,
@@ -217,7 +217,7 @@ def test_shadow_plan_accepts_node_without_legacy_line_and_keeps_formal_facts(
             and segment["process_line_id"] is None
             for segment in operation["segments"]
         )
-        assert ScheduleCapacityRepository.formal_schedule_digest(order_id, db=db) == before
+        assert SchedulePlanningRepository.formal_schedule_digest(order_id, db=db) == before
         assert db.execute(
             "SELECT COUNT(*) FROM production_node_shadow_segments segment "
             "JOIN production_node_shadow_items item ON item.id=segment.shadow_item_id "

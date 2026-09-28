@@ -18,8 +18,8 @@ import sqlite3
 import sys
 
 from modules.domain.production_node_scheduling import NodeSchedulingError
-from modules.repositories.schedule_capacity_repository import (
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_planning_repository import (
+    SchedulePlanningRepository,
 )
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
@@ -64,7 +64,7 @@ def _active_orders(db):
 
 def _formal_digests(db, orders):
     return {
-        str(int(order["id"])): ScheduleCapacityRepository.formal_schedule_digest(
+        str(int(order["id"])): SchedulePlanningRepository.formal_schedule_digest(
             int(order["id"]), db=db
         )
         for order in orders

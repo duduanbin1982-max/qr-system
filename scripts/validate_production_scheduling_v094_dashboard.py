@@ -21,8 +21,14 @@ from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
 from modules.repositories.production_node_repository import (  # noqa: E402
     ProductionNodeRepository,
 )
-from modules.repositories.schedule_capacity_repository import (  # noqa: E402
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_evidence_repository import (  # noqa: E402
+    ScheduleEvidenceRepository,
+)
+from modules.repositories.schedule_planning_repository import (  # noqa: E402
+    SchedulePlanningRepository,
+)
+from modules.repositories.schedule_revision_repository import (  # noqa: E402
+    ScheduleRevisionRepository,
 )
 
 
@@ -63,7 +69,7 @@ def _formal_digest(db):
 
 def _candidate_items(db):
     rows = []
-    for item in ScheduleCapacityRepository.list_latest_candidate_revision_items(
+    for item in ScheduleRevisionRepository.list_latest_candidate_revision_items(
         limit=1000, db=db
     ):
         normalized = dict(item)
@@ -78,15 +84,15 @@ def _candidate_items(db):
 def _formal_operations(db):
     operations = [
         {**dict(row), "candidate_revision": False}
-        for row in ScheduleCapacityRepository.list_scheduled_operations(1000, db=db)
+        for row in SchedulePlanningRepository.list_scheduled_operations(1000, db=db)
     ]
     schedule_ids = [row.get("id") for row in operations]
     segments = {}
-    for row in ScheduleCapacityRepository.list_schedule_segments(schedule_ids, db=db):
+    for row in SchedulePlanningRepository.list_schedule_segments(schedule_ids, db=db):
         segment = dict(row)
         segments.setdefault(segment["schedule_id"], []).append(segment)
     allocations = {}
-    for row in ScheduleCapacityRepository.list_schedule_allocations(schedule_ids, db=db):
+    for row in SchedulePlanningRepository.list_schedule_allocations(schedule_ids, db=db):
         allocation = dict(row)
         allocations.setdefault(allocation["schedule_id"], []).append(allocation)
     for operation in operations:
@@ -164,18 +170,18 @@ def validate(source_db, output_db):
         ] + candidate_operations
         intervals = _intervals(display_operations)
         nodes = ProductionNodeRepository.list_nodes(db=db, full=True)
-        calendars = ScheduleCapacityRepository.list_calendars(db=db)
+        calendars = SchedulePlanningRepository.list_calendars(db=db)
         unavailable = [
             dict(row)
-            for row in ScheduleCapacityRepository.list_capacity_unavailability(db=db)
+            for row in SchedulePlanningRepository.list_capacity_unavailability(db=db)
         ]
         overrides = [
             dict(row)
-            for row in ScheduleCapacityRepository.list_capacity_overrides(db=db)
+            for row in SchedulePlanningRepository.list_capacity_overrides(db=db)
         ]
         risks = [
             dict(row)
-            for row in ScheduleCapacityRepository.list_schedule_risk_inputs(
+            for row in ScheduleEvidenceRepository.list_schedule_risk_inputs(
                 limit=1000, db=db
             )
         ]

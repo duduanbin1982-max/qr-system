@@ -25,8 +25,8 @@ from factories import (
 )
 from modules import config
 from modules.db import get_db
-from modules.repositories.schedule_capacity_repository import (
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_revision_repository import (
+    ScheduleRevisionRepository,
 )
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
@@ -575,13 +575,13 @@ def test_failure_and_publication_baseline_preserves_auditable_state(
             standard_minutes=60,
             route_name="characterization failed run",
         )
-        real_insert = ScheduleCapacityRepository.insert_operation_schedule
+        real_insert = ScheduleRevisionRepository.insert_operation_schedule
 
         def fail_insert(*args, **kwargs):
             raise RuntimeError("characterization persistence failure")
 
         monkeypatch.setattr(
-            ScheduleCapacityRepository,
+            ScheduleRevisionRepository,
             "insert_operation_schedule",
             fail_insert,
         )
@@ -593,7 +593,7 @@ def test_failure_and_publication_baseline_preserves_auditable_state(
                 actor_id=creator_id,
             )
         monkeypatch.setattr(
-            ScheduleCapacityRepository,
+            ScheduleRevisionRepository,
             "insert_operation_schedule",
             real_insert,
         )

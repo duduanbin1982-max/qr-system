@@ -5,7 +5,7 @@ import pytest
 from factories import create_process_route
 from modules import config
 from modules.db import get_db
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.schedule_replan_service import ScheduleReplanService
 
@@ -94,7 +94,7 @@ def test_evidence_failure_keeps_failed_ledger_and_old_projection(client, monkeyp
             raise RuntimeError("task4 evidence persistence failure")
 
         monkeypatch.setattr(
-            ScheduleCapacityRepository,
+            ScheduleEvidenceRepository,
             "save_replan_evidence",
             fail_evidence,
         )

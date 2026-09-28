@@ -4,6 +4,7 @@ from datetime import datetime
 
 from modules.repositories.position_version_repository import PositionVersionRepository
 from modules.repositories.scan_repository import ScanRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.services import BaseService
 from modules.services.inventory_auto_inbound_service import InventoryAutoInboundService
 from modules.services.material_service import MaterialService
@@ -84,14 +85,11 @@ class WorkReportWriter:
         order_id, process_id, trigger_type, source_type, source_id,
         reason, quantity, actor_id, db,
     ):
-        from modules.repositories.schedule_capacity_repository import (
-            ScheduleCapacityRepository,
-        )
 
         operation = WorkReportWriter._scan_helper_service().get_order_process(
             order_id, process_id, db=db
         )
-        ScheduleCapacityRepository.record_replan_trigger(
+        ScheduleEvidenceRepository.record_replan_trigger(
             order_id,
             trigger_type,
             source_type,
