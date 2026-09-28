@@ -7,7 +7,7 @@ import pytest
 from factories import create_process_route
 from modules.db import get_db
 from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -88,7 +88,7 @@ def test_priority_queue_orders_priority_expedited_deadline_and_excludes_paused_p
         p2_early = _seed_order(db, process_id, route_id, priority=2, deadline="2026-09-15")
         _seed_order(db, process_id, route_id, priority=5)
         _seed_order(db, process_id, route_id, priority=2, status="paused")
-        orders = ScheduleCapacityRepository.list_schedulable_orders(limit=100, db=db)
+        orders = SchedulePlanningRepository.list_schedulable_orders(limit=100, db=db)
         ids = [item["id"] for item in orders if item["id"] in {p1, p2_expedited, p2_early, p2_late}]
         assert ids == [p1, p2_expedited, p2_early, p2_late]
 

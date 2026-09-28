@@ -22,8 +22,8 @@ if str(ROOT) not in sys.path:
 os.environ.setdefault("SECRET_KEY", "task8-v094-final-acceptance-only")
 
 from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_capacity_repository import (  # noqa: E402
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_planning_repository import (  # noqa: E402
+    SchedulePlanningRepository,
 )
 import modules.services.schedule_capacity_service as schedule_service_module  # noqa: E402
 from modules.services.schedule_capacity_service import (  # noqa: E402
@@ -407,7 +407,7 @@ def run(args):
             )
 
         actor = _actor(db, args.actor_username)
-        queue_before = ScheduleCapacityRepository.list_schedulable_orders(
+        queue_before = SchedulePlanningRepository.list_schedulable_orders(
             1000, db=db, now=planning_now
         )
         active_count = int(db.execute(

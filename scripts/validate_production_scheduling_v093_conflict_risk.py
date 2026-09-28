@@ -22,15 +22,15 @@ from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy  # 
 from modules.migration_production_nodes import (  # noqa: E402
     m093_schedule_conflict_risk_evidence,
 )
-from modules.repositories.schedule_capacity_repository import (  # noqa: E402
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_evidence_repository import (  # noqa: E402
+    ScheduleEvidenceRepository,
 )
 from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
 
 
 def _risk_report(db, limit=1000):
     conflicts = [
-        dict(row) for row in ScheduleCapacityRepository.list_schedule_conflicts(db=db)
+        dict(row) for row in ScheduleEvidenceRepository.list_schedule_conflicts(db=db)
     ]
     conflicts_by_order = {}
     for conflict in conflicts:
@@ -41,7 +41,7 @@ def _risk_report(db, limit=1000):
 
     risk_counts = Counter()
     risk_orders = []
-    for raw in ScheduleCapacityRepository.list_schedule_risk_inputs(
+    for raw in ScheduleEvidenceRepository.list_schedule_risk_inputs(
         limit=limit, db=db
     ):
         row = dict(raw)

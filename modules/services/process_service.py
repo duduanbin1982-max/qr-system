@@ -7,7 +7,7 @@ from modules.services.master_data_impact_service import MasterDataImpactService
 from modules.services.legacy_process_compatibility_service import (
     LegacyProcessCompatibilityService,
 )
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 
 
 class ProcessService:
@@ -103,7 +103,7 @@ class ProcessService:
                 name, data.get("description", ""), category,
                 seq_order, status, db=txn
             )
-            ScheduleCapacityRepository.ensure_default_lines(process_id, name, txn)
+            SchedulePlanningRepository.ensure_default_lines(process_id, name, txn)
             return process_id
 
     @staticmethod
@@ -150,7 +150,7 @@ class ProcessService:
 
         with BaseService.transaction() as txn:
             ProcessRepository.update_txn(", ".join(sets), params, pid, db=txn)
-            ScheduleCapacityRepository.ensure_default_lines(
+            SchedulePlanningRepository.ensure_default_lines(
                 pid, data.get("name", existing["name"]), txn
             )
 

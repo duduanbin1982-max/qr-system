@@ -13,7 +13,8 @@ from modules import config
 from modules.domain.errors import ProductionNodeWriteDisabledError
 from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
 from modules.repositories.production_node_repository import ProductionNodeRepository
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
+from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
 
 
 class ScheduleRevisionService:
@@ -73,7 +74,7 @@ class ScheduleRevisionService:
 
     @staticmethod
     def _workflow_replay(db, key, digest):
-        event = ScheduleCapacityRepository.find_workflow_event(key, db=db)
+        event = ScheduleRevisionRepository.find_workflow_event(key, db=db)
         if event is None:
             return None
         if event["input_digest"] != digest:
@@ -104,7 +105,7 @@ class ScheduleRevisionService:
         after_json = json.dumps(
             after or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
-        event = ScheduleCapacityRepository.create_workflow_event(
+        event = ScheduleRevisionRepository.create_workflow_event(
             revision_id=revision_id,
             revision_item_id=revision_item_id,
             event_type=event_type,
@@ -139,7 +140,7 @@ class ScheduleRevisionService:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
-            item = ScheduleCapacityRepository.find_revision_item(revision_item_id, db=txn)
+            item = ScheduleRevisionRepository.find_revision_item(revision_item_id, db=txn)
             if item is None:
                 raise ValueError("排程条目不存在")
             if item["revision_status"] in ("superseded", "cancelled"):
@@ -148,9 +149,9 @@ class ScheduleRevisionService:
                 raise NodeSchedulingError(
                     "NO_COMPATIBLE_NODE", "只有已分配内部生产节点的排程任务可锁定"
                 )
-            if ScheduleCapacityRepository.find_active_task_lock(revision_item_id, db=txn):
+            if ScheduleRevisionRepository.find_active_task_lock(revision_item_id, db=txn):
                 raise NodeSchedulingError("LOCKED_TASK_CONFLICT", "排程条目已锁定")
-            lock = ScheduleCapacityRepository.create_task_lock(
+            lock = ScheduleRevisionRepository.create_task_lock(
                 revision_item_id, item["production_node_id"], actor, reason, txn
             )
             return cls._record_workflow_event(
@@ -175,15 +176,15 @@ class ScheduleRevisionService:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
-            item = ScheduleCapacityRepository.find_revision_item(revision_item_id, db=txn)
+            item = ScheduleRevisionRepository.find_revision_item(revision_item_id, db=txn)
             if item is None:
                 raise ValueError("排程条目不存在")
-            active_lock = ScheduleCapacityRepository.find_active_task_lock(
+            active_lock = ScheduleRevisionRepository.find_active_task_lock(
                 revision_item_id, db=txn
             )
             if active_lock is None:
                 raise NodeSchedulingError("LOCKED_TASK_CONFLICT", "排程条目当前未锁定")
-            ScheduleCapacityRepository.release_task_lock(
+            ScheduleRevisionRepository.release_task_lock(
                 revision_item_id, actor, reason, txn
             )
             return cls._record_workflow_event(
@@ -221,7 +222,7 @@ class ScheduleRevisionService:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
-            item = ScheduleCapacityRepository.find_revision_item(revision_item_id, db=txn)
+            item = ScheduleRevisionRepository.find_revision_item(revision_item_id, db=txn)
             if item is None:
                 raise ValueError("排程条目不存在")
             if int(item["row_version"] or 1) != expected_row_version:
@@ -233,15 +234,15 @@ class ScheduleRevisionService:
                 raise NodeSchedulingError("REVISION_STATE_CONFLICT", "当前排程版本不可调整")
             if item["revision_status"] == "draft" and item["approval_status"] not in ("draft", "rejected"):
                 raise NodeSchedulingError("REVISION_STATE_CONFLICT", "已提交审批的排程版本不可调整")
-            if ScheduleCapacityRepository.find_active_task_lock(revision_item_id, db=txn):
+            if ScheduleRevisionRepository.find_active_task_lock(revision_item_id, db=txn):
                 raise NodeSchedulingError("LOCKED_TASK_CONFLICT", "锁定排程条目不能移动")
             node = ProductionNodeRepository.find_node(node_id, db=txn)
             if node is None or node.get("status") != "active" or node.get("process_id") != item["process_id"]:
                 raise NodeSchedulingError("NO_COMPATIBLE_NODE", "生产节点与排程工序不匹配")
-            source_schedule = ScheduleCapacityRepository.find_schedule(
+            source_schedule = SchedulePlanningRepository.find_schedule(
                 item["source_schedule_id"], db=txn
             )
-            order = ScheduleCapacityRepository.find_order(item["order_id"], txn)
+            order = SchedulePlanningRepository.find_order(item["order_id"], txn)
             if order is None:
                 raise ValueError("排程所属订单不存在")
             if source_schedule is None:
@@ -255,7 +256,7 @@ class ScheduleRevisionService:
                 operation = dict(source_schedule)
             policy_order = dict(order)
             policy_order["process_version_id"] = operation.get("process_version_id")
-            standard = ScheduleCapacityRepository.find_standard(
+            standard = SchedulePlanningRepository.find_standard(
                 operation.get("standard_id"), db=txn
             )
             capabilities = ProductionNodeRepository.list_capabilities(node_id, db=txn)
@@ -264,12 +265,12 @@ class ScheduleRevisionService:
                 order=policy_order, standard=dict(standard) if standard else None,
                 quantity=max(int(item["quantity"] or 0), 1),
             )
-            calendar = ScheduleCapacityRepository.get_calendar(node["calendar_id"], db=txn)
-            shifts = ScheduleCapacityRepository.list_calendar_shifts(node["calendar_id"], db=txn)
+            calendar = SchedulePlanningRepository.get_calendar(node["calendar_id"], db=txn)
+            shifts = SchedulePlanningRepository.list_calendar_shifts(node["calendar_id"], db=txn)
             if calendar is None or not shifts:
                 raise NodeSchedulingError("NODE_CALENDAR_UNAVAILABLE", "生产节点日历没有可用时间")
             occupied = []
-            for row in ScheduleCapacityRepository.list_node_occupancy_for_adjustment(
+            for row in SchedulePlanningRepository.list_node_occupancy_for_adjustment(
                 node_id, item["source_schedule_id"], db=txn
             ):
                 occupied.append({
@@ -328,7 +329,7 @@ class ScheduleRevisionService:
             encoded_payload = json.dumps(
                 source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             )
-            new_revision_id, item_map = ScheduleCapacityRepository.clone_revision_with_override(
+            new_revision_id, item_map = ScheduleRevisionRepository.clone_revision_with_override(
                 item["revision_id"], override_item_id=revision_item_id,
                 overrides={
                     "production_node_id": node_id,
@@ -380,10 +381,10 @@ class ScheduleRevisionService:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
-            revision = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
+            revision = ScheduleRevisionRepository.find_revision(revision_id, db=txn)
             if revision is None:
                 raise ValueError("排程版本不存在")
-            if ScheduleCapacityRepository.revision_uses_production_nodes(revision_id, db=txn):
+            if ScheduleRevisionRepository.revision_uses_production_nodes(revision_id, db=txn):
                 cls._assert_node_write_enabled()
             if revision["status"] != "draft":
                 raise NodeSchedulingError("REVISION_STATE_CONFLICT", "只有草稿排程版本可执行审批流程")
@@ -400,7 +401,7 @@ class ScheduleRevisionService:
                 )
             if target_status in ("submitted", "approved"):
                 try:
-                    ScheduleCapacityRepository.assert_revision_integrity(revision_id, db=txn)
+                    ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=txn)
                 except ValueError as exc:
                     raise NodeSchedulingError("REVISION_INTEGRITY_FAILED", str(exc)) from exc
                 cls._assert_revision_conflict_gate(
@@ -409,12 +410,12 @@ class ScheduleRevisionService:
                 )
             if target_status == "approved" and revision["created_by"] == actor:
                 raise NodeSchedulingError("INDEPENDENT_APPROVER_REQUIRED", "排程版本创建人不能批准自己的版本")
-            changed = ScheduleCapacityRepository.transition_revision(
+            changed = ScheduleRevisionRepository.transition_revision(
                 revision_id, current, target_status, actor, reason, txn
             )
             if changed != 1:
                 raise NodeSchedulingError("REVISION_STATE_CONFLICT", "排程版本状态已发生变化")
-            after_revision = dict(ScheduleCapacityRepository.find_revision(revision_id, db=txn))
+            after_revision = dict(ScheduleRevisionRepository.find_revision(revision_id, db=txn))
             return cls._record_workflow_event(
                 txn, revision_id=revision_id, revision_item_id=None,
                 event_type={"submitted": "submit", "approved": "approve", "rejected": "reject"}[target_status],
@@ -471,10 +472,10 @@ class ScheduleRevisionService:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
-            revision = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
+            revision = ScheduleRevisionRepository.find_revision(revision_id, db=txn)
             if revision is None:
                 raise ValueError("排程版本不存在")
-            if ScheduleCapacityRepository.revision_uses_production_nodes(revision_id, db=txn):
+            if ScheduleRevisionRepository.revision_uses_production_nodes(revision_id, db=txn):
                 cls._assert_node_write_enabled()
             if revision["status"] != "draft":
                 raise NodeSchedulingError(
@@ -487,17 +488,17 @@ class ScheduleRevisionService:
                     {"revision_id": revision_id, "approval_status": revision["approval_status"]},
                 )
             try:
-                ScheduleCapacityRepository.assert_revision_integrity(revision_id, db=txn)
+                ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=txn)
             except ValueError as exc:
                 raise NodeSchedulingError("REVISION_INTEGRITY_FAILED", str(exc)) from exc
             cls._assert_revision_conflict_gate(
                 capacity_service, revision_id, "publish", txn
             )
             before = dict(revision)
-            ScheduleCapacityRepository.publish_revision(
+            ScheduleRevisionRepository.publish_revision(
                 revision_id, txn, published_by=actor, reason=reason, idempotency_key=key
             )
-            published = ScheduleCapacityRepository.find_revision(revision_id, db=txn)
+            published = ScheduleRevisionRepository.find_revision(revision_id, db=txn)
             return cls._record_workflow_event(
                 txn, revision_id=revision_id, revision_item_id=None,
                 event_type="publish", actor_id=actor, reason=reason,

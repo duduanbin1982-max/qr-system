@@ -294,8 +294,8 @@ def test_routes_do_not_depend_on_database_or_repositories():
 def test_import_expansion_detects_repository_reexports_and_relative_imports():
     fixtures = (
         ("from modules import repositories as persistence", ["tests"], "modules.repositories"),
-        ("from ..repositories import schedule_capacity_repository", ["modules", "routes"], "modules.repositories"),
-        ("import modules.repositories.schedule_capacity_repository as repo", ["modules", "routes"], "modules.repositories"),
+        ("from ..repositories import schedule_planning_repository", ["modules", "routes"], "modules.repositories"),
+        ("import modules.repositories.schedule_planning_repository as repo", ["modules", "routes"], "modules.repositories"),
     )
 
     for source, package_parts, forbidden_prefix in fixtures:
@@ -420,13 +420,7 @@ def test_architecture_gate_runs_backend_and_frontend_boundary_checks():
 
 
 def test_repositories_do_not_depend_on_other_repositories():
-    compatibility_facade_imports = {
-        "modules/repositories/schedule_capacity_repository.py": {
-            "modules.repositories.schedule_evidence_repository",
-            "modules.repositories.schedule_planning_repository",
-            "modules.repositories.schedule_revision_repository",
-        }
-    }
+    compatibility_facade_imports = {}
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
     for path in sorted(repository_root.rglob("*.py")):

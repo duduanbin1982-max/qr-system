@@ -6,6 +6,7 @@ from datetime import datetime
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.services import BaseService
 from modules.repositories.rework_repository import ReworkRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 
 
 class ReworkService:
@@ -210,10 +211,7 @@ class ReworkService:
             snapshot={"reason": reason, "source_ncr_id": source_ncr_id},
             db=db,
         )
-        from modules.repositories.schedule_capacity_repository import (
-            ScheduleCapacityRepository,
-        )
-        ScheduleCapacityRepository.record_replan_trigger(
+        ScheduleEvidenceRepository.record_replan_trigger(
             order_id,
             "rework_created",
             "rework_record",
@@ -338,10 +336,7 @@ class ReworkService:
         context = ReworkRepository.find_order_process_context(
             rework["order_id"], rework["process_id"], db=db
         )
-        from modules.repositories.schedule_capacity_repository import (
-            ScheduleCapacityRepository,
-        )
-        ScheduleCapacityRepository.record_replan_trigger(
+        ScheduleEvidenceRepository.record_replan_trigger(
             rework["order_id"],
             "rework_completed",
             "rework_record",

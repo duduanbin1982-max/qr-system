@@ -5,7 +5,7 @@ import pytest
 from factories import create_process_route
 from modules import config
 from modules.db import get_db
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -192,7 +192,7 @@ def test_dynamic_replan_keeps_formal_projection_and_records_immutable_difference
             "VALUES (?,?,?,'normal','approved',2)",
             (order_id, process_id, user_id),
         ).lastrowid
-        ScheduleCapacityRepository.record_replan_trigger(
+        ScheduleEvidenceRepository.record_replan_trigger(
             order_id,
             "work_report",
             "work_record",

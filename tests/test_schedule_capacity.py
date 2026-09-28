@@ -9,7 +9,8 @@ from factories import TEST_HASH, ensure_process, create_process_route, ensure_us
 from modules.db import get_db
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 from modules.services.process_service import ProcessService
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
+from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
 from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.migrations import run_migrations
 from scripts.preflight_schedule_precision import (
@@ -316,10 +317,10 @@ def test_version_binding_mismatch_is_rejected_on_schedule_fact_write(client):
         process = db.execute("SELECT id FROM processes WHERE name='下料'").fetchone()["id"]
         route_id = create_process_route(db, [process], name="Capacity Binding Guard")
         order_id, _ = _seed_capacity_order(db, [process], route_id=route_id)
-        order = ScheduleCapacityRepository.ensure_order_version_bindings(order_id, db)
+        order = SchedulePlanningRepository.ensure_order_version_bindings(order_id, db)
         op = db.execute("SELECT id,process_id,process_version_id FROM order_processes WHERE order_id=?", (order_id,)).fetchone()
         with pytest.raises(ValueError, match="版本绑定不一致"):
-            ScheduleCapacityRepository.insert_operation_schedule(
+            ScheduleRevisionRepository.insert_operation_schedule(
                 {
                     "order_id": order_id,
                     "order_process_id": op["id"],
@@ -789,7 +790,7 @@ def test_failed_generation_retains_cancelled_revision(client, monkeypatch):
             raise RuntimeError("schedule persistence failed")
 
         monkeypatch.setattr(
-            ScheduleCapacityRepository, "insert_operation_schedule", fail_insert
+            ScheduleRevisionRepository, "insert_operation_schedule", fail_insert
         )
         with pytest.raises(ValueError, match="schedule persistence failed"):
             ScheduleCapacityService.generate_order_schedule(
@@ -924,7 +925,7 @@ def test_revision_publish_requires_exact_operation_set(client):
             "SELECT id FROM order_processes WHERE order_id=?", (order_id,)
         ).fetchone()[0]
         assert op != other_op_id
-        malformed = ScheduleCapacityRepository.create_revision(
+        malformed = ScheduleRevisionRepository.create_revision(
             order_id,
             None,
             "capacity-revision-completeness-malformed",

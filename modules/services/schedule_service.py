@@ -8,7 +8,7 @@ from modules.services import BaseService
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.repositories.production_line_repository import ProductionLineRepository
 from modules.repositories.schedule_repository import ScheduleRepository
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 
 
 class ScheduleNotFoundError(ValueError):
@@ -113,7 +113,7 @@ class ScheduleService:
         )
         summary = ScheduleRepository.get_schedule_summary(schedule_scope=schedule_scope)
         total = summary["total"]
-        conflict_by_order = ScheduleCapacityRepository.list_schedule_conflicts_by_order()
+        conflict_by_order = ScheduleEvidenceRepository.list_schedule_conflicts_by_order()
 
         orders = []
         now = datetime.now()

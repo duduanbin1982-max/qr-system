@@ -18,8 +18,8 @@ os.environ.setdefault("SECRET_KEY", "task6-v094-local-validation-only")
 
 from modules import config  # noqa: E402
 from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_capacity_repository import (  # noqa: E402
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_evidence_repository import (  # noqa: E402
+    ScheduleEvidenceRepository,
 )
 from modules.services.rework_service import ReworkService  # noqa: E402
 from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
@@ -179,11 +179,11 @@ def validate(source_db, output_db):
             _digest(execution_before_replan) == _digest(execution_after_replan)
         )
         revision_id = int(result["schedule_revision_id"])
-        summary, differences = ScheduleCapacityRepository.get_replan_evidence(
+        summary, differences = ScheduleEvidenceRepository.get_replan_evidence(
             revision_id, db=db
         )
         triggers = [
-            dict(row) for row in ScheduleCapacityRepository.list_replan_triggers(
+            dict(row) for row in ScheduleEvidenceRepository.list_replan_triggers(
                 fixture["order_id"], db=db
             )
         ]

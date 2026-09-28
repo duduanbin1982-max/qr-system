@@ -21,8 +21,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from modules import config  # noqa: E402
 from modules.domain.production_node_scheduling import NodeSchedulingError  # noqa: E402
 from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_capacity_repository import (  # noqa: E402
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_revision_repository import (  # noqa: E402
+    ScheduleRevisionRepository,
 )
 from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
 
@@ -161,10 +161,10 @@ def validate(source, output, operator_login, approver_login, order_id=None):
         formal_after_draft = _formal_snapshot(db, selected["id"])
         if _digest(formal_before) != _digest(formal_after_draft):
             raise RuntimeError("draft generation changed the formal schedule projection")
-        revision = ScheduleCapacityRepository.find_revision(revision_id, db=db)
+        revision = ScheduleRevisionRepository.find_revision(revision_id, db=db)
         if not revision or not revision["content_digest"]:
             raise RuntimeError("draft revision content digest was not frozen")
-        ScheduleCapacityRepository.assert_revision_integrity(revision_id, db=db)
+        ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=db)
 
         ScheduleCapacityService.submit_revision(
             revision_id,

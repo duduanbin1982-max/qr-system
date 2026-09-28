@@ -15,8 +15,8 @@ from modules import config
 from modules.db import get_db
 from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.migration_production_nodes import m089_schedule_revision_workflow
-from modules.repositories.schedule_capacity_repository import (
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_revision_repository import (
+    ScheduleRevisionRepository,
 )
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
@@ -553,7 +553,7 @@ def test_v092_freezes_revision_content_and_controls_current_pointer(
         ).fetchone()
         assert len(revision["content_digest"]) == 64
         assert revision["content_digest"] == (
-            ScheduleCapacityRepository.compute_revision_content_digest(
+            ScheduleRevisionRepository.compute_revision_content_digest(
                 revision_id, db=db
             )
         )
@@ -575,7 +575,7 @@ def test_v092_freezes_revision_content_and_controls_current_pointer(
                 creator_id,
             )
         assert corrupt.value.code == "REVISION_INTEGRITY_FAILED"
-        ScheduleCapacityRepository.finalize_revision_content_digest(
+        ScheduleRevisionRepository.finalize_revision_content_digest(
             revision_id, db=db
         )
         db.commit()

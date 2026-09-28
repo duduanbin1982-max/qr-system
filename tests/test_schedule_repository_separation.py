@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
+from pathlib import Path
 
-import pytest
-
-from modules.repositories.schedule_capacity_repository import (
-    ScheduleCapacityRepository,
-)
 from modules.repositories.schedule_evidence_repository import (
     ScheduleEvidenceRepository,
 )
@@ -146,56 +141,13 @@ def test_repository_responsibilities_are_complete_and_disjoint():
     assert not (actual_sets[0] & actual_sets[1])
     assert not (actual_sets[0] & actual_sets[2])
     assert not (actual_sets[1] & actual_sets[2])
-    assert _static_methods(ScheduleCapacityRepository) == set().union(*actual_sets)
 
 
-def test_compatibility_facade_preserves_public_signatures():
-    for repository, methods in REPOSITORY_METHODS.items():
-        for method_name in methods:
-            assert inspect.signature(
-                getattr(ScheduleCapacityRepository, method_name)
-            ) == inspect.signature(getattr(repository, method_name))
-
-
-@pytest.mark.parametrize(
-    ("repository", "method_name", "args", "kwargs"),
-    [
-        (SchedulePlanningRepository, "find_order", (17, object()), {}),
-        (ScheduleRevisionRepository, "find_revision", (23,), {"db": object()}),
-        (ScheduleEvidenceRepository, "list_schedule_conflicts", (), {"db": object()}),
-    ],
-)
-def test_compatibility_facade_delegates_arguments_and_results(
-    monkeypatch, repository, method_name, args, kwargs
-):
-    calls = []
-    result = object()
-
-    def replacement(*received_args, **received_kwargs):
-        calls.append((received_args, received_kwargs))
-        return result
-
-    monkeypatch.setattr(repository, method_name, staticmethod(replacement))
-
-    assert getattr(ScheduleCapacityRepository, method_name)(*args, **kwargs) is result
-    assert calls == [(args, kwargs)]
-
-
-def test_compatibility_facade_preserves_repository_errors(monkeypatch):
-    class ExpectedRepositoryError(RuntimeError):
-        pass
-
-    transaction = object()
-
-    def fail(*, db=None):
-        assert db is transaction
-        raise ExpectedRepositoryError("repository failure")
-
-    monkeypatch.setattr(
-        ScheduleEvidenceRepository,
-        "list_schedule_conflicts",
-        staticmethod(fail),
+def test_legacy_compatibility_facade_has_been_removed_after_migration():
+    facade = (
+        Path(__file__).resolve().parents[1]
+        / "modules"
+        / "repositories"
+        / "schedule_capacity_repository.py"
     )
-
-    with pytest.raises(ExpectedRepositoryError, match="repository failure"):
-        ScheduleCapacityRepository.list_schedule_conflicts(db=transaction)
+    assert not facade.exists()

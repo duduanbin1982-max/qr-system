@@ -24,8 +24,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from modules.repositories.schedule_capacity_repository import (
-    ScheduleCapacityRepository,
+from modules.repositories.schedule_planning_repository import (
+    SchedulePlanningRepository,
 )
 from modules.migration_production_nodes import APPROVED_PRODUCTION_NODE_COUNTS
 import modules.services.schedule_capacity_service as schedule_service_module
@@ -513,7 +513,7 @@ def run(args):
         if version != 91:
             raise RuntimeError(f"V091 replica required; observed V{version}")
         actor = _actor(db, args.actor_username)
-        queue_before = ScheduleCapacityRepository.list_schedulable_orders(
+        queue_before = SchedulePlanningRepository.list_schedulable_orders(
             1000, db=db, now=planning_now
         )
         execution_before = _execution_fingerprint(db)

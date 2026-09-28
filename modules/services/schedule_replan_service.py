@@ -13,7 +13,9 @@ from modules import config
 from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.repositories.production_node_repository import ProductionNodeRepository
-from modules.repositories.schedule_capacity_repository import ScheduleCapacityRepository
+from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
+from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
 
 
 class ScheduleReplanService:
@@ -170,12 +172,12 @@ class ScheduleReplanService:
 
     @staticmethod
     def _copy_active_lock_to_schedule(lock, schedule_id, revision_id, db):
-        item = ScheduleCapacityRepository.find_revision_item_by_source_schedule(
+        item = ScheduleRevisionRepository.find_revision_item_by_source_schedule(
             revision_id, schedule_id, db=db
         )
         if item is None:
             raise ValueError("新排程版本缺少锁定任务快照")
-        ScheduleCapacityRepository.create_task_lock(
+        ScheduleRevisionRepository.create_task_lock(
             item["id"], lock["production_node_id"], lock["locked_by"],
             lock.get("reason") or "动态重排保留锁定任务", db
         )
@@ -202,7 +204,7 @@ class ScheduleReplanService:
     @staticmethod
     def _load_replan_facts(order_id, txn, use_node_engine):
         """Load immutable production facts used by one replan attempt."""
-        active_lock_rows = ScheduleCapacityRepository.list_active_order_task_locks(
+        active_lock_rows = ScheduleRevisionRepository.list_active_order_task_locks(
             order_id, db=txn
         )
         if active_lock_rows and not use_node_engine:
@@ -221,9 +223,9 @@ class ScheduleReplanService:
         )
         # Resolve legacy orders to immutable route/process bindings before any
         # revision fact is written.
-        if not ScheduleCapacityRepository.ensure_order_version_bindings(order_id, txn):
+        if not SchedulePlanningRepository.ensure_order_version_bindings(order_id, txn):
             raise ValueError("订单不存在")
-        context = ScheduleCapacityRepository.dynamic_replan_order_context(
+        context = SchedulePlanningRepository.dynamic_replan_order_context(
             order_id, db=txn, use_nodes=use_node_engine
         )
         if not context:
@@ -232,7 +234,7 @@ class ScheduleReplanService:
             "context": context,
             "order": context["order"],
             "active_locks": active_locks,
-            "order_serial_ids": ScheduleCapacityRepository.list_order_serial_ids(
+            "order_serial_ids": SchedulePlanningRepository.list_order_serial_ids(
                 order_id, db=txn
             ),
         }
@@ -244,15 +246,15 @@ class ScheduleReplanService:
             return None
         if prior_run["order_id"] != order_id:
             raise ValueError("排程幂等键已被其他订单使用")
-        revision = ScheduleCapacityRepository.find_revision_by_run(
+        revision = ScheduleRevisionRepository.find_revision_by_run(
             prior_run["id"], db=txn
         )
-        replay_operations = ScheduleCapacityRepository.run_result(prior_run)
+        replay_operations = ScheduleRevisionRepository.run_result(prior_run)
         evidence_summary = None
         evidence_differences = []
         if revision:
             stored_summary, stored_differences = (
-                ScheduleCapacityRepository.get_replan_evidence(
+                ScheduleEvidenceRepository.get_replan_evidence(
                     revision["id"], db=txn
                 )
             )
@@ -325,7 +327,7 @@ class ScheduleReplanService:
             current_revision_items=context["current_revision_items"],
             replan_triggers=context["replan_triggers"],
         )
-        run_id = ScheduleCapacityRepository.create_run(
+        run_id = ScheduleRevisionRepository.create_run(
             order_id,
             run_key,
             request["start"].strftime("%Y-%m-%d"),
@@ -335,7 +337,7 @@ class ScheduleReplanService:
             input_digest=input_digest,
             replan_reason=request["reason"],
         )
-        revision_id = ScheduleCapacityRepository.create_revision(
+        revision_id = ScheduleRevisionRepository.create_revision(
             order_id,
             run_id,
             run_key,
@@ -357,12 +359,12 @@ class ScheduleReplanService:
         order_id, context, active_locks, use_node_engine, txn, capacity_service
     ):
         """Reset the projection and load occupancy/downtime/lock constraints."""
-        ScheduleCapacityRepository.clear_order_schedules(order_id, txn)
+        ScheduleRevisionRepository.clear_order_schedules(order_id, txn)
         occupancy = {}
         occupancy_rows = (
             ProductionNodeRepository.list_node_occupancy(order_id, db=txn)
             if use_node_engine
-            else ScheduleCapacityRepository.list_line_occupancy(order_id, txn)
+            else SchedulePlanningRepository.list_line_occupancy(order_id, txn)
         )
         occupancy_key = "production_node_id" if use_node_engine else "process_line_id"
         for row in occupancy_rows:
@@ -462,7 +464,7 @@ class ScheduleReplanService:
             "blocked_reason": conflict["reason"] if conflict else "",
             "blocked_code": "LOCKED_TASK_CONFLICT" if conflict else "",
         }
-        payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(
+        payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
             payload, txn
         )
         new_item = ScheduleReplanService._copy_active_lock_to_schedule(
@@ -558,7 +560,7 @@ class ScheduleReplanService:
                     "status": "completed", "blocked_reason": "",
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": "已完成，无需重排"})
                 continue
@@ -606,12 +608,12 @@ class ScheduleReplanService:
                     "blocked_reason": "前序工序无法重排", "blocked_code": "PREVIOUS_OPERATION_BLOCKED",
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["blocked_reason"]})
                 continue
 
-            execution_policy = ScheduleCapacityRepository.find_execution_policy(
+            execution_policy = SchedulePlanningRepository.find_execution_policy(
                 common.get("route_version_id"), common.get("process_version_id"), txn,
             )
             if execution_policy and execution_policy["execution_mode"] in {
@@ -649,7 +651,7 @@ class ScheduleReplanService:
                     "segments": [],
                     "line_name_snapshot": "",
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 cursor = end
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": "外协/非排程工序，不占用内部产能"})
@@ -672,7 +674,7 @@ class ScheduleReplanService:
                     "blocked_reason": block_reason, "blocked_code": "MISSING_WORK_TIME_STANDARD",
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": block_reason})
                 continue
@@ -683,7 +685,7 @@ class ScheduleReplanService:
                 no_resource_code = "NO_COMPATIBLE_NODE"
                 no_resource_reason = "没有满足能力要求的生产节点"
             else:
-                resources = [line for line in ScheduleCapacityRepository.list_process_lines(
+                resources = [line for line in SchedulePlanningRepository.list_process_lines(
                     operation["process_id"], db=txn
                 ) if line["status"] == "active"]
                 no_resource_code = "NO_COMPATIBLE_NODE"
@@ -702,7 +704,7 @@ class ScheduleReplanService:
                     "blocked_reason": block_reason, "blocked_code": no_resource_code,
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": block_reason})
                 continue
@@ -740,7 +742,7 @@ class ScheduleReplanService:
                     "blocked_reason": block_reason, "blocked_code": exc.code,
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": block_reason})
                 continue
@@ -759,7 +761,7 @@ class ScheduleReplanService:
                     "blocked_code": "NODE_CALENDAR_UNAVAILABLE" if use_node_engine else "NODE_CALENDAR_UNAVAILABLE",
                     "line_name_snapshot": "", "segments": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": block_reason})
                 continue
@@ -788,7 +790,7 @@ class ScheduleReplanService:
                     "segments": [],
                     "allocations": [],
                 }
-                payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(
+                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
                     payload, txn
                 )
                 result.append({
@@ -813,8 +815,8 @@ class ScheduleReplanService:
             snapshots = []
             for resource_id in resource_ids:
                 resource = resource_by_id[resource_id]
-                calendar = ScheduleCapacityRepository.get_calendar(resource["calendar_id"], db=txn) or ScheduleCapacityRepository.get_calendar(db=txn)
-                shifts = ScheduleCapacityRepository.list_calendar_shifts(calendar["id"], db=txn) if calendar else []
+                calendar = SchedulePlanningRepository.get_calendar(resource["calendar_id"], db=txn) or SchedulePlanningRepository.get_calendar(db=txn)
+                shifts = SchedulePlanningRepository.list_calendar_shifts(calendar["id"], db=txn) if calendar else []
                 item = capacity_service._calendar_snapshot(calendar, shifts)
                 item.update({
                     resource_key: resource_id,
@@ -860,7 +862,7 @@ class ScheduleReplanService:
                 "segments": segments, "allocations": allocations,
                 "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d"),
             }
-            payload["id"] = ScheduleCapacityRepository.insert_operation_schedule(payload, txn)
+            payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
             cursor = end
             result.append({**payload, "line_name": primary_snapshot["line_name"], "line_count": len(snapshots),
                            "lines": snapshots, "process_name": process_snapshot})
@@ -894,7 +896,7 @@ class ScheduleReplanService:
             and (item.get("process_line_id") or item.get("production_node_id"))
         ]
         if planned and not order.get("current_schedule_revision_id"):
-            ScheduleCapacityRepository.update_order_summary(
+            ScheduleRevisionRepository.update_order_summary(
                 order_id,
                 min(item["plan_start"] for item in planned),
                 max(item["plan_end"] for item in planned),
@@ -903,10 +905,10 @@ class ScheduleReplanService:
         result_json = json.dumps(
             result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
-        ScheduleCapacityRepository.set_revision_digest(
+        ScheduleRevisionRepository.set_revision_digest(
             revision_id, hashlib.sha256(result_json.encode("utf-8")).hexdigest(), txn
         )
-        ScheduleCapacityRepository.finalize_revision_content_digest(
+        ScheduleRevisionRepository.finalize_revision_content_digest(
             revision_id, db=txn
         )
         conflict_assessment = capacity_service._assess_revision_conflicts(
@@ -914,7 +916,7 @@ class ScheduleReplanService:
         )
         after_items = [
             dict(item)
-            for item in ScheduleCapacityRepository.list_revision_items(
+            for item in ScheduleRevisionRepository.list_revision_items(
                 revision_id, db=txn
             )
         ]
@@ -953,7 +955,7 @@ class ScheduleReplanService:
                 )
             ),
         }
-        ScheduleCapacityRepository.save_replan_evidence(
+        ScheduleEvidenceRepository.save_replan_evidence(
             revision_id,
             order.get("current_schedule_revision_id"),
             order_id,
@@ -961,7 +963,7 @@ class ScheduleReplanService:
             replan_summary,
             db=txn,
         )
-        ScheduleCapacityRepository.complete_run(run_id, "completed", result, db=txn)
+        ScheduleRevisionRepository.complete_run(run_id, "completed", result, db=txn)
         return {
             "ok": True,
             "order_id": order_id,
@@ -986,8 +988,8 @@ class ScheduleReplanService:
         """Keep a failed run auditable while cancelling the new revision."""
         txn.execute("ROLLBACK TO SAVEPOINT dynamic_schedule_replan")
         txn.execute("RELEASE SAVEPOINT dynamic_schedule_replan")
-        ScheduleCapacityRepository.cancel_revision(revision_id, txn)
-        ScheduleCapacityRepository.complete_run(
+        ScheduleRevisionRepository.cancel_revision(revision_id, txn)
+        ScheduleRevisionRepository.complete_run(
             run_id, "failed", [], str(error), db=txn
         )
 
@@ -1016,7 +1018,7 @@ class ScheduleReplanService:
             facts = ScheduleReplanService._load_replan_facts(
                 order_id, txn, use_node_engine
             )
-            prior_run = ScheduleCapacityRepository.find_run(
+            prior_run = ScheduleRevisionRepository.find_run(
                 request["run_key"], txn
             )
             replay = ScheduleReplanService._replay_existing_run(
