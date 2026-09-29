@@ -19,4 +19,10 @@ export const inventoryApi = {
   approveCountTask: (taskId) => request('POST', '/api/inventory/count-task/' + taskId + '/approve', {}),
   listLocations:    ()       => request('GET', '/api/inventory/locations'),
   inventoryImpact:  (id)     => request('GET', '/api/inventory/' + id + '/impact'),
+  inventoryCapabilities: () => request('GET', '/api/inventory/capabilities'),
+  listProductGroups: (params) => request('GET', '/api/inventory/product-groups' + buildQuery(params)),
+  productGroupDetails: (productId, params) => request(
+    'GET', `/api/inventory/product-groups/${productId}/details` + buildQuery(params),
+  ),
+  productGroupExportUrl: (params) => '/api/inventory/product-groups/export' + buildQuery(params),
 }
