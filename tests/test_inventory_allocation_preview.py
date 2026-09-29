@@ -138,6 +138,39 @@ def test_cross_order_outbound_rejects_stale_preview(client, auth_headers, db):
     assert response.get_json()["code"] == "conflict"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"quantity": 1, "idempotency_key": "allocation-missing-preview"},
+        {
+            "quantity": 1,
+            "idempotency_key": "allocation-blank-preview",
+            "preview_digest": "   ",
+        },
+    ],
+)
+def test_cross_order_outbound_requires_non_blank_preview_digest(
+    client, auth_headers, db, payload
+):
+    scenario = seed_product_inventory_scenario(db)
+    before_runs = db.execute(
+        "SELECT COUNT(*) FROM inventory_allocation_runs"
+    ).fetchone()[0]
+    before_logs = db.execute("SELECT COUNT(*) FROM inventory_logs").fetchone()[0]
+
+    response = client.post(
+        f"/api/inventory/product-groups/{scenario['product_id']}/outbound",
+        headers=auth_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert db.execute(
+        "SELECT COUNT(*) FROM inventory_allocation_runs"
+    ).fetchone()[0] == before_runs
+    assert db.execute("SELECT COUNT(*) FROM inventory_logs").fetchone()[0] == before_logs
+
+
 def test_outbound_can_be_reversed_once_with_a_new_idempotency_key(client, auth_headers, db):
     scenario = seed_product_inventory_scenario(db, quantities=(5, 7), reserved=(1, 2), frozen=(0, 1))
     preview = client.post(

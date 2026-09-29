@@ -205,6 +205,9 @@ class InventoryAllocationService:
         idempotency_key = (idempotency_key or "").strip()
         if not idempotency_key:
             raise InventoryAllocationValidationError("正式出库必须提供幂等键")
+        preview_digest = (preview_digest or "").strip()
+        if not preview_digest:
+            raise InventoryAllocationValidationError("正式出库必须提供预览摘要")
         with BaseService.transaction() as txn:
             existing = InventoryRepository.find_allocation_run_by_idempotency(
                 idempotency_key, db=txn
@@ -227,7 +230,7 @@ class InventoryAllocationService:
                 reason=reason,
                 db=txn,
             )
-            if preview_digest and preview_digest != preview["preview_digest"]:
+            if preview_digest != preview["preview_digest"]:
                 raise ConflictError("库存预览已变化，请重新生成预览")
             request_digest = cls._request_digest(
                 product_id, quantity, mode, compatibility_key,
