@@ -112,8 +112,12 @@ class InventoryRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT id AS inventory_id, product_model, product_name, specification, "
-            "quantity, reserved, quantity - reserved AS available_quantity, unit, order_id FROM inventory "
-            "WHERE order_id = ? AND quantity - reserved > 0 AND deleted_at IS NULL",
+            "quantity, reserved, "
+            "MAX(quantity - COALESCE(reserved,0) - COALESCE(frozen_quantity,0),0) "
+            "AS available_quantity, unit, order_id FROM inventory "
+            "WHERE order_id = ? AND "
+            "MAX(quantity - COALESCE(reserved,0) - COALESCE(frozen_quantity,0),0) > 0 "
+            "AND deleted_at IS NULL",
             (order_id,),
         ).fetchall()
 

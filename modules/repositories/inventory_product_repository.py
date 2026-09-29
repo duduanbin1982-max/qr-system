@@ -28,14 +28,19 @@ CASE
 END
 """
 AVAILABLE_SQL = "MAX(i.quantity-COALESCE(i.reserved,0)-COALESCE(i.frozen_quantity,0),0)"
+NORMALIZED_SPECIFICATION_SQL = "TRIM(COALESCE(i.specification,''))"
+NORMALIZED_QUALITY_STATUS_SQL = (
+    "COALESCE(NULLIF(TRIM(COALESCE(i.quality_status,'')),''),'qualified')"
+)
 
 
 def compatibility_key(row):
+    quality_status = (row["quality_status"] or "").strip() or "qualified"
     raw = "|".join((
         str(row["product_id"]),
         (row["specification"] or "").strip(),
         str(row["route_version_id_snapshot"] or 0),
-        (row["quality_status"] or "qualified").strip(),
+        quality_status,
     ))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -166,19 +171,19 @@ class InventoryProductRepository:
         rows = db.execute(
             cls._resolved_cte()
             + "SELECT i.resolved_product_id AS product_id, "
-              "COALESCE(i.specification,'') AS specification, "
+              f"{NORMALIZED_SPECIFICATION_SQL} AS specification, "
               "i.route_version_id_snapshot, "
-              "COALESCE(NULLIF(i.quality_status,''),'qualified') AS quality_status, "
+              f"{NORMALIZED_QUALITY_STATUS_SQL} AS quality_status, "
               "SUM(i.quantity) AS quantity, "
               "SUM(COALESCE(i.reserved,0)) AS reserved_quantity, "
               "SUM(COALESCE(i.frozen_quantity,0)) AS frozen_quantity, "
               f"SUM({AVAILABLE_SQL}) AS available_quantity, "
               "COUNT(DISTINCT i.order_id) AS order_count, COUNT(*) AS inventory_count "
               "FROM resolved_inventory i WHERE i.resolved_product_id=? "
-              "GROUP BY i.resolved_product_id,COALESCE(i.specification,''),"
-              "i.route_version_id_snapshot,COALESCE(NULLIF(i.quality_status,''),'qualified') "
-              "ORDER BY specification COLLATE NOCASE,"
-              "COALESCE(route_version_id_snapshot,0),quality_status",
+              f"GROUP BY i.resolved_product_id,{NORMALIZED_SPECIFICATION_SQL},"
+              f"i.route_version_id_snapshot,{NORMALIZED_QUALITY_STATUS_SQL} "
+              f"ORDER BY {NORMALIZED_SPECIFICATION_SQL} COLLATE NOCASE,"
+              f"COALESCE(i.route_version_id_snapshot,0),{NORMALIZED_QUALITY_STATUS_SQL}",
             (product_id,),
         ).fetchall()
         groups = []
@@ -194,13 +199,13 @@ class InventoryProductRepository:
         rows = db.execute(
             cls._resolved_cte()
             + "SELECT i.id AS inventory_id,i.resolved_product_id AS product_id,i.product_model,"
-              "i.product_name,i.product_code_snapshot,i.product_name_snapshot,i.specification,"
+              "i.product_name,i.product_code_snapshot,i.product_name_snapshot,"
+              f"{NORMALIZED_SPECIFICATION_SQL} AS specification,"
               "i.quantity,COALESCE(i.reserved,0) AS reserved_quantity,"
               "COALESCE(i.frozen_quantity,0) AS frozen_quantity,"
               f"{AVAILABLE_SQL} AS available_quantity,i.safe_stock,i.location,i.unit,"
               "i.order_id,i.order_no,i.customer,i.route_version_id_snapshot,"
-              "COALESCE(NULLIF(i.quality_status,''),'qualified') "
-              "AS quality_status,"
+              f"{NORMALIZED_QUALITY_STATUS_SQL} AS quality_status,"
               "(SELECT GROUP_CONCAT(DISTINCT NULLIF(l.lot_no,'')) FROM inventory_logs l "
               "WHERE l.inventory_id=i.id) AS lot_no,"
               "(SELECT GROUP_CONCAT(DISTINCT NULLIF(l.serial_no,'')) FROM inventory_logs l "
@@ -223,13 +228,10 @@ class InventoryProductRepository:
         product = cls.get_product(product_id, db=db)
         if not product:
             return None
-        warnings = []
-        for row in cls.list_identity_exceptions(db=db):
-            candidate_ids = {
-                row["inventory_product_id"], row["order_product_id"], row["alias_product_id"]
-            }
-            if product_id in candidate_ids:
-                warnings.append(dict(row))
+        warnings = [
+            dict(row)
+            for row in cls.list_identity_exceptions_for_product(product_id, db=db)
+        ]
         return {
             "product": product,
             "aliases": cls.list_aliases(product_id, db=db),
@@ -254,6 +256,24 @@ class InventoryProductRepository:
             "WHERE i.deleted_at IS NULL AND "
             f"({IDENTITY_REASON_SQL})<>'resolved' ORDER BY i.id LIMIT ?",
             (limit,),
+        ).fetchall()
+
+    @staticmethod
+    def list_identity_exceptions_for_product(product_id, limit=100, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            f"SELECT i.id AS inventory_id,i.product_model,i.product_name,i.order_id,"
+            f"o.order_no,i.location,i.quantity,i.product_id AS inventory_product_id,"
+            f"o.product_id AS order_product_id,pca.product_id AS alias_product_id,"
+            f"{IDENTITY_REASON_SQL} AS reason "
+            "FROM inventory i LEFT JOIN orders o ON o.id=i.order_id "
+            "LEFT JOIN product_code_aliases pca "
+            "ON pca.product_code=COALESCE(NULLIF(i.product_code_snapshot,''),i.product_model) "
+            "WHERE i.deleted_at IS NULL AND "
+            f"({IDENTITY_REASON_SQL})<>'resolved' AND "
+            "(i.product_id=? OR o.product_id=? OR pca.product_id=?) "
+            "ORDER BY i.id LIMIT ?",
+            (product_id, product_id, product_id, limit),
         ).fetchall()
 
     @staticmethod

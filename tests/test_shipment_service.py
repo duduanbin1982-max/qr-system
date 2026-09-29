@@ -109,6 +109,37 @@ def test_create_shipment_rejects_empty_items_and_insufficient_stock(client):
             )
 
 
+def test_order_stock_does_not_offer_frozen_inventory(client):
+    with client.application.app_context():
+        db = get_db()
+        order_id, _, inventory_id = _shipment_context(db, quantity=5)
+        available_inventory_id = create_inventory_item(
+            db,
+            quantity=5,
+            order_id=order_id,
+            product_model="SHIP-PARTIAL-FROZEN",
+            product_name="部分冻结库存",
+        )
+        db.execute(
+            "UPDATE inventory SET reserved=1,frozen_quantity=4 WHERE id=?",
+            (inventory_id,),
+        )
+        db.execute(
+            "UPDATE inventory SET reserved=1,frozen_quantity=2 WHERE id=?",
+            (available_inventory_id,),
+        )
+        db.commit()
+
+        payload = ShipmentService.get_order_stock(order_id)
+
+        assert inventory_id not in {item["inventory_id"] for item in payload["items"]}
+        partial = next(
+            item for item in payload["items"]
+            if item["inventory_id"] == available_inventory_id
+        )
+        assert partial["available_quantity"] == 2
+
+
 def test_complete_shipment_deducts_stock_and_updates_delivery_status(client):
     with client.application.app_context():
         db = get_db()
