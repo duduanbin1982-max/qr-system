@@ -15,6 +15,40 @@ from modules.route_decorators import (
 )
 from modules.services.setting_service import SettingsService
 from modules.services.inventory_service import InventoryService
+from modules.services.inventory_product_query_service import InventoryProductQueryService
+
+
+@app.route('/api/inventory/capabilities', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_capabilities():
+    return jsonify(InventoryProductQueryService.capabilities())
+
+
+@app.route('/api/inventory/product-groups', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_product_groups():
+    pagination = parse_pagination(max_limit=200)
+    return jsonify(InventoryProductQueryService.list_groups(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '0') == '1',
+        location=request.args.get('location', ''),
+        quality_status=request.args.get('quality_status', ''),
+        identity_status=request.args.get('identity_status', ''),
+        page=pagination['page'],
+        limit=pagination['limit'],
+    ))
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/details', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_product_group_details(product_id):
+    return jsonify(InventoryProductQueryService.get_details(
+        product_id,
+        compatibility_key=request.args.get('compatibility_key', ''),
+    ))
 
 
 @app.route('/api/inventory', methods=['GET'])

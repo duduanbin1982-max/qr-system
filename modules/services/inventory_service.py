@@ -7,6 +7,7 @@ from modules.domain.errors import ConflictError, NotFoundError
 from datetime import datetime
 from modules.services import BaseService
 from modules.repositories.inventory_repository import InventoryRepository
+from modules.repositories.inventory_product_repository import InventoryProductRepository
 from modules.services.inventory_posting_service import InventoryPostingService
 
 
@@ -37,6 +38,11 @@ class InventoryService:
         with BaseService.transaction() as txn:
             if InventoryRepository.find_duplicate_model_txn(model, order_id, 0, txn):
                 raise ConflictError('产品型号已存在')
+            identity = InventoryProductRepository.resolve_creation_identity(
+                model, order_id, txn
+            )
+            if not identity["product_name_snapshot"]:
+                identity["product_name_snapshot"] = data.get('product_name', '') or model
             item_id = InventoryRepository.insert_txn(
                 model,
                 data.get('product_name', ''),
@@ -48,6 +54,10 @@ class InventoryService:
                 data.get('category', ''),
                 data.get('unit_cost', 0),
                 order_id,
+                identity["product_id"],
+                identity["product_code_snapshot"],
+                identity["product_name_snapshot"],
+                identity["route_version_id_snapshot"],
                 txn,
             )
             if opening_quantity:

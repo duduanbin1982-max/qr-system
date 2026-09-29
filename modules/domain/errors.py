@@ -31,6 +31,15 @@ class ConflictError(DomainError):
     status_code = 409
 
 
+class InventoryProductQueryDisabledError(ConflictError):
+    code = "inventory_product_query_disabled"
+
+    def to_payload(self):
+        payload = super().to_payload()
+        payload["action"] = "use_order_inventory_view"
+        return payload
+
+
 class AuthorizationError(DomainError):
     code = "forbidden"
     status_code = 403

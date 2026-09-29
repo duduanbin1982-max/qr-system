@@ -17,7 +17,10 @@ class InventoryRepository:
             )
             params.extend([f"%{keyword}%"] * 8)
         if low_stock:
-            clauses.append("i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0")
+            clauses.append(
+                "i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0) "
+                "<= i.safe_stock AND i.safe_stock > 0"
+            )
         if location:
             clauses.append("i.location = ?")
             params.append(location)
@@ -37,9 +40,17 @@ class InventoryRepository:
     def list_items_paginated(where_clause, params, page, limit, db=None):
         db = resolve_db(db)
         base_sql = (
-            "SELECT i.*, i.quantity - i.reserved AS available_quantity, "
+            "SELECT COALESCE(i.product_id,o.product_id,pca.product_id) AS product_id, "
+            "COALESCE(NULLIF(i.product_code_snapshot,''),NULLIF(o.product_code,''),"
+            "i.product_model) AS product_code_snapshot, "
+            "COALESCE(NULLIF(i.product_name_snapshot,''),NULLIF(i.product_name,''),"
+            "o.product_name,'') AS product_name_snapshot, "
+            "i.*, COALESCE(i.frozen_quantity,0) AS frozen_quantity, "
+            "MAX(i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0), 0) "
+            "AS available_quantity, "
             "o.order_no, o.customer, p.price, "
-            "CASE WHEN i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0 "
+            "CASE WHEN i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0) "
+            "<= i.safe_stock AND i.safe_stock > 0 "
             "THEN 1 ELSE 0 END as is_low FROM inventory i "
             "LEFT JOIN orders o ON i.order_id = o.id "
             "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
@@ -52,12 +63,21 @@ class InventoryRepository:
         return rows, size
 
     @staticmethod
-    def insert_txn(model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id, db):
+    def insert_txn(
+        model, product_name, specification, safe_stock, location, unit, remark,
+        category, unit_cost, order_id, product_id, product_code_snapshot,
+        product_name_snapshot, route_version_id_snapshot, db
+    ):
         db.execute(
             "INSERT INTO inventory (product_model, product_name, specification, "
-            "quantity, safe_stock, location, unit, remark, category, unit_cost, order_id) "
-            "VALUES (?,?,?,0,?,?,?,?,?,?,?)",
-            (model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id)
+            "quantity, safe_stock, location, unit, remark, category, unit_cost, order_id, "
+            "product_id, product_code_snapshot, product_name_snapshot, "
+            "route_version_id_snapshot) VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                model, product_name, specification, safe_stock, location, unit,
+                remark, category, unit_cost, order_id, product_id,
+                product_code_snapshot, product_name_snapshot, route_version_id_snapshot,
+            )
         )
         return db.execute("SELECT last_insert_rowid()").fetchone()[0]
 

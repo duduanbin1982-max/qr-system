@@ -347,13 +347,15 @@ class ScanHelperService:
         return ScanRepository.find_inventory_by_model(product_code, db=ScanHelperService._db(db))
 
     @staticmethod
-    def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
+    def find_or_create_inventory(product_code, product_name, order_id=None, specification="", *, product_id, route_version_id, db=None):
         """Per-order inventory: each order gets its own inventory record, no merging."""
         return ScanRepository.find_or_create_inventory(
             product_code,
             product_name,
             order_id,
             specification,
+            product_id=product_id,
+            route_version_id=route_version_id,
             db=ScanHelperService._db(db),
         )
 

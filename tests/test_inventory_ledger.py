@@ -7,7 +7,7 @@ from modules.domain.errors import ConflictError
 from modules.services.inventory_posting_service import InventoryPostingService
 from modules.services.inventory_service import InventoryService
 from modules.services.scan_helper_service import ScanHelperService
-from factories import create_order, ensure_process
+from factories import create_order, create_process_route, ensure_process, ensure_product
 
 
 def _create_item(quantity=0, model="LEDGER-001"):
@@ -191,21 +191,132 @@ def test_inventory_api_rejects_direct_quantity_edit(client, auth_headers):
     assert response.status_code == 400
 
 
+def test_inventory_api_preserves_order_list_fields_and_exposes_identity_snapshots(
+    client, auth_headers
+):
+    with client.application.app_context():
+        db = get_db()
+        item_id = _create_item(quantity=5, model="API-LIST-COMPAT")
+        db.execute(
+            "UPDATE inventory SET reserved=1,frozen_quantity=2 WHERE id=?",
+            (item_id,),
+        )
+        db.commit()
+
+    response = client.get("/api/inventory", headers=auth_headers)
+
+    assert response.status_code == 200
+    item = next(row for row in response.get_json()["items"] if row["id"] == item_id)
+    assert {
+        "id", "product_model", "product_name", "specification", "quantity",
+        "reserved", "safe_stock", "location", "unit", "remark", "category",
+        "unit_cost", "order_id", "order_no", "customer", "price", "is_low",
+    }.issubset(item)
+    assert item["quantity"] == 5
+    assert item["reserved"] == 1
+    assert item["frozen_quantity"] == 2
+    assert item["available_quantity"] == 2
+    assert item["product_id"] is None
+    assert item["product_code_snapshot"] == "API-LIST-COMPAT"
+    assert item["product_name_snapshot"] == "Ledger product"
+
+
+def test_inventory_create_captures_resolved_identity_and_rejects_conflicts(client):
+    with client.application.app_context():
+        db = get_db()
+        process_id = ensure_process(db, "inventory-identity-process")
+        first_product = ensure_product(db, "IDENTITY-CODE-1", "Identity Product 1")
+        second_product = ensure_product(db, "IDENTITY-CODE-2", "Identity Product 2")
+        order_id = create_order(db, [process_id], product_code="IDENTITY-CODE-1")
+        route_version_id = db.execute(
+            "SELECT route_version_id FROM orders WHERE id=?", (order_id,)
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE orders SET product_id=? WHERE id=?", (first_product, order_id)
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO product_code_aliases(product_id,product_code,source) "
+            "VALUES(?,?,'current')",
+            (first_product, "IDENTITY-CODE-1"),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO product_code_aliases(product_id,product_code,source) "
+            "VALUES(?,?,'legacy')",
+            (second_product, "IDENTITY-CODE-2"),
+        )
+        db.commit()
+
+        item_id = InventoryService.create_item({
+            "product_model": "IDENTITY-CODE-1",
+            "product_name": "Fallback Name",
+            "order_id": order_id,
+        })
+        item = db.execute(
+            "SELECT product_id,product_code_snapshot,product_name_snapshot,"
+            "route_version_id_snapshot FROM inventory WHERE id=?",
+            (item_id,),
+        ).fetchone()
+        assert tuple(item) == (
+            first_product, "IDENTITY-CODE-1", "Identity Product 1", route_version_id,
+        )
+
+        conflicting_order = create_order(
+            db, [process_id], product_code="IDENTITY-CODE-2"
+        )
+        db.execute(
+            "UPDATE orders SET product_id=? WHERE id=?",
+            (first_product, conflicting_order),
+        )
+        db.commit()
+
+        with pytest.raises(ConflictError, match="订单产品与库存产品编码不一致"):
+            InventoryService.create_item({
+                "product_model": "IDENTITY-CODE-2",
+                "product_name": "Conflict",
+                "order_id": conflicting_order,
+            })
+
+
 def test_auto_inbound_can_create_separate_inventory_for_same_model_by_order(client):
     with client.application.app_context():
         db = get_db()
         process_id = ensure_process(db, "inventory-ledger-process")
+        route_id = create_process_route(db, [process_id], name="inventory-ledger-route")
+        route_version_id = db.execute(
+            "SELECT current_effective_version_id FROM process_routes WHERE id=?",
+            (route_id,),
+        ).fetchone()[0]
+        product_id = ensure_product(db, "SHARED-MODEL", "Product")
+        db.execute(
+            "INSERT OR IGNORE INTO product_code_aliases(product_id,product_code,source) "
+            "VALUES(?,?,'current')",
+            (product_id, "SHARED-MODEL"),
+        )
         first_order = create_order(db, [process_id], product_code="SHARED-MODEL")
         second_order = create_order(db, [process_id], product_code="SHARED-MODEL")
+        db.execute(
+            "UPDATE orders SET product_id=?,route_id=?,route_version_id=? WHERE id IN (?,?)",
+            (product_id, route_id, route_version_id, first_order, second_order),
+        )
+        db.commit()
 
         first = ScanHelperService.find_or_create_inventory(
-            "SHARED-MODEL", "Product", first_order, db=db
+            "SHARED-MODEL", "Product", first_order,
+            product_id=product_id, route_version_id=route_version_id, db=db
         )
         second = ScanHelperService.find_or_create_inventory(
-            "SHARED-MODEL", "Product", second_order, db=db
+            "SHARED-MODEL", "Product", second_order,
+            product_id=product_id, route_version_id=route_version_id, db=db
         )
 
         assert first != second
-        assert db.execute(
-            "SELECT COUNT(*) FROM inventory WHERE product_model='SHARED-MODEL'"
-        ).fetchone()[0] == 2
+        rows = db.execute(
+            "SELECT product_id,product_code_snapshot,product_name_snapshot,"
+            "route_version_id_snapshot FROM inventory "
+            "WHERE product_model='SHARED-MODEL' ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 2
+        assert [tuple(row) for row in rows] == [
+            (product_id, "SHARED-MODEL", "Product", route_version_id),
+            (product_id, "SHARED-MODEL", "Product", route_version_id),
+        ]
