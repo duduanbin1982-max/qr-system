@@ -78,7 +78,21 @@ class InventoryPostingService:
             if qty_delta > 0 and serial_no:
                 inbound = InventoryRepository.find_serial_inbound(serial_no, db=txn)
                 if inbound:
-                    raise ConflictError("序列号已入库")
+                    serial_balance = InventoryRepository.get_serial_balance(
+                        inventory_id, serial_no, db=txn
+                    )
+                    reversal_allowed = False
+                    if reversal_of_id and serial_balance <= 0:
+                        original = InventoryRepository.find_log_by_id(reversal_of_id, db=txn)
+                        reversal_allowed = bool(
+                            original
+                            and original["inventory_id"] == inventory_id
+                            and original["serial_no"] == serial_no
+                            and float(original["qty_delta"] or 0) < 0
+                            and abs(float(original["qty_delta"] or 0)) == quantity
+                        )
+                    if not reversal_allowed:
+                        raise ConflictError("序列号已入库")
             if qty_delta < 0 and serial_no:
                 inbound = InventoryRepository.find_serial_inbound(serial_no, db=txn)
                 serial_balance = InventoryRepository.get_serial_balance(

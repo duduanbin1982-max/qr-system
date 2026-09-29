@@ -32,6 +32,9 @@ export function useInventoryProductGroups() {
 
   async function loadCapabilities() {
     capabilities.value = await api.domains.inventory.inventoryCapabilities()
+    if (viewMode.value === 'product' && enabled.value && !groups.value.length) {
+      await loadGroups()
+    }
     return capabilities.value
   }
 

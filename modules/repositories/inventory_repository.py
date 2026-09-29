@@ -6,6 +6,103 @@ from modules.query_utils import paginate, build_sort_clause
 class InventoryRepository:
 
     @staticmethod
+    def find_log_by_id(log_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT inventory_id,serial_no,qty_delta FROM inventory_logs WHERE id=?",
+            (log_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_allocation_run_by_idempotency(idempotency_key, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+
+    @staticmethod
+    def find_allocation_run(run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE id=?", (run_id,)
+        ).fetchone()
+
+    @staticmethod
+    def find_reversal_run(original_run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE reversal_of_run_id=?",
+            (original_run_id,),
+        ).fetchone()
+
+    @staticmethod
+    def list_allocation_items(run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_items WHERE run_id=? ORDER BY sequence_no",
+            (run_id,),
+        ).fetchall()
+
+    @staticmethod
+    def list_allocation_runs(product_id=None, page=1, limit=50, db=None):
+        db = resolve_db(db)
+        page = max(int(page), 1)
+        limit = max(1, min(int(limit), 200))
+        clauses, params = ["1=1"], []
+        if product_id is not None:
+            clauses.append("r.product_id=?")
+            params.append(product_id)
+        where = " AND ".join(clauses)
+        total = db.execute(
+            "SELECT COUNT(*) FROM inventory_allocation_runs r WHERE " + where,
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            "SELECT r.*,p.product_code,p.product_name "
+            "FROM inventory_allocation_runs r JOIN products p ON p.id=r.product_id "
+            "WHERE " + where + " ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?",
+            [*params, limit, (page - 1) * limit],
+        ).fetchall()
+        return rows, int(total)
+
+    @staticmethod
+    def insert_allocation_run_txn(payload, db):
+        cursor = db.execute(
+            "INSERT INTO inventory_allocation_runs "
+            "(idempotency_key,request_digest,preview_digest,result_digest,product_id,"
+            "compatibility_key,mode,requested_quantity,reason,operator_id,operator_name,"
+            "reversal_of_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload["idempotency_key"], payload["request_digest"],
+                payload["preview_digest"], payload["result_digest"],
+                payload["product_id"], payload["compatibility_key"], payload["mode"],
+                payload["requested_quantity"], payload.get("reason", ""),
+                payload.get("operator_id"), payload.get("operator_name", ""),
+                payload.get("reversal_of_run_id"),
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
+    def insert_allocation_item_txn(payload, db):
+        cursor = db.execute(
+            "INSERT INTO inventory_allocation_items "
+            "(run_id,sequence_no,inventory_id,source_order_id,order_no_snapshot,"
+            "lot_no,serial_no,location_snapshot,allocated_quantity,movement_id,"
+            "balance_before,balance_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload["run_id"], payload["sequence_no"], payload["inventory_id"],
+                payload.get("source_order_id"), payload.get("order_no", ""),
+                payload.get("lot_no", ""), payload.get("serial_no", ""),
+                payload.get("location", ""), payload["allocated_quantity"],
+                payload["movement_id"], payload["balance_before"],
+                payload["balance_after"],
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
     def build_item_filters(keyword="", low_stock=False, location=""):
         clauses = ["i.deleted_at IS NULL"]
         params = []

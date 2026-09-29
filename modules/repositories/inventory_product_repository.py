@@ -99,8 +99,8 @@ class InventoryProductRepository:
         having = ""
         if filters.get("low_stock"):
             having = (
-                f"HAVING SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
-                "AND SUM(COALESCE(i.safe_stock,0)) > 0"
+                f"HAVING SUM({AVAILABLE_SQL}) <= COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) "
+                "AND COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) > 0"
             )
         return where, having, params
 
@@ -112,6 +112,7 @@ class InventoryProductRepository:
             cls._resolved_cte()
             + "SELECT COUNT(*) FROM ("
               "SELECT i.resolved_product_id FROM resolved_inventory i "
+              "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
               f"WHERE {where} GROUP BY i.resolved_product_id {having}) grouped",
             params,
         ).fetchone()
@@ -124,10 +125,14 @@ class InventoryProductRepository:
         offset = (page - 1) * limit
         return db.execute(
             cls._resolved_cte()
+            + ", lot_counts AS (SELECT inventory_id, COUNT(DISTINCT NULLIF(lot_no,'')) AS lot_count FROM inventory_logs GROUP BY inventory_id) "
             + "SELECT i.resolved_product_id AS product_id, "
               "i.canonical_product_code AS product_code, "
               "i.canonical_product_name AS product_name, "
               "i.canonical_category AS category, "
+              "CASE WHEN COUNT(DISTINCT NULLIF(TRIM(i.specification),'')) > 1 "
+              "THEN '多规格' ELSE COALESCE(MAX(NULLIF(TRIM(i.specification),'')),'') END "
+              "AS specification, "
               "SUM(i.quantity) AS quantity, "
               "SUM(COALESCE(i.reserved,0)) AS reserved_quantity, "
               "SUM(COALESCE(i.frozen_quantity,0)) AS frozen_quantity, "
@@ -135,13 +140,25 @@ class InventoryProductRepository:
               "SUM(COALESCE(i.safe_stock,0)) AS safe_stock, "
               "COUNT(DISTINCT i.order_id) AS order_count, "
               "COUNT(*) AS inventory_count, "
+              "COUNT(DISTINCT NULLIF(TRIM(i.location),'')) AS location_count, "
+              "SUM(COALESCE(lc.lot_count,0)) AS lot_count, "
               f"CASE WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
-              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 1 ELSE 0 END AS is_low "
+              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 1 ELSE 0 END AS is_low, "
+              f"CASE WHEN SUM({AVAILABLE_SQL}) <= 0 THEN 'out_of_stock' "
+              f"WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
+              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 'low' "
+              f"WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
+              " + SUM(COALESCE(i.safe_stock,0)) * 0.25 "
+              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 'attention' "
+              "ELSE 'normal' END AS product_alert_level "
               "FROM resolved_inventory i "
+              "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
+              "LEFT JOIN lot_counts lc ON lc.inventory_id=i.id "
               f"WHERE {where} GROUP BY i.resolved_product_id,i.canonical_product_code,"
-              f"i.canonical_product_name,i.canonical_category {having} "
+              f"i.canonical_product_name,i.canonical_category,pt.safe_stock,pt.warning_buffer {having} "
               "ORDER BY is_low DESC, "
-              "(safe_stock-available_quantity) DESC, product_code COLLATE NOCASE, product_id "
+              "(COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) - SUM(" + AVAILABLE_SQL + ")) DESC, "
+              "product_code COLLATE NOCASE, product_id "
               "LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
@@ -154,6 +171,26 @@ class InventoryProductRepository:
             "FROM products WHERE id=? AND deleted_at IS NULL",
             (product_id,),
         ).fetchone()
+
+    @staticmethod
+    def get_threshold(product_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM product_inventory_thresholds WHERE product_id=?",
+            (product_id,),
+        ).fetchone()
+
+    @staticmethod
+    def upsert_threshold_txn(product_id, safe_stock, warning_buffer, updated_by, updated_by_name, db):
+        return db.execute(
+            "INSERT INTO product_inventory_thresholds "
+            "(product_id,safe_stock,warning_buffer,updated_by,updated_by_name,updated_at) "
+            "VALUES (?,?,?,?,?,datetime('now','localtime')) "
+            "ON CONFLICT(product_id) DO UPDATE SET safe_stock=excluded.safe_stock,"
+            "warning_buffer=excluded.warning_buffer,updated_by=excluded.updated_by,"
+            "updated_by_name=excluded.updated_by_name,updated_at=excluded.updated_at",
+            (product_id, safe_stock, warning_buffer, updated_by, updated_by_name),
+        )
 
     @staticmethod
     def list_aliases(product_id, db=None):
@@ -189,7 +226,7 @@ class InventoryProductRepository:
         groups = []
         for row in rows:
             item = dict(row)
-            item["compatibility_key"] = compatibility_key(item)
+            item["compatibility_key"] = _compatibility_key_for_row(item)
             groups.append(item)
         return groups
 
@@ -218,7 +255,9 @@ class InventoryProductRepository:
         for row in rows:
             row_key = _compatibility_key_for_row(row)
             if not compatibility_key or row_key == compatibility_key:
-                details.append(row)
+                item = dict(row)
+                item["compatibility_key"] = row_key
+                details.append(item)
         return details
 
     @classmethod
@@ -241,6 +280,40 @@ class InventoryProductRepository:
             ),
             "identity_warnings": warnings,
         }
+
+    @classmethod
+    def list_allocation_candidates(cls, product_id, compatibility_key="", db=None):
+        """Return a stable, read-only candidate snapshot for allocation preview."""
+        db = resolve_db(db)
+        rows = db.execute(
+            cls._resolved_cte()
+            + "SELECT i.id AS inventory_id,i.resolved_product_id AS product_id,"
+              "i.order_id,i.order_no,"
+              f"{AVAILABLE_SQL} AS available_quantity,"
+              f"{NORMALIZED_SPECIFICATION_SQL} AS specification,"
+              "i.route_version_id_snapshot,"
+              f"{NORMALIZED_QUALITY_STATUS_SQL} AS quality_status,"
+              "i.location,i.unit,"
+              "COALESCE(MIN(NULLIF(l.created_at,'')),i.updated_at,'') AS received_at,"
+              "COALESCE(MIN(NULLIF(l.lot_no,'')),'') AS lot_no,"
+              "COALESCE(MIN(NULLIF(l.serial_no,'')),'') AS serial_no "
+              "FROM resolved_inventory i "
+              "LEFT JOIN inventory_logs l ON l.inventory_id=i.id "
+              "WHERE i.resolved_product_id=? "
+              "AND " + NORMALIZED_QUALITY_STATUS_SQL + "='qualified' "
+              "GROUP BY i.id,i.resolved_product_id,i.order_id,i.order_no,"
+              "i.quantity,i.reserved,i.frozen_quantity,i.specification,"
+              "i.route_version_id_snapshot,i.quality_status,i.location,i.unit,i.updated_at "
+              "ORDER BY received_at COLLATE NOCASE, i.id",
+            (product_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["compatibility_key"] = _compatibility_key_for_row(item)
+            if not compatibility_key or item["compatibility_key"] == compatibility_key:
+                result.append(item)
+        return result
 
     @staticmethod
     def list_identity_exceptions(limit=100, db=None):

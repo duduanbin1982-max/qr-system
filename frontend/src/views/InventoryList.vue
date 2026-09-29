@@ -5,7 +5,7 @@
     <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
       <ProductInventoryTable :groups="productState.groups" :filters="productState.filters" :loading="productState.loading" :error="productState.error" @search="productActions.loadGroups" @reset="productActions.resetFilters" @open-product="productActions.openProduct" />
     </div>
-    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" @close="productActions.closeDrawer" />
+    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
     <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
