@@ -55,7 +55,7 @@ ACTION_LABELS = {
     "calendar_manage": "日历管理",
     "downtime_manage": "停机管理",
     "generate": "生成排程",
-    "adjust": "调整排程",
+    "adjust": "调整",
     "lock": "锁定",
     "unlock": "解锁",
     "inbound": "入库",

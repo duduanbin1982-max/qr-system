@@ -72,6 +72,7 @@ def test_inventory_permissions_extend_catalog_and_warehouse_role():
         "outbound": "出库",
         "allocate": "分配",
         "reserve": "预留",
+        "adjust": "调整",
         "manage_threshold": "安全库存管理",
     }.items() <= ACTION_LABELS.items()
 

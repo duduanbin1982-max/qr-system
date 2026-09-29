@@ -13,6 +13,7 @@ def v095_database(tmp_path_factory):
     database = tmp_path_factory.mktemp("inventory-v096") / "v095.db"
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
     try:
         for version, _, migrate in migrations.MIGRATIONS:
             if version >= 96:
@@ -73,6 +74,73 @@ def test_v096_adds_product_identity_and_immutable_allocation_evidence(db):
         "prevent_inventory_allocation_items_update",
         "prevent_inventory_allocation_items_delete",
     }.issubset(triggers)
+
+
+def test_v096_rejects_allocation_evidence_updates_and_deletes(db):
+    m096_inventory_product_views(db)
+    product_id = db.execute(
+        "INSERT INTO products(product_code,product_name) "
+        "VALUES('P-IMMUTABLE','不可变产品')"
+    ).lastrowid
+    inventory_id = db.execute(
+        "INSERT INTO inventory "
+        "(product_model,product_name,quantity,product_id,product_code_snapshot,"
+        "product_name_snapshot) VALUES('P-IMMUTABLE','不可变产品',5,?,?,?)",
+        (product_id, "P-IMMUTABLE", "不可变产品"),
+    ).lastrowid
+    movement_id = db.execute(
+        "INSERT INTO inventory_logs(inventory_id,type,quantity) VALUES(?,'out',1)",
+        (inventory_id,),
+    ).lastrowid
+    run_id = db.execute(
+        "INSERT INTO inventory_allocation_runs "
+        "(idempotency_key,request_digest,preview_digest,result_digest,product_id,"
+        "compatibility_key,mode,requested_quantity) "
+        "VALUES('immutable-run','request','preview','result',?,'qualified','fifo',1)",
+        (product_id,),
+    ).lastrowid
+    item_id = db.execute(
+        "INSERT INTO inventory_allocation_items "
+        "(run_id,sequence_no,inventory_id,allocated_quantity,movement_id,"
+        "balance_before,balance_after) VALUES(?,1,?,1,?,5,4)",
+        (run_id, inventory_id, movement_id),
+    ).lastrowid
+    db.commit()
+
+    blocked_operations = (
+        (
+            "UPDATE inventory_allocation_runs SET reason='changed' WHERE id=?",
+            run_id,
+            "inventory_allocation_runs is immutable",
+        ),
+        (
+            "DELETE FROM inventory_allocation_runs WHERE id=?",
+            run_id,
+            "inventory_allocation_runs is immutable",
+        ),
+        (
+            "UPDATE inventory_allocation_items SET order_no_snapshot='changed' "
+            "WHERE id=?",
+            item_id,
+            "inventory_allocation_items is immutable",
+        ),
+        (
+            "DELETE FROM inventory_allocation_items WHERE id=?",
+            item_id,
+            "inventory_allocation_items is immutable",
+        ),
+    )
+    for statement, row_id, message in blocked_operations:
+        with pytest.raises(sqlite3.IntegrityError, match=message):
+            db.execute(statement, (row_id,))
+        db.rollback()
+
+    assert db.execute(
+        "SELECT COUNT(*) FROM inventory_allocation_runs WHERE id=?", (run_id,)
+    ).fetchone()[0] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM inventory_allocation_items WHERE id=?", (item_id,)
+    ).fetchone()[0] == 1
 
 
 def test_v096_backfills_only_unambiguous_product_identity(db):
