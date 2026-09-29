@@ -39,9 +39,10 @@ class ScanRepository:
     def get_order_for_stock(order_id, db=None):
         db = resolve_db(db)
         return db.execute(
-            "SELECT o.id, o.order_no, o.product_code, o.product_name, o.quantity, p.spec "
+            "SELECT o.id,o.order_no,o.product_code,o.product_name,o.quantity,p.spec,"
+            "COALESCE(opl.product_id,o.product_id) AS product_id,o.route_version_id "
             "FROM orders o LEFT JOIN order_product_links opl ON opl.order_id = o.id "
-            "LEFT JOIN products p ON p.id = opl.product_id "
+            "LEFT JOIN products p ON p.id=COALESCE(opl.product_id,o.product_id) "
             "WHERE o.id = ?",
             (order_id,)
         ).fetchone()
@@ -612,7 +613,10 @@ class ScanRepository:
         )
 
     @staticmethod
-    def find_or_create_inventory(product_code, product_name, order_id=None, specification="", db=None):
+    def find_or_create_inventory(
+        product_code, product_name, order_id=None, specification="", *,
+        product_id, route_version_id, db=None
+    ):
         db = resolve_db(db)
         if order_id:
             inv = db.execute(
@@ -624,9 +628,14 @@ class ScanRepository:
                 return inv["id"]
         try:
             cur = db.execute(
-                "INSERT INTO inventory (product_model, product_name, quantity, order_id, specification) "
-                "VALUES (?, ?, 0, ?, ?)",
-                (product_code, product_name or product_code, order_id, specification or ""),
+                "INSERT INTO inventory (product_model,product_name,quantity,order_id,"
+                "specification,product_id,product_code_snapshot,product_name_snapshot,"
+                "route_version_id_snapshot) VALUES (?,?,0,?,?,?,?,?,?)",
+                (
+                    product_code, product_name or product_code, order_id,
+                    specification or "", product_id, product_code,
+                    product_name or product_code, route_version_id,
+                ),
             )
         except sqlite3.IntegrityError as exc:
             # Compatibility for databases created by the former global UNIQUE

@@ -1,6 +1,11 @@
 <!-- InventoryList.vue -->
 <template>
 <div style="padding:var(--space-6)">
+    <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
+    <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
+      <ProductInventoryTable :groups="productState.groups" :filters="productState.filters" :loading="productState.loading" :error="productState.error" @search="productActions.loadGroups" @reset="productActions.resetFilters" @open-product="productActions.openProduct" />
+    </div>
+    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
     <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
     <div class="summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
@@ -11,7 +16,7 @@
       <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: stats.low_stock > 0 ? 'var(--danger)' : 'var(--success)'}">{{ stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
     </div>
     <!-- ====== 主内容卡片 ====== -->
-    <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
+    <div v-if="productState.viewMode !== 'product'" class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
       <div class="card-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">
         <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2)">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--primary-accent));border-radius:var(--radius-md);font-size:var(--text-lg)">🏗️</span>
@@ -272,10 +277,17 @@
 </template>
 <script>
 import { useInventory } from '@/composables/useInventory.js'
+import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
+import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
+import ProductInventoryTable from '@/components/inventory/ProductInventoryTable.vue'
+import ProductInventoryDrawer from '@/components/inventory/ProductInventoryDrawer.vue'
 
 export default {
+  components: { InventoryViewTabs, ProductInventoryTable, ProductInventoryDrawer },
   setup() {
-    return useInventory()
+    const inventory = useInventory()
+    const product = useInventoryProductGroups()
+    return { ...inventory, productState: product.state, productActions: product.actions }
   }
 }
 </script>

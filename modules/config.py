@@ -255,6 +255,53 @@ ROUTE_PRICE_PENDING_WRITE_ENABLED = _PENDING_ROUTE_PRICE_FLAGS[
 ]
 validate_pending_route_price_flags(_PENDING_ROUTE_PRICE_FLAGS)
 
+
+def load_inventory_product_flags(env=None):
+    source = os.environ if env is None else env
+    values = {
+        key: str(source.get(key, "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+        for key in (
+            "INVENTORY_PRODUCT_QUERY_ENABLED",
+            "INVENTORY_ALLOCATION_PREVIEW_ENABLED",
+            "INVENTORY_CROSS_ORDER_OUTBOUND_ENABLED",
+            "INVENTORY_PRODUCT_THRESHOLD_ENABLED",
+        )
+    }
+    if (
+        values["INVENTORY_ALLOCATION_PREVIEW_ENABLED"]
+        and not values["INVENTORY_PRODUCT_QUERY_ENABLED"]
+    ):
+        raise RuntimeError("inventory allocation preview requires product query")
+    if values["INVENTORY_CROSS_ORDER_OUTBOUND_ENABLED"] and not (
+        values["INVENTORY_PRODUCT_QUERY_ENABLED"]
+        and values["INVENTORY_ALLOCATION_PREVIEW_ENABLED"]
+    ):
+        raise RuntimeError(
+            "inventory cross-order outbound requires query and preview"
+        )
+    if (
+        values["INVENTORY_PRODUCT_THRESHOLD_ENABLED"]
+        and not values["INVENTORY_PRODUCT_QUERY_ENABLED"]
+    ):
+        raise RuntimeError("inventory product threshold requires product query")
+    return values
+
+
+_INVENTORY_PRODUCT_FLAGS = load_inventory_product_flags()
+INVENTORY_PRODUCT_QUERY_ENABLED = _INVENTORY_PRODUCT_FLAGS[
+    "INVENTORY_PRODUCT_QUERY_ENABLED"
+]
+INVENTORY_ALLOCATION_PREVIEW_ENABLED = _INVENTORY_PRODUCT_FLAGS[
+    "INVENTORY_ALLOCATION_PREVIEW_ENABLED"
+]
+INVENTORY_CROSS_ORDER_OUTBOUND_ENABLED = _INVENTORY_PRODUCT_FLAGS[
+    "INVENTORY_CROSS_ORDER_OUTBOUND_ENABLED"
+]
+INVENTORY_PRODUCT_THRESHOLD_ENABLED = _INVENTORY_PRODUCT_FLAGS[
+    "INVENTORY_PRODUCT_THRESHOLD_ENABLED"
+]
+
 # File upload whitelist (lowercase extensions with dot)
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents
@@ -340,6 +387,9 @@ PREDEFINED_ROLES = {
         'permissions': [
             'page:inventory', 'page:shipments',
             'inventory:view','inventory:create','inventory:edit','inventory:delete',
+            'inventory:export','inventory:inbound','inventory:outbound',
+            'inventory:allocate','inventory:reserve','inventory:adjust',
+            'inventory:audit','inventory:manage_threshold',
             'shipments:view','shipments:create','shipments:edit','shipments:delete',
             'products:view',
         ]

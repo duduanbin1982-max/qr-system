@@ -28,6 +28,8 @@ class InventoryAutoInboundService:
                 product_name,
                 order_id,
                 spec,
+                product_id=order_row["product_id"],
+                route_version_id=order_row["route_version_id"],
                 db=d,
             )
 

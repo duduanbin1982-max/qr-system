@@ -15,6 +15,147 @@ from modules.route_decorators import (
 )
 from modules.services.setting_service import SettingsService
 from modules.services.inventory_service import InventoryService
+from modules.services.inventory_product_query_service import InventoryProductQueryService
+from modules.services.inventory_allocation_service import InventoryAllocationService
+
+
+@app.route('/api/inventory/capabilities', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_capabilities():
+    return jsonify(InventoryProductQueryService.capabilities())
+
+
+@app.route('/api/inventory/product-groups', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_product_groups():
+    pagination = parse_pagination(max_limit=200)
+    return jsonify(InventoryProductQueryService.list_groups(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '0') == '1',
+        location=request.args.get('location', ''),
+        quality_status=request.args.get('quality_status', ''),
+        identity_status=request.args.get('identity_status', ''),
+        page=pagination['page'],
+        limit=pagination['limit'],
+    ))
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/details', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_product_group_details(product_id):
+    return jsonify(InventoryProductQueryService.get_details(
+        product_id,
+        compatibility_key=request.args.get('compatibility_key', ''),
+    ))
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/threshold', methods=['POST'])
+@check_auth
+@check_permission('inventory:manage_threshold')
+@validate_json('inventory_product_threshold')
+def inventory_product_group_threshold(product_id):
+    data = get_json_body()
+    return jsonify(InventoryProductQueryService.set_threshold(
+        product_id,
+        data.get('safe_stock'),
+        data.get('warning_buffer'),
+        updated_by=g.current_user.get('id'),
+        updated_by_name=g.current_user.get('name', g.current_user.get('username', '')),
+    ))
+
+
+@app.route('/api/inventory/product-groups/export', methods=['GET'])
+@check_auth
+@check_permission('inventory:export')
+def inventory_product_groups_export():
+    output = InventoryProductQueryService.export_groups(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '0') == '1',
+        location=request.args.get('location', ''),
+        quality_status=request.args.get('quality_status', ''),
+        identity_status=request.args.get('identity_status', ''),
+    )
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'inventory_product_groups_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/export', methods=['GET'])
+@check_auth
+@check_permission('inventory:export')
+def inventory_product_group_details_export(product_id):
+    output = InventoryProductQueryService.export_details(
+        product_id, compatibility_key=request.args.get('compatibility_key', '')
+    )
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'inventory_product_{product_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/allocation-preview', methods=['POST'])
+@check_auth
+@check_permission('inventory:allocate')
+@validate_json('inventory_allocation_preview')
+def inventory_product_group_allocation_preview(product_id):
+    data = get_json_body()
+    return jsonify(InventoryAllocationService.preview(
+        product_id,
+        data.get('quantity'),
+        mode=data.get('mode', 'fifo'),
+        compatibility_key=data.get('compatibility_key', ''),
+        selected_inventory_ids=data.get('selected_inventory_ids', ()),
+        reason=data.get('reason', ''),
+    ))
+
+
+@app.route('/api/inventory/product-groups/<int:product_id>/outbound', methods=['POST'])
+@check_auth
+@check_permission('inventory:outbound')
+@validate_json('inventory_allocation_outbound')
+def inventory_product_group_outbound(product_id):
+    data = get_json_body()
+    result = InventoryAllocationService.outbound(
+        product_id,
+        data.get('quantity'),
+        idempotency_key=data.get('idempotency_key', ''),
+        operator_id=g.current_user.get('id'),
+        operator_name=g.current_user.get('name', g.current_user.get('username', '')),
+        mode=data.get('mode', 'fifo'),
+        compatibility_key=data.get('compatibility_key', ''),
+        selected_inventory_ids=data.get('selected_inventory_ids', ()),
+        reason=data.get('reason', ''),
+        preview_digest=data.get('preview_digest', ''),
+        order_id=data.get('order_id'),
+        order_no=data.get('order_no', ''),
+    )
+    return jsonify(result)
+
+
+@app.route('/api/inventory/allocation-runs', methods=['GET'])
+@check_auth
+@check_permission('inventory:audit')
+def inventory_allocation_runs():
+    page = max(request.args.get('page', 1, type=int), 1)
+    limit = min(max(request.args.get('limit', 50, type=int), 1), 200)
+    return jsonify(InventoryAllocationService.list_runs(
+        product_id=request.args.get('product_id', type=int), page=page, limit=limit,
+    ))
+
+
+@app.route('/api/inventory/allocation-runs/<int:run_id>/reverse', methods=['POST'])
+@check_auth
+@check_permission('inventory:outbound')
+@validate_json('inventory_allocation_reversal')
+def inventory_allocation_reverse(run_id):
+    data = get_json_body()
+    return jsonify(InventoryAllocationService.reverse(
+        run_id,
+        idempotency_key=data.get('idempotency_key', ''),
+        operator_id=g.current_user.get('id'),
+        operator_name=g.current_user.get('name', g.current_user.get('username', '')),
+        reason=data.get('reason', ''),
+    ))
 
 
 @app.route('/api/inventory', methods=['GET'])

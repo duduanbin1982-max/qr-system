@@ -19,4 +19,19 @@ export const inventoryApi = {
   approveCountTask: (taskId) => request('POST', '/api/inventory/count-task/' + taskId + '/approve', {}),
   listLocations:    ()       => request('GET', '/api/inventory/locations'),
   inventoryImpact:  (id)     => request('GET', '/api/inventory/' + id + '/impact'),
+  inventoryCapabilities: () => request('GET', '/api/inventory/capabilities'),
+  listProductGroups: (params) => request('GET', '/api/inventory/product-groups' + buildQuery(params)),
+  productGroupDetails: (productId, params) => request(
+    'GET', `/api/inventory/product-groups/${productId}/details` + buildQuery(params),
+  ),
+  allocationPreview: (productId, data) => request(
+    'POST', `/api/inventory/product-groups/${productId}/allocation-preview`, data,
+  ),
+  productGroupOutbound: (productId, data) => request(
+    'POST', `/api/inventory/product-groups/${productId}/outbound`, data,
+  ),
+  listAllocationRuns: (params) => request('GET', '/api/inventory/allocation-runs' + buildQuery(params)),
+  reverseAllocation: (runId, data) => request('POST', `/api/inventory/allocation-runs/${runId}/reverse`, data),
+  productGroupThreshold: (productId, data) => request('POST', `/api/inventory/product-groups/${productId}/threshold`, data),
+  productGroupExportUrl: (params) => '/api/inventory/product-groups/export' + buildQuery(params),
 }

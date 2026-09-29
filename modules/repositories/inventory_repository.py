@@ -6,6 +6,103 @@ from modules.query_utils import paginate, build_sort_clause
 class InventoryRepository:
 
     @staticmethod
+    def find_log_by_id(log_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT inventory_id,serial_no,qty_delta FROM inventory_logs WHERE id=?",
+            (log_id,),
+        ).fetchone()
+
+    @staticmethod
+    def find_allocation_run_by_idempotency(idempotency_key, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+
+    @staticmethod
+    def find_allocation_run(run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE id=?", (run_id,)
+        ).fetchone()
+
+    @staticmethod
+    def find_reversal_run(original_run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_runs WHERE reversal_of_run_id=?",
+            (original_run_id,),
+        ).fetchone()
+
+    @staticmethod
+    def list_allocation_items(run_id, db=None):
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM inventory_allocation_items WHERE run_id=? ORDER BY sequence_no",
+            (run_id,),
+        ).fetchall()
+
+    @staticmethod
+    def list_allocation_runs(product_id=None, page=1, limit=50, db=None):
+        db = resolve_db(db)
+        page = max(int(page), 1)
+        limit = max(1, min(int(limit), 200))
+        clauses, params = ["1=1"], []
+        if product_id is not None:
+            clauses.append("r.product_id=?")
+            params.append(product_id)
+        where = " AND ".join(clauses)
+        total = db.execute(
+            "SELECT COUNT(*) FROM inventory_allocation_runs r WHERE " + where,
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            "SELECT r.*,p.product_code,p.product_name "
+            "FROM inventory_allocation_runs r JOIN products p ON p.id=r.product_id "
+            "WHERE " + where + " ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?",
+            [*params, limit, (page - 1) * limit],
+        ).fetchall()
+        return rows, int(total)
+
+    @staticmethod
+    def insert_allocation_run_txn(payload, db):
+        cursor = db.execute(
+            "INSERT INTO inventory_allocation_runs "
+            "(idempotency_key,request_digest,preview_digest,result_digest,product_id,"
+            "compatibility_key,mode,requested_quantity,reason,operator_id,operator_name,"
+            "reversal_of_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload["idempotency_key"], payload["request_digest"],
+                payload["preview_digest"], payload["result_digest"],
+                payload["product_id"], payload["compatibility_key"], payload["mode"],
+                payload["requested_quantity"], payload.get("reason", ""),
+                payload.get("operator_id"), payload.get("operator_name", ""),
+                payload.get("reversal_of_run_id"),
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
+    def insert_allocation_item_txn(payload, db):
+        cursor = db.execute(
+            "INSERT INTO inventory_allocation_items "
+            "(run_id,sequence_no,inventory_id,source_order_id,order_no_snapshot,"
+            "lot_no,serial_no,location_snapshot,allocated_quantity,movement_id,"
+            "balance_before,balance_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload["run_id"], payload["sequence_no"], payload["inventory_id"],
+                payload.get("source_order_id"), payload.get("order_no", ""),
+                payload.get("lot_no", ""), payload.get("serial_no", ""),
+                payload.get("location", ""), payload["allocated_quantity"],
+                payload["movement_id"], payload["balance_before"],
+                payload["balance_after"],
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
     def build_item_filters(keyword="", low_stock=False, location=""):
         clauses = ["i.deleted_at IS NULL"]
         params = []
@@ -17,7 +114,10 @@ class InventoryRepository:
             )
             params.extend([f"%{keyword}%"] * 8)
         if low_stock:
-            clauses.append("i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0")
+            clauses.append(
+                "i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0) "
+                "<= i.safe_stock AND i.safe_stock > 0"
+            )
         if location:
             clauses.append("i.location = ?")
             params.append(location)
@@ -37,9 +137,17 @@ class InventoryRepository:
     def list_items_paginated(where_clause, params, page, limit, db=None):
         db = resolve_db(db)
         base_sql = (
-            "SELECT i.*, i.quantity - i.reserved AS available_quantity, "
+            "SELECT COALESCE(i.product_id,o.product_id,pca.product_id) AS product_id, "
+            "COALESCE(NULLIF(i.product_code_snapshot,''),NULLIF(o.product_code,''),"
+            "i.product_model) AS product_code_snapshot, "
+            "COALESCE(NULLIF(i.product_name_snapshot,''),NULLIF(i.product_name,''),"
+            "o.product_name,'') AS product_name_snapshot, "
+            "i.*, COALESCE(i.frozen_quantity,0) AS frozen_quantity, "
+            "MAX(i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0), 0) "
+            "AS available_quantity, "
             "o.order_no, o.customer, p.price, "
-            "CASE WHEN i.quantity - i.reserved <= i.safe_stock AND i.safe_stock > 0 "
+            "CASE WHEN i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0) "
+            "<= i.safe_stock AND i.safe_stock > 0 "
             "THEN 1 ELSE 0 END as is_low FROM inventory i "
             "LEFT JOIN orders o ON i.order_id = o.id "
             "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
@@ -52,12 +160,21 @@ class InventoryRepository:
         return rows, size
 
     @staticmethod
-    def insert_txn(model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id, db):
+    def insert_txn(
+        model, product_name, specification, safe_stock, location, unit, remark,
+        category, unit_cost, order_id, product_id, product_code_snapshot,
+        product_name_snapshot, route_version_id_snapshot, db
+    ):
         db.execute(
             "INSERT INTO inventory (product_model, product_name, specification, "
-            "quantity, safe_stock, location, unit, remark, category, unit_cost, order_id) "
-            "VALUES (?,?,?,0,?,?,?,?,?,?,?)",
-            (model, product_name, specification, safe_stock, location, unit, remark, category, unit_cost, order_id)
+            "quantity, safe_stock, location, unit, remark, category, unit_cost, order_id, "
+            "product_id, product_code_snapshot, product_name_snapshot, "
+            "route_version_id_snapshot) VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                model, product_name, specification, safe_stock, location, unit,
+                remark, category, unit_cost, order_id, product_id,
+                product_code_snapshot, product_name_snapshot, route_version_id_snapshot,
+            )
         )
         return db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
@@ -92,8 +209,12 @@ class InventoryRepository:
         db = resolve_db(db)
         return db.execute(
             "SELECT id AS inventory_id, product_model, product_name, specification, "
-            "quantity, reserved, quantity - reserved AS available_quantity, unit, order_id FROM inventory "
-            "WHERE order_id = ? AND quantity - reserved > 0 AND deleted_at IS NULL",
+            "quantity, reserved, "
+            "MAX(quantity - COALESCE(reserved,0) - COALESCE(frozen_quantity,0),0) "
+            "AS available_quantity, unit, order_id FROM inventory "
+            "WHERE order_id = ? AND "
+            "MAX(quantity - COALESCE(reserved,0) - COALESCE(frozen_quantity,0),0) > 0 "
+            "AND deleted_at IS NULL",
             (order_id,),
         ).fetchall()
 
