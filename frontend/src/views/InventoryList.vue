@@ -276,6 +276,7 @@
   </div>
 </template>
 <script>
+import { reactive } from 'vue'
 import { useInventory } from '@/composables/useInventory.js'
 import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
 import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
@@ -287,7 +288,11 @@ export default {
   setup() {
     const inventory = useInventory()
     const product = useInventoryProductGroups()
-    return { ...inventory, productState: product.state, productActions: product.actions }
+    // The composable exposes refs for direct JavaScript consumers. Convert the
+    // nested state object at the view boundary so Vue unwraps those refs in the
+    // template (tabs, table and drawer otherwise receive Ref objects).
+    const productState = reactive(product.state)
+    return { ...inventory, productState, productActions: product.actions }
   }
 }
 </script>
