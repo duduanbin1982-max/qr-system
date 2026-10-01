@@ -25,12 +25,39 @@
         </tbody>
       </table>
     </div>
+    <div v-if="!loading && !error && total > 0" class="product-pagination" aria-label="产品库存分页">
+      <span class="product-total">共 {{ total }} 个产品，当前显示 {{ rangeStart }}–{{ rangeEnd }}</span>
+      <label class="product-page-size">
+        每页
+        <select :value="limit" class="form-input" @change="$emit('change-limit', Number($event.target.value))">
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+          <option :value="200">200</option>
+        </select>
+      </label>
+      <button class="btn btn-default btn-sm" :disabled="page <= 1" @click="$emit('change-page', page - 1)">上一页</button>
+      <span class="product-page-current">第 {{ page }} / {{ totalPages }} 页</span>
+      <button class="btn btn-default btn-sm" :disabled="page >= totalPages" @click="$emit('change-page', page + 1)">下一页</button>
+    </div>
   </div>
 </template>
 
 <script setup>
-defineProps({ groups: { type: Array, default: () => [] }, filters: { type: Object, required: true }, loading: Boolean, error: { type: String, default: '' } })
-defineEmits(['search', 'reset', 'open-product'])
+import { computed } from 'vue'
+
+const props = defineProps({
+  groups: { type: Array, default: () => [] },
+  filters: { type: Object, required: true },
+  loading: Boolean,
+  error: { type: String, default: '' },
+  total: { type: Number, default: 0 },
+  page: { type: Number, default: 1 },
+  limit: { type: Number, default: 200 },
+})
+defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product'])
+const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.limit)))
+const rangeStart = computed(() => props.total ? (props.page - 1) * props.limit + 1 : 0)
+const rangeEnd = computed(() => Math.min(props.page * props.limit, props.total))
 function alertText(item) { return item.product_alert_level === 'out_of_stock' ? '缺货' : item.product_alert_level === 'low' ? '低库存' : item.product_alert_level === 'attention' ? '关注' : '正常' }
 function alertClass(item) { return `status-${item.product_alert_level || 'normal'}` }
 </script>
@@ -44,5 +71,14 @@ function alertClass(item) { return `status-${item.product_alert_level || 'normal
 .product-table { min-width:980px; }.product-table th,.product-table td { white-space:nowrap; }.product-table small { color:var(--text-muted); }
 .available { font-weight:700; color:var(--success); }.status-text { font-size:12px; font-weight:600; }
 .status-normal { color:var(--success); }.status-attention { color:var(--warning); }.status-low,.status-out_of_stock { color:var(--danger); }
-@media (max-width: 700px) { .product-toolbar input.form-input { min-width:100%; } }
+.product-pagination { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:12px 16px; border-top:1px solid var(--border-light); background:var(--bg-table-stripe); }
+.product-total { margin-right:auto; color:var(--text-secondary); font-size:13px; }
+.product-page-size { display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-size:13px; }
+.product-page-size .form-input { width:76px; padding:5px 8px; }
+.product-page-current { min-width:76px; text-align:center; color:var(--text-secondary); font-size:13px; }
+@media (max-width: 700px) {
+  .product-toolbar input.form-input { min-width:100%; }
+  .product-pagination { justify-content:center; }
+  .product-total { width:100%; margin-right:0; text-align:center; }
+}
 </style>

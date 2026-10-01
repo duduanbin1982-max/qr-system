@@ -2,12 +2,8 @@
 <template>
 <div style="padding:var(--space-6)">
     <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
-    <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
-      <ProductInventoryTable :groups="productState.groups" :filters="productState.filters" :loading="productState.loading" :error="productState.error" @search="productActions.loadGroups" @reset="productActions.resetFilters" @open-product="productActions.openProduct" />
-    </div>
-    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
     <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
-    <div class="summary-bar">
+    <div class="summary-bar inventory-summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
       <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ stats.total_quantity || totalQty }}</div><div class="s-label">库存总量</div></div></div>
       <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ inventoryValue.toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
@@ -15,6 +11,23 @@
       <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ stats.today_out }}</div><div class="s-label">今日出库</div></div></div>
       <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: stats.low_stock > 0 ? 'var(--danger)' : 'var(--success)'}">{{ stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
     </div>
+    <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
+      <ProductInventoryTable
+        :groups="productState.groups"
+        :filters="productState.filters"
+        :loading="productState.loading"
+        :error="productState.error"
+        :total="productState.total"
+        :page="productState.page"
+        :limit="productState.limit"
+        @search="productActions.searchGroups"
+        @reset="productActions.resetFilters"
+        @change-page="productActions.changePage"
+        @change-limit="productActions.changeLimit"
+        @open-product="productActions.openProduct"
+      />
+    </div>
+    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
     <!-- ====== 主内容卡片 ====== -->
     <div v-if="productState.viewMode !== 'product'" class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
       <div class="card-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">

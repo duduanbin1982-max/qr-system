@@ -19,7 +19,10 @@ export function useInventoryProductGroups() {
   const groups = ref([])
   const total = ref(0)
   const page = ref(1)
-  const limit = ref(50)
+  // The production catalogue currently exceeds 50 product groups. Prefer the
+  // API maximum so the normal view shows the complete catalogue, while the
+  // pager still supports future catalogues larger than 200 groups.
+  const limit = ref(200)
   const filters = ref(readJson(FILTER_KEY, { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '' }))
   const loading = ref(false)
   const error = ref('')
@@ -60,6 +63,25 @@ export function useInventoryProductGroups() {
     }
   }
 
+  function searchGroups() {
+    page.value = 1
+    return loadGroups()
+  }
+
+  function changePage(nextPage) {
+    const lastPage = Math.max(1, Math.ceil(total.value / limit.value))
+    page.value = Math.min(Math.max(Number(nextPage) || 1, 1), lastPage)
+    return loadGroups()
+  }
+
+  function changeLimit(nextLimit) {
+    const allowed = [50, 100, 200]
+    const parsed = Number(nextLimit)
+    limit.value = allowed.includes(parsed) ? parsed : 200
+    page.value = 1
+    return loadGroups()
+  }
+
   function resetFilters() {
     filters.value = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '' }
     page.value = 1
@@ -89,6 +111,6 @@ export function useInventoryProductGroups() {
 
   return {
     state: { capabilities, enabled, viewMode, groups, total, page, limit, filters, loading, error, selectedProduct, selectedDetails, drawerOpen },
-    actions: { loadCapabilities, setViewMode, loadGroups, resetFilters, openProduct, closeDrawer },
+    actions: { loadCapabilities, setViewMode, loadGroups, searchGroups, changePage, changeLimit, resetFilters, openProduct, closeDrawer },
   }
 }
