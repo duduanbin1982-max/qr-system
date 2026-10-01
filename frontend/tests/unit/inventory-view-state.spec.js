@@ -1,8 +1,21 @@
 import { computed, reactive, ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
+
+vi.mock('@/lib/api.js', () => ({
+  api: {
+    domains: {
+      inventory: {
+        inventoryCapabilities: vi.fn().mockResolvedValue({ product_query_enabled: true }),
+        listProductGroups: vi.fn().mockResolvedValue({ items: [], total: 101, page: 1, limit: 200 }),
+      },
+    },
+  },
+}))
+
+import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
 
 describe('inventory product view state binding', () => {
   it('unwraps nested refs at the view boundary so tab state is rendered as values', async () => {
@@ -25,5 +38,21 @@ describe('inventory product view state binding', () => {
     await wrapper.findAll('button')[1].trigger('click')
     expect(state.viewMode).toBe('product')
     expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toContain('按产品编码')
+  })
+
+  it('requests the full catalogue page by default', async () => {
+    localStorage.setItem('inventory-workbench:v1:view', 'product')
+    const { api } = await import('@/lib/api.js')
+    const wrapper = mount({
+      setup() {
+        return useInventoryProductGroups()
+      },
+      template: '<div />',
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(api.domains.inventory.listProductGroups).toHaveBeenCalledWith(expect.objectContaining({ limit: 200, page: 1 }))
+    wrapper.unmount()
+    localStorage.removeItem('inventory-workbench:v1:view')
   })
 })
