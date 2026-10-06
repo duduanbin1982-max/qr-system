@@ -68,7 +68,8 @@ class InventoryProductRepository:
             ), resolved_inventory AS (
                 SELECT ir.*, p.product_code AS canonical_product_code,
                        p.product_name AS canonical_product_name,
-                       p.category AS canonical_category
+                       p.category AS canonical_category,
+                       p.price AS canonical_price
                 FROM identity_rows ir
                 JOIN products p ON p.id=ir.resolved_product_id AND p.deleted_at IS NULL
                 WHERE ir.identity_reason='resolved'
@@ -90,10 +91,20 @@ class InventoryProductRepository:
         if filters.get("location"):
             clauses.append("i.location=?")
             params.append(filters["location"])
+        specifications = tuple(filters.get("specifications") or ())
+        if specifications:
+            spec_clauses = []
+            for specification in specifications:
+                if specification == "__empty__":
+                    spec_clauses.append(NORMALIZED_SPECIFICATION_SQL + "=''")
+                else:
+                    spec_clauses.append(NORMALIZED_SPECIFICATION_SQL + "=?")
+                    params.append(specification)
+            clauses.append("(" + " OR ".join(spec_clauses) + ")")
         if filters.get("quality_status"):
-            clauses.append("i.quality_status=?")
+            clauses.append(NORMALIZED_QUALITY_STATUS_SQL + "=?")
             params.append(filters["quality_status"])
-        if filters.get("identity_status") not in ("", "resolved"):
+        if (filters.get("identity_status") or "") not in ("", "resolved"):
             clauses.append("1=0")
         where = " AND ".join(clauses) if clauses else "1=1"
         having = ""
@@ -103,6 +114,91 @@ class InventoryProductRepository:
                 "AND COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) > 0"
             )
         return where, having, params
+
+    @classmethod
+    def list_filter_options(cls, db=None):
+        db = resolve_db(db)
+        specifications = db.execute(
+            cls._resolved_cte()
+            + f"SELECT {NORMALIZED_SPECIFICATION_SQL} AS value, COUNT(*) AS inventory_count, "
+              "COUNT(DISTINCT i.resolved_product_id) AS product_count "
+              "FROM resolved_inventory i GROUP BY " + NORMALIZED_SPECIFICATION_SQL + " "
+              "ORDER BY CASE WHEN value='' THEN 1 ELSE 0 END, value COLLATE NOCASE"
+        ).fetchall()
+        quality_statuses = db.execute(
+            cls._resolved_cte()
+            + f"SELECT {NORMALIZED_QUALITY_STATUS_SQL} AS value, COUNT(*) AS inventory_count "
+              "FROM resolved_inventory i GROUP BY " + NORMALIZED_QUALITY_STATUS_SQL + " "
+              "ORDER BY value COLLATE NOCASE"
+        ).fetchall()
+        locations = db.execute(
+            cls._resolved_cte()
+            + "SELECT TRIM(COALESCE(i.location,'')) AS value, COUNT(*) AS inventory_count "
+              "FROM resolved_inventory i WHERE TRIM(COALESCE(i.location,'')) != '' "
+              "GROUP BY TRIM(COALESCE(i.location,'')) ORDER BY value COLLATE NOCASE"
+        ).fetchall()
+        return {
+            "specifications": [dict(row) for row in specifications],
+            "quality_statuses": [dict(row) for row in quality_statuses],
+            "locations": [dict(row) for row in locations],
+        }
+
+    @classmethod
+    def get_group_summary(cls, filters, db=None):
+        """Return summary values using exactly the same filters as the group list."""
+        db = resolve_db(db)
+        where, having, params = cls._group_filters(filters)
+        grouped_sql = (
+            cls._resolved_cte()
+            + ", grouped AS ("
+              "SELECT i.resolved_product_id AS product_id, "
+              "SUM(i.quantity) AS quantity, "
+              "SUM(COALESCE(i.reserved,0)) AS reserved_quantity, "
+              "SUM(COALESCE(i.frozen_quantity,0)) AS frozen_quantity, "
+              f"SUM({AVAILABLE_SQL}) AS available_quantity, "
+              "SUM(i.quantity * COALESCE(i.canonical_price,0)) AS total_value, "
+              "CASE WHEN SUM(" + AVAILABLE_SQL + ") <= "
+              "COALESCE(MAX(pt.safe_stock), SUM(COALESCE(i.safe_stock,0))) "
+              "AND COALESCE(MAX(pt.safe_stock), SUM(COALESCE(i.safe_stock,0))) > 0 "
+              "THEN 1 ELSE 0 END AS is_low "
+              "FROM resolved_inventory i "
+              "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
+              f"WHERE {where} GROUP BY i.resolved_product_id {having}) "
+              "SELECT COUNT(*) AS total_items, "
+              "COALESCE(SUM(quantity),0) AS total_quantity, "
+              "COALESCE(SUM(reserved_quantity),0) AS reserved_quantity, "
+              "COALESCE(SUM(frozen_quantity),0) AS frozen_quantity, "
+              "COALESCE(SUM(available_quantity),0) AS available_quantity, "
+              "COALESCE(SUM(total_value),0) AS total_value, "
+              "COALESCE(SUM(is_low),0) AS low_stock FROM grouped"
+        )
+        row = db.execute(grouped_sql, params).fetchone()
+        today = db.execute(
+            cls._resolved_cte()
+            + ", grouped AS ("
+              "SELECT i.resolved_product_id AS product_id "
+              "FROM resolved_inventory i "
+              "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
+              f"WHERE {where} GROUP BY i.resolved_product_id {having}), "
+              "selected_inventory AS (SELECT i.id FROM resolved_inventory i "
+              "JOIN grouped g ON g.product_id=i.resolved_product_id) "
+              "SELECT COALESCE(SUM(CASE WHEN il.qty_delta > 0 THEN il.qty_delta ELSE 0 END),0) AS today_in, "
+              "COALESCE(SUM(CASE WHEN il.qty_delta < 0 THEN -il.qty_delta ELSE 0 END),0) AS today_out "
+              "FROM inventory_logs il JOIN selected_inventory si ON si.id=il.inventory_id "
+              "WHERE date(il.created_at)=date('now','localtime')",
+            params,
+        ).fetchone()
+        return {
+            "total_items": int(row["total_items"] or 0),
+            "total_quantity": row["total_quantity"] or 0,
+            "reserved_quantity": row["reserved_quantity"] or 0,
+            "frozen_quantity": row["frozen_quantity"] or 0,
+            "available_quantity": row["available_quantity"] or 0,
+            "total_value": row["total_value"] or 0,
+            "low_stock": int(row["low_stock"] or 0),
+            "today_in": today["today_in"] or 0,
+            "today_out": today["today_out"] or 0,
+        }
 
     @classmethod
     def count_groups(cls, filters, db=None):

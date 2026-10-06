@@ -5,6 +5,11 @@ from modules.query_utils import paginate, build_sort_clause
 
 class InventoryRepository:
 
+    EMPTY_SPECIFICATION_FILTER = "__empty__"
+    NORMALIZED_QUALITY_STATUS_SQL = (
+        "COALESCE(NULLIF(TRIM(COALESCE(i.quality_status,'')),''),'qualified')"
+    )
+
     @staticmethod
     def find_log_by_id(log_id, db=None):
         db = resolve_db(db)
@@ -103,7 +108,8 @@ class InventoryRepository:
         return cursor.lastrowid
 
     @staticmethod
-    def build_item_filters(keyword="", low_stock=False, location=""):
+    def build_item_filters(keyword="", low_stock=False, location="", specifications=None,
+                           quality_status=""):
         clauses = ["i.deleted_at IS NULL"]
         params = []
         if keyword:
@@ -121,6 +127,19 @@ class InventoryRepository:
         if location:
             clauses.append("i.location = ?")
             params.append(location)
+        specifications = tuple(specifications or ())
+        if specifications:
+            spec_clauses = []
+            for specification in specifications:
+                if specification == InventoryRepository.EMPTY_SPECIFICATION_FILTER:
+                    spec_clauses.append("TRIM(COALESCE(i.specification, '')) = ''")
+                else:
+                    spec_clauses.append("TRIM(COALESCE(i.specification, '')) = ?")
+                    params.append(specification)
+            clauses.append("(" + " OR ".join(spec_clauses) + ")")
+        if quality_status:
+            clauses.append(InventoryRepository.NORMALIZED_QUALITY_STATUS_SQL + " = ?")
+            params.append(quality_status)
         return " AND ".join(clauses), params
 
     @staticmethod
@@ -463,23 +482,73 @@ class InventoryRepository:
         ).fetchone()[0]
 
     @staticmethod
-    def get_inventory_stats(db=None):
+    def get_inventory_stats(where_clause=None, params=None, db=None):
         db = resolve_db(db)
+        if where_clause is None:
+            return db.execute(
+                "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
+                "COALESCE(SUM(CASE WHEN quantity - COALESCE(reserved,0) "
+                "- COALESCE(frozen_quantity,0) <= safe_stock "
+                "AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
+                "FROM inventory WHERE deleted_at IS NULL"
+            ).fetchone()
+        params = params or []
         return db.execute(
-            "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
-            "COALESCE(SUM(CASE WHEN quantity - reserved <= safe_stock "
-            "AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
-            "FROM inventory WHERE deleted_at IS NULL"
+            "SELECT COUNT(DISTINCT i.id) as total_items, "
+            "COALESCE(SUM(i.quantity),0) as total_quantity, "
+            "COALESCE(SUM(CASE WHEN i.quantity - COALESCE(i.reserved,0) "
+            "- COALESCE(i.frozen_quantity,0) <= i.safe_stock "
+            "AND i.safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
+            "FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
+            "WHERE " + where_clause,
+            params,
         ).fetchone()
 
     @staticmethod
-    def get_today_stats(today, db=None):
+    def get_today_stats(today, where_clause=None, params=None, db=None):
         db = resolve_db(db)
+        if where_clause is None:
+            return db.execute(
+                "SELECT COALESCE(SUM(CASE WHEN qty_delta > 0 THEN qty_delta ELSE 0 END),0) as today_in, "
+                "COALESCE(SUM(CASE WHEN qty_delta < 0 THEN -qty_delta ELSE 0 END),0) as today_out "
+                "FROM inventory_logs WHERE date(created_at) = ?", (today,)
+            ).fetchone()
+        params = params or []
         return db.execute(
-            "SELECT COALESCE(SUM(CASE WHEN qty_delta > 0 THEN qty_delta ELSE 0 END),0) as today_in, "
-            "COALESCE(SUM(CASE WHEN qty_delta < 0 THEN -qty_delta ELSE 0 END),0) as today_out "
-            "FROM inventory_logs WHERE date(created_at) = ?", (today,)
+            "SELECT COALESCE(SUM(CASE WHEN il.qty_delta > 0 THEN il.qty_delta ELSE 0 END),0) as today_in, "
+            "COALESCE(SUM(CASE WHEN il.qty_delta < 0 THEN -il.qty_delta ELSE 0 END),0) as today_out "
+            "FROM inventory_logs il JOIN inventory i ON i.id = il.inventory_id "
+            "LEFT JOIN orders o ON i.order_id = o.id "
+            "WHERE date(il.created_at) = ? AND " + where_clause,
+            [today, *params],
         ).fetchone()
+
+    @staticmethod
+    def list_filter_options(db=None):
+        """Return distinct order-view filter values from active inventory facts."""
+        db = resolve_db(db)
+        specifications = db.execute(
+            "SELECT TRIM(COALESCE(i.specification,'')) AS value, COUNT(*) AS inventory_count "
+            "FROM inventory i WHERE i.deleted_at IS NULL "
+            "GROUP BY TRIM(COALESCE(i.specification,'')) "
+            "ORDER BY CASE WHEN value='' THEN 1 ELSE 0 END, value COLLATE NOCASE"
+        ).fetchall()
+        quality_statuses = db.execute(
+            "SELECT COALESCE(NULLIF(TRIM(COALESCE(i.quality_status,'')),''),'qualified') AS value, "
+            "COUNT(*) AS inventory_count FROM inventory i WHERE i.deleted_at IS NULL "
+            "GROUP BY COALESCE(NULLIF(TRIM(COALESCE(i.quality_status,'')),''),'qualified') "
+            "ORDER BY value COLLATE NOCASE"
+        ).fetchall()
+        locations = db.execute(
+            "SELECT TRIM(COALESCE(i.location,'')) AS value, COUNT(*) AS inventory_count "
+            "FROM inventory i WHERE i.deleted_at IS NULL AND TRIM(COALESCE(i.location,'')) != '' "
+            "GROUP BY TRIM(COALESCE(i.location,'')) ORDER BY value COLLATE NOCASE"
+        ).fetchall()
+        return {
+            "specifications": [dict(row) for row in specifications],
+            "quality_statuses": [dict(row) for row in quality_statuses],
+            "locations": [dict(row) for row in locations],
+        }
 
     @staticmethod
     def list_abc_rows(db=None):

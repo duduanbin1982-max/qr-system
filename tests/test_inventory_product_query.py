@@ -71,6 +71,84 @@ def test_product_groups_aggregate_by_product_id_and_preserve_order_details(
     }
 
 
+def test_product_filter_options_and_multi_specification_filter(client, auth_headers, db):
+    scenario = seed_product_inventory_scenario(db, specs=("标准", "加厚"))
+
+    options = client.get(
+        "/api/inventory/filter-options?view=product", headers=auth_headers
+    )
+    assert options.status_code == 200
+    values = {item["value"] for item in options.get_json()["specifications"]}
+    assert {"标准", "加厚"}.issubset(values)
+
+    filtered = client.get(
+        "/api/inventory/product-groups?specification=加厚", headers=auth_headers
+    )
+    assert filtered.status_code == 200
+    payload = filtered.get_json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["product_id"] == scenario["product_id"]
+
+    empty = db.execute(
+        "INSERT INTO inventory(product_model,product_name,specification,quantity,product_id,"
+        "product_code_snapshot,product_name_snapshot) VALUES(?,?,?,?,?,?,?)",
+        (
+            scenario["product_code"], "空规格库存", "", 1, scenario["product_id"],
+            scenario["product_code"], "测试产品",
+        ),
+    ).lastrowid
+    db.commit()
+    empty_filtered = client.get(
+        "/api/inventory/product-groups?specification=__empty__", headers=auth_headers
+    ).get_json()
+    assert empty_filtered["total"] == 1
+    assert empty_filtered["items"][0]["inventory_count"] == 1
+    assert empty_filtered["items"][0]["quantity"] == 1
+
+
+def test_product_summary_uses_same_specification_filter(client, auth_headers, db):
+    scenario = seed_product_inventory_scenario(db, specs=("标准", "加厚"))
+    response = client.get(
+        "/api/inventory/stats?view=product&specification=加厚",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    summary = response.get_json()
+    assert summary["total_items"] == 1
+    assert summary["total_quantity"] == 7
+    assert summary["available_quantity"] == 4
+
+
+def test_product_summary_uses_product_threshold_override(
+    client, auth_headers, db, monkeypatch
+):
+    monkeypatch.setattr(config, "INVENTORY_PRODUCT_THRESHOLD_ENABLED", True)
+    scenario = seed_product_inventory_scenario(
+        db, safe_stocks=(0, 0), quantities=(5, 7), reserved=(1, 2), frozen=(0, 1)
+    )
+    db.execute(
+        "INSERT INTO product_inventory_thresholds "
+        "(product_id,safe_stock,warning_buffer,updated_by,updated_by_name,updated_at) "
+        "VALUES(?,?,?,?,?,datetime('now','localtime'))",
+        (scenario["product_id"], 20, 5, 1, "测试"),
+    )
+    db.commit()
+
+    groups = client.get(
+        "/api/inventory/product-groups", headers=auth_headers
+    ).get_json()
+    summary = client.get(
+        "/api/inventory/stats?view=product", headers=auth_headers
+    ).get_json()
+    group = next(
+        item for item in groups["items"] if item["product_id"] == scenario["product_id"]
+    )
+
+    assert group["safe_stock"] == 20
+    assert group["is_low"] == 1
+    assert summary["low_stock"] == 1
+
+
 def test_product_group_keeps_incompatible_specifications_separate(
     client, auth_headers, db
 ):

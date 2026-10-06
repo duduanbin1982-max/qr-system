@@ -3,6 +3,7 @@ import { api } from '@/lib/api.js'
 
 const VIEW_KEY = 'inventory-workbench:v1:view'
 const FILTER_KEY = 'inventory-workbench:v1:filters'
+const DEFAULT_FILTERS = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '', specifications: [] }
 
 function readJson(key, fallback) {
   try {
@@ -14,6 +15,7 @@ function readJson(key, fallback) {
 }
 
 export function useInventoryProductGroups() {
+  const storedFilters = readJson(FILTER_KEY, {})
   const capabilities = ref({ product_query_enabled: false })
   const viewMode = ref(localStorage.getItem(VIEW_KEY) || 'order')
   const groups = ref([])
@@ -23,7 +25,13 @@ export function useInventoryProductGroups() {
   // API maximum so the normal view shows the complete catalogue, while the
   // pager still supports future catalogues larger than 200 groups.
   const limit = ref(200)
-  const filters = ref(readJson(FILTER_KEY, { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '' }))
+  const filters = ref({
+    ...DEFAULT_FILTERS,
+    ...storedFilters,
+    specifications: Array.isArray(storedFilters.specifications) ? storedFilters.specifications : [],
+  })
+  const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
+  const summary = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
   const loading = ref(false)
   const error = ref('')
   const selectedProduct = ref(null)
@@ -35,10 +43,19 @@ export function useInventoryProductGroups() {
 
   async function loadCapabilities() {
     capabilities.value = await api.domains.inventory.inventoryCapabilities()
+    if (enabled.value) await loadFilterOptions()
     if (viewMode.value === 'product' && enabled.value && !groups.value.length) {
       await loadGroups()
     }
     return capabilities.value
+  }
+
+  async function loadFilterOptions() {
+    try {
+      filterOptions.value = await api.domains.inventory.inventoryFilterOptions({ view: 'product' })
+    } catch (_) {
+      // Keep the table usable when an older server does not expose options yet.
+    }
   }
 
   function setViewMode(mode) {
@@ -56,10 +73,23 @@ export function useInventoryProductGroups() {
       const data = await api.domains.inventory.listProductGroups({ ...filters.value, low_stock: filters.value.low_stock ? '1' : '', page: page.value, limit: limit.value })
       groups.value = data.items || []
       total.value = Number(data.total || 0)
+      await loadSummary()
     } catch (err) {
       error.value = err.message || '产品库存加载失败'
     } finally {
       loading.value = false
+    }
+  }
+
+  async function loadSummary() {
+    try {
+      summary.value = await api.domains.inventory.inventoryStats({
+        ...filters.value,
+        low_stock: filters.value.low_stock ? '1' : '',
+        view: 'product',
+      })
+    } catch (_) {
+      // Summary is supplemental; leave the previous values visible.
     }
   }
 
@@ -83,7 +113,7 @@ export function useInventoryProductGroups() {
   }
 
   function resetFilters() {
-    filters.value = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '' }
+    filters.value = { ...DEFAULT_FILTERS, specifications: [] }
     page.value = 1
     return loadGroups()
   }
@@ -110,7 +140,7 @@ export function useInventoryProductGroups() {
   onMounted(() => { loadCapabilities() })
 
   return {
-    state: { capabilities, enabled, viewMode, groups, total, page, limit, filters, loading, error, selectedProduct, selectedDetails, drawerOpen },
-    actions: { loadCapabilities, setViewMode, loadGroups, searchGroups, changePage, changeLimit, resetFilters, openProduct, closeDrawer },
+    state: { capabilities, enabled, viewMode, groups, total, page, limit, filters, filterOptions, summary, loading, error, selectedProduct, selectedDetails, drawerOpen },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, resetFilters, openProduct, closeDrawer },
   }
 }

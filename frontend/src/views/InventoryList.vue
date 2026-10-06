@@ -4,17 +4,18 @@
     <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
     <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
     <div class="summary-bar inventory-summary-bar">
-      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
-      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ stats.total_quantity || totalQty }}</div><div class="s-label">库存总量</div></div></div>
-      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ inventoryValue.toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
-      <div class="summary-item"><span class="s-icon">📥</span><div><div class="s-val text-success">{{ stats.today_in }}</div><div class="s-label">今日入库</div></div></div>
-      <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ stats.today_out }}</div><div class="s-label">今日出库</div></div></div>
-      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: stats.low_stock > 0 ? 'var(--danger)' : 'var(--success)'}">{{ stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ productState.viewMode === 'product' ? productState.summary.total_items : stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
+      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ productState.viewMode === 'product' ? productState.summary.total_quantity : (stats.total_quantity || totalQty) }}</div><div class="s-label">库存总量</div></div></div>
+      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ (productState.viewMode === 'product' ? productState.summary.total_value : inventoryValue).toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
+      <div class="summary-item"><span class="s-icon">📥</span><div><div class="s-val text-success">{{ productState.viewMode === 'product' ? productState.summary.today_in : stats.today_in }}</div><div class="s-label">今日入库</div></div></div>
+      <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ productState.viewMode === 'product' ? productState.summary.today_out : stats.today_out }}</div><div class="s-label">今日出库</div></div></div>
+      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: (productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock) > 0 ? 'var(--danger)' : 'var(--success)'}">{{ productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
     </div>
     <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
       <ProductInventoryTable
         :groups="productState.groups"
         :filters="productState.filters"
+        :filter-options="productState.filterOptions"
         :loading="productState.loading"
         :error="productState.error"
         :total="productState.total"
@@ -38,17 +39,26 @@
         <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
           <div style="display:flex;align-items:center;background:var(--bg-hover);border-radius:var(--radius-md);padding:0 12px;transition:all 0.2s;border:1px solid transparent">
             <span style="color:var(--text-placeholder);font-size:var(--text-base)">🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索型号 / 名称…" @keyup.enter="load" style="border:none;background:transparent;outline:none;padding:var(--space-2) 8px;font-size:var(--text-sm);width:170px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索型号 / 名称…" @keyup.enter="search" style="border:none;background:transparent;outline:none;padding:var(--space-2) 8px;font-size:var(--text-sm);width:170px;box-shadow:none">
           </div>
           <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-placeholder);cursor:pointer;white-space:nowrap;padding:6px 10px;background:#FFF;border-radius:var(--radius-md);border:1px solid var(--border-light)">
-            <input type="checkbox" v-model="lowStockOnly" @change="load" style="accent-color:var(--danger);width:14px;height:14px"> 仅低库存
+            <input type="checkbox" v-model="lowStockOnly" @change="search" style="accent-color:var(--danger);width:14px;height:14px"> 仅低库存
           </label>
-          <select class="form-input" v-model="locationFilter" @change="load" style="border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-xs);background:white;cursor:pointer;width:110px">
+          <select class="form-input" v-model="locationFilter" @change="search" style="border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-xs);background:white;cursor:pointer;width:110px">
             <option value="">📍 全部库位</option>
             <option v-for="loc in locations" :key="loc" :value="loc">{{ loc }}</option>
           </select>
+          <select class="form-input inventory-spec-filter" v-model="specificationFilter" multiple size="2" aria-label="规格筛选">
+            <option v-for="option in filterOptions.specifications" :key="option.value || '__empty__'" :value="option.value || '__empty__'">
+              {{ option.value || '未填写规格' }}（{{ option.inventory_count }}）
+            </option>
+          </select>
+          <select class="form-input" v-model="qualityStatusFilter" @change="search" style="border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-xs);background:white;cursor:pointer;width:125px">
+            <option value="">全部质量状态</option>
+            <option v-for="option in filterOptions.quality_statuses" :key="option.value" :value="option.value">{{ option.value }}（{{ option.inventory_count }}）</option>
+          </select>
           <div style="display:flex;gap:var(--space-2)">
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="load">🔍 搜索</button>
+            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="search">🔍 搜索</button>
             <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="doABC">🏷️ ABC</button>
             <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="loadLogs()">📋 流水</button>
             <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="loadTurnover">📊 周转</button>
@@ -129,6 +139,17 @@
             <div style="font-size:var(--text-base);color:var(--text-placeholder);margin-bottom:6px">暂无库存数据</div>
             <div style="font-size:var(--text-xs);color:var(--border)">点击「+ 新增库存」添加第一条记录</div>
           </div>
+        </div>
+        <div v-if="total > 0" class="inventory-pagination" aria-label="按订单库存分页" style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:12px 16px;border-top:1px solid var(--border-light);background:var(--bg-table-stripe);font-size:13px;color:var(--text-secondary)">
+          <span>共 {{ total }} 条，当前显示 {{ (page - 1) * limit + 1 }}–{{ Math.min(page * limit, total) }}</span>
+          <label>每页
+            <select class="form-input" :value="limit" @change="changeLimit(Number($event.target.value))">
+              <option :value="50">50</option><option :value="100">100</option><option :value="200">200</option><option :value="500">500</option>
+            </select>
+          </label>
+          <button class="btn btn-default btn-sm" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
+          <span>第 {{ page }} / {{ Math.max(1, Math.ceil(total / limit)) }} 页</span>
+          <button class="btn btn-default btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="changePage(page + 1)">下一页</button>
         </div>
       </div>
     </div>

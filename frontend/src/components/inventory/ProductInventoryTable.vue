@@ -3,6 +3,11 @@
     <div class="product-toolbar">
       <input v-model="filters.keyword" class="form-input" placeholder="搜索产品编码或名称" @keyup.enter="$emit('search')">
       <select v-model="filters.quality_status" class="form-input"><option value="">全部质量状态</option><option value="qualified">合格</option><option value="hold">冻结/待检</option></select>
+      <select v-model="filters.specifications" class="form-input specification-filter" multiple size="3" aria-label="规格筛选">
+        <option v-for="option in filterOptions.specifications" :key="option.value || '__empty__'" :value="option.value || '__empty__'">
+          {{ option.value || '未填写规格' }}（{{ option.inventory_count }}）
+        </option>
+      </select>
       <label><input v-model="filters.low_stock" type="checkbox" @change="$emit('search')"> 仅低库存</label>
       <button class="btn btn-primary" @click="$emit('search')">查询</button>
       <button class="btn btn-default" @click="$emit('reset')">重置</button>
@@ -48,6 +53,7 @@ import { computed } from 'vue'
 const props = defineProps({
   groups: { type: Array, default: () => [] },
   filters: { type: Object, required: true },
+  filterOptions: { type: Object, default: () => ({ specifications: [] }) },
   loading: Boolean,
   error: { type: String, default: '' },
   total: { type: Number, default: 0 },
@@ -64,7 +70,7 @@ function alertClass(item) { return `status-${item.product_alert_level || 'normal
 
 <style scoped>
 .product-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px; background:var(--bg-table-stripe); border-bottom:1px solid var(--border-light); }
-.product-toolbar input.form-input { min-width:220px; }
+.product-toolbar input.form-input { min-width:220px; }.specification-filter { min-width:150px; min-height:58px; }
 .product-toolbar label { font-size:13px; color:var(--text-secondary); }
 .product-empty,.product-error { padding:48px 16px; text-align:center; color:var(--text-muted); }
 .product-error { color:var(--danger); }
