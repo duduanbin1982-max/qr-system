@@ -7,10 +7,16 @@ export function useInventory() {
   const items = ref([])
   const orderOptions = ref([])
   const loading = ref(true)
+  const total = ref(0)
+  const page = ref(1)
+  const limit = ref(100)
   const searchKeyword = ref('')
   const lowStockOnly = ref(false)
   const locationFilter = ref('')
   const locations = ref([])
+  const specificationFilter = ref([])
+  const qualityStatusFilter = ref('')
+  const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
 
   const showLogs = ref(false)
   const logs = ref([])
@@ -56,9 +62,9 @@ export function useInventory() {
   const canDelete = computed(() => can('inventory:delete'))
   const canCreate = computed(() => can('inventory:create'))
 
-  async function loadStats() {
+  async function loadStats(params = null) {
     try {
-      const data = await api.domains.inventory.inventoryStats()
+      const data = await api.domains.inventory.inventoryStats(params)
       Object.assign(stats.value, data)
     } catch (error) {
       // noop
@@ -72,13 +78,38 @@ export function useInventory() {
       if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
       if (lowStockOnly.value) params.low_stock = '1'
       if (locationFilter.value) params.location = locationFilter.value
-      const data = await api.domains.inventory.listInventory(Object.keys(params).length ? params : null)
+      if (specificationFilter.value.length) params.specification = specificationFilter.value.join(',')
+      if (qualityStatusFilter.value) params.quality_status = qualityStatusFilter.value
+      params.page = page.value
+      params.limit = limit.value
+      const data = await api.domains.inventory.listInventory(params)
       items.value = data.items || []
+      total.value = Number(data.total || 0)
+      await loadStats({ ...params, page: undefined, limit: undefined })
     } catch (error) {
       showToast(error.message || '加载失败', 'error')
     } finally {
       loading.value = false
     }
+  }
+
+  function search() {
+    page.value = 1
+    return load()
+  }
+
+  function changePage(nextPage) {
+    const lastPage = Math.max(1, Math.ceil(total.value / limit.value))
+    page.value = Math.min(Math.max(Number(nextPage) || 1, 1), lastPage)
+    return load()
+  }
+
+  function changeLimit(nextLimit) {
+    const allowed = [50, 100, 200, 500]
+    const parsed = Number(nextLimit)
+    limit.value = allowed.includes(parsed) ? parsed : 100
+    page.value = 1
+    return load()
   }
 
   function exportExcel() {
@@ -171,6 +202,17 @@ export function useInventory() {
       locations.value = (data.locations || []).map((row) => row.location)
     } catch (error) {
       // noop
+    }
+  }
+
+  async function loadFilterOptions() {
+    try {
+      const data = await api.domains.inventory.inventoryFilterOptions({ view: 'order' })
+      filterOptions.value = data
+      locations.value = (data.locations || []).map((row) => row.value || row.location).filter(Boolean)
+    } catch (_) {
+      // Keep the legacy location endpoint as a fallback.
+      await loadLocations()
     }
   }
 
@@ -322,19 +364,24 @@ export function useInventory() {
 
   onMounted(() => {
     load()
-    loadStats()
     loadOrders()
-    loadLocations()
+    loadFilterOptions()
   })
 
   return {
     items,
+    total,
+    page,
+    limit,
     orderOptions,
     loading,
     searchKeyword,
     lowStockOnly,
     locationFilter,
     locations,
+    specificationFilter,
+    qualityStatusFilter,
+    filterOptions,
     showLogs,
     logs,
     logsLoading,
@@ -363,6 +410,11 @@ export function useInventory() {
     canDelete,
     canCreate,
     load,
+    search,
+    changePage,
+    changeLimit,
+    loadStats,
+    loadFilterOptions,
     exportExcel,
     doABC,
     loadTurnover,

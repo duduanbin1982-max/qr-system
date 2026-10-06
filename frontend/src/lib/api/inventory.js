@@ -3,6 +3,7 @@ import { request, buildQuery, uploadFile } from './client.js'
 export const inventoryApi = {
   // ========== 库存 ==========
   listInventory:    (params) => request('GET', '/api/inventory' + buildQuery(params)),
+  inventoryFilterOptions: (params) => request('GET', '/api/inventory/filter-options' + buildQuery(params)),
   classifyABC:      ()       => request('POST', '/api/inventory/abc'),
   createInventory:  (data)   => request('POST', '/api/inventory', data),
   updateInventory:  (id,data)=> request('PUT',  '/api/inventory/' + id, data),
@@ -11,7 +12,7 @@ export const inventoryApi = {
   stockOut:         (data)   => request('POST', '/api/inventory/stock-out', data),
   inventoryLogs:    (params) => request('GET', '/api/inventory/logs' + buildQuery(params)),
   inventoryAlerts:  ()       => request('GET', '/api/inventory/alerts'),
-  inventoryStats:   ()       => request('GET', '/api/inventory/stats'),
+  inventoryStats:   (params) => request('GET', '/api/inventory/stats' + buildQuery(params)),
   inventoryTurnover:()       => request('GET', '/api/inventory/turnover'),
   createCountTask:  ()       => request('POST', '/api/inventory/count-task', {}),
   countStatus:      (taskId) => request('GET', '/api/inventory/count-status' + buildQuery({ task_id: taskId })),

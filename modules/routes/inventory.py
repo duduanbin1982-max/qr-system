@@ -19,6 +19,26 @@ from modules.services.inventory_product_query_service import InventoryProductQue
 from modules.services.inventory_allocation_service import InventoryAllocationService
 
 
+def _multi_query_values(name):
+    """Parse repeated or comma-separated query values without duplicates."""
+    values = []
+    for raw in request.args.getlist(name):
+        values.extend(part.strip() for part in raw.split(',') if part.strip())
+    return tuple(dict.fromkeys(values))
+
+
+@app.route('/api/inventory/filter-options', methods=['GET'])
+@check_auth
+@check_permission('inventory:view')
+def inventory_filter_options():
+    view = request.args.get('view', 'order').strip().lower()
+    if view == 'product':
+        return jsonify(InventoryProductQueryService.filter_options())
+    if view != 'order':
+        return jsonify({'error': 'view 必须是 order 或 product'}), 400
+    return jsonify(InventoryService.get_filter_options())
+
+
 @app.route('/api/inventory/capabilities', methods=['GET'])
 @check_auth
 @check_permission('inventory:view')
@@ -37,6 +57,7 @@ def inventory_product_groups():
         location=request.args.get('location', ''),
         quality_status=request.args.get('quality_status', ''),
         identity_status=request.args.get('identity_status', ''),
+        specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
         page=pagination['page'],
         limit=pagination['limit'],
     ))
@@ -77,6 +98,7 @@ def inventory_product_groups_export():
         location=request.args.get('location', ''),
         quality_status=request.args.get('quality_status', ''),
         identity_status=request.args.get('identity_status', ''),
+        specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
     )
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'inventory_product_groups_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
@@ -181,9 +203,13 @@ def list_inventory():
     keyword = request.args.get('keyword', '')
     low_stock = request.args.get('low_stock', '0') == '1'
     location = request.args.get('location', '')
+    specifications = _multi_query_values('specification') or _multi_query_values('specifications')
+    quality_status = request.args.get('quality_status', '')
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
-    return jsonify(InventoryService.list_items(keyword, low_stock, location, page, limit))
+    return jsonify(InventoryService.list_items(
+        keyword, low_stock, location, page, limit, specifications, quality_status
+    ))
 
 
 @app.route('/api/inventory', methods=['POST'])
@@ -600,4 +626,15 @@ def inventory_stats():
     responses: {200: {description: 统计数据}}
     security: [{Bearer: []}]
     """
-    return jsonify(InventoryService.get_stats())
+    view = request.args.get('view', 'order').strip().lower()
+    if view not in {'order', 'product'}:
+        return jsonify({'error': 'view 必须是 order 或 product'}), 400
+    specifications = _multi_query_values('specification') or _multi_query_values('specifications')
+    return jsonify(InventoryService.get_stats(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '0') == '1',
+        location=request.args.get('location', ''),
+        specifications=specifications,
+        quality_status=request.args.get('quality_status', ''),
+        view=view,
+    ))

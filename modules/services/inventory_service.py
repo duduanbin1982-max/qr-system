@@ -15,9 +15,12 @@ class InventoryService:
     """库存管理业务逻辑。"""
 
     @staticmethod
-    def list_items(keyword='', low_stock=False, location='', page=1, limit=100):
+    def list_items(keyword='', low_stock=False, location='', page=1, limit=100,
+                   specifications=None, quality_status=''):
         """库存列表（搜索 + 低库存筛选 + 分页）。"""
-        where, params = InventoryRepository.build_item_filters(keyword, low_stock, location)
+        where, params = InventoryRepository.build_item_filters(
+            keyword, low_stock, location, specifications, quality_status
+        )
         total = InventoryRepository.count_items(where, params)
         rows, size = InventoryRepository.list_items_paginated(where, params, page, limit)
         return {'items': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': size}
@@ -533,11 +536,34 @@ class InventoryService:
         }
 
     @staticmethod
-    def get_stats():
+    def get_filter_options():
+        return InventoryRepository.list_filter_options()
+
+    @staticmethod
+    def get_stats(keyword='', low_stock=False, location='', specifications=None,
+                  quality_status='', view='order'):
         """库存统计（2次查询替代4次）。"""
+        if view == 'product':
+            from modules.services.inventory_product_query_service import InventoryProductQueryService
+            return InventoryProductQueryService.get_summary({
+                'keyword': (keyword or '').strip(),
+                'low_stock': bool(low_stock),
+                'location': (location or '').strip(),
+                'specifications': tuple(specifications or ()),
+                'quality_status': (quality_status or '').strip(),
+                'identity_status': '',
+            })
         today = datetime.now().strftime('%Y-%m-%d')
-        inv_stats = InventoryRepository.get_inventory_stats()
-        today_stats = InventoryRepository.get_today_stats(today)
+        where, params = InventoryRepository.build_item_filters(
+            keyword, low_stock, location, specifications, quality_status
+        )
+        unfiltered = not any((keyword, low_stock, location, specifications, quality_status))
+        inv_stats = InventoryRepository.get_inventory_stats(
+            None if unfiltered else where, None if unfiltered else params
+        )
+        today_stats = InventoryRepository.get_today_stats(
+            today, None if unfiltered else where, None if unfiltered else params
+        )
         return {
             'total_items': inv_stats['total_items'] or 0,
             'total_quantity': inv_stats['total_quantity'] or 0,

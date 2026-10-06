@@ -19,7 +19,7 @@ class InventoryProductQueryService:
     @classmethod
     def list_groups(
         cls, *, keyword="", low_stock=False, location="", quality_status="",
-        identity_status="", page=1, limit=50
+        identity_status="", specifications=None, page=1, limit=50
     ):
         if not config.INVENTORY_PRODUCT_QUERY_ENABLED:
             raise InventoryProductQueryDisabledError("产品编码库存视图尚未启用")
@@ -29,6 +29,7 @@ class InventoryProductQueryService:
             "location": (location or "").strip(),
             "quality_status": (quality_status or "").strip(),
             "identity_status": (identity_status or "").strip(),
+            "specifications": tuple(specifications or ()),
         }
         size = min(max(int(limit), 1), 200)
         current_page = max(int(page), 1)
@@ -69,6 +70,18 @@ class InventoryProductQueryService:
             "page": current_page,
             "limit": size,
         }
+
+    @classmethod
+    def filter_options(cls):
+        if not config.INVENTORY_PRODUCT_QUERY_ENABLED:
+            raise InventoryProductQueryDisabledError("产品编码库存视图尚未启用")
+        return InventoryProductRepository.list_filter_options()
+
+    @classmethod
+    def get_summary(cls, filters):
+        if not config.INVENTORY_PRODUCT_QUERY_ENABLED:
+            raise InventoryProductQueryDisabledError("产品编码库存视图尚未启用")
+        return InventoryProductRepository.get_group_summary(filters)
 
     @classmethod
     def set_threshold(cls, product_id, safe_stock, warning_buffer, *, updated_by=None, updated_by_name=""):
