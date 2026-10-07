@@ -39,7 +39,7 @@ function productGroups(count = 60) {
   }))
 }
 
-test('inventory desktop filter workbench is full-width, persistent, and uses a sticky header', async ({ page }) => {
+test('inventory filters persist while the 200-row product table pins key columns across both scroll axes', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginAdmin(page)
 
@@ -80,7 +80,7 @@ test('inventory desktop filter workbench is full-width, persistent, and uses a s
     if (pathname === '/api/inventory/product-groups') {
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ items: productGroups(), total: 60, page: 1, limit: 200 }),
+        body: JSON.stringify({ items: productGroups(200), total: 450, page: 1, limit: 200 }),
       })
     }
     if (pathname === '/api/inventory') {
@@ -122,10 +122,71 @@ test('inventory desktop filter workbench is full-width, persistent, and uses a s
   const after = await firstHeader.boundingBox()
   expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1)
 
+  const productViewRenderStartedAt = await page.evaluate(() => performance.now())
   await main.getByRole('tab', { name: /按产品编码/ }).click()
   const productWorkbench = main.locator('.inventory-product-card .inventory-filter-workbench')
   await expect(productWorkbench).toBeVisible()
   await expect(productWorkbench.getByRole('button', { name: '导出当前筛选' })).toBeVisible()
-  await expect(main.locator('.inventory-product-card .inventory-table-scroll thead')).toBeVisible()
+  const productScroll = main.locator('.inventory-product-card .inventory-product-scroll')
+  await expect(productScroll).toHaveAttribute('tabindex', '0')
+  await expect(productScroll.locator('tbody tr')).toHaveCount(200)
+  await expect(main.getByText('共 450 个产品，当前显示 1–200')).toBeVisible()
+  const productViewRenderDuration = await page.evaluate(
+    startedAt => performance.now() - startedAt,
+    productViewRenderStartedAt,
+  )
+  expect(productViewRenderDuration).toBeLessThan(5000)
+
+  const codeHeader = productScroll.locator('thead th.inventory-frozen--code')
+  const nameHeader = productScroll.locator('thead th.inventory-frozen--name')
+  const specHeader = productScroll.locator('thead th.inventory-frozen--spec')
+  const scrollingHeader = productScroll.locator('thead th').nth(3)
+  const codeCell = productScroll.locator('tbody td.inventory-frozen--code').first()
+  const nameCell = productScroll.locator('tbody td.inventory-frozen--name').first()
+  const specCell = productScroll.locator('tbody td.inventory-frozen--spec').first()
+  for (const headerCell of [codeHeader, nameHeader, specHeader]) {
+    await expect(headerCell).toHaveCSS('position', 'sticky')
+  }
+  expect(Number(await codeHeader.evaluate(element => getComputedStyle(element).zIndex))).toBeGreaterThan(
+    Number(await scrollingHeader.evaluate(element => getComputedStyle(element).zIndex)),
+  )
+
+  const productBefore = {
+    code: await codeHeader.boundingBox(),
+    name: await nameHeader.boundingBox(),
+    spec: await specHeader.boundingBox(),
+    scrolling: await scrollingHeader.boundingBox(),
+    codeCell: await codeCell.boundingBox(),
+    nameCell: await nameCell.boundingBox(),
+    specCell: await specCell.boundingBox(),
+  }
+  const offsets = await Promise.all([codeHeader, nameHeader, specHeader].map(element =>
+    element.evaluate(node => Number.parseFloat(getComputedStyle(node).left)),
+  ))
+  expect(offsets[0]).toBe(0)
+  expect(offsets[1]).toBeCloseTo(productBefore.code.width, 0)
+  expect(offsets[2]).toBeCloseTo(productBefore.code.width + productBefore.name.width, 0)
+  expect(await specHeader.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none')
+  await productScroll.evaluate(element => {
+    element.scrollLeft = 600
+    element.scrollTop = 500
+  })
+  await expect.poll(() => productScroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+  const productAfter = {
+    code: await codeHeader.boundingBox(),
+    name: await nameHeader.boundingBox(),
+    spec: await specHeader.boundingBox(),
+    scrolling: await scrollingHeader.boundingBox(),
+    codeCell: await codeCell.boundingBox(),
+    nameCell: await nameCell.boundingBox(),
+    specCell: await specCell.boundingBox(),
+  }
+  for (const key of ['code', 'name', 'spec']) {
+    expect(Math.abs(productAfter[key].x - productBefore[key].x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(productAfter[key].y - productBefore[key].y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(productAfter[`${key}Cell`].x - productBefore[`${key}Cell`].x)).toBeLessThanOrEqual(1)
+  }
+  expect(productAfter.scrolling.x).toBeLessThan(productBefore.scrolling.x)
+  expect(Math.abs(productAfter.scrolling.y - productBefore.scrolling.y)).toBeLessThanOrEqual(1)
   expect(failures).toEqual([])
 })
