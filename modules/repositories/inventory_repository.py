@@ -484,23 +484,32 @@ class InventoryRepository:
     @staticmethod
     def get_inventory_stats(where_clause=None, params=None, db=None):
         db = resolve_db(db)
+        joins = (
+            " FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
+            "LEFT JOIN product_code_aliases pca ON pca.product_code = "
+            "COALESCE(NULLIF(i.product_code_snapshot,''),i.product_model) "
+            "LEFT JOIN products p ON p.id = COALESCE(i.product_id,o.product_id,pca.product_id) "
+            "AND p.deleted_at IS NULL "
+        )
         if where_clause is None:
             return db.execute(
-                "SELECT COUNT(*) as total_items, COALESCE(SUM(quantity),0) as total_quantity, "
-                "COALESCE(SUM(CASE WHEN quantity - COALESCE(reserved,0) "
-                "- COALESCE(frozen_quantity,0) <= safe_stock "
-                "AND safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
-                "FROM inventory WHERE deleted_at IS NULL"
+                "SELECT COUNT(DISTINCT i.id) as total_items, "
+                "COALESCE(SUM(i.quantity),0) as total_quantity, "
+                "COALESCE(SUM(i.quantity * COALESCE(p.price,i.unit_cost,0)),0) as total_value, "
+                "COALESCE(SUM(CASE WHEN i.quantity - COALESCE(i.reserved,0) "
+                "- COALESCE(i.frozen_quantity,0) <= i.safe_stock "
+                "AND i.safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
+                + joins + "WHERE i.deleted_at IS NULL"
             ).fetchone()
         params = params or []
         return db.execute(
             "SELECT COUNT(DISTINCT i.id) as total_items, "
             "COALESCE(SUM(i.quantity),0) as total_quantity, "
+            "COALESCE(SUM(i.quantity * COALESCE(p.price,i.unit_cost,0)),0) as total_value, "
             "COALESCE(SUM(CASE WHEN i.quantity - COALESCE(i.reserved,0) "
             "- COALESCE(i.frozen_quantity,0) <= i.safe_stock "
             "AND i.safe_stock > 0 THEN 1 ELSE 0 END),0) as low_stock "
-            "FROM inventory i LEFT JOIN orders o ON i.order_id = o.id "
-            "WHERE " + where_clause,
+            + joins + "WHERE " + where_clause,
             params,
         ).fetchone()
 

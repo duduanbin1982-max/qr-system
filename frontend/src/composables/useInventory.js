@@ -4,6 +4,7 @@ import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
 
 export function useInventory() {
+  const FILTER_PRESETS_KEY = 'inventory-workbench:v1:order-presets'
   const items = ref([])
   const orderOptions = ref([])
   const loading = ref(true)
@@ -17,6 +18,14 @@ export function useInventory() {
   const specificationFilter = ref([])
   const qualityStatusFilter = ref('')
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
+  const savedFilters = ref(readSavedFilters(FILTER_PRESETS_KEY))
+  const filters = computed(() => ({
+    keyword: searchKeyword.value,
+    low_stock: lowStockOnly.value,
+    location: locationFilter.value,
+    quality_status: qualityStatusFilter.value,
+    specifications: [...specificationFilter.value],
+  }))
 
   const showLogs = ref(false)
   const logs = ref([])
@@ -53,14 +62,70 @@ export function useInventory() {
   const moveLotNo = ref('')
   const moveSerialNo = ref('')
 
-  const stats = ref({ total_items: 0, total_quantity: 0, low_stock: 0, today_in: 0, today_out: 0 })
+  const stats = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
   const lowCount = computed(() => stats.value.low_stock || items.value.filter((item) => item.is_low).length)
   const totalQty = computed(() => stats.value.total_quantity || items.value.reduce((sum, item) => sum + (item.quantity || 0), 0))
   const inventoryValue = computed(() => items.value.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0))
 
+  function readSavedFilters(key) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '[]')
+      return Array.isArray(stored) ? stored : []
+    } catch (_) {
+      return []
+    }
+  }
+
+  function persistSavedFilters() {
+    localStorage.setItem(FILTER_PRESETS_KEY, JSON.stringify(savedFilters.value))
+  }
+
+  function setFilter({ key, value }) {
+    if (key === 'keyword') searchKeyword.value = value
+    else if (key === 'low_stock') lowStockOnly.value = Boolean(value)
+    else if (key === 'location') locationFilter.value = value || ''
+    else if (key === 'quality_status') qualityStatusFilter.value = value || ''
+    else if (key === 'specifications') specificationFilter.value = Array.isArray(value) ? [...value] : []
+  }
+
+  function clearFilter(input) {
+    const key = input?.key || input
+    const value = input?.value
+    const nextSpecifications = key === 'specifications' && value
+      ? specificationFilter.value.filter(item => item !== value)
+      : []
+    setFilter({
+      key,
+      value: key === 'low_stock' ? false : key === 'specifications' ? nextSpecifications : '',
+    })
+    return search()
+  }
+
+  function saveFilter(name) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    savedFilters.value = [
+      ...savedFilters.value.filter(item => item.name !== name),
+      { id, name, filters: JSON.parse(JSON.stringify(filters.value)), created_at: new Date().toISOString() },
+    ].slice(-12)
+    persistSavedFilters()
+    showToast(`已保存筛选“${name}”`)
+  }
+
+  function applyFilter(preset) {
+    if (!preset?.filters) return
+    Object.entries(preset.filters).forEach(([key, value]) => setFilter({ key, value }))
+    return search()
+  }
+
+  function removeFilterPreset(id) {
+    savedFilters.value = savedFilters.value.filter(item => item.id !== id)
+    persistSavedFilters()
+  }
+
   const canEdit = computed(() => can('inventory:edit'))
   const canDelete = computed(() => can('inventory:delete'))
   const canCreate = computed(() => can('inventory:create'))
+  const canExport = computed(() => can('inventory:export'))
 
   async function loadStats(params = null) {
     try {
@@ -98,6 +163,16 @@ export function useInventory() {
     return load()
   }
 
+  function resetFilters() {
+    searchKeyword.value = ''
+    lowStockOnly.value = false
+    locationFilter.value = ''
+    specificationFilter.value = []
+    qualityStatusFilter.value = ''
+    page.value = 1
+    return load()
+  }
+
   function changePage(nextPage) {
     const lastPage = Math.max(1, Math.ceil(total.value / limit.value))
     page.value = Math.min(Math.max(Number(nextPage) || 1, 1), lastPage)
@@ -113,7 +188,14 @@ export function useInventory() {
   }
 
   function exportExcel() {
-    window.open('/api/inventory/export', '_blank')
+    const params = {
+      keyword: searchKeyword.value.trim(),
+      low_stock: lowStockOnly.value ? '1' : '',
+      location: locationFilter.value,
+      specification: specificationFilter.value.join(','),
+      quality_status: qualityStatusFilter.value,
+    }
+    window.open(api.domains.inventory.inventoryExportUrl(params), '_blank')
   }
 
   async function doABC() {
@@ -382,6 +464,8 @@ export function useInventory() {
     specificationFilter,
     qualityStatusFilter,
     filterOptions,
+    filters,
+    savedFilters,
     showLogs,
     logs,
     logsLoading,
@@ -409,8 +493,15 @@ export function useInventory() {
     canEdit,
     canDelete,
     canCreate,
+    canExport,
     load,
     search,
+    resetFilters,
+    setFilter,
+    clearFilter,
+    saveFilter,
+    applyFilter,
+    removeFilterPreset,
     changePage,
     changeLimit,
     loadStats,

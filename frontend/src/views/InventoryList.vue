@@ -6,7 +6,7 @@
     <div class="summary-bar inventory-summary-bar">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ productState.viewMode === 'product' ? productState.summary.total_items : stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
       <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ productState.viewMode === 'product' ? productState.summary.total_quantity : (stats.total_quantity || totalQty) }}</div><div class="s-label">库存总量</div></div></div>
-      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ (productState.viewMode === 'product' ? productState.summary.total_value : inventoryValue).toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
+      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ Number(productState.viewMode === 'product' ? productState.summary.total_value : stats.total_value || 0).toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
       <div class="summary-item"><span class="s-icon">📥</span><div><div class="s-val text-success">{{ productState.viewMode === 'product' ? productState.summary.today_in : stats.today_in }}</div><div class="s-label">今日入库</div></div></div>
       <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ productState.viewMode === 'product' ? productState.summary.today_out : stats.today_out }}</div><div class="s-label">今日出库</div></div></div>
       <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: (productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock) > 0 ? 'var(--danger)' : 'var(--success)'}">{{ productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
@@ -16,6 +16,8 @@
         :groups="productState.groups"
         :filters="productState.filters"
         :filter-options="productState.filterOptions"
+        :saved-filters="productState.savedFilters"
+        :can-export="productState.canExport"
         :loading="productState.loading"
         :error="productState.error"
         :total="productState.total"
@@ -23,6 +25,12 @@
         :limit="productState.limit"
         @search="productActions.searchGroups"
         @reset="productActions.resetFilters"
+        @update-filter="productActions.setFilter"
+        @clear-filter="productActions.clearFilter"
+        @save-filter="productActions.saveFilter"
+        @apply-filter="productActions.applyFilter"
+        @remove-filter="productActions.removeFilterPreset"
+        @export="productActions.exportGroups"
         @change-page="productActions.changePage"
         @change-limit="productActions.changeLimit"
         @open-product="productActions.openProduct"
@@ -31,45 +39,38 @@
     <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
     <!-- ====== 主内容卡片 ====== -->
     <div v-if="productState.viewMode !== 'product'" class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
-      <div class="card-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">
+      <div class="card-header inventory-order-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">
         <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2)">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--primary-accent));border-radius:var(--radius-md);font-size:var(--text-lg)">🏗️</span>
           库存管理
         </h3>
-        <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;background:var(--bg-hover);border-radius:var(--radius-md);padding:0 12px;transition:all 0.2s;border:1px solid transparent">
-            <span style="color:var(--text-placeholder);font-size:var(--text-base)">🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索型号 / 名称…" @keyup.enter="search" style="border:none;background:transparent;outline:none;padding:var(--space-2) 8px;font-size:var(--text-sm);width:170px;box-shadow:none">
-          </div>
-          <label style="display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--text-placeholder);cursor:pointer;white-space:nowrap;padding:6px 10px;background:#FFF;border-radius:var(--radius-md);border:1px solid var(--border-light)">
-            <input type="checkbox" v-model="lowStockOnly" @change="search" style="accent-color:var(--danger);width:14px;height:14px"> 仅低库存
-          </label>
-          <select class="form-input" v-model="locationFilter" @change="search" style="border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-xs);background:white;cursor:pointer;width:110px">
-            <option value="">📍 全部库位</option>
-            <option v-for="loc in locations" :key="loc" :value="loc">{{ loc }}</option>
-          </select>
-          <select class="form-input inventory-spec-filter" v-model="specificationFilter" multiple size="2" aria-label="规格筛选">
-            <option v-for="option in filterOptions.specifications" :key="option.value || '__empty__'" :value="option.value || '__empty__'">
-              {{ option.value || '未填写规格' }}（{{ option.inventory_count }}）
-            </option>
-          </select>
-          <select class="form-input" v-model="qualityStatusFilter" @change="search" style="border:1px solid var(--border-light);border-radius:var(--radius-md);padding:var(--space-2) 12px;font-size:var(--text-xs);background:white;cursor:pointer;width:125px">
-            <option value="">全部质量状态</option>
-            <option v-for="option in filterOptions.quality_statuses" :key="option.value" :value="option.value">{{ option.value }}（{{ option.inventory_count }}）</option>
-          </select>
-          <div style="display:flex;gap:var(--space-2)">
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="search">🔍 搜索</button>
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="doABC">🏷️ ABC</button>
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="loadLogs()">📋 流水</button>
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="loadTurnover">📊 周转</button>
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="doCount">🔢 盘点</button>
-            <button class="btn" style="padding:var(--space-2) 14px;font-size:var(--text-xs);background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;font-weight:500" @click="exportExcel">📥导出</button>
-            <button class="btn" style="padding:var(--space-2) 16px;font-size:var(--text-xs);background:linear-gradient(135deg,var(--primary),var(--primary));color:#FFF;border:none;border-radius:var(--radius-md);cursor:pointer;font-weight:600;box-shadow:0 2px 6px rgba(99,102,241,0.35)" @click="openAdd" v-if="canCreate">+ 新增库存</button>
-          </div>
-        </div>
+        <InventoryFilterWorkbench
+          view-mode="order"
+          :filters="filters"
+          :filter-options="filterOptions"
+          :saved-filters="savedFilters"
+          :result-count="total"
+          :loading="loading"
+          @search="search"
+          @reset="resetFilters"
+          @update-filter="setFilter"
+          @clear-filter="clearFilter"
+          @save-filter="saveFilter"
+          @apply-filter="applyFilter"
+          @remove-filter="removeFilterPreset"
+        >
+          <template #actions>
+            <button class="btn btn-default btn-sm" type="button" @click="doABC">ABC</button>
+            <button class="btn btn-default btn-sm" type="button" @click="loadLogs()">流水</button>
+            <button class="btn btn-default btn-sm" type="button" @click="loadTurnover">周转</button>
+            <button class="btn btn-default btn-sm" type="button" @click="doCount">盘点</button>
+            <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportExcel">导出当前筛选</button>
+            <button v-if="canCreate" class="btn btn-primary btn-sm" type="button" @click="openAdd">+ 新增库存</button>
+          </template>
+        </InventoryFilterWorkbench>
       </div>
       <div class="card-body" style="padding:0">
-        <div class="table-wrap" style="border-radius:0">
+        <div class="table-wrap inventory-table-scroll" style="border-radius:0">
           <table v-if="items.length" class="data-table" style="min-width:850px;margin:0">
             <thead>
               <tr style="background:var(--bg-table-header)">
@@ -314,11 +315,12 @@ import { reactive } from 'vue'
 import { useInventory } from '@/composables/useInventory.js'
 import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
 import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
+import InventoryFilterWorkbench from '@/components/inventory/InventoryFilterWorkbench.vue'
 import ProductInventoryTable from '@/components/inventory/ProductInventoryTable.vue'
 import ProductInventoryDrawer from '@/components/inventory/ProductInventoryDrawer.vue'
 
 export default {
-  components: { InventoryViewTabs, ProductInventoryTable, ProductInventoryDrawer },
+  components: { InventoryViewTabs, InventoryFilterWorkbench, ProductInventoryTable, ProductInventoryDrawer },
   setup() {
     const inventory = useInventory()
     const product = useInventoryProductGroups()

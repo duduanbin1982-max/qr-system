@@ -1,8 +1,10 @@
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '@/lib/api.js'
+import { can } from '@/lib/auth.js'
 
 const VIEW_KEY = 'inventory-workbench:v1:view'
 const FILTER_KEY = 'inventory-workbench:v1:filters'
+const PRESET_KEY = 'inventory-workbench:v1:product-presets'
 const DEFAULT_FILTERS = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '', specifications: [] }
 
 function readJson(key, fallback) {
@@ -30,6 +32,8 @@ export function useInventoryProductGroups() {
     ...storedFilters,
     specifications: Array.isArray(storedFilters.specifications) ? storedFilters.specifications : [],
   })
+  const storedPresets = readJson(PRESET_KEY, [])
+  const savedFilters = ref(Array.isArray(storedPresets) ? storedPresets : [])
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
   const summary = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
   const loading = ref(false)
@@ -40,6 +44,7 @@ export function useInventoryProductGroups() {
   let detailRequest = 0
 
   const enabled = computed(() => Boolean(capabilities.value.product_query_enabled))
+  const canExport = computed(() => can('inventory:export'))
 
   async function loadCapabilities() {
     capabilities.value = await api.domains.inventory.inventoryCapabilities()
@@ -60,9 +65,12 @@ export function useInventoryProductGroups() {
 
   function setViewMode(mode) {
     viewMode.value = mode === 'product' ? 'product' : 'order'
-    localStorage.setItem(VIEW_KEY, viewMode.value)
-    if (viewMode.value === 'product' && enabled.value && !groups.value.length) loadGroups()
   }
+
+  watch(viewMode, (mode) => {
+    localStorage.setItem(VIEW_KEY, mode)
+    if (mode === 'product' && enabled.value && !groups.value.length) void loadGroups()
+  })
 
   async function loadGroups() {
     if (!enabled.value) return
@@ -118,6 +126,58 @@ export function useInventoryProductGroups() {
     return loadGroups()
   }
 
+  function setFilter({ key, value }) {
+    if (!(key in filters.value)) return
+    filters.value = {
+      ...filters.value,
+      [key]: key === 'specifications' ? (Array.isArray(value) ? [...value] : []) : value,
+    }
+  }
+
+  function clearFilter(input) {
+    const key = input?.key || input
+    const value = input?.value
+    const nextSpecifications = key === 'specifications' && value
+      ? filters.value.specifications.filter(item => item !== value)
+      : []
+    setFilter({ key, value: key === 'low_stock' ? false : key === 'specifications' ? nextSpecifications : '' })
+    return searchGroups()
+  }
+
+  function persistPresets() {
+    localStorage.setItem(PRESET_KEY, JSON.stringify(savedFilters.value))
+  }
+
+  function saveFilter(name) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    savedFilters.value = [
+      ...savedFilters.value.filter(item => item.name !== name),
+      { id, name, filters: JSON.parse(JSON.stringify(filters.value)), created_at: new Date().toISOString() },
+    ].slice(-12)
+    persistPresets()
+  }
+
+  function applyFilter(preset) {
+    if (!preset?.filters) return
+    Object.entries(preset.filters).forEach(([key, value]) => setFilter({ key, value }))
+    return searchGroups()
+  }
+
+  function removeFilterPreset(id) {
+    savedFilters.value = savedFilters.value.filter(item => item.id !== id)
+    persistPresets()
+  }
+
+  function exportGroups() {
+    const params = {
+      ...filters.value,
+      low_stock: filters.value.low_stock ? '1' : '',
+      specification: (filters.value.specifications || []).join(','),
+    }
+    delete params.specifications
+    window.open(api.domains.inventory.productGroupExportUrl(params), '_blank')
+  }
+
   async function openProduct(product) {
     const requestId = ++detailRequest
     selectedProduct.value = product
@@ -140,7 +200,7 @@ export function useInventoryProductGroups() {
   onMounted(() => { loadCapabilities() })
 
   return {
-    state: { capabilities, enabled, viewMode, groups, total, page, limit, filters, filterOptions, summary, loading, error, selectedProduct, selectedDetails, drawerOpen },
-    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, resetFilters, openProduct, closeDrawer },
+    state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, openProduct, closeDrawer },
   }
 }
