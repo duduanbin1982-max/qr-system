@@ -163,6 +163,33 @@ def test_inventory_export_is_not_truncated_at_the_page_limit(
     assert len(rows) == 502
 
 
+def test_order_inventory_sort_is_stable_and_inherited_by_export(client, auth_headers, db):
+    db.executemany(
+        "INSERT INTO inventory(product_model,product_name,quantity,updated_at) VALUES(?,?,?,?)",
+        [
+            ("SORT-LOW", "排序低", 2, "2026-01-01 00:00:00"),
+            ("SORT-HIGH", "排序高", 9, "2026-01-01 00:00:00"),
+        ],
+    )
+    db.commit()
+
+    response = client.get(
+        "/api/inventory?sort_by=quantity&sort_dir=desc&limit=10",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    items = response.get_json()["items"]
+    assert [item["product_model"] for item in items[:2]] == ["SORT-HIGH", "SORT-LOW"]
+
+    exported = client.get(
+        "/api/inventory/export?sort_by=quantity&sort_dir=desc",
+        headers=auth_headers,
+    )
+    assert exported.status_code == 200
+    rows = list(load_workbook(BytesIO(exported.data), read_only=True).active.iter_rows(values_only=True))
+    assert rows[1][3] == "SORT-HIGH"
+
+
 def test_inventory_exports_require_the_export_permission(client):
     view_only = _permission_headers(client, ["inventory:view"])
     assert client.get("/api/inventory", headers=view_only).status_code == 200

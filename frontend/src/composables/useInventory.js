@@ -5,6 +5,20 @@ import { can } from '@/lib/auth.js'
 
 export function useInventory() {
   const FILTER_PRESETS_KEY = 'inventory-workbench:v1:order-presets'
+  const COLUMN_KEY = 'inventory-workbench:v1:order-columns'
+  const ORDER_COLUMNS = [
+    { key: 'product_name', label: '产品名称' },
+    { key: 'order_no', label: '订单号' },
+    { key: 'customer', label: '客户' },
+    { key: 'product_model', label: '产品型号', required: true },
+    { key: 'specification', label: '规格' },
+    { key: 'category', label: 'ABC' },
+    { key: 'quantity', label: '数量' },
+    { key: 'safe_stock', label: '安全库存' },
+    { key: 'location', label: '存放位置' },
+    { key: 'unit', label: '单位' },
+    { key: 'actions', label: '操作', required: true },
+  ]
   const items = ref([])
   const orderOptions = ref([])
   const loading = ref(true)
@@ -17,6 +31,11 @@ export function useInventory() {
   const locations = ref([])
   const specificationFilter = ref([])
   const qualityStatusFilter = ref('')
+  const sortBy = ref('updated_at')
+  const sortDir = ref('desc')
+  const summaryLoading = ref(false)
+  const visibleColumns = ref(readColumns(COLUMN_KEY, ORDER_COLUMNS))
+  const selectedIds = ref([])
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
   const savedFilters = ref(readSavedFilters(FILTER_PRESETS_KEY))
   const filters = computed(() => ({
@@ -66,6 +85,7 @@ export function useInventory() {
   const lowCount = computed(() => stats.value.low_stock || items.value.filter((item) => item.is_low).length)
   const totalQty = computed(() => stats.value.total_quantity || items.value.reduce((sum, item) => sum + (item.quantity || 0), 0))
   const inventoryValue = computed(() => items.value.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0))
+  const selectedCount = computed(() => selectedIds.value.length)
 
   function readSavedFilters(key) {
     try {
@@ -75,6 +95,21 @@ export function useInventory() {
       return []
     }
   }
+
+  function readColumns(key, columns) {
+    const defaults = columns.map(column => column.key)
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || 'null')
+      if (!Array.isArray(stored)) return defaults
+      const allowed = new Set(defaults)
+      const required = columns.filter(column => column.required).map(column => column.key)
+      return [...required, ...new Set(stored.filter(keyName => allowed.has(keyName) && !required.includes(keyName)))]
+    } catch (_) {
+      return defaults
+    }
+  }
+
+  function persistColumns() { localStorage.setItem(COLUMN_KEY, JSON.stringify(visibleColumns.value)) }
 
   function persistSavedFilters() {
     localStorage.setItem(FILTER_PRESETS_KEY, JSON.stringify(savedFilters.value))
@@ -128,11 +163,14 @@ export function useInventory() {
   const canExport = computed(() => can('inventory:export'))
 
   async function loadStats(params = null) {
+    summaryLoading.value = true
     try {
       const data = await api.domains.inventory.inventoryStats(params)
       Object.assign(stats.value, data)
     } catch (error) {
       // noop
+    } finally {
+      summaryLoading.value = false
     }
   }
 
@@ -147,9 +185,12 @@ export function useInventory() {
       if (qualityStatusFilter.value) params.quality_status = qualityStatusFilter.value
       params.page = page.value
       params.limit = limit.value
+      params.sort_by = sortBy.value
+      params.sort_dir = sortDir.value
       const data = await api.domains.inventory.listInventory(params)
       items.value = data.items || []
       total.value = Number(data.total || 0)
+      selectedIds.value = selectedIds.value.filter(id => items.value.some(item => item.id === id))
       await loadStats({ ...params, page: undefined, limit: undefined })
     } catch (error) {
       showToast(error.message || '加载失败', 'error')
@@ -187,6 +228,39 @@ export function useInventory() {
     return load()
   }
 
+  function setSort(key) {
+    if (!ORDER_COLUMNS.some(column => column.key === key) || key === 'actions') return
+    if (sortBy.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+    else { sortBy.value = key; sortDir.value = 'asc' }
+    page.value = 1
+    return load()
+  }
+
+  function setVisibleColumns(keys) {
+    const allowed = new Set(ORDER_COLUMNS.map(column => column.key))
+    const required = ORDER_COLUMNS.filter(column => column.required).map(column => column.key)
+    visibleColumns.value = [...required, ...new Set(keys.filter(key => allowed.has(key) && !required.includes(key)))]
+    persistColumns()
+  }
+
+  function resetVisibleColumns() { setVisibleColumns(ORDER_COLUMNS.map(column => column.key)) }
+
+  function toggleSelect(id) {
+    selectedIds.value = selectedIds.value.includes(id)
+      ? selectedIds.value.filter(item => item !== id)
+      : [...selectedIds.value, id]
+  }
+
+  function toggleSelectAll() {
+    const pageIds = items.value.map(item => item.id)
+    const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.value.includes(id))
+    selectedIds.value = allSelected
+      ? selectedIds.value.filter(id => !pageIds.includes(id))
+      : [...new Set([...selectedIds.value, ...pageIds])]
+  }
+
+  function clearSelection() { selectedIds.value = [] }
+
   function exportExcel() {
     const params = {
       keyword: searchKeyword.value.trim(),
@@ -194,6 +268,19 @@ export function useInventory() {
       location: locationFilter.value,
       specification: specificationFilter.value.join(','),
       quality_status: qualityStatusFilter.value,
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
+    }
+    window.open(api.domains.inventory.inventoryExportUrl(params), '_blank')
+  }
+
+  function exportSelected() {
+    if (!selectedIds.value.length) return
+    if (!window.confirm(`确认导出已选 ${selectedIds.value.length} 条库存吗？`)) return
+    const params = {
+      inventory_id: selectedIds.value.join(','),
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
     }
     window.open(api.domains.inventory.inventoryExportUrl(params), '_blank')
   }
@@ -494,6 +581,13 @@ export function useInventory() {
     canDelete,
     canCreate,
     canExport,
+    sortBy,
+    sortDir,
+    summaryLoading,
+    visibleColumns,
+    orderColumns: ORDER_COLUMNS,
+    selectedIds,
+    selectedCount,
     load,
     search,
     resetFilters,
@@ -504,9 +598,16 @@ export function useInventory() {
     removeFilterPreset,
     changePage,
     changeLimit,
+    setSort,
+    setVisibleColumns,
+    resetVisibleColumns,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
     loadStats,
     loadFilterOptions,
     exportExcel,
+    exportSelected,
     doABC,
     loadTurnover,
     loadLocations,

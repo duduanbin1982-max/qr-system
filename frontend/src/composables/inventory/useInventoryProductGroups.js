@@ -5,7 +5,22 @@ import { can } from '@/lib/auth.js'
 const VIEW_KEY = 'inventory-workbench:v1:view'
 const FILTER_KEY = 'inventory-workbench:v1:filters'
 const PRESET_KEY = 'inventory-workbench:v1:product-presets'
+const COLUMN_KEY = 'inventory-workbench:v1:product-columns'
 const DEFAULT_FILTERS = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '', specifications: [] }
+const PRODUCT_COLUMNS = [
+  { key: 'product_code', label: '产品编码', required: true },
+  { key: 'product_name', label: '产品名称', required: true },
+  { key: 'specification', label: '规格', required: true },
+  { key: 'quantity', label: '总库存' },
+  { key: 'reserved_quantity', label: '预留' },
+  { key: 'frozen_quantity', label: '冻结' },
+  { key: 'available_quantity', label: '可用' },
+  { key: 'order_count', label: '订单数' },
+  { key: 'lot_count', label: '批次数' },
+  { key: 'location_count', label: '库位数' },
+  { key: 'alert', label: '预警' },
+  { key: 'actions', label: '操作', required: true },
+]
 
 function readJson(key, fallback) {
   try {
@@ -37,7 +52,12 @@ export function useInventoryProductGroups() {
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
   const summary = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
   const loading = ref(false)
+  const summaryLoading = ref(false)
   const error = ref('')
+  const sortBy = ref('alert')
+  const sortDir = ref('desc')
+  const visibleColumns = ref(readColumns(COLUMN_KEY, PRODUCT_COLUMNS))
+  const selectedIds = ref([])
   const selectedProduct = ref(null)
   const selectedDetails = ref(null)
   const drawerOpen = ref(false)
@@ -45,6 +65,7 @@ export function useInventoryProductGroups() {
 
   const enabled = computed(() => Boolean(capabilities.value.product_query_enabled))
   const canExport = computed(() => can('inventory:export'))
+  const selectedCount = computed(() => selectedIds.value.length)
 
   async function loadCapabilities() {
     capabilities.value = await api.domains.inventory.inventoryCapabilities()
@@ -78,9 +99,10 @@ export function useInventoryProductGroups() {
     error.value = ''
     localStorage.setItem(FILTER_KEY, JSON.stringify(filters.value))
     try {
-      const data = await api.domains.inventory.listProductGroups({ ...filters.value, low_stock: filters.value.low_stock ? '1' : '', page: page.value, limit: limit.value })
+      const data = await api.domains.inventory.listProductGroups({ ...filters.value, low_stock: filters.value.low_stock ? '1' : '', page: page.value, limit: limit.value, sort_by: sortBy.value, sort_dir: sortDir.value })
       groups.value = data.items || []
       total.value = Number(data.total || 0)
+      selectedIds.value = selectedIds.value.filter(id => groups.value.some(item => item.product_id === id))
       await loadSummary()
     } catch (err) {
       error.value = err.message || '产品库存加载失败'
@@ -90,6 +112,7 @@ export function useInventoryProductGroups() {
   }
 
   async function loadSummary() {
+    summaryLoading.value = true
     try {
       summary.value = await api.domains.inventory.inventoryStats({
         ...filters.value,
@@ -98,8 +121,25 @@ export function useInventoryProductGroups() {
       })
     } catch (_) {
       // Summary is supplemental; leave the previous values visible.
+    } finally {
+      summaryLoading.value = false
     }
   }
+
+  function readColumns(key, columns) {
+    const defaults = columns.map(column => column.key)
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || 'null')
+      if (!Array.isArray(stored)) return defaults
+      const allowed = new Set(defaults)
+      const required = columns.filter(column => column.required).map(column => column.key)
+      return [...required, ...new Set(stored.filter(keyName => allowed.has(keyName) && !required.includes(keyName)))]
+    } catch (_) {
+      return defaults
+    }
+  }
+
+  function persistColumns() { localStorage.setItem(COLUMN_KEY, JSON.stringify(visibleColumns.value)) }
 
   function searchGroups() {
     page.value = 1
@@ -119,6 +159,39 @@ export function useInventoryProductGroups() {
     page.value = 1
     return loadGroups()
   }
+
+  function setSort(key) {
+    if (!PRODUCT_COLUMNS.some(column => column.key === key) || key === 'actions') return
+    if (sortBy.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+    else { sortBy.value = key; sortDir.value = 'asc' }
+    page.value = 1
+    return loadGroups()
+  }
+
+  function setVisibleColumns(keys) {
+    const allowed = new Set(PRODUCT_COLUMNS.map(column => column.key))
+    const required = PRODUCT_COLUMNS.filter(column => column.required).map(column => column.key)
+    visibleColumns.value = [...required, ...new Set(keys.filter(key => allowed.has(key) && !required.includes(key)))]
+    persistColumns()
+  }
+
+  function resetVisibleColumns() { setVisibleColumns(PRODUCT_COLUMNS.map(column => column.key)) }
+
+  function toggleSelect(id) {
+    selectedIds.value = selectedIds.value.includes(id)
+      ? selectedIds.value.filter(item => item !== id)
+      : [...selectedIds.value, id]
+  }
+
+  function toggleSelectAll() {
+    const pageIds = groups.value.map(item => item.product_id)
+    const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.value.includes(id))
+    selectedIds.value = allSelected
+      ? selectedIds.value.filter(id => !pageIds.includes(id))
+      : [...new Set([...selectedIds.value, ...pageIds])]
+  }
+
+  function clearSelection() { selectedIds.value = [] }
 
   function resetFilters() {
     filters.value = { ...DEFAULT_FILTERS, specifications: [] }
@@ -173,9 +246,18 @@ export function useInventoryProductGroups() {
       ...filters.value,
       low_stock: filters.value.low_stock ? '1' : '',
       specification: (filters.value.specifications || []).join(','),
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
     }
     delete params.specifications
+    if (selectedIds.value.length) params.product_id = selectedIds.value.join(',')
     window.open(api.domains.inventory.productGroupExportUrl(params), '_blank')
+  }
+
+  function exportSelected() {
+    if (!selectedIds.value.length) return
+    if (!window.confirm(`确认导出已选 ${selectedIds.value.length} 个产品吗？`)) return
+    exportGroups()
   }
 
   async function openProduct(product) {
@@ -200,7 +282,7 @@ export function useInventoryProductGroups() {
   onMounted(() => { loadCapabilities() })
 
   return {
-    state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters },
-    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, openProduct, closeDrawer },
+    state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, summaryLoading, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters, sortBy, sortDir, visibleColumns, productColumns: PRODUCT_COLUMNS, selectedIds, selectedCount },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportSelected, openProduct, closeDrawer },
   }
 }

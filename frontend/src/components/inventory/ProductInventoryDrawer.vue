@@ -31,7 +31,10 @@
             </section>
           </template>
         </main>
-        <footer><button class="btn btn-default" @click="$emit('close')">关闭</button></footer>
+        <footer>
+          <button v-if="canExport" class="btn btn-default" type="button" @click="exportDetails">导出详情</button>
+          <button class="btn btn-default" type="button" @click="$emit('close')">关闭</button>
+        </footer>
       </aside>
     </div>
   </Teleport>
@@ -41,7 +44,7 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '@/lib/api.js'
 
-const props = defineProps({ open: Boolean, product: { type: Object, default: null }, details: { type: Object, default: null }, capabilities: { type: Object, default: () => ({}) } })
+const props = defineProps({ open: Boolean, product: { type: Object, default: null }, details: { type: Object, default: null }, capabilities: { type: Object, default: () => ({}) }, canExport: Boolean })
 defineEmits(['close'])
 const compatibilityKey = ref('')
 const allocationQuantity = ref(1)
@@ -85,6 +88,10 @@ async function reverseRun(run) {
   try { await api.domains.inventory.reverseAllocation(run.id, { idempotency_key: `inventory-ui-reverse-${run.id}-${Date.now()}`, reason: '库存产品视图撤销' }); await loadHistory(); window.alert('撤销成功') }
   catch (error) { allocationError.value = error.message || '撤销失败' }
   finally { allocationLoading.value = false }
+}
+function exportDetails() {
+  if (!props.product?.product_id || !props.canExport) return
+  window.open(api.domains.inventory.productGroupDetailsExportUrl(props.product.product_id, { compatibility_key: compatibilityKey.value }), '_blank')
 }
 </script>
 

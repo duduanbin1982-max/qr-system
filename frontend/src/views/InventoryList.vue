@@ -3,13 +3,15 @@
 <div style="padding:var(--space-6)">
     <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
     <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
-    <div class="summary-bar inventory-summary-bar">
-      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ productState.viewMode === 'product' ? productState.summary.total_items : stats.total_items }}</div><div class="s-label">库存品类</div></div></div>
-      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ productState.viewMode === 'product' ? productState.summary.total_quantity : (stats.total_quantity || totalQty) }}</div><div class="s-label">库存总量</div></div></div>
-      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ Number(productState.viewMode === 'product' ? productState.summary.total_value : stats.total_value || 0).toLocaleString() }}</div><div class="s-label">库存总值</div></div></div>
-      <div class="summary-item"><span class="s-icon">📥</span><div><div class="s-val text-success">{{ productState.viewMode === 'product' ? productState.summary.today_in : stats.today_in }}</div><div class="s-label">今日入库</div></div></div>
-      <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ productState.viewMode === 'product' ? productState.summary.today_out : stats.today_out }}</div><div class="s-label">今日出库</div></div></div>
-      <div class="summary-item"><span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: (productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock) > 0 ? 'var(--danger)' : 'var(--success)'}">{{ productState.viewMode === 'product' ? productState.summary.low_stock : stats.low_stock }}</div><div class="s-label">低库存预警</div></div></div>
+    <div class="summary-bar inventory-summary-bar" aria-live="polite" :aria-busy="productState.viewMode === 'product' ? productState.summaryLoading : summaryLoading">
+      <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ summaryValue('total_items') }}</div><div class="s-label">当前筛选库存品类</div></div></div>
+      <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ summaryValue('total_quantity') }}</div><div class="s-label">当前筛选库存总量</div></div></div>
+      <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ Number(summaryValue('total_value') || 0).toLocaleString() }}</div><div class="s-label">当前筛选库存总值</div></div></div>
+      <div class="summary-item"><span class="s-icon">📥</span><div><div class="s-val text-success">{{ summaryValue('today_in') }}</div><div class="s-label">筛选范围今日入库</div></div></div>
+      <div class="summary-item"><span class="s-icon">📤</span><div><div class="s-val text-warning">{{ summaryValue('today_out') }}</div><div class="s-label">筛选范围今日出库</div></div></div>
+      <button class="summary-item summary-item-action" type="button" :aria-label="`筛选低库存，共 ${summaryValue('low_stock')} 项`" @click="focusLowStock">
+        <span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: summaryValue('low_stock') > 0 ? 'var(--danger)' : 'var(--success)'}">{{ summaryValue('low_stock') }}</div><div class="s-label">低库存预警（点击筛选）</div></div>
+      </button>
     </div>
     <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
       <ProductInventoryTable
@@ -23,6 +25,12 @@
         :total="productState.total"
         :page="productState.page"
         :limit="productState.limit"
+        :columns="productState.productColumns"
+        :visible-columns="productState.visibleColumns"
+        :selected-ids="productState.selectedIds"
+        :selected-count="productState.selectedCount"
+        :sort-by="productState.sortBy"
+        :sort-dir="productState.sortDir"
         @search="productActions.searchGroups"
         @reset="productActions.resetFilters"
         @update-filter="productActions.setFilter"
@@ -34,9 +42,16 @@
         @change-page="productActions.changePage"
         @change-limit="productActions.changeLimit"
         @open-product="productActions.openProduct"
+        @update-columns="productActions.setVisibleColumns"
+        @reset-columns="productActions.resetVisibleColumns"
+        @toggle-select-all="productActions.toggleSelectAll"
+        @toggle-select="productActions.toggleSelect"
+        @batch-export="productActions.exportSelected"
+        @sort="productActions.setSort"
       />
     </div>
-    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" @close="productActions.closeDrawer" />
+    <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" :can-export="productState.canExport" @close="productActions.closeDrawer" />
+    <InventoryOrderDrawer :open="Boolean(orderDrawerItem)" :item="orderDrawerItem" @close="closeOrderDetails" @logs="openOrderLogs" />
     <!-- ====== 主内容卡片 ====== -->
     <div v-if="productState.viewMode !== 'product'" class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
       <div class="card-header inventory-order-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">
@@ -60,6 +75,10 @@
           @remove-filter="removeFilterPreset"
         >
           <template #actions>
+            <InventoryColumnConfigurator :columns="orderColumns" :visible-keys="visibleColumns" @update="setVisibleColumns" @reset="resetVisibleColumns" />
+            <label class="inventory-page-select" title="选择当前页"><input type="checkbox" :checked="orderPageSelected" :disabled="!items.length" @change="toggleSelectAll"> 选择当前页</label>
+            <span v-if="selectedCount" class="inventory-selection-count">已选 {{ selectedCount }} 项</span>
+            <button v-if="canExport && selectedCount" class="btn btn-default btn-sm" type="button" @click="exportSelected">批量导出</button>
             <button class="btn btn-default btn-sm" type="button" @click="doABC">ABC</button>
             <button class="btn btn-default btn-sm" type="button" @click="loadLogs()">流水</button>
             <button class="btn btn-default btn-sm" type="button" @click="loadTurnover">周转</button>
@@ -71,66 +90,29 @@
       </div>
       <div class="card-body" style="padding:0">
         <div class="table-wrap inventory-table-scroll" style="border-radius:0">
-          <table v-if="items.length" class="data-table" style="min-width:850px;margin:0">
+          <table v-if="items.length" class="data-table inventory-order-table" style="min-width:850px;margin:0">
             <thead>
               <tr style="background:var(--bg-table-header)">
-                <th style="min-width:100px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">产品名称</th>
-                <th style="min-width:90px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">订单号</th>
-                <th style="min-width:80px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">客户</th>
-                <th style="min-width:110px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">产品型号</th>
-                <th style="min-width:80px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">规格</th>
-                <th style="width:55px;text-align:center;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">ABC</th>
-                <th style="width:80px;text-align:center;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">数量</th>
-                <th style="width:80px;text-align:center;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">安全库存</th>
-                <th style="min-width:80px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">存放位置</th>
-                <th style="width:55px;text-align:center;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">单位</th>
-                <th style="width:195px;text-align:center;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);white-space:nowrap">操作</th>
+                <th v-for="column in orderVisibleColumnDefs" :key="column.key" :class="column.key === 'actions' ? 'inventory-order-actions-head' : ''" :aria-sort="ariaSort(column.key)">
+                  <button v-if="column.key !== 'actions'" class="inventory-sort-button" type="button" @click="setSort(column.key)">{{ column.label }}<span class="inventory-sort-indicator" aria-hidden="true">{{ sortIndicator(column.key) }}</span></button>
+                  <span v-else>{{ column.label }}</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in items" :key="item.id" class="inv-row" :class="{'inv-row-low': item.is_low}" @click="loadLogs(item.id)" style="cursor:pointer">
-                <td style="font-weight:500">{{ item.product_name || '-' }}</td>
-                <td><code style="font-size:var(--text-xs-alt)">{{ item.order_no || '-' }}</code></td>
-                <td style="font-size:var(--text-xs)">{{ item.customer || '-' }}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:var(--space-2)">
-                    <span :style="{display:'inline-block',width:8,height:8,borderRadius:'50%',background: item.is_low ? 'var(--danger)' : 'var(--success)',flexShrink:0}"></span>
-                    <code style="font-size:var(--text-xs);font-weight:600;color:var(--text-primary)">{{ item.product_model }}</code>
-                  </div>
-                </td>
-                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ item.specification || '-' }}</td>
-                <td style="text-align:center">
-                  <span v-if="item.category" class="badge" :class="item.category==='A'?'badge-danger':item.category==='B'?'badge-warning':'badge-success'" style="font-size:var(--text-2xs);font-weight:700">{{ item.category }}</span>
-                  <span v-else style="color:var(--text-placeholder);font-size:var(--text-2xs)">-</span>
-                </td>
-                <td style="text-align:center">
-                  <span style="display:inline-block;font-weight:700;font-size:15px;min-width:28px;padding:var(--space-1) 8px;border-radius:var(--radius-sm)" :style="{background: item.is_low ? 'var(--danger-light)' : 'var(--success-light)', color: item.is_low ? 'var(--danger)' : 'var(--success)'}">{{ item.available_quantity }}</span>
-                  <div v-if="item.reserved" style="font-size:var(--text-2xs);color:var(--text-muted);margin-top:2px">现存 {{ item.quantity }} / 预留 {{ item.reserved }}</div>
-                </td>
-                <td style="text-align:center;font-size:var(--text-xs);color:var(--text-placeholder)">
-                  <span v-if="item.safe_stock" style="display:inline-block;background:var(--bg-hover);padding:1px 8px;border-radius:var(--radius-md);font-size:var(--text-xs-alt)">{{ item.safe_stock }}</span>
-                  <span v-else>-</span>
-                </td>
-                <td style="font-size:var(--text-xs);color:var(--text-placeholder)">
-                  <span v-if="item.location" style="display:inline-flex;align-items:center;gap:var(--space-1)">📍 {{ item.location }}</span>
-                  <span v-else>-</span>
-                </td>
-                <td style="text-align:center;font-size:var(--text-xs);font-weight:500;color:var(--text-placeholder)">{{ item.unit }}</td>
-                <td style="text-align:center">
-                  <div class="inv-actions" @click.stop>
-                    <button v-if="canEdit" class="inv-btn inv-btn-in" @click="openMove(item, 'in')" title="入库">
-                      <span>📥</span><span>入库</span>
-                    </button>
-                    <button v-if="canEdit" class="inv-btn inv-btn-out" @click="openMove(item, 'out')" title="出库">
-                      <span>📤</span><span>出库</span>
-                    </button>
-                    <button class="inv-btn inv-btn-edit" @click="openEdit(item)" v-if="canEdit" title="编辑">
-                      <span>✏️</span>
-                    </button>
-                    <button class="inv-btn inv-btn-del" @click="del(item)" v-if="canDelete" title="停用">
-                      <span>🗑️</span>
-                    </button>
-                  </div>
+              <tr v-for="item in items" :key="item.id" class="inv-row" :class="{'inv-row-low': item.is_low}" @click="openOrderDetails(item)" style="cursor:pointer">
+                <td v-for="column in orderVisibleColumnDefs" :key="column.key">
+                  <template v-if="column.key === 'product_name'"><span style="font-weight:500">{{ item.product_name || '-' }}</span></template>
+                  <template v-else-if="column.key === 'order_no'"><code style="font-size:var(--text-xs-alt)">{{ item.order_no || '-' }}</code></template>
+                  <template v-else-if="column.key === 'customer'"><span style="font-size:var(--text-xs)">{{ item.customer || '-' }}</span></template>
+                  <template v-else-if="column.key === 'product_model'"><div style="display:flex;align-items:center;gap:var(--space-2)"><input class="inventory-row-select" type="checkbox" :checked="selectedIds.includes(item.id)" :aria-label="`选择 ${item.product_model}`" @click.stop @change="toggleSelect(item.id)"><span :style="{display:'inline-block',width:8,height:8,borderRadius:'50%',background: item.is_low ? 'var(--danger)' : 'var(--success)',flexShrink:0}"></span><code style="font-size:var(--text-xs);font-weight:600;color:var(--text-primary)">{{ item.product_model }}</code></div></template>
+                  <template v-else-if="column.key === 'specification'"><span style="font-size:var(--text-xs);color:var(--text-placeholder)">{{ item.specification || '-' }}</span></template>
+                  <template v-else-if="column.key === 'category'"><span v-if="item.category" class="badge" :class="item.category==='A'?'badge-danger':item.category==='B'?'badge-warning':'badge-success'">{{ item.category }}</span><span v-else>-</span></template>
+                  <template v-else-if="column.key === 'quantity'"><span class="inventory-order-quantity" :class="item.is_low ? 'is-low' : ''">{{ item.available_quantity ?? 0 }}</span><small v-if="item.reserved">现存 {{ item.quantity }} / 预留 {{ item.reserved }}</small></template>
+                  <template v-else-if="column.key === 'safe_stock'"><span>{{ item.safe_stock || 0 }}</span></template>
+                  <template v-else-if="column.key === 'location'"><span>{{ item.location || '-' }}</span></template>
+                  <template v-else-if="column.key === 'unit'"><span>{{ item.unit || '-' }}</span></template>
+                  <template v-else-if="column.key === 'actions'"><div class="inv-actions" @click.stop><button v-if="canEdit" class="inv-btn inv-btn-in" @click="openMove(item, 'in')" title="入库"><span>📥</span><span>入库</span></button><button v-if="canEdit" class="inv-btn inv-btn-out" @click="openMove(item, 'out')" title="出库"><span>📤</span><span>出库</span></button><button class="inv-btn inv-btn-edit" @click="openEdit(item)" v-if="canEdit" title="编辑"><span>✏️</span></button><button class="inv-btn inv-btn-del" @click="del(item)" v-if="canDelete" title="停用"><span>🗑️</span></button></div></template>
                 </td>
               </tr>
             </tbody>
@@ -311,24 +293,50 @@
   </div>
 </template>
 <script>
-import { reactive } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { useInventory } from '@/composables/useInventory.js'
 import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
 import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
 import InventoryFilterWorkbench from '@/components/inventory/InventoryFilterWorkbench.vue'
 import ProductInventoryTable from '@/components/inventory/ProductInventoryTable.vue'
 import ProductInventoryDrawer from '@/components/inventory/ProductInventoryDrawer.vue'
+import InventoryColumnConfigurator from '@/components/inventory/InventoryColumnConfigurator.vue'
+import InventoryOrderDrawer from '@/components/inventory/InventoryOrderDrawer.vue'
 
 export default {
-  components: { InventoryViewTabs, InventoryFilterWorkbench, ProductInventoryTable, ProductInventoryDrawer },
+  components: { InventoryViewTabs, InventoryFilterWorkbench, ProductInventoryTable, ProductInventoryDrawer, InventoryColumnConfigurator, InventoryOrderDrawer },
   setup() {
     const inventory = useInventory()
     const product = useInventoryProductGroups()
+    const orderDrawerItem = ref(null)
+    const orderColumns = inventory.orderColumns
+    const orderVisibleColumnDefs = computed(() => orderColumns.filter(column => inventory.visibleColumns.value.includes(column.key)))
+    const orderPageSelected = computed(() => inventory.items.value.length > 0 && inventory.items.value.every(item => inventory.selectedIds.value.includes(item.id)))
+    const openOrderDetails = (item) => { orderDrawerItem.value = item }
+    const openOrderLogs = (item) => { closeOrderDetails(); loadLogs(item?.id) }
+    const setSort = (key) => inventory.setSort(key)
+    const toggleSelectAll = () => inventory.toggleSelectAll()
+    const toggleSelect = (id) => inventory.toggleSelect(id)
+    const sortIndicator = (key) => inventory.sortBy.value === key ? (inventory.sortDir.value === 'asc' ? ' ↑' : ' ↓') : ''
+    const ariaSort = (key) => inventory.sortBy.value === key ? (inventory.sortDir.value === 'asc' ? 'ascending' : 'descending') : 'none'
+    const closeOrderDetails = () => { orderDrawerItem.value = null }
+    const summaryValue = (key) => {
+      if (product.viewMode.value === 'product') return product.summary.value?.[key] || 0
+      return inventory.stats.value?.[key] || 0
+    }
+    const focusLowStock = () => {
+      if (product.viewMode.value === 'product') {
+        product.setFilter({ key: 'low_stock', value: true })
+        return product.searchGroups()
+      }
+      inventory.setFilter({ key: 'low_stock', value: true })
+      return inventory.search()
+    }
     // The composable exposes refs for direct JavaScript consumers. Convert the
     // nested state object at the view boundary so Vue unwraps those refs in the
     // template (tabs, table and drawer otherwise receive Ref objects).
     const productState = reactive(product.state)
-    return { ...inventory, productState, productActions: product.actions }
+    return { ...inventory, productState, productActions: product.actions, orderDrawerItem, orderColumns, orderVisibleColumnDefs, orderPageSelected, openOrderDetails, closeOrderDetails, openOrderLogs, setSort, toggleSelectAll, toggleSelect, sortIndicator, ariaSort, summaryValue, focusLowStock }
   }
 }
 </script>
