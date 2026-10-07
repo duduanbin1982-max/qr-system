@@ -19,7 +19,8 @@ class InventoryProductQueryService:
     @classmethod
     def list_groups(
         cls, *, keyword="", low_stock=False, location="", quality_status="",
-        identity_status="", specifications=None, page=1, limit=50
+        identity_status="", specifications=None, page=1, limit=50,
+        sort_by="alert", sort_dir="desc", product_ids=None
     ):
         if not config.INVENTORY_PRODUCT_QUERY_ENABLED:
             raise InventoryProductQueryDisabledError("产品编码库存视图尚未启用")
@@ -30,11 +31,16 @@ class InventoryProductQueryService:
             "quality_status": (quality_status or "").strip(),
             "identity_status": (identity_status or "").strip(),
             "specifications": tuple(specifications or ()),
+            "product_ids": tuple(
+                int(value) for value in (product_ids or ()) if str(value).isdigit()
+            ),
         }
         size = min(max(int(limit), 1), 200)
         current_page = max(int(page), 1)
         total = InventoryProductRepository.count_groups(filters)
-        rows = InventoryProductRepository.list_groups(filters, current_page, size)
+        rows = InventoryProductRepository.list_groups(
+            filters, current_page, size, sort_by=sort_by, sort_dir=sort_dir
+        )
         enriched = []
         for row in rows:
             item = dict(row)
@@ -130,8 +136,14 @@ class InventoryProductQueryService:
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
         items = []
         page = 1
+        sort_by = filters.pop("sort_by", "alert")
+        sort_dir = filters.pop("sort_dir", "desc")
+        product_ids = filters.pop("product_ids", None)
         while True:
-            result = cls.list_groups(page=page, limit=200, **filters)
+            result = cls.list_groups(
+                page=page, limit=200, sort_by=sort_by, sort_dir=sort_dir,
+                product_ids=product_ids, **filters
+            )
             page_items = result.get("items", [])
             items.extend(page_items)
             if not page_items or len(items) >= int(result.get("total", 0)):

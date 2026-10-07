@@ -77,6 +77,28 @@ def test_product_group_export_is_not_truncated_at_200_rows(monkeypatch):
     assert [page for page, _, _ in calls] == [1, 2]
 
 
+def test_product_group_sort_and_selected_export_are_deterministic(client, auth_headers, db):
+    first = seed_product_inventory_scenario(db, code="SORT-PRODUCT-A", quantities=(2, 2))
+    second = seed_product_inventory_scenario(db, code="SORT-PRODUCT-B", quantities=(9, 9))
+
+    response = client.get(
+        "/api/inventory/product-groups?sort_by=available_quantity&sort_dir=desc&limit=10",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    items = response.get_json()["items"]
+    assert [item["product_id"] for item in items[:2]] == [second["product_id"], first["product_id"]]
+
+    exported = client.get(
+        f"/api/inventory/product-groups/export?product_id={first['product_id']}",
+        headers=auth_headers,
+    )
+    assert exported.status_code == 200
+    rows = list(load_workbook(BytesIO(exported.data), read_only=True).active.iter_rows(values_only=True))
+    assert len(rows) == 2
+    assert rows[1][0] == first["product_code"]
+
+
 def test_product_groups_aggregate_by_product_id_and_preserve_order_details(
     client, auth_headers, db
 ):

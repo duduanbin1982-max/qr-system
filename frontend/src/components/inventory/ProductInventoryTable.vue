@@ -16,6 +16,18 @@
       @remove-filter="$emit('remove-filter', $event)"
     >
       <template #actions>
+        <InventoryColumnConfigurator
+          :columns="columns"
+          :visible-keys="visibleColumns"
+          @update="$emit('update-columns', $event)"
+          @reset="$emit('reset-columns')"
+        />
+        <label class="inventory-page-select" title="选择当前页">
+          <input type="checkbox" :checked="allPageSelected" :disabled="!groups.length" @change="$emit('toggle-select-all')">
+          选择当前页
+        </label>
+        <span v-if="selectedCount" class="inventory-selection-count">已选 {{ selectedCount }} 项</span>
+        <button v-if="canExport && selectedCount" class="btn btn-default btn-sm" type="button" @click="$emit('batch-export')">批量导出</button>
         <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="$emit('export')">导出当前筛选</button>
       </template>
     </InventoryFilterWorkbench>
@@ -25,44 +37,29 @@
     <div v-else class="table-wrap inventory-table-scroll inventory-product-scroll" role="region" aria-label="产品库存表格，可横向和纵向滚动" tabindex="0">
       <table class="data-table product-table inventory-product-table" aria-label="按产品编码汇总的库存">
         <colgroup>
-          <col class="inventory-col-product-code">
-          <col class="inventory-col-product-name">
-          <col class="inventory-col-specification">
-          <col class="inventory-col-total">
-          <col class="inventory-col-reserved">
-          <col class="inventory-col-frozen">
-          <col class="inventory-col-available">
-          <col class="inventory-col-orders">
-          <col class="inventory-col-lots">
-          <col class="inventory-col-locations">
-          <col class="inventory-col-alert">
-          <col class="inventory-col-actions">
+          <col v-for="column in visibleColumnDefs" :key="column.key" :class="columnClass(column.key)">
         </colgroup>
         <thead>
           <tr>
-            <th class="inventory-frozen-cell inventory-frozen--code" scope="col">产品编码</th>
-            <th class="inventory-frozen-cell inventory-frozen--name" scope="col">产品名称</th>
-            <th class="inventory-frozen-cell inventory-frozen--spec" scope="col">规格</th>
-            <th scope="col">总库存</th>
-            <th scope="col">预留</th>
-            <th scope="col">冻结</th>
-            <th scope="col">可用</th>
-            <th scope="col">订单数</th>
-            <th scope="col">批次数</th>
-            <th scope="col">库位数</th>
-            <th scope="col">预警</th>
-            <th scope="col">操作</th>
+            <th v-for="(column, index) in visibleColumnDefs" :key="column.key" :class="cellClass(column.key, index)" scope="col" :aria-sort="ariaSort(column.key)">
+              <button v-if="column.key !== 'actions'" class="inventory-sort-button" type="button" @click="$emit('sort', column.key)">
+                {{ column.label }}<span class="inventory-sort-indicator" aria-hidden="true">{{ sortIndicator(column.key) }}</span>
+              </button>
+              <span v-else>{{ column.label }}</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="item in groups" :key="item.product_id">
-            <td class="inventory-frozen-cell inventory-frozen--code" :title="item.product_code || '-'"><code>{{ item.product_code || '-' }}</code></td>
-            <td class="inventory-frozen-cell inventory-frozen--name" :title="item.product_name || '-'">{{ item.product_name || '-' }}</td>
-            <td class="inventory-frozen-cell inventory-frozen--spec" :title="item.specification || '-'">{{ item.specification || '-' }}</td>
-            <td>{{ item.quantity ?? 0 }}</td><td>{{ item.reserved_quantity ?? 0 }}</td><td>{{ item.frozen_quantity ?? 0 }}</td>
-            <td class="available">{{ item.available_quantity ?? 0 }}</td><td>{{ item.order_count ?? 0 }}</td><td>{{ item.lot_count ?? 0 }}</td><td>{{ item.location_count ?? 0 }}</td>
-            <td><span class="status-text" :class="alertClass(item)">{{ alertText(item) }}</span></td>
-            <td><button class="btn btn-default btn-sm" type="button" @click="$emit('open-product', item)">查看详情</button></td>
+            <td v-for="(column, index) in visibleColumnDefs" :key="column.key" :class="cellClass(column.key, index)" :title="cellTitle(item, column.key)">
+              <template v-if="column.key === 'product_code'"><input class="inventory-row-select" type="checkbox" :checked="selectedIds.includes(item.product_id)" :aria-label="`选择 ${item.product_code || item.product_id}`" @click.stop @change="$emit('toggle-select', item.product_id)"><code>{{ item.product_code || '-' }}</code></template>
+              <template v-else-if="column.key === 'product_name'">{{ item.product_name || '-' }}</template>
+              <template v-else-if="column.key === 'specification'">{{ item.specification || '-' }}</template>
+              <template v-else-if="column.key === 'available_quantity'"><span class="available">{{ item.available_quantity ?? 0 }}</span></template>
+              <template v-else-if="column.key === 'alert'"><span class="status-text" :class="alertClass(item)">{{ alertText(item) }}</span></template>
+              <template v-else-if="column.key === 'actions'"><button class="btn btn-default btn-sm" type="button" @click="$emit('open-product', item)">查看详情</button></template>
+              <template v-else>{{ item[column.key] ?? 0 }}</template>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -87,6 +84,7 @@
 <script setup>
 import { computed } from 'vue'
 import InventoryFilterWorkbench from './InventoryFilterWorkbench.vue'
+import InventoryColumnConfigurator from './InventoryColumnConfigurator.vue'
 
 const props = defineProps({
   groups: { type: Array, default: () => [] },
@@ -99,11 +97,46 @@ const props = defineProps({
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
   limit: { type: Number, default: 200 },
+  columns: { type: Array, default: () => [] },
+  visibleColumns: { type: Array, default: () => [] },
+  selectedIds: { type: Array, default: () => [] },
+  selectedCount: { type: Number, default: 0 },
+  sortBy: { type: String, default: 'alert' },
+  sortDir: { type: String, default: 'desc' },
 })
-defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product', 'update-filter', 'clear-filter', 'save-filter', 'apply-filter', 'remove-filter', 'export'])
+defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product', 'update-filter', 'clear-filter', 'save-filter', 'apply-filter', 'remove-filter', 'export', 'batch-export', 'update-columns', 'reset-columns', 'toggle-select-all', 'toggle-select', 'sort'])
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.limit)))
 const rangeStart = computed(() => props.total ? (props.page - 1) * props.limit + 1 : 0)
 const rangeEnd = computed(() => Math.min(props.page * props.limit, props.total))
+const columns = computed(() => props.columns.length ? props.columns : [
+  { key: 'product_code', label: '产品编码', required: true }, { key: 'product_name', label: '产品名称', required: true }, { key: 'specification', label: '规格', required: true }, { key: 'quantity', label: '总库存' }, { key: 'reserved_quantity', label: '预留' }, { key: 'frozen_quantity', label: '冻结' }, { key: 'available_quantity', label: '可用' }, { key: 'order_count', label: '订单数' }, { key: 'lot_count', label: '批次数' }, { key: 'location_count', label: '库位数' }, { key: 'alert', label: '预警' }, { key: 'actions', label: '操作', required: true },
+])
+const visibleColumnDefs = computed(() => columns.value.filter(column => props.visibleColumns.length ? props.visibleColumns.includes(column.key) : true))
+const allPageSelected = computed(() => props.groups.length > 0 && props.groups.every(item => props.selectedIds.includes(item.product_id)))
+function columnClass(key) {
+  return {
+    product_code: 'inventory-col-product-code',
+    product_name: 'inventory-col-product-name',
+    specification: 'inventory-col-specification',
+    quantity: 'inventory-col-total',
+    reserved_quantity: 'inventory-col-reserved',
+    frozen_quantity: 'inventory-col-frozen',
+    available_quantity: 'inventory-col-available',
+    order_count: 'inventory-col-orders',
+    lot_count: 'inventory-col-lots',
+    location_count: 'inventory-col-locations',
+    alert: 'inventory-col-alert',
+    actions: 'inventory-col-actions',
+  }[key] || ''
+}
+function cellClass(key) {
+  return key === 'product_code' ? 'inventory-frozen-cell inventory-frozen--code'
+    : key === 'product_name' ? 'inventory-frozen-cell inventory-frozen--name'
+      : key === 'specification' ? 'inventory-frozen-cell inventory-frozen--spec' : ''
+}
+function cellTitle(item, key) { return ['product_code', 'product_name', 'specification'].includes(key) ? (item[key] || '-') : undefined }
+function sortIndicator(key) { return props.sortBy === key ? (props.sortDir === 'asc' ? ' ↑' : ' ↓') : '' }
+function ariaSort(key) { return props.sortBy === key ? (props.sortDir === 'asc' ? 'ascending' : 'descending') : 'none' }
 function alertText(item) { return item.product_alert_level === 'out_of_stock' ? '缺货' : item.product_alert_level === 'low' ? '低库存' : item.product_alert_level === 'attention' ? '关注' : '正常' }
 function alertClass(item) { return `status-${item.product_alert_level || 'normal'}` }
 </script>
@@ -115,6 +148,9 @@ function alertClass(item) { return `status-${item.product_alert_level || 'normal
 .product-empty,.product-error { padding:48px 16px; text-align:center; color:var(--text-muted); }
 .product-error { color:var(--danger); }
 .product-table th,.product-table td { white-space:nowrap; }
+.inventory-sort-button { border:0; background:transparent; color:inherit; font:inherit; font-weight:600; cursor:pointer; padding:0; white-space:nowrap; }
+.inventory-sort-button:hover { color:var(--primary); }.inventory-sort-indicator { color:var(--primary); font-weight:700; }
+.inventory-page-select { display:inline-flex; align-items:center; gap:5px; color:var(--text-secondary); font-size:12px; white-space:nowrap; }.inventory-selection-count { color:var(--primary); font-size:12px; font-weight:600; white-space:nowrap; }
 .available { font-weight:700; color:var(--success); }.status-text { font-size:12px; font-weight:600; }
 .status-normal { color:var(--success); }.status-attention { color:var(--warning); }.status-low,.status-out_of_stock { color:var(--danger); }
 .product-pagination { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:12px 16px; border-top:1px solid var(--border-light); background:var(--bg-table-stripe); }

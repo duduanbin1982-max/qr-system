@@ -60,6 +60,8 @@ def inventory_product_groups():
         specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
         page=pagination['page'],
         limit=pagination['limit'],
+        sort_by=request.args.get('sort_by', 'alert'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
     ))
 
 
@@ -92,6 +94,14 @@ def inventory_product_group_threshold(product_id):
 @check_auth
 @check_permission('inventory:export')
 def inventory_product_groups_export():
+    product_ids = _multi_query_values('product_id')
+    if product_ids:
+        safe_audit_log(
+            'export_inventory_product_groups',
+            'inventory_product_group',
+            0,
+            f'count={len(product_ids)};sort_by={request.args.get("sort_by", "alert")};sort_dir={request.args.get("sort_dir", "desc")}',
+        )
     output = InventoryProductQueryService.export_groups(
         keyword=request.args.get('keyword', ''),
         low_stock=request.args.get('low_stock', '0') == '1',
@@ -99,6 +109,9 @@ def inventory_product_groups_export():
         quality_status=request.args.get('quality_status', ''),
         identity_status=request.args.get('identity_status', ''),
         specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
+        sort_by=request.args.get('sort_by', 'alert'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
+        product_ids=product_ids,
     )
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'inventory_product_groups_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
@@ -108,6 +121,7 @@ def inventory_product_groups_export():
 @check_auth
 @check_permission('inventory:export')
 def inventory_product_group_details_export(product_id):
+    safe_audit_log('export_inventory_product_group_details', 'inventory_product_group', product_id)
     output = InventoryProductQueryService.export_details(
         product_id, compatibility_key=request.args.get('compatibility_key', '')
     )
@@ -208,7 +222,9 @@ def list_inventory():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     return jsonify(InventoryService.list_items(
-        keyword, low_stock, location, page, limit, specifications, quality_status
+        keyword, low_stock, location, page, limit, specifications, quality_status,
+        sort_by=request.args.get('sort_by', 'updated_at'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
     ))
 
 
@@ -473,12 +489,21 @@ def inventory_adjust(id):
 @check_auth
 @check_permission('inventory:export')
 def inventory_export():
+    inventory_ids = _multi_query_values('inventory_id')
+    if inventory_ids:
+        safe_audit_log(
+            'export_inventory_items', 'inventory', 0,
+            f'count={len(inventory_ids)};sort_by={request.args.get("sort_by", "updated_at")};sort_dir={request.args.get("sort_dir", "desc")}',
+        )
     output = InventoryService.export_inventory(
         keyword=request.args.get('keyword', ''),
         low_stock=request.args.get('low_stock', '') == '1',
         location=request.args.get('location', ''),
         specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
         quality_status=request.args.get('quality_status', ''),
+        sort_by=request.args.get('sort_by', 'updated_at'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
+        inventory_ids=inventory_ids,
     )
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

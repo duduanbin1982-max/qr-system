@@ -106,6 +106,11 @@ class InventoryProductRepository:
             params.append(filters["quality_status"])
         if (filters.get("identity_status") or "") not in ("", "resolved"):
             clauses.append("1=0")
+        product_ids = tuple(filters.get("product_ids") or ())
+        if product_ids:
+            placeholders = ",".join("?" for _ in product_ids)
+            clauses.append(f"i.resolved_product_id IN ({placeholders})")
+            params.extend(product_ids)
         where = " AND ".join(clauses) if clauses else "1=1"
         having = ""
         if filters.get("low_stock"):
@@ -215,10 +220,25 @@ class InventoryProductRepository:
         return int(row[0] or 0)
 
     @classmethod
-    def list_groups(cls, filters, page, limit, db=None):
+    def list_groups(cls, filters, page, limit, sort_by="alert", sort_dir="desc", db=None):
         db = resolve_db(db)
         where, having, params = cls._group_filters(filters)
         offset = (page - 1) * limit
+        sort_columns = {
+            "product_code": "product_code COLLATE NOCASE",
+            "product_name": "product_name COLLATE NOCASE",
+            "specification": "specification COLLATE NOCASE",
+            "quantity": "quantity",
+            "reserved_quantity": "reserved_quantity",
+            "frozen_quantity": "frozen_quantity",
+            "available_quantity": "available_quantity",
+            "order_count": "order_count",
+            "lot_count": "lot_count",
+            "location_count": "location_count",
+            "alert": "is_low",
+        }
+        sort_column = sort_columns.get(sort_by, "is_low")
+        direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
         return db.execute(
             cls._resolved_cte()
             + ", lot_counts AS (SELECT inventory_id, COUNT(DISTINCT NULLIF(lot_no,'')) AS lot_count FROM inventory_logs GROUP BY inventory_id) "
@@ -252,8 +272,7 @@ class InventoryProductRepository:
               "LEFT JOIN lot_counts lc ON lc.inventory_id=i.id "
               f"WHERE {where} GROUP BY i.resolved_product_id,i.canonical_product_code,"
               f"i.canonical_product_name,i.canonical_category,pt.safe_stock,pt.warning_buffer {having} "
-              "ORDER BY is_low DESC, "
-              "(COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) - SUM(" + AVAILABLE_SQL + ")) DESC, "
+              f"ORDER BY {sort_column} {direction}, "
               "product_code COLLATE NOCASE, product_id "
               "LIMIT ? OFFSET ?",
             [*params, limit, offset],

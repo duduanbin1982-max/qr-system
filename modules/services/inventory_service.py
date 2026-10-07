@@ -16,13 +16,15 @@ class InventoryService:
 
     @staticmethod
     def list_items(keyword='', low_stock=False, location='', page=1, limit=100,
-                   specifications=None, quality_status=''):
+                   specifications=None, quality_status='', sort_by='updated_at', sort_dir='desc', inventory_ids=None):
         """库存列表（搜索 + 低库存筛选 + 分页）。"""
         where, params = InventoryRepository.build_item_filters(
-            keyword, low_stock, location, specifications, quality_status
+            keyword, low_stock, location, specifications, quality_status, inventory_ids
         )
         total = InventoryRepository.count_items(where, params)
-        rows, size = InventoryRepository.list_items_paginated(where, params, page, limit)
+        rows, size = InventoryRepository.list_items_paginated(
+            where, params, page, limit, sort_by=sort_by, sort_dir=sort_dir
+        )
         return {'items': [dict(r) for r in rows], 'total': total, 'page': page, 'limit': size}
 
     @staticmethod
@@ -350,7 +352,7 @@ class InventoryService:
 
     @staticmethod
     def export_inventory(keyword='', low_stock=False, location='', specifications=None,
-                         quality_status=''):
+                         quality_status='', sort_by='updated_at', sort_dir='desc', inventory_ids=None):
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
         from openpyxl import Workbook
         from openpyxl.styles import Font
@@ -366,6 +368,9 @@ class InventoryService:
                 location=location,
                 specifications=specifications,
                 quality_status=quality_status,
+                inventory_ids=inventory_ids,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
                 page=page,
                 limit=page_size,
             )

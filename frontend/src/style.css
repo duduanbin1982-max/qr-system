@@ -503,6 +503,28 @@ textarea { resize: vertical; min-height: 80px; }
 .inventory-order-header .inventory-filter-workbench {
   width: 100%;
 }
+.inventory-summary-bar .summary-item-action {
+  border: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
+}
+.inventory-summary-bar .summary-item-action:hover {
+  background: var(--bg-hover);
+}
+.inventory-order-table th {
+  min-width: 80px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.inventory-order-table td { white-space: nowrap; }
+.inventory-order-actions-head { min-width: 195px; text-align: center; }
+.inventory-order-quantity { display:inline-block; min-width:28px; padding:var(--space-1) 8px; border-radius:var(--radius-sm); font-weight:700; color:var(--success); background:var(--success-light); }
+.inventory-order-quantity.is-low { color:var(--danger); background:var(--danger-light); }
+.inventory-order-table td small { display:block; margin-top:2px; color:var(--text-muted); font-size:var(--text-2xs); }
+.inventory-row-select { accent-color:var(--primary); }
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th {
   background: var(--bg-table-header);

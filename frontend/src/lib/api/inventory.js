@@ -25,6 +25,7 @@ export const inventoryApi = {
   productGroupDetails: (productId, params) => request(
     'GET', `/api/inventory/product-groups/${productId}/details` + buildQuery(params),
   ),
+  productGroupDetailsExportUrl: (productId, params) => `/api/inventory/product-groups/${productId}/export` + buildQuery(params),
   allocationPreview: (productId, data) => request(
     'POST', `/api/inventory/product-groups/${productId}/allocation-preview`, data,
   ),

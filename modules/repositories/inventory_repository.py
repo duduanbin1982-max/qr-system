@@ -1,6 +1,6 @@
 """qr-system - InventoryRepository"""
 from modules.repositories.context import resolve_db
-from modules.query_utils import paginate, build_sort_clause
+from modules.query_utils import paginate
 
 
 class InventoryRepository:
@@ -109,7 +109,7 @@ class InventoryRepository:
 
     @staticmethod
     def build_item_filters(keyword="", low_stock=False, location="", specifications=None,
-                           quality_status=""):
+                           quality_status="", inventory_ids=None):
         clauses = ["i.deleted_at IS NULL"]
         params = []
         if keyword:
@@ -140,6 +140,11 @@ class InventoryRepository:
         if quality_status:
             clauses.append(InventoryRepository.NORMALIZED_QUALITY_STATUS_SQL + " = ?")
             params.append(quality_status)
+        inventory_ids = tuple(int(value) for value in (inventory_ids or ()) if str(value).isdigit())
+        if inventory_ids:
+            placeholders = ",".join("?" for _ in inventory_ids)
+            clauses.append(f"i.id IN ({placeholders})")
+            params.extend(inventory_ids)
         return " AND ".join(clauses), params
 
     @staticmethod
@@ -153,8 +158,24 @@ class InventoryRepository:
         ).fetchone()[0]
 
     @staticmethod
-    def list_items_paginated(where_clause, params, page, limit, db=None):
+    def list_items_paginated(where_clause, params, page, limit, sort_by="updated_at", sort_dir="desc", db=None):
         db = resolve_db(db)
+        sort_columns = {
+            "updated_at": "i.updated_at",
+            "product_name": "COALESCE(NULLIF(i.product_name_snapshot,''),NULLIF(i.product_name,''),o.product_name,'')",
+            "order_no": "COALESCE(o.order_no,'')",
+            "customer": "COALESCE(o.customer,'')",
+            "product_model": "i.product_model",
+            "specification": "TRIM(COALESCE(i.specification,''))",
+            "category": "COALESCE(i.category,'')",
+            "quantity": "i.quantity",
+            "available_quantity": "MAX(i.quantity - COALESCE(i.reserved,0) - COALESCE(i.frozen_quantity,0), 0)",
+            "safe_stock": "i.safe_stock",
+            "location": "COALESCE(i.location,'')",
+            "is_low": "is_low",
+        }
+        sort_column = sort_columns.get(sort_by, sort_columns["updated_at"])
+        direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
         base_sql = (
             "SELECT COALESCE(i.product_id,o.product_id,pca.product_id) AS product_id, "
             "COALESCE(NULLIF(i.product_code_snapshot,''),NULLIF(o.product_code,''),"
@@ -172,7 +193,7 @@ class InventoryRepository:
             "LEFT JOIN product_code_aliases pca ON pca.product_code = i.product_model "
             "LEFT JOIN products p ON p.id = pca.product_id AND p.deleted_at IS NULL WHERE "
             + where_clause + " "
-            + build_sort_clause("updated_at", {"updated_at": "i.updated_at"}, default="i.updated_at")
+            + f"ORDER BY {sort_column} {direction}, i.id DESC"
         )
         paginated_sql, all_params, size, offset = paginate(base_sql, params, page=page, page_size=limit)
         rows = db.execute(paginated_sql, all_params).fetchall()
