@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 
@@ -65,9 +65,12 @@ export function useInventoryProductGroups() {
 
   function setViewMode(mode) {
     viewMode.value = mode === 'product' ? 'product' : 'order'
-    localStorage.setItem(VIEW_KEY, viewMode.value)
-    if (viewMode.value === 'product' && enabled.value && !groups.value.length) loadGroups()
   }
+
+  watch(viewMode, (mode) => {
+    localStorage.setItem(VIEW_KEY, mode)
+    if (mode === 'product' && enabled.value && !groups.value.length) void loadGroups()
+  })
 
   async function loadGroups() {
     if (!enabled.value) return

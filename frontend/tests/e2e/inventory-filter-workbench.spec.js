@@ -126,7 +126,6 @@ test('inventory desktop filter workbench is full-width, persistent, and uses a s
   const productWorkbench = main.locator('.inventory-product-card .inventory-filter-workbench')
   await expect(productWorkbench).toBeVisible()
   await expect(productWorkbench.getByRole('button', { name: '导出当前筛选' })).toBeVisible()
-  await productWorkbench.getByRole('button', { name: '查询', exact: true }).click()
   await expect(main.locator('.inventory-product-card .inventory-table-scroll thead')).toBeVisible()
   expect(failures).toEqual([])
 })
