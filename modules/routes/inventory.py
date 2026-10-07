@@ -471,11 +471,14 @@ def inventory_adjust(id):
 
 @app.route('/api/inventory/export', methods=['GET'])
 @check_auth
-@check_permission('inventory:view')
+@check_permission('inventory:export')
 def inventory_export():
     output = InventoryService.export_inventory(
         keyword=request.args.get('keyword', ''),
         low_stock=request.args.get('low_stock', '') == '1',
+        location=request.args.get('location', ''),
+        specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
+        quality_status=request.args.get('quality_status', ''),
     )
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

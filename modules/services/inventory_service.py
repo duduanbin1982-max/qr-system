@@ -349,14 +349,31 @@ class InventoryService:
         }
 
     @staticmethod
-    def export_inventory(keyword='', low_stock=False):
+    def export_inventory(keyword='', low_stock=False, location='', specifications=None,
+                         quality_status=''):
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
         from openpyxl import Workbook
         from openpyxl.styles import Font
         from io import BytesIO
 
-        result = InventoryService.list_items(keyword=keyword, low_stock=low_stock, page=1, limit=99999)
-        items = result.get('items', [])
+        items = []
+        page = 1
+        page_size = 500
+        while True:
+            result = InventoryService.list_items(
+                keyword=keyword,
+                low_stock=low_stock,
+                location=location,
+                specifications=specifications,
+                quality_status=quality_status,
+                page=page,
+                limit=page_size,
+            )
+            page_items = result.get('items', [])
+            items.extend(page_items)
+            if not page_items or len(items) >= int(result.get('total', 0)):
+                break
+            page += 1
 
         wb = Workbook()
         ws = wb.active
@@ -567,6 +584,7 @@ class InventoryService:
         return {
             'total_items': inv_stats['total_items'] or 0,
             'total_quantity': inv_stats['total_quantity'] or 0,
+            'total_value': inv_stats['total_value'] or 0,
             'low_stock': inv_stats['low_stock'] or 0,
             'today_in': today_stats['today_in'] or 0,
             'today_out': today_stats['today_out'] or 0,

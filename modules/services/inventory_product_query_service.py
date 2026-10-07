@@ -128,13 +128,21 @@ class InventoryProductQueryService:
         from io import BytesIO
         from openpyxl import Workbook
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
-        result = cls.list_groups(page=1, limit=200, **filters)
+        items = []
+        page = 1
+        while True:
+            result = cls.list_groups(page=page, limit=200, **filters)
+            page_items = result.get("items", [])
+            items.extend(page_items)
+            if not page_items or len(items) >= int(result.get("total", 0)):
+                break
+            page += 1
         wb = Workbook()
         ws = wb.active
         ws.title = "产品库存汇总"
         headers = ["产品编码", "产品名称", "总库存", "预留", "冻结", "可用", "安全库存", "预警缓冲", "订单数", "批次数", "库位数", "预警等级"]
         style_header(ws, headers)
-        for row_index, item in enumerate(result["items"], start=2):
+        for row_index, item in enumerate(items, start=2):
             values = [item.get("product_code", ""), item.get("product_name", ""), item.get("quantity", 0), item.get("reserved_quantity", 0), item.get("frozen_quantity", 0), item.get("available_quantity", 0), item.get("safe_stock", 0), item.get("warning_buffer", 0), item.get("order_count", 0), item.get("lot_count", 0), item.get("location_count", 0), item.get("product_alert_level", "normal")]
             for column, value in enumerate(values, start=1):
                 cell = ws.cell(row=row_index, column=column, value=value)

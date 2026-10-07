@@ -1,21 +1,28 @@
 <template>
   <div class="product-inventory-panel">
-    <div class="product-toolbar">
-      <input v-model="filters.keyword" class="form-input" placeholder="搜索产品编码或名称" @keyup.enter="$emit('search')">
-      <select v-model="filters.quality_status" class="form-input"><option value="">全部质量状态</option><option value="qualified">合格</option><option value="hold">冻结/待检</option></select>
-      <select v-model="filters.specifications" class="form-input specification-filter" multiple size="3" aria-label="规格筛选">
-        <option v-for="option in filterOptions.specifications" :key="option.value || '__empty__'" :value="option.value || '__empty__'">
-          {{ option.value || '未填写规格' }}（{{ option.inventory_count }}）
-        </option>
-      </select>
-      <label><input v-model="filters.low_stock" type="checkbox" @change="$emit('search')"> 仅低库存</label>
-      <button class="btn btn-primary" @click="$emit('search')">查询</button>
-      <button class="btn btn-default" @click="$emit('reset')">重置</button>
-    </div>
+    <InventoryFilterWorkbench
+      view-mode="product"
+      :filters="filters"
+      :filter-options="filterOptions"
+      :saved-filters="savedFilters"
+      :result-count="total"
+      :loading="loading"
+      @search="$emit('search')"
+      @reset="$emit('reset')"
+      @update-filter="$emit('update-filter', $event)"
+      @clear-filter="$emit('clear-filter', $event)"
+      @save-filter="$emit('save-filter', $event)"
+      @apply-filter="$emit('apply-filter', $event)"
+      @remove-filter="$emit('remove-filter', $event)"
+    >
+      <template #actions>
+        <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="$emit('export')">导出当前筛选</button>
+      </template>
+    </InventoryFilterWorkbench>
     <div v-if="loading" class="product-empty">加载中…</div>
     <div v-else-if="error" class="product-error">{{ error }}</div>
     <div v-else-if="!groups.length" class="product-empty">暂无可聚合的产品库存</div>
-    <div v-else class="table-wrap">
+    <div v-else class="table-wrap inventory-table-scroll">
       <table class="data-table product-table">
         <thead><tr><th>产品编码</th><th>产品名称/规格</th><th>总库存</th><th>预留</th><th>冻结</th><th>可用</th><th>订单数</th><th>批次数</th><th>库位数</th><th>预警</th><th>操作</th></tr></thead>
         <tbody>
@@ -49,18 +56,21 @@
 
 <script setup>
 import { computed } from 'vue'
+import InventoryFilterWorkbench from './InventoryFilterWorkbench.vue'
 
 const props = defineProps({
   groups: { type: Array, default: () => [] },
   filters: { type: Object, required: true },
   filterOptions: { type: Object, default: () => ({ specifications: [] }) },
+  savedFilters: { type: Array, default: () => [] },
+  canExport: Boolean,
   loading: Boolean,
   error: { type: String, default: '' },
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
   limit: { type: Number, default: 200 },
 })
-defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product'])
+defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product', 'update-filter', 'clear-filter', 'save-filter', 'apply-filter', 'remove-filter', 'export'])
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.limit)))
 const rangeStart = computed(() => props.total ? (props.page - 1) * props.limit + 1 : 0)
 const rangeEnd = computed(() => Math.min(props.page * props.limit, props.total))

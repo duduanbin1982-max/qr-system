@@ -3,8 +3,11 @@ import sqlite3
 from uuid import uuid4
 
 import pytest
+from io import BytesIO
+from openpyxl import load_workbook
 
 from modules import config
+from modules.services.inventory_product_query_service import InventoryProductQueryService
 from factories import create_process_route, ensure_process
 from tests.inventory_product_helpers import (
     seed_product_inventory_scenario,
@@ -39,6 +42,39 @@ def _product(db, code):
         (product_id, code),
     )
     return product_id
+
+
+def test_product_group_export_is_not_truncated_at_200_rows(monkeypatch):
+    calls = []
+
+    def fake_list_groups(cls, *, page, limit, **filters):
+        calls.append((page, limit, filters))
+        start = (page - 1) * limit
+        end = min(start + limit, 201)
+        return {
+            "items": [
+                {
+                    "product_id": index + 1,
+                    "product_code": f"P-{index + 1:04d}",
+                    "product_name": f"产品-{index + 1:04d}",
+                }
+                for index in range(start, end)
+            ],
+            "total": 201,
+        }
+
+    monkeypatch.setattr(
+        InventoryProductQueryService,
+        "list_groups",
+        classmethod(fake_list_groups),
+    )
+
+    output = InventoryProductQueryService.export_groups(keyword="测试")
+    workbook = load_workbook(BytesIO(output.getvalue()), read_only=True)
+    rows = list(workbook.active.iter_rows(values_only=True))
+
+    assert len(rows) == 202
+    assert [page for page, _, _ in calls] == [1, 2]
 
 
 def test_product_groups_aggregate_by_product_id_and_preserve_order_details(

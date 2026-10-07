@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   approveCountTask: vi.fn(),
   listInventory: vi.fn(),
   inventoryStats: vi.fn(),
+  inventoryExportUrl: vi.fn(),
   listOrders: vi.fn(),
   showToast: vi.fn(),
 }))
@@ -33,6 +34,7 @@ vi.mock('@/lib/api.js', () => ({
       approveCountTask: mocks.approveCountTask,
       listInventory: mocks.listInventory,
       inventoryStats: mocks.inventoryStats,
+      inventoryExportUrl: mocks.inventoryExportUrl,
     },
     orders: { listOrders: mocks.listOrders },
   } },
@@ -61,6 +63,7 @@ describe('inventory composable contracts', () => {
     mocks.updateInventory.mockResolvedValue({ message: 'updated' })
     mocks.listInventory.mockResolvedValue({ items: [] })
     mocks.inventoryStats.mockResolvedValue({})
+    mocks.inventoryExportUrl.mockReturnValue('/api/inventory/export?keyword=待出库')
     mocks.listOrders.mockResolvedValue({ orders: [] })
     globalThis.confirm = vi.fn(() => true)
   })
@@ -131,6 +134,24 @@ describe('inventory composable contracts', () => {
     })
     expect(mocks.approveCountTask).toHaveBeenCalledWith(4)
     expect(inventory.countTask.value.status).toBe('posted')
+    harness.wrapper.unmount()
+  })
+
+  it('inherits the current order filters when exporting', async () => {
+    const harness = mountHarness()
+    await flushPromises()
+    const inventory = harness.state
+    inventory.setFilter({ key: 'keyword', value: '待出库' })
+    inventory.setFilter({ key: 'location', value: '东库' })
+    inventory.setFilter({ key: 'specifications', value: ['标准'] })
+    window.open = vi.fn()
+
+    inventory.exportExcel()
+
+    expect(mocks.inventoryExportUrl).toHaveBeenCalledWith(expect.objectContaining({
+      keyword: '待出库', location: '东库', specification: '标准',
+    }))
+    expect(window.open).toHaveBeenCalledWith('/api/inventory/export?keyword=待出库', '_blank')
     harness.wrapper.unmount()
   })
 })

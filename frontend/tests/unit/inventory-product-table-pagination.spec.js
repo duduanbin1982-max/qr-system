@@ -20,6 +20,28 @@ function groups(count) {
 }
 
 describe('product inventory catalogue pagination', () => {
+  it('only shows filtered export to users with inventory export permission', () => {
+    const hidden = mount(ProductInventoryTable, {
+      props: {
+        groups: groups(1),
+        filters: { keyword: '', quality_status: '', low_stock: false },
+        total: 1,
+        canExport: false,
+      },
+    })
+    expect(hidden.text()).not.toContain('导出当前筛选')
+
+    const visible = mount(ProductInventoryTable, {
+      props: {
+        groups: groups(1),
+        filters: { keyword: '', quality_status: '', low_stock: false },
+        total: 1,
+        canExport: true,
+      },
+    })
+    expect(visible.text()).toContain('导出当前筛选')
+  })
+
   it('shows the complete catalogue when the API returns up to 200 groups', () => {
     const wrapper = mount(ProductInventoryTable, {
       props: {
