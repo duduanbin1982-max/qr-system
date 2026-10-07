@@ -22,17 +22,47 @@
     <div v-if="loading" class="product-empty">加载中…</div>
     <div v-else-if="error" class="product-error">{{ error }}</div>
     <div v-else-if="!groups.length" class="product-empty">暂无可聚合的产品库存</div>
-    <div v-else class="table-wrap inventory-table-scroll">
-      <table class="data-table product-table">
-        <thead><tr><th>产品编码</th><th>产品名称/规格</th><th>总库存</th><th>预留</th><th>冻结</th><th>可用</th><th>订单数</th><th>批次数</th><th>库位数</th><th>预警</th><th>操作</th></tr></thead>
+    <div v-else class="table-wrap inventory-table-scroll inventory-product-scroll" role="region" aria-label="产品库存表格，可横向和纵向滚动" tabindex="0">
+      <table class="data-table product-table inventory-product-table" aria-label="按产品编码汇总的库存">
+        <colgroup>
+          <col class="inventory-col-product-code">
+          <col class="inventory-col-product-name">
+          <col class="inventory-col-specification">
+          <col class="inventory-col-total">
+          <col class="inventory-col-reserved">
+          <col class="inventory-col-frozen">
+          <col class="inventory-col-available">
+          <col class="inventory-col-orders">
+          <col class="inventory-col-lots">
+          <col class="inventory-col-locations">
+          <col class="inventory-col-alert">
+          <col class="inventory-col-actions">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="inventory-frozen-cell inventory-frozen--code" scope="col">产品编码</th>
+            <th class="inventory-frozen-cell inventory-frozen--name" scope="col">产品名称</th>
+            <th class="inventory-frozen-cell inventory-frozen--spec" scope="col">规格</th>
+            <th scope="col">总库存</th>
+            <th scope="col">预留</th>
+            <th scope="col">冻结</th>
+            <th scope="col">可用</th>
+            <th scope="col">订单数</th>
+            <th scope="col">批次数</th>
+            <th scope="col">库位数</th>
+            <th scope="col">预警</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="item in groups" :key="item.product_id">
-            <td><code>{{ item.product_code || '-' }}</code></td>
-            <td>{{ item.product_name || '-' }}<small v-if="item.specification"> · {{ item.specification }}</small></td>
+            <td class="inventory-frozen-cell inventory-frozen--code" :title="item.product_code || '-'"><code>{{ item.product_code || '-' }}</code></td>
+            <td class="inventory-frozen-cell inventory-frozen--name" :title="item.product_name || '-'">{{ item.product_name || '-' }}</td>
+            <td class="inventory-frozen-cell inventory-frozen--spec" :title="item.specification || '-'">{{ item.specification || '-' }}</td>
             <td>{{ item.quantity ?? 0 }}</td><td>{{ item.reserved_quantity ?? 0 }}</td><td>{{ item.frozen_quantity ?? 0 }}</td>
             <td class="available">{{ item.available_quantity ?? 0 }}</td><td>{{ item.order_count ?? 0 }}</td><td>{{ item.lot_count ?? 0 }}</td><td>{{ item.location_count ?? 0 }}</td>
             <td><span class="status-text" :class="alertClass(item)">{{ alertText(item) }}</span></td>
-            <td><button class="btn btn-default btn-sm" @click="$emit('open-product', item)">查看详情</button></td>
+            <td><button class="btn btn-default btn-sm" type="button" @click="$emit('open-product', item)">查看详情</button></td>
           </tr>
         </tbody>
       </table>
@@ -84,7 +114,7 @@ function alertClass(item) { return `status-${item.product_alert_level || 'normal
 .product-toolbar label { font-size:13px; color:var(--text-secondary); }
 .product-empty,.product-error { padding:48px 16px; text-align:center; color:var(--text-muted); }
 .product-error { color:var(--danger); }
-.product-table { min-width:980px; }.product-table th,.product-table td { white-space:nowrap; }.product-table small { color:var(--text-muted); }
+.product-table th,.product-table td { white-space:nowrap; }
 .available { font-weight:700; color:var(--success); }.status-text { font-size:12px; font-weight:600; }
 .status-normal { color:var(--success); }.status-attention { color:var(--warning); }.status-low,.status-out_of_stock { color:var(--danger); }
 .product-pagination { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:12px 16px; border-top:1px solid var(--border-light); background:var(--bg-table-stripe); }
