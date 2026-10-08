@@ -36,5 +36,7 @@ export const inventoryApi = {
   reverseAllocation: (runId, data) => request('POST', `/api/inventory/allocation-runs/${runId}/reverse`, data),
   productGroupThreshold: (productId, data) => request('POST', `/api/inventory/product-groups/${productId}/threshold`, data),
   productGroupExportUrl: (params) => '/api/inventory/product-groups/export' + buildQuery(params),
+  productGroupExportCsvUrl: (params) => '/api/inventory/product-groups/export.csv' + buildQuery(params),
   inventoryExportUrl: (params) => '/api/inventory/export' + buildQuery(params),
+  inventoryExportCsvUrl: (params) => '/api/inventory/export.csv' + buildQuery(params),
 }

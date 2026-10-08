@@ -1,9 +1,10 @@
 import os
 import sqlite3
+import csv
 from uuid import uuid4
 
 import pytest
-from io import BytesIO
+from io import BytesIO, StringIO
 from openpyxl import load_workbook
 
 from modules import config
@@ -75,6 +76,141 @@ def test_product_group_export_is_not_truncated_at_200_rows(monkeypatch):
 
     assert len(rows) == 202
     assert [page for page, _, _ in calls] == [1, 2]
+
+
+@pytest.mark.parametrize("sort_dir", ["asc", "desc"])
+def test_product_export_real_api_preserves_all_filtered_rows_and_numeric_codes(
+    client, auth_headers, db, sort_dir
+):
+    """Accept the actual XLSX contract, not a mocked page or a renamed CSV."""
+    codes = [f"{index + 1:08d}" for index in range(205)]
+    for index, code in enumerate(codes):
+        product_id = _product(db, code)
+        db.execute("UPDATE products SET price=2.5 WHERE id=?", (product_id,))
+        for specification, quantity in (("加厚", index + 5), ("标准", 1000)):
+            order_id = db.execute(
+                "INSERT INTO orders(order_no,product_code,product_id,product_name,quantity,status) "
+                "VALUES(?,?,?, ?,1000,'pending')",
+                (f"EXPORT-{code}-{specification}", code, product_id, f"产品-{code}"),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO inventory(product_model,product_name,specification,quantity,"
+                "reserved,frozen_quantity,location,quality_status,order_id,product_id,"
+                "product_code_snapshot,product_name_snapshot) "
+                "VALUES(?,?,?,?,1,2,'A-01','qualified',?,?,?,?)",
+                (code, f"产品-{code}", specification, quantity,
+                 order_id, product_id, code, f"产品-{code}"),
+            )
+
+    # Each non-matching filter must exclude facts before product aggregation.
+    for index, (specification, location, quality) in enumerate((
+        ("标准", "A-01", "qualified"),
+        ("加厚", "B-02", "qualified"),
+        ("加厚", "A-01", "pending"),
+    )):
+        code = f"9999000{index}"
+        product_id = _product(db, code)
+        db.execute(
+            "INSERT INTO inventory(product_model,product_name,specification,quantity,"
+            "location,quality_status,product_id,product_code_snapshot) "
+            "VALUES(?,?,?,1000,?,?,?,?)",
+            (code, f"产品-{code}", specification, location, quality, product_id, code),
+        )
+    db.commit()
+    facts_before = db.execute(
+        "SELECT id,quantity,reserved,frozen_quantity FROM inventory ORDER BY id"
+    ).fetchall()
+    filters = {
+        "keyword": "产品-", "specification": "加厚", "location": "A-01",
+        "quality_status": "qualified", "sort_by": "available_quantity",
+        "sort_dir": sort_dir,
+    }
+    listing = client.get(
+        "/api/inventory/product-groups",
+        query_string={**filters, "page": 1, "limit": 1}, headers=auth_headers,
+    )
+    assert listing.status_code == 200
+    assert listing.get_json()["total"] == 205
+    assert len(listing.get_json()["items"]) == 1
+
+    exported = client.get(
+        "/api/inventory/product-groups/export",
+        query_string={**filters, "page": 7, "limit": 1}, headers=auth_headers,
+    )
+    assert exported.status_code == 200
+    assert exported.mimetype == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert ".xlsx" in exported.headers["Content-Disposition"]
+    workbook = load_workbook(BytesIO(exported.data), read_only=True)
+    try:
+        rows = list(workbook.active.iter_rows(values_only=True))
+        assert rows[0] == (
+            "产品编码", "产品名称", "总库存", "预留", "冻结", "可用",
+            "安全库存", "预警缓冲", "订单数", "批次数", "库位数", "预警等级",
+        )
+        assert len(rows) == 206
+        assert [row[0] for row in rows[1:]] == (
+            codes if sort_dir == "asc" else codes[::-1]
+        )
+        assert all(row[1] == f"产品-{row[0]}" for row in rows[1:])
+        assert all(row[3:5] == (1, 2) and row[8] == 1 for row in rows[1:])
+        assert all(row[5] == row[2] - row[3] - row[4] for row in rows[1:])
+        assert workbook.active.cell(row=2, column=1).data_type == "s"
+    finally:
+        workbook.close()
+
+    stats = client.get(
+        "/api/inventory/stats", query_string={**filters, "view": "product"},
+        headers=auth_headers,
+    )
+    assert stats.status_code == 200
+    summary = stats.get_json()
+    assert summary["total_items"] == len(rows) - 1
+    assert summary["total_quantity"] == sum(row[2] for row in rows[1:])
+    assert summary["available_quantity"] == sum(row[5] for row in rows[1:])
+    assert summary["total_value"] == sum(row[2] for row in rows[1:]) * 2.5
+    assert db.execute(
+        "SELECT id,quantity,reserved,frozen_quantity FROM inventory ORDER BY id"
+    ).fetchall() == facts_before
+
+
+def test_product_csv_export_is_utf8_bom_escaped_and_complete(client, auth_headers, db):
+    rows = [
+        ("00000001", "产品,一", "标准", 4),
+        ("=FORMULA", '产品"二', "加厚", 5),
+        ("00000003", "产品\n三", "加厚", 6),
+    ]
+    for code, name, specification, quantity in rows:
+        product_id = _product(db, code)
+        order_id = db.execute(
+            "INSERT INTO orders(order_no,product_code,product_id,product_name,quantity,status) "
+            "VALUES(?,?,?,?,?,'pending')",
+            (f"CSV-{code}", code, product_id, name, quantity),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO inventory(product_model,product_name,specification,quantity,"
+            "reserved,frozen_quantity,location,quality_status,order_id,product_id,"
+            "product_code_snapshot,product_name_snapshot) VALUES(?,?,?,?,0,0,'A-01',"
+            "'qualified',?,?,?,?)",
+            (code, name, specification, quantity, order_id, product_id, code, name),
+        )
+    db.commit()
+
+    response = client.get(
+        "/api/inventory/product-groups/export.csv?specification=加厚&sort_by=product_code&sort_dir=asc",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/csv")
+    assert response.data.startswith(b"\xef\xbb\xbf")
+    assert ".csv" in response.headers["Content-Disposition"]
+
+    csv_rows = list(csv.reader(StringIO(response.data.decode("utf-8-sig"))))
+    assert csv_rows[0][:3] == ["产品编码", "产品名称", "总库存"]
+    assert [row[0] for row in csv_rows[1:]] == ["00000003", "'=FORMULA"]
+    assert csv_rows[1][1] == "产品-00000003"
+    assert csv_rows[2][1] == "产品-=FORMULA"
 
 
 def test_product_group_sort_and_selected_export_are_deterministic(client, auth_headers, db):

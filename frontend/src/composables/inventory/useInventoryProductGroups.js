@@ -254,6 +254,19 @@ export function useInventoryProductGroups() {
     window.open(api.domains.inventory.productGroupExportUrl(params), '_blank')
   }
 
+  function exportGroupsCsv() {
+    const params = {
+      ...filters.value,
+      low_stock: filters.value.low_stock ? '1' : '',
+      specification: (filters.value.specifications || []).join(','),
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
+    }
+    delete params.specifications
+    if (selectedIds.value.length) params.product_id = selectedIds.value.join(',')
+    window.open(api.domains.inventory.productGroupExportCsvUrl(params), '_blank')
+  }
+
   function exportSelected() {
     if (!selectedIds.value.length) return
     if (!window.confirm(`确认导出已选 ${selectedIds.value.length} 个产品吗？`)) return
@@ -283,6 +296,6 @@ export function useInventoryProductGroups() {
 
   return {
     state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, summaryLoading, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters, sortBy, sortDir, visibleColumns, productColumns: PRODUCT_COLUMNS, selectedIds, selectedCount },
-    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setViewMode, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportSelected, openProduct, closeDrawer },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setViewMode, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportGroupsCsv, exportSelected, openProduct, closeDrawer },
   }
 }

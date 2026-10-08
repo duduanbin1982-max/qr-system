@@ -411,6 +411,48 @@ class InventoryService:
         return output
 
     @staticmethod
+    def export_inventory_csv(keyword='', low_stock=False, location='', specifications=None,
+                             quality_status='', sort_by='updated_at', sort_dir='desc', inventory_ids=None):
+        """Export the complete filtered order inventory view as native CSV."""
+        from modules.export_utils import export_rows_to_csv
+
+        items = []
+        page = 1
+        page_size = 500
+        while True:
+            result = InventoryService.list_items(
+                keyword=keyword,
+                low_stock=low_stock,
+                location=location,
+                specifications=specifications,
+                quality_status=quality_status,
+                inventory_ids=inventory_ids,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+                page=page,
+                limit=page_size,
+            )
+            page_items = result.get('items', [])
+            items.extend(page_items)
+            if not page_items or len(items) >= int(result.get('total', 0)):
+                break
+            page += 1
+
+        headers = ['产品名称', '订单号', '客户', '产品型号', '规格', '当前库存', '安全库存', '状态', '存放位置', '单位', '备注', '更新时间']
+        rows = []
+        for item in items:
+            status = '⚠低库存' if item.get('is_low') else '正常'
+            rows.append([
+                item.get('product_name', ''), item.get('order_no', ''),
+                item.get('customer', ''), item.get('product_model', ''),
+                item.get('specification', ''), item.get('quantity', 0),
+                item.get('safe_stock', 0), status, item.get('location', ''),
+                item.get('unit', ''), item.get('remark', ''),
+                (item.get('updated_at') or '')[:19],
+            ])
+        return export_rows_to_csv(headers, rows)
+
+    @staticmethod
     def export_logs(inv_id='', type_filter='', date_from='', date_to=''):
         from modules.export_utils import style_header, auto_width, THIN_BORDER, CELL_ALIGN
         from openpyxl import Workbook

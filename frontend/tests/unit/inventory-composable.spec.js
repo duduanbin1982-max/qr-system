@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   listInventory: vi.fn(),
   inventoryStats: vi.fn(),
   inventoryExportUrl: vi.fn(),
+  inventoryExportCsvUrl: vi.fn(),
   listOrders: vi.fn(),
   showToast: vi.fn(),
 }))
@@ -35,6 +36,7 @@ vi.mock('@/lib/api.js', () => ({
       listInventory: mocks.listInventory,
       inventoryStats: mocks.inventoryStats,
       inventoryExportUrl: mocks.inventoryExportUrl,
+      inventoryExportCsvUrl: mocks.inventoryExportCsvUrl,
     },
     orders: { listOrders: mocks.listOrders },
   } },
@@ -64,6 +66,7 @@ describe('inventory composable contracts', () => {
     mocks.listInventory.mockResolvedValue({ items: [] })
     mocks.inventoryStats.mockResolvedValue({})
     mocks.inventoryExportUrl.mockReturnValue('/api/inventory/export?keyword=待出库')
+    mocks.inventoryExportCsvUrl.mockReturnValue('/api/inventory/export.csv?keyword=待出库')
     mocks.listOrders.mockResolvedValue({ orders: [] })
     globalThis.confirm = vi.fn(() => true)
   })
@@ -83,6 +86,24 @@ describe('inventory composable contracts', () => {
     expect(inventory.turnoverData.value).toEqual([{ id: 1, turnover_rate: 2 }])
     expect(inventory.locations.value).toEqual(['A-01', 'B-02'])
     harness.wrapper.unmount()
+  })
+
+  it('exports the current order view to native CSV with active filters and sorting', async () => {
+    const harness = mountHarness()
+    const inventory = harness.state
+    inventory.searchKeyword.value = '泵'
+    inventory.specificationFilter.value = ['加厚', '标准']
+    inventory.qualityStatusFilter.value = 'qualified'
+    inventory.sortBy.value = 'quantity'
+    inventory.sortDir.value = 'asc'
+    inventory.selectedIds.value = [7, 9]
+
+    inventory.exportCsv()
+
+    expect(mocks.inventoryExportCsvUrl).toHaveBeenCalledWith({
+      keyword: '泵', low_stock: '', location: '', specification: '加厚,标准',
+      quality_status: 'qualified', sort_by: 'quantity', sort_dir: 'asc', inventory_id: '7,9',
+    })
   })
 
   it('normalizes an empty order id on create and strips audited fields on edit', async () => {

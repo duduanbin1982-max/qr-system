@@ -1,9 +1,37 @@
 """qr-system - Excel Export Utility"""
+import csv
 import io
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+
+def _csv_cell(value):
+    """Return a CSV-safe value while preserving numeric values and text codes.
+
+    Strings beginning with Excel formula/operator characters are prefixed with
+    an apostrophe to prevent spreadsheet formula injection. Numeric values are
+    intentionally left numeric, including negative quantities.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    text = str(value)
+    if text[:1] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+
+def export_rows_to_csv(headers, rows):
+    """Serialize rows as UTF-8-BOM CSV for direct Excel download."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow([_csv_cell(header) for header in headers])
+    for row in rows:
+        writer.writerow([_csv_cell(value) for value in row])
+    return io.BytesIO(output.getvalue().encode("utf-8-sig"))
 
 
 HEADER_FONT = Font(name="Microsoft YaHei", bold=True, size=11, color="FFFFFF")

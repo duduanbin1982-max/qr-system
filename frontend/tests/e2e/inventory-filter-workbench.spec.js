@@ -39,6 +39,95 @@ function productGroups(count = 60) {
   }))
 }
 
+test('mobile inventory keeps long summary text inside cards and detail actions reachable past the pinned code', async ({ page }, testInfo) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+  let totalValue = 1636309
+  await page.route(/\/api\/inventory(?:\/[^?]*)?(?:\?.*)?$/, async route => {
+    const pathname = new URL(route.request().url()).pathname
+    let response
+    if (pathname === '/api/inventory/capabilities') response = { product_query_enabled: true }
+    else if (pathname === '/api/inventory/filter-options') response = { specifications: [], locations: [], quality_statuses: [] }
+    else if (pathname === '/api/inventory/stats') response = { total_items: 3, total_quantity: 477, total_value: totalValue, today_in: 6, today_out: 0, low_stock: 0 }
+    else if (pathname === '/api/inventory/product-groups') response = { items: productGroups(3), total: 3, page: 1, limit: 200 }
+    else if (pathname === '/api/inventory') response = { items: orderItems(3), total: 3, page: 1, limit: 100 }
+    else if (pathname === '/api/inventory/product-groups/1/details') response = { product: productGroups(1)[0], inventory_items: [], compatibility_groups: [] }
+    else return route.fallback()
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) })
+  })
+  await openSidebarPage(page, '库存管理', '库存管理')
+  const main = page.locator('.main-content')
+  const summaryBar = main.locator('.inventory-summary-bar')
+  const productTab = main.getByRole('tab', { name: '按产品编码', exact: true })
+  const orderTab = main.getByRole('tab', { name: '按订单', exact: true })
+
+  async function expectSummaryContained() {
+    await expect(summaryBar.locator('.s-val').nth(2)).toHaveText(totalValue.toLocaleString('en-US'))
+    const overflow = await summaryBar.evaluate(bar => [...bar.querySelectorAll('.summary-item')].flatMap(card => {
+      const bounds = card.getBoundingClientRect()
+      return [...card.querySelectorAll('.s-val, .s-label')].flatMap(element => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return [...range.getClientRects()].filter(rect => rect.width > 0 && (
+          rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+          rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1
+        )).map(() => element.textContent)
+      })
+    }))
+    expect(overflow).toEqual([])
+  }
+
+  for (const width of [390, 320, 768]) {
+    await page.setViewportSize({ width, height: 844 })
+    await orderTab.click()
+    await expectSummaryContained()
+    if (width === 390) await page.screenshot({ path: testInfo.outputPath('inventory-mobile-order-390.png') })
+    await productTab.click()
+    await expectSummaryContained()
+
+    const scroll = main.locator('.inventory-product-scroll')
+    const code = scroll.locator('tbody .inventory-frozen--code').first()
+    const name = scroll.locator('tbody .inventory-frozen--name').first()
+    const spec = scroll.locator('tbody .inventory-frozen--spec').first()
+    const codeBefore = await code.boundingBox()
+    const nameBefore = await name.boundingBox()
+    await expect(code).toHaveCSS('position', 'sticky')
+    for (const cell of [name, spec]) await expect(cell).toHaveCSS('left', 'auto')
+    await scroll.evaluate(element => { element.scrollLeft = element.scrollWidth })
+    expect(Math.abs((await code.boundingBox()).x - codeBefore.x)).toBeLessThanOrEqual(1)
+    expect((await name.boundingBox()).x).toBeLessThan(nameBefore.x)
+    const details = scroll.getByRole('button', { name: '查看详情', exact: true }).first()
+    await details.scrollIntoViewIfNeeded()
+    const buttonBox = await details.boundingBox()
+    const codeBox = await code.boundingBox()
+    expect(buttonBox.x).toBeGreaterThanOrEqual(codeBox.x + codeBox.width)
+    if (width === 390) await page.screenshot({ path: testInfo.outputPath('inventory-mobile-product-390.png') })
+    // A real, non-forced click catches frozen cells intercepting pointer input.
+    await details.click()
+    const drawer = page.locator('.inventory-drawer')
+    await expect(drawer).toBeVisible()
+    await expect(drawer).toContainText('E2E-PRODUCT-001')
+    const drawerBox = await drawer.boundingBox()
+    expect(drawerBox.x).toBeGreaterThanOrEqual(0)
+    expect(drawerBox.x + drawerBox.width).toBeLessThanOrEqual(width)
+    if (width === 390) await page.screenshot({ path: testInfo.outputPath('inventory-mobile-drawer-390.png') })
+    await drawer.locator('footer').getByRole('button', { name: '关闭', exact: true }).click()
+    await expect(drawer).toHaveCount(0)
+  }
+
+  totalValue = 1234567890123.75
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({ width, height: 844 })
+    await orderTab.click()
+    await main.locator('.inventory-order-header').getByRole('button', { name: '查询', exact: true }).click()
+    await expectSummaryContained()
+    await productTab.click()
+    await main.locator('.inventory-product-card').getByRole('button', { name: '查询', exact: true }).click()
+    await expectSummaryContained()
+  }
+  expect(failures).toEqual([])
+})
+
 test('inventory filters persist while the 200-row product table pins key columns across both scroll axes', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
   await loginAdmin(page)
