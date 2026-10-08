@@ -1,9 +1,37 @@
 <!-- InventoryList.vue -->
 <template>
-<div style="padding:var(--space-6)">
-    <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
-    <!-- ====== 统计栏（统一 summary-bar 风格）====== -->
-    <div class="summary-bar inventory-summary-bar" aria-live="polite" :aria-busy="productState.viewMode === 'product' ? productState.summaryLoading : summaryLoading">
+<div class="inventory-page">
+    <header class="inventory-page-header">
+      <div class="inventory-page-title-block">
+        <div class="inventory-page-eyebrow">物料与库存</div>
+        <div class="inventory-page-title-row">
+          <span class="inventory-page-icon" aria-hidden="true">📦</span>
+          <div>
+            <h1>库存管理</h1>
+            <p>按订单追溯库存明细，按产品编码查看跨订单汇总。</p>
+          </div>
+        </div>
+      </div>
+      <div class="inventory-page-status" aria-live="polite">
+        <span class="inventory-page-status-dot" aria-hidden="true"></span>
+        <span>{{ productState.viewMode === 'product' ? '产品编码视图' : '订单明细视图' }}</span>
+      </div>
+    </header>
+
+    <div class="inventory-navigation">
+      <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
+      <span class="inventory-navigation-hint">切换视图不会改变库存事实，只改变统计与列表口径。</span>
+    </div>
+
+    <section class="inventory-overview" aria-labelledby="inventory-overview-title">
+      <div class="inventory-section-heading">
+        <div>
+          <h2 id="inventory-overview-title">库存概览</h2>
+          <p>统计卡片会随当前筛选条件实时更新，点击低库存可直接进入预警清单。</p>
+        </div>
+        <span class="inventory-section-context">{{ productState.viewMode === 'product' ? '按产品编码汇总' : '按订单明细' }}</span>
+      </div>
+      <div class="summary-bar inventory-summary-bar" aria-live="polite" :aria-busy="productState.viewMode === 'product' ? productState.summaryLoading : summaryLoading">
       <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ summaryValue('total_items') }}</div><div class="s-label">当前筛选库存品类</div></div></div>
       <div class="summary-item"><span class="s-icon">📊</span><div><div class="s-val text-primary">{{ summaryValue('total_quantity') }}</div><div class="s-label">当前筛选库存总量</div></div></div>
       <div class="summary-item"><span class="s-icon">💎</span><div><div class="s-val" style="color:var(--primary)">{{ Number(summaryValue('total_value') || 0).toLocaleString() }}</div><div class="s-label">当前筛选库存总值</div></div></div>
@@ -12,8 +40,17 @@
       <button class="summary-item summary-item-action" type="button" :aria-label="`筛选低库存，共 ${summaryValue('low_stock')} 项`" @click="focusLowStock">
         <span class="s-icon">⚠️</span><div><div class="s-val" :style="{color: summaryValue('low_stock') > 0 ? 'var(--danger)' : 'var(--success)'}">{{ summaryValue('low_stock') }}</div><div class="s-label">低库存预警（点击筛选）</div></div>
       </button>
-    </div>
+      </div>
+    </section>
+
     <div v-if="productState.viewMode === 'product'" class="card inventory-product-card">
+      <div class="inventory-card-heading">
+        <div>
+          <h2>按产品编码查看</h2>
+          <p>合并同一产品在不同订单、批次和库位中的库存。</p>
+        </div>
+        <span class="inventory-card-count">{{ productState.total }} 个产品</span>
+      </div>
       <ProductInventoryTable
         :groups="productState.groups"
         :filters="productState.filters"
@@ -54,12 +91,15 @@
     <ProductInventoryDrawer :open="productState.drawerOpen" :product="productState.selectedProduct" :details="productState.selectedDetails" :capabilities="productState.capabilities" :can-export="productState.canExport" @close="productActions.closeDrawer" />
     <InventoryOrderDrawer :open="Boolean(orderDrawerItem)" :item="orderDrawerItem" @close="closeOrderDetails" @logs="openOrderLogs" />
     <!-- ====== 主内容卡片 ====== -->
-    <div v-if="productState.viewMode !== 'product'" class="card" style="border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04)">
-      <div class="card-header inventory-order-header" style="background:var(--bg-table-stripe);border-bottom:1px solid var(--bg-hover);padding:var(--space-4) 20px">
-        <h3 style="font-size:var(--text-lg);font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:var(--space-2)">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--primary-accent));border-radius:var(--radius-md);font-size:var(--text-lg)">🏗️</span>
-          库存管理
-        </h3>
+    <div v-if="productState.viewMode !== 'product'" class="card inventory-order-card">
+      <div class="inventory-card-heading inventory-order-header">
+        <div>
+          <h2>按订单查看</h2>
+          <p>保留订单归属、库位和出入库操作，适合逐条追溯。</p>
+        </div>
+        <span class="inventory-card-count">{{ total }} 条库存</span>
+      </div>
+      <div class="inventory-order-filter-area">
         <InventoryFilterWorkbench
           view-mode="order"
           :filters="filters"
@@ -76,17 +116,23 @@
           @remove-filter="removeFilterPreset"
         >
           <template #actions>
-            <InventoryColumnConfigurator :columns="orderColumns" :visible-keys="visibleColumns" @update="setVisibleColumns" @reset="resetVisibleColumns" />
-            <label class="inventory-page-select" title="选择当前页"><input type="checkbox" :checked="orderPageSelected" :disabled="!items.length" @change="toggleSelectAll"> 选择当前页</label>
-            <span v-if="selectedCount" class="inventory-selection-count">已选 {{ selectedCount }} 项</span>
-            <button v-if="canExport && selectedCount" class="btn btn-default btn-sm" type="button" @click="exportSelected">批量导出</button>
-            <button class="btn btn-default btn-sm" type="button" @click="doABC">ABC</button>
-            <button class="btn btn-default btn-sm" type="button" @click="loadLogs()">流水</button>
-            <button class="btn btn-default btn-sm" type="button" @click="loadTurnover">周转</button>
-            <button class="btn btn-default btn-sm" type="button" @click="doCount">盘点</button>
-            <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportExcel">导出当前筛选</button>
-            <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportCsv">导出 CSV</button>
-            <button v-if="canCreate" class="btn btn-primary btn-sm" type="button" @click="openAdd">+ 新增库存</button>
+            <div class="inventory-action-group">
+              <InventoryColumnConfigurator :columns="orderColumns" :visible-keys="visibleColumns" @update="setVisibleColumns" @reset="resetVisibleColumns" />
+              <label class="inventory-page-select" title="选择当前页"><input type="checkbox" :checked="orderPageSelected" :disabled="!items.length" @change="toggleSelectAll"> 选择当前页</label>
+              <span v-if="selectedCount" class="inventory-selection-count">已选 {{ selectedCount }} 项</span>
+            </div>
+            <div class="inventory-action-group inventory-action-group-secondary">
+              <button v-if="canExport && selectedCount" class="btn btn-default btn-sm" type="button" @click="exportSelected">批量导出</button>
+              <button class="btn btn-default btn-sm" type="button" @click="doABC">ABC</button>
+              <button class="btn btn-default btn-sm" type="button" @click="loadLogs()">流水</button>
+              <button class="btn btn-default btn-sm" type="button" @click="loadTurnover">周转</button>
+              <button class="btn btn-default btn-sm" type="button" @click="doCount">盘点</button>
+            </div>
+            <div class="inventory-action-group">
+              <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportExcel">导出 XLSX</button>
+              <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportCsv">导出 CSV</button>
+              <button v-if="canCreate" class="btn btn-primary btn-sm" type="button" @click="openAdd">+ 新增库存</button>
+            </div>
           </template>
         </InventoryFilterWorkbench>
       </div>

@@ -119,7 +119,7 @@ test('mobile inventory keeps long summary text inside cards and detail actions r
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 })
     await orderTab.click()
-    await main.locator('.inventory-order-header').getByRole('button', { name: '查询', exact: true }).click()
+    await main.locator('.inventory-order-filter-area').getByRole('button', { name: '查询', exact: true }).click()
     await expectSummaryContained()
     await productTab.click()
     await main.locator('.inventory-product-card').getByRole('button', { name: '查询', exact: true }).click()
@@ -183,13 +183,13 @@ test('inventory filters persist while the 200-row product table pins key columns
 
   await openSidebarPage(page, '库存管理', '库存管理')
   const main = page.locator('.main-content')
-  const header = main.locator('.inventory-order-header')
-  const workbench = header.locator('.inventory-filter-workbench')
+  const header = main.locator('.inventory-card-heading.inventory-order-header')
+  const workbench = main.locator('.inventory-order-filter-area .inventory-filter-workbench')
   await expect(header).toBeVisible()
   await expect(workbench).toBeVisible()
 
   const headerBox = await header.boundingBox()
-  const titleBox = await header.locator('h3').boundingBox()
+  const titleBox = await header.locator('h2').boundingBox()
   const workbenchBox = await workbench.boundingBox()
   expect(workbenchBox.y).toBeGreaterThan(titleBox.y + titleBox.height - 1)
   expect(workbenchBox.width).toBeGreaterThan(headerBox.width * 0.9)
@@ -325,7 +325,7 @@ test('inventory summary cards switch data sources and low-stock clicks keep both
 
   const orderStart = requests.length
   await summaryBar.getByRole('button', { name: '筛选低库存，共 3 项' }).click()
-  const orderWorkbench = main.locator('.inventory-order-header .inventory-filter-workbench')
+  const orderWorkbench = main.locator('.inventory-order-filter-area .inventory-filter-workbench')
   await expect(orderWorkbench.getByRole('checkbox', { name: '仅低库存', exact: true })).toBeChecked()
   await expectSummary(lowOrderSummary)
   const orderRequests = requests.slice(orderStart)
