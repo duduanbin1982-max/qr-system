@@ -190,3 +190,85 @@ test('inventory filters persist while the 200-row product table pins key columns
   expect(Math.abs(productAfter.scrolling.y - productBefore.scrolling.y)).toBeLessThanOrEqual(1)
   expect(failures).toEqual([])
 })
+
+test('inventory summary cards switch data sources and low-stock clicks keep both views isolated', async ({ page }) => {
+  const failures = observeRuntimeFailures(page)
+  await loginAdmin(page)
+
+  const orderSummary = { total_items: 12, total_quantity: 96, total_value: 12500, today_in: 10, today_out: 4, low_stock: 3 }
+  const productSummary = { total_items: 7, total_quantity: 71, total_value: 7100, today_in: 0, today_out: 2, low_stock: 2 }
+  const lowOrderSummary = { total_items: 3, total_quantity: 6, total_value: 120, today_in: 0, today_out: 1, low_stock: 3 }
+  const lowProductSummary = { total_items: 2, total_quantity: 5, total_value: 100, today_in: 0, today_out: 0, low_stock: 2 }
+  const requests = []
+  await page.route(/\/api\/inventory(?:\/[^?]*)?(?:\?.*)?$/, async route => {
+    const url = new URL(route.request().url())
+    const params = Object.fromEntries(url.searchParams)
+    const product = params.view === 'product'
+    const low = params.low_stock === '1'
+    let response
+    if (url.pathname === '/api/inventory/capabilities') response = { product_query_enabled: true }
+    else if (url.pathname === '/api/inventory/filter-options') response = { specifications: [], locations: [], quality_statuses: [] }
+    else if (url.pathname === '/api/inventory/stats') response = low
+      ? (product ? lowProductSummary : lowOrderSummary)
+      : (product ? productSummary : orderSummary)
+    else if (url.pathname === '/api/inventory/product-groups') response = { items: productGroups(low ? 2 : 7), total: low ? 2 : 7, page: 1, limit: 200 }
+    else if (url.pathname === '/api/inventory') response = { items: orderItems(low ? 3 : 12), total: low ? 3 : 12, page: 1, limit: 100 }
+    else return route.fallback()
+
+    if (['/api/inventory', '/api/inventory/product-groups', '/api/inventory/stats'].includes(url.pathname)) {
+      requests.push({ path: url.pathname, params })
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) })
+  })
+
+  await openSidebarPage(page, '库存管理', '库存管理')
+  const main = page.locator('.main-content')
+  const summaryBar = main.locator('.inventory-summary-bar')
+  async function expectSummary(summary) {
+    await expect(summaryBar.locator('.s-val')).toHaveText([
+      String(summary.total_items), String(summary.total_quantity),
+      Number(summary.total_value).toLocaleString('en-US'),
+      String(summary.today_in), String(summary.today_out), String(summary.low_stock),
+    ])
+    await expect(summaryBar.getByRole('button')).toHaveAccessibleName(`筛选低库存，共 ${summary.low_stock} 项`)
+  }
+  await expectSummary(orderSummary)
+
+  const orderStart = requests.length
+  await summaryBar.getByRole('button', { name: '筛选低库存，共 3 项' }).click()
+  const orderWorkbench = main.locator('.inventory-order-header .inventory-filter-workbench')
+  await expect(orderWorkbench.getByRole('checkbox', { name: '仅低库存', exact: true })).toBeChecked()
+  await expectSummary(lowOrderSummary)
+  const orderRequests = requests.slice(orderStart)
+  expect(orderRequests).toHaveLength(2)
+  expect(orderRequests).toEqual(expect.arrayContaining([
+    { path: '/api/inventory', params: expect.objectContaining({ low_stock: '1', page: '1' }) },
+    { path: '/api/inventory/stats', params: expect.objectContaining({ low_stock: '1' }) },
+  ]))
+  expect(orderRequests.every(request => !('view' in request.params))).toBe(true)
+
+  await main.getByRole('tab', { name: '按产品编码', exact: true }).click()
+  const productWorkbench = main.locator('.inventory-product-card .inventory-filter-workbench')
+  await expect(productWorkbench).toBeVisible()
+  await expect(productWorkbench.getByRole('checkbox', { name: '仅低库存', exact: true })).not.toBeChecked()
+  await expectSummary(productSummary)
+  expect(await page.evaluate(() => localStorage.getItem('inventory-workbench:v1:view'))).toBe('product')
+
+  const productStart = requests.length
+  await summaryBar.getByRole('button', { name: '筛选低库存，共 2 项' }).click()
+  await expect(productWorkbench.getByRole('checkbox', { name: '仅低库存', exact: true })).toBeChecked()
+  await expectSummary(lowProductSummary)
+  const productRequests = requests.slice(productStart)
+  expect(productRequests).toHaveLength(2)
+  expect(productRequests).toEqual(expect.arrayContaining([
+    { path: '/api/inventory/product-groups', params: expect.objectContaining({ low_stock: '1', page: '1' }) },
+    { path: '/api/inventory/stats', params: expect.objectContaining({ low_stock: '1', view: 'product' }) },
+  ]))
+
+  await main.getByRole('tab', { name: '按订单', exact: true }).click()
+  await expect(orderWorkbench).toBeVisible()
+  await expect(orderWorkbench.getByRole('checkbox', { name: '仅低库存', exact: true })).toBeChecked()
+  await expectSummary(lowOrderSummary)
+  expect(await page.evaluate(() => localStorage.getItem('inventory-workbench:v1:view'))).toBe('order')
+  expect(failures).toEqual([])
+})

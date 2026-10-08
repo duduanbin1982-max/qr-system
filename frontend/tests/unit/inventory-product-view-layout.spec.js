@@ -17,14 +17,4 @@ describe('inventory product view layout', () => {
     expect(styles).toMatch(/\.inventory-order-header\s*\{[^}]*flex-direction:\s*column/s)
     expect(styles).toMatch(/\.inventory-order-header \.inventory-filter-workbench\s*\{[^}]*width:\s*100%/s)
   })
-
-  it('reads product summary and actions from the exposed reactive state', () => {
-    expect(source).toContain('productState.viewMode === \'product\'')
-    expect(source).toContain('productState.summary?.[key]')
-    expect(source).toContain('const productActions = product.actions')
-    expect(source).toContain('productActions.setViewMode')
-    expect(source).toContain('productActions.searchGroups()')
-    expect(source).not.toContain('product.viewMode.value')
-    expect(source).not.toContain('product.summary.value')
-  })
 })
