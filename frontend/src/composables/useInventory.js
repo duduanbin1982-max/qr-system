@@ -274,6 +274,20 @@ export function useInventory() {
     window.open(api.domains.inventory.inventoryExportUrl(params), '_blank')
   }
 
+  function exportCsv() {
+    const params = {
+      keyword: searchKeyword.value.trim(),
+      low_stock: lowStockOnly.value ? '1' : '',
+      location: locationFilter.value,
+      specification: specificationFilter.value.join(','),
+      quality_status: qualityStatusFilter.value,
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
+    }
+    if (selectedIds.value.length) params.inventory_id = selectedIds.value.join(',')
+    window.open(api.domains.inventory.inventoryExportCsvUrl(params), '_blank')
+  }
+
   function exportSelected() {
     if (!selectedIds.value.length) return
     if (!window.confirm(`确认导出已选 ${selectedIds.value.length} 条库存吗？`)) return
@@ -607,6 +621,7 @@ export function useInventory() {
     loadStats,
     loadFilterOptions,
     exportExcel,
+    exportCsv,
     exportSelected,
     doABC,
     loadTurnover,

@@ -39,6 +39,7 @@
         @apply-filter="productActions.applyFilter"
         @remove-filter="productActions.removeFilterPreset"
         @export="productActions.exportGroups"
+        @export-csv="productActions.exportGroupsCsv"
         @change-page="productActions.changePage"
         @change-limit="productActions.changeLimit"
         @open-product="productActions.openProduct"
@@ -84,6 +85,7 @@
             <button class="btn btn-default btn-sm" type="button" @click="loadTurnover">周转</button>
             <button class="btn btn-default btn-sm" type="button" @click="doCount">盘点</button>
             <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportExcel">导出当前筛选</button>
+            <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="exportCsv">导出 CSV</button>
             <button v-if="canCreate" class="btn btn-primary btn-sm" type="button" @click="openAdd">+ 新增库存</button>
           </template>
         </InventoryFilterWorkbench>

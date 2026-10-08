@@ -2,7 +2,8 @@ import os
 import sqlite3
 import json
 import uuid
-from io import BytesIO
+import csv
+from io import BytesIO, StringIO
 
 from openpyxl import load_workbook
 
@@ -145,6 +146,26 @@ def test_inventory_export_uses_the_same_filters_as_the_order_view(
     assert rows[1][4] == "加厚"
 
 
+def test_inventory_csv_export_uses_filters_and_preserves_quoted_values(client, auth_headers, db):
+    db.execute(
+        "INSERT INTO inventory(product_model,product_name,quantity,location,"
+        "specification,quality_status,unit,remark) VALUES(?,?,?,?,?,?,?,?)",
+        ("00000001", '产品,一', 4, "A-01", "加厚", "qualified", "件", '说明"一'),
+    )
+    db.commit()
+    response = client.get(
+        "/api/inventory/export.csv?specification=加厚&quality_status=qualified",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/csv")
+    assert response.data.startswith(b"\xef\xbb\xbf")
+    rows = list(csv.reader(StringIO(response.data.decode("utf-8-sig"))))
+    assert rows[0][0:5] == ["产品名称", "订单号", "客户", "产品型号", "规格"]
+    assert rows[1][0] == "产品,一"
+    assert rows[1][3] == "00000001"
+
+
 def test_inventory_export_is_not_truncated_at_the_page_limit(
     client, auth_headers, db
 ):
@@ -194,7 +215,9 @@ def test_inventory_exports_require_the_export_permission(client):
     view_only = _permission_headers(client, ["inventory:view"])
     assert client.get("/api/inventory", headers=view_only).status_code == 200
     assert client.get("/api/inventory/export", headers=view_only).status_code == 403
+    assert client.get("/api/inventory/export.csv", headers=view_only).status_code == 403
     assert (
         client.get("/api/inventory/product-groups/export", headers=view_only).status_code
         == 403
     )
+    assert client.get("/api/inventory/product-groups/export.csv", headers=view_only).status_code == 403

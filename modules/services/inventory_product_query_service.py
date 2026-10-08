@@ -167,6 +167,41 @@ class InventoryProductQueryService:
         return output
 
     @classmethod
+    def export_groups_csv(cls, **filters):
+        """Export the complete filtered product view as native UTF-8 CSV."""
+        from modules.export_utils import export_rows_to_csv
+
+        items = []
+        page = 1
+        sort_by = filters.pop("sort_by", "alert")
+        sort_dir = filters.pop("sort_dir", "desc")
+        product_ids = filters.pop("product_ids", None)
+        while True:
+            result = cls.list_groups(
+                page=page, limit=200, sort_by=sort_by, sort_dir=sort_dir,
+                product_ids=product_ids, **filters
+            )
+            page_items = result.get("items", [])
+            items.extend(page_items)
+            if not page_items or len(items) >= int(result.get("total", 0)):
+                break
+            page += 1
+
+        headers = ["产品编码", "产品名称", "总库存", "预留", "冻结", "可用", "安全库存", "预警缓冲", "订单数", "批次数", "库位数", "预警等级"]
+        rows = [
+            [
+                item.get("product_code", ""), item.get("product_name", ""),
+                item.get("quantity", 0), item.get("reserved_quantity", 0),
+                item.get("frozen_quantity", 0), item.get("available_quantity", 0),
+                item.get("safe_stock", 0), item.get("warning_buffer", 0),
+                item.get("order_count", 0), item.get("lot_count", 0),
+                item.get("location_count", 0), item.get("product_alert_level", "normal"),
+            ]
+            for item in items
+        ]
+        return export_rows_to_csv(headers, rows)
+
+    @classmethod
     def export_details(cls, product_id, compatibility_key=""):
         from io import BytesIO
         from openpyxl import Workbook

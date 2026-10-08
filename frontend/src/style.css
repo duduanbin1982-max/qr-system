@@ -491,6 +491,27 @@ textarea { resize: vertical; min-height: 80px; }
     --inventory-product-name-width: 112px;
     --inventory-product-spec-width: 86px;
   }
+  /* Keep the code pinned without covering the rest of the narrow viewport. */
+  .inventory-product-table .inventory-frozen--name,
+  .inventory-product-table .inventory-frozen--spec {
+    position: static;
+    left: auto;
+    z-index: auto;
+    box-shadow: none;
+  }
+  .inventory-product-scroll .inventory-product-table thead th.inventory-frozen--name,
+  .inventory-product-scroll .inventory-product-table thead th.inventory-frozen--spec {
+    position: sticky;
+    left: auto;
+    z-index: 4;
+    box-shadow: 0 1px 0 var(--border);
+  }
+  .inventory-product-table .inventory-frozen--code {
+    box-shadow: 8px 0 12px -10px rgba(17, 24, 39, 0.55);
+  }
+  .inventory-product-scroll .inventory-product-table thead th.inventory-frozen--code {
+    box-shadow: 0 1px 0 var(--border), 8px 0 12px -10px rgba(17, 24, 39, 0.55);
+  }
 }
 .inventory-order-header {
   flex-direction: column;
@@ -699,6 +720,27 @@ textarea { resize: vertical; min-height: 80px; }
 .summary-item .s-icon { font-size: var(--text-3xl); }
 .summary-item .s-val { font-size: 24px; font-weight: bold; color: var(--sidebar-bg-start); }
 .summary-item .s-label { font-size: var(--text-sm); color: var(--text-placeholder); }
+.inventory-summary-bar .summary-item > div {
+  min-width: 0;
+  flex: 1;
+}
+.inventory-summary-bar .s-icon { flex: 0 0 auto; }
+.inventory-summary-bar .s-val,
+.inventory-summary-bar .s-label { overflow-wrap: anywhere; }
+@media (max-width: 768px) {
+  .summary-bar.inventory-summary-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+  .inventory-summary-bar .summary-item {
+    min-width: 0;
+    padding: var(--space-3);
+    gap: var(--space-2);
+  }
+  .inventory-summary-bar .s-icon { font-size: 24px; }
+  .inventory-summary-bar .s-val { font-size: 18px; line-height: 1.4; }
+}
 
 /* ===== 筛选标签 ===== */
 .filter-bar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }

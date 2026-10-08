@@ -117,6 +117,37 @@ def inventory_product_groups_export():
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'inventory_product_groups_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
 
 
+@app.route('/api/inventory/product-groups/export.csv', methods=['GET'])
+@check_auth
+@check_permission('inventory:export')
+def inventory_product_groups_csv_export():
+    product_ids = _multi_query_values('product_id')
+    safe_audit_log(
+        'export_inventory_product_groups_csv',
+        'inventory_product_group',
+        0,
+        f'count={len(product_ids)};sort_by={request.args.get("sort_by", "alert")};sort_dir={request.args.get("sort_dir", "desc")}',
+    )
+    output = InventoryProductQueryService.export_groups_csv(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '0') == '1',
+        location=request.args.get('location', ''),
+        quality_status=request.args.get('quality_status', ''),
+        identity_status=request.args.get('identity_status', ''),
+        specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
+        sort_by=request.args.get('sort_by', 'alert'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
+        product_ids=product_ids,
+    )
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='text/csv; charset=utf-8',
+        as_attachment=True,
+        download_name=f'inventory_product_groups_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+    )
+
+
 @app.route('/api/inventory/product-groups/<int:product_id>/export', methods=['GET'])
 @check_auth
 @check_permission('inventory:export')
@@ -508,6 +539,36 @@ def inventory_export():
     output.seek(0)
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      as_attachment=True, download_name=f'inventory_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+
+
+@app.route('/api/inventory/export.csv', methods=['GET'])
+@check_auth
+@check_permission('inventory:export')
+def inventory_csv_export():
+    inventory_ids = _multi_query_values('inventory_id')
+    safe_audit_log(
+        'export_inventory_items_csv',
+        'inventory',
+        0,
+        f'count={len(inventory_ids)};sort_by={request.args.get("sort_by", "updated_at")};sort_dir={request.args.get("sort_dir", "desc")}',
+    )
+    output = InventoryService.export_inventory_csv(
+        keyword=request.args.get('keyword', ''),
+        low_stock=request.args.get('low_stock', '') == '1',
+        location=request.args.get('location', ''),
+        specifications=_multi_query_values('specification') or _multi_query_values('specifications'),
+        quality_status=request.args.get('quality_status', ''),
+        sort_by=request.args.get('sort_by', 'updated_at'),
+        sort_dir=request.args.get('sort_dir', 'desc'),
+        inventory_ids=inventory_ids,
+    )
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='text/csv; charset=utf-8',
+        as_attachment=True,
+        download_name=f'inventory_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+    )
 
 
 @app.route('/api/inventory/logs/export', methods=['GET'])

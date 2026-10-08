@@ -29,6 +29,7 @@
         <span v-if="selectedCount" class="inventory-selection-count">已选 {{ selectedCount }} 项</span>
         <button v-if="canExport && selectedCount" class="btn btn-default btn-sm" type="button" @click="$emit('batch-export')">批量导出</button>
         <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="$emit('export')">导出当前筛选</button>
+        <button v-if="canExport" class="btn btn-default btn-sm" type="button" @click="$emit('export-csv')">导出 CSV</button>
       </template>
     </InventoryFilterWorkbench>
     <div v-if="loading" class="product-empty">加载中…</div>
@@ -104,7 +105,7 @@ const props = defineProps({
   sortBy: { type: String, default: 'alert' },
   sortDir: { type: String, default: 'desc' },
 })
-defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product', 'update-filter', 'clear-filter', 'save-filter', 'apply-filter', 'remove-filter', 'export', 'batch-export', 'update-columns', 'reset-columns', 'toggle-select-all', 'toggle-select', 'sort'])
+defineEmits(['search', 'reset', 'change-page', 'change-limit', 'open-product', 'update-filter', 'clear-filter', 'save-filter', 'apply-filter', 'remove-filter', 'export', 'export-csv', 'batch-export', 'update-columns', 'reset-columns', 'toggle-select-all', 'toggle-select', 'sort'])
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.limit)))
 const rangeStart = computed(() => props.total ? (props.page - 1) * props.limit + 1 : 0)
 const rangeEnd = computed(() => Math.min(props.page * props.limit, props.total))
