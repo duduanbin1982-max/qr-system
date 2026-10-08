@@ -15,7 +15,8 @@ describe('inventory product view layout', () => {
   it('uses a structured page header and separated order filter area', () => {
     expect(source).toContain('inventory-page-header')
     expect(source).toContain('inventory-order-filter-area')
-    expect(styles).toMatch(/\.inventory-page\s*\{[^}]*max-width:/s)
+    expect(styles).toMatch(/\.inventory-page\s*\{[^}]*width:\s*100%;/s)
+    expect(styles).toMatch(/\.inventory-page\s*\{[^}]*max-width:\s*none;/s)
     expect(styles).toMatch(/\.inventory-order-filter-area\s*\{[^}]*background:/s)
   })
 })
