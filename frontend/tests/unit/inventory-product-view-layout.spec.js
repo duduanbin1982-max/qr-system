@@ -12,9 +12,10 @@ describe('inventory product view layout', () => {
     expect(source.indexOf('inventory-summary-bar')).toBeLessThan(source.indexOf('inventory-product-card'))
   })
 
-  it('uses a full-width vertical header for the order filter workbench', () => {
-    expect(source).toContain('card-header inventory-order-header')
-    expect(styles).toMatch(/\.inventory-order-header\s*\{[^}]*flex-direction:\s*column/s)
-    expect(styles).toMatch(/\.inventory-order-header \.inventory-filter-workbench\s*\{[^}]*width:\s*100%/s)
+  it('uses a structured page header and separated order filter area', () => {
+    expect(source).toContain('inventory-page-header')
+    expect(source).toContain('inventory-order-filter-area')
+    expect(styles).toMatch(/\.inventory-page\s*\{[^}]*max-width:/s)
+    expect(styles).toMatch(/\.inventory-order-filter-area\s*\{[^}]*background:/s)
   })
 })

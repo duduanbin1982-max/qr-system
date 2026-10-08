@@ -150,7 +150,7 @@ describe('inventory view behavior', () => {
     }
     const workbench = wrapper.find(mode === 'product'
       ? '.inventory-product-card .inventory-filter-workbench'
-      : '.inventory-order-header .inventory-filter-workbench')
+      : '.inventory-order-filter-area .inventory-filter-workbench')
     await workbench.find('.inventory-filter-keyword input').setValue('待出库')
     await workbench.findAll('.inventory-filter-field select')[0].setValue('东库')
     await workbench.findAll('.inventory-filter-field select')[1].setValue('qualified')
