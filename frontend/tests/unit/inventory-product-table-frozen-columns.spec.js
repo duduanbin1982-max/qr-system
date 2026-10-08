@@ -35,5 +35,6 @@ describe('product inventory frozen columns', () => {
     const cells = wrapper.findAll('tbody tr').at(0).findAll('td')
     expect(cells.slice(0, 3).map(cell => cell.text())).toEqual(['SB-121', '静音机头', '加强型'])
     expect(cells.slice(0, 3).every(cell => cell.classes().includes('inventory-frozen-cell'))).toBe(true)
+    expect(cells.at(0).find('code').classes()).toContain('inventory-product-code')
   })
 })

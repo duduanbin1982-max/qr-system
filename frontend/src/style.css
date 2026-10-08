@@ -434,17 +434,18 @@ textarea { resize: vertical; min-height: 80px; }
   box-shadow: 0 1px 0 var(--border);
 }
 .inventory-product-scroll {
-  --inventory-product-code-width: 150px;
+  --inventory-product-code-width: 220px;
   --inventory-product-name-width: 190px;
   --inventory-product-spec-width: 140px;
+  --inventory-product-table-min-width: calc(var(--inventory-product-code-width) + var(--inventory-product-name-width) + var(--inventory-product-spec-width) + 840px);
 }
 .inventory-product-scroll:focus-visible {
   outline: 3px solid var(--primary);
   outline-offset: 2px;
 }
 .inventory-product-scroll .inventory-product-table {
-  width: calc(var(--inventory-product-code-width) + var(--inventory-product-name-width) + var(--inventory-product-spec-width) + 840px);
-  min-width: calc(var(--inventory-product-code-width) + var(--inventory-product-name-width) + var(--inventory-product-spec-width) + 840px);
+  width: max(100%, var(--inventory-product-table-min-width));
+  min-width: var(--inventory-product-table-min-width);
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -469,6 +470,15 @@ textarea { resize: vertical; min-height: 80px; }
   background: var(--bg-surface);
   background-clip: padding-box;
 }
+.inventory-product-table .inventory-frozen--code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.inventory-product-table .inventory-product-code {
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
 .inventory-product-table .inventory-frozen--code { left: 0; }
 .inventory-product-table .inventory-frozen--name { left: var(--inventory-product-code-width); }
 .inventory-product-table .inventory-frozen--spec {
@@ -487,7 +497,7 @@ textarea { resize: vertical; min-height: 80px; }
 }
 @media (max-width: 768px) {
   .inventory-product-scroll {
-    --inventory-product-code-width: 88px;
+    --inventory-product-code-width: 180px;
     --inventory-product-name-width: 112px;
     --inventory-product-spec-width: 86px;
   }
