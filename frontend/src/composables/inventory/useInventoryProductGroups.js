@@ -283,6 +283,6 @@ export function useInventoryProductGroups() {
 
   return {
     state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, summaryLoading, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters, sortBy, sortDir, visibleColumns, productColumns: PRODUCT_COLUMNS, selectedIds, selectedCount },
-    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportSelected, openProduct, closeDrawer },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setViewMode, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportSelected, openProduct, closeDrawer },
   }
 }

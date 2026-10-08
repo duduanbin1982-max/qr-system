@@ -308,6 +308,11 @@ export default {
   setup() {
     const inventory = useInventory()
     const product = useInventoryProductGroups()
+    const productActions = product.actions
+    // The composable exposes refs for direct JavaScript consumers. Convert the
+    // nested state object at the view boundary so Vue unwraps those refs in the
+    // template (tabs, table and drawer otherwise receive Ref objects).
+    const productState = reactive(product.state)
     const orderDrawerItem = ref(null)
     const orderColumns = inventory.orderColumns
     const orderVisibleColumnDefs = computed(() => orderColumns.filter(column => inventory.visibleColumns.value.includes(column.key)))
@@ -321,22 +326,18 @@ export default {
     const ariaSort = (key) => inventory.sortBy.value === key ? (inventory.sortDir.value === 'asc' ? 'ascending' : 'descending') : 'none'
     const closeOrderDetails = () => { orderDrawerItem.value = null }
     const summaryValue = (key) => {
-      if (product.viewMode.value === 'product') return product.summary.value?.[key] || 0
+      if (productState.viewMode === 'product') return productState.summary?.[key] || 0
       return inventory.stats.value?.[key] || 0
     }
     const focusLowStock = () => {
-      if (product.viewMode.value === 'product') {
-        product.setFilter({ key: 'low_stock', value: true })
-        return product.searchGroups()
+      if (productState.viewMode === 'product') {
+        productActions.setFilter({ key: 'low_stock', value: true })
+        return productActions.searchGroups()
       }
       inventory.setFilter({ key: 'low_stock', value: true })
       return inventory.search()
     }
-    // The composable exposes refs for direct JavaScript consumers. Convert the
-    // nested state object at the view boundary so Vue unwraps those refs in the
-    // template (tabs, table and drawer otherwise receive Ref objects).
-    const productState = reactive(product.state)
-    return { ...inventory, productState, productActions: product.actions, orderDrawerItem, orderColumns, orderVisibleColumnDefs, orderPageSelected, openOrderDetails, closeOrderDetails, openOrderLogs, setSort, toggleSelectAll, toggleSelect, sortIndicator, ariaSort, summaryValue, focusLowStock }
+    return { ...inventory, productState, productActions, orderDrawerItem, orderColumns, orderVisibleColumnDefs, orderPageSelected, openOrderDetails, closeOrderDetails, openOrderLogs, setSort, toggleSelectAll, toggleSelect, sortIndicator, ariaSort, summaryValue, focusLowStock }
   }
 }
 </script>
