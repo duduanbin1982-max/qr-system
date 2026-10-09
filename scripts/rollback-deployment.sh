@@ -88,8 +88,8 @@ for _ in {1..20}; do
                 python3 "$MANIFEST_TOOL_SNAPSHOT" update \
                     --manifest "$MANIFEST_PATH" \
                     --status rollback_release_failed \
-                    --detail "rollback restored state is healthy but write fence remains active"
-                echo "Rollback data restored, but write fence release failed" >&2
+                    --detail "rollback restored state is healthy but write release did not complete; inspect fence and manifest state"
+                echo "Rollback data restored, but write release did not complete" >&2
                 exit 1
             fi
         fi

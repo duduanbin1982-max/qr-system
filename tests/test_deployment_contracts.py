@@ -3,6 +3,8 @@ import json
 import shutil
 import sqlite3
 import tarfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -366,6 +368,34 @@ def test_write_fence_cannot_be_reacquired_by_same_deployment(tmp_path):
         )
 
 
+def test_write_fence_acquisition_is_exclusive_under_concurrency(tmp_path):
+    fence_path = tmp_path / "write-fence.json"
+    barrier = threading.Barrier(2)
+
+    def acquire(deployment_key):
+        barrier.wait()
+        try:
+            deployment_manifest.acquire_write_fence(
+                SimpleNamespace(
+                    path=str(fence_path),
+                    deployment_key=deployment_key,
+                    target_commit=deployment_key[0] * 40,
+                )
+            )
+            return deployment_key, "acquired"
+        except RuntimeError as exc:
+            assert "already active" in str(exc)
+            return deployment_key, "blocked"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(acquire, ("alpha", "bravo")))
+
+    assert sorted(status for _, status in results) == ["acquired", "blocked"]
+    winner = next(key for key, status in results if status == "acquired")
+    fence = json.loads(fence_path.read_text(encoding="utf-8"))
+    assert fence["deployment_key"] == winner
+
+
 def test_failure_snapshot_uses_unique_non_overwriting_directory(tmp_path):
     project_root, database, manifest_path, _ = _prepared_manifest(tmp_path)
     backup_root = manifest_path.parent
@@ -434,6 +464,73 @@ def test_release_authorization_disables_destructive_automatic_restore(tmp_path):
         SimpleNamespace(manifest=str(manifest_path), mode="deployment")
     )
     assert not fence_path.exists()
+
+
+def test_rollback_release_disables_restore_before_removing_fence(
+    tmp_path, monkeypatch
+):
+    project_root, database, manifest_path, fence_path = _prepared_manifest(tmp_path)
+    deployment_manifest.restore_deployment(
+        SimpleNamespace(
+            manifest=str(manifest_path),
+            database=str(database),
+            project_root=str(project_root),
+        )
+    )
+    original_atomic_write = deployment_manifest.atomic_write_json
+    write_count = 0
+
+    def fail_final_manifest_write(path, payload):
+        nonlocal write_count
+        write_count += 1
+        if write_count == 2:
+            raise OSError("simulated final manifest write failure")
+        original_atomic_write(path, payload)
+
+    monkeypatch.setattr(
+        deployment_manifest, "atomic_write_json", fail_final_manifest_write
+    )
+
+    with pytest.raises(OSError, match="simulated final manifest write failure"):
+        deployment_manifest.release_write_fence(
+            SimpleNamespace(manifest=str(manifest_path), mode="rollback")
+        )
+
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert persisted["status"] == "rollback_release_authorized"
+    assert persisted["rollback"]["automatic_restore_allowed"] is False
+    assert persisted["write_fence"]["rollback_release_authorized_at"]
+    assert not fence_path.exists()
+
+
+def test_rollback_release_keeps_fence_when_authorization_persistence_fails(
+    tmp_path, monkeypatch
+):
+    project_root, database, manifest_path, fence_path = _prepared_manifest(tmp_path)
+    deployment_manifest.restore_deployment(
+        SimpleNamespace(
+            manifest=str(manifest_path),
+            database=str(database),
+            project_root=str(project_root),
+        )
+    )
+
+    def fail_authorization_write(path, payload):
+        raise OSError("simulated authorization persistence failure")
+
+    monkeypatch.setattr(
+        deployment_manifest, "atomic_write_json", fail_authorization_write
+    )
+
+    with pytest.raises(OSError, match="authorization persistence failure"):
+        deployment_manifest.release_write_fence(
+            SimpleNamespace(manifest=str(manifest_path), mode="rollback")
+        )
+
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert persisted["status"] == "data_restored"
+    assert persisted["rollback"]["automatic_restore_allowed"] is True
+    assert fence_path.exists()
 
 
 def test_write_fence_reader_fails_closed_for_invalid_evidence(tmp_path):

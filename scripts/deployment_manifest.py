@@ -89,6 +89,27 @@ def atomic_write_json(path, payload):
         temporary.unlink(missing_ok=True)
 
 
+def atomic_create_json(path, payload):
+    """Create JSON evidence exactly once without a check-then-write race."""
+    target = Path(path).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        target.unlink(missing_ok=True)
+        raise
+
+
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -311,9 +332,6 @@ def safe_tar_members(archive, allowed_roots):
 
 def acquire_write_fence(args):
     path = Path(args.path).resolve()
-    if path.exists():
-        require_schema(read_json(path), WRITE_FENCE_SCHEMA, "deployment write fence")
-        raise RuntimeError(f"another deployment write fence is already active: {path}")
     payload = {
         "schema": WRITE_FENCE_SCHEMA,
         "deployment_key": args.deployment_key,
@@ -321,7 +339,12 @@ def acquire_write_fence(args):
         "acquired_at": utc_now(),
         "reason": "verified deployment in progress",
     }
-    atomic_write_json(path, payload)
+    try:
+        atomic_create_json(path, payload)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"another deployment write fence is already active: {path}"
+        ) from exc
     return payload
 
 
@@ -391,9 +414,29 @@ def release_write_fence(args):
         status = "succeeded"
         detail = "write fence released after fenced health acceptance"
     else:
-        if manifest.get("status") != "data_restored":
+        if manifest.get("status") == "data_restored":
+            now = utc_now()
+            manifest["rollback"]["automatic_restore_allowed"] = False
+            manifest["write_fence"]["rollback_release_authorized_at"] = now
+            manifest["status"] = "rollback_release_authorized"
+            manifest["updated_at"] = now
+            manifest.setdefault("events", []).append(
+                {
+                    "status": "rollback_release_authorized",
+                    "at": now,
+                    "detail": (
+                        "rollback data restoration verified; destructive automatic "
+                        "restore disabled before releasing writes"
+                    ),
+                }
+            )
+            atomic_write_json(args.manifest, manifest)
+        elif manifest.get("status") != "rollback_release_authorized":
             raise RuntimeError("rollback fence release requires restored deployment data")
-        manifest["rollback"]["automatic_restore_allowed"] = False
+        if manifest["rollback"].get("automatic_restore_allowed"):
+            raise RuntimeError(
+                "rollback fence release requires durable automatic-restore disablement"
+            )
         status = "rollback_data_restored"
         detail = "write fence released after verified rollback data restoration"
     fence_path.unlink()
