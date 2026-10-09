@@ -136,6 +136,23 @@ import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
 import { exportCSV } from './shared.js'
 
+function buildDailyDetailCsvRows(groups, workNumber) {
+  const rows = [['员工姓名', '工号', '岗位', '报工时间', '订单号/序列号', '产品编码', '正常数量', '返修数量', '报废数量']]
+  groups.forEach(group => {
+    group.records.forEach(record => {
+      const qty = record.quantity ?? 0
+      // Match the existing group totals: an empty legacy type is normal work.
+      const normal = record.type !== 'rework' && record.type !== 'scrap'
+      rows.push([
+        group.worker_name || '', group.employee_no || '', group.position_name || '',
+        record.created_at || '', workNumber(record) || '', record.product_code || '',
+        normal ? qty : 0, record.type === 'rework' ? qty : 0, record.type === 'scrap' ? qty : 0,
+      ])
+    })
+  })
+  return rows
+}
+
 export default {
   props: { date: { type: String, default: '' }, productCode: { type: String, default: '' } },
   setup(props) {
@@ -293,12 +310,9 @@ export default {
     }
 
     function exportDetailCsv() {
+      if (isTruncated.value) { showToast('数据已截断，请缩小筛选范围后再导出明细', 'warning'); return }
       if (!detailRecordCount.value) { showToast('没有数据可导出', 'warning'); return }
-      const data = [['员工','工号','班组','部门','岗位','时间','订单号/序列号','订单','订单号/序列号','产品编码','产品','型号规格','客户','路线/工序','工序','数量','类型','质检','备注']]
-      filteredEmployeeGroups.value.forEach(group => {
-        group.records.forEach(r => data.push([group.worker_name, group.employee_no || '', group.group_name || '', group.department_name || '', group.position_name || '', r.created_at, displayWorkNo(r), r.order_no || '', r.serial_no || '', r.product_code || '', r.product_name || '', productMeta(r), r.customer || '', r.route_name || '', r.process_name || '', r.quantity, typeLabel(r.type), qualityText(r), r.remark || '']))
-        data.push([group.worker_name + ' 小计', group.employee_no || '', '', '', '', '', '', '', '', '', '', '', '', '', '', group.total_quantity, '正常 ' + group.normal_quantity + ' / 返修 ' + group.rework_quantity + ' / 报废 ' + group.scrap_quantity, '', ''])
-      })
+      const data = buildDailyDetailCsvRows(filteredEmployeeGroups.value, displayWorkNo)
       exportCSV(data, '日报表_员工明细_' + (props.date || ''))
     }
 
