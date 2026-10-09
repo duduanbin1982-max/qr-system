@@ -152,7 +152,7 @@ def test_run_authoritative_backup_invokes_script_and_verifies_metadata(
         metadata.write_text("{}", encoding="utf-8")
         return SimpleNamespace(returncode=0, stdout="BACKUP OK\n", stderr="")
 
-    expected = {"schema": "qr-system-backup-evidence/v1"}
+    expected = {"schema": "qr-system-backup-evidence/v2"}
     monkeypatch.setattr(production_operations.subprocess, "run", fake_run)
     monkeypatch.setattr(
         production_operations.deployment_manifest,

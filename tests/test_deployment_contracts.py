@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.runtime_version import get_application_version
+from modules.deployment_write_fence import fence_status, read_fence
 from scripts import deployment_manifest
 
 
@@ -34,6 +35,10 @@ def test_deploy_script_has_required_release_gates():
     assert "scripts/rollback-deployment.sh" in content
     assert "deployment_manifest.py" in content
     assert "health_is_ok" in content
+    assert "health_is_fenced" in content
+    assert "acquire-fence" in content
+    assert "authorize-release" in content
+    assert "release-fence" in content
     assert "atomic_write_deployed_commit" in content
     assert "git pull" not in content
     assert "systemctl --user reload" not in content
@@ -145,7 +150,21 @@ def _archive_tree(path, project_root, relative_root):
     with tarfile.open(path, "w:gz") as archive:
         source = project_root / relative_root
         if source.exists():
-            archive.add(source, arcname=relative_root.as_posix())
+            if source.is_file():
+                payload = source.read_bytes()
+                member = tarfile.TarInfo(relative_root.as_posix())
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+            else:
+                for child in sorted(source.rglob("*")):
+                    if not child.is_file():
+                        continue
+                    payload = child.read_bytes()
+                    member = tarfile.TarInfo(
+                        (relative_root / child.relative_to(source)).as_posix()
+                    )
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
 
 
 def test_deployment_manifest_restores_database_attachments_and_release(tmp_path):
@@ -181,6 +200,14 @@ def test_deployment_manifest_restores_database_attachments_and_release(tmp_path)
         )
     )
     manifest_path = backup_root / "deployment.json"
+    write_fence_path = backup_root / "write-fence.json"
+    deployment_manifest.acquire_write_fence(
+        SimpleNamespace(
+            path=str(write_fence_path),
+            deployment_key="test-deployment",
+            target_commit="b" * 40,
+        )
+    )
     deployment_manifest.prepare_deployment_manifest(
         SimpleNamespace(
             backup_metadata=str(backup_metadata),
@@ -189,6 +216,7 @@ def test_deployment_manifest_restores_database_attachments_and_release(tmp_path)
             before_commit="a" * 40,
             target_commit="b" * 40,
             target_database_version=73,
+            write_fence=str(write_fence_path),
             output=str(manifest_path),
         )
     )
@@ -215,6 +243,221 @@ def test_deployment_manifest_restores_database_attachments_and_release(tmp_path)
     assert static_asset.read_text(encoding="utf-8") == "old release"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["status"] == "data_restored"
+    assert manifest["rollback"]["failure_snapshot"]["database"]["path"]
+    failed_attachments = Path(
+        manifest["rollback"]["failure_snapshot"]["attachments"]["path"]
+    )
+    with tarfile.open(failed_attachments, "r:gz") as archive:
+        assert "data/attachments/employee_docs/new.pdf" in archive.getnames()
+
+
+def _prepared_manifest(tmp_path, *, deployment_key="fenced-deployment"):
+    project_root = tmp_path / "project"
+    backup_root = tmp_path / "backups"
+    database = project_root / "data" / "production.db"
+    _create_database(database, 96)
+    attachment = project_root / "data" / "attachments" / "baseline.txt"
+    attachment.parent.mkdir(parents=True)
+    attachment.write_bytes(b"b" * 8192)
+    release = project_root / "public" / "static" / "app.js"
+    release.parent.mkdir(parents=True)
+    release.write_bytes(b"r" * 8192)
+    backup_root.mkdir()
+    database_backup = backup_root / "production.db"
+    shutil.copy2(database, database_backup)
+    attachment_backup = backup_root / "attachments.tar.gz"
+    release_backup = backup_root / "release.tar.gz"
+    _archive_tree(attachment_backup, project_root, Path("data") / "attachments")
+    _archive_tree(release_backup, project_root, Path("public") / "static")
+    backup_metadata = backup_root / "backup.json"
+    deployment_manifest.create_backup_metadata(
+        SimpleNamespace(
+            database=str(database_backup),
+            attachments=str(attachment_backup),
+            attachment_root=["data/attachments"],
+            output=str(backup_metadata),
+        )
+    )
+    fence_path = backup_root / "write-fence.json"
+    deployment_manifest.acquire_write_fence(
+        SimpleNamespace(
+            path=str(fence_path),
+            deployment_key=deployment_key,
+            target_commit="b" * 40,
+        )
+    )
+    manifest_path = backup_root / "deployment.json"
+    deployment_manifest.prepare_deployment_manifest(
+        SimpleNamespace(
+            backup_metadata=str(backup_metadata),
+            release_backup=str(release_backup),
+            deployment_key=deployment_key,
+            before_commit="a" * 40,
+            target_commit="b" * 40,
+            target_database_version=96,
+            write_fence=str(fence_path),
+            output=str(manifest_path),
+        )
+    )
+    return project_root, database, manifest_path, fence_path
+
+
+def test_write_fence_blocks_mutations_but_keeps_health_readable(tmp_path, monkeypatch):
+    _, _, _, fence_path = _prepared_manifest(tmp_path)
+    monkeypatch.setenv("DEPLOYMENT_WRITE_FENCE_PATH", str(fence_path))
+    monkeypatch.setattr(
+        "modules.app.get_deployed_commit", lambda: "b" * 40
+    )
+    from modules.app import app
+
+    client = app.test_client()
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.get_json()["write_fenced"] is True
+    response = client.post("/api/auth/login", json={"username": "x", "password": "x"})
+    assert response.status_code == 503
+    assert response.get_json()["code"] == "deployment_write_fenced"
+    assert response.headers["Retry-After"] == "30"
+    monkeypatch.delenv("DEPLOYMENT_WRITE_FENCE_PATH")
+    if app.config.get("SERVER_NAME"):
+        app.config.pop("SERVER_NAME", None)
+
+
+def test_runtime_database_connection_is_query_only_while_fenced(tmp_path, monkeypatch):
+    project_root, database, _, fence_path = _prepared_manifest(tmp_path)
+    monkeypatch.setenv("DEPLOYMENT_WRITE_FENCE_PATH", str(fence_path))
+    monkeypatch.setattr("modules.db.DB_PATH", str(database))
+    from modules.app import app
+    from modules.db import get_db
+
+    with app.app_context():
+        db = get_db()
+        assert db.execute("PRAGMA query_only").fetchone()[0] == 1
+        assert not Path(str(database) + "-wal").exists()
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            db.execute("INSERT INTO users (username) VALUES ('blocked')")
+    monkeypatch.delenv("DEPLOYMENT_WRITE_FENCE_PATH")
+
+
+def test_automatic_restore_requires_active_write_fence(tmp_path):
+    project_root, database, manifest_path, fence_path = _prepared_manifest(tmp_path)
+    fence_path.unlink()
+
+    with pytest.raises(RuntimeError, match="write fence is not active"):
+        deployment_manifest.restore_deployment(
+            SimpleNamespace(
+                manifest=str(manifest_path),
+                database=str(database),
+                project_root=str(project_root),
+            )
+        )
+
+
+def test_write_fence_cannot_be_reacquired_by_same_deployment(tmp_path):
+    _, _, _, fence_path = _prepared_manifest(tmp_path)
+
+    with pytest.raises(RuntimeError, match="already active"):
+        deployment_manifest.acquire_write_fence(
+            SimpleNamespace(
+                path=str(fence_path),
+                deployment_key="fenced-deployment",
+                target_commit="b" * 40,
+            )
+        )
+
+
+def test_failure_snapshot_uses_unique_non_overwriting_directory(tmp_path):
+    project_root, database, manifest_path, _ = _prepared_manifest(tmp_path)
+    backup_root = manifest_path.parent
+    orphan = backup_root / "failed_fenced-deployment_orphan"
+    orphan.mkdir()
+    marker = orphan / "production.db"
+    marker.write_bytes(b"preserve orphaned failed facts")
+
+    deployment_manifest.capture_failure_state(
+        manifest_path, database, project_root
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    snapshot = manifest["rollback"]["failure_snapshot"]
+    assert Path(snapshot["root"]) != orphan
+    assert Path(snapshot["root"]).parent == backup_root
+    assert marker.read_bytes() == b"preserve orphaned failed facts"
+
+
+def test_restore_preserves_corrupt_failed_database_before_recovery(tmp_path):
+    project_root, database, manifest_path, _ = _prepared_manifest(tmp_path)
+    database.write_bytes(b"not a sqlite database")
+
+    deployment_manifest.restore_deployment(
+        SimpleNamespace(
+            manifest=str(manifest_path),
+            database=str(database),
+            project_root=str(project_root),
+        )
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    failed_database = manifest["rollback"]["failure_snapshot"]["database"]
+    assert failed_database["sqlite_error"]
+    assert Path(failed_database["path"]).read_bytes() == b"not a sqlite database"
+    assert deployment_manifest.sqlite_evidence(database)["user_version"] == 96
+
+
+def test_release_authorization_disables_destructive_automatic_restore(tmp_path):
+    project_root, database, manifest_path, fence_path = _prepared_manifest(tmp_path)
+    deployment_manifest.update_manifest(
+        SimpleNamespace(
+            manifest=str(manifest_path),
+            status="accepted_fenced",
+            detail="health passed while fenced",
+            database_version=96,
+        )
+    )
+    deployment_manifest.authorize_write_release(
+        SimpleNamespace(manifest=str(manifest_path))
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["rollback"]["automatic_restore_allowed"] is False
+    assert fence_path.exists()
+
+    with pytest.raises(RuntimeError, match="production writes may have been released"):
+        deployment_manifest.restore_deployment(
+            SimpleNamespace(
+                manifest=str(manifest_path),
+                database=str(database),
+                project_root=str(project_root),
+            )
+        )
+
+    deployment_manifest.release_write_fence(
+        SimpleNamespace(manifest=str(manifest_path), mode="deployment")
+    )
+    assert not fence_path.exists()
+
+
+def test_write_fence_reader_fails_closed_for_invalid_evidence(tmp_path):
+    fence = tmp_path / "write-fence.json"
+    fence.write_text("not-json", encoding="utf-8")
+
+    assert read_fence(fence)["invalid"] is True
+    assert fence_status(fence)["active"] is True
+
+
+def test_v1_backup_metadata_is_upgraded_with_attachment_inventory(tmp_path):
+    project_root, _, manifest_path, _ = _prepared_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    metadata_path = Path(manifest["backup"]["database"]["path"]).parent / "backup.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["schema"] = "qr-system-backup-evidence/v1"
+    metadata["attachments"].pop("inventory")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    verified = deployment_manifest.verify_backup_metadata(metadata_path)
+
+    assert verified["schema"] == "qr-system-backup-evidence/v1"
+    assert verified["attachments"]["inventory"]["file_count"] == 1
+    assert verified["attachments"]["inventory"]["manifest_sha256"]
 
 
 def test_backup_verification_rejects_attachment_path_traversal(tmp_path):
@@ -228,17 +471,15 @@ def test_backup_verification_rejects_attachment_path_traversal(tmp_path):
         archive.addfile(member, io.BytesIO(payload))
 
     metadata_path = tmp_path / "backup.json"
-    deployment_manifest.create_backup_metadata(
-        SimpleNamespace(
-            database=str(database),
-            attachments=str(archive_path),
-            attachment_root=[],
-            output=str(metadata_path),
-        )
-    )
-
     with pytest.raises(RuntimeError, match="unsafe attachment archive path"):
-        deployment_manifest.verify_backup_metadata(metadata_path)
+        deployment_manifest.create_backup_metadata(
+            SimpleNamespace(
+                database=str(database),
+                attachments=str(archive_path),
+                attachment_root=[],
+                output=str(metadata_path),
+            )
+        )
 
 
 def test_deployment_manifest_refuses_to_overwrite_existing_evidence(tmp_path):
@@ -258,7 +499,11 @@ def test_rollback_script_records_failures_and_restores_all_release_state():
 
     assert "trap record_rollback_failure ERR" in content
     assert 'systemctl --user stop qr-system.service || true' in content
-    assert 'deployment_manifest.py" restore' in content
+    assert "MANIFEST_TOOL_SNAPSHOT" in content
+    assert '"$MANIFEST_TOOL_SNAPSHOT" restore' in content
+    assert 'cat-file -e "$before_commit:modules/deployment_write_fence.py"' in content
+    assert "rollback_accepted_fenced" in content
+    assert 'release-fence' in content
     assert 'git -C "$PROJECT_ROOT" switch --detach "$before_commit"' in content
     assert '.deployed_commit.tmp.$$' in content
     assert "systemctl --user start qr-system.service" in content

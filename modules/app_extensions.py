@@ -5,7 +5,9 @@ core app instance does not directly depend on middleware implementations.
 """
 import secrets
 
-from flask import g, request
+from flask import g, jsonify, request
+
+from modules.deployment_write_fence import MUTATING_METHODS, fence_status
 
 
 ALLOWED_ORIGINS = {
@@ -37,6 +39,24 @@ def _register_request_hooks(app):
     def api_version_prefix():
         if request.path.startswith("/api/v1/"):
             request.environ["PATH_INFO"] = request.path.replace("/api/v1/", "/api/", 1)
+
+    @app.before_request
+    def enforce_deployment_write_fence():
+        if request.method.upper() not in MUTATING_METHODS:
+            return None
+        status = fence_status()
+        if not status["active"]:
+            return None
+        response = jsonify(
+            {
+                "error": "系统正在执行受控发布，写入已暂时冻结，请稍后重试",
+                "code": "deployment_write_fenced",
+                "deployment_key": status.get("deployment_key"),
+            }
+        )
+        response.status_code = 503
+        response.headers["Retry-After"] = "30"
+        return response
 
 
 def _register_security_headers(app, apply_global_rate_limit):
