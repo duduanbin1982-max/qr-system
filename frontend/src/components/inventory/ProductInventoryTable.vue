@@ -53,7 +53,7 @@
         <tbody>
           <tr v-for="item in groups" :key="item.product_id">
             <td v-for="(column, index) in visibleColumnDefs" :key="column.key" :class="cellClass(column.key, index)" :title="cellTitle(item, column.key)">
-              <template v-if="column.key === 'product_code'"><input class="inventory-row-select" type="checkbox" :checked="selectedIds.includes(item.product_id)" :aria-label="`选择 ${item.product_code || item.product_id}`" @click.stop @change="$emit('toggle-select', item.product_id)"><code>{{ item.product_code || '-' }}</code></template>
+              <template v-if="column.key === 'product_code'"><input class="inventory-row-select" type="checkbox" :checked="selectedIds.includes(item.product_id)" :aria-label="`选择 ${item.product_code || item.product_id}`" @click.stop @change="$emit('toggle-select', item.product_id)"><code class="inventory-product-code">{{ item.product_code || '-' }}</code></template>
               <template v-else-if="column.key === 'product_name'">{{ item.product_name || '-' }}</template>
               <template v-else-if="column.key === 'specification'">{{ item.specification || '-' }}</template>
               <template v-else-if="column.key === 'available_quantity'"><span class="available">{{ item.available_quantity ?? 0 }}</span></template>

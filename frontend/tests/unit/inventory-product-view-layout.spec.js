@@ -19,4 +19,10 @@ describe('inventory product view layout', () => {
     expect(styles).toMatch(/\.inventory-page\s*\{[^}]*max-width:\s*none;/s)
     expect(styles).toMatch(/\.inventory-order-filter-area\s*\{[^}]*background:/s)
   })
+
+  it('fills the product table container and keeps the product code readable', () => {
+    expect(styles).toMatch(/\.inventory-product-scroll\s*\{[^}]*--inventory-product-code-width:\s*220px;/s)
+    expect(styles).toMatch(/\.inventory-product-table\s*\{[^}]*width:\s*max\(100%,\s*var\(--inventory-product-table-min-width\)\);/s)
+    expect(styles).toMatch(/\.inventory-product-table\s+\.inventory-frozen--code\s*\{[^}]*overflow-wrap:\s*anywhere;/s)
+  })
 })
