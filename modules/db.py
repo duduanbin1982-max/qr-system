@@ -12,6 +12,7 @@ import time
 from flask import g
 
 from modules.config import DB_PATH, PREDEFINED_ROLES
+from modules.deployment_write_fence import write_fenced
 from modules.migrations import LATEST_VERSION, run_migrations
 
 # 缓存系统设置（避免每次查询）
@@ -22,7 +23,14 @@ def get_db() -> sqlite3.Connection:
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
+        fenced = write_fenced()
+        if fenced:
+            # Set query_only before any connection pragma that could mutate the
+            # database or its sidecar files.  A fenced runtime is a read-only
+            # acceptance process, not a journal-mode initializer.
+            g.db.execute("PRAGMA query_only=ON")
+        else:
+            g.db.execute("PRAGMA journal_mode=WAL")
         g.db.execute("PRAGMA busy_timeout=5000")
         g.db.execute("PRAGMA foreign_keys=ON")
     return g.db

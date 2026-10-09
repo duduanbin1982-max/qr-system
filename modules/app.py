@@ -13,6 +13,7 @@ from modules.bootstrap import load_environment
 load_environment()
 
 from modules.config import DB_PATH, EMPLOYEE_DOCUMENT_MAX_BYTES
+from modules.deployment_write_fence import fence_status
 from modules.runtime_version import get_application_version, get_deployed_commit
 
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,6 +116,10 @@ def health_check():
         'commit': get_deployed_commit(),
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
+    write_fence = fence_status()
+    status['write_fenced'] = write_fence['active']
+    if write_fence['active']:
+        status['deployment_key'] = write_fence.get('deployment_key')
     try:
         db = get_db()
         db.execute('SELECT 1')

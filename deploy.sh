@@ -13,6 +13,8 @@ PYTEST_BIN="${PYTEST_BIN:-$HOME/.local/bin/pytest}"
 ROLLBACK_SCRIPT="$PROJECT_ROOT/scripts/rollback-deployment.sh"
 MANIFEST_TOOL="$PROJECT_ROOT/scripts/deployment_manifest.py"
 deployment_manifest=""
+write_fence_path=""
+write_fence_acquired=false
 rollback_armed=false
 service_stopped=false
 
@@ -23,6 +25,11 @@ log() {
 health_is_ok() {
     curl -ksSf --max-time 5 "$HEALTH_URL" 2>/dev/null \
         | python3 -c 'import json,sys; raise SystemExit(json.load(sys.stdin).get("status") != "ok")'
+}
+
+health_is_fenced() {
+    curl -ksSf --max-time 5 "$HEALTH_URL" 2>/dev/null \
+        | python3 -c 'import json,sys; payload=json.load(sys.stdin); raise SystemExit(not (payload.get("status") == "ok" and payload.get("write_fenced") is True and payload.get("deployment_key") == sys.argv[1]))' "$deployment_key"
 }
 
 install_user_service() {
@@ -64,6 +71,14 @@ rollback_on_error() {
             log "automatic rollback failed; manual recovery is required"
         fi
         exit "$exit_code"
+    fi
+    if [[ "$write_fence_acquired" == true && -n "${write_fence_path:-}" ]]; then
+        set +e
+        python3 "$MANIFEST_TOOL" abandon-fence \
+            --path "$write_fence_path" \
+            --deployment-key "$deployment_key" \
+            --target-commit "$commit" >/dev/null 2>&1 || true
+        write_fence_acquired=false
     fi
     if [[ "$service_stopped" == true ]]; then
         set +e
@@ -142,6 +157,14 @@ install -d -m 0700 "$BACKUP_DIR" "$DEPLOYMENT_DIR"
 deployment_manifest="$DEPLOYMENT_DIR/$deployment_key.json"
 backup_metadata="$BACKUP_DIR/backup_${deployment_key}.json"
 release_backup="$BACKUP_DIR/release_${deployment_key}.tar.gz"
+write_fence_path="$DEPLOYMENT_DIR/write-fence.json"
+
+log "acquiring deployment write fence before final backup"
+python3 "$MANIFEST_TOOL" acquire-fence \
+    --path "$write_fence_path" \
+    --deployment-key "$deployment_key" \
+    --target-commit "$commit" >/dev/null
+write_fence_acquired=true
 
 log "stopping application for the final consistent backup"
 systemctl --user stop qr-system.service
@@ -163,7 +186,8 @@ python3 "$MANIFEST_TOOL" prepare \
     --deployment-key "$deployment_key" \
     --before-commit "$before_commit" \
     --target-commit "$commit" \
-    --target-database-version "$target_database_version"
+    --target-database-version "$target_database_version" \
+    --write-fence "$write_fence_path"
 rollback_armed=true
 record_manifest_status service_stopped "service stopped and final backup verified"
 
@@ -187,12 +211,19 @@ install_user_service
 atomic_write_deployed_commit "$commit"
 record_manifest_status starting "deployment marker synchronized; starting service" "$schema_version"
 systemctl --user start qr-system.service
+service_stopped=false
 
 for _ in {1..20}; do
-    if health_is_ok; then
-        record_manifest_status succeeded "schema and health acceptance passed" "$schema_version"
+    if health_is_ok && health_is_fenced; then
+        record_manifest_status accepted_fenced "schema and health acceptance passed while writes remained fenced" "$schema_version"
+        python3 "$MANIFEST_TOOL" authorize-release --manifest "$deployment_manifest"
         rollback_armed=false
-        service_stopped=false
+        if ! python3 "$MANIFEST_TOOL" release-fence --manifest "$deployment_manifest" --mode deployment; then
+            record_manifest_status release_failed "health passed but write fence could not be released" "$schema_version" || true
+            echo "Deployment failed: write fence release did not complete; service remains write-fenced" >&2
+            exit 1
+        fi
+        write_fence_acquired=false
         log "deployment succeeded: $commit"
         exit 0
     fi
