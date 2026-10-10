@@ -1,12 +1,14 @@
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
+import { createInventoryQueryCoordinator } from './inventoryQueryCoordinator.js'
 
 const VIEW_KEY = 'inventory-workbench:v1:view'
 const FILTER_KEY = 'inventory-workbench:v1:filters'
 const PRESET_KEY = 'inventory-workbench:v1:product-presets'
 const COLUMN_KEY = 'inventory-workbench:v1:product-columns'
 const DEFAULT_FILTERS = { keyword: '', low_stock: false, location: '', quality_status: '', identity_status: '', specifications: [] }
+const EMPTY_SUMMARY = { total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 }
 const PRODUCT_COLUMNS = [
   { key: 'product_code', label: '产品编码', required: true },
   { key: 'product_name', label: '产品名称', required: true },
@@ -50,7 +52,7 @@ export function useInventoryProductGroups() {
   const storedPresets = readJson(PRESET_KEY, [])
   const savedFilters = ref(Array.isArray(storedPresets) ? storedPresets : [])
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
-  const summary = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
+  const summary = ref({ ...EMPTY_SUMMARY })
   const loading = ref(false)
   const summaryLoading = ref(false)
   const error = ref('')
@@ -61,6 +63,7 @@ export function useInventoryProductGroups() {
   const selectedProduct = ref(null)
   const selectedDetails = ref(null)
   const drawerOpen = ref(false)
+  const queryCoordinator = createInventoryQueryCoordinator()
   let detailRequest = 0
 
   const enabled = computed(() => Boolean(capabilities.value.product_query_enabled))
@@ -86,44 +89,70 @@ export function useInventoryProductGroups() {
 
   function setViewMode(mode) {
     viewMode.value = mode === 'product' ? 'product' : 'order'
+    localStorage.setItem(VIEW_KEY, viewMode.value)
+    if (viewMode.value === 'product' && enabled.value) return loadGroups()
   }
 
   watch(viewMode, (mode) => {
     localStorage.setItem(VIEW_KEY, mode)
-    if (mode === 'product' && enabled.value && !groups.value.length) void loadGroups()
   })
+
+  function querySnapshot() {
+    const listParams = {
+      ...filters.value,
+      specifications: [...filters.value.specifications],
+      low_stock: filters.value.low_stock ? '1' : '',
+      page: page.value,
+      limit: limit.value,
+      sort_by: sortBy.value,
+      sort_dir: sortDir.value,
+    }
+    const summaryParams = {
+      ...filters.value,
+      specifications: [...filters.value.specifications],
+      low_stock: filters.value.low_stock ? '1' : '',
+      view: 'product',
+    }
+    return { listParams, summaryParams }
+  }
 
   async function loadGroups() {
     if (!enabled.value) return
+    const snapshot = querySnapshot()
+    const request = queryCoordinator.begin(snapshot)
     loading.value = true
+    summaryLoading.value = true
     error.value = ''
     localStorage.setItem(FILTER_KEY, JSON.stringify(filters.value))
     try {
-      const data = await api.domains.inventory.listProductGroups({ ...filters.value, low_stock: filters.value.low_stock ? '1' : '', page: page.value, limit: limit.value, sort_by: sortBy.value, sort_dir: sortDir.value })
+      const [data, summaryData] = await Promise.all([
+        api.domains.inventory.listProductGroups(snapshot.listParams),
+        api.domains.inventory.inventoryStats(snapshot.summaryParams),
+      ])
+      if (!queryCoordinator.isCurrent(request)) return
       groups.value = data.items || []
       total.value = Number(data.total || 0)
+      summary.value = { ...EMPTY_SUMMARY, ...summaryData }
       selectedIds.value = selectedIds.value.filter(id => groups.value.some(item => item.product_id === id))
-      await loadSummary()
     } catch (err) {
+      if (!queryCoordinator.isCurrent(request)) return
       error.value = err.message || '产品库存加载失败'
     } finally {
-      loading.value = false
+      if (queryCoordinator.isCurrent(request)) {
+        loading.value = false
+        summaryLoading.value = false
+      }
     }
   }
 
-  async function loadSummary() {
-    summaryLoading.value = true
-    try {
-      summary.value = await api.domains.inventory.inventoryStats({
-        ...filters.value,
-        low_stock: filters.value.low_stock ? '1' : '',
-        view: 'product',
-      })
-    } catch (_) {
-      // Summary is supplemental; leave the previous values visible.
-    } finally {
-      summaryLoading.value = false
-    }
+  function loadSummary() {
+    return loadGroups()
+  }
+
+  function cancelPendingLoad() {
+    queryCoordinator.invalidate()
+    loading.value = false
+    summaryLoading.value = false
   }
 
   function readColumns(key, columns) {
@@ -293,9 +322,10 @@ export function useInventoryProductGroups() {
   }
 
   onMounted(() => { loadCapabilities() })
+  onUnmounted(cancelPendingLoad)
 
   return {
     state: { capabilities, enabled, canExport, viewMode, groups, total, page, limit, filters, filterOptions, summary, summaryLoading, loading, error, selectedProduct, selectedDetails, drawerOpen, savedFilters, sortBy, sortDir, visibleColumns, productColumns: PRODUCT_COLUMNS, selectedIds, selectedCount },
-    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, searchGroups, changePage, changeLimit, setViewMode, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportGroupsCsv, exportSelected, openProduct, closeDrawer },
+    actions: { loadCapabilities, loadFilterOptions, loadGroups, loadSummary, cancelPendingLoad, searchGroups, changePage, changeLimit, setViewMode, setSort, setVisibleColumns, resetVisibleColumns, toggleSelect, toggleSelectAll, clearSelection, resetFilters, setFilter, clearFilter, saveFilter, applyFilter, removeFilterPreset, exportGroups, exportGroupsCsv, exportSelected, openProduct, closeDrawer },
   }
 }

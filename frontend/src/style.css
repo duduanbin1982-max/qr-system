@@ -497,7 +497,7 @@ textarea { resize: vertical; min-height: 80px; }
 }
 @media (max-width: 768px) {
   .inventory-product-scroll {
-    --inventory-product-code-width: 180px;
+    --inventory-product-code-width: min(38vw, 150px);
     --inventory-product-name-width: 112px;
     --inventory-product-spec-width: 86px;
   }
@@ -521,6 +521,23 @@ textarea { resize: vertical; min-height: 80px; }
   }
   .inventory-product-scroll .inventory-product-table thead th.inventory-frozen--code {
     box-shadow: 0 1px 0 var(--border), 8px 0 12px -10px rgba(17, 24, 39, 0.55);
+  }
+  .inventory-product-table .inventory-mobile-actions {
+    position: sticky;
+    right: 0;
+    z-index: 3;
+    min-width: 108px;
+    background: var(--bg-surface);
+    background-clip: padding-box;
+    box-shadow: -8px 0 12px -10px rgba(17, 24, 39, 0.55);
+  }
+  .inventory-product-scroll .inventory-product-table thead th.inventory-mobile-actions {
+    z-index: 9;
+    background: var(--bg-table-header);
+    box-shadow: 0 1px 0 var(--border), -8px 0 12px -10px rgba(17, 24, 39, 0.55);
+  }
+  .inventory-product-scroll .inventory-product-table tbody tr:hover td.inventory-mobile-actions {
+    background: var(--bg-table-hover);
   }
 }
 .inventory-page {

@@ -25,4 +25,10 @@ describe('inventory product view layout', () => {
     expect(styles).toMatch(/\.inventory-product-table\s*\{[^}]*width:\s*max\(100%,\s*var\(--inventory-product-table-min-width\)\);/s)
     expect(styles).toMatch(/\.inventory-product-table\s+\.inventory-frozen--code\s*\{[^}]*overflow-wrap:\s*anywhere;/s)
   })
+
+  it('pins the mobile detail action on the opposite edge of the product code', () => {
+    expect(styles).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.inventory-product-table\s+\.inventory-mobile-actions\s*\{[^}]*position:\s*sticky;[^}]*right:\s*0;/s)
+    expect(styles).toMatch(/\.inventory-product-table\s+\.inventory-mobile-actions\s*\{[^}]*z-index:\s*3;/s)
+    expect(styles).toMatch(/thead\s+th\.inventory-mobile-actions\s*\{[^}]*z-index:\s*9;/s)
+  })
 })

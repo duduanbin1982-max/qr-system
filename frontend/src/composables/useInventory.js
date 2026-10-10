@@ -1,7 +1,10 @@
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
+import { createInventoryQueryCoordinator } from '@/composables/inventory/inventoryQueryCoordinator.js'
+
+const EMPTY_SUMMARY = { total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 }
 
 export function useInventory() {
   const FILTER_PRESETS_KEY = 'inventory-workbench:v1:order-presets'
@@ -38,6 +41,7 @@ export function useInventory() {
   const selectedIds = ref([])
   const filterOptions = ref({ specifications: [], quality_statuses: [], locations: [] })
   const savedFilters = ref(readSavedFilters(FILTER_PRESETS_KEY))
+  const queryCoordinator = createInventoryQueryCoordinator()
   const filters = computed(() => ({
     keyword: searchKeyword.value,
     low_stock: lowStockOnly.value,
@@ -81,7 +85,7 @@ export function useInventory() {
   const moveLotNo = ref('')
   const moveSerialNo = ref('')
 
-  const stats = ref({ total_items: 0, total_quantity: 0, total_value: 0, low_stock: 0, today_in: 0, today_out: 0 })
+  const stats = ref({ ...EMPTY_SUMMARY })
   const lowCount = computed(() => stats.value.low_stock || items.value.filter((item) => item.is_low).length)
   const totalQty = computed(() => stats.value.total_quantity || items.value.reduce((sum, item) => sum + (item.quantity || 0), 0))
   const inventoryValue = computed(() => items.value.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0))
@@ -162,41 +166,59 @@ export function useInventory() {
   const canCreate = computed(() => can('inventory:create'))
   const canExport = computed(() => can('inventory:export'))
 
-  async function loadStats(params = null) {
-    summaryLoading.value = true
-    try {
-      const data = await api.domains.inventory.inventoryStats(params)
-      Object.assign(stats.value, data)
-    } catch (error) {
-      // noop
-    } finally {
-      summaryLoading.value = false
-    }
+  function querySnapshot() {
+    const listParams = {}
+    if (searchKeyword.value.trim()) listParams.keyword = searchKeyword.value.trim()
+    if (lowStockOnly.value) listParams.low_stock = '1'
+    if (locationFilter.value) listParams.location = locationFilter.value
+    if (specificationFilter.value.length) listParams.specification = specificationFilter.value.join(',')
+    if (qualityStatusFilter.value) listParams.quality_status = qualityStatusFilter.value
+    listParams.page = page.value
+    listParams.limit = limit.value
+    listParams.sort_by = sortBy.value
+    listParams.sort_dir = sortDir.value
+    const summaryParams = { ...listParams }
+    delete summaryParams.page
+    delete summaryParams.limit
+    delete summaryParams.sort_by
+    delete summaryParams.sort_dir
+    return { listParams, summaryParams }
   }
 
   async function load() {
+    const snapshot = querySnapshot()
+    const request = queryCoordinator.begin(snapshot)
     loading.value = true
+    summaryLoading.value = true
     try {
-      const params = {}
-      if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
-      if (lowStockOnly.value) params.low_stock = '1'
-      if (locationFilter.value) params.location = locationFilter.value
-      if (specificationFilter.value.length) params.specification = specificationFilter.value.join(',')
-      if (qualityStatusFilter.value) params.quality_status = qualityStatusFilter.value
-      params.page = page.value
-      params.limit = limit.value
-      params.sort_by = sortBy.value
-      params.sort_dir = sortDir.value
-      const data = await api.domains.inventory.listInventory(params)
+      const [data, summaryData] = await Promise.all([
+        api.domains.inventory.listInventory(snapshot.listParams),
+        api.domains.inventory.inventoryStats(snapshot.summaryParams),
+      ])
+      if (!queryCoordinator.isCurrent(request)) return
       items.value = data.items || []
       total.value = Number(data.total || 0)
+      stats.value = { ...EMPTY_SUMMARY, ...summaryData }
       selectedIds.value = selectedIds.value.filter(id => items.value.some(item => item.id === id))
-      await loadStats({ ...params, page: undefined, limit: undefined })
     } catch (error) {
+      if (!queryCoordinator.isCurrent(request)) return
       showToast(error.message || '加载失败', 'error')
     } finally {
-      loading.value = false
+      if (queryCoordinator.isCurrent(request)) {
+        loading.value = false
+        summaryLoading.value = false
+      }
     }
+  }
+
+  function loadStats() {
+    return load()
+  }
+
+  function cancelPendingLoad() {
+    queryCoordinator.invalidate()
+    loading.value = false
+    summaryLoading.value = false
   }
 
   function search() {
@@ -371,7 +393,6 @@ export function useInventory() {
       applyCountTask(data)
       showToast('盘点差异已过账')
       await load()
-      await loadStats()
     } catch (error) {
       showToast(error.message || '盘点审批失败', 'error')
     } finally {
@@ -465,7 +486,6 @@ export function useInventory() {
       }
       showModal.value = false
       await load()
-      await loadStats()
     } catch (error) {
       showToast(error.message || '保存失败', 'error')
     }
@@ -486,7 +506,6 @@ export function useInventory() {
       await api.domains.inventory.deleteInventory(item.id)
       showToast('已停用')
       await load()
-      await loadStats()
     } catch (error) {
       showToast(error.message || '删除失败', 'error')
     }
@@ -530,7 +549,6 @@ export function useInventory() {
       showMoveModal.value = false
       moveOrderId.value = ''
       await load()
-      await loadStats()
     } catch (error) {
       showToast(error.message || '操作失败', 'error')
     }
@@ -550,6 +568,7 @@ export function useInventory() {
     loadOrders()
     loadFilterOptions()
   })
+  onUnmounted(cancelPendingLoad)
 
   return {
     items,
@@ -603,6 +622,7 @@ export function useInventory() {
     selectedIds,
     selectedCount,
     load,
+    cancelPendingLoad,
     search,
     resetFilters,
     setFilter,
