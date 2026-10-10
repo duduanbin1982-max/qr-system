@@ -122,10 +122,27 @@ class ScheduleEvidenceRepository:
     @staticmethod
     def get_replan_evidence(revision_id, db=None):
         db = resolve_db(db)
-        summary = db.execute(
+        summary_row = db.execute(
             "SELECT * FROM schedule_replan_summaries WHERE revision_id=?",
             (int(revision_id),),
         ).fetchone()
+        summary = None
+        if summary_row is not None:
+            summary = dict(summary_row)
+            try:
+                encoded_summary = json.loads(summary.get("summary_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                encoded_summary = {}
+            if isinstance(encoded_summary, dict):
+                # Keep the relational columns for existing callers while
+                # exposing the pure-planning evidence stored in summary_json.
+                summary.update(
+                    {
+                        key: value
+                        for key, value in encoded_summary.items()
+                        if key in {"planning_summary", "planning_manifest"}
+                    }
+                )
         differences = db.execute(
             "SELECT d.*,p.name AS process_name FROM schedule_replan_differences d "
             "JOIN processes p ON p.id=d.process_id WHERE d.revision_id=? "
@@ -133,6 +150,62 @@ class ScheduleEvidenceRepository:
             (int(revision_id),),
         ).fetchall()
         return summary, differences
+
+    @staticmethod
+    def save_planning_evidence(revision_id, summary, manifest, db=None):
+        """Persist planning summary/manifest as independent immutable evidence.
+
+        Risk assessments are deliberately immutable after they are recorded.  A
+        planning manifest therefore must never be attached by updating the risk
+        row (the database trigger rejects that mutation).  The conflict-check
+        ledger already provides an append-only, revision-scoped evidence stream,
+        so use a dedicated ``planning`` check stage with no conflict rows.
+        """
+        db = resolve_db(db)
+        payload = {
+            "planning_summary": summary or {},
+            "planning_manifest": manifest or {},
+        }
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        input_digest = str(
+            (manifest or {}).get("input_digest")
+            or hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        )
+        summary_payload = {
+            "blocking_count": 0,
+            "warning_count": 0,
+            "planning_digest": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+            **payload,
+        }
+        row = ScheduleEvidenceRepository.record_revision_conflict_check(
+            revision_id,
+            "planning",
+            input_digest,
+            summary_payload,
+            (),
+            db=db,
+        )
+        return row
+
+    @staticmethod
+    def get_planning_evidence(revision_id, db=None):
+        """Read the immutable planning manifest evidence for a revision."""
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT summary_json FROM schedule_revision_conflict_checks "
+            "WHERE revision_id=? AND check_stage='planning' "
+            "ORDER BY id DESC LIMIT 1",
+            (int(revision_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row["summary_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
     @staticmethod
     def set_revision_risk_snapshot(revision_id, risk, assessed_at, db):
         cursor = db.execute(

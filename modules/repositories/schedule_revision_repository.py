@@ -137,6 +137,16 @@ class ScheduleRevisionRepository:
             "updated_at=datetime('now','localtime') WHERE id=? AND deleted_at IS NULL",
             (order_id,),
         )
+
+    @staticmethod
+    def clear_initial_schedule_replan_flag(order_id, *, blocked, current_revision_id, db):
+        """Clear the marker only for a successful first draft, in one guarded write."""
+        db.execute(
+            "UPDATE orders SET schedule_replan_required=0,schedule_replan_reason='',"
+            "updated_at=datetime('now','localtime') WHERE id=? AND deleted_at IS NULL "
+            "AND ?=0 AND current_schedule_revision_id IS NULL",
+            (order_id, int(bool(blocked))),
+        )
     @staticmethod
     def clear_order_schedules(order_id, db):
         """Clear only an unpublished compatibility projection.
@@ -796,6 +806,8 @@ class ScheduleRevisionRepository:
             result = json.loads(run["result_json"] or "[]")
         except (TypeError, json.JSONDecodeError):
             result = []
+        if isinstance(result, dict):
+            result = result.get("operations")
         return result if isinstance(result, list) else []
     @staticmethod
     def insert_operation_schedule(
