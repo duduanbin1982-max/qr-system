@@ -4,6 +4,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET = 353
@@ -21,12 +23,52 @@ IGNORED_PARTS = {
     "uploads",
 }
 
+ARCHITECTURE_FILE_ALLOWLIST = {
+    "repositories": frozenset({"modules/repositories/context.py"}),
+    "routes": frozenset(),
+    "services": frozenset({"modules/services/__init__.py"}),
+}
+GENERATED_PYTHON_FILE_PATTERNS = (
+    "*.generated.py",
+    "*_generated.py",
+    "*_pb2.py",
+    "*_pb2_grpc.py",
+)
+GENERATED_PYTHON_DIRECTORY_NAMES = frozenset(
+    {"__generated__", "_generated", "generated"}
+)
+
+
+def _is_generated_python_file(path):
+    return (
+        any(path.match(pattern) for pattern in GENERATED_PYTHON_FILE_PATTERNS)
+        or bool(set(path.parts).intersection(GENERATED_PYTHON_DIRECTORY_NAMES))
+    )
+
+
+def _architecture_files(root, *, layer=None):
+    """Yield architecture-owned Python files using one recursive scan policy."""
+    allowlisted_paths = ARCHITECTURE_FILE_ALLOWLIST.get(layer, frozenset())
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        project_relative = _display_path(path)
+        relative_parts = set(relative.parts)
+        if relative_parts.intersection(IGNORED_PARTS):
+            continue
+        if project_relative in allowlisted_paths or _is_generated_python_file(path):
+            continue
+        yield path
+
+
+def _display_path(path, root=PROJECT_ROOT):
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
 
 def _source_files():
-    for path in PROJECT_ROOT.rglob("*.py"):
-        relative_parts = set(path.relative_to(PROJECT_ROOT).parts)
-        if not relative_parts.intersection(IGNORED_PARTS):
-            yield path
+    yield from _architecture_files(PROJECT_ROOT)
 
 
 def _module_map():
@@ -189,20 +231,10 @@ def test_source_classes_do_not_shadow_methods_with_later_definitions():
 
 
 def test_repositories_do_not_depend_on_service_db_helper():
-    violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
-    for path in sorted(repository_root.glob("*.py")):
-        if path.name in {"__init__.py", "context.py"}:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                imported_names = {alias.name for alias in node.names}
-                if module == "modules.db_unit_of_work" and "BaseService" in imported_names:
-                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
-                if module == "modules.services" or module.startswith("modules.services."):
-                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+    violations = _repository_service_dependency_violations(
+        _architecture_files(repository_root, layer="repositories")
+    )
 
     assert violations == [], f"repositories must depend on repository/context seams, not services: {violations}"
 
@@ -232,8 +264,8 @@ def _expanded_imports(tree, package_parts):
                         yield node.lineno, imported_module
 
 
-def _imported_modules(path):
-    relative = path.relative_to(PROJECT_ROOT).with_suffix("")
+def _imported_modules(path, source_root=PROJECT_ROOT):
+    relative = path.relative_to(source_root).with_suffix("")
     package_parts = list(relative.parts[:-1])
     tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
     yield from _expanded_imports(tree, package_parts)
@@ -243,6 +275,95 @@ def _matches_module_prefix(module_name, prefixes):
     return any(
         module_name == prefix or module_name.startswith(prefix + ".")
         for prefix in prefixes
+    )
+
+
+def _forbidden_import_violations(paths, forbidden_prefixes, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        for lineno, module_name in _imported_modules(path, source_root):
+            if _matches_module_prefix(module_name, forbidden_prefixes):
+                violations.append(
+                    f"{_display_path(path, source_root)}:{lineno} -> {module_name}"
+                )
+    return violations
+
+
+def _repository_service_dependency_violations(paths, *, source_root=PROJECT_ROOT):
+    forbidden_prefixes = (
+        "modules.services",
+        "modules.db_unit_of_work.BaseService",
+    )
+    return _forbidden_import_violations(
+        paths, forbidden_prefixes, source_root=source_root
+    )
+
+
+def _service_sqlite_import_violations(paths, *, source_root=PROJECT_ROOT):
+    return _forbidden_import_violations(
+        paths, ("sqlite3",), source_root=source_root
+    )
+
+
+def _service_migration_import_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        for lineno, module_name in _imported_modules(path, source_root):
+            if (
+                _matches_module_prefix(module_name, ("modules.migrations",))
+                or module_name.startswith("modules.migration_")
+            ):
+                violations.append(
+                    f"{_display_path(path, source_root)}:{lineno} -> {module_name}"
+                )
+    return violations
+
+
+SERVICE_SQL_PATTERN = re.compile(
+    r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+REPOSITORY_DDL_PATTERN = re.compile(
+    r"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|TRIGGER)\b",
+    re.IGNORECASE,
+)
+
+
+def _string_literal_violations(paths, pattern, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and pattern.search(node.value)
+            ):
+                violations.append(f"{_display_path(path, source_root)}:{node.lineno}")
+    return violations
+
+
+def _service_sql_violations(paths, *, source_root=PROJECT_ROOT):
+    return _string_literal_violations(
+        paths, SERVICE_SQL_PATTERN, source_root=source_root
+    )
+
+
+def _repository_ddl_violations(paths, *, source_root=PROJECT_ROOT):
+    return _string_literal_violations(
+        paths, REPOSITORY_DDL_PATTERN, source_root=source_root
+    )
+
+
+def _route_infrastructure_violations(paths, *, source_root=PROJECT_ROOT):
+    forbidden_prefixes = (
+        "sqlite3",
+        "modules.db",
+        "modules.db_unit_of_work",
+        "modules.repositories",
+    )
+    return _forbidden_import_violations(
+        paths, forbidden_prefixes, source_root=source_root
     )
 
 
@@ -257,13 +378,10 @@ def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
         "modules.routes",
         "modules.services",
     )
-    violations = []
-    for path in sorted((PROJECT_ROOT / "modules" / "domain").rglob("*.py")):
-        for lineno, module_name in _imported_modules(path):
-            if _matches_module_prefix(module_name, forbidden_prefixes):
-                violations.append(
-                    f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
-                )
+    violations = _forbidden_import_violations(
+        _architecture_files(PROJECT_ROOT / "modules" / "domain"),
+        forbidden_prefixes,
+    )
 
     assert violations == [], (
         "domain policy must remain independent of Flask, persistence, routes, and services: "
@@ -272,18 +390,10 @@ def test_domain_layer_has_no_framework_or_infrastructure_dependencies():
 
 
 def test_routes_do_not_depend_on_database_or_repositories():
-    forbidden_prefixes = (
-        "modules.db",
-        "modules.db_unit_of_work",
-        "modules.repositories",
+    route_root = PROJECT_ROOT / "modules" / "routes"
+    violations = _route_infrastructure_violations(
+        _architecture_files(route_root, layer="routes")
     )
-    violations = []
-    for path in sorted((PROJECT_ROOT / "modules" / "routes").rglob("*.py")):
-        for lineno, module_name in _imported_modules(path):
-            if _matches_module_prefix(module_name, forbidden_prefixes):
-                violations.append(
-                    f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
-                )
 
     assert violations == [], (
         "routes must call application services instead of persistence details: "
@@ -307,6 +417,100 @@ def test_import_expansion_detects_repository_reexports_and_relative_imports():
             _matches_module_prefix(module_name, (forbidden_prefix,))
             for module_name in imported_modules
         ), f"import form escaped the architecture check: {source}"
+
+
+@pytest.fixture
+def nested_architecture_violation_tree(tmp_path):
+    fixture_root = tmp_path / "fixture_project"
+    fixture_sources = {
+        "modules/services/quality_management/bad_sqlite.py": "import sqlite3\n",
+        "modules/services/quality_management/bad_migration.py": (
+            "from modules.migrations import migrate\n"
+        ),
+        "modules/services/quality_management/bad_business_sql.py": (
+            'QUERY = "SELECT id FROM orders"\n'
+        ),
+        "modules/services/quality_management/ignored.generated.py": "import sqlite3\n",
+        "modules/services/quality_management/__init__.py": "import sqlite3\n",
+        "modules/repositories/quality_management/bad_service_dependency.py": (
+            "from modules.services.order_service import OrderService\n"
+        ),
+        "modules/repositories/quality_management/bad_ddl.py": (
+            'DDL = "CREATE TABLE forbidden_fixture (id INTEGER)"\n'
+        ),
+        "modules/routes/inventory/nested/bad_repository_route.py": (
+            "from modules.repositories.inventory_repository import InventoryRepository\n"
+        ),
+        "modules/routes/inventory/nested/bad_database_route.py": (
+            "from modules.db import get_db\n"
+        ),
+    }
+    for relative_path, source in fixture_sources.items():
+        path = fixture_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    return fixture_root
+
+
+def test_nested_architecture_violations_are_rejected(nested_architecture_violation_tree):
+    fixture_root = nested_architecture_violation_tree
+    service_paths = tuple(
+        _architecture_files(
+            fixture_root / "modules" / "services", layer="services"
+        )
+    )
+    repository_paths = tuple(
+        _architecture_files(
+            fixture_root / "modules" / "repositories", layer="repositories"
+        )
+    )
+    route_paths = tuple(
+        _architecture_files(fixture_root / "modules" / "routes", layer="routes")
+    )
+
+    scanned_service_paths = {
+        path.relative_to(fixture_root / "modules" / "services").as_posix()
+        for path in service_paths
+    }
+    assert "quality_management/ignored.generated.py" not in scanned_service_paths
+    assert "quality_management/__init__.py" in scanned_service_paths
+    sqlite_violations = _service_sqlite_import_violations(
+        service_paths, source_root=fixture_root
+    )
+    assert any("bad_sqlite.py" in violation for violation in sqlite_violations)
+    assert any(
+        "quality_management/__init__.py" in violation
+        for violation in sqlite_violations
+    )
+    assert any(
+        "bad_migration.py" in violation
+        for violation in _service_migration_import_violations(
+            service_paths, source_root=fixture_root
+        )
+    )
+    assert any(
+        "bad_business_sql.py" in violation
+        for violation in _service_sql_violations(
+            service_paths, source_root=fixture_root
+        )
+    )
+    assert any(
+        "bad_service_dependency.py" in violation
+        for violation in _repository_service_dependency_violations(
+            repository_paths, source_root=fixture_root
+        )
+    )
+    assert any(
+        "bad_ddl.py" in violation
+        for violation in _repository_ddl_violations(
+            repository_paths, source_root=fixture_root
+        )
+    )
+    route_violations = _route_infrastructure_violations(
+        route_paths, source_root=fixture_root
+    )
+    assert any("bad_repository_route.py" in violation for violation in route_violations)
+    assert any("bad_database_route.py" in violation for violation in route_violations)
 
 
 def test_schedule_capacity_allocator_is_database_independent():
@@ -355,7 +559,12 @@ def test_schedule_services_only_execute_transaction_control_sql():
     database_methods = {"execute", "executemany", "executescript", "cursor"}
     violations = []
 
-    for path in sorted((PROJECT_ROOT / "modules" / "services").rglob("schedule_*service.py")):
+    service_root = PROJECT_ROOT / "modules" / "services"
+    for path in (
+        candidate
+        for candidate in _architecture_files(service_root, layer="services")
+        if candidate.match("schedule_*service.py")
+    ):
         tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
         relative_path = path.relative_to(PROJECT_ROOT).as_posix()
         for node in ast.walk(tree):
@@ -423,9 +632,7 @@ def test_repositories_do_not_depend_on_other_repositories():
     compatibility_facade_imports = {}
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
-    for path in sorted(repository_root.rglob("*.py")):
-        if path.name in {"__init__.py", "context.py"}:
-            continue
+    for path in _architecture_files(repository_root, layer="repositories"):
         relative_parent = path.parent.relative_to(repository_root)
         owned_namespace = None
         if relative_parent.parts:
@@ -464,26 +671,42 @@ def test_quality_management_facades_stay_thin():
     assert len(service_facade.read_text(encoding="utf-8").splitlines()) < 40
     assert len(repository_facade.read_text(encoding="utf-8").splitlines()) < 40
     assert not legacy_repository.exists()
-    assert expected_service_modules.issubset({
-        path.name for path in service_facade.parent.joinpath("quality_management").glob("*.py")
-    })
-    assert expected_repository_modules.issubset({
-        path.name for path in repository_facade.parent.glob("*.py")
-    })
+    quality_service_root = service_facade.parent / "quality_management"
+    quality_repository_root = repository_facade.parent
+    all_service_paths = set(
+        _architecture_files(service_facade.parent, layer="services")
+    )
+    assert service_facade.parent / "__init__.py" not in all_service_paths
+    assert quality_service_root / "__init__.py" in all_service_paths
+    scanned_service_modules = {
+        path.relative_to(quality_service_root).as_posix()
+        for path in _architecture_files(quality_service_root, layer="services")
+    }
+    scanned_repository_modules = {
+        path.relative_to(quality_repository_root).as_posix()
+        for path in _architecture_files(quality_repository_root, layer="repositories")
+    }
+    service_modules_on_disk = {
+        path.relative_to(quality_service_root).as_posix()
+        for path in (service_facade.parent / "quality_management").rglob("*.py")
+        if not _is_generated_python_file(path)
+    }
+    repository_modules_on_disk = {
+        path.relative_to(quality_repository_root).as_posix()
+        for path in quality_repository_root.rglob("*.py")
+        if not _is_generated_python_file(path)
+    }
+    assert scanned_service_modules == service_modules_on_disk
+    assert scanned_repository_modules == repository_modules_on_disk
+    assert expected_service_modules.issubset(scanned_service_modules)
+    assert expected_repository_modules.issubset(scanned_repository_modules)
 
 
 def test_repositories_do_not_execute_schema_ddl():
-    ddl_pattern = re.compile(r"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX)\b", re.IGNORECASE)
-    violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
-    for path in sorted(repository_root.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if ddl_pattern.search(node.value):
-                    violations.append(
-                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
-                    )
+    violations = _repository_ddl_violations(
+        _architecture_files(repository_root, layer="repositories")
+    )
 
     assert violations == [], f"schema DDL belongs in migrations, not repositories: {violations}"
 
@@ -518,36 +741,19 @@ def test_process_reporting_policy_delegates_decisions_and_presentation():
 
 
 def test_services_do_not_import_sqlite_driver_directly():
-    violations = []
     service_root = PROJECT_ROOT / "modules" / "services"
-    for path in sorted(service_root.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                if any(alias.name == "sqlite3" for alias in node.names):
-                    violations.append(path.relative_to(PROJECT_ROOT).as_posix())
-            elif isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
-                violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+    violations = _service_sqlite_import_violations(
+        _architecture_files(service_root, layer="services")
+    )
 
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
 
 
 def test_services_do_not_depend_on_migrations():
-    violations = []
     service_root = PROJECT_ROOT / "modules" / "services"
-    for path in sorted(service_root.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            imported_modules = []
-            if isinstance(node, ast.Import):
-                imported_modules.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported_modules.append(node.module)
-            for module_name in imported_modules:
-                if module_name == "modules.migrations" or module_name.startswith("modules.migration_"):
-                    violations.append(
-                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno} -> {module_name}"
-                    )
+    violations = _service_migration_import_violations(
+        _architecture_files(service_root, layer="services")
+    )
 
     assert violations == [], f"services must not depend on schema migrations: {violations}"
 
@@ -598,19 +804,10 @@ def test_performance_fact_repository_uses_only_canonical_quality_sources():
 
 
 def test_services_do_not_embed_sql_statements():
-    sql_pattern = re.compile(
-        r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",
-        re.IGNORECASE | re.DOTALL,
+    service_root = PROJECT_ROOT / "modules" / "services"
+    violations = _service_sql_violations(
+        _architecture_files(service_root, layer="services")
     )
-    violations = []
-    for path in sorted((PROJECT_ROOT / "modules" / "services").glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if sql_pattern.search(node.value):
-                    violations.append(
-                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
-                    )
 
     assert violations == [], f"service layer must pass business filters, not SQL: {violations}"
 
