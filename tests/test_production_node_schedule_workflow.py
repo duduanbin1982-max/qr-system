@@ -665,6 +665,7 @@ def test_workflow_api_returns_400_403_404_and_409(client, monkeypatch):
             "schedule:edit",
             "schedules:lock",
             "schedules:unlock",
+            "schedules:adjust",
             "schedules:approve",
         ],
     )
@@ -690,6 +691,19 @@ def test_workflow_api_returns_400_403_404_and_409(client, monkeypatch):
         json={"idempotency_key": "workflow-api-invalid"},
     )
     assert invalid.status_code == 400
+
+    invalid_timestamp = client.post(
+        f"/api/schedule/revision-items/{item['id']}/adjust",
+        headers=allowed_headers,
+        json={
+            "production_node_id": item["production_node_id"],
+            "planned_start_at": "2026-99-99T08:00:00+08:00",
+            "reason": "invalid timestamp",
+            "row_version": item["row_version"],
+            "idempotency_key": "workflow-api-invalid-timestamp",
+        },
+    )
+    assert invalid_timestamp.status_code == 400, invalid_timestamp.get_json()
 
     forbidden = client.post(
         f"/api/schedule/revision-items/{item['id']}/lock",

@@ -275,13 +275,17 @@ def schedule_revision_item_unlock(revision_item_id):
 @validate_json("schedule_revision_item_adjust")
 def schedule_revision_item_adjust(revision_item_id):
     data = get_json_body()
-    planned_start_at = format_database_timestamp(
-        parse_api_timestamp(data["planned_start_at"], "计划开始时间")
-    )
     return _schedule_workflow_response(lambda: ScheduleRevisionService.adjust_schedule_item(
-        revision_item_id, data["production_node_id"], planned_start_at,
-        data["reason"], data["row_version"], data["idempotency_key"],
-        g.current_user.get("id"), capacity_service=ScheduleCapacityService,
+        revision_item_id,
+        data["production_node_id"],
+        format_database_timestamp(
+            parse_api_timestamp(data["planned_start_at"], "计划开始时间")
+        ),
+        data["reason"],
+        data["row_version"],
+        data["idempotency_key"],
+        g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
