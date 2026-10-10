@@ -57,6 +57,7 @@ REVISION_METHODS = {
     "cancel_revision",
     "clear_order_schedules",
     "clear_schedule_replan_flag",
+    "clear_initial_schedule_replan_flag",
     "clone_revision_with_override",
     "complete_auto_plan_run",
     "complete_run",
@@ -112,6 +113,8 @@ EVIDENCE_METHODS = {
     "record_replan_trigger",
     "record_revision_conflict_check",
     "record_revision_risk_assessment",
+    "save_planning_evidence",
+    "get_planning_evidence",
     "save_replan_evidence",
     "set_revision_risk_snapshot",
 }
