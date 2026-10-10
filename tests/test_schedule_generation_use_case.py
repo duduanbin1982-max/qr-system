@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from modules.domain.production_time import PRODUCTION_TIMEZONE
+
 from modules.services.schedule_capacity_service import ScheduleCapacityService
 
 
@@ -34,7 +36,7 @@ def test_generation_request_normalizes_planning_facts(client):
         assert request["order"]["id"] == order_id
         assert request["operations"]
         assert request["order_serial_ids"] == []
-        assert request["cursor"] == datetime(2030, 1, 8)
+        assert request["cursor"] == datetime(2030, 1, 8, tzinfo=PRODUCTION_TIMEZONE)
         assert request["run_key"] == "generation-use-case-request-v1"
         assert request["standard_as_of"] >= "2030-01-08"
 

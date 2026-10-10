@@ -22,11 +22,21 @@ from modules.services.schedule_revision_service import ScheduleRevisionService
 from modules.services.order_service import OrderService
 from modules.domain.errors import DomainError, LegacyProcessLineWriteBlockedError
 from modules.domain.production_node_scheduling import NodeSchedulingError
+from modules.domain.production_time import (
+    api_time_payload,
+    format_database_timestamp,
+    parse_api_timestamp,
+)
+
+
+def _schedule_json(payload):
+    """Serialize schedule timestamps with an explicit production offset."""
+    return jsonify(api_time_payload(payload))
 
 
 def _schedule_workflow_response(callback):
     try:
-        return jsonify(callback())
+        return _schedule_json(callback())
     except NodeSchedulingError as exc:
         return jsonify(exc.to_payload()), 409
     except DomainError as exc:
@@ -44,7 +54,7 @@ def schedule_gantt():
     limit = request.args.get("limit", 200, type=int)
     offset = request.args.get("offset", 0, type=int)
     schedule_scope = request.args.get("status", "active")
-    return jsonify(ScheduleService.get_gantt_data(
+    return _schedule_json(ScheduleService.get_gantt_data(
         limit=limit, offset=offset, schedule_scope=schedule_scope
     ))
 
@@ -102,7 +112,7 @@ def schedule_update_order_priority(order_id):
                 f"version={result['priority_version']}; "
                 f"reason={data['schedule_change_reason']}",
             )
-        return jsonify(result)
+        return _schedule_json(result)
     except DomainError as exc:
         return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
@@ -131,7 +141,7 @@ def schedule_batch_shift():
 def schedule_capacity_lines():
     try:
         process_id = request.args.get("process_id", type=int)
-        return jsonify(ScheduleCapacityService.list_lines(
+        return _schedule_json(ScheduleCapacityService.list_lines(
             process_id, request.args.get("limit", 500)
         ))
     except ValueError as exc:
@@ -142,7 +152,7 @@ def schedule_capacity_lines():
 @check_auth
 @check_permission("schedule:view")
 def schedule_calendars():
-    return jsonify(ScheduleCapacityService.list_calendars())
+    return _schedule_json(ScheduleCapacityService.list_calendars())
 
 
 @app.route("/api/schedule/capacity-orders", methods=["GET"])
@@ -150,7 +160,7 @@ def schedule_calendars():
 @check_permission("schedule:view")
 def schedule_capacity_orders():
     try:
-        return jsonify(ScheduleCapacityService.list_schedulable_orders(
+        return _schedule_json(ScheduleCapacityService.list_schedulable_orders(
             request.args.get("limit", 500)
         ))
     except ValueError as exc:
@@ -176,7 +186,7 @@ def schedule_auto_plan():
             f"key={result.get('auto_plan_key', '')}; "
             f"status={result.get('status')}; queue={result.get('queue_count', 0)}",
         )
-        return jsonify(result)
+        return _schedule_json(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -186,7 +196,7 @@ def schedule_auto_plan():
 @check_permission("schedule:view")
 def schedule_order_operations(order_id):
     try:
-        return jsonify(ScheduleCapacityService.list_order_schedule(
+        return _schedule_json(ScheduleCapacityService.list_order_schedule(
             order_id, request.args.get("limit", 500)
         ))
     except ValueError as exc:
@@ -198,7 +208,7 @@ def schedule_order_operations(order_id):
 @check_permission("schedule:view")
 def schedule_order_revisions(order_id):
     try:
-        return jsonify(ScheduleCapacityService.list_order_revisions(
+        return _schedule_json(ScheduleCapacityService.list_order_revisions(
             order_id, request.args.get("limit", 100)
         ))
     except ValueError as exc:
@@ -210,7 +220,7 @@ def schedule_order_revisions(order_id):
 @check_permission("schedule:view")
 def schedule_revision_detail(revision_id):
     try:
-        return jsonify(ScheduleCapacityService.get_revision(
+        return _schedule_json(ScheduleCapacityService.get_revision(
             revision_id, request.args.get("limit", 1000)
         ))
     except ValueError as exc:
@@ -266,9 +276,16 @@ def schedule_revision_item_unlock(revision_item_id):
 def schedule_revision_item_adjust(revision_item_id):
     data = get_json_body()
     return _schedule_workflow_response(lambda: ScheduleRevisionService.adjust_schedule_item(
-        revision_item_id, data["production_node_id"], data["planned_start_at"],
-        data["reason"], data["row_version"], data["idempotency_key"],
-        g.current_user.get("id"), capacity_service=ScheduleCapacityService,
+        revision_item_id,
+        data["production_node_id"],
+        format_database_timestamp(
+            parse_api_timestamp(data["planned_start_at"], "计划开始时间")
+        ),
+        data["reason"],
+        data["row_version"],
+        data["idempotency_key"],
+        g.current_user.get("id"),
+        capacity_service=ScheduleCapacityService,
     ))
 
 
@@ -311,7 +328,7 @@ def schedule_revision_reject(revision_id):
 def schedule_generate_operations(order_id):
     try:
         data = get_json_body()
-        return jsonify(ScheduleCapacityService.generate_order_schedule(
+        return _schedule_json(ScheduleCapacityService.generate_order_schedule(
             order_id,
             start_date=data.get("start_date"),
             schedule_run_key=data.get("schedule_run_key", ""),
@@ -340,7 +357,7 @@ def schedule_generate_shadow_plan(order_id):
         "generate_node_shadow_schedule", "order", order_id,
         f"shadow_run_key={data['shadow_run_key']}; shadow_run_id={result.get('shadow_run_id')}",
     )
-    return jsonify(result)
+    return _schedule_json(result)
 
 
 @app.route("/api/schedule/order/<int:order_id>/shadow-runs", methods=["GET"])
@@ -348,7 +365,7 @@ def schedule_generate_shadow_plan(order_id):
 @check_permission("schedule:view")
 def schedule_list_shadow_runs(order_id):
     try:
-        return jsonify(ScheduleCapacityService.list_shadow_runs(
+        return _schedule_json(ScheduleCapacityService.list_shadow_runs(
             order_id, request.args.get("limit", 100)
         ))
     except ValueError as exc:
@@ -360,7 +377,7 @@ def schedule_list_shadow_runs(order_id):
 @check_permission("schedule:view")
 def schedule_shadow_run_detail(run_id):
     try:
-        return jsonify(ScheduleCapacityService.get_shadow_run(run_id))
+        return _schedule_json(ScheduleCapacityService.get_shadow_run(run_id))
     except DomainError as exc:
         return jsonify(exc.to_payload()), exc.status_code
     except ValueError as exc:
@@ -374,16 +391,21 @@ def schedule_dynamic_replan(order_id):
     """Replan unfinished work from approved reports, rework and downtime facts."""
     try:
         data = get_json_body()
+        start_at = None
+        if data.get("start_at") not in (None, ""):
+            start_at = format_database_timestamp(
+                parse_api_timestamp(data.get("start_at"), "重排开始时间")
+            )
         result = ScheduleCapacityService.dynamic_replan_order(
             order_id,
-            start_at=data.get("start_at"),
+            start_at=start_at,
             schedule_run_key=data.get("schedule_run_key", ""),
             reason=data.get("reason", ""),
             actor_id=g.current_user.get("id") if g.current_user else None,
         )
         safe_audit_log("dynamic_replan_schedule", "order", order_id,
                        f"run={data.get('schedule_run_key', '')}; reason={data.get('reason', '')}")
-        return jsonify(result)
+        return _schedule_json(result)
     except NodeSchedulingError as exc:
         return jsonify(exc.to_payload()), 409
     except ValueError as exc:
@@ -394,7 +416,7 @@ def schedule_dynamic_replan(order_id):
 @check_auth
 def schedule_downtime():
     try:
-        return jsonify(ScheduleCapacityService.list_downtime_events(
+        return _schedule_json(ScheduleCapacityService.list_downtime_events(
             production_node_id=request.args.get("production_node_id", type=int),
             process_line_id=request.args.get("process_line_id", type=int),
             start_at=request.args.get("start_at", ""),
@@ -412,13 +434,19 @@ def schedule_downtime():
 def schedule_downtime_create():
     try:
         data = get_json_body()
+        start_at = format_database_timestamp(
+            parse_api_timestamp(data.get("start_at"), "停机开始时间")
+        )
+        end_at = format_database_timestamp(
+            parse_api_timestamp(data.get("end_at"), "停机结束时间")
+        )
         result = ScheduleCapacityService.create_downtime_event(
-            data.get("production_node_id"), data.get("start_at"), data.get("end_at"),
+            data.get("production_node_id"), start_at, end_at,
             data.get("reason", ""), created_by=g.current_user.get("id") if g.current_user else None,
         )
         safe_audit_log("create_schedule_downtime", "schedule_downtime", result["event"]["id"],
                        f"node={data.get('production_node_id')}; {data.get('start_at')}~{data.get('end_at')}")
-        return jsonify(result)
+        return _schedule_json(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -434,7 +462,7 @@ def schedule_downtime_cancel(event_id):
             actor_id=g.current_user.get("id") if g.current_user else None,
         )
         safe_audit_log("cancel_schedule_downtime", "schedule_downtime", event_id, "status=cancelled")
-        return jsonify(result)
+        return _schedule_json(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -444,7 +472,7 @@ def schedule_downtime_cancel(event_id):
 @check_permission("schedule:view")
 def schedule_operations():
     try:
-        return jsonify(ScheduleCapacityService.list_schedules(
+        return _schedule_json(ScheduleCapacityService.list_schedules(
             request.args.get("limit", 500)
         ))
     except ValueError as exc:
@@ -456,7 +484,7 @@ def schedule_operations():
 @check_permission("schedule:view")
 def schedule_capacity_audit():
     try:
-        return jsonify(ScheduleCapacityService.audit_schedule_capacity(
+        return _schedule_json(ScheduleCapacityService.audit_schedule_capacity(
             request.args.get("limit", 1000)
         ))
     except ValueError as exc:

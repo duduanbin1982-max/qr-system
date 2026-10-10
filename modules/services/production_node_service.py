@@ -1,13 +1,15 @@
 """Validated transactional commands for production-node administration."""
 
-from datetime import datetime
-
 from modules import config
 from modules.domain.errors import (
     ConflictError,
     NotFoundError,
     ProductionNodeWriteDisabledError,
     ValidationError,
+)
+from modules.domain.production_time import (
+    format_database_timestamp,
+    parse_api_timestamp,
 )
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.services import BaseService
@@ -366,8 +368,8 @@ class ProductionNodeService:
     @staticmethod
     def _parse_datetime(value, label):
         try:
-            return datetime.fromisoformat(str(value).replace("T", " "))
-        except (TypeError, ValueError) as exc:
+            return parse_api_timestamp(value, f"{label}时间")
+        except ValueError as exc:
             raise ValidationError(f"{label}时间格式无效") from exc
 
     @staticmethod
@@ -376,12 +378,12 @@ class ProductionNodeService:
         node_id = ProductionNodeService._positive_int(node_id, "node_id")
         reason = ProductionNodeService._text(data.get("reason"), "变更原因", 1024)
         key = ProductionNodeService._text(data.get("idempotency_key"), "幂等键", 128)
-        start_at = str(data.get("start_at") or "").replace("T", " ")
-        end_at = str(data.get("end_at") or "").replace("T", " ")
-        start = ProductionNodeService._parse_datetime(start_at, "开始")
-        end = ProductionNodeService._parse_datetime(end_at, "结束")
+        start = ProductionNodeService._parse_datetime(data.get("start_at"), "开始")
+        end = ProductionNodeService._parse_datetime(data.get("end_at"), "结束")
         if end <= start:
             raise ValidationError("结束时间必须晚于开始时间")
+        start_at = format_database_timestamp(start)
+        end_at = format_database_timestamp(end)
         command = {
             "node_id": node_id,
             "start_at": start_at,
@@ -463,8 +465,14 @@ class ProductionNodeService:
     def list_calendar_overrides(node_id, start_at="", end_at="", limit=500):
         node_id = ProductionNodeService._positive_int(node_id, "node_id")
         limit = ProductionNodeService._limit(limit)
-        if start_at and end_at:
-            if ProductionNodeService._parse_datetime(end_at, "结束") <= ProductionNodeService._parse_datetime(start_at, "开始"):
+        parsed_start = ProductionNodeService._parse_datetime(start_at, "开始") if start_at else None
+        parsed_end = ProductionNodeService._parse_datetime(end_at, "结束") if end_at else None
+        if parsed_start is not None:
+            start_at = format_database_timestamp(parsed_start)
+        if parsed_end is not None:
+            end_at = format_database_timestamp(parsed_end)
+        if parsed_start is not None and parsed_end is not None:
+            if parsed_end <= parsed_start:
                 raise ValidationError("结束时间必须晚于开始时间")
         db = BaseService.db()
         ProductionNodeService._node(node_id, db)

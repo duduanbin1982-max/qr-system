@@ -222,8 +222,8 @@ describe('useGantt', () => {
 
     expect(mocks.createScheduleNodeDowntime).toHaveBeenCalledWith({
       production_node_id: 41,
-      start_at: '2026-09-01T08:00',
-      end_at: '2026-09-01T09:30',
+      start_at: '2026-09-01T08:00:00+08:00',
+      end_at: '2026-09-01T09:30:00+08:00',
       reason: '设备检修',
     })
     expect(mocks.createScheduleNodeDowntime.mock.calls[0][0]).not.toHaveProperty('process_line_id')
@@ -270,7 +270,7 @@ describe('useGantt', () => {
 
     expect(mocks.adjustScheduleItem).toHaveBeenCalledWith(901, {
       production_node_id: 41,
-      planned_start_at: '2026-09-01T08:00',
+      planned_start_at: '2026-09-01T08:00:00+08:00',
       row_version: 3,
       reason: '改用可用焊接节点',
       idempotency_key: 'adjust-901-1',

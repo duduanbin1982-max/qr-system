@@ -312,14 +312,14 @@ def test_dynamic_replan_and_downtime_api_contract(client, auth_headers):
         ).fetchone()[0]
     event = client.post(
         "/api/schedule/downtime",
-        json={"production_node_id": node_id, "start_at": "2026-09-01 08:00", "end_at": "2026-09-01 09:00", "reason": "换刀"},
+        json={"production_node_id": node_id, "start_at": "2026-09-01T08:00:00+08:00", "end_at": "2026-09-01T09:00:00+08:00", "reason": "换刀"},
         headers=auth_headers,
     )
     assert event.status_code == 200, event.get_json()
     assert event.get_json()["event"]["production_node_id"] == node_id
     legacy_post = client.post(
         "/api/schedule/downtime",
-        json={"process_line_id": line_id, "start_at": "2026-09-01 09:00", "end_at": "2026-09-01 10:00", "reason": "legacy"},
+        json={"process_line_id": line_id, "start_at": "2026-09-01T09:00:00+08:00", "end_at": "2026-09-01T10:00:00+08:00", "reason": "legacy"},
         headers=auth_headers,
     )
     assert legacy_post.status_code == 400
@@ -329,7 +329,7 @@ def test_dynamic_replan_and_downtime_api_contract(client, auth_headers):
     assert listed.get_json()["events"][0]["reason"] == "换刀"
     replanned = client.post(
         f"/api/schedule/order/{order_id}/dynamic-replan",
-        json={"start_at": "2026-09-01 08:00", "schedule_run_key": "dynamic-api-v1", "reason": "停机后重排"},
+        json={"start_at": "2026-09-01T08:00:00+08:00", "schedule_run_key": "dynamic-api-v1", "reason": "停机后重排"},
         headers=auth_headers,
     )
     assert replanned.status_code == 200, replanned.get_json()

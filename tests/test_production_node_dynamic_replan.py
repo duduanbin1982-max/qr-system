@@ -112,8 +112,8 @@ def test_node_downtime_api_and_legacy_filter_compatibility_observation(
         "/api/schedule/downtime",
         json={
             "production_node_id": node_id,
-            "start_at": "2026-09-21 08:00",
-            "end_at": "2026-09-21 09:00",
+            "start_at": "2026-09-21T08:00:00+08:00",
+            "end_at": "2026-09-21T09:00:00+08:00",
             "reason": "节点换刀",
         },
         headers=auth_headers,
@@ -122,6 +122,8 @@ def test_node_downtime_api_and_legacy_filter_compatibility_observation(
     event = created.get_json()["event"]
     assert event["production_node_id"] == node_id
     assert event["process_line_id"] == line_id
+    assert event["start_at"] == "2026-09-21T08:00+08:00"
+    assert event["end_at"] == "2026-09-21T09:00+08:00"
 
     node_list = client.get(
         f"/api/schedule/downtime?production_node_id={node_id}&limit=10",

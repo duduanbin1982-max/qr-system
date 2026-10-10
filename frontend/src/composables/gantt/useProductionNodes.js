@@ -2,6 +2,10 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import {
+  parseProductionTimestamp,
+  productionApiTimestamp,
+} from '@/lib/productionTime.js'
 
 
 function freshNodeForm() {
@@ -534,7 +538,9 @@ export function useProductionNodes({
       showToast('请选择生产节点', 'error')
       return null
     }
-    if (!form.start_at || !form.end_at || new Date(form.end_at) <= new Date(form.start_at)) {
+    const start = parseProductionTimestamp(form.start_at)
+    const end = parseProductionTimestamp(form.end_at)
+    if (!start || !end || end <= start) {
       showToast('节点日历结束时间必须晚于开始时间', 'error')
       return null
     }
@@ -551,8 +557,8 @@ export function useProductionNodes({
     )
     if (!formContextIsCurrent()) return null
     const payload = {
-      start_at: form.start_at,
-      end_at: form.end_at,
+      start_at: productionApiTimestamp(form.start_at),
+      end_at: productionApiTimestamp(form.end_at),
       override_type: form.override_type,
       reason: String(form.reason).trim(),
       idempotency_key: String(form.idempotency_key || commandKey('production-node-calendar')).trim(),

@@ -113,6 +113,7 @@ def test_node_create_update_replay_conflict_and_delete_rejection(client, auth_he
     node = created.get_json()
     assert node["row_version"] == 1
     assert node["legacy_process_line_id"] is None
+    assert node["created_at"].endswith("+08:00")
 
     replay = client.post("/api/production-nodes", headers=auth_headers, json=command)
     assert replay.status_code == 201, replay.get_json()
@@ -223,7 +224,9 @@ def test_capability_replacement_validates_scope_boundaries_and_audits(client, au
         json=command,
     )
     assert response.status_code == 200, response.get_json()
-    assert response.get_json()[0]["product_family"] == "steel-shell"
+    replacement = response.get_json()
+    assert replacement[0]["product_family"] == "steel-shell"
+    assert replacement[0]["created_at"].endswith("+08:00")
 
     duplicate = client.put(
         f"/api/production-nodes/{node['id']}/capabilities",
@@ -285,6 +288,7 @@ def test_capability_query_uses_view_permission_and_does_not_mutate_facts(client)
     assert response.status_code == 200, response.get_json()
     payload = response.get_json()
     assert payload["node"]["id"] == node["id"]
+    assert payload["node"]["created_at"].endswith("+08:00")
     assert isinstance(payload["capabilities"], list)
     assert client.get(
         f"/api/production-nodes/{node['id']}/capabilities",
@@ -311,8 +315,8 @@ def test_capability_query_uses_view_permission_and_does_not_mutate_facts(client)
 def test_calendar_override_create_cancel_and_audit_are_strict(client, auth_headers):
     node, _, _ = _node_fixture(client)
     command = {
-        "start_at": "2026-09-20 08:00:00",
-        "end_at": "2026-09-20 10:00:00",
+        "start_at": "2026-09-20T08:00:00+08:00",
+        "end_at": "2026-09-20T10:00:00+08:00",
         "override_type": "maintenance",
         "reason": "planned maintenance",
         "idempotency_key": f"node-calendar-{uuid.uuid4().hex}",
@@ -363,6 +367,7 @@ def test_calendar_override_create_cancel_and_audit_are_strict(client, auth_heade
         "calendar_override_created",
         "calendar_override_cancelled",
     }
+    assert all(item["created_at"].endswith("+08:00") for item in audits.get_json())
     with client.application.app_context():
         db = get_db()
         event_id = db.execute(

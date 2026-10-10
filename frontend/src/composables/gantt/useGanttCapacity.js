@@ -3,6 +3,12 @@ import { computed, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { scheduleSegments } from '@/composables/gantt/useScheduleSegments.js'
+import {
+  parseProductionTimestamp,
+  productionApiTimestamp,
+  productionDate,
+  productionDateTimeLocal,
+} from '@/lib/productionTime.js'
 
 const STANDARD_SCOPE_LABELS = Object.freeze({
   'route_version:product': '路线版本 · 产品专用',
@@ -63,7 +69,7 @@ export function useGanttCapacity({
   const replanRunKey = ref('')
   const replanResult = ref(null)
   const autoPlanVisible = ref(false)
-  const autoPlanStartDate = ref(new Date().toISOString().slice(0, 10))
+  const autoPlanStartDate = ref(productionDate())
   const autoPlanLimit = ref(100)
   const autoPlanKey = ref('')
   const autoPlanLoading = ref(false)
@@ -209,7 +215,9 @@ export function useGanttCapacity({
       showToast('请填写停机开始和结束时间', 'error')
       return null
     }
-    if (new Date(form.end_at) <= new Date(form.start_at)) {
+    const start = parseProductionTimestamp(form.start_at)
+    const end = parseProductionTimestamp(form.end_at)
+    if (!start || !end || end <= start) {
       showToast('停机结束时间必须晚于开始时间', 'error')
       return null
     }
@@ -220,8 +228,8 @@ export function useGanttCapacity({
     try {
       const result = await api.domains.production.createScheduleNodeDowntime({
         production_node_id: Number(form.production_node_id),
-        start_at: form.start_at,
-        end_at: form.end_at,
+        start_at: productionApiTimestamp(form.start_at),
+        end_at: productionApiTimestamp(form.end_at),
         reason: String(form.reason).trim(),
       })
       showToast('停机记录已保存')
@@ -251,7 +259,7 @@ export function useGanttCapacity({
 
   function startGeneration(order) {
     generationOrderId.value = order?.id || ''
-    generationStartDate.value = order?.plan_start || new Date().toISOString().slice(0, 10)
+    generationStartDate.value = order?.plan_start || productionDate()
     generationRunKey.value = commandKey('schedule', order?.id || 'order')
   }
 
@@ -286,9 +294,7 @@ export function useGanttCapacity({
 
   function startDynamicReplan(order) {
     replanOrderId.value = order?.id || ''
-    const now = new Date()
-    const pad = value => String(value).padStart(2, '0')
-    replanStartAt.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+    replanStartAt.value = productionDateTimeLocal()
     replanRunKey.value = commandKey('dynamic-replan', order?.id || 'order')
     replanResult.value = null
   }
@@ -311,7 +317,7 @@ export function useGanttCapacity({
     }
     try {
       const result = await api.domains.production.dynamicReplanOrderSchedule(replanOrderId.value, {
-        start_at: replanStartAt.value,
+        start_at: productionApiTimestamp(replanStartAt.value),
         schedule_run_key: replanRunKey.value,
         reason: String(replanReason.value).trim(),
       })
@@ -327,7 +333,7 @@ export function useGanttCapacity({
 
   function prepareAutoPlan() {
     autoPlanVisible.value = true
-    autoPlanStartDate.value = new Date().toISOString().slice(0, 10)
+    autoPlanStartDate.value = productionDate()
     autoPlanLimit.value = 100
     autoPlanKey.value = commandKey('auto-plan')
     autoPlanResult.value = null
@@ -434,7 +440,7 @@ export function useGanttCapacity({
     adjustmentForm.value = {
       revision_item_id: row.revision_item_id,
       production_node_id: row.production_node_id || '',
-      planned_start_at: String(row.planned_start_at || '').replace(' ', 'T').slice(0, 16),
+      planned_start_at: productionDateTimeLocal(row.planned_start_at),
       row_version: Number(row.revision_item_row_version || 1),
       reason: '',
       idempotency_key: commandKey('schedule-adjust', row.revision_item_id),
@@ -463,7 +469,7 @@ export function useGanttCapacity({
         Number(form.revision_item_id),
         {
           production_node_id: Number(form.production_node_id),
-          planned_start_at: form.planned_start_at,
+          planned_start_at: productionApiTimestamp(form.planned_start_at),
           row_version: Number(form.row_version || 1),
           reason: String(form.reason).trim(),
           idempotency_key: String(form.idempotency_key).trim(),

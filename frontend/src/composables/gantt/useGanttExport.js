@@ -1,5 +1,6 @@
 import { showToast } from '@/lib/store.js'
 import { scheduleSegments } from '@/composables/gantt/useScheduleSegments.js'
+import { productionDate } from '@/lib/productionTime.js'
 
 
 let html2canvasLibrary = null
@@ -26,7 +27,7 @@ export function useGanttExport() {
         scale: 2,
       })
       const link = document.createElement('a')
-      link.download = `生产排程_${new Date().toISOString().slice(0, 10)}.png`
+      link.download = `生产排程_${productionDate()}.png`
       link.href = canvas.toDataURL('image/png')
       link.click()
       showToast('排程图已导出')
@@ -68,7 +69,7 @@ export function useGanttExport() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `生产排程_${kind === 'operations' ? '工序节点' : '订单'}_${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `生产排程_${kind === 'operations' ? '工序节点' : '订单'}_${productionDate()}.csv`
     link.click()
     URL.revokeObjectURL(url)
     showToast('排程 CSV 已导出')

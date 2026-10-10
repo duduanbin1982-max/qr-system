@@ -2,6 +2,11 @@ import { ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import {
+  addProductionDays,
+  parseProductionTimestamp,
+  productionDate,
+} from '@/lib/productionTime.js'
 
 
 export function useGanttEditor({
@@ -34,7 +39,7 @@ export function useGanttEditor({
     dragTarget.value = order
     if (dragResizeEdge === 'right') {
       dragPreviewLeft.value = (
-        (new Date(order.plan_start) - new Date(ganttData.value.minDate))
+        (parseProductionTimestamp(order.plan_start) - parseProductionTimestamp(ganttData.value.minDate))
         / 86400000
         * dayWidth.value
       )
@@ -76,9 +81,8 @@ export function useGanttEditor({
 
   async function saveRightResize(order) {
     const days = Math.max(1, Math.round(dragPreviewWidth.value / dayWidth.value))
-    const newEnd = new Date(order.plan_start)
-    newEnd.setDate(newEnd.getDate() + days - 1)
-    const planEnd = newEnd.toISOString().slice(0, 10)
+    const newEnd = addProductionDays(parseProductionTimestamp(order.plan_start), days - 1)
+    const planEnd = productionDate(newEnd)
     await api.domains.production.updateScheduleOrder(order.id, {
       plan_start: order.plan_start,
       plan_end: planEnd,
@@ -89,9 +93,8 @@ export function useGanttEditor({
 
   async function saveLeftResize(order) {
     const daysOffset = Math.round(dragPreviewLeft.value / dayWidth.value)
-    const newStart = new Date(ganttData.value.minDate)
-    newStart.setDate(newStart.getDate() + daysOffset)
-    const planStart = newStart.toISOString().slice(0, 10)
+    const newStart = addProductionDays(parseProductionTimestamp(ganttData.value.minDate), daysOffset)
+    const planStart = productionDate(newStart)
     await api.domains.production.updateScheduleOrder(order.id, {
       plan_start: planStart,
       plan_end: order.plan_end,

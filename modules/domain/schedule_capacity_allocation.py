@@ -5,13 +5,14 @@ occupancy intervals, and candidate completion facts. Calendar and override
 facts are resolved by the service/repository adapter.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import math
 
 from modules.domain.production_node_scheduling import (
     NodeSchedulingError,
     ProductionNodePolicy,
 )
+from modules.domain.production_time import parse_database_timestamp
 
 
 class ScheduleCapacityAllocationPolicy:
@@ -53,6 +54,19 @@ class ScheduleCapacityAllocationPolicy:
         shift_id. Occupancy is a sequence of datetime pairs. The function
         returns new segment mappings and does not mutate any input.
         """
+        earliest = parse_database_timestamp(earliest)
+        slots = [
+            {
+                **slot,
+                "start": parse_database_timestamp(slot.get("start")),
+                "end": parse_database_timestamp(slot.get("end")),
+            }
+            for slot in slots
+        ]
+        occupied = [
+            (parse_database_timestamp(start), parse_database_timestamp(end))
+            for start, end in occupied
+        ]
         remaining = float(duration)
         segments = []
         intervals = cls.merge_intervals(occupied)
@@ -114,14 +128,7 @@ class ScheduleCapacityAllocationPolicy:
 
     @staticmethod
     def _parse_timestamp(value):
-        if isinstance(value, datetime):
-            return value
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(str(value).replace("T", " "))
-        except (TypeError, ValueError):
-            return None
+        return parse_database_timestamp(value)
 
     @classmethod
     def allocate_split_on_nodes(

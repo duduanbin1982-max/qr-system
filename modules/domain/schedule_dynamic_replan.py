@@ -8,7 +8,8 @@ kept as a separate immutable source fact.
 
 import hashlib
 import json
-from datetime import datetime
+
+from modules.domain.production_time import parse_database_timestamp
 
 
 class ScheduleDynamicReplanPolicy:
@@ -188,10 +189,9 @@ class ScheduleDynamicReplanPolicy:
     def _minute_delta(before, after):
         if not before or not after:
             return 0
-        try:
-            before_dt = datetime.fromisoformat(str(before).replace("T", " "))
-            after_dt = datetime.fromisoformat(str(after).replace("T", " "))
-        except (TypeError, ValueError):
+        before_dt = parse_database_timestamp(before)
+        after_dt = parse_database_timestamp(after)
+        if before_dt is None or after_dt is None:
             return 0
         return int(round((after_dt - before_dt).total_seconds() / 60))
 
