@@ -19,7 +19,7 @@
     </header>
 
     <div class="inventory-navigation">
-      <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="productActions.setViewMode" />
+      <InventoryViewTabs v-model="productState.viewMode" :product-enabled="productState.enabled" @update:model-value="setInventoryViewMode" />
       <span class="inventory-navigation-hint">切换视图不会改变库存事实，只改变统计与列表口径。</span>
     </div>
 
@@ -373,6 +373,15 @@ export default {
     const sortIndicator = (key) => inventory.sortBy.value === key ? (inventory.sortDir.value === 'asc' ? ' ↑' : ' ↓') : ''
     const ariaSort = (key) => inventory.sortBy.value === key ? (inventory.sortDir.value === 'asc' ? 'ascending' : 'descending') : 'none'
     const closeOrderDetails = () => { orderDrawerItem.value = null }
+    const setInventoryViewMode = (mode) => {
+      if (mode === 'product') {
+        inventory.cancelPendingLoad()
+        return productActions.setViewMode(mode)
+      }
+      productActions.setViewMode(mode)
+      productActions.cancelPendingLoad()
+      return inventory.load()
+    }
     const summaryValue = (key) => {
       if (productState.viewMode === 'product') return productState.summary?.[key] || 0
       return inventory.stats.value?.[key] || 0
@@ -385,7 +394,7 @@ export default {
       inventory.setFilter({ key: 'low_stock', value: true })
       return inventory.search()
     }
-    return { ...inventory, productState, productActions, orderDrawerItem, orderColumns, orderVisibleColumnDefs, orderPageSelected, openOrderDetails, closeOrderDetails, openOrderLogs, setSort, toggleSelectAll, toggleSelect, sortIndicator, ariaSort, summaryValue, focusLowStock }
+    return { ...inventory, productState, productActions, orderDrawerItem, orderColumns, orderVisibleColumnDefs, orderPageSelected, openOrderDetails, closeOrderDetails, openOrderLogs, setInventoryViewMode, setSort, toggleSelectAll, toggleSelect, sortIndicator, ariaSort, summaryValue, focusLowStock }
   }
 }
 </script>

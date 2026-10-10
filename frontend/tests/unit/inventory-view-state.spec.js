@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import InventoryViewTabs from '@/components/inventory/InventoryViewTabs.vue'
@@ -18,6 +18,16 @@ vi.mock('@/lib/api.js', () => ({
 }))
 
 import { useInventoryProductGroups } from '@/composables/inventory/useInventoryProductGroups.js'
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve
+    reject = onReject
+  })
+  return { promise, resolve, reject }
+}
 
 describe('inventory product view state binding', () => {
   it('unwraps nested refs at the view boundary so tab state is rendered as values', async () => {
@@ -73,6 +83,53 @@ describe('inventory product view state binding', () => {
     expect(api.domains.inventory.inventoryFilterOptions).toHaveBeenCalledWith({ view: 'product' })
     expect(api.domains.inventory.inventoryStats).toHaveBeenCalledWith(expect.objectContaining({ view: 'product' }))
     expect(calls.some(([params]) => Array.isArray(params.specifications))).toBe(true)
+    wrapper.unmount()
+    localStorage.removeItem('inventory-workbench:v1:view')
+    localStorage.removeItem('inventory-workbench:v1:filters')
+  })
+
+  it('rejects a stale product response and commits list, total, and summary as one snapshot', async () => {
+    localStorage.setItem('inventory-workbench:v1:view', 'product')
+    const { api } = await import('@/lib/api.js')
+    let product
+    const wrapper = mount({
+      setup() {
+        product = useInventoryProductGroups()
+        return {}
+      },
+      template: '<div />',
+    })
+    await flushPromises()
+    const oldList = deferred()
+    const oldSummary = deferred()
+    const newList = deferred()
+    const newSummary = deferred()
+    api.domains.inventory.listProductGroups.mockImplementation(params => params.keyword === '新产品' ? newList.promise : oldList.promise)
+    api.domains.inventory.inventoryStats.mockImplementation(params => params.keyword === '新产品' ? newSummary.promise : oldSummary.promise)
+
+    product.actions.setFilter({ key: 'keyword', value: '旧产品' })
+    const oldRequest = product.actions.searchGroups()
+    product.actions.setFilter({ key: 'keyword', value: '新产品' })
+    const newRequest = product.actions.searchGroups()
+
+    newList.resolve({ items: [{ product_id: 22, product_code: 'NEW-22' }], total: 1 })
+    await Promise.resolve()
+    expect(product.state.groups.value).toEqual([])
+    expect(product.state.loading.value).toBe(true)
+
+    newSummary.resolve({ total_items: 1, total_quantity: 22, total_value: 220 })
+    await newRequest
+    expect(product.state.groups.value).toEqual([{ product_id: 22, product_code: 'NEW-22' }])
+    expect(product.state.total.value).toBe(1)
+    expect(product.state.summary.value).toEqual({ total_items: 1, total_quantity: 22, total_value: 220, low_stock: 0, today_in: 0, today_out: 0 })
+
+    oldList.resolve({ items: [{ product_id: 11, product_code: 'OLD-11' }], total: 99 })
+    oldSummary.resolve({ total_items: 99, total_quantity: 999, total_value: 9990 })
+    await oldRequest
+    expect(product.state.groups.value).toEqual([{ product_id: 22, product_code: 'NEW-22' }])
+    expect(product.state.total.value).toBe(1)
+    expect(product.state.summary.value).toEqual({ total_items: 1, total_quantity: 22, total_value: 220, low_stock: 0, today_in: 0, today_out: 0 })
+    expect(product.state.loading.value).toBe(false)
     wrapper.unmount()
     localStorage.removeItem('inventory-workbench:v1:view')
     localStorage.removeItem('inventory-workbench:v1:filters')

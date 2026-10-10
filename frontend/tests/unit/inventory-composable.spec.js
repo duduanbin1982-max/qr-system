@@ -55,6 +55,16 @@ function mountHarness() {
   return { wrapper: mount(harness), get state() { return state } }
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve
+    reject = onReject
+  })
+  return { promise, resolve, reject }
+}
+
 
 describe('inventory composable contracts', () => {
   beforeEach(() => {
@@ -173,6 +183,44 @@ describe('inventory composable contracts', () => {
       keyword: '待出库', location: '东库', specification: '标准',
     }))
     expect(window.open).toHaveBeenCalledWith('/api/inventory/export?keyword=待出库', '_blank')
+    harness.wrapper.unmount()
+  })
+
+  it('atomically keeps the newest order query when an older response arrives last', async () => {
+    const harness = mountHarness()
+    await flushPromises()
+    const inventory = harness.state
+    const oldList = deferred()
+    const oldSummary = deferred()
+    const newList = deferred()
+    const newSummary = deferred()
+    mocks.listInventory.mockImplementation(params => params.keyword === '新筛选' ? newList.promise : oldList.promise)
+    mocks.inventoryStats.mockImplementation(params => params.keyword === '新筛选' ? newSummary.promise : oldSummary.promise)
+
+    inventory.setFilter({ key: 'keyword', value: '旧筛选' })
+    const oldRequest = inventory.search()
+    inventory.setFilter({ key: 'keyword', value: '新筛选' })
+    const newRequest = inventory.search()
+
+    newList.resolve({ items: [{ id: 22, product_model: 'NEW-22' }], total: 1 })
+    await Promise.resolve()
+    expect(inventory.items.value).toEqual([])
+    expect(inventory.loading.value).toBe(true)
+
+    newSummary.resolve({ total_items: 1, total_quantity: 22, total_value: 220 })
+    await newRequest
+    expect(inventory.items.value).toEqual([{ id: 22, product_model: 'NEW-22' }])
+    expect(inventory.total.value).toBe(1)
+    expect(inventory.stats.value).toMatchObject({ total_items: 1, total_quantity: 22, total_value: 220 })
+
+    oldList.resolve({ items: [{ id: 11, product_model: 'OLD-11' }], total: 99 })
+    oldSummary.resolve({ total_items: 99, total_quantity: 999, total_value: 9990 })
+    await oldRequest
+    expect(inventory.items.value).toEqual([{ id: 22, product_model: 'NEW-22' }])
+    expect(inventory.total.value).toBe(1)
+    expect(inventory.stats.value).toMatchObject({ total_items: 1, total_quantity: 22, total_value: 220 })
+    expect(inventory.loading.value).toBe(false)
+    expect(mocks.showToast).not.toHaveBeenCalled()
     harness.wrapper.unmount()
   })
 })

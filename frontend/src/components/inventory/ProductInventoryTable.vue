@@ -133,7 +133,8 @@ function columnClass(key) {
 function cellClass(key) {
   return key === 'product_code' ? 'inventory-frozen-cell inventory-frozen--code'
     : key === 'product_name' ? 'inventory-frozen-cell inventory-frozen--name'
-      : key === 'specification' ? 'inventory-frozen-cell inventory-frozen--spec' : ''
+      : key === 'specification' ? 'inventory-frozen-cell inventory-frozen--spec'
+        : key === 'actions' ? 'inventory-mobile-actions' : ''
 }
 function cellTitle(item, key) { return ['product_code', 'product_name', 'specification'].includes(key) ? (item[key] || '-') : undefined }
 function sortIndicator(key) { return props.sortBy === key ? (props.sortDir === 'asc' ? ' ↑' : ' ↓') : '' }

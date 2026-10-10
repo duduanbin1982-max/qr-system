@@ -36,5 +36,7 @@ describe('product inventory frozen columns', () => {
     expect(cells.slice(0, 3).map(cell => cell.text())).toEqual(['SB-121', '静音机头', '加强型'])
     expect(cells.slice(0, 3).every(cell => cell.classes().includes('inventory-frozen-cell'))).toBe(true)
     expect(cells.at(0).find('code').classes()).toContain('inventory-product-code')
+    expect(headers.at(-1).classes()).toContain('inventory-mobile-actions')
+    expect(cells.at(-1).classes()).toContain('inventory-mobile-actions')
   })
 })
