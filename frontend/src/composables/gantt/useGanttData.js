@@ -2,6 +2,12 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import {
+  addProductionDays,
+  parseProductionTimestamp,
+  productionCalendarParts,
+  productionDate,
+} from '@/lib/productionTime.js'
 
 const RISK_LABELS = Object.freeze({
   none: '正常',
@@ -106,14 +112,14 @@ export function useGanttData() {
   function barLeft(order) {
     const min = ganttData.value.minDate
     if (!min || !order.plan_start) return 0
-    return Math.max(0, (new Date(order.plan_start) - new Date(min)) / 86400000) * dayWidth.value
+    return Math.max(0, (parseProductionTimestamp(order.plan_start) - parseProductionTimestamp(min)) / 86400000) * dayWidth.value
   }
 
   function barWidth(order) {
     if (!order.plan_start || !order.plan_end) return dayWidth.value
     const days = Math.max(
       1,
-      (new Date(order.plan_end) - new Date(order.plan_start)) / 86400000 + 1,
+      (parseProductionTimestamp(order.plan_end) - parseProductionTimestamp(order.plan_start)) / 86400000 + 1,
     )
     return days * dayWidth.value
   }
@@ -122,14 +128,14 @@ export function useGanttData() {
     const min = ganttData.value.minDate
     const startValue = order.actual_start_at || order.actual_start
     if (!min || !startValue) return 0
-    return Math.max(0, (new Date(startValue) - new Date(min)) / 86400000) * dayWidth.value
+    return Math.max(0, (parseProductionTimestamp(startValue) - parseProductionTimestamp(min)) / 86400000) * dayWidth.value
   }
 
   function actualBarWidth(order) {
     const startValue = order.actual_start_at || order.actual_start
     const endValue = order.actual_end_at || order.actual_end || order.actual_last_report_at || startValue
     if (!startValue || !endValue) return 4
-    const days = Math.max(1 / 24, (new Date(endValue) - new Date(startValue)) / 86400000)
+    const days = Math.max(1 / 24, (parseProductionTimestamp(endValue) - parseProductionTimestamp(startValue)) / 86400000)
     return Math.max(4, days * dayWidth.value)
   }
 
@@ -385,17 +391,17 @@ function buildGanttData(orders, range) {
   if (!orders.length || !range.minDate || !range.maxDate) {
     return { minDate: '', maxDate: '', totalDays: 0, days: [] }
   }
-  const start = new Date(range.minDate)
-  const end = new Date(range.maxDate)
+  const start = parseProductionTimestamp(range.minDate)
+  const end = parseProductionTimestamp(range.maxDate)
   const totalDays = Math.max(Math.ceil((end - start) / 86400000) + 1, 1)
   const days = Array.from({ length: totalDays }, (_, index) => {
-    const date = new Date(start)
-    date.setDate(date.getDate() + index)
+    const date = addProductionDays(start, index)
+    const parts = productionCalendarParts(date)
     return {
-      date: date.toISOString().slice(0, 10),
-      label: `${date.getMonth() + 1}/${date.getDate()}`,
-      isToday: date.toDateString() === new Date().toDateString(),
-      isWeekend: date.getDay() === 0 || date.getDay() === 6,
+      date: productionDate(date),
+      label: `${parts.month}/${parts.day}`,
+      isToday: productionDate(date) === productionDate(),
+      isWeekend: [6, 7].includes(parts.weekday),
     }
   })
   return {

@@ -11,6 +11,7 @@ from modules.route_decorators import (
     validate_json,
 )
 from modules.services.production_node_service import ProductionNodeService
+from modules.domain.production_time import api_time_payload
 
 
 def _actor_id():
@@ -18,11 +19,15 @@ def _actor_id():
     return actor.get("id")
 
 
+def _production_node_json(payload):
+    return jsonify(api_time_payload(payload))
+
+
 @app.route("/api/production-nodes", methods=["GET"])
 @check_auth
 @check_permission("production_nodes:view")
 def list_production_nodes():
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.list_nodes(
             process_id=request.args.get("process_id"),
             status=request.args.get("status"),
@@ -39,7 +44,7 @@ def list_production_nodes():
 def create_production_node():
     data = get_json_body()
     return (
-        jsonify(
+        _production_node_json(
             ProductionNodeService.create_node(data, _actor_id())
         ),
         201,
@@ -52,7 +57,7 @@ def create_production_node():
 @require_production_node_write
 @validate_json("production_node_write")
 def update_production_node(node_id):
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.update_node(node_id, get_json_body(), _actor_id())
     )
 
@@ -65,7 +70,7 @@ def update_production_node(node_id):
 @require_production_node_write
 @validate_json("production_node_capabilities_replace")
 def replace_production_node_capabilities(node_id):
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.replace_capabilities(
             node_id, get_json_body(), _actor_id()
         )
@@ -78,7 +83,7 @@ def replace_production_node_capabilities(node_id):
 @check_auth
 @check_permission("production_nodes:view")
 def list_production_node_capabilities(node_id):
-    return jsonify(ProductionNodeService.list_capabilities(node_id))
+    return _production_node_json(ProductionNodeService.list_capabilities(node_id))
 
 
 @app.route(
@@ -87,7 +92,7 @@ def list_production_node_capabilities(node_id):
 @check_auth
 @check_permission("production_nodes:view")
 def list_production_node_calendar_overrides(node_id):
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.list_calendar_overrides(
             node_id,
             start_at=request.args.get("start_at", ""),
@@ -106,7 +111,7 @@ def list_production_node_calendar_overrides(node_id):
 @validate_json("production_node_calendar_override_create")
 def create_production_node_calendar_override(node_id):
     return (
-        jsonify(
+        _production_node_json(
             ProductionNodeService.create_calendar_override(
                 node_id, get_json_body(), _actor_id()
             )
@@ -124,7 +129,7 @@ def create_production_node_calendar_override(node_id):
 @require_production_node_write
 @validate_json("production_node_calendar_override_cancel")
 def cancel_production_node_calendar_override(override_id):
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.cancel_calendar_override(
             override_id, get_json_body(), _actor_id()
         )
@@ -137,7 +142,7 @@ def cancel_production_node_calendar_override(override_id):
 @check_auth
 @check_permission("production_nodes:view")
 def list_production_node_audit_events(node_id):
-    return jsonify(
+    return _production_node_json(
         ProductionNodeService.list_audit_events(
             node_id, limit=request.args.get("limit", 500)
         )

@@ -6,11 +6,12 @@ same immutable input always produces the same result.
 """
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import timezone
 import hashlib
 import json
 import math
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from modules.domain.production_time import parse_database_timestamp
 
 
 class NodeSchedulingError(ValueError):
@@ -186,26 +187,8 @@ class ProductionNodePolicy:
 
     @staticmethod
     def _parse_datetime(value):
-        if isinstance(value, datetime):
-            parsed = value
-        elif value in (None, ""):
-            return None
-        else:
-            try:
-                text = str(value).strip()
-                if not text:
-                    return None
-                if text.endswith(("Z", "z")):
-                    text = text[:-1] + "+00:00"
-                parsed = datetime.fromisoformat(text.replace("T", " "))
-            except (TypeError, ValueError):
-                return None
-        if parsed.tzinfo is None:
-            try:
-                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-            except (ZoneInfoNotFoundError, ValueError, OverflowError):
-                return None
-        return parsed.astimezone(timezone.utc)
+        parsed = parse_database_timestamp(value)
+        return parsed.astimezone(timezone.utc) if parsed is not None else None
 
     @classmethod
     def _interval(cls, item):

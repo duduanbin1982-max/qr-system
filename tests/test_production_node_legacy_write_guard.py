@@ -175,8 +175,8 @@ def test_node_native_write_keeps_optional_legacy_projection_when_available(
         headers=auth_headers,
         json={
             "production_node_id": node_id,
-            "start_at": "2026-09-20 08:00:00",
-            "end_at": "2026-09-20 09:00:00",
+            "start_at": "2026-09-20T08:00:00+08:00",
+            "end_at": "2026-09-20T09:00:00+08:00",
             "reason": "verify node-native compatibility projection",
         },
     )

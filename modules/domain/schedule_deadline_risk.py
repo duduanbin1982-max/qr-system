@@ -1,6 +1,13 @@
 """Pure deadline-risk policy for precision production schedules."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
+
+from modules.domain.production_time import (
+    format_database_timestamp,
+    parse_database_timestamp,
+    parse_production_date,
+    production_now,
+)
 
 
 def parse_schedule_datetime(value, *, end_of_day=False):
@@ -11,21 +18,17 @@ def parse_schedule_datetime(value, *, end_of_day=False):
         return None
     try:
         if len(text) == 10:
-            parsed = datetime.strptime(text, "%Y-%m-%d")
+            parsed = parse_production_date(text, "交期")
             if end_of_day:
                 return parsed + timedelta(days=1) - timedelta(seconds=1)
             return parsed
-        return datetime.fromisoformat(text.replace("T", " "))
+        return parse_database_timestamp(text)
     except (TypeError, ValueError):
         return None
 
 
 def format_schedule_datetime(value):
-    if value is None:
-        return ""
-    if value.second or value.microsecond:
-        return value.strftime("%Y-%m-%d %H:%M:%S")
-    return value.strftime("%Y-%m-%d %H:%M")
+    return format_database_timestamp(value)
 
 
 class ScheduleDeadlineRiskPolicy:
@@ -46,7 +49,7 @@ class ScheduleDeadlineRiskPolicy:
         bottleneck_process="",
         bottleneck_node="",
     ):
-        now = now or datetime.now()
+        now = parse_database_timestamp(now) if now else production_now()
         deadline_at = parse_schedule_datetime(deadline_text, end_of_day=True)
         projected_at = parse_schedule_datetime(projected_completion_at)
         if projected_at is None:

@@ -4,6 +4,14 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import ProductionNodeQueueBoard from '@/components/schedule/ProductionNodeQueueBoard.vue'
+import {
+  addProductionDays,
+  formatProductionDateTime,
+  parseProductionTimestamp,
+  productionCalendarParts,
+  productionDate,
+  productionStartOfDay,
+} from '@/lib/productionTime.js'
 
 const props = defineProps({
   operations: { type: Array, default: () => [] },
@@ -18,7 +26,7 @@ const emit = defineEmits(['filterNode', 'filterOrder', 'openOrder', 'refresh'])
 const groupMode = ref('node')
 const capacityPeriod = ref('day')
 const horizonDays = ref(7)
-const anchorDate = ref(new Date().toISOString().slice(0, 10))
+const anchorDate = ref(productionDate())
 const activeWorkbench = ref('capacity')
 const revisionDialog = ref(false)
 const revisionLoading = ref(false)
@@ -27,42 +35,23 @@ const revisionDetail = ref(null)
 const previousRevisionDetail = ref(null)
 
 function parseDate(value) {
-  if (!value) return null
-  if (value instanceof Date) {
-    const cloned = new Date(value.getTime())
-    return Number.isNaN(cloned.getTime()) ? null : cloned
-  }
-  const text = String(value).trim()
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
-  const parsed = dateOnly
-    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-    : new Date(text.replace(' ', 'T'))
-  return Number.isNaN(parsed.getTime()) ? null : parsed
+  return parseProductionTimestamp(value)
 }
 
 function startOfDay(value) {
-  const parsed = parseDate(value) || new Date()
-  parsed.setHours(0, 0, 0, 0)
-  return parsed
+  return productionStartOfDay(value) || productionStartOfDay()
 }
 
 function addDays(value, days) {
-  const result = new Date(value)
-  result.setDate(result.getDate() + days)
-  return result
+  return addProductionDays(value, days)
 }
 
 function isoDate(value) {
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return productionDate(value)
 }
 
 function formatDateTime(value) {
-  const parsed = parseDate(value)
-  if (!parsed) return '-'
-  return `${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')} ${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
+  return formatProductionDateTime(value)
 }
 
 function formatMinutes(value) {
@@ -165,10 +154,11 @@ const timelineWidth = computed(() => Math.max(Number(horizonDays.value || 7) * 1
 
 const dayTicks = computed(() => Array.from({ length: Number(horizonDays.value || 7) }, (_, index) => {
   const date = addDays(rangeStart.value, index)
+  const parts = productionCalendarParts(date)
   return {
     date: isoDate(date),
-    label: `${date.getMonth() + 1}/${date.getDate()}`,
-    weekend: [0, 6].includes(date.getDay()),
+    label: `${parts.month}/${parts.day}`,
+    weekend: [6, 7].includes(parts.weekday),
   }
 }))
 
@@ -223,7 +213,7 @@ function baseCapacity(node, bucketStart, bucketEnd) {
   let minutes = 0
   const workdays = calendarWorkdays(node)
   for (let cursor = startOfDay(bucketStart); cursor < bucketEnd; cursor = addDays(cursor, 1)) {
-    if (workdays.has(cursor.getDay() || 7)) minutes += Number(node.capacity_minutes || 0)
+    if (workdays.has(productionCalendarParts(cursor).weekday)) minutes += Number(node.capacity_minutes || 0)
   }
   return minutes
 }

@@ -6,7 +6,7 @@ import json
 import math
 from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from modules.services import BaseService
 from modules import config
@@ -16,6 +16,14 @@ from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
 from modules.domain.schedule_capacity_allocation import ScheduleCapacityAllocationPolicy
 from modules.domain.errors import NotFoundError, ProductionNodeWriteDisabledError
+from modules.domain.production_time import (
+    format_database_timestamp,
+    parse_api_timestamp,
+    parse_database_timestamp,
+    parse_production_date,
+    production_midnight,
+    production_now,
+)
 from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
@@ -77,14 +85,14 @@ class ScheduleCapacityService:
             raise ValueError("自动排程幂等键不能为空")
         bounded_limit = ScheduleCapacityService._limit(limit, default=100)
         if start_date in (None, ""):
-            effective_start = datetime.now().strftime("%Y-%m-%d")
+            effective_start = production_now().strftime("%Y-%m-%d")
         else:
             effective_start = ScheduleCapacityService._date(start_date, "计划开始日期").strftime("%Y-%m-%d")
 
         response = None
         failure = None
         with ScheduleCapacityService._transaction(db) as txn:
-            planning_now = datetime.now()
+            planning_now = production_now()
             queue = SchedulePlanningRepository.list_schedulable_orders(
                 bounded_limit, db=txn, now=planning_now,
             )
@@ -184,10 +192,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _date(value, label):
-        try:
-            return datetime.strptime((value or "").strip(), "%Y-%m-%d")
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{label}必须使用 YYYY-MM-DD 格式") from exc
+        return parse_production_date(value, label)
 
     @staticmethod
     def _duration_minutes(quantity, standard):
@@ -226,21 +231,12 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _parse_timestamp(value):
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(str(value).replace("T", " "))
-        except ValueError:
-            return None
+        return parse_database_timestamp(value)
 
     @staticmethod
     def _format_timestamp(value):
         """Serialize timestamps without losing fractional-minute precision."""
-        if value is None:
-            return ""
-        if getattr(value, "second", 0) or getattr(value, "microsecond", 0):
-            return value.strftime("%Y-%m-%d %H:%M:%S")
-        return value.strftime("%Y-%m-%d %H:%M")
+        return format_database_timestamp(value)
 
     @staticmethod
     def _revision_operations(revision_id, db):
@@ -402,7 +398,7 @@ class ScheduleCapacityService:
                 deadline_text=order.get("deadline") or "",
                 projected_completion_at=projected_completion,
                 plan_end=order.get("plan_end") or "",
-                now=datetime.now(),
+                now=production_now(),
                 completed=is_completed,
                 blocked_count=len(blocked),
                 blocked_reasons=blocked_reasons,
@@ -415,7 +411,7 @@ class ScheduleCapacityService:
                     or ""
                 ),
             )
-            assessed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            assessed_at = format_database_timestamp(production_now())
             ScheduleEvidenceRepository.set_revision_risk_snapshot(
                 revision_id, risk, assessed_at, db
             )
@@ -523,7 +519,7 @@ class ScheduleCapacityService:
             for shift in selected:
                 if daily_remaining is not None and daily_remaining <= 0:
                     break
-                midnight = datetime.combine(work_date, datetime.min.time())
+                midnight = production_midnight(work_date)
                 begin = midnight + timedelta(minutes=int(shift["start_minute"]))
                 end = midnight + timedelta(minutes=int(shift["end_minute"]))
                 if daily_remaining is not None:
@@ -801,10 +797,10 @@ class ScheduleCapacityService:
         )
         # Standards are effective for this planning run, not retroactively for
         # an old plan start retained by an in-progress order.
-        standard_as_of = max(cursor.date(), datetime.now().date()).strftime("%Y-%m-%d")
+        standard_as_of = max(cursor.date(), production_now().date()).strftime("%Y-%m-%d")
         run_key = (
             schedule_run_key
-            or datetime.now().strftime("schedule-%Y%m%d%H%M%S")
+            or production_now().strftime("schedule-%Y%m%d%H%M%S")
         ).strip()
         if not run_key:
             raise ValueError("排程幂等键不能为空")
@@ -1634,6 +1630,15 @@ class ScheduleCapacityService:
             if process_line_id <= 0:
                 raise ValueError("Legacy 产线参数不正确")
 
+        if start_at:
+            start_at = format_database_timestamp(
+                parse_api_timestamp(start_at, "停机查询开始时间")
+            )
+        if end_at:
+            end_at = format_database_timestamp(
+                parse_api_timestamp(end_at, "停机查询结束时间")
+            )
+
         with ScheduleCapacityService._transaction(db) as txn:
             rows = [dict(row) for row in SchedulePlanningRepository.list_downtime_events(
                 process_line_id=process_line_id,
@@ -1697,8 +1702,8 @@ class ScheduleCapacityService:
     def create_downtime_event(production_node_id, start_at, end_at, reason="", created_by=None,
                               db=None):
         ScheduleCapacityService._assert_node_write_enabled()
-        start = ScheduleCapacityService._parse_timestamp(start_at)
-        end = ScheduleCapacityService._parse_timestamp(end_at)
+        start = parse_database_timestamp(start_at)
+        end = parse_database_timestamp(end_at)
         if not start or not end or end <= start:
             raise ValueError("停机开始和结束时间必须有效且结束时间晚于开始时间")
         reason = str(reason or "").strip()

@@ -6,26 +6,21 @@ produce the same conflict evidence.
 """
 
 from collections import defaultdict
-from datetime import datetime
 import hashlib
 import json
 
+from modules.domain.production_time import (
+    format_database_timestamp,
+    parse_database_timestamp,
+)
+
 
 def _parse_datetime(value):
-    if isinstance(value, datetime):
-        return value
-    if value in (None, ""):
-        return None
-    try:
-        return datetime.fromisoformat(str(value).strip().replace("T", " "))
-    except (TypeError, ValueError):
-        return None
+    return parse_database_timestamp(value)
 
 
 def _format_datetime(value):
-    if value is None:
-        return ""
-    return value.strftime("%Y-%m-%d %H:%M:%S")
+    return format_database_timestamp(value)
 
 
 class ScheduleConflictPolicy:

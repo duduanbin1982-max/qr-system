@@ -7,10 +7,11 @@ primitives to ScheduleCapacityService.
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from modules import config
 from modules.domain.production_node_scheduling import NodeSchedulingError
+from modules.domain.production_time import parse_database_timestamp, production_now
 from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
@@ -22,18 +23,11 @@ class ScheduleReplanService:
     @staticmethod
     def _replan_start(value):
         if not value:
-            return datetime.now().replace(second=0, microsecond=0)
-        text = str(value).strip().replace("T", " ")
-        try:
-            if len(text) == 10:
-                return datetime.strptime(text, "%Y-%m-%d")
-            parsed = datetime.fromisoformat(text)
-            # SQLite stores local production timestamps without offsets.  Keep
-            # the supplied wall-clock value when a client sends an ISO offset
-            # so aware/naive datetime comparisons cannot mix silently.
-            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
-        except ValueError as exc:
-            raise ValueError("重排开始时间必须使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM 格式") from exc
+            return production_now().replace(second=0, microsecond=0)
+        parsed = parse_database_timestamp(value)
+        if parsed is None:
+            raise ValueError("重排开始时间必须使用有效的 ISO 8601 格式")
+        return parsed
 
     @staticmethod
     def _add_downtime_to_occupancy(occupancy, downtime, resource_key="process_line_id", capacity_service=None):

@@ -415,7 +415,7 @@ def test_schedule_gantt_exposes_priority_revision_lock_and_actual_fact_contract(
     assert "schedule_revision_id" in row
     assert row["locked_task_count"] == 0
     assert row["actual_completed_qty"] == 2
-    assert row["actual_start_at"] == "2026-09-22 08:30:00"
-    assert row["actual_last_report_at"] == "2026-09-22 08:30:00"
+    assert row["actual_start_at"] == "2026-09-22T08:30+08:00"
+    assert row["actual_last_report_at"] == "2026-09-22T08:30+08:00"
     assert row["actual_end_at"] == ""
     assert row["actual_status"] == "in_progress"

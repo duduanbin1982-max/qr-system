@@ -2,9 +2,12 @@
 
 _KEY = {"type": "string", "minLength": 8, "maxLength": 128}
 _REASON = {"type": "string", "minLength": 1, "maxLength": 1024}
-_DATETIME = {
+_OFFSET_DATETIME = {
     "type": "string",
-    "pattern": r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$",
+    "pattern": (
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?"
+        r"(Z|[+-]\d{2}:\d{2})$"
+    ),
 }
 
 production_node_write = {
@@ -82,8 +85,8 @@ production_node_calendar_override_create = {
         "idempotency_key",
     ],
     "properties": {
-        "start_at": _DATETIME,
-        "end_at": _DATETIME,
+        "start_at": _OFFSET_DATETIME,
+        "end_at": _OFFSET_DATETIME,
         "override_type": {
             "enum": ["unavailable", "maintenance", "overtime", "holiday"]
         },
@@ -118,7 +121,7 @@ schedule_revision_item_adjust = {
     ],
     "properties": {
         "production_node_id": {"type": "integer", "minimum": 1},
-        "planned_start_at": _DATETIME,
+        "planned_start_at": _OFFSET_DATETIME,
         "row_version": {"type": "integer", "minimum": 1},
         "reason": _REASON,
         "idempotency_key": _KEY,

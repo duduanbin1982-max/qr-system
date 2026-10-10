@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from modules.domain.schedule_deadline_risk import parse_schedule_datetime
+from modules.domain.production_time import PRODUCTION_TIMEZONE, parse_database_timestamp, production_now
 
 
 class ScheduleOrderPriorityPolicy:
@@ -24,7 +25,7 @@ class ScheduleOrderPriorityPolicy:
 
     @classmethod
     def effective_intent(cls, order, now=None):
-        now = now or datetime.now()
+        now = parse_database_timestamp(now) if now else production_now()
         effective_at = parse_schedule_datetime(order.get("priority_effective_at") or "")
         use_previous = effective_at is not None and effective_at > now
         current_level = cls._int(order.get("priority_level"), 3)
@@ -56,12 +57,13 @@ class ScheduleOrderPriorityPolicy:
         intent = cls.effective_intent(order, now=now)
         deadline = parse_schedule_datetime(order.get("deadline") or "", end_of_day=True)
         plan_start = parse_schedule_datetime(order.get("plan_start") or "")
+        latest = datetime.max.replace(tzinfo=PRODUCTION_TIMEZONE)
         return (
             intent["priority_level"],
             0 if intent["is_expedited"] else 1,
             1 if deadline is None else 0,
-            deadline or datetime.max,
-            plan_start or datetime.max,
+            deadline or latest,
+            plan_start or latest,
             cls._int(order.get("id"), 0),
         )
 
