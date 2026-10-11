@@ -55,6 +55,57 @@ bash /home/dubin/qr-system/deploy.sh
 - **Backups**: /home/dubin/qr-system/data/backups/
 - **Schema**: Auto-managed by modules/migrations.py
 
+## Controlled code-only production release
+
+Use this path only when the approved change is backend/application code and the
+database schema, attachments, frontend assets, service unit, and runtime write
+fence implementation are all unchanged. The release tool must be a clean
+worktree at the exact target commit, and that commit must already exist in the
+production checkout's Git object database. `data/` may remain untracked in the
+production checkout; every other tracked or untracked local change is rejected.
+
+Run the read-only preflight first, using the production checkout's actual
+`.deployed_commit` as `EXPECTED_BEFORE` and the full merge SHA as `TARGET_COMMIT`:
+
+```bash
+SYSTEM_ROOT=/home/dubin/qr-system
+EXPECTED_BEFORE=<verified-current-production-sha>
+TARGET_COMMIT=<approved-target-sha>
+DEPLOYMENT_KEY=<unique-idempotency-key>
+
+bash scripts/deploy-code-only.sh \
+  --project-root "$SYSTEM_ROOT" \
+  --expected-before "$EXPECTED_BEFORE" \
+  --target-commit "$TARGET_COMMIT" \
+  --deployment-key "$DEPLOYMENT_KEY" \
+  --check-only
+```
+
+Only after review of that output and separate production authorization, run the
+same command with `--execute`. The execute path:
+
+1. Revalidates both worktrees, the exact SHAs, allowed changed paths, schema
+   version, current health, and idempotency-key evidence paths.
+2. Creates an atomic write fence and requires the current service to report the
+   expected commit, fence state, and deployment key before stopping it.
+3. Stops the user-level `qr-system.service`, creates integrity-checked database
+   and attachment backups without retention cleanup, and snapshots frontend
+   fingerprints. All evidence is unique per idempotency key and is never
+   overwritten by this path.
+4. Switches only the code checkout and `.deployed_commit`, then starts the
+   service while writes remain fenced. It verifies health, commit, schema, and
+   unchanged database/attachment/frontend fingerprints before durably
+   authorizing fence release.
+5. On failure, it attempts a code-only rollback and never restores or overwrites
+   the database, attachments, or frontend. If any protected-state fingerprint
+   changed or health cannot be verified, automatic rollback/release stops; the
+   service stays stopped and the write fence stays active for manual recovery.
+
+This path does not run database migrations, attachment migrations, frontend
+builds/publication, dependency installation, or service-unit installation.
+The existing `deploy.sh` remains the separate full-release path and must be
+used when any of those areas need to change.
+
 ## Process V2 controlled cutover
 
 Process and route versioning uses a five-stage release. Keep all evidence outside

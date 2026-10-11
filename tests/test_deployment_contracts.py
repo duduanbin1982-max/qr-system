@@ -129,7 +129,7 @@ def test_employee_documents_share_verified_attachment_backup_boundary():
     assert 'LEGACY_ATTACH_DIR="$QR_PROJECT_ROOT/uploads/employee_docs"' in backup
     assert 'attachment_paths+=("data/attachments")' in backup
     assert 'attachment_paths+=("uploads/employee_docs")' in backup
-    assert 'tar -tzf "$ATTACH_BACKUP"' in backup
+    assert 'tar -tzf "$ATTACH_TEMP"' in backup
     assert 'sha256sum "$ATTACH_BACKUP"' in backup
     assert 'secure_chmod 0600 "$partial_file"' in migration
     assert 'mv "$partial_file" "$target_file"' in migration
@@ -478,28 +478,28 @@ def test_rollback_release_disables_restore_before_removing_fence(
         )
     )
     original_atomic_write = deployment_manifest.atomic_write_json
-    write_count = 0
+    release_writes = []
 
-    def fail_final_manifest_write(path, payload):
-        nonlocal write_count
-        write_count += 1
-        if write_count == 2:
-            raise OSError("simulated final manifest write failure")
+    def observe_release_intent(path, payload):
+        if payload.get("status") == "rollback_data_restored":
+            assert fence_path.exists()
+            assert payload["rollback"]["automatic_restore_allowed"] is False
+            release_writes.append(payload["status"])
         original_atomic_write(path, payload)
 
     monkeypatch.setattr(
-        deployment_manifest, "atomic_write_json", fail_final_manifest_write
+        deployment_manifest, "atomic_write_json", observe_release_intent
     )
 
-    with pytest.raises(OSError, match="simulated final manifest write failure"):
-        deployment_manifest.release_write_fence(
-            SimpleNamespace(manifest=str(manifest_path), mode="rollback")
-        )
+    deployment_manifest.release_write_fence(
+        SimpleNamespace(manifest=str(manifest_path), mode="rollback")
+    )
 
     persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert persisted["status"] == "rollback_release_authorized"
+    assert persisted["status"] == "rollback_data_restored"
     assert persisted["rollback"]["automatic_restore_allowed"] is False
     assert persisted["write_fence"]["rollback_release_authorized_at"]
+    assert release_writes == ["rollback_data_restored"]
     assert not fence_path.exists()
 
 
@@ -602,7 +602,7 @@ def test_rollback_script_records_failures_and_restores_all_release_state():
     assert "rollback_accepted_fenced" in content
     assert 'release-fence' in content
     assert 'git -C "$PROJECT_ROOT" switch --detach "$before_commit"' in content
-    assert '.deployed_commit.tmp.$$' in content
+    assert 'write-commit-marker' in content
     assert "systemctl --user start qr-system.service" in content
     assert "--status rolled_back" in content
     assert "--status rollback_failed" in content
