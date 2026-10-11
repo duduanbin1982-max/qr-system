@@ -495,6 +495,7 @@ def test_code_only_shell_path_has_no_migration_or_frontend_steps_and_keeps_evide
     assert "acquire-fence" in script
     assert "record-code-only-fence" in script
     assert "PRESERVE_EXISTING_BACKUPS=1" in script
+    assert 'DEPLOYMENT_MANIFEST_TOOL_SOURCE="$deployment_manifest"' in script
     assert "capture-code-only-state" in script
     assert "verify-code-only-state" in script
     assert "authorize-release" in script
@@ -505,4 +506,6 @@ def test_code_only_shell_path_has_no_migration_or_frontend_steps_and_keeps_evide
     assert "npm " not in script
     assert "cleanup skipped" in backup
     assert "if [[ \"$PRESERVE_EXISTING_BACKUPS\" == \"0\" ]]" in backup
+    assert 'DEPLOYMENT_MANIFEST_TOOL_SOURCE="${DEPLOYMENT_MANIFEST_TOOL_SOURCE:-$QR_PROJECT_ROOT/scripts/deployment_manifest.py}"' in backup
+    assert 'python3 "$DEPLOYMENT_MANIFEST_TOOL_SOURCE"' in backup
 
