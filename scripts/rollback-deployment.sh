@@ -7,7 +7,7 @@ DB_PATH="${DB_PATH:-$PROJECT_ROOT/data/production.db}"
 HEALTH_URL="${HEALTH_URL:-https://127.0.0.1/api/health}"
 UNIT_SOURCE="$PROJECT_ROOT/deploy/qr-system.service"
 UNIT_TARGET="$HOME/.config/systemd/user/qr-system.service"
-MANIFEST_TOOL="$PROJECT_ROOT/scripts/deployment_manifest.py"
+MANIFEST_TOOL="${DEPLOYMENT_MANIFEST_TOOL_SOURCE:-$PROJECT_ROOT/scripts/deployment_manifest.py}"
 MANIFEST_TOOL_SNAPSHOT="$(mktemp "$PROJECT_ROOT/data/deployments/.deployment-manifest.XXXXXX.py")"
 install -m 0600 "$MANIFEST_TOOL" "$MANIFEST_TOOL_SNAPSHOT"
 cleanup_manifest_tool() {
@@ -40,10 +40,19 @@ if [[ ! "$before_commit" =~ ^[0-9a-f]{40}$ ]]; then
     echo "Invalid rollback commit in deployment manifest" >&2
     exit 1
 fi
+deployment_scope="$(field scope)"
 
 rollback_supports_runtime_fence=false
 if git -C "$PROJECT_ROOT" cat-file -e "$before_commit:modules/deployment_write_fence.py" 2>/dev/null; then
     rollback_supports_runtime_fence=true
+fi
+if [[ "$deployment_scope" == "code_only" && "$rollback_supports_runtime_fence" != true ]]; then
+    python3 "$MANIFEST_TOOL_SNAPSHOT" update \
+        --manifest "$MANIFEST_PATH" \
+        --status rollback_failed \
+        --detail "code-only rollback refused because the original commit cannot enforce the active write fence"
+    echo "Code-only rollback refused: original commit lacks write-fence support" >&2
+    exit 1
 fi
 
 systemctl --user stop qr-system.service || true
@@ -62,11 +71,15 @@ fi
 
 git -C "$PROJECT_ROOT" cat-file -e "$before_commit^{commit}"
 git -C "$PROJECT_ROOT" switch --detach "$before_commit"
-printf '%s\n' "$before_commit" > "$PROJECT_ROOT/.deployed_commit.tmp.$$"
-mv -f "$PROJECT_ROOT/.deployed_commit.tmp.$$" "$PROJECT_ROOT/.deployed_commit"
+python3 "$MANIFEST_TOOL_SNAPSHOT" write-commit-marker \
+    --project-root "$PROJECT_ROOT" \
+    --expected-current "$(field target_commit)" \
+    --commit "$before_commit"
 
-install -D -m 0644 "$UNIT_SOURCE" "$UNIT_TARGET"
-systemctl --user daemon-reload
+if [[ "$deployment_scope" != "code_only" ]]; then
+    install -D -m 0644 "$UNIT_SOURCE" "$UNIT_TARGET"
+    systemctl --user daemon-reload
+fi
 systemctl --user start qr-system.service
 
 for _ in {1..20}; do
@@ -83,6 +96,13 @@ for _ in {1..20}; do
                 --manifest "$MANIFEST_PATH" \
                 --status rollback_accepted_fenced \
                 --detail "rollback health passed while writes remained fenced"
+            if [[ "$deployment_scope" == "code_only" ]]; then
+                python3 "$MANIFEST_TOOL_SNAPSHOT" authorize-code-only-rollback-release \
+                    --manifest "$MANIFEST_PATH" \
+                    --database "$DB_PATH" \
+                    --project-root "$PROJECT_ROOT" \
+                    --current-commit "$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+            fi
             if ! python3 "$MANIFEST_TOOL_SNAPSHOT" release-fence \
                 --manifest "$MANIFEST_PATH" --mode rollback; then
                 python3 "$MANIFEST_TOOL_SNAPSHOT" update \
@@ -92,6 +112,10 @@ for _ in {1..20}; do
                 echo "Rollback data restored, but write release did not complete" >&2
                 exit 1
             fi
+        fi
+        if [[ "$deployment_scope" == "code_only" ]]; then
+            # release-fence already wrote the terminal rollback_code_only state.
+            exit 0
         fi
         python3 "$MANIFEST_TOOL_SNAPSHOT" update \
             --manifest "$MANIFEST_PATH" \

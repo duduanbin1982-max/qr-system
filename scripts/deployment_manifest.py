@@ -24,6 +24,8 @@ BACKUP_SCHEMA_V1 = "qr-system-backup-evidence/v1"
 BACKUP_SCHEMA = "qr-system-backup-evidence/v2"
 DEPLOYMENT_SCHEMA = "qr-system-deployment/v2"
 WRITE_FENCE_SCHEMA = "qr-system-write-fence/v1"
+DEPLOYMENT_SCOPE_FULL = "full"
+DEPLOYMENT_SCOPE_CODE_ONLY = "code_only"
 
 
 def utc_now():
@@ -43,6 +45,29 @@ def sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _resolve_without_symlinks(path):
+    raw = Path(path).expanduser()
+    if ".." in raw.parts:
+        raise RuntimeError("evidence path cannot contain parent-directory traversal")
+    candidate = Path(os.path.abspath(raw))
+    cursor = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise RuntimeError(f"evidence path cannot traverse symlinks: {cursor}")
+    return candidate
+
+
+def _fsync_directory(path):
+    if os.name != "posix":
+        return
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def sqlite_evidence(path):
@@ -71,27 +96,49 @@ def sqlite_evidence(path):
         connection.close()
 
 
-def atomic_write_json(path, payload):
-    target = Path(path).resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
+def sqlite_logical_digest(path):
+    """Hash a consistent SQLite SQL dump, including committed WAL contents."""
+    database = Path(path).resolve()
+    if not database.is_file():
+        raise RuntimeError(f"database does not exist: {database}")
+    connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
+    digest = hashlib.sha256()
     try:
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        try:
-            temporary.chmod(0o600)
-        except OSError:
-            pass
+        for statement in connection.iterdump():
+            digest.update(statement.encode("utf-8"))
+            digest.update(b"\n")
+        schema_identity = {
+            "user_version": int(connection.execute("PRAGMA user_version").fetchone()[0]),
+            "schema_version": int(connection.execute("PRAGMA schema_version").fetchone()[0]),
+        }
+        digest.update(canonical_digest(schema_identity).encode("ascii"))
+        return digest.hexdigest()
+    finally:
+        connection.close()
+
+
+def atomic_write_json(path, payload):
+    target = _resolve_without_symlinks(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.tmp.", dir=target.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
         os.replace(temporary, target)
+        _fsync_directory(target.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def atomic_create_json(path, payload):
     """Create JSON evidence exactly once without a check-then-write race."""
-    target = Path(path).resolve()
+    target = _resolve_without_symlinks(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     encoded = (
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
@@ -108,6 +155,7 @@ def atomic_create_json(path, payload):
             os.close(descriptor)
         target.unlink(missing_ok=True)
         raise
+    _fsync_directory(target.parent)
 
 
 def read_json(path):
@@ -183,6 +231,7 @@ def create_backup_metadata(args):
         "database": {
             "path": str(database),
             "sha256": sha256_file(database),
+            "logical_sha256": sqlite_logical_digest(database),
             "size_bytes": database.stat().st_size,
             **evidence,
         },
@@ -194,7 +243,7 @@ def create_backup_metadata(args):
             "inventory": attachment_inventory,
         },
     }
-    atomic_write_json(args.output, payload)
+    atomic_create_json(args.output, payload)
     return payload
 
 
@@ -227,15 +276,49 @@ def verify_backup_metadata(path):
 
 def prepare_deployment_manifest(args):
     output = Path(args.output).resolve()
+    scope = getattr(args, "scope", DEPLOYMENT_SCOPE_FULL)
+    if scope not in {DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_CODE_ONLY}:
+        raise RuntimeError(f"unsupported deployment scope: {scope!r}")
+    existing = None
     if output.exists():
-        raise RuntimeError(f"deployment manifest already exists: {output}")
+        if scope != DEPLOYMENT_SCOPE_CODE_ONLY:
+            raise RuntimeError(f"deployment manifest already exists: {output}")
+        existing = require_schema(
+            read_json(output), DEPLOYMENT_SCHEMA, "deployment manifest"
+        )
+        if (
+            existing.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY
+            or existing.get("deployment_key") != args.deployment_key
+            or existing.get("before_commit") != args.before_commit
+            or existing.get("target_commit") != args.target_commit
+            or existing.get("status") != "fenced"
+        ):
+            raise RuntimeError("code-only preparation manifest does not match request")
+        if existing.get("backup") is not None:
+            raise RuntimeError("code-only backup evidence is already attached")
+    elif scope == DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("code-only deployment requires a started audit manifest")
+
     backup = verify_backup_metadata(args.backup_metadata)
+    source_database_version = int(backup["database"]["user_version"])
+    target_database_version = args.target_database_version
+    if scope == DEPLOYMENT_SCOPE_CODE_ONLY:
+        if target_database_version is None:
+            raise RuntimeError(
+                "code-only deployment requires an explicit target database version"
+            )
+        if int(target_database_version) != source_database_version:
+            raise RuntimeError(
+                "code-only deployment cannot change the database schema version"
+            )
+    elif target_database_version is None:
+        raise RuntimeError("full deployment requires a target database version")
     release_backup = Path(args.release_backup).resolve()
     if not release_backup.is_file():
         raise RuntimeError(f"release backup does not exist: {release_backup}")
     with tarfile.open(release_backup, "r:gz") as archive:
         safe_tar_members(archive, MANAGED_RELEASE_ROOTS)
-    write_fence_path = Path(args.write_fence).resolve()
+    write_fence_path = _resolve_without_symlinks(args.write_fence)
     write_fence = require_schema(
         read_json(write_fence_path), WRITE_FENCE_SCHEMA, "deployment write fence"
     )
@@ -243,15 +326,27 @@ def prepare_deployment_manifest(args):
         raise RuntimeError("deployment write fence key does not match deployment manifest")
     if write_fence.get("target_commit") != args.target_commit:
         raise RuntimeError("deployment write fence target does not match deployment manifest")
+    if existing is not None and existing.get("write_fence", {}).get("path") != str(
+        write_fence_path
+    ):
+        raise RuntimeError("code-only write fence path does not match started manifest")
     payload = {
         "schema": DEPLOYMENT_SCHEMA,
         "deployment_key": args.deployment_key,
-        "created_at": utc_now(),
+        "scope": scope,
+        "operations": {
+            "database_migration": scope == DEPLOYMENT_SCOPE_FULL,
+            "attachment_migration": scope == DEPLOYMENT_SCOPE_FULL,
+            "frontend_publish": scope == DEPLOYMENT_SCOPE_FULL,
+            "code_switch": True,
+            "service_restart": True,
+        },
+        "created_at": (existing or {}).get("created_at", utc_now()),
         "status": "prepared",
         "before_commit": args.before_commit,
         "target_commit": args.target_commit,
-        "source_database_version": backup["database"]["user_version"],
-        "target_database_version": args.target_database_version,
+        "source_database_version": source_database_version,
+        "target_database_version": int(target_database_version),
         "backup": backup,
         "release": {
             "path": str(release_backup),
@@ -268,6 +363,7 @@ def prepare_deployment_manifest(args):
             "attachment_file_count": backup["attachments"]["inventory"]["file_count"],
         },
         "write_fence": {
+            **(existing or {}).get("write_fence", {}),
             "path": str(write_fence_path),
             "acquired_at": write_fence["acquired_at"],
             "release_authorized_at": None,
@@ -275,12 +371,344 @@ def prepare_deployment_manifest(args):
         },
         "rollback": {
             "automatic_restore_allowed": True,
+            "restore_scope_verified": False,
             "failure_snapshot": None,
         },
-        "events": [],
+        "code_only_state": (existing or {}).get("code_only_state"),
+        "events": list((existing or {}).get("events", [])),
     }
-    atomic_write_json(args.output, payload)
+    if existing is None:
+        atomic_create_json(args.output, payload)
+    else:
+        payload["events"].append(
+            {
+                "status": "backup_verified",
+                "at": payload["created_at"],
+                "detail": "database and attachment backups verified without retention cleanup",
+            }
+        )
+        atomic_write_json(args.output, payload)
     return payload
+
+
+def begin_code_only_deployment(args):
+    output = Path(args.output).resolve()
+    if output.exists():
+        raise RuntimeError(f"deployment manifest already exists: {output}")
+    for label, value in (
+        ("before commit", args.before_commit),
+        ("target commit", args.target_commit),
+    ):
+        if len(value) != 40 or any(char not in "0123456789abcdef" for char in value):
+            raise RuntimeError(f"invalid code-only {label}")
+    if not args.deployment_key or len(args.deployment_key) > 128 or any(
+        char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+        for char in args.deployment_key
+    ):
+        raise RuntimeError("invalid code-only deployment key")
+    if args.source_database_version != args.target_database_version:
+        raise RuntimeError("code-only deployment requires an unchanged database version")
+    fence_path = str(Path(args.write_fence).resolve())
+    now = utc_now()
+    payload = {
+        "schema": DEPLOYMENT_SCHEMA,
+        "deployment_key": args.deployment_key,
+        "scope": DEPLOYMENT_SCOPE_CODE_ONLY,
+        "operations": {
+            "database_migration": False,
+            "attachment_migration": False,
+            "frontend_publish": False,
+            "code_switch": True,
+            "service_restart": True,
+        },
+        "created_at": now,
+        "updated_at": now,
+        "status": "preparing",
+        "before_commit": args.before_commit,
+        "target_commit": args.target_commit,
+        "source_database_version": args.source_database_version,
+        "target_database_version": args.target_database_version,
+        "backup": None,
+        "release": None,
+        "fact_watermark": None,
+        "write_fence": {
+            "path": fence_path,
+            "acquired_at": None,
+            "release_authorized_at": None,
+            "released_at": None,
+        },
+        "rollback": {
+            "automatic_restore_allowed": True,
+            "restore_scope_verified": False,
+            "failure_snapshot": None,
+        },
+        "code_only_state": None,
+        "events": [
+            {
+                "status": "preparing",
+                "at": now,
+                "detail": "code-only deployment requested; database, attachments, and frontend are excluded",
+            }
+        ],
+    }
+    atomic_create_json(output, payload)
+    return payload
+
+
+def record_code_only_fence(args):
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    fence_path, fence = _active_fence_for_manifest(manifest)
+    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("fence recording requires code_only scope")
+    if fence.get("deployment_key") != manifest.get("deployment_key"):
+        raise RuntimeError("write fence does not match deployment key")
+    if manifest.get("status") != "preparing":
+        raise RuntimeError("code-only deployment is not in preparing state")
+    now = utc_now()
+    manifest["status"] = "fenced"
+    manifest["updated_at"] = now
+    manifest["write_fence"]["path"] = str(fence_path)
+    manifest["write_fence"]["acquired_at"] = fence["acquired_at"]
+    manifest.setdefault("events", []).append(
+        {
+            "status": "fenced",
+            "at": now,
+            "detail": "atomic application write fence acquired",
+        }
+    )
+    atomic_write_json(args.manifest, manifest)
+    return manifest
+
+
+def managed_path_inventory(project_root, roots):
+    """Hash managed files without copying or changing them."""
+    root = Path(project_root).resolve()
+    files = []
+    total_bytes = 0
+    for managed_root in roots:
+        source = root
+        for part in managed_root.parts:
+            source = source / part
+            if source.is_symlink():
+                raise RuntimeError(f"managed state cannot traverse symlinks: {source}")
+        if not source.exists():
+            continue
+        candidates = [source] if source.is_file() else sorted(source.rglob("*"))
+        for candidate in candidates:
+            if candidate.is_symlink():
+                raise RuntimeError(f"managed state cannot contain symlinks: {candidate}")
+            if candidate.is_dir():
+                continue
+            if not candidate.is_file():
+                raise RuntimeError(f"managed state contains a non-file entry: {candidate}")
+            relative = candidate.relative_to(root).as_posix()
+            size = candidate.stat().st_size
+            files.append(
+                {"path": relative, "size_bytes": size, "sha256": sha256_file(candidate)}
+            )
+            total_bytes += size
+    files.sort(key=lambda item: item["path"])
+    return {
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "manifest_sha256": canonical_digest(files),
+        "files": files,
+    }
+
+
+def code_only_state(database, project_root):
+    database = Path(database)
+    if database.is_symlink():
+        raise RuntimeError(f"production database cannot be a symlink: {database}")
+    database = database.resolve()
+    evidence = sqlite_evidence(database)
+    sidecars = {}
+    for suffix in ("-wal", "-journal"):
+        path = Path(str(database) + suffix)
+        if path.is_file():
+            sidecars[suffix] = {
+                "size_bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        else:
+            sidecars[suffix] = None
+    return {
+        "database": {
+            "sha256": sha256_file(database),
+            "logical_sha256": sqlite_logical_digest(database),
+            "size_bytes": database.stat().st_size,
+            **evidence,
+            "sidecars": sidecars,
+        },
+        "attachments": managed_path_inventory(
+            project_root, MANAGED_ATTACHMENT_ROOTS
+        ),
+        "release": managed_path_inventory(project_root, MANAGED_RELEASE_ROOTS),
+    }
+
+
+def capture_code_only_state(args):
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    if manifest.get("scope", DEPLOYMENT_SCOPE_FULL) != DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("code-only state capture requires code_only scope")
+    _active_fence_for_manifest(manifest)
+    if manifest.get("code_only_state"):
+        raise RuntimeError("code-only baseline already exists")
+    state = code_only_state(args.database, args.project_root)
+    if state["database"]["user_version"] != manifest["source_database_version"]:
+        raise RuntimeError("production database version changed after backup")
+    backup = manifest.get("backup")
+    if not isinstance(backup, dict):
+        raise RuntimeError("code-only deployment backup evidence is missing")
+    if (
+        state["database"]["logical_sha256"]
+        != backup["database"].get("logical_sha256")
+    ):
+        raise RuntimeError("production database differs from its final backup")
+    if (
+        state["attachments"]["manifest_sha256"]
+        != backup["attachments"]["inventory"]["manifest_sha256"]
+    ):
+        raise RuntimeError("managed attachments differ from their final backup")
+    release = manifest.get("release")
+    if not isinstance(release, dict):
+        raise RuntimeError("frontend preservation evidence is missing")
+    release_inventory = archive_inventory(
+        verify_file_evidence(release, "frontend preservation backup"),
+        MANAGED_RELEASE_ROOTS,
+    )
+    if state["release"] != release_inventory:
+        raise RuntimeError("frontend files differ from their preservation backup")
+    manifest["code_only_state"] = state
+    manifest["updated_at"] = utc_now()
+    manifest.setdefault("events", []).append(
+        {
+            "status": "code_only_baseline_captured",
+            "at": manifest["updated_at"],
+            "detail": "database, managed attachments, and frontend fingerprints captured",
+            "database_sha256": state["database"]["sha256"],
+            "attachment_manifest_sha256": state["attachments"]["manifest_sha256"],
+            "release_manifest_sha256": state["release"]["manifest_sha256"],
+        }
+    )
+    atomic_write_json(args.manifest, manifest)
+    return state
+
+
+def verify_code_only_state(args):
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    if manifest.get("scope", DEPLOYMENT_SCOPE_FULL) != DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("code-only state verification requires code_only scope")
+    expected = manifest.get("code_only_state")
+    if not isinstance(expected, dict):
+        raise RuntimeError("code-only immutable baseline is missing")
+    observed = code_only_state(args.database, args.project_root)
+    if observed != expected:
+        raise RuntimeError(
+            "code-only invariant drift detected; keep service fenced for review"
+        )
+    manifest["updated_at"] = utc_now()
+    manifest.setdefault("events", []).append(
+        {
+            "status": "code_only_state_verified",
+            "at": manifest["updated_at"],
+            "detail": "database, managed attachments, and frontend match the fenced baseline",
+            "state_sha256": canonical_digest(observed),
+        }
+    )
+    atomic_write_json(args.manifest, manifest)
+    return observed
+
+
+def authorize_code_only_abort(args):
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("pre-switch abort requires code_only scope")
+    _active_fence_for_manifest(manifest)
+    if manifest.get("status") not in {"fenced", "prepared", "deployment_failed"}:
+        raise RuntimeError("pre-switch abort is not allowed after code switching began")
+    marker = Path(args.project_root).resolve() / ".deployed_commit"
+    if (
+        marker.is_symlink()
+        or not marker.is_file()
+        or marker.read_text(encoding="utf-8").strip() != manifest["before_commit"]
+    ):
+        raise RuntimeError("pre-switch abort refused: deployed commit marker changed")
+    if args.current_commit != manifest["before_commit"]:
+        raise RuntimeError("pre-switch abort refused: checkout is not the original commit")
+    verify_code_only_state(
+        argparse.Namespace(
+            manifest=args.manifest,
+            database=args.database,
+            project_root=args.project_root,
+        )
+    )
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    now = utc_now()
+    manifest["rollback"]["automatic_restore_allowed"] = False
+    manifest["rollback"]["restore_scope_verified"] = True
+    manifest["status"] = "abort_release_authorized"
+    manifest["updated_at"] = now
+    manifest.setdefault("events", []).append(
+        {
+            "status": "abort_release_authorized",
+            "at": now,
+            "detail": "original code and unchanged production data verified before releasing an aborted deployment fence",
+        }
+    )
+    atomic_write_json(args.manifest, manifest)
+    return manifest
+
+
+def authorize_code_only_rollback_release(args):
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
+        raise RuntimeError("code-only rollback authorization requires code_only scope")
+    _active_fence_for_manifest(manifest)
+    if manifest.get("status") != "rollback_accepted_fenced":
+        raise RuntimeError("code-only rollback release requires fenced health acceptance")
+    if args.current_commit != manifest["before_commit"]:
+        raise RuntimeError("code-only rollback refused: checkout is not the original commit")
+    marker = Path(args.project_root).resolve() / ".deployed_commit"
+    if (
+        marker.is_symlink()
+        or not marker.is_file()
+        or marker.read_text(encoding="utf-8").strip() != manifest["before_commit"]
+    ):
+        raise RuntimeError("code-only rollback refused: deployed commit marker is not restored")
+    verify_code_only_state(
+        argparse.Namespace(
+            manifest=args.manifest,
+            database=args.database,
+            project_root=args.project_root,
+        )
+    )
+    manifest = require_schema(
+        read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    manifest["rollback"]["restore_scope_verified"] = True
+    manifest["updated_at"] = utc_now()
+    manifest.setdefault("events", []).append(
+        {
+            "status": "code_only_rollback_verified",
+            "at": manifest["updated_at"],
+            "detail": "original code is running healthy behind the fence and business data fingerprints are unchanged",
+        }
+    )
+    atomic_write_json(args.manifest, manifest)
+    return manifest
 
 
 def update_manifest(args):
@@ -299,6 +727,26 @@ def update_manifest(args):
     return payload
 
 
+def record_verified_rollback_scope(manifest_path, status, detail, database_version):
+    manifest = require_schema(
+        read_json(manifest_path), DEPLOYMENT_SCHEMA, "deployment manifest"
+    )
+    now = utc_now()
+    manifest["rollback"]["restore_scope_verified"] = status != "code_only_data_preserved"
+    manifest["status"] = status
+    manifest["updated_at"] = now
+    manifest.setdefault("events", []).append(
+        {
+            "status": status,
+            "at": now,
+            "detail": detail,
+            "database_version": database_version,
+        }
+    )
+    atomic_write_json(manifest_path, manifest)
+    return manifest
+
+
 def manifest_field(args):
     value = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
@@ -309,6 +757,42 @@ def manifest_field(args):
         print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
     else:
         print(value)
+
+
+def print_database_evidence(args):
+    print(json.dumps(sqlite_evidence(args.database), separators=(",", ":")))
+
+
+def write_deployed_commit(args):
+    project_root = Path(args.project_root).resolve(strict=True)
+    if len(args.commit) != 40 or any(char not in "0123456789abcdef" for char in args.commit):
+        raise RuntimeError("deployed commit must be a full lowercase SHA")
+    if len(args.expected_current) != 40 or any(
+        char not in "0123456789abcdef" for char in args.expected_current
+    ):
+        raise RuntimeError("expected current commit must be a full lowercase SHA")
+    marker = _resolve_without_symlinks(project_root / ".deployed_commit")
+    if not marker.is_file():
+        raise RuntimeError("deployed commit marker is missing")
+    current = marker.read_text(encoding="ascii").strip().lower()
+    if current == args.commit:
+        return
+    if current != args.expected_current:
+        raise RuntimeError("deployed commit marker changed unexpectedly")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".deployed_commit.tmp.", dir=project_root
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+            handle.write(args.commit + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, marker)
+        _fsync_directory(project_root)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def safe_tar_members(archive, allowed_roots):
@@ -331,7 +815,7 @@ def safe_tar_members(archive, allowed_roots):
 
 
 def acquire_write_fence(args):
-    path = Path(args.path).resolve()
+    path = _resolve_without_symlinks(args.path)
     payload = {
         "schema": WRITE_FENCE_SCHEMA,
         "deployment_key": args.deployment_key,
@@ -362,7 +846,7 @@ def abandon_write_fence(args):
 
 
 def _active_fence_for_manifest(manifest):
-    fence_path = Path(manifest["write_fence"]["path"]).resolve()
+    fence_path = _resolve_without_symlinks(manifest["write_fence"]["path"])
     if not fence_path.is_file():
         raise RuntimeError("automatic restore refused: deployment write fence is not active")
     fence = require_schema(
@@ -413,8 +897,19 @@ def release_write_fence(args):
             raise RuntimeError("write fence release has not been authorized")
         status = "succeeded"
         detail = "write fence released after fenced health acceptance"
-    else:
-        if manifest.get("status") == "data_restored":
+    elif mode == "rollback":
+        code_only = manifest.get("scope", DEPLOYMENT_SCOPE_FULL) == DEPLOYMENT_SCOPE_CODE_ONLY
+        rollback_ready_status = "rollback_accepted_fenced" if code_only else "data_restored"
+        if not manifest["rollback"].get("restore_scope_verified"):
+            raise RuntimeError("rollback fence release requires durable scope verification")
+        accepted_statuses = {
+            rollback_ready_status,
+            "rollback_accepted_fenced",
+            "rollback_release_failed",
+        }
+        if code_only:
+            accepted_statuses.add("rollback_code_only")
+        if manifest.get("status") in accepted_statuses:
             now = utc_now()
             manifest["rollback"]["automatic_restore_allowed"] = False
             manifest["write_fence"]["rollback_release_authorized_at"] = now
@@ -425,8 +920,8 @@ def release_write_fence(args):
                     "status": "rollback_release_authorized",
                     "at": now,
                     "detail": (
-                        "rollback data restoration verified; destructive automatic "
-                        "restore disabled before releasing writes"
+                        "rollback scope verified; destructive automatic restore "
+                        "disabled before releasing writes"
                     ),
                 }
             )
@@ -437,17 +932,34 @@ def release_write_fence(args):
             raise RuntimeError(
                 "rollback fence release requires durable automatic-restore disablement"
             )
-        status = "rollback_data_restored"
-        detail = "write fence released after verified rollback data restoration"
-    fence_path.unlink()
+        if code_only:
+            status = "rollback_code_only"
+            detail = "write fence released after verified code-only rollback"
+        else:
+            status = "rollback_data_restored"
+            detail = "write fence released after verified rollback data restoration"
+    else:
+        if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
+            raise RuntimeError("pre-switch abort is only supported for code-only deployment")
+        if manifest.get("status") != "abort_release_authorized":
+            raise RuntimeError("code-only abort fence release has not been authorized")
+        if manifest["rollback"].get("automatic_restore_allowed"):
+            raise RuntimeError("code-only abort was not durably authorized")
+        status = "aborted_before_switch"
+        detail = "fence released after old-code health acceptance and invariant verification"
     now = utc_now()
     manifest["write_fence"]["released_at"] = now
     manifest["status"] = status
     manifest["updated_at"] = now
     manifest.setdefault("events", []).append(
-        {"status": status, "at": now, "detail": detail}
+        {
+            "status": status,
+            "at": now,
+            "detail": detail + "; release authorization durably recorded before removing the write fence",
+        }
     )
     atomic_write_json(args.manifest, manifest)
+    fence_path.unlink()
     return manifest
 
 
@@ -628,7 +1140,11 @@ def restore_deployment(args):
     manifest = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
-    if not manifest["rollback"].get("automatic_restore_allowed"):
+    scope = manifest.get("scope", DEPLOYMENT_SCOPE_FULL)
+    if (
+        not manifest["rollback"].get("automatic_restore_allowed")
+        and scope != DEPLOYMENT_SCOPE_CODE_ONLY
+    ):
         raise RuntimeError(
             "automatic restore refused: production writes may have been released"
         )
@@ -647,6 +1163,26 @@ def restore_deployment(args):
     if observed["user_version"] != manifest["source_database_version"]:
         raise RuntimeError("database backup version no longer matches deployment manifest")
 
+    if scope == DEPLOYMENT_SCOPE_CODE_ONLY:
+        if manifest["target_database_version"] != manifest["source_database_version"]:
+            raise RuntimeError("code-only rollback cannot restore a changed schema version")
+        verify_code_only_state(
+            argparse.Namespace(
+                manifest=args.manifest,
+                database=args.database,
+                project_root=args.project_root,
+            )
+        )
+        record_verified_rollback_scope(
+            args.manifest,
+            "code_only_data_preserved",
+            "code-only rollback data fingerprints are unchanged; no database, attachment, or frontend restore was performed",
+            observed["user_version"],
+        )
+        return
+    if scope != DEPLOYMENT_SCOPE_FULL:
+        raise RuntimeError(f"unsupported deployment scope in rollback: {scope!r}")
+
     database = Path(args.database).resolve()
     database.parent.mkdir(parents=True, exist_ok=True)
     temporary = database.with_name(f".{database.name}.restore.{os.getpid()}")
@@ -663,13 +1199,12 @@ def restore_deployment(args):
     restore_archive(attachment_backup, project_root, MANAGED_ATTACHMENT_ROOTS)
     restore_archive(release_backup, project_root, MANAGED_RELEASE_ROOTS)
 
-    update_args = argparse.Namespace(
-        manifest=args.manifest,
-        status="data_restored",
-        detail="database, attachments, and release assets restored from verified backups",
-        database_version=observed["user_version"],
+    record_verified_rollback_scope(
+        args.manifest,
+        "data_restored",
+        "database, attachments, and release assets restored from verified backups",
+        observed["user_version"],
     )
-    update_manifest(update_args)
 
 
 def build_parser():
@@ -694,9 +1229,66 @@ def build_parser():
     prepare.add_argument("--deployment-key", required=True)
     prepare.add_argument("--before-commit", required=True)
     prepare.add_argument("--target-commit", required=True)
-    prepare.add_argument("--target-database-version", required=True, type=int)
+    prepare.add_argument("--target-database-version", type=int)
     prepare.add_argument("--write-fence", required=True)
+    prepare.add_argument(
+        "--scope",
+        choices=(DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_CODE_ONLY),
+        default=DEPLOYMENT_SCOPE_FULL,
+    )
     prepare.set_defaults(handler=prepare_deployment_manifest)
+
+    capture_code_state = commands.add_parser("capture-code-only-state")
+    capture_code_state.add_argument("--manifest", required=True)
+    capture_code_state.add_argument("--database", required=True)
+    capture_code_state.add_argument("--project-root", required=True)
+    capture_code_state.set_defaults(handler=capture_code_only_state)
+
+    verify_code_state = commands.add_parser("verify-code-only-state")
+    verify_code_state.add_argument("--manifest", required=True)
+    verify_code_state.add_argument("--database", required=True)
+    verify_code_state.add_argument("--project-root", required=True)
+    verify_code_state.set_defaults(handler=verify_code_only_state)
+
+    begin_code_only = commands.add_parser("begin-code-only")
+    begin_code_only.add_argument("--output", required=True)
+    begin_code_only.add_argument("--deployment-key", required=True)
+    begin_code_only.add_argument("--before-commit", required=True)
+    begin_code_only.add_argument("--target-commit", required=True)
+    begin_code_only.add_argument("--source-database-version", required=True, type=int)
+    begin_code_only.add_argument("--target-database-version", required=True, type=int)
+    begin_code_only.add_argument("--write-fence", required=True)
+    begin_code_only.set_defaults(handler=begin_code_only_deployment)
+
+    record_fence = commands.add_parser("record-code-only-fence")
+    record_fence.add_argument("--manifest", required=True)
+    record_fence.set_defaults(handler=record_code_only_fence)
+
+    authorize_abort = commands.add_parser("authorize-code-only-abort")
+    authorize_abort.add_argument("--manifest", required=True)
+    authorize_abort.add_argument("--database", required=True)
+    authorize_abort.add_argument("--project-root", required=True)
+    authorize_abort.add_argument("--current-commit", required=True)
+    authorize_abort.set_defaults(handler=authorize_code_only_abort)
+
+    authorize_code_rollback = commands.add_parser(
+        "authorize-code-only-rollback-release"
+    )
+    authorize_code_rollback.add_argument("--manifest", required=True)
+    authorize_code_rollback.add_argument("--database", required=True)
+    authorize_code_rollback.add_argument("--project-root", required=True)
+    authorize_code_rollback.add_argument("--current-commit", required=True)
+    authorize_code_rollback.set_defaults(handler=authorize_code_only_rollback_release)
+
+    database_evidence = commands.add_parser("database-evidence")
+    database_evidence.add_argument("--database", required=True)
+    database_evidence.set_defaults(handler=print_database_evidence)
+
+    deployed_marker = commands.add_parser("write-commit-marker")
+    deployed_marker.add_argument("--project-root", required=True)
+    deployed_marker.add_argument("--expected-current", required=True)
+    deployed_marker.add_argument("--commit", required=True)
+    deployed_marker.set_defaults(handler=write_deployed_commit)
 
     update = commands.add_parser("update")
     update.add_argument("--manifest", required=True)
@@ -735,7 +1327,7 @@ def build_parser():
     release_fence = commands.add_parser("release-fence")
     release_fence.add_argument("--manifest", required=True)
     release_fence.add_argument(
-        "--mode", required=True, choices=("deployment", "rollback")
+        "--mode", required=True, choices=("deployment", "rollback", "abort")
     )
     release_fence.set_defaults(handler=release_write_fence)
     return parser
