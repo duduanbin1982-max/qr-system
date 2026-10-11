@@ -333,6 +333,7 @@ log "creating and verifying immutable final database and attachment backups"
 PRESERVE_EXISTING_BACKUPS=1 \
 BACKUP_TIMESTAMP="$DEPLOYMENT_KEY" \
 BACKUP_METADATA_FILE="$BACKUP_METADATA" \
+DEPLOYMENT_MANIFEST_TOOL_SOURCE="$deployment_manifest" \
 QR_PROJECT_ROOT="$PROJECT_ROOT" \
 DB_PATH="$DB_PATH" \
 BACKUP_DIR="$BACKUP_DIR" \

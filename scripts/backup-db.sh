@@ -35,6 +35,7 @@ ATTACH_TEMP="$ATTACH_BACKUP.partial.$$"
 ATTACH_CHECKSUM="$ATTACH_BACKUP.sha256"
 ATTACH_CHECKSUM_TEMP="$ATTACH_CHECKSUM.partial.$$"
 BACKUP_METADATA_FILE="${BACKUP_METADATA_FILE:-$BACKUP_DIR/backup_${TIMESTAMP}.json}"
+DEPLOYMENT_MANIFEST_TOOL_SOURCE="${DEPLOYMENT_MANIFEST_TOOL_SOURCE:-$QR_PROJECT_ROOT/scripts/deployment_manifest.py}"
 WEEKLY_BACKUP_FILE="$BACKUP_DIR/weekly_${TIMESTAMP}.db"
 for output_path in \
     "$BACKUP_FILE" "$TEMP_FILE" "$ATTACH_BACKUP" "$ATTACH_TEMP" \
@@ -137,7 +138,7 @@ metadata_args=(
 for attachment_path in "${attachment_paths[@]}"; do
     metadata_args+=(--attachment-root "$attachment_path")
 done
-python3 "$QR_PROJECT_ROOT/scripts/deployment_manifest.py" "${metadata_args[@]}"
-python3 "$QR_PROJECT_ROOT/scripts/deployment_manifest.py" verify-backup \
+python3 "$DEPLOYMENT_MANIFEST_TOOL_SOURCE" "${metadata_args[@]}"
+python3 "$DEPLOYMENT_MANIFEST_TOOL_SOURCE" verify-backup \
     --metadata "$BACKUP_METADATA_FILE"
 echo "BACKUP_METADATA=$BACKUP_METADATA_FILE"
