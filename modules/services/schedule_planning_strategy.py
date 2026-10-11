@@ -33,6 +33,16 @@ class SchedulePlanningStrategy:
         return cls._capacity_service()._transaction(db)
 
     @classmethod
+    def read_transaction(cls, db=None):
+        return cls._capacity_service()._read_transaction(db)
+
+    @classmethod
+    def persist_operation_payload(cls, payload, txn, *, persist=True):
+        return cls._capacity_service().persist_operation_payload(
+            payload, txn, persist=persist
+        )
+
+    @classmethod
     def parse_timestamp(cls, value):
         return cls._capacity_service()._parse_timestamp(value)
 

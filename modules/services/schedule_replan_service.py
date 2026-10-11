@@ -209,7 +209,7 @@ class ScheduleReplanService:
         }
 
     @staticmethod
-    def _load_replan_facts(order_id, txn, use_node_engine):
+    def _load_replan_facts(order_id, txn, use_node_engine, *, persist_bindings=True):
         """Load immutable production facts used by one replan attempt."""
         active_lock_rows = ScheduleRevisionRepository.list_active_order_task_locks(
             order_id, db=txn
@@ -230,13 +230,29 @@ class ScheduleReplanService:
         )
         # Resolve legacy orders to immutable route/process bindings before any
         # revision fact is written.
-        if not SchedulePlanningRepository.ensure_order_version_bindings(order_id, txn):
+        bound_order = SchedulePlanningRepository.ensure_order_version_bindings(
+            order_id, txn, persist=persist_bindings
+        )
+        if not bound_order:
             raise ValueError("订单不存在")
         context = SchedulePlanningRepository.dynamic_replan_order_context(
             order_id, db=txn, use_nodes=use_node_engine
         )
         if not context:
             raise ValueError("订单不存在")
+        if not persist_bindings:
+            bindings = SchedulePlanningRepository.resolve_order_operation_bindings(
+                order_id, bound_order["route_version_id"], txn
+            )
+            context["order"] = {
+                **dict(context["order"]),
+                "route_version_id": bound_order["route_version_id"],
+                "route_name_snapshot": bound_order["route_name_snapshot"],
+            }
+            for operation in context["operations"]:
+                operation.update(bindings.get(int(operation["order_process_id"]), {}))
+                operation["route_version_id"] = bound_order["route_version_id"]
+                operation["route_name_snapshot"] = bound_order["route_name_snapshot"]
         return {
             "context": context,
             "order": context["order"],
@@ -332,6 +348,7 @@ class ScheduleReplanService:
         actor_id,
         txn,
         capacity_service,
+        input_digest_override=None,
     ):
         """Create the run/revision ledger before entering the savepoint."""
         context = facts["context"]
@@ -352,6 +369,7 @@ class ScheduleReplanService:
             current_revision_items=context["current_revision_items"],
             replan_triggers=context["replan_triggers"],
         )
+        input_digest = input_digest_override or input_digest
         run_id = ScheduleRevisionRepository.create_run(
             order_id,
             run_key,
@@ -381,10 +399,12 @@ class ScheduleReplanService:
 
     @staticmethod
     def _load_replan_occupancy(
-        order_id, context, active_locks, use_node_engine, txn, capacity_service
+        order_id, context, active_locks, use_node_engine, txn, capacity_service,
+        *, clear_projection=True
     ):
         """Reset the projection and load occupancy/downtime/lock constraints."""
-        ScheduleRevisionRepository.clear_order_schedules(order_id, txn)
+        if clear_projection:
+            ScheduleRevisionRepository.clear_order_schedules(order_id, txn)
         occupancy = {}
         occupancy_rows = (
             ProductionNodeRepository.list_node_occupancy(order_id, db=txn)
@@ -435,6 +455,7 @@ class ScheduleReplanService:
         revision_id,
         txn,
         capacity_service,
+        persist=True,
     ):
         """Restore a locked task without moving its immutable interval."""
         try:
@@ -489,12 +510,17 @@ class ScheduleReplanService:
             "blocked_reason": conflict["reason"] if conflict else "",
             "blocked_code": "LOCKED_TASK_CONFLICT" if conflict else "",
         }
-        payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
-            payload, txn
-        )
-        new_item = ScheduleReplanService._copy_active_lock_to_schedule(
-            locked_task, payload["id"], revision_id, txn
-        )
+        if persist:
+            payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
+                payload, txn
+            )
+            new_item = ScheduleReplanService._copy_active_lock_to_schedule(
+                locked_task, payload["id"], revision_id, txn
+            )
+        else:
+            payload = dict(payload)
+            payload.pop("id", None)
+            new_item = {"id": None, "revision_item_id": None}
         locked_result = {
             **payload,
             "line_name": payload.get("line_name_snapshot") or None,
@@ -537,6 +563,7 @@ class ScheduleReplanService:
         occupancy,
         txn,
         capacity_service,
+        persist=True,
     ):
         """Plan unfinished operations and restore locked operations."""
         prior_by_op = {
@@ -579,7 +606,7 @@ class ScheduleReplanService:
                     planned_end_at=previous.get("planned_end_at") or "",
                     reason="已完成，无需重排",
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -595,12 +622,14 @@ class ScheduleReplanService:
                         revision_id=revision_id,
                         txn=txn,
                         capacity_service=capacity_service,
+                    persist=persist,
                     )
                 )
                 if lock_conflict:
                     blocked = True
                     conflicts.append({
                         "code": "LOCKED_TASK_CONFLICT",
+                        "order_process_id": operation["order_process_id"],
                         "revision_item_id": locked_result["revision_item_id"],
                         "source_revision_item_id": locked_result[
                             "source_revision_item_id"
@@ -630,7 +659,7 @@ class ScheduleReplanService:
                     code=decision.blocked_code,
                     reason=decision.blocked_reason,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -654,7 +683,7 @@ class ScheduleReplanService:
                     begin_date=begin.strftime("%Y-%m-%d"),
                     end_date=end.strftime("%Y-%m-%d"),
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 cursor = end
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
@@ -678,7 +707,7 @@ class ScheduleReplanService:
                     code=decision.blocked_code,
                     reason=decision.blocked_reason,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -711,7 +740,7 @@ class ScheduleReplanService:
                     reason=decision.blocked_reason,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -745,7 +774,7 @@ class ScheduleReplanService:
                     reason=block_reason,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -759,7 +788,7 @@ class ScheduleReplanService:
                     reason=block_reason,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -773,9 +802,7 @@ class ScheduleReplanService:
                     reason=block_reason,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
-                    payload, txn
-                )
+                payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
                 result.append({
                     **payload,
                     "line_name": None,
@@ -845,7 +872,7 @@ class ScheduleReplanService:
                 "segments": segments, "allocations": allocations,
                 "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d"),
             }
-            payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+            payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=persist)
             cursor = end
             result.append({**payload, "line_name": primary_snapshot["line_name"], "line_count": len(snapshots),
                            "lines": snapshots, "process_name": process_snapshot})
@@ -1022,6 +1049,73 @@ class ScheduleReplanService:
         )
 
     @staticmethod
+    def _build_replan_input(facts, request):
+        context = facts["context"]
+        return ScheduleDynamicReplanPolicy.build_input_snapshot(
+            order=facts["order"], operations=context["operations"],
+            downtime=context["downtime"], occupancy=context["occupancy"],
+            reason=request["reason"],
+            as_of=SchedulePlanningStrategy.format_timestamp(request["start"]),
+            locked_tasks=list(facts["active_locks"].values()),
+            work_reports=context["work_reports"], scrap_records=context["scrap_records"],
+            rework_records=context["rework_records"],
+            current_revision=context["current_revision"],
+            current_revision_items=context["current_revision_items"],
+            replan_triggers=context["replan_triggers"],
+        )
+
+    @staticmethod
+    def _materialize_replan_result(result, run_id, revision_id, run_key, facts, txn):
+        materialized = []
+        for raw in result:
+            payload = dict(raw)
+            payload.pop("id", None)
+            payload.update({
+                "schedule_run_id": run_id,
+                "schedule_revision_id": revision_id,
+                "schedule_run_key": run_key,
+            })
+            payload = SchedulePlanningStrategy.persist_operation_payload(payload, txn, persist=True)
+            if raw.get("locked"):
+                lock = facts["active_locks"].get(int(raw["order_process_id"]))
+                if lock:
+                    item = ScheduleReplanService._copy_active_lock_to_schedule(
+                        lock, payload["id"], revision_id, txn
+                    )
+                    payload["revision_item_id"] = item["id"]
+                    payload["source_revision_item_id"] = lock["revision_item_id"]
+            materialized.append(payload)
+        return materialized
+
+    @staticmethod
+    def _record_stale_replan(*, order_id, run_key, request, facts, actor_id,
+                             expected_digest, actual_digest, txn, capacity_service):
+        ledger = ScheduleReplanService._create_replan_ledger(
+            order_id, request, facts, run_key, actor_id, txn, capacity_service,
+            input_digest_override=expected_digest,
+        )
+        summary = {
+            "status": "STALE_INPUT", "stale_input": True,
+            "expected_digest": expected_digest, "actual_digest": actual_digest,
+            "reason": "重排期间业务事实发生变化，未写入排程版本",
+        }
+        manifest = {"input_digest": expected_digest, "status": "STALE_INPUT"}
+        ScheduleEvidenceRepository.save_planning_evidence(
+            ledger["revision_id"], summary, manifest, db=txn
+        )
+        ScheduleRevisionRepository.cancel_revision(ledger["revision_id"], txn)
+        ScheduleRevisionRepository.complete_run(
+            ledger["run_id"], "failed", [], "STALE_INPUT: 重排事实已变化", db=txn
+        )
+        return {
+            "ok": False, "order_id": order_id, "schedule_run_key": run_key,
+            "status": "STALE_INPUT", "error": "STALE_INPUT: 重排事实已变化",
+            "schedule_revision_id": ledger["revision_id"],
+            "revision_status": "cancelled", "operations": [],
+            "planning_summary": summary, "planning_manifest": manifest,
+        }
+
+    @staticmethod
     def dynamic_replan_order(
         order_id,
         start_at=None,
@@ -1037,96 +1131,103 @@ class ScheduleReplanService:
         request = ScheduleReplanService._prepare_request(
             start_at, schedule_run_key, reason, capacity_service
         )
+        use_node_engine = bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
+        with SchedulePlanningStrategy.read_transaction(db) as snapshot_db:
+            prior_run = ScheduleRevisionRepository.find_run(request["run_key"], snapshot_db)
+            replay = ScheduleReplanService._replay_existing_run(
+                order_id, request["run_key"], prior_run, snapshot_db
+            )
+            if replay is not None:
+                return replay
+            facts = ScheduleReplanService._load_replan_facts(
+                order_id, snapshot_db, use_node_engine, persist_bindings=False
+            )
+            planning_digest = SchedulePlanningRepository.planning_input_digest(
+                order_id, db=snapshot_db
+            )
+            occupancy = ScheduleReplanService._load_replan_occupancy(
+                order_id, facts["context"], facts["active_locks"], use_node_engine,
+                snapshot_db, capacity_service, clear_projection=False
+            )
+            facts_snapshot = PlanningFactsSnapshot.create(
+                order=dict(facts["order"]),
+                operations=tuple(dict(item) for item in facts["context"]["operations"]),
+                order_serial_ids=tuple(facts["order_serial_ids"]),
+                cursor=request["start"], standard_as_of=request["standard_as_of"],
+                use_node_engine=use_node_engine, occupancy=occupancy,
+            )
+            _, policy_input_digest = ScheduleReplanService._build_replan_input(facts, request)
+            result, conflicts, blocked = ScheduleReplanService._plan_replan_operations(
+                order_id=order_id, order=facts["order"], context=facts["context"],
+                active_locks=facts["active_locks"], order_serial_ids=facts["order_serial_ids"],
+                start=request["start"], standard_as_of=request["standard_as_of"],
+                run_key=request["run_key"], run_id=0, revision_id=0,
+                input_digest=policy_input_digest, use_node_engine=use_node_engine,
+                occupancy=occupancy, txn=snapshot_db, capacity_service=capacity_service,
+                persist=False,
+            )
+
         failure = None
         response = None
         with SchedulePlanningStrategy.transaction(db) as txn:
-            use_node_engine = bool(
-                getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False)
-            )
-            facts = ScheduleReplanService._load_replan_facts(
-                order_id, txn, use_node_engine
-            )
-            prior_run = ScheduleRevisionRepository.find_run(
-                request["run_key"], txn
-            )
+            prior_run = ScheduleRevisionRepository.find_run(request["run_key"], txn)
             replay = ScheduleReplanService._replay_existing_run(
                 order_id, request["run_key"], prior_run, txn
             )
             if replay is not None:
                 return replay
+            actual_digest = SchedulePlanningRepository.planning_input_digest(order_id, db=txn)
+            facts_write = ScheduleReplanService._load_replan_facts(
+                order_id, txn, use_node_engine, persist_bindings=True
+            )
+            if actual_digest != planning_digest:
+                return ScheduleReplanService._record_stale_replan(
+                    order_id=order_id, run_key=request["run_key"], request=request,
+                    facts=facts_write, actor_id=actor_id, expected_digest=planning_digest,
+                    actual_digest=actual_digest, txn=txn, capacity_service=capacity_service,
+                )
             ledger = ScheduleReplanService._create_replan_ledger(
-                order_id,
-                request,
-                facts,
-                request["run_key"],
-                actor_id,
-                txn,
-                capacity_service,
+                order_id, request, facts_write, request["run_key"], actor_id, txn,
+                capacity_service, input_digest_override=planning_digest,
             )
             try:
                 txn.execute("SAVEPOINT dynamic_schedule_replan")
-                occupancy = ScheduleReplanService._load_replan_occupancy(
-                    order_id,
-                    facts["context"],
-                    facts["active_locks"],
-                    use_node_engine,
-                    txn,
-                    capacity_service,
+                ScheduleReplanService._load_replan_occupancy(
+                    order_id, facts_write["context"], facts_write["active_locks"],
+                    use_node_engine, txn, capacity_service, clear_projection=True
                 )
-                facts_snapshot = PlanningFactsSnapshot.create(
-                    order=dict(facts["order"]),
-                    operations=tuple(
-                        dict(item) for item in facts["context"]["operations"]
-                    ),
-                    order_serial_ids=tuple(facts["order_serial_ids"]),
-                    cursor=request["start"],
-                    standard_as_of=request["standard_as_of"],
-                    use_node_engine=use_node_engine,
-                    occupancy=occupancy,
+                result = ScheduleReplanService._materialize_replan_result(
+                    result, ledger["run_id"], ledger["revision_id"],
+                    request["run_key"], facts_write, txn
                 )
-                result, conflicts, blocked = (
-                    ScheduleReplanService._plan_replan_operations(
-                        order_id=order_id,
-                        order=facts["order"],
-                        context=facts["context"],
-                        active_locks=facts["active_locks"],
-                        order_serial_ids=facts["order_serial_ids"],
-                        start=request["start"],
-                        standard_as_of=request["standard_as_of"],
-                        run_key=request["run_key"],
-                        run_id=ledger["run_id"],
-                        revision_id=ledger["revision_id"],
-                        input_digest=ledger["input_digest"],
-                        use_node_engine=use_node_engine,
-                        occupancy=occupancy,
-                        txn=txn,
-                        capacity_service=capacity_service,
-                    )
-                )
+                revision_ids = {
+                    int(item["order_process_id"]): item.get("revision_item_id")
+                    for item in result if item.get("revision_item_id") is not None
+                }
+                conflicts = [
+                    {
+                        **{
+                            key: value for key, value in conflict.items()
+                            if key != "order_process_id"
+                        },
+                        "revision_item_id": conflict.get("revision_item_id")
+                        or revision_ids.get(int(conflict.get("order_process_id") or 0)),
+                    }
+                    for conflict in conflicts
+                ]
                 response = ScheduleReplanService._finalize_replan(
-                    order_id=order_id,
-                    order=facts["order"],
-                    context=facts["context"],
-                    result=result,
-                    conflicts=conflicts,
-                    blocked=blocked,
-                    run_id=ledger["run_id"],
-                    revision_id=ledger["revision_id"],
-                    run_key=request["run_key"],
-                    input_digest=ledger["input_digest"],
-                    snapshot=ledger["snapshot"],
-                    reason=request["reason"],
-                    txn=txn,
-                    capacity_service=capacity_service,
-                    facts_snapshot=facts_snapshot,
+                    order_id=order_id, order=facts_write["order"],
+                    context=facts_write["context"], result=result, conflicts=conflicts,
+                    blocked=blocked, run_id=ledger["run_id"], revision_id=ledger["revision_id"],
+                    run_key=request["run_key"], input_digest=ledger["input_digest"],
+                    snapshot=ledger["snapshot"], reason=request["reason"], txn=txn,
+                    capacity_service=capacity_service, facts_snapshot=facts_snapshot,
                 )
                 txn.execute("RELEASE SAVEPOINT dynamic_schedule_replan")
             except Exception as exc:
                 ScheduleReplanService._fail_replan(
-                    run_id=ledger["run_id"],
-                    revision_id=ledger["revision_id"],
-                    error=exc,
-                    txn=txn,
+                    run_id=ledger["run_id"], revision_id=ledger["revision_id"],
+                    error=exc, txn=txn
                 )
                 failure = str(exc)
         if failure:

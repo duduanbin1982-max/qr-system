@@ -249,6 +249,25 @@ class ScheduleCapacityService:
             raise
 
     @staticmethod
+    @contextmanager
+    def _read_transaction(db=None):
+        """Open a deferred snapshot transaction for planning-only work."""
+        if db is None:
+            db = BaseService.db()
+        started = False
+        if not db.in_transaction:
+            db.execute("BEGIN")
+            started = True
+        try:
+            yield db
+            if started:
+                db.commit()
+        except Exception:
+            if started:
+                db.rollback()
+            raise
+
+    @staticmethod
     def _parse_timestamp(value):
         return parse_database_timestamp(value)
 
@@ -802,12 +821,25 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _prepare_generation_request(
-        order_id, start_date, schedule_run_key, txn,
+        order_id, start_date, schedule_run_key, txn, *, persist_bindings=True,
     ):
-        order = SchedulePlanningRepository.ensure_order_version_bindings(order_id, txn)
+        order = SchedulePlanningRepository.ensure_order_version_bindings(
+            order_id, txn, persist=persist_bindings
+        )
         if not order:
             raise ValueError("订单不存在")
-        operations = SchedulePlanningRepository.find_order_operations(order_id, db=txn)
+        operations = [
+            dict(row)
+            for row in SchedulePlanningRepository.find_order_operations(order_id, db=txn)
+        ]
+        if not persist_bindings:
+            bindings = SchedulePlanningRepository.resolve_order_operation_bindings(
+                order_id, order["route_version_id"], txn
+            )
+            for operation in operations:
+                operation.update(bindings.get(int(operation["order_process_id"]), {}))
+                operation["route_version_id"] = order["route_version_id"]
+                operation["route_name_snapshot"] = order["route_name_snapshot"]
         if not operations:
             raise ValueError("订单没有工序，无法生成排程")
         order_serial_ids = SchedulePlanningRepository.list_order_serial_ids(order_id, db=txn)
@@ -915,6 +947,7 @@ class ScheduleCapacityService:
         run_key,
         facts_snapshot,
         txn,
+        input_digest=None,
     ):
         planned = [
             row for row in result
@@ -951,12 +984,13 @@ class ScheduleCapacityService:
             conflicts=conflict_assessment["conflicts"],
             risk=conflict_assessment["risk"],
         )
+        effective_input_digest = input_digest or facts_snapshot.input_digest
         summary = summarize_schedule_result(
             planning_result,
-            input_digest=facts_snapshot.input_digest,
+            input_digest=effective_input_digest,
         )
         manifest = build_manifest(
-            input_digest=facts_snapshot.input_digest,
+            input_digest=effective_input_digest,
             stage_outputs=stage_bundle.manifest_stages(),
             result={"operations": result, "summary": summary},
         )
@@ -1012,6 +1046,83 @@ class ScheduleCapacityService:
         ScheduleRevisionRepository.complete_run(
             run_id, "failed", [], str(error), db=txn
         )
+
+    @staticmethod
+    def persist_operation_payload(payload, txn, *, persist=True):
+        """Persist one operation only in the short write phase."""
+        if not persist:
+            result = dict(payload)
+            result.pop("id", None)
+            return result
+        result = dict(payload)
+        result["id"] = ScheduleRevisionRepository.insert_operation_schedule(
+            result, txn
+        )
+        return result
+
+    @staticmethod
+    def _materialize_generation_result(result, run_id, revision_id, run_key, txn):
+        """Materialize a read-planned result during the short write phase."""
+        materialized = []
+        for raw in result:
+            payload = dict(raw)
+            payload.pop("id", None)
+            payload["schedule_run_id"] = run_id
+            payload["schedule_revision_id"] = revision_id
+            payload["schedule_run_key"] = run_key
+            payload = ScheduleCapacityService.persist_operation_payload(
+                payload, txn, persist=True
+            )
+            materialized.append(payload)
+        return materialized
+
+    @staticmethod
+    def _record_stale_generation(
+        *, order_id, run_key, cursor, actor_id, expected_digest, actual_digest, txn
+    ):
+        """Keep a failed stale-input attempt fully auditable without publishing it."""
+        run_id, revision_id = ScheduleCapacityService._create_generation_ledger(
+            order_id, run_key, cursor, actor_id, txn
+        )
+        ScheduleRevisionRepository.update_run_input(
+            run_id, input_digest=expected_digest, trigger_source="planning_facts", db=txn
+        )
+        summary = {
+            "status": "STALE_INPUT",
+            "blocked": True,
+            "stale_input": True,
+            "expected_digest": expected_digest,
+            "actual_digest": actual_digest,
+            "reason": "规划期间业务事实发生变化，未写入排程版本",
+        }
+        manifest = {
+            "input_digest": expected_digest,
+            "status": "STALE_INPUT",
+            "actual_digest": actual_digest,
+        }
+        ScheduleEvidenceRepository.save_planning_evidence(
+            revision_id, summary, manifest, db=txn
+        )
+        ScheduleRevisionRepository.cancel_revision(revision_id, txn)
+        ScheduleRevisionRepository.complete_run(
+            run_id,
+            "failed",
+            [],
+            "STALE_INPUT: 规划事实已变化",
+            db=txn,
+        )
+        return {
+            "ok": False,
+            "order_id": order_id,
+            "schedule_run_key": run_key,
+            "status": "STALE_INPUT",
+            "error": "STALE_INPUT: 规划事实已变化",
+            "schedule_revision_id": revision_id,
+            "revision_status": "cancelled",
+            "operations": [],
+            "planning_summary": summary,
+            "planning_manifest": manifest,
+        }
     @staticmethod
     def _plan_generation_operations(
         *,
@@ -1027,6 +1138,7 @@ class ScheduleCapacityService:
         use_node_engine,
         occupancy,
         txn,
+        persist=True,
     ):
         """Plan and persist each operation in route order.
 
@@ -1065,8 +1177,8 @@ class ScheduleCapacityService:
                     reason="已完成，无剩余排程量",
                     include_allocations=True,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
-                    payload, txn
+                payload = ScheduleCapacityService.persist_operation_payload(
+                    payload, txn, persist=persist
                 )
                 result.append({
                     **payload,
@@ -1085,7 +1197,7 @@ class ScheduleCapacityService:
                     code=decision.blocked_code,
                     reason=decision.blocked_reason,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -1109,7 +1221,7 @@ class ScheduleCapacityService:
                     begin_date=begin.strftime("%Y-%m-%d"),
                     end_date=end.strftime("%Y-%m-%d"),
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 cursor = end
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
@@ -1133,7 +1245,7 @@ class ScheduleCapacityService:
                     code=decision.blocked_code,
                     reason=decision.blocked_reason,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -1166,7 +1278,7 @@ class ScheduleCapacityService:
                     reason=decision.blocked_reason,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -1205,7 +1317,7 @@ class ScheduleCapacityService:
                     reason=exc.message,
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -1218,7 +1330,7 @@ class ScheduleCapacityService:
                     reason=str(exc) or "未配置有效工作日历或班次",
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
                 result.append({**payload, "line_name": None, "process_name": process_snapshot,
                                "reason": payload["reason"]})
                 continue
@@ -1231,8 +1343,8 @@ class ScheduleCapacityService:
                     reason="生产节点未生成可用排程分段",
                     standard=standard,
                 )
-                payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(
-                    payload, txn
+                payload = ScheduleCapacityService.persist_operation_payload(
+                    payload, txn, persist=persist
                 )
                 result.append({
                     **payload,
@@ -1327,7 +1439,7 @@ class ScheduleCapacityService:
                        "line_name_snapshot": primary_snapshot["line_name"],
                        "segments": segments, "allocations": allocations,
                        "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d")}
-            payload["id"] = ScheduleRevisionRepository.insert_operation_schedule(payload, txn)
+            payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
             cursor = end
             result.append({**payload, "line_name": primary_snapshot["line_name"],
                            "line_count": len(resource_snapshots), "lines": resource_snapshots,
@@ -1339,11 +1451,20 @@ class ScheduleCapacityService:
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None,
                                 actor_id=None, use_node_engine_override=None):
-        failure = None
-        response = None
-        with ScheduleCapacityService._transaction(db) as txn:
+        # Phase 1: a deferred read snapshot.  No schedule rows or ledgers are
+        # written while matching standards and allocating capacity.
+        use_node_engine = (
+            bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
+            if use_node_engine_override is None
+            else bool(use_node_engine_override)
+        )
+        with ScheduleCapacityService._read_transaction(db) as snapshot_db:
             request = ScheduleCapacityService._prepare_generation_request(
-                order_id, start_date, schedule_run_key, txn
+                order_id,
+                start_date,
+                schedule_run_key,
+                snapshot_db,
+                persist_bindings=False,
             )
             order = request["order"]
             operations = request["operations"]
@@ -1352,55 +1473,92 @@ class ScheduleCapacityService:
             standard_as_of = request["standard_as_of"]
             run_key = request["run_key"]
             replay = ScheduleCapacityService._replay_generation_if_present(
+                order_id, run_key, snapshot_db
+            )
+            if replay is not None:
+                return replay
+            planning_digest = SchedulePlanningRepository.planning_input_digest(
+                order_id, db=snapshot_db
+            )
+            occupancy = ScheduleCapacityService._load_generation_occupancy(
+                order_id, use_node_engine, snapshot_db
+            )
+            planning_occupancy = occupancy
+            facts_snapshot = PlanningFactsSnapshot.create(
+                order=dict(order),
+                operations=tuple(dict(item) for item in operations),
+                order_serial_ids=tuple(order_serial_ids),
+                cursor=cursor,
+                standard_as_of=standard_as_of,
+                use_node_engine=use_node_engine,
+                occupancy=occupancy,
+            )
+            result, blocked, _ = ScheduleCapacityService._plan_generation_operations(
+                order_id=order_id,
+                order=order,
+                operations=operations,
+                order_serial_ids=order_serial_ids,
+                cursor=cursor,
+                standard_as_of=standard_as_of,
+                run_key=run_key,
+                run_id=0,
+                revision_id=0,
+                use_node_engine=use_node_engine,
+                occupancy=occupancy,
+                txn=snapshot_db,
+                persist=False,
+            )
+
+        # Phase 2: short BEGIN IMMEDIATE.  Re-check the business facts before
+        # replacing the compatibility projection and saving all evidence.
+        failure = None
+        response = None
+        with ScheduleCapacityService._transaction(db) as txn:
+            replay = ScheduleCapacityService._replay_generation_if_present(
                 order_id, run_key, txn
             )
             if replay is not None:
                 return replay
+            actual_digest = SchedulePlanningRepository.planning_input_digest(
+                order_id, db=txn
+            )
+            if actual_digest != planning_digest:
+                return ScheduleCapacityService._record_stale_generation(
+                    order_id=order_id,
+                    run_key=run_key,
+                    cursor=cursor,
+                    actor_id=actor_id,
+                    expected_digest=planning_digest,
+                    actual_digest=actual_digest,
+                    txn=txn,
+                )
+            request = ScheduleCapacityService._prepare_generation_request(
+                order_id, start_date, schedule_run_key, txn, persist_bindings=True
+            )
+            order = request["order"]
             run_id, revision_id = ScheduleCapacityService._create_generation_ledger(
                 order_id, run_key, cursor, actor_id, txn
             )
             try:
-                # Keep the run ledger even if scheduling fails halfway through.
                 txn.execute("SAVEPOINT schedule_generation")
                 ScheduleRevisionRepository.clear_order_schedules(order_id, txn)
-                use_node_engine = (
-                    bool(getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False))
-                    if use_node_engine_override is None
-                    else bool(use_node_engine_override)
-                )
-                occupancy = ScheduleCapacityService._load_generation_occupancy(
-                    order_id, use_node_engine, txn
+                result = ScheduleCapacityService._materialize_generation_result(
+                    result, run_id, revision_id, run_key, txn
                 )
                 facts_snapshot = PlanningFactsSnapshot.create(
                     order=dict(order),
-                    operations=tuple(dict(item) for item in operations),
-                    order_serial_ids=tuple(order_serial_ids),
+                    operations=tuple(dict(item) for item in request["operations"]),
+                    order_serial_ids=tuple(request["order_serial_ids"]),
                     cursor=cursor,
-                    standard_as_of=standard_as_of,
+                    standard_as_of=request["standard_as_of"],
                     use_node_engine=use_node_engine,
-                    occupancy=occupancy,
+                    occupancy=planning_occupancy,
                 )
                 ScheduleRevisionRepository.update_run_input(
                     run_id,
-                    input_digest=facts_snapshot.input_digest,
+                    input_digest=planning_digest,
                     trigger_source="planning_facts",
                     db=txn,
-                )
-                result, blocked, cursor = (
-                    ScheduleCapacityService._plan_generation_operations(
-                        order_id=order_id,
-                        order=order,
-                        operations=operations,
-                        order_serial_ids=order_serial_ids,
-                        cursor=cursor,
-                        standard_as_of=standard_as_of,
-                        run_key=run_key,
-                        run_id=run_id,
-                        revision_id=revision_id,
-                        use_node_engine=use_node_engine,
-                        occupancy=occupancy,
-                        txn=txn,
-                    )
                 )
                 response = ScheduleCapacityService._finalize_generation(
                     order_id=order_id,
@@ -1412,14 +1570,12 @@ class ScheduleCapacityService:
                     run_key=run_key,
                     facts_snapshot=facts_snapshot,
                     txn=txn,
+                    input_digest=planning_digest,
                 )
                 txn.execute("RELEASE SAVEPOINT schedule_generation")
             except Exception as exc:
                 ScheduleCapacityService._fail_generation(
-                    run_id=run_id,
-                    revision_id=revision_id,
-                    error=exc,
-                    txn=txn,
+                    run_id=run_id, revision_id=revision_id, error=exc, txn=txn
                 )
                 failure = str(exc)
         if failure:
