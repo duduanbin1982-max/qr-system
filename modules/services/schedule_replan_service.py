@@ -29,6 +29,7 @@ from modules.repositories.production_node_repository import ProductionNodeReposi
 from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
+from modules.services.schedule_planning_strategy import SchedulePlanningStrategy
 
 
 class ScheduleReplanService:
@@ -47,8 +48,8 @@ class ScheduleReplanService:
             raise ValueError("动态重排必须由容量服务提供时间解析器")
         for event in downtime:
             event = dict(event)
-            start = capacity_service._parse_timestamp(event.get("start_at"))
-            end = capacity_service._parse_timestamp(event.get("end_at"))
+            start = SchedulePlanningStrategy.parse_timestamp(event.get("start_at"))
+            end = SchedulePlanningStrategy.parse_timestamp(event.get("end_at"))
             resource_id = event.get(resource_key)
             if resource_id is None or not start or not end or end <= start:
                 continue
@@ -128,8 +129,8 @@ class ScheduleReplanService:
     @staticmethod
     def _locked_task_conflict(lock, downtime, cursor, db, capacity_service):
         """Return an immutable conflict fact without moving the locked task."""
-        start = capacity_service._parse_timestamp(lock.get("planned_start_at"))
-        end = capacity_service._parse_timestamp(lock.get("planned_end_at"))
+        start = SchedulePlanningStrategy.parse_timestamp(lock.get("planned_start_at"))
+        end = SchedulePlanningStrategy.parse_timestamp(lock.get("planned_end_at"))
         node_id = lock.get("production_node_id")
         if not start or not end or end <= start:
             return {
@@ -145,8 +146,8 @@ class ScheduleReplanService:
             event = dict(event)
             if event.get("production_node_id") != node_id:
                 continue
-            event_start = capacity_service._parse_timestamp(event.get("start_at"))
-            event_end = capacity_service._parse_timestamp(event.get("end_at"))
+            event_start = SchedulePlanningStrategy.parse_timestamp(event.get("start_at"))
+            event_end = SchedulePlanningStrategy.parse_timestamp(event.get("end_at"))
             if event_start and event_end and start < event_end and event_start < end:
                 return {
                     "reason": "锁定任务与生产节点停机时段冲突",
@@ -159,10 +160,10 @@ class ScheduleReplanService:
             override = dict(override)
             if override.get("override_type") == "overtime":
                 continue
-            override_start = capacity_service._parse_timestamp(
+            override_start = SchedulePlanningStrategy.parse_timestamp(
                 override.get("start_at")
             )
-            override_end = capacity_service._parse_timestamp(
+            override_end = SchedulePlanningStrategy.parse_timestamp(
                 override.get("end_at")
             )
             if (
@@ -342,7 +343,7 @@ class ScheduleReplanService:
             downtime=context["downtime"],
             occupancy=context["occupancy"],
             reason=request["reason"],
-            as_of=capacity_service._format_timestamp(request["start"]),
+            as_of=SchedulePlanningStrategy.format_timestamp(request["start"]),
             locked_tasks=list(active_locks.values()),
             work_reports=context["work_reports"],
             scrap_records=context["scrap_records"],
@@ -369,7 +370,7 @@ class ScheduleReplanService:
             created_by=actor_id,
             replan_reason=request["reason"],
             replan_source_digest=input_digest,
-            replanned_at=capacity_service._format_timestamp(request["start"]),
+            replanned_at=SchedulePlanningStrategy.format_timestamp(request["start"]),
         )
         return {
             "snapshot": snapshot,
@@ -392,8 +393,8 @@ class ScheduleReplanService:
         )
         occupancy_key = "production_node_id" if use_node_engine else "process_line_id"
         for row in occupancy_rows:
-            begin = capacity_service._parse_timestamp(row["start_at"])
-            end = capacity_service._parse_timestamp(row["end_at"])
+            begin = SchedulePlanningStrategy.parse_timestamp(row["start_at"])
+            end = SchedulePlanningStrategy.parse_timestamp(row["end_at"])
             resource_id = row[occupancy_key]
             if resource_id is not None and begin and end and end > begin:
                 occupancy.setdefault(int(resource_id), []).append((begin, end))
@@ -405,10 +406,10 @@ class ScheduleReplanService:
         )
         if use_node_engine:
             for lock in active_locks.values():
-                lock_start = capacity_service._parse_timestamp(
+                lock_start = SchedulePlanningStrategy.parse_timestamp(
                     lock.get("planned_start_at")
                 )
-                lock_end = capacity_service._parse_timestamp(
+                lock_end = SchedulePlanningStrategy.parse_timestamp(
                     lock.get("planned_end_at")
                 )
                 node_id = lock.get("production_node_id")
@@ -446,10 +447,10 @@ class ScheduleReplanService:
         allocations = ScheduleReplanService._locked_task_allocations(
             locked_payload
         )
-        locked_start = capacity_service._parse_timestamp(
+        locked_start = SchedulePlanningStrategy.parse_timestamp(
             locked_task.get("planned_start_at")
         )
-        locked_end = capacity_service._parse_timestamp(
+        locked_end = SchedulePlanningStrategy.parse_timestamp(
             locked_task.get("planned_end_at")
         )
         conflict = ScheduleReplanService._locked_task_conflict(
@@ -648,8 +649,8 @@ class ScheduleReplanService:
                     planning_context,
                     execution_mode=decision.execution_mode,
                     lead_minutes=lead_minutes,
-                    begin_at=capacity_service._format_timestamp(begin),
-                    end_at=capacity_service._format_timestamp(end),
+                    begin_at=SchedulePlanningStrategy.format_timestamp(begin),
+                    end_at=SchedulePlanningStrategy.format_timestamp(end),
                     begin_date=begin.strftime("%Y-%m-%d"),
                     end_date=end.strftime("%Y-%m-%d"),
                 )
@@ -659,7 +660,7 @@ class ScheduleReplanService:
                                "reason": payload["reason"]})
                 continue
 
-            standard = capacity_service._find_standard(
+            standard = SchedulePlanningStrategy.find_standard(
                 txn, order.get("route_id"), operation.get("route_version_id") or order.get("route_version_id"),
                 operation["process_id"], operation.get("process_version_id"), order.get("product_id"),
                 order.get("product_code"), standard_as_of,
@@ -722,7 +723,7 @@ class ScheduleReplanService:
                     else None
                 )
                 if use_node_engine:
-                    segments, allocations = capacity_service._allocate_split_on_nodes(
+                    segments, allocations = SchedulePlanningStrategy.allocate_split_on_nodes(
                         txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
                         operation=operation, order=order,
                         serial_ids=serial_ids,
@@ -730,7 +731,7 @@ class ScheduleReplanService:
                         return_allocations=True,
                     )
                 else:
-                    segments = capacity_service._allocate_split_on_lines(
+                    segments = SchedulePlanningStrategy.allocate_split_on_lines(
                         txn, resources, cursor, baseline["remaining_quantity"], standard, occupancy,
                     )
                     allocations = []
@@ -782,8 +783,8 @@ class ScheduleReplanService:
                     "reason": payload["reason"],
                 })
                 continue
-            begin = min(capacity_service._parse_timestamp(item["start_at"]) for item in segments)
-            end = max(capacity_service._parse_timestamp(item["end_at"]) for item in segments)
+            begin = min(SchedulePlanningStrategy.parse_timestamp(item["start_at"]) for item in segments)
+            end = max(SchedulePlanningStrategy.parse_timestamp(item["end_at"]) for item in segments)
             resource_key = "production_node_id" if use_node_engine else "process_line_id"
             resource_ids = sorted({item[resource_key] for item in segments})
             resource_by_id = {resource["id"]: dict(resource) for resource in resources}
@@ -799,7 +800,7 @@ class ScheduleReplanService:
                 resource = resource_by_id[resource_id]
                 calendar = SchedulePlanningRepository.get_calendar(resource["calendar_id"], db=txn) or SchedulePlanningRepository.get_calendar(db=txn)
                 shifts = SchedulePlanningRepository.list_calendar_shifts(calendar["id"], db=txn) if calendar else []
-                item = capacity_service._calendar_snapshot(calendar, shifts)
+                item = SchedulePlanningStrategy.calendar_snapshot(calendar, shifts)
                 item.update({
                     resource_key: resource_id,
                     "process_line_id": resource.get("legacy_process_line_id", resource_id),
@@ -834,8 +835,8 @@ class ScheduleReplanService:
                 "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
                 "planned_minutes": duration, "occupied_minutes": duration, "status": "planned",
                 "standard_match_scope": standard["match_scope"],
-                "planned_start_at": capacity_service._format_timestamp(begin),
-                "planned_end_at": capacity_service._format_timestamp(end),
+                "planned_start_at": SchedulePlanningStrategy.format_timestamp(begin),
+                "planned_end_at": SchedulePlanningStrategy.format_timestamp(end),
                 "capacity_snapshot_json": json.dumps({**primary_snapshot, "line_count": len(snapshots), "lines": snapshots,
                                                        "node_count": len(snapshots) if use_node_engine else 0,
                                                        "nodes": snapshots if use_node_engine else []}, ensure_ascii=False, sort_keys=True),
@@ -894,7 +895,7 @@ class ScheduleReplanService:
         ScheduleRevisionRepository.finalize_revision_content_digest(
             revision_id, db=txn
         )
-        conflict_assessment = capacity_service._assess_revision_conflicts(
+        conflict_assessment = SchedulePlanningStrategy.assess_revision_conflicts(
             revision_id, "replan", txn, freeze_risk=True
         )
         after_items = [
@@ -1038,7 +1039,7 @@ class ScheduleReplanService:
         )
         failure = None
         response = None
-        with capacity_service._transaction(db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             use_node_engine = bool(
                 getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False)
             )

@@ -41,6 +41,8 @@ from modules.repositories.schedule_planning_repository import SchedulePlanningRe
 from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.services.production_node_service import ProductionNodeService
+from modules.services.schedule_planning_strategy import SchedulePlanningStrategy
+from modules.services.schedule_workflow_evidence import ScheduleWorkflowEvidence
 
 
 class ScheduleCapacityService:
@@ -935,7 +937,7 @@ class ScheduleCapacityService:
         ScheduleRevisionRepository.finalize_revision_content_digest(
             revision_id, db=txn
         )
-        conflict_assessment = ScheduleCapacityService._assess_revision_conflicts(
+        conflict_assessment = SchedulePlanningStrategy.assess_revision_conflicts(
             revision_id, "generation", txn, freeze_risk=True
         )
         planning_result = {
@@ -1113,7 +1115,7 @@ class ScheduleCapacityService:
                                "reason": payload["reason"]})
                 continue
 
-            standard = ScheduleCapacityService._find_standard(
+            standard = SchedulePlanningStrategy.find_standard(
                 txn, order["route_id"], route_version_id, operation["process_id"],
                 process_version_id, order["product_id"], order["product_code"],
                 standard_as_of,
@@ -1177,7 +1179,7 @@ class ScheduleCapacityService:
                     else None
                 )
                 if use_node_engine:
-                    segments, allocations = ScheduleCapacityService._allocate_split_on_nodes(
+                    segments, allocations = SchedulePlanningStrategy.allocate_split_on_nodes(
                         txn, resources, cursor, remaining, standard, occupancy,
                         # Policy matching is mapping-based.  SQLite
                         # rows support keyed indexing but not ``get``;
@@ -1190,7 +1192,7 @@ class ScheduleCapacityService:
                         return_allocations=True,
                     )
                 else:
-                    segments = ScheduleCapacityService._allocate_split_on_lines(
+                    segments = SchedulePlanningStrategy.allocate_split_on_lines(
                         txn, resources, cursor, remaining, standard, occupancy,
                     )
                     allocations = []
@@ -1269,7 +1271,7 @@ class ScheduleCapacityService:
                 shifts = SchedulePlanningRepository.list_calendar_shifts(
                     calendar["id"], db=txn
                 ) if calendar else []
-                snapshot = ScheduleCapacityService._calendar_snapshot(calendar, shifts)
+                snapshot = SchedulePlanningStrategy.calendar_snapshot(calendar, shifts)
                 snapshot.update({
                     resource_key: resource_id,
                     "process_line_id": resource.get("legacy_process_line_id", resource_id),
@@ -1868,7 +1870,7 @@ class ScheduleCapacityService:
         revision = ScheduleRevisionRepository.find_revision(revision_id)
         if revision is None:
             raise ValueError("排程版本不存在")
-        conflict_assessment = ScheduleCapacityService._assess_revision_conflicts(
+        conflict_assessment = SchedulePlanningStrategy.assess_revision_conflicts(
             revision_id, "detail", BaseService.db(), freeze_risk=False, persist=False
         )
         risk_assessment = ScheduleEvidenceRepository.find_revision_risk_assessment(
@@ -1901,76 +1903,33 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _workflow_input(reason, idempotency_key, actor_id):
-        reason = str(reason or "").strip()
-        key = str(idempotency_key or "").strip()
-        try:
-            actor = int(actor_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("操作人不能为空") from exc
-        if actor <= 0:
-            raise ValueError("操作人不能为空")
-        if not reason or len(reason) > 1024:
-            raise ValueError("原因必须填写且不能超过 1024 个字符")
-        if len(key) < 8 or len(key) > 128:
-            raise ValueError("幂等键长度必须在 8 到 128 个字符之间")
-        return reason, key, actor
+        return ScheduleWorkflowEvidence.normalize_input(
+            reason, idempotency_key, actor_id
+        )
 
     @staticmethod
     def _workflow_digest(payload):
-        encoded = json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return ScheduleWorkflowEvidence.digest(payload)
 
     @staticmethod
     def _workflow_replay(db, key, digest):
-        event = ScheduleRevisionRepository.find_workflow_event(key, db=db)
-        if event is None:
-            return None
-        if event["input_digest"] != digest:
-            raise NodeSchedulingError(
-                "IDEMPOTENCY_CONFLICT",
-                "幂等键已被不同输入使用",
-                {"idempotency_key": key},
-            )
-        try:
-            result = json.loads(event["after_json"] or "{}")
-        except (TypeError, json.JSONDecodeError):
-            result = {}
-        return {
-            "ok": True,
-            "idempotent_replay": True,
-            "event": dict(event),
-            "result": result,
-        }
+        return ScheduleWorkflowEvidence.replay(db, key, digest)
 
     @staticmethod
     def _record_workflow_event(db, *, revision_id, revision_item_id, event_type,
                                actor_id, reason, before, after, digest, key):
-        before_json = json.dumps(
-            before or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        after_json = json.dumps(
-            after or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        event = ScheduleRevisionRepository.create_workflow_event(
+        return ScheduleWorkflowEvidence.record(
+            db,
             revision_id=revision_id,
             revision_item_id=revision_item_id,
             event_type=event_type,
             actor_id=actor_id,
             reason=reason,
-            before_json=before_json,
-            after_json=after_json,
-            input_digest=digest,
+            before=before,
+            after=after,
+            digest=digest,
             idempotency_key=key,
-            db=db,
         )
-        return {
-            "ok": True,
-            "idempotent_replay": False,
-            "event": dict(event),
-            "result": after,
-        }
 
     # Compatibility facade: the revision workflow now lives in
     # ScheduleRevisionService. Keep historical callers stable while ensuring
@@ -2272,3 +2231,8 @@ class ScheduleCapacityService:
                 for row in SchedulePlanningRepository.list_capacity_overrides()
             ],
         }
+
+
+# Register the compatibility implementation after the class is fully defined;
+# the strategy module itself stays free of a static service import.
+SchedulePlanningStrategy.bind(ScheduleCapacityService)
