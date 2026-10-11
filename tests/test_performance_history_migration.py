@@ -517,6 +517,43 @@ def test_apply_generates_only_reviewable_v2_and_is_idempotent(client):
         ).fetchone()[0] == 1
 
 
+def test_apply_rejects_source_snapshot_drift_before_writing(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        seeded = _seed_history(db)
+        original_month_plan = PerformanceHistoryMigrationService._month_plan
+        calls = {"count": 0}
+
+        def drifting_month_plan(cls, production_month, connection):
+            calls["count"] += 1
+            planned = original_month_plan(production_month, connection)
+            if calls["count"] == 2:
+                planned = dict(planned)
+                planned["source_snapshot_sha256"] = "drifted-source-snapshot"
+            return planned
+
+        monkeypatch.setattr(
+            PerformanceHistoryMigrationService,
+            "_month_plan",
+            classmethod(drifting_month_plan),
+        )
+
+        with pytest.raises(RuntimeError, match="来源快照已漂移"):
+            PerformanceHistoryMigrationService.apply(
+                db,
+                MONTH,
+                MONTH,
+                seeded["actor_id"],
+                _expected_counts(),
+            )
+
+        assert db.execute(
+            "SELECT COUNT(*) FROM performance_batches WHERE production_month=? "
+            "AND legacy_imported=0",
+            (MONTH,),
+        ).fetchone()[0] == 0
+
+
 def test_apply_rejects_count_mismatch_and_stale_manifest_without_partial_writes(client):
     with client.application.app_context():
         db = get_db()
