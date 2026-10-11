@@ -31,6 +31,7 @@ PLANNING_METHODS = {
     "find_schedule",
     "find_standard",
     "formal_schedule_digest",
+    "planning_input_digest",
     "get_calendar",
     "get_calendar_exception",
     "line_available_dates",
@@ -49,6 +50,7 @@ PLANNING_METHODS = {
     "list_schedule_allocations",
     "list_schedule_segments",
     "list_scheduled_operations",
+    "resolve_order_operation_bindings",
 }
 
 REVISION_METHODS = {

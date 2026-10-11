@@ -90,6 +90,75 @@ class SchedulePlanningRepository:
             snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def planning_input_digest(order_id, db=None):
+        """Digest only facts that can change a planning decision.
+
+        Run/revision ledgers are deliberately excluded.  They are outputs of
+        planning and therefore must not make the optimistic re-check stale
+        merely because the short write transaction created its audit rows.
+        """
+        db = resolve_db(db)
+
+        def rows(sql, params=()):
+            return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+        snapshot = {
+            "order": rows(
+                "SELECT id,quantity,completed,status,plan_start,plan_end,deadline,"
+                "product_id,product_code,product_name,route_id,route_version_id,"
+                "route_name_snapshot,current_schedule_revision_id,schedule_replan_required "
+                "FROM orders WHERE id=? AND deleted_at IS NULL", (order_id,)
+            ),
+            "order_processes": rows(
+                "SELECT * FROM order_processes WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "work_records": rows(
+                "SELECT * FROM work_records WHERE order_id=? ORDER BY id", (order_id,)
+            ),
+            "scrap_records": rows(
+                "SELECT * FROM scrap_records WHERE order_id=? ORDER BY id", (order_id,)
+            ),
+            "rework_records": rows(
+                "SELECT * FROM rework_records WHERE order_id=? ORDER BY id", (order_id,)
+            ),
+            "schedules": rows(
+                "SELECT * FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (order_id,),
+            ),
+            "segments": rows(
+                "SELECT ss.* FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "WHERE s.order_id=? ORDER BY ss.id", (order_id,)
+            ),
+            "nodes": rows("SELECT * FROM production_nodes ORDER BY id"),
+            "capabilities": rows(
+                "SELECT * FROM production_node_capabilities ORDER BY id"
+            ),
+            "calendar_overrides": rows(
+                "SELECT * FROM production_node_calendar_overrides ORDER BY id"
+            ),
+            "calendars": rows("SELECT * FROM schedule_calendars ORDER BY id"),
+            "shifts": rows("SELECT * FROM schedule_shifts ORDER BY id"),
+            "standards": rows("SELECT * FROM work_time_standards ORDER BY id"),
+            "downtime": rows("SELECT * FROM schedule_downtime_events ORDER BY id"),
+            "other_node_occupancy": rows(
+                "SELECT ss.production_node_id,ss.segment_start_at,ss.segment_end_at,"
+                "ss.schedule_id FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "JOIN orders o ON o.id=s.order_id "
+                "WHERE s.order_id<>? AND o.deleted_at IS NULL "
+                "AND s.status<>'blocked' AND ss.production_node_id IS NOT NULL "
+                "ORDER BY ss.production_node_id,ss.segment_start_at,ss.id",
+                (order_id,),
+            ),
+        }
+        encoded = json.dumps(
+            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     @staticmethod
     def list_order_serial_ids(order_id, db=None):
         """Return active serial-item identifiers for a schedulable order."""
@@ -106,7 +175,7 @@ class SchedulePlanningRepository:
             return []
         return [str(row["serial_no"]) for row in rows]
     @staticmethod
-    def ensure_order_version_bindings(order_id, db):
+    def ensure_order_version_bindings(order_id, db, *, persist=True):
         """Materialize exact route/process revisions for a schedulable order.
 
         This is deliberately idempotent: legacy rows are upgraded only when a
@@ -127,7 +196,11 @@ class SchedulePlanningRepository:
                 (route_version_id,),
             ).fetchone()
             if route_binding is None or route_binding["process_route_id"] != order["route_id"]:
-                raise ValueError("订单—路线版本绑定不一致")
+                raise ValueError(
+                    "订单—路线版本绑定不一致"
+                    f"（order.route_id={order['route_id']}, route_version_id={route_version_id}, "
+                    f"version.route_id={route_binding['process_route_id'] if route_binding else None}）"
+                )
             if not route_name:
                 route_name = route_binding["name"] or ""
         if order["route_id"] is not None and route_version_id is None:
@@ -162,9 +235,9 @@ class SchedulePlanningRepository:
                     (route_version_id, op["process_id"]),
                 ).fetchone()
                 if item is None:
-                    raise ValueError("订单—路线—工序版本绑定不一致")
+                    raise ValueError("订单—路线—工序版本绑定不一致（路线中缺少工序）")
                 if op["process_version_id"] is not None and op["process_version_id"] != item["process_version_id"]:
-                    raise ValueError("订单—路线—工序版本绑定不一致")
+                    raise ValueError("订单—路线—工序版本绑定不一致（工序版本冲突）")
                 process_version_id = item["process_version_id"]
             if process_version_id is None:
                 row = db.execute(
@@ -185,20 +258,65 @@ class SchedulePlanningRepository:
             ).fetchone() if process_version_id else None
             if version is None:
                 raise ValueError("订单工序尚未绑定有效工序版本")
+            if persist:
+                db.execute(
+                    "UPDATE order_processes SET process_version_id=?,process_code_snapshot=?,"
+                    "process_name_snapshot=?,process_category_snapshot=? WHERE id=?",
+                    (process_version_id, version["process_code_snapshot"], version["name"], version["category"], op["id"]),
+                )
+        if persist:
             db.execute(
-                "UPDATE order_processes SET process_version_id=?,process_code_snapshot=?,"
-                "process_name_snapshot=?,process_category_snapshot=? WHERE id=?",
-                (process_version_id, version["process_code_snapshot"], version["name"], version["category"], op["id"]),
+                "UPDATE orders SET route_version_id=?,route_name_snapshot=? WHERE id=?",
+                (route_version_id, route_name, order_id),
             )
-        db.execute(
-            "UPDATE orders SET route_version_id=?,route_name_snapshot=? WHERE id=?",
-            (route_version_id, route_name, order_id),
-        )
-        return db.execute(
+        result = db.execute(
             "SELECT id,quantity,completed,status,plan_start,plan_end,deadline,product_id,product_code,product_name,"
             "route_id,route_version_id,route_name_snapshot,current_schedule_revision_id "
             "FROM orders WHERE id=? AND deleted_at IS NULL", (order_id,)
         ).fetchone()
+        if not persist:
+            result = dict(result)
+            result["route_version_id"] = route_version_id
+            result["route_name_snapshot"] = route_name
+        return result
+
+    @staticmethod
+    def resolve_order_operation_bindings(order_id, route_version_id, db):
+        """Return the read-only route/process bindings used by a plan."""
+        rows = db.execute(
+            "SELECT id,process_id,process_version_id FROM order_processes "
+            "WHERE order_id=? ORDER BY seq_order,id", (order_id,)
+        ).fetchall()
+        resolved = {}
+        for row in rows:
+            process_version_id = row["process_version_id"]
+            if route_version_id is not None:
+                item = db.execute(
+                    "SELECT process_version_id FROM process_route_version_items "
+                    "WHERE route_version_id=? AND process_id=?",
+                    (route_version_id, row["process_id"]),
+                ).fetchone()
+                if item is not None:
+                    process_version_id = item["process_version_id"]
+            if process_version_id is None:
+                current = db.execute(
+                    "SELECT current_effective_version_id FROM processes WHERE id=?",
+                    (row["process_id"],),
+                ).fetchone()
+                process_version_id = current["current_effective_version_id"] if current else None
+            version = db.execute(
+                "SELECT process_code_snapshot,name,category FROM process_versions "
+                "WHERE id=? AND process_id=?", (process_version_id, row["process_id"])
+            ).fetchone() if process_version_id else None
+            if version is None:
+                raise ValueError("订单工序尚未绑定有效工序版本")
+            resolved[int(row["id"])] = {
+                "process_version_id": process_version_id,
+                "process_code_snapshot": version["process_code_snapshot"],
+                "process_name_snapshot": version["name"],
+                "process_category_snapshot": version["category"],
+            }
+        return resolved
     @staticmethod
     def ensure_default_lines(process_id, process_name, db):
         count = DEFAULT_PROCESS_LINE_COUNTS.get(process_name)
