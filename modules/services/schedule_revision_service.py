@@ -15,34 +15,12 @@ from modules.domain.production_node_scheduling import NodeSchedulingError, Produ
 from modules.repositories.production_node_repository import ProductionNodeRepository
 from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.repositories.schedule_revision_repository import ScheduleRevisionRepository
+from modules.services.schedule_planning_strategy import SchedulePlanningStrategy
+from modules.services.schedule_workflow_evidence import ScheduleWorkflowEvidence
 
 
 class ScheduleRevisionService:
     """锁定、调整、审批和发布排程版本的应用服务。"""
-
-    @staticmethod
-    def _transaction(capacity_service, db=None):
-        return capacity_service._transaction(db)
-
-    @staticmethod
-    def _parse_timestamp(capacity_service, value):
-        return capacity_service._parse_timestamp(value)
-
-    @staticmethod
-    def _format_timestamp(capacity_service, value):
-        return capacity_service._format_timestamp(value)
-
-    @staticmethod
-    def _allocate_on_line(capacity_service, *args, **kwargs):
-        return capacity_service._allocate_on_line(*args, **kwargs)
-
-    @staticmethod
-    def _assess_revision_conflicts(capacity_service, *args, **kwargs):
-        return capacity_service._assess_revision_conflicts(*args, **kwargs)
-
-    @staticmethod
-    def _assert_revision_conflict_gate(capacity_service, *args, **kwargs):
-        return capacity_service._assert_revision_conflict_gate(*args, **kwargs)
 
     @staticmethod
     def _assert_node_write_enabled():
@@ -51,78 +29,35 @@ class ScheduleRevisionService:
 
     @staticmethod
     def _workflow_input(reason, idempotency_key, actor_id):
-        reason = str(reason or "").strip()
-        key = str(idempotency_key or "").strip()
-        try:
-            actor = int(actor_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("操作人不能为空") from exc
-        if actor <= 0:
-            raise ValueError("操作人不能为空")
-        if not reason or len(reason) > 1024:
-            raise ValueError("原因必须填写且不能超过 1024 个字符")
-        if len(key) < 8 or len(key) > 128:
-            raise ValueError("幂等键长度必须在 8 到 128 个字符之间")
-        return reason, key, actor
+        return ScheduleWorkflowEvidence.normalize_input(
+            reason, idempotency_key, actor_id
+        )
 
     @staticmethod
     def _workflow_digest(payload):
-        encoded = json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return ScheduleWorkflowEvidence.digest(payload)
 
     @staticmethod
     def _workflow_replay(db, key, digest):
-        event = ScheduleRevisionRepository.find_workflow_event(key, db=db)
-        if event is None:
-            return None
-        if event["input_digest"] != digest:
-            raise NodeSchedulingError(
-                "IDEMPOTENCY_CONFLICT",
-                "幂等键已被不同输入使用",
-                {"idempotency_key": key},
-            )
-        try:
-            result = json.loads(event["after_json"] or "{}")
-        except (TypeError, json.JSONDecodeError):
-            result = {}
-        return {
-            "ok": True,
-            "idempotent_replay": True,
-            "event": dict(event),
-            "result": result,
-        }
+        return ScheduleWorkflowEvidence.replay(db, key, digest)
 
     @staticmethod
     def _record_workflow_event(
         db, *, revision_id, revision_item_id, event_type, actor_id,
         reason, before, after, digest, key,
     ):
-        before_json = json.dumps(
-            before or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        after_json = json.dumps(
-            after or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        event = ScheduleRevisionRepository.create_workflow_event(
+        return ScheduleWorkflowEvidence.record(
+            db,
             revision_id=revision_id,
             revision_item_id=revision_item_id,
             event_type=event_type,
             actor_id=actor_id,
             reason=reason,
-            before_json=before_json,
-            after_json=after_json,
-            input_digest=digest,
+            before=before,
+            after=after,
+            digest=digest,
             idempotency_key=key,
-            db=db,
         )
-        return {
-            "ok": True,
-            "idempotent_replay": False,
-            "event": dict(event),
-            "result": after,
-        }
 
     @classmethod
     def lock_schedule_item(
@@ -136,7 +71,7 @@ class ScheduleRevisionService:
             "reason": reason, "actor_id": actor,
         }
         digest = cls._workflow_digest(payload)
-        with cls._transaction(capacity_service, db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
@@ -172,7 +107,7 @@ class ScheduleRevisionService:
             "reason": reason, "actor_id": actor,
         }
         digest = cls._workflow_digest(payload)
-        with cls._transaction(capacity_service, db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
@@ -208,17 +143,17 @@ class ScheduleRevisionService:
             expected_row_version = int(row_version)
         except (TypeError, ValueError) as exc:
             raise ValueError("排程条目、生产节点和行版本必须为正整数") from exc
-        start = cls._parse_timestamp(capacity_service, planned_start_at)
+        start = SchedulePlanningStrategy.parse_timestamp(planned_start_at)
         if start is None:
             raise ValueError("计划开始时间格式不正确")
         payload = {
             "action": "adjust", "revision_item_id": revision_item_id,
             "production_node_id": node_id,
-            "planned_start_at": cls._format_timestamp(capacity_service, start),
+            "planned_start_at": SchedulePlanningStrategy.format_timestamp(start),
             "row_version": expected_row_version, "reason": reason, "actor_id": actor,
         }
         digest = cls._workflow_digest(payload)
-        with cls._transaction(capacity_service, db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
@@ -288,11 +223,11 @@ class ScheduleRevisionService:
                         "locked": False,
                     })
             duration = max(float(item["occupied_minutes"] or 0), 1.0)
-            segments = cls._allocate_on_line(
-                capacity_service, txn, calendar, shifts, None, start, duration, []
+            segments = SchedulePlanningStrategy.allocate_on_line(
+                txn, calendar, shifts, None, start, duration, []
             )
-            if not segments or cls._parse_timestamp(
-                capacity_service, segments[0]["start_at"]
+            if not segments or SchedulePlanningStrategy.parse_timestamp(
+                segments[0]["start_at"]
             ) != start:
                 raise NodeSchedulingError("NODE_CALENDAR_UNAVAILABLE", "指定开始时间不在生产节点可用日历内")
             for segment in segments:
@@ -304,7 +239,7 @@ class ScheduleRevisionService:
                     occupancy=occupied, quantity=max(int(item["quantity"] or 0), 1),
                     batch_orders=[item["order_id"]],
                 )
-            end = cls._parse_timestamp(capacity_service, segments[-1]["end_at"])
+            end = SchedulePlanningStrategy.parse_timestamp(segments[-1]["end_at"])
             segment_payload = [
                 {**segment, "production_node_id": node_id,
                  "process_line_id": node.get("legacy_process_line_id")}
@@ -320,8 +255,8 @@ class ScheduleRevisionService:
                 "node_code_snapshot": node.get("node_code") or "",
                 "node_name_snapshot": node.get("node_name") or "",
                 "capacity_mode_snapshot": node.get("capacity_mode") or "",
-                "planned_start_at": cls._format_timestamp(capacity_service, start),
-                "planned_end_at": cls._format_timestamp(capacity_service, end),
+                "planned_start_at": SchedulePlanningStrategy.format_timestamp(start),
+                "planned_end_at": SchedulePlanningStrategy.format_timestamp(end),
                 "plan_start": start.strftime("%Y-%m-%d"),
                 "plan_end": end.strftime("%Y-%m-%d"),
                 "segments": segment_payload,
@@ -337,22 +272,22 @@ class ScheduleRevisionService:
                     "node_code_snapshot": node.get("node_code") or "",
                     "node_name_snapshot": node.get("node_name") or "",
                     "capacity_mode_snapshot": node.get("capacity_mode") or "",
-                    "planned_start_at": cls._format_timestamp(capacity_service, start),
-                    "planned_end_at": cls._format_timestamp(capacity_service, end),
+                    "planned_start_at": SchedulePlanningStrategy.format_timestamp(start),
+                    "planned_end_at": SchedulePlanningStrategy.format_timestamp(end),
                     "payload_json": encoded_payload,
                     "payload_digest": hashlib.sha256(encoded_payload.encode("utf-8")).hexdigest(),
                 },
                 created_by=actor, reason=reason, db=txn,
             )
-            cls._assess_revision_conflicts(
-                capacity_service, new_revision_id, "generation", txn, freeze_risk=True
+            SchedulePlanningStrategy.assess_revision_conflicts(
+                new_revision_id, "generation", txn, freeze_risk=True
             )
             new_item_id = item_map[revision_item_id]
             after = {
                 "source_revision_id": item["revision_id"], "revision_id": new_revision_id,
                 "revision_item_id": new_item_id, "production_node_id": node_id,
-                "planned_start_at": cls._format_timestamp(capacity_service, start),
-                "planned_end_at": cls._format_timestamp(capacity_service, end),
+                "planned_start_at": SchedulePlanningStrategy.format_timestamp(start),
+                "planned_end_at": SchedulePlanningStrategy.format_timestamp(end),
                 "approval_status": "draft",
             }
             return cls._record_workflow_event(
@@ -377,7 +312,7 @@ class ScheduleRevisionService:
             "reason": reason, "actor_id": actor,
         }
         digest = cls._workflow_digest(payload)
-        with cls._transaction(capacity_service, db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
@@ -404,8 +339,7 @@ class ScheduleRevisionService:
                     ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=txn)
                 except ValueError as exc:
                     raise NodeSchedulingError("REVISION_INTEGRITY_FAILED", str(exc)) from exc
-                cls._assert_revision_conflict_gate(
-                    capacity_service,
+                SchedulePlanningStrategy.assert_revision_conflict_gate(
                     revision_id, "submit" if target_status == "submitted" else "approve", txn
                 )
             if target_status == "approved" and revision["created_by"] == actor:
@@ -468,7 +402,7 @@ class ScheduleRevisionService:
             "reason": reason, "actor_id": actor,
         }
         digest = cls._workflow_digest(payload)
-        with cls._transaction(capacity_service, db) as txn:
+        with SchedulePlanningStrategy.transaction(db) as txn:
             replay = cls._workflow_replay(txn, key, digest)
             if replay:
                 return replay
@@ -491,8 +425,8 @@ class ScheduleRevisionService:
                 ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=txn)
             except ValueError as exc:
                 raise NodeSchedulingError("REVISION_INTEGRITY_FAILED", str(exc)) from exc
-            cls._assert_revision_conflict_gate(
-                capacity_service, revision_id, "publish", txn
+            SchedulePlanningStrategy.assert_revision_conflict_gate(
+                revision_id, "publish", txn
             )
             before = dict(revision)
             ScheduleRevisionRepository.publish_revision(
