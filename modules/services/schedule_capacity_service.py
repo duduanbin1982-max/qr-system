@@ -35,6 +35,7 @@ from modules.domain.production_time import (
     parse_production_date,
     production_midnight,
     production_now,
+    resolve_planning_now,
 )
 from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
 from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
@@ -86,6 +87,7 @@ class ScheduleCapacityService:
     @staticmethod
     def auto_plan_orders(
         start_date=None, auto_plan_key="", limit=100, actor_id=None, db=None,
+        planning_now=None,
     ):
         """Generate schedules for the immutable priority queue as one ledgered run.
 
@@ -98,17 +100,17 @@ class ScheduleCapacityService:
         if not run_key:
             raise ValueError("自动排程幂等键不能为空")
         bounded_limit = ScheduleCapacityService._limit(limit, default=100)
+        effective_now = resolve_planning_now(planning_now)
         if start_date in (None, ""):
-            effective_start = production_now().strftime("%Y-%m-%d")
+            effective_start = effective_now.strftime("%Y-%m-%d")
         else:
             effective_start = ScheduleCapacityService._date(start_date, "计划开始日期").strftime("%Y-%m-%d")
 
         response = None
         failure = None
         with ScheduleCapacityService._transaction(db) as txn:
-            planning_now = production_now()
             queue = SchedulePlanningRepository.list_schedulable_orders(
-                bounded_limit, db=txn, now=planning_now,
+                bounded_limit, db=txn, now=effective_now,
             )
             input_snapshot = {
                 "start_date": effective_start,
@@ -160,6 +162,7 @@ class ScheduleCapacityService:
                         schedule_run_key=order_run_key,
                         actor_id=actor_id,
                         db=txn,
+                        planning_now=effective_now,
                     )
                     results.append({
                         "order_id": order_id,
@@ -380,7 +383,8 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _assess_revision_conflicts(
-        revision_id, check_stage, db, *, freeze_risk=False, persist=True
+        revision_id, check_stage, db, *, freeze_risk=False, persist=True,
+        planning_now=None,
     ):
         (
             order, operations, candidate, occupied, unavailable, input_digest,
@@ -436,7 +440,7 @@ class ScheduleCapacityService:
                 deadline_text=order.get("deadline") or "",
                 projected_completion_at=projected_completion,
                 plan_end=order.get("plan_end") or "",
-                now=production_now(),
+                now=resolve_planning_now(planning_now),
                 completed=is_completed,
                 blocked_count=len(blocked),
                 blocked_reasons=blocked_reasons,
@@ -449,7 +453,7 @@ class ScheduleCapacityService:
                     or ""
                 ),
             )
-            assessed_at = format_database_timestamp(production_now())
+            assessed_at = format_database_timestamp(resolve_planning_now(planning_now))
             ScheduleEvidenceRepository.set_revision_risk_snapshot(
                 revision_id, risk, assessed_at, db
             )
@@ -822,6 +826,7 @@ class ScheduleCapacityService:
     @staticmethod
     def _prepare_generation_request(
         order_id, start_date, schedule_run_key, txn, *, persist_bindings=True,
+        planning_now=None,
     ):
         order = SchedulePlanningRepository.ensure_order_version_bindings(
             order_id, txn, persist=persist_bindings
@@ -848,10 +853,11 @@ class ScheduleCapacityService:
         )
         # Standards are effective for this planning run, not retroactively for
         # an old plan start retained by an in-progress order.
-        standard_as_of = max(cursor.date(), production_now().date()).strftime("%Y-%m-%d")
+        effective_now = resolve_planning_now(planning_now)
+        standard_as_of = max(cursor.date(), effective_now.date()).strftime("%Y-%m-%d")
         run_key = (
             schedule_run_key
-            or production_now().strftime("schedule-%Y%m%d%H%M%S")
+            or effective_now.strftime("schedule-%Y%m%d%H%M%S")
         ).strip()
         if not run_key:
             raise ValueError("排程幂等键不能为空")
@@ -948,6 +954,7 @@ class ScheduleCapacityService:
         facts_snapshot,
         txn,
         input_digest=None,
+        planning_now=None,
     ):
         planned = [
             row for row in result
@@ -971,7 +978,8 @@ class ScheduleCapacityService:
             revision_id, db=txn
         )
         conflict_assessment = SchedulePlanningStrategy.assess_revision_conflicts(
-            revision_id, "generation", txn, freeze_risk=True
+            revision_id, "generation", txn, freeze_risk=True,
+            planning_now=planning_now,
         )
         planning_result = {
             "operations": result,
@@ -1450,7 +1458,8 @@ class ScheduleCapacityService:
 
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None,
-                                actor_id=None, use_node_engine_override=None):
+                                actor_id=None, use_node_engine_override=None,
+                                planning_now=None):
         # Phase 1: a deferred read snapshot.  No schedule rows or ledgers are
         # written while matching standards and allocating capacity.
         use_node_engine = (
@@ -1465,6 +1474,7 @@ class ScheduleCapacityService:
                 schedule_run_key,
                 snapshot_db,
                 persist_bindings=False,
+                planning_now=planning_now,
             )
             order = request["order"]
             operations = request["operations"]
@@ -1533,7 +1543,8 @@ class ScheduleCapacityService:
                     txn=txn,
                 )
             request = ScheduleCapacityService._prepare_generation_request(
-                order_id, start_date, schedule_run_key, txn, persist_bindings=True
+                order_id, start_date, schedule_run_key, txn, persist_bindings=True,
+                planning_now=planning_now,
             )
             order = request["order"]
             run_id, revision_id = ScheduleCapacityService._create_generation_ledger(
@@ -1571,6 +1582,7 @@ class ScheduleCapacityService:
                     facts_snapshot=facts_snapshot,
                     txn=txn,
                     input_digest=planning_digest,
+                    planning_now=planning_now,
                 )
                 txn.execute("RELEASE SAVEPOINT schedule_generation")
             except Exception as exc:

@@ -128,7 +128,7 @@ def _timestamp(value):
         return None
 
 
-def _historical_replay(db, order, actor_id, index):
+def _historical_replay(db, order, actor_id, index, planning_now=None):
     order_id = int(order["id"])
     actual_operations = _actual_operation_windows(db, order_id)
     actual_by_process = {
@@ -160,6 +160,7 @@ def _historical_replay(db, order, actor_id, index):
             actor_id=actor_id,
             db=db,
             use_node_engine_override=True,
+            planning_now=planning_now,
         )
         operations = result.get("operations") or []
         planned = [row for row in operations if row.get("status") == "planned"]
@@ -416,7 +417,6 @@ def run(args):
         ).fetchone()[0])
         execution_before = _execution_fingerprint(db)
 
-        real_datetime = schedule_service_module.datetime
         original_flags = {
             "PRODUCTION_NODE_QUERY_ENABLED": getattr(
                 schedule_service_module.config,
@@ -436,14 +436,6 @@ def run(args):
             ),
         }
 
-        class FixedDateTime(real_datetime):
-            @classmethod
-            def now(cls, tz=None):
-                if tz is None:
-                    return cls.fromtimestamp(planning_now.timestamp())
-                return cls.fromtimestamp(planning_now.timestamp(), tz)
-
-        schedule_service_module.datetime = FixedDateTime
         schedule_service_module.config.PRODUCTION_NODE_QUERY_ENABLED = True
         schedule_service_module.config.PRODUCTION_NODE_COMPAT_AUDIT_ENABLED = True
         schedule_service_module.config.PRODUCTION_NODE_WRITE_ENABLED = True
@@ -455,16 +447,18 @@ def run(args):
                 limit=1000,
                 actor_id=int(actor["id"]),
                 db=db,
+                planning_now=planning_now,
             )
             historical_candidates = _historical_candidates(
                 db, args.historical_limit
             )
             historical_replays = [
-                _historical_replay(db, row, int(actor["id"]), index)
+                _historical_replay(
+                    db, row, int(actor["id"]), index, planning_now=planning_now
+                )
                 for index, row in enumerate(historical_candidates, start=1)
             ]
         finally:
-            schedule_service_module.datetime = real_datetime
             for name, value in original_flags.items():
                 setattr(schedule_service_module.config, name, value)
 
