@@ -1,7 +1,7 @@
 """qr-system - SettingsService (Repository-refactored)"""
 from modules.services import BaseService
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.repositories.setting_repository import SettingRepository
-from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.order_focus_config import (
     COMPLETION_FOCUS_MODE_KEY,
     COMPLETION_FOCUS_MODES,
@@ -138,14 +138,16 @@ class SettingsService:
             for k in valid_deletes:
                 SettingRepository.delete_txn(k, db=txn)
             if actor:
-                AuditLogRepository.insert_log(
-                    actor.get('id'),
-                    'save_settings',
-                    'system',
-                    0,
-                    {
-                        'changed_keys': sorted(validated),
-                        'deleted_keys': sorted(valid_deletes),
-                    },
+                AuditWriter.required(
+                    AuditCommand.create(
+                        actor.get('id'),
+                        'save_settings',
+                        'system',
+                        0,
+                        {
+                            'changed_keys': sorted(validated),
+                            'deleted_keys': sorted(valid_deletes),
+                        },
+                    ),
                     db=txn,
                 )

@@ -2,9 +2,9 @@
 import json
 import re
 
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.config import _get_pinyin_initial
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
-from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.repositories.role_repository import RoleGroupRepository, RoleRepository
 from modules.services import BaseService
 from modules.services.administrator_policy import AdministratorPolicy
@@ -16,6 +16,27 @@ def _audit_detail(before, after):
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
+    )
+
+
+def _write_required_audit(
+    user_id,
+    action,
+    target_type,
+    target_id,
+    detail,
+    *,
+    db,
+):
+    return AuditWriter.required(
+        AuditCommand.create(
+            user_id,
+            action,
+            target_type,
+            target_id,
+            detail,
+        ),
+        db=db,
     )
 
 
@@ -53,7 +74,7 @@ class RoleGroupService:
                 db=txn,
             )
             after = dict(RoleGroupRepository.find_by_id(group_id, db=txn))
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "create_role_group",
                 "role_group",
@@ -116,7 +137,7 @@ class RoleGroupService:
             sets.append('updated_at = datetime("now","localtime")')
             RoleGroupRepository.update_txn(", ".join(sets), params, group_id, db=txn)
             after = dict(RoleGroupRepository.find_by_id(group_id, db=txn))
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "update_role_group",
                 "role_group",
@@ -139,7 +160,7 @@ class RoleGroupService:
                 raise ConflictError("该角色组下有 " + str(role_count) + " 个角色，无法删除")
             before = dict(existing)
             RoleGroupRepository.delete_txn(group_id, db=txn)
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "delete_role_group",
                 "role_group",
@@ -232,7 +253,7 @@ class RoleService:
                 db=txn,
             )
             after = dict(RoleRepository.find_by_id(role_id, db=txn))
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "create_role",
                 "role",
@@ -350,7 +371,7 @@ class RoleService:
             sets.append('updated_at = datetime("now","localtime")')
             RoleRepository.update_txn(", ".join(sets), params, role_id, db=txn)
             after = dict(RoleRepository.find_by_id(role_id, db=txn))
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "update_role",
                 "role",
@@ -375,7 +396,7 @@ class RoleService:
                 )
             before = dict(role)
             RoleRepository.delete_txn(role_id, db=txn)
-            AuditLogRepository.insert_log(
+            _write_required_audit(
                 actor_id,
                 "delete_role",
                 "role",
