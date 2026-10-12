@@ -1,6 +1,6 @@
 """Derive the order completion state from workpiece and process facts."""
 
-from modules.repositories.audit_log_repository import AuditLogRepository
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.repositories.order_completion_repository import OrderCompletionRepository
 from modules.services import BaseService
 
@@ -10,7 +10,7 @@ class OrderCompletionService:
 
     ACTIVE_STATUSES = {"pending", "producing"}
     repository = None
-    audit_repository = None
+    audit_writer = None
     unit_of_work = None
 
     @classmethod
@@ -18,8 +18,8 @@ class OrderCompletionService:
         return cls.repository or OrderCompletionRepository
 
     @classmethod
-    def _audit_repository(cls):
-        return cls.audit_repository or AuditLogRepository
+    def _audit_writer(cls):
+        return cls.audit_writer or AuditWriter
 
     @classmethod
     def _unit_of_work(cls):
@@ -95,12 +95,14 @@ class OrderCompletionService:
                 f"processes={result['completed_processes']}/{result['process_total']}; "
                 f"quality_gates={result.get('pending_quality_gates', 0)}"
             )
-            OrderCompletionService._audit_repository().insert_log(
-                actor_id,
-                "order_status_reconciled",
-                "order",
-                order_id,
-                detail,
+            OrderCompletionService._audit_writer().required(
+                AuditCommand.create(
+                    actor_id,
+                    "order_status_reconciled",
+                    "order",
+                    order_id,
+                    detail,
+                ),
                 db=db,
             )
         return result

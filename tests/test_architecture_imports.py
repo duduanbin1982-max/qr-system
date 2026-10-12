@@ -50,15 +50,8 @@ SERVICE_DATABASE_IMPORT_BASELINE = {
         {"modules.db_unit_of_work"}
     ),
 }
-MIDDLEWARE_SQL_BASELINE = frozenset({"modules/middleware/audit.py"})
-MIDDLEWARE_SQL_FINGERPRINT_BASELINE = {
-    "modules/middleware/audit.py": (
-        (
-            "execute",
-            "8361a74f5fffeea750d020a55a31cda192382c38dcc5115b2fccb2e3880aebd4",
-        ),
-    ),
-}
+MIDDLEWARE_SQL_BASELINE = frozenset()
+MIDDLEWARE_SQL_FINGERPRINT_BASELINE = {}
 
 
 def _is_generated_python_file(path):
@@ -854,8 +847,7 @@ def test_middleware_sql_access_matches_frozen_task0_baseline():
     actual_files = frozenset(item.split(":", 1)[0] for item in violations)
 
     assert actual_files <= MIDDLEWARE_SQL_BASELINE, (
-        "middleware database writes must stay inside the existing audit adapter while the "
-        f"audit boundary is migrated: {violations}"
+        f"middleware must delegate persistence to an adapter: {violations}"
     )
     actual_fingerprints = _middleware_sql_fingerprints(
         paths, source_root=PROJECT_ROOT
@@ -865,6 +857,29 @@ def test_middleware_sql_access_matches_frozen_task0_baseline():
         f"the baseline: expected {MIDDLEWARE_SQL_FINGERPRINT_BASELINE}, "
         f"actual {actual_fingerprints}"
     )
+
+
+def test_audit_middleware_only_adapts_request_context():
+    path = PROJECT_ROOT / "modules" / "middleware" / "audit.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "get_db" not in source
+    assert ".execute(" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
+    assert "AuditCommand.create" in source
+    assert "AuditWriter.best_effort" in source
+    assert "AuditWriter.required" in source
+
+
+def test_audit_repository_only_persists_caller_owned_commands():
+    path = PROJECT_ROOT / "modules" / "repositories" / "audit_log_repository.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "def insert_command(" in source
+    assert "def insert_log(" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
 
 
 def test_services_do_not_depend_on_migrations():

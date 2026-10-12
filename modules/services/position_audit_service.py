@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from modules.audit_policy import sanitize_audit_detail
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.domain.actor_context import ActorContextParseError, parse_actor_context
 from modules.domain.errors import ValidationError
 from modules.domain.position_versioning import canonical_json, position_diff
@@ -42,15 +43,17 @@ class PositionAuditService:
 
     @staticmethod
     def _insert(db, *, actor_id, action, position_id, detail, event_id, request_id):
-        return AuditLogRepository.insert_log(
-            actor_id,
-            action,
-            "position",
-            position_id,
-            detail,
+        return AuditWriter.required(
+            AuditCommand.create(
+                actor_id,
+                action,
+                "position",
+                position_id,
+                detail,
+                event_id=event_id,
+                request_id=request_id,
+            ),
             db=db,
-            event_id=event_id,
-            request_id=request_id,
         )
 
     @staticmethod

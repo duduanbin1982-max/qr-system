@@ -9,6 +9,7 @@ import json
 from decimal import Decimal
 
 from modules import config
+from modules.audit_writer import AuditCommand
 from modules.domain.errors import (
     ConflictError,
     InventoryAllocationPreviewDisabledError,
@@ -288,13 +289,20 @@ class InventoryAllocationService:
                     txn,
                 )
             AuditLogRepository.enqueue_event_txn(
-                operator_id,
-                "inventory_allocation_outbound",
-                "inventory_allocation_run",
-                run_id,
-                {"product_id": product_id, "quantity": quantity, "mode": mode, "idempotency_key": idempotency_key},
+                AuditCommand.create(
+                    operator_id,
+                    "inventory_allocation_outbound",
+                    "inventory_allocation_run",
+                    run_id,
+                    {
+                        "product_id": product_id,
+                        "quantity": quantity,
+                        "mode": mode,
+                        "idempotency_key": idempotency_key,
+                    },
+                    request_id=idempotency_key,
+                ),
                 db=txn,
-                request_id=idempotency_key,
             )
             saved = InventoryRepository.find_allocation_run(run_id, db=txn)
             return cls._run_payload(saved, db=txn, idempotent=False)
@@ -426,13 +434,18 @@ class InventoryAllocationService:
                     txn,
                 )
             AuditLogRepository.enqueue_event_txn(
-                operator_id,
-                "inventory_allocation_reversal",
-                "inventory_allocation_run",
-                reversal_id,
-                {"reversal_of_run_id": run_id, "idempotency_key": idempotency_key},
+                AuditCommand.create(
+                    operator_id,
+                    "inventory_allocation_reversal",
+                    "inventory_allocation_run",
+                    reversal_id,
+                    {
+                        "reversal_of_run_id": run_id,
+                        "idempotency_key": idempotency_key,
+                    },
+                    request_id=idempotency_key,
+                ),
                 db=txn,
-                request_id=idempotency_key,
             )
             return cls._run_payload(
                 InventoryRepository.find_allocation_run(reversal_id, db=txn),

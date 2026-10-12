@@ -1,6 +1,7 @@
 """Controlled retention workflow for audit evidence."""
 
 from modules.audit_policy import AUDIT_MIN_RETENTION_DAYS
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.repositories.audit_log_repository import AuditLogRepository
 from modules.services import BaseService
 
@@ -27,16 +28,18 @@ class AuditRetentionService:
             result = AuditLogRepository.create_cleanup_request_txn(
                 int(before_days), reason, actor.get("id"), db=txn
             )
-            AuditLogRepository.insert_log(
-                actor.get("id"),
-                "audit_cleanup_requested",
-                "audit_log_cleanup_request",
-                result["id"],
-                {
-                    "before_at": result["before_at"],
-                    "affected_count": result["affected_count"],
-                    "reason": reason,
-                },
+            AuditWriter.required(
+                AuditCommand.create(
+                    actor.get("id"),
+                    "audit_cleanup_requested",
+                    "audit_log_cleanup_request",
+                    result["id"],
+                    {
+                        "before_at": result["before_at"],
+                        "affected_count": result["affected_count"],
+                        "reason": reason,
+                    },
+                ),
                 db=txn,
             )
             return result
@@ -55,12 +58,14 @@ class AuditRetentionService:
                 request_id, actor.get("id"), reason, db=txn
             ):
                 raise ValueError("清理申请已经处理")
-            AuditLogRepository.insert_log(
-                actor.get("id"),
-                "audit_cleanup_rejected",
-                "audit_log_cleanup_request",
-                request_id,
-                {"decision_reason": reason},
+            AuditWriter.required(
+                AuditCommand.create(
+                    actor.get("id"),
+                    "audit_cleanup_rejected",
+                    "audit_log_cleanup_request",
+                    request_id,
+                    {"decision_reason": reason},
+                ),
                 db=txn,
             )
 
@@ -73,17 +78,19 @@ class AuditRetentionService:
             result = AuditLogRepository.execute_cleanup_request_txn(
                 request_id, actor.get("id"), reason, db=txn
             )
-            AuditLogRepository.insert_log(
-                actor.get("id"),
-                "audit_cleanup_executed",
-                "audit_log_cleanup_request",
-                request_id,
-                {
-                    "archive_batch_id": result["archive_batch_id"],
-                    "archived": result["archived"],
-                    "deleted": result["deleted"],
-                    "decision_reason": reason,
-                },
+            AuditWriter.required(
+                AuditCommand.create(
+                    actor.get("id"),
+                    "audit_cleanup_executed",
+                    "audit_log_cleanup_request",
+                    request_id,
+                    {
+                        "archive_batch_id": result["archive_batch_id"],
+                        "archived": result["archived"],
+                        "deleted": result["deleted"],
+                        "decision_reason": reason,
+                    },
+                ),
                 db=txn,
             )
             return result

@@ -25,7 +25,7 @@ from modules.services.work_report_writer import WorkReportWriter
         (MaterialService, "consumption_repository", "_consumption_repository"),
         (MaterialService, "unit_of_work", "_unit_of_work"),
         (OrderCompletionService, "repository", "_repository"),
-        (OrderCompletionService, "audit_repository", "_audit_repository"),
+        (OrderCompletionService, "audit_writer", "_audit_writer"),
         (OrderCompletionService, "unit_of_work", "_unit_of_work"),
         (OrderService, "repository", "_repository"),
         (OrderService, "material_repository", "_material_repository"),
