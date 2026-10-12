@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -37,6 +38,28 @@ GENERATED_PYTHON_FILE_PATTERNS = (
 GENERATED_PYTHON_DIRECTORY_NAMES = frozenset(
     {"__generated__", "_generated", "generated"}
 )
+
+# Task 0 ratchet: these are the only pre-existing service-to-database seams
+# accepted while the infrastructure boundary is being migrated. New imports
+# must be removed or explicitly reviewed instead of silently expanding this set.
+SERVICE_DATABASE_IMPORT_BASELINE = {
+    "modules/services/approval_policy_service.py": frozenset(
+        {"modules.db_unit_of_work"}
+    ),
+    "modules/services/auth_session_service.py": frozenset({"modules.db"}),
+    "modules/services/department_service.py": frozenset(
+        {"modules.db_unit_of_work"}
+    ),
+}
+MIDDLEWARE_SQL_BASELINE = frozenset({"modules/middleware/audit.py"})
+MIDDLEWARE_SQL_FINGERPRINT_BASELINE = {
+    "modules/middleware/audit.py": (
+        (
+            "execute",
+            "8361a74f5fffeea750d020a55a31cda192382c38dcc5115b2fccb2e3880aebd4",
+        ),
+    ),
+}
 
 
 def _is_generated_python_file(path):
@@ -319,6 +342,55 @@ def _service_migration_import_violations(paths, *, source_root=PROJECT_ROOT):
     return violations
 
 
+def _service_database_imports(paths, *, source_root=PROJECT_ROOT):
+    imports = defaultdict(set)
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        for _, module_name in _imported_modules(path, source_root):
+            if module_name in {"modules.db", "modules.db_unit_of_work"}:
+                imports[relative_path].add(module_name)
+    return {path: frozenset(values) for path, values in imports.items()}
+
+
+def _middleware_sql_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    database_methods = {"execute", "executemany", "executescript", "cursor"}
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in database_methods
+            ):
+                violations.append(
+                    f"{_display_path(path, source_root)}:{node.lineno} -> .{node.func.attr}()"
+                )
+    return violations
+
+
+def _middleware_sql_fingerprints(paths, *, source_root=PROJECT_ROOT):
+    fingerprints = defaultdict(list)
+    database_methods = {"execute", "executemany", "executescript", "cursor"}
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        relative_path = _display_path(path, source_root)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in database_methods
+            ):
+                semantic_shape = ast.dump(
+                    node, annotate_fields=True, include_attributes=False
+                )
+                digest = hashlib.sha256(semantic_shape.encode("utf-8")).hexdigest()
+                fingerprints[relative_path].append((node.func.attr, digest))
+    return {
+        path: tuple(sorted(values)) for path, values in fingerprints.items()
+    }
+
+
 SERVICE_SQL_PATTERN = re.compile(
     r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",
     re.IGNORECASE | re.DOTALL,
@@ -430,6 +502,9 @@ def nested_architecture_violation_tree(tmp_path):
         "modules/services/quality_management/bad_business_sql.py": (
             'QUERY = "SELECT id FROM orders"\n'
         ),
+        "modules/services/quality_management/bad_db_boundary.py": (
+            "from modules.db import get_db\n"
+        ),
         "modules/services/quality_management/ignored.generated.py": "import sqlite3\n",
         "modules/services/quality_management/__init__.py": "import sqlite3\n",
         "modules/repositories/quality_management/bad_service_dependency.py": (
@@ -443,6 +518,9 @@ def nested_architecture_violation_tree(tmp_path):
         ),
         "modules/routes/inventory/nested/bad_database_route.py": (
             "from modules.db import get_db\n"
+        ),
+        "modules/middleware/bad_sql_boundary.py": (
+            "def write_badly(db):\n    db.execute(\"UPDATE orders SET status = 'x'\")\n"
         ),
     }
     for relative_path, source in fixture_sources.items():
@@ -494,6 +572,10 @@ def test_nested_architecture_violations_are_rejected(nested_architecture_violati
             service_paths, source_root=fixture_root
         )
     )
+    service_database_imports = _service_database_imports(
+        service_paths, source_root=fixture_root
+    )
+    assert "modules/services/quality_management/bad_db_boundary.py" in service_database_imports
     assert any(
         "bad_service_dependency.py" in violation
         for violation in _repository_service_dependency_violations(
@@ -511,6 +593,11 @@ def test_nested_architecture_violations_are_rejected(nested_architecture_violati
     )
     assert any("bad_repository_route.py" in violation for violation in route_violations)
     assert any("bad_database_route.py" in violation for violation in route_violations)
+    middleware_violations = _middleware_sql_violations(
+        _architecture_files(fixture_root / "modules" / "middleware"),
+        source_root=fixture_root,
+    )
+    assert any("bad_sql_boundary.py" in violation for violation in middleware_violations)
 
 
 def test_schedule_capacity_allocator_is_database_independent():
@@ -747,6 +834,38 @@ def test_services_do_not_import_sqlite_driver_directly():
     )
 
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
+
+
+def test_service_database_imports_match_frozen_task0_baseline():
+    service_root = PROJECT_ROOT / "modules" / "services"
+    actual = _service_database_imports(
+        _architecture_files(service_root, layer="services")
+    )
+
+    assert actual == SERVICE_DATABASE_IMPORT_BASELINE, (
+        "service-to-database imports changed; remove the new seam or update the architecture "
+        f"plan explicitly: expected {SERVICE_DATABASE_IMPORT_BASELINE}, actual {actual}"
+    )
+
+
+def test_middleware_sql_access_matches_frozen_task0_baseline():
+    middleware_root = PROJECT_ROOT / "modules" / "middleware"
+    paths = tuple(_architecture_files(middleware_root))
+    violations = _middleware_sql_violations(paths, source_root=PROJECT_ROOT)
+    actual_files = frozenset(item.split(":", 1)[0] for item in violations)
+
+    assert actual_files <= MIDDLEWARE_SQL_BASELINE, (
+        "middleware database writes must stay inside the existing audit adapter while the "
+        f"audit boundary is migrated: {violations}"
+    )
+    actual_fingerprints = _middleware_sql_fingerprints(
+        paths, source_root=PROJECT_ROOT
+    )
+    assert actual_fingerprints == MIDDLEWARE_SQL_FINGERPRINT_BASELINE, (
+        "middleware SQL calls changed; update the audit boundary instead of silently changing "
+        f"the baseline: expected {MIDDLEWARE_SQL_FINGERPRINT_BASELINE}, "
+        f"actual {actual_fingerprints}"
+    )
 
 
 def test_services_do_not_depend_on_migrations():
