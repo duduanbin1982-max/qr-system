@@ -57,6 +57,11 @@ def production_now():
     return datetime.now(PRODUCTION_TIMEZONE)
 
 
+def resolve_planning_now(value=None):
+    """Use an explicit planning instant, or the current production instant."""
+    return value if value is not None else production_now()
+
+
 def production_midnight(value):
     """Return an aware production-zone midnight for a date or datetime."""
     if isinstance(value, datetime):
@@ -183,5 +188,6 @@ __all__ = [
     "parse_production_date",
     "production_midnight",
     "production_now",
+    "resolve_planning_now",
     "same_instant",
 ]
