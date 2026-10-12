@@ -95,6 +95,34 @@ def test_best_effort_failure_rolls_back_only_its_savepoint(client, caplog):
         assert "best-effort audit write failed" in caplog.text
 
 
+def test_best_effort_db_initialization_failure_is_isolated(client, monkeypatch, caplog):
+    command = AuditCommand.create(1000, "legacy_event", "system")
+
+    def fail_get_db():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr("modules.db.get_db", fail_get_db)
+
+    with client.application.app_context():
+        assert AuditWriter.best_effort(command) is None
+
+    assert "best-effort audit write failed" in caplog.text
+    assert "database unavailable" in caplog.text
+
+
+def test_safe_audit_log_command_failure_is_isolated(client, monkeypatch, caplog):
+    def fail_command(*args, **kwargs):
+        raise RuntimeError("request context unavailable")
+
+    monkeypatch.setattr("modules.middleware.audit._request_command", fail_command)
+
+    with client.application.test_request_context("/api/settings"):
+        assert safe_audit_log("save_settings", "system") is None
+
+    assert "best-effort request audit preparation failed" in caplog.text
+    assert "request context unavailable" in caplog.text
+
+
 def test_request_audit_preserves_context_redaction_and_metadata(client):
     request_id = "request-" + "x" * 140
     with client.application.test_request_context(

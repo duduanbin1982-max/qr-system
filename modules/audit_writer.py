@@ -108,13 +108,15 @@ class AuditWriter:
     ):
         """Isolate an audit attempt and never alter the caller's failure outcome."""
 
-        if db is None:
-            from modules.db import get_db
-
-            db = get_db()
         savepoint = "audit_" + uuid.uuid4().hex
         savepoint_created = False
+        event_id = getattr(command, "event_id", "<unknown>")
+        action = getattr(command, "action", "<unknown>")
         try:
+            if db is None:
+                from modules.db import get_db
+
+                db = get_db()
             db.execute(f"SAVEPOINT {savepoint}")
             savepoint_created = True
             event_id = (port or cls._port()).insert_command(command, db=db)
@@ -132,8 +134,8 @@ class AuditWriter:
                     )
             LOGGER.warning(
                 "best-effort audit write failed action=%s event_id=%s: %s",
-                command.action,
-                command.event_id,
+                action,
+                event_id,
                 exc,
             )
             return None

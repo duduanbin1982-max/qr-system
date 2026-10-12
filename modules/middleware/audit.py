@@ -1,8 +1,13 @@
 """Request-context adapter for the unified audit writer."""
 
+import logging
+
 from flask import g, request
 
 from modules.audit_writer import AuditCommand, AuditWriter
+
+
+LOGGER = logging.getLogger("qr-system")
 
 
 def _request_command(action, target_type="", target_id=0, detail=""):
@@ -32,9 +37,16 @@ def safe_audit_log(
 ):
     """Write an isolated audit event without changing the business outcome."""
 
-    return AuditWriter.best_effort(
-        _request_command(action, target_type, target_id, detail)
-    )
+    try:
+        command = _request_command(action, target_type, target_id, detail)
+        return AuditWriter.best_effort(command)
+    except Exception as exc:
+        LOGGER.warning(
+            "best-effort request audit preparation failed action=%s: %s",
+            action,
+            exc,
+        )
+        return None
 
 
 def required_audit_log(
