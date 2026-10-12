@@ -46,7 +46,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = {
     "modules/services/approval_policy_service.py": frozenset(
         {"modules.db_unit_of_work"}
     ),
-    "modules/services/auth_session_service.py": frozenset({"modules.db"}),
     "modules/services/department_service.py": frozenset(
         {"modules.db_unit_of_work"}
     ),

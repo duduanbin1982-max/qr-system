@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from modules.db import get_db
+from modules.services.auth_session_service import AuthSessionService
 from factory_auth import TEST_PASS, TEST_USER
 
 
@@ -39,6 +40,50 @@ def _get_session_times(client, token):
             (token,),
         ).fetchone()
         return user_last_active, session["last_active"], session["is_active"]
+
+
+def test_auth_session_setting_reads_boundary_value(monkeypatch):
+    calls = []
+
+    def fake_setting_reader(key, default):
+        calls.append((key, default))
+        return "45"
+
+    monkeypatch.setattr(
+        AuthSessionService,
+        "setting_reader",
+        staticmethod(fake_setting_reader),
+    )
+
+    assert AuthSessionService._setting_int("session_idle_minutes", 30) == 45
+    assert calls == [("session_idle_minutes", "")]
+
+
+@pytest.mark.parametrize("stored_value", [None, "", "invalid", "-1"])
+def test_auth_session_setting_invalid_values_use_default(monkeypatch, stored_value):
+    def fake_setting_reader(key, default):
+        return stored_value
+
+    monkeypatch.setattr(
+        AuthSessionService,
+        "setting_reader",
+        staticmethod(fake_setting_reader),
+    )
+
+    assert AuthSessionService._setting_int("session_timeout_hours", 8) == 8
+
+
+def test_auth_session_setting_reader_errors_use_default(monkeypatch):
+    def failing_setting_reader(key, default):
+        raise RuntimeError("settings unavailable")
+
+    monkeypatch.setattr(
+        AuthSessionService,
+        "setting_reader",
+        staticmethod(failing_setting_reader),
+    )
+
+    assert AuthSessionService._setting_int("session_timeout_hours", 8) == 8
 
 
 @pytest.mark.integration
