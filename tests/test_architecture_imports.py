@@ -8,6 +8,12 @@ from pathlib import Path
 import pytest
 
 
+def test_operations_scripts_use_the_stable_application_boundary():
+    from test_operations_script_boundary import assert_script_boundaries
+
+    assert_script_boundaries()
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEDULE_CAPACITY_SERVICE_DECISION_POINT_BUDGET = 353
 IGNORED_PARTS = {

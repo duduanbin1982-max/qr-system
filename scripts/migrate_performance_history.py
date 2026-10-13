@@ -26,6 +26,8 @@ BASELINE_FIELDS = (
 )
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(
         description=(
@@ -90,9 +92,6 @@ def main(argv=None):
         parser.error(str(exc))
     _require_apply_arguments(parser, args, expected_counts)
 
-    from modules.services.performance_history_migration_service import (
-        PerformanceHistoryMigrationService,
-    )
 
     db = sqlite3.connect(args.db)
     db.row_factory = sqlite3.Row
@@ -101,17 +100,17 @@ def main(argv=None):
     if not args.apply:
         db.execute("PRAGMA query_only=ON")
     try:
-        plan = PerformanceHistoryMigrationService.analyze(
+        plan = OperationsFacade.performance_history_analyze(
             db, args.start_month, args.end_month
         )
         if expected_counts is not None:
-            PerformanceHistoryMigrationService.validate_counts(
+            OperationsFacade.performance_history_validate_counts(
                 plan, expected_counts
             )
         if not args.apply:
             result = {"mode": "preflight", "plan": plan}
         else:
-            applied = PerformanceHistoryMigrationService.apply(
+            applied = OperationsFacade.performance_history_apply(
                 db,
                 args.start_month,
                 args.end_month,

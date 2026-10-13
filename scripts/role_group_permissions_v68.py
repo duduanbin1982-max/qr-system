@@ -12,7 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.permission_catalog import ALL_PERMISSION_CODES  # noqa: E402
+from modules.application.operations_facade import OperationsFacade
+
+ALL_PERMISSION_CODES = OperationsFacade.all_permission_codes()
 
 
 REQUIRED_SCHEMA_VERSION = 68
@@ -409,7 +411,6 @@ def apply_cutover(
         if report["manifest_sha256"] != expected_manifest_sha256:
             raise ValueError("生产数据已变化，预检清单 SHA-256 不匹配")
 
-        from modules.audit_writer import insert_audit_log
 
         manifest = _manifest_projection(report)
         cursor = db.execute(
@@ -459,7 +460,7 @@ def apply_cutover(
                     "角色组权限在迁移事务中发生并发变化：" + str(group["group_id"])
                 )
 
-        insert_audit_log(
+        OperationsFacade.insert_audit_log(
             db,
             int(actor_user_id),
             "role_group_permission_cutover",

@@ -35,6 +35,8 @@ EXPECTED_PAYROLL = {
 QUERY_KEY = "PERFORMANCE_LEDGER_V2_QUERY_ENABLED"
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(description="Production performance V2 query cutover")
     parser.add_argument("--system-root", required=True)
@@ -254,17 +256,13 @@ def _query_acceptance(db, root):
     os.environ[QUERY_KEY] = "true"
     os.environ.setdefault("SECRET_KEY", "offline-production-v2-cutover-verification")
     sys.path.insert(0, str(root))
-    from flask import Flask
-    from modules.access_policy import collect_permission_codes
-    from modules.repositories.access_policy_repository import AccessPolicyRepository
-    from modules.services.performance_service import PerformanceService
 
-    reviewer = _actor(db, "1000_perf", AccessPolicyRepository, collect_permission_codes)
+    reviewer = _actor(db, "1000_perf", OperationsFacade, OperationsFacade.collect_permission_codes)
     legacy_admin = _actor(
         db,
         "1000",
-        AccessPolicyRepository,
-        collect_permission_codes,
+        OperationsFacade,
+        OperationsFacade.collect_permission_codes,
         allowed_roles=("admin",),
     )
     if "*" not in legacy_admin["_permissions"] and "performance:view_all" not in legacy_admin["_permissions"]:
@@ -282,13 +280,12 @@ def _query_acceptance(db, root):
     if scopes != expected_scopes:
         raise RuntimeError(f"复核账号 9 部门范围不正确: {scopes}")
 
-    app = Flask("performance-v2-cutover-verification")
     v2_results = []
     legacy_results = []
-    with app.app_context():
-        app.config[QUERY_KEY] = True
+    with OperationsFacade.verification_context("performance-v2-cutover-verification") as verification_config:
+        verification_config[QUERY_KEY] = True
         for month, batch_id, count in (("2026-06", 3, 27), ("2026-07", 4, 37)):
-            result = PerformanceService.list_scores(
+            result = OperationsFacade.performance_list_scores(
                 month, page=1, per_page=200, actor=reviewer, db=db
             )
             if (
@@ -319,9 +316,9 @@ def _query_acceptance(db, root):
                 }
             )
 
-        app.config[QUERY_KEY] = False
+        verification_config[QUERY_KEY] = False
         for month, batch_id, count in (("2026-06", 1, 27), ("2026-07", 2, 37)):
-            result = PerformanceService.list_scores(
+            result = OperationsFacade.performance_list_scores(
                 month, page=1, per_page=200, actor=legacy_admin, db=db
             )
             if (
@@ -342,9 +339,9 @@ def _query_acceptance(db, root):
                 }
             )
 
-        app.config[QUERY_KEY] = True
+        verification_config[QUERY_KEY] = True
         try:
-            PerformanceService.list_scores(
+            OperationsFacade.performance_list_scores(
                 "2026-07",
                 department_id=9,
                 page=1,

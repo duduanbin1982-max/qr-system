@@ -7,6 +7,8 @@ import shutil
 import sqlite3
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def file_sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -120,20 +122,19 @@ def rehearse_copy(source, destination):
     before_hash = file_sha256(source_path)
     before_size = source_path.stat().st_size
 
-    from modules.migrations import LATEST_VERSION, run_migrations
 
     db = sqlite3.connect(destination_path)
     db.row_factory = sqlite3.Row
     try:
         db.execute("PRAGMA foreign_keys=ON")
-        run_migrations(db)
+        OperationsFacade.migrate_database(db)
         integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_keys = [tuple(row) for row in db.execute("PRAGMA foreign_key_check")]
         report = inspect_product_integrity(db)
         report.update({
             "integrity_check": integrity,
             "foreign_key_issues": foreign_keys,
-            "expected_schema_version": LATEST_VERSION,
+            "expected_schema_version": OperationsFacade.latest_schema_version(),
         })
     finally:
         db.close()

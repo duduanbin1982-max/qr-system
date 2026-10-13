@@ -22,16 +22,14 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.migration_process_versioning import (  # noqa: E402
-    m060_process_master_versioning,
-    m061_bind_order_versions,
-)
 from scripts.process_v2_operations import (  # noqa: E402
     canonical_json,
     database_sha256,
     file_sha256,
 )
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _open_read_only(path: Path) -> sqlite3.Connection:
     uri = "file:" + path.resolve().as_posix() + "?mode=ro"
@@ -243,8 +241,8 @@ def collect_evidence(source_path: Path, backup_dir: Path | None) -> dict:
     simulation.row_factory = sqlite3.Row
     source.backup(simulation)
     simulation.execute("PRAGMA foreign_keys=ON")
-    m060_process_master_versioning(simulation)
-    m061_bind_order_versions(simulation)
+    OperationsFacade.replay_migration_step(simulation, 60)
+    OperationsFacade.replay_migration_step(simulation, 61)
 
     orphan_rows = simulation.execute(
         "SELECT price.*,route.name AS route_name,process.name AS process_name "

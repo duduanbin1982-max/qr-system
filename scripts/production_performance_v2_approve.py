@@ -16,7 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
 
@@ -30,6 +29,8 @@ EXPECTED_PAYROLL = {
     "payroll_migration_manifests": 1,
 }
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _parser():
     parser = argparse.ArgumentParser(description="Production V2 dual approval")
@@ -45,11 +46,11 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value):
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _sha256(path):
@@ -148,8 +149,6 @@ def run(args):
         raise RuntimeError("批准前 V2 查询开关必须关闭")
     os.environ.setdefault("SECRET_KEY", "offline-production-v2-approval")
     sys.path.insert(0, str(root))
-    from modules.repositories.performance_ledger_repository import PerformanceLedgerRepository
-    from modules.services.performance_ledger_service import PerformanceLedgerService
 
     started_at = datetime.now().astimezone()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
@@ -211,8 +210,8 @@ def run(args):
             raise RuntimeError("待批准 V2 批次数不是 2")
         for batch in batches:
             batch_id = int(batch["id"])
-            current = PerformanceLedgerRepository.batch(batch_id, db=db)
-            submitted = PerformanceLedgerService.submit_approval(
+            current = OperationsFacade.performance_ledger_batch(batch_id, db=db)
+            submitted = OperationsFacade.performance_workflow_submit_approval(
                 batch_id,
                 {
                     "expected_row_version": current["row_version"],
@@ -224,10 +223,10 @@ def run(args):
             )
             if submitted.get("input_drift_detected"):
                 raise RuntimeError(f"批次 {batch_id} 检测到来源漂移并生成替代批次，停止批准")
-            current = PerformanceLedgerRepository.batch(batch_id, db=db)
+            current = OperationsFacade.performance_ledger_batch(batch_id, db=db)
             if current["status"] != "approval_pending":
                 raise RuntimeError(f"批次 {batch_id} 未进入待批准状态")
-            approved = PerformanceLedgerService.approve_batch(
+            approved = OperationsFacade.performance_workflow_approve_batch(
                 batch_id,
                 {
                     "expected_row_version": current["row_version"],
@@ -241,7 +240,7 @@ def run(args):
             if final_batch["status"] != "approved":
                 raise RuntimeError(f"批次 {batch_id} 批准失败")
             predecessor_id = final_batch.get("supersedes_batch_id")
-            predecessor = PerformanceLedgerRepository.batch(predecessor_id, db=db)
+            predecessor = OperationsFacade.performance_ledger_batch(predecessor_id, db=db)
             if not predecessor or predecessor["status"] != "superseded" or int(predecessor.get("superseded_by_batch_id") or 0) != batch_id:
                 raise RuntimeError(f"批次 {batch_id} 的 Legacy 取代关系不正确")
             results.append(
