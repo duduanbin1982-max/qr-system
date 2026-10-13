@@ -1,79 +1,169 @@
 """Shared planning primitives used by generation, replan, and revision flows.
 
 The strategy is the stable public seam for reusable planning behavior.  The
-legacy capacity service remains the compatibility owner of the underlying
-allocation implementation for now, but callers no longer reach through its
-private methods or inject a service object into another service.
+implementation loads immutable repository facts and delegates to pure domain
+policies; no service provider or private service calls participate.
 """
 
-import importlib
+
+from modules.domain.production_time import (
+    format_database_timestamp,
+    parse_database_timestamp,
+)
+from modules.domain.schedule_pure_planner import SchedulePurePlanner
+from modules.services.schedule_unit_of_work import ScheduleUnitOfWork
+from modules.services.schedule_assessment_service import ScheduleAssessmentService
+from modules.repositories.production_node_repository import ProductionNodeRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 
 
 class SchedulePlanningStrategy:
-    """Public planning seam retained while allocation code is migrated."""
+    """Public planning seam backed by immutable facts and the pure planner."""
 
-    _provider = None
+    @staticmethod
+    def transaction(db=None):
+        return ScheduleUnitOfWork.transaction(db)
 
-    @classmethod
-    def bind(cls, provider):
-        """Bind the legacy implementation without creating an import cycle."""
-        cls._provider = provider
+    @staticmethod
+    def read_transaction(db=None):
+        return ScheduleUnitOfWork.read_transaction(db)
 
-    @classmethod
-    def _capacity_service(cls):
-        if cls._provider is None:
-            module = importlib.import_module(
-                "modules.services.schedule_capacity_service"
-            )
-            cls._provider = module.ScheduleCapacityService
-        return cls._provider
-
-    @classmethod
-    def transaction(cls, db=None):
-        return cls._capacity_service()._transaction(db)
-
-    @classmethod
-    def read_transaction(cls, db=None):
-        return cls._capacity_service()._read_transaction(db)
-
-    @classmethod
-    def persist_operation_payload(cls, payload, txn, *, persist=True):
-        return cls._capacity_service().persist_operation_payload(
-            payload, txn, persist=persist
-        )
+    @staticmethod
+    def persist_operation_payload(payload, txn, *, persist=True):
+        return ScheduleUnitOfWork.persist_operation_payload(payload, txn, persist=persist)
 
     @classmethod
     def parse_timestamp(cls, value):
-        return cls._capacity_service()._parse_timestamp(value)
+        return parse_database_timestamp(value)
 
     @classmethod
     def format_timestamp(cls, value):
-        return cls._capacity_service()._format_timestamp(value)
+        return format_database_timestamp(value)
 
     @classmethod
-    def find_standard(cls, *args, **kwargs):
-        return cls._capacity_service()._find_standard(*args, **kwargs)
+    def find_standard(
+        cls,
+        db,
+        route_id,
+        route_version_id,
+        process_id,
+        process_version_id,
+        product_id,
+        product_code,
+        as_of_date,
+    ):
+        standard = SchedulePlanningRepository.find_active_standard(
+            route_id,
+            route_version_id,
+            process_id,
+            process_version_id,
+            product_id,
+            product_code,
+            as_of_date,
+            db,
+        )
+        return dict(standard) if standard is not None else None
 
-    @classmethod
-    def calendar_snapshot(cls, *args, **kwargs):
-        return cls._capacity_service()._calendar_snapshot(*args, **kwargs)
+    @staticmethod
+    def load_resource_facts(resource, db, *, use_node_engine):
+        """Resolve all calendar facts once before entering the pure planner."""
+        from modules.domain.schedule_planning import PlanningResourceFacts
 
-    @classmethod
-    def allocate_on_line(cls, *args, **kwargs):
-        return cls._capacity_service()._allocate_on_line(*args, **kwargs)
+        resource = dict(resource)
+        calendar = SchedulePlanningRepository.get_calendar(
+            resource.get("calendar_id"), db=db
+        )
+        if not calendar and not use_node_engine:
+            calendar = SchedulePlanningRepository.get_calendar(db=db)
+        calendar = dict(calendar) if calendar else {}
+        shifts = (
+            [
+                dict(row)
+                for row in SchedulePlanningRepository.list_calendar_shifts(
+                    calendar["id"], db=db
+                )
+            ]
+            if calendar
+            else []
+        )
+        exceptions = (
+            [
+                dict(row)
+                for row in SchedulePlanningRepository.list_calendar_exceptions(
+                    calendar["id"], db=db
+                )
+            ]
+            if calendar
+            else []
+        )
+        overrides = (
+            [
+                dict(row)
+                for row in ProductionNodeRepository.list_node_calendar_overrides(
+                    resource["id"], db=db
+                )
+            ]
+            if use_node_engine
+            else []
+        )
+        if use_node_engine:
+            resource["production_node_id"] = resource["id"]
+        return PlanningResourceFacts(
+            resource=resource,
+            calendar=calendar,
+            shifts=tuple(shifts),
+            exceptions=tuple(exceptions),
+            overrides=tuple(overrides),
+        )
 
-    @classmethod
-    def allocate_split_on_nodes(cls, *args, **kwargs):
-        return cls._capacity_service()._allocate_split_on_nodes(*args, **kwargs)
+    @staticmethod
+    def plan(facts, operation_facts, **kwargs):
+        return SchedulePurePlanner.plan(facts, operation_facts, **kwargs)
 
-    @classmethod
-    def allocate_split_on_lines(cls, *args, **kwargs):
-        return cls._capacity_service()._allocate_split_on_lines(*args, **kwargs)
+    @staticmethod
+    def calendar_snapshot(calendar, shifts):
+        from modules.domain.schedule_planning import PlanningResourceFacts
 
-    @classmethod
-    def assess_revision_conflicts(cls, *args, **kwargs):
-        return cls._capacity_service()._assess_revision_conflicts(*args, **kwargs)
+        return SchedulePurePlanner.calendar_snapshot(PlanningResourceFacts({}, dict(calendar), tuple(dict(row) for row in shifts)))
 
-    @classmethod
-    def assert_revision_conflict_gate(cls, *args, **kwargs):
-        return cls._capacity_service()._assert_revision_conflict_gate(*args, **kwargs)
+    @staticmethod
+    def allocate_on_line(db, calendar, shifts, daily_minutes, earliest, duration, occupied):
+        from modules.domain.schedule_planning import PlanningResourceFacts
+
+        facts = PlanningResourceFacts(
+            resource={}, calendar=dict(calendar), shifts=tuple(dict(row) for row in shifts),
+            exceptions=tuple(dict(row) for row in SchedulePlanningRepository.list_calendar_exceptions(calendar["id"], db=db)),
+        )
+        return SchedulePurePlanner.allocate_from_slots(
+            SchedulePurePlanner.calendar_slots(facts, earliest, daily_minutes),
+            earliest, duration, occupied,
+        )
+
+    @staticmethod
+    def allocate_split_on_lines(db, lines, earliest, quantity, standard, occupancy):
+        facts = tuple(SchedulePlanningStrategy.load_resource_facts(row, db, use_node_engine=False) for row in lines)
+        return SchedulePurePlanner.allocate_lines(facts, earliest, quantity, standard, occupancy)
+
+    @staticmethod
+    def allocate_on_node(db, node, earliest, duration, occupancy):
+        facts = SchedulePlanningStrategy.load_resource_facts(node, db, use_node_engine=True)
+        return SchedulePurePlanner.allocate_resource(facts, earliest, duration, occupancy.get(node["id"], []))
+
+    @staticmethod
+    def allocate_split_on_nodes(db, nodes, earliest, quantity, standard, occupancy, *,
+                                operation=None, order=None, serial_ids=None,
+                                allocation_key_prefix="", return_allocations=False):
+        facts = tuple(SchedulePlanningStrategy.load_resource_facts(row, db, use_node_engine=True) for row in nodes)
+        segments, allocations = SchedulePurePlanner.allocate_nodes(
+            facts, earliest, quantity, standard, occupancy, operation, order,
+            serial_ids, allocation_key_prefix,
+        )
+        return (segments, allocations) if return_allocations else segments
+
+    @staticmethod
+    def assess_revision_conflicts(*args, **kwargs):
+        return ScheduleAssessmentService.assess_revision_conflicts(*args, **kwargs)
+
+    @staticmethod
+    def assert_revision_conflict_gate(*args, **kwargs):
+        return ScheduleAssessmentService.assert_revision_conflict_gate(*args, **kwargs)
