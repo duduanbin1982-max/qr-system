@@ -25,6 +25,8 @@ INFINITY = "9999-12-31 23:59:59"
 SETTLEMENT_DECISIONS = {"settle", "zero_price", "no_settlement"}
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -945,12 +947,8 @@ def _revise_payroll_command(args) -> dict[str, Any]:
     database = str(Path(args.database).expanduser().resolve())
     os.environ["DB_PATH"] = database
     os.environ.setdefault("SECRET_KEY", "historical-price-repair-operation")
-    from modules.app import app
-    from modules.db import get_db
-    from modules.services.payroll_service import PayrollWorkflowService
 
-    with app.app_context():
-        db = get_db()
+    with OperationsFacade.application_database() as db:
         run = db.execute(
             "SELECT * FROM historical_price_binding_repair_runs "
             "WHERE idempotency_key=? AND status='applied'",
@@ -983,7 +981,7 @@ def _revise_payroll_command(args) -> dict[str, Any]:
                 (month,),
             ).fetchone()
             key = f"{args.repair_key}:payroll:{month}"
-            batch = PayrollWorkflowService.create_batch(
+            batch = OperationsFacade.payroll_workflow_create_batch(
                 month,
                 actor,
                 key,

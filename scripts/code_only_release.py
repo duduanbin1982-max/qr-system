@@ -144,24 +144,10 @@ def _assert_runtime_fence_unchanged(repository, before_commit, target_commit):
 
 
 def _target_schema_version(target_root):
-    result = subprocess.run(
-        [sys.executable, "-c", "from modules.migrations import LATEST_VERSION; print(LATEST_VERSION)"],
-        cwd=target_root,
-        env={**os.environ, "PYTHONPATH": str(target_root)},
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode:
-        raise RuntimeError(
-            "cannot read target schema version without running migrations: "
-            + result.stderr.strip()
-        )
-    try:
-        return int(result.stdout.strip())
-    except ValueError as exc:
-        raise RuntimeError("target schema version is not an integer") from exc
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from modules.application.operations_facade import OperationsFacade
+
+    return OperationsFacade.target_schema_version(target_root)
 
 
 def validate_code_only_release(tool_root, project_root, database, before_commit, target_commit):

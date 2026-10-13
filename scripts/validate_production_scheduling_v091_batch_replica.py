@@ -24,16 +24,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from modules.repositories.schedule_planning_repository import (
-    SchedulePlanningRepository,
-)
-from modules.migration_production_nodes import APPROVED_PRODUCTION_NODE_COUNTS
-import modules.services.schedule_capacity_service as schedule_service_module
-from modules.services.schedule_capacity_service import ScheduleCapacityService
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 FOCUS_MULTI_NODE_COUNTS = {
-    name: APPROVED_PRODUCTION_NODE_COUNTS[name]
+    name: OperationsFacade.approved_production_node_counts()[name]
     for name in ("铆接", "焊接", "镗孔", "喷漆")
 }
 
@@ -513,40 +511,21 @@ def run(args):
         if version != 91:
             raise RuntimeError(f"V091 replica required; observed V{version}")
         actor = _actor(db, args.actor_username)
-        queue_before = SchedulePlanningRepository.list_schedulable_orders(
+        queue_before = OperationsFacade.list_schedulable_orders(
             1000, db=db, now=planning_now
         )
         execution_before = _execution_fingerprint(db)
 
-        real_datetime = schedule_service_module.datetime
-
-        class FixedDateTime(real_datetime):
-            @classmethod
-            def now(cls, tz=None):
-                if tz is None:
-                    return cls.fromtimestamp(planning_now.timestamp())
-                return cls.fromtimestamp(planning_now.timestamp(), tz)
-
-        schedule_service_module.datetime = FixedDateTime
-        real_node_engine_enabled = schedule_service_module.config.PRODUCTION_NODE_ENGINE_ENABLED
-        # This validator exists specifically to exercise the production-node
-        # engine on a disposable replica.  Do not inherit the workstation or
-        # production feature-flag state, otherwise a disabled flag silently
-        # exercises the Legacy line planner and produces no node allocations.
-        schedule_service_module.config.PRODUCTION_NODE_ENGINE_ENABLED = True
-        try:
-            result = ScheduleCapacityService.auto_plan_orders(
+        # Only the disposable replica uses this temporary engine override.
+        with OperationsFacade.schedule_flags(PRODUCTION_NODE_ENGINE_ENABLED=True):
+            result = OperationsFacade.auto_plan_orders(
                 start_date=args.start_date,
                 auto_plan_key=args.auto_plan_key,
                 limit=1000,
                 actor_id=int(actor["id"]),
                 db=db,
+                planning_now=planning_now,
             )
-        finally:
-            schedule_service_module.config.PRODUCTION_NODE_ENGINE_ENABLED = (
-                real_node_engine_enabled
-            )
-            schedule_service_module.datetime = real_datetime
 
         execution_after = _execution_fingerprint(db)
         order_results = result.get("orders") or []

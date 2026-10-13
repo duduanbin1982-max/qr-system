@@ -8,12 +8,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.permission_catalog import (
-    ACTION_PAGE_MAP,
-    PAGE_RULES,
-    PERMISSION_IMPLICATIONS,
-    SIDEBAR_ITEMS,
-)
+from modules.application.operations_facade import OperationsFacade
+
+_CATALOG = OperationsFacade.permission_catalog()
+ACTION_PAGE_MAP = _CATALOG["action_page_map"]
+PAGE_RULES = _CATALOG["page_rules"]
+PERMISSION_IMPLICATIONS = _CATALOG["permission_implications"]
+SIDEBAR_ITEMS = _CATALOG["sidebar_items"]
 
 OUTPUT = PROJECT_ROOT / "frontend" / "src" / "lib" / "permissionFallback.generated.js"
 

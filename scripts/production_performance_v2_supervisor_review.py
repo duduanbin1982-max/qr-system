@@ -17,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
 
@@ -31,6 +30,8 @@ EXPECTED_PAYROLL = {
     "payroll_migration_manifests": 1,
 }
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _parser():
     parser = argparse.ArgumentParser(description="Production V2 uniform supervisor review")
@@ -46,11 +47,11 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value):
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _sha256(path):
@@ -152,10 +153,6 @@ def run(args):
         raise RuntimeError("V2 查询开关必须保持关闭")
     os.environ.setdefault("SECRET_KEY", "offline-production-v2-supervisor-review")
     sys.path.insert(0, str(root))
-    from modules.access_policy import collect_permission_codes
-    from modules.repositories.access_policy_repository import AccessPolicyRepository
-    from modules.repositories.performance_ledger_repository import PerformanceLedgerRepository
-    from modules.services.performance_ledger_service import PerformanceLedgerService
 
     started_at = datetime.now().astimezone()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
@@ -195,7 +192,7 @@ def run(args):
     reviewer = None
     try:
         db.execute("BEGIN IMMEDIATE")
-        reviewer = _actor(db, args.reviewer_username, AccessPolicyRepository, collect_permission_codes)
+        reviewer = _actor(db, args.reviewer_username, OperationsFacade, OperationsFacade.collect_permission_codes)
         preparer = {"id": args.preparer_id, "name": "杨冰", "_permissions": ["performance:prepare"]}
         batches = _rows(
             db,
@@ -205,23 +202,23 @@ def run(args):
         )
         for batch in batches:
             batch_id = int(batch["id"])
-            current = PerformanceLedgerRepository.batch(batch_id, db=db)
+            current = OperationsFacade.performance_ledger_batch(batch_id, db=db)
             if current["status"] == "draft":
-                submitted = PerformanceLedgerService.submit_supervisor_review(
+                submitted = OperationsFacade.performance_workflow_submit_supervisor_review(
                     batch_id,
                     {"expected_row_version": current["row_version"], "idempotency_key": f"production-v2-submit-review:{batch_id}"},
                     preparer,
                     db=db,
                 )
-                current = PerformanceLedgerRepository.batch(batch_id, db=db)
+                current = OperationsFacade.performance_ledger_batch(batch_id, db=db)
             if current["status"] != "supervisor_review":
                 raise RuntimeError(f"V2 批次 {batch_id} 未进入主管复核状态")
-            scores = PerformanceLedgerRepository.latest_score_revisions(batch_id, db=db)
+            scores = OperationsFacade.performance_ledger_latest_score_revisions(batch_id, db=db)
             if not scores:
                 raise RuntimeError(f"V2 批次 {batch_id} 没有评分")
             reviews = 0
             for score in scores:
-                result = PerformanceLedgerService.save_supervisor_review(
+                result = OperationsFacade.performance_workflow_save_supervisor_review(
                     {
                         "batch_id": batch_id,
                         "user_id": int(score["user_id"]),
@@ -234,9 +231,9 @@ def run(args):
                     reviewer,
                     db=db,
                 )
-                current = PerformanceLedgerRepository.batch(batch_id, db=db)
+                current = OperationsFacade.performance_ledger_batch(batch_id, db=db)
                 reviews += 1
-            latest = PerformanceLedgerRepository.latest_score_revisions(batch_id, db=db)
+            latest = OperationsFacade.performance_ledger_latest_score_revisions(batch_id, db=db)
             if len(latest) != len(scores):
                 raise RuntimeError(f"V2 批次 {batch_id} 复核后评分数量变化")
             eligible_by_position = Counter(

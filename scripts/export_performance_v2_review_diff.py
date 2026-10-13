@@ -13,9 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _parser():
     parser = argparse.ArgumentParser(description="Export production V1/V2 review differences")
@@ -29,11 +30,11 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value):
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _sha256(path):

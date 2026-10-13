@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import sys
 
@@ -17,20 +16,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ.setdefault("SECRET_KEY", "task5-v093-local-validation-only")
 
-from modules.domain.production_node_scheduling import NodeSchedulingError  # noqa: E402
-from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy  # noqa: E402
-from modules.migration_production_nodes import (  # noqa: E402
-    m093_schedule_conflict_risk_evidence,
-)
-from modules.repositories.schedule_evidence_repository import (  # noqa: E402
-    ScheduleEvidenceRepository,
-)
-from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 def _risk_report(db, limit=1000):
     conflicts = [
-        dict(row) for row in ScheduleEvidenceRepository.list_schedule_conflicts(db=db)
+        dict(row) for row in OperationsFacade.list_schedule_conflicts(db=db)
     ]
     conflicts_by_order = {}
     for conflict in conflicts:
@@ -41,13 +35,13 @@ def _risk_report(db, limit=1000):
 
     risk_counts = Counter()
     risk_orders = []
-    for raw in ScheduleEvidenceRepository.list_schedule_risk_inputs(
+    for raw in OperationsFacade.list_schedule_risk_inputs(
         limit=limit, db=db
     ):
         row = dict(raw)
         quantity = int(row.get("quantity") or 0)
         completed = int(row.get("completed") or 0)
-        risk = ScheduleDeadlineRiskPolicy.evaluate(
+        risk = OperationsFacade.evaluate_deadline_risk(
             deadline_text=row.get("deadline") or "",
             projected_completion_at=row.get("projected_completion_at") or "",
             plan_end=row.get("plan_end") or "",
@@ -118,10 +112,10 @@ def _validate_gate_with_temporary_downtime(db):
             ),
         ).lastrowid
         try:
-            ScheduleCapacityService._assert_revision_conflict_gate(
+            OperationsFacade.assert_revision_conflict_gate(
                 fixture["revision_id"], "replica_validation", db
             )
-        except NodeSchedulingError as exc:
+        except ScheduleOperationError as exc:
             result = {
                 "status": "passed",
                 "code": exc.code,
@@ -148,14 +142,14 @@ def validate(source_db, output_db):
     source = Path(source_db).resolve()
     output = Path(output_db).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, output)
+    OperationsFacade.copy_database_replica(source, output)
 
     db = sqlite3.connect(output)
     db.row_factory = sqlite3.Row
     try:
         before_version = db.execute("PRAGMA user_version").fetchone()[0]
         if before_version == 92:
-            m093_schedule_conflict_risk_evidence(db)
+            OperationsFacade.replay_migration_step(db, 93)
             db.execute("PRAGMA user_version=93")
             db.commit()
         elif before_version != 93:

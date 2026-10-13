@@ -22,11 +22,6 @@ import subprocess
 import tempfile
 from typing import Any, Mapping, Sequence
 
-from modules import migrations
-from modules.schedule_capacity_config import (
-    DEFAULT_DAILY_MINUTES,
-    DEFAULT_PROCESS_LINE_COUNTS,
-)
 from scripts import production_operations
 
 
@@ -53,6 +48,8 @@ _STATES = {
 class OperationError(RuntimeError):
     """A deterministic operational error suitable for JSON output."""
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _table_exists(db: sqlite3.Connection, table: str) -> bool:
     return db.execute(
@@ -291,23 +288,23 @@ def _node_master_data_metrics(db: sqlite3.Connection) -> dict[str, Any] | None:
 
     missing = {
         name: expected - distribution.get(name, 0)
-        for name, expected in DEFAULT_PROCESS_LINE_COUNTS.items()
+        for name, expected in OperationsFacade.production_node_defaults()["process_node_counts"].items()
         if distribution.get(name, 0) < expected
     }
     extra = {
         name: distribution.get(name, 0) - expected
-        for name, expected in DEFAULT_PROCESS_LINE_COUNTS.items()
+        for name, expected in OperationsFacade.production_node_defaults()["process_node_counts"].items()
         if distribution.get(name, 0) > expected
     }
     unknown = {
         name: count
         for name, count in distribution.items()
-        if name not in DEFAULT_PROCESS_LINE_COUNTS
+        if name not in OperationsFacade.production_node_defaults()["process_node_counts"]
     }
     return {
         "active_node_count": len(rows),
         "active_node_distribution": dict(sorted(distribution.items())),
-        "target_node_distribution": dict(DEFAULT_PROCESS_LINE_COUNTS),
+        "target_node_distribution": dict(OperationsFacade.production_node_defaults()["process_node_counts"]),
         "missing_node_distribution": missing,
         "extra_node_distribution": extra,
         "unknown_process_node_distribution": unknown,
@@ -316,10 +313,10 @@ def _node_master_data_metrics(db: sqlite3.Connection) -> dict[str, Any] | None:
             str(calendar_id): minutes
             for calendar_id, minutes in sorted(calendar_minutes.items())
         },
-        "daily_minutes_target": DEFAULT_DAILY_MINUTES,
+        "daily_minutes_target": OperationsFacade.production_node_defaults()["daily_minutes"],
         "active_calendar_valid": not invalid_calendar_nodes,
         "active_calendar_daily_capacity_exact": bool(rows)
-        and all(minutes == DEFAULT_DAILY_MINUTES for minutes in calendar_minutes.values()),
+        and all(minutes == OperationsFacade.production_node_defaults()["daily_minutes"] for minutes in calendar_minutes.values()),
         "target_node_distribution_covered": not missing,
         "target_node_distribution_exact": not missing and not extra and not unknown,
     }
@@ -765,7 +762,7 @@ def migrate_replica(
     backup = production_operations.online_database_backup(source_db, replica)
     connection = sqlite3.connect(str(replica))
     try:
-        executed = migrations.run_migrations(connection)
+        executed = OperationsFacade.migrate_database(connection)
         connection.commit()
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     finally:

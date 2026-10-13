@@ -29,8 +29,8 @@ def test_deploy_script_has_required_release_gates():
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
-    assert "from modules.bootstrap import load_environment" in content
-    assert "from modules.migrations import run_migrations" in content
+    assert "OperationsFacade.load_environment()" in content
+    assert "OperationsFacade.migrate_default_database()" in content
     assert "scripts/publish-frontend.sh" in content
     assert "systemctl --user stop qr-system.service" in content
     assert "systemctl --user start qr-system.service" in content
@@ -53,7 +53,7 @@ def test_deploy_script_has_required_release_gates():
     stop_index = content.index("systemctl --user stop qr-system.service")
     backup_index = content.index("scripts/backup-db.sh")
     attachment_migration_index = content.index("scripts/migrate-employee-documents.sh")
-    migration_index = content.index("from modules.migrations import run_migrations")
+    migration_index = content.index("OperationsFacade.migrate_default_database()")
     build_index = content.rindex("scripts/publish-frontend.sh")
     marker_index = content.rindex('atomic_write_deployed_commit "$commit"')
     start_index = content.rindex("systemctl --user start qr-system.service")
@@ -674,12 +674,12 @@ def test_user_service_has_working_reload_and_restart_policy():
 def test_build_restart_runs_migrations_before_restarting_service():
     content = (PROJECT_ROOT / "scripts" / "build.sh").read_text(encoding="utf-8")
 
-    assert "from modules.db import init_db" in content
-    assert "from dotenv import load_dotenv" in content
-    assert "from modules.migrations import LATEST_VERSION" in content
+    assert "OperationsFacade.initialize_database()" in content
+    assert "OperationsFacade.load_environment()" in content
+    assert "OperationsFacade.verify_schema()" in content
     assert "systemctl --user restart qr-system.service" in content
     assert "reload-or-restart" not in content
-    assert content.index("init_db") < content.index("systemctl --user restart")
+    assert content.index("initialize_database") < content.index("systemctl --user restart")
 
 
 def test_gunicorn_startup_only_verifies_schema_and_never_runs_migrations():

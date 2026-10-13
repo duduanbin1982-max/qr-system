@@ -14,11 +14,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 load_dotenv(PROJECT_ROOT / ".env")
 
-from modules.config import DB_PATH
-from modules.services.payroll_history_migration_service import (
-    PayrollHistoryMigrationService,
-)
 
+
+from modules.application.operations_facade import OperationsFacade
+
+DB_PATH = OperationsFacade.default_database_path(PROJECT_ROOT)
 
 def _summary(plan):
     return {
@@ -55,14 +55,14 @@ def main():
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA busy_timeout=5000")
     try:
-        plan = PayrollHistoryMigrationService.analyze(db, args.month)
-        PayrollHistoryMigrationService.validate_counts(
+        plan = OperationsFacade.payroll_history_analyze(db, args.month)
+        OperationsFacade.payroll_history_validate_counts(
             plan, args.expect_resolved, args.expect_unresolved
         )
         if not args.apply:
             result = {"mode": "preflight", **_summary(plan)}
         else:
-            applied = PayrollHistoryMigrationService.apply(
+            applied = OperationsFacade.payroll_history_apply(
                 db,
                 args.month,
                 args.preparer_id,
