@@ -51,6 +51,16 @@ def test_frontend_build_runs_api_facade_gate_first():
     assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
 
 
+def test_frontend_layer_gate_runs_in_architecture_and_production_build():
+    root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
+    scripts = root_package["scripts"]
+
+    for entrypoint in ("build", "check:architecture"):
+        assert "npm run check:layers" in scripts[entrypoint]
+    assert "node --test frontend/tests/architecture/frontend-layers.test.mjs" in scripts["check:layers"]
+    assert "node frontend/scripts/check-frontend-layers.mjs" in scripts["check:layers"]
+
+
 def test_process_quality_page_only_loads_stats_with_permission():
     page = (
         PROJECT_ROOT / "frontend" / "src" / "views" / "ProcessQualityEvaluationPage.vue"
