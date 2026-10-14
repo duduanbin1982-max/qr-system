@@ -2,11 +2,11 @@
 """Read-only validation for the controlled code-only production release path."""
 
 import argparse
+import ast
 import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path, PurePosixPath
 
 try:
@@ -16,6 +16,7 @@ except ImportError:  # Executed directly by the production shell entry point.
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+MAX_MIGRATION_VERSION_ITEMS = 10_000
 PROTECTED_RUNTIME_PATHS = (
     "modules/app.py",
     "modules/config.py",
@@ -24,6 +25,55 @@ PROTECTED_RUNTIME_PATHS = (
     "modules/deployment_write_fence.py",
     "modules/runtime_version.py",
 )
+PROTECTED_RELEASE_CONTROL_PATHS = (
+    "scripts/code_only_release.py",
+    "scripts/deploy-code-only.sh",
+    "scripts/deployment_manifest.py",
+    "scripts/rollback-deployment.sh",
+    "scripts/backup-db.sh",
+)
+
+# Task 4 moved operational entry points behind OperationsFacade. These executable
+# adapters are allowed in a code-only release only while their target Git blobs
+# exactly match the independently reviewed Task 4 content. Any later byte-level
+# change is fail-closed until this manifest is deliberately reviewed and updated.
+APPROVED_OPERATION_ADAPTER_BLOBS = {
+    "deploy.sh": "954b03b3b4ad4b90faa917a93c3f5cf6c5c3b908",
+    "modules/application/operations_migrations.py": (
+        "94914a8a8eb42a46d718739a8fbef6888d9baa11"
+    ),
+    "scripts/migrate_payroll_history.py": (
+        "4ad27f86c823430a005abd84b2bc8a516af0c131"
+    ),
+    "scripts/migrate_performance_history.py": (
+        "042c13abed6cad1e17247c9bb72f14949cd1f660"
+    ),
+    "scripts/plan_migrations.py": "9cd4781dbd547fb25b4c5ec6d93527b1517da290",
+}
+
+
+def _blob_oid(repository, commit, path):
+    result = _git(repository, "rev-parse", f"{commit}:{path}", check=False)
+    oid = result.stdout.decode("ascii", errors="strict").strip().lower()
+    if result.returncode or not SHA_RE.fullmatch(oid):
+        raise RuntimeError(
+            "code-only release cannot verify approved operation adapter blob: "
+            f"{path}"
+        )
+    return oid
+
+
+def _assert_operation_adapter_content(repository, target_commit, changed):
+    for path in changed:
+        approved_blob = APPROVED_OPERATION_ADAPTER_BLOBS.get(path)
+        if approved_blob is None:
+            continue
+        target_blob = _blob_oid(repository, target_commit, path)
+        if target_blob != approved_blob:
+            raise RuntimeError(
+                "code-only release operation adapter does not match approved content: "
+                f"{path}"
+            )
 
 
 def _git(repository, *args, check=True):
@@ -48,6 +98,7 @@ def _changed_paths(repository, before_commit, target_commit):
     result = _git(
         repository,
         "diff",
+        "--no-renames",
         "--name-only",
         "-z",
         before_commit,
@@ -91,10 +142,12 @@ def _path_is_forbidden(path):
     basename = parts[-1].lower() if parts else ""
     if not parts:
         return True
+    if normalized in APPROVED_OPERATION_ADAPTER_BLOBS:
+        return False
     if parts[0] in {"data", "frontend", "public", "uploads", "dist"}:
         return True
     if normalized in {
-        "deploy.sh",
+        *PROTECTED_RELEASE_CONTROL_PATHS,
         "scripts/deploy.sh",
         "gunicorn.conf.py",
         "package.json",
@@ -143,11 +196,92 @@ def _assert_runtime_fence_unchanged(repository, before_commit, target_commit):
             raise RuntimeError(f"code-only release cannot change write-fence runtime: {path}")
 
 
-def _target_schema_version(target_root):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from modules.application.operations_facade import OperationsFacade
+def _assert_release_controls_unchanged(repository, before_commit, target_commit):
+    for path in PROTECTED_RELEASE_CONTROL_PATHS:
+        before = _git(repository, "rev-parse", f"{before_commit}:{path}", check=False)
+        target = _git(repository, "rev-parse", f"{target_commit}:{path}", check=False)
+        if before.returncode or target.returncode or before.stdout.strip() != target.stdout.strip():
+            raise RuntimeError(
+                f"code-only release cannot change trusted release control: {path}"
+            )
 
-    return OperationsFacade.target_schema_version(target_root)
+
+def _parse_python_file(path, label):
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"target {label} is missing or unsafe")
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, SyntaxError) as error:
+        raise RuntimeError(f"target {label} cannot be parsed safely") from error
+
+
+def _assigned_value(tree, name):
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            continue
+        return node.value
+    return None
+
+
+def _integer_literal(node):
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    raise RuntimeError("migration version expression contains a non-integer value")
+
+
+def _migration_version_items(node):
+    if isinstance(node, (ast.Tuple, ast.List)):
+        values = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                values.extend(_migration_version_items(item.value))
+            else:
+                values.append(_integer_literal(item))
+            if len(values) > MAX_MIGRATION_VERSION_ITEMS:
+                raise RuntimeError("migration version chain is unreasonably large")
+        return values
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "range"
+        and not node.keywords
+        and 1 <= len(node.args) <= 3
+    ):
+        arguments = [_integer_literal(argument) for argument in node.args]
+        try:
+            result = range(*arguments)
+        except ValueError as error:
+            raise RuntimeError("migration version range is invalid") from error
+        if len(result) > MAX_MIGRATION_VERSION_ITEMS:
+            raise RuntimeError("migration version chain is unreasonably large")
+        return list(result)
+    raise RuntimeError("migration version chain contains an unsafe expression")
+
+
+def _target_schema_version(target_root):
+    target_root = Path(target_root).resolve(strict=True)
+    migrations_tree = _parse_python_file(
+        target_root / "modules/migrations.py", "migration runner"
+    )
+    latest_version = _assigned_value(migrations_tree, "LATEST_VERSION")
+    if isinstance(latest_version, ast.Constant) and type(latest_version.value) is int:
+        return latest_version.value
+
+    catalog_tree = _parse_python_file(
+        target_root / "modules/migration_catalog.py", "migration catalog"
+    )
+    version_chain = _assigned_value(catalog_tree, "MIGRATION_VERSION_CHAIN")
+    if version_chain is None:
+        raise RuntimeError("target migration version chain is missing")
+    versions = _migration_version_items(version_chain)
+    if not versions:
+        raise RuntimeError("target migration version chain is empty")
+    if any(version < 0 for version in versions):
+        raise RuntimeError("target migration version chain contains a negative version")
+    return max(versions)
 
 
 def validate_code_only_release(tool_root, project_root, database, before_commit, target_commit):
@@ -193,7 +327,9 @@ def validate_code_only_release(tool_root, project_root, database, before_commit,
     changed = _changed_paths(tool_root, before_commit, target_commit)
     if not changed:
         raise RuntimeError("target commit contains no changes from production baseline")
+    _assert_release_controls_unchanged(tool_root, before_commit, target_commit)
     _assert_runtime_fence_unchanged(tool_root, before_commit, target_commit)
+    _assert_operation_adapter_content(tool_root, target_commit, changed)
     forbidden = [path for path in changed if _path_is_forbidden(path)]
     if forbidden:
         raise RuntimeError("code-only release contains out-of-scope paths: " + ", ".join(forbidden))
