@@ -284,6 +284,58 @@ def test_code_only_preflight_rejects_migrations_frontend_and_runtime_changes(
         )
 
 
+@pytest.mark.parametrize(
+    "changed_path",
+    sorted(code_only_release.APPROVED_FRONTEND_TOOLING_PATHS),
+)
+def test_code_only_preflight_allows_reviewed_frontend_architecture_tooling(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == [changed_path]
+
+
+@pytest.mark.parametrize(
+    "changed_path",
+    [
+        "frontend/src/App.vue",
+        "frontend/src/composables/useInventory.js",
+        "frontend/components/UnknownWidget.vue",
+        "frontend/scripts/unknown-release-helper.mjs",
+        "frontend/tests/unknown-runtime.test.mjs",
+        "public/static/app.js",
+        "dist/index.js",
+        "package.json.bak",
+    ],
+)
+def test_code_only_preflight_rejects_unapproved_frontend_and_package_paths(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    with pytest.raises(RuntimeError, match="out-of-scope paths"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
 def test_approved_task4_operation_adapter_blobs_match_reviewed_release():
     root = Path(__file__).resolve().parents[1]
 

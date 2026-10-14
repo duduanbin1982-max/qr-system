@@ -51,6 +51,21 @@ APPROVED_OPERATION_ADAPTER_BLOBS = {
     "scripts/plan_migrations.py": "9cd4781dbd547fb25b4c5ec6d93527b1517da290",
 }
 
+# Task 5 changes only the reviewed frontend architecture tooling and its
+# package metadata. These paths are not runtime frontend assets and may be
+# carried by a code-only release; every other frontend path remains forbidden.
+APPROVED_FRONTEND_TOOLING_PATHS = frozenset(
+    {
+        "frontend/scripts/check-frontend-layers.mjs",
+        "frontend/scripts/check-import-cycles.mjs",
+        "frontend/scripts/frontend-layer-baseline.json",
+        "frontend/scripts/frontend-source-graph.mjs",
+        "frontend/tests/architecture/frontend-layers.test.mjs",
+        "package.json",
+        "package-lock.json",
+    }
+)
+
 
 def _blob_oid(repository, commit, path):
     result = _git(repository, "rev-parse", f"{commit}:{path}", check=False)
@@ -144,6 +159,8 @@ def _path_is_forbidden(path):
         return True
     if normalized in APPROVED_OPERATION_ADAPTER_BLOBS:
         return False
+    if normalized in APPROVED_FRONTEND_TOOLING_PATHS:
+        return False
     if parts[0] in {"data", "frontend", "public", "uploads", "dist"}:
         return True
     if normalized in {
@@ -164,6 +181,8 @@ def _path_is_forbidden(path):
         "modules/migration_planning.py",
     }:
         return True
+    if basename.startswith("package.json") or basename.startswith("package-lock.json"):
+        return normalized not in APPROVED_FRONTEND_TOOLING_PATHS
     if (
         ("migration" in lower or (parts[0] == "scripts" and "migrate" in basename))
         and parts[0] != "tests"
