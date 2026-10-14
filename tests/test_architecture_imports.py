@@ -35,6 +35,11 @@ ARCHITECTURE_FILE_ALLOWLIST = {
     "routes": frozenset(),
     "services": frozenset({"modules/services/__init__.py"}),
 }
+ORDINARY_MODULE_FANOUT_LIMIT = 30
+COMPOSITION_ROOT_FANOUT_ALLOWLIST = {
+    "modules/migration_catalog.py": "migration registry composition root",
+    "modules/schemas/__init__.py": "schema registry composition root",
+}
 GENERATED_PYTHON_FILE_PATTERNS = (
     "*.generated.py",
     "*_generated.py",
@@ -90,6 +95,61 @@ def _display_path(path, root=PROJECT_ROOT):
 
 def _source_files():
     yield from _architecture_files(PROJECT_ROOT)
+
+
+def _direct_internal_imports(path, *, source_root=PROJECT_ROOT):
+    """Return direct internal module imports without counting imported symbols."""
+    relative = path.relative_to(source_root).with_suffix("")
+    package_parts = list(relative.parts[:-1])
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "modules" or alias.name.startswith("modules."):
+                    yield alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base_parts = package_parts[: max(0, len(package_parts) - node.level + 1)]
+                if node.module:
+                    base_parts = [*base_parts, *node.module.split(".")]
+                module_name = ".".join(base_parts)
+            else:
+                module_name = node.module or ""
+            if module_name == "modules" or module_name.startswith("modules."):
+                yield module_name
+
+
+def _module_fanout(path, *, source_root=PROJECT_ROOT):
+    return frozenset(_direct_internal_imports(path, source_root=source_root))
+
+
+def _fanout_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        fanout = _module_fanout(path, source_root=source_root)
+        if relative_path in COMPOSITION_ROOT_FANOUT_ALLOWLIST:
+            continue
+        if len(fanout) > ORDINARY_MODULE_FANOUT_LIMIT:
+            violations.append(
+                f"{relative_path}: fan-out {len(fanout)} exceeds "
+                f"{ORDINARY_MODULE_FANOUT_LIMIT}"
+            )
+    return violations
+
+
+def _composition_root_service_import_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        if relative_path not in COMPOSITION_ROOT_FANOUT_ALLOWLIST:
+            continue
+        for lineno, module_name in _imported_modules(path, source_root):
+            if _matches_module_prefix(module_name, ("modules.services",)):
+                violations.append(
+                    f"{relative_path}:{lineno} -> {module_name}"
+                )
+    return violations
 
 
 def _module_map():
@@ -192,6 +252,53 @@ def test_backend_modules_have_no_import_cycles():
     cycles = _strongly_connected_components(graph, known_modules)
 
     assert cycles == [], f"backend import graph contains cycles: {cycles}"
+
+
+def test_high_fanout_is_limited_to_documented_composition_roots():
+    migration_catalog = PROJECT_ROOT / "modules" / "migration_catalog.py"
+    schema_registry = PROJECT_ROOT / "modules" / "schemas" / "__init__.py"
+
+    assert set(COMPOSITION_ROOT_FANOUT_ALLOWLIST) == {
+        "modules/migration_catalog.py",
+        "modules/schemas/__init__.py",
+    }
+    assert len(_module_fanout(migration_catalog)) == 37
+    assert len(_module_fanout(schema_registry)) == 19
+    assert _fanout_violations(tuple(_source_files())) == []
+    assert _composition_root_service_import_violations(
+        (migration_catalog, schema_registry)
+    ) == []
+
+
+def test_new_ordinary_high_fanout_and_registry_reverse_import_are_rejected(tmp_path):
+    fixture_root = tmp_path / "fixture_project"
+    ordinary_module = fixture_root / "modules" / "services" / "new_hotspot.py"
+    ordinary_module.parent.mkdir(parents=True, exist_ok=True)
+    ordinary_module.write_text(
+        "\n".join(
+            f"from modules.leaf_{index} import value" for index in range(31)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry_module = fixture_root / "modules" / "migration_catalog.py"
+    registry_module.parent.mkdir(parents=True, exist_ok=True)
+    registry_module.write_text(
+        "from modules.services.order_service import OrderService\n",
+        encoding="utf-8",
+    )
+
+    paths = tuple(_architecture_files(fixture_root))
+    assert any(
+        "new_hotspot.py" in violation
+        for violation in _fanout_violations(paths, source_root=fixture_root)
+    )
+    assert any(
+        "migration_catalog.py" in violation
+        for violation in _composition_root_service_import_violations(
+            paths, source_root=fixture_root
+        )
+    )
 
 def test_source_files_do_not_have_utf8_bom():
     bom_files = [
