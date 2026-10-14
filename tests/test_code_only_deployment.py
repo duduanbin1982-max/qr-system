@@ -23,7 +23,10 @@ def _git(path, *args):
 
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8")
 
 
 def _create_database(path, version=96):
@@ -38,7 +41,11 @@ def _create_database(path, version=96):
         db.close()
 
 
-def _create_release_repositories(tmp_path, changed_path="modules/services/sample.py"):
+def _create_release_repositories(
+    tmp_path, changed_path="modules/services/sample.py", target_overrides=None
+):
+    changed_paths = [changed_path] if isinstance(changed_path, str) else list(changed_path)
+    target_overrides = target_overrides or {}
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "--quiet", "--initial-branch=master")
@@ -54,10 +61,15 @@ def _create_release_repositories(tmp_path, changed_path="modules/services/sample
     _write(repository / "modules/runtime_version.py", "VERSION = True\n")
     _write(repository / "modules/migrations.py", "LATEST_VERSION = 96\n")
     _write(repository / "modules/services/sample.py", "VALUE = 1\n")
+    for path in code_only_release.PROTECTED_RELEASE_CONTROL_PATHS:
+        _write(repository / path, "TRUSTED_CONTROL = True\n")
+    for path in changed_paths:
+        _write(repository / path, "VALUE = 1\n")
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "baseline")
     before = _git(repository, "rev-parse", "HEAD")
-    _write(repository / changed_path, "VALUE = 2\n")
+    for path in changed_paths:
+        _write(repository / path, target_overrides.get(path, "VALUE = 2\n"))
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "target")
     target = _git(repository, "rev-parse", "HEAD")
@@ -166,6 +178,58 @@ def test_code_only_preflight_accepts_clean_backend_change_and_untracked_data(tmp
     assert result["changed_paths"] == ["modules/services/sample.py"]
 
 
+def test_target_schema_version_reads_real_repository_without_importing_target_code():
+    root = Path(__file__).resolve().parents[1]
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+def test_target_schema_version_accepts_integer_literal_fixture(tmp_path):
+    root = tmp_path / "target"
+    _write(root / "modules/migrations.py", "LATEST_VERSION = 96\n")
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+def test_target_schema_version_safely_parses_restricted_version_chain(tmp_path):
+    root = tmp_path / "target"
+    _write(
+        root / "modules/migrations.py",
+        "LATEST_VERSION = max(version for version in MIGRATIONS)\n",
+    )
+    _write(
+        root / "modules/migration_catalog.py",
+        "MIGRATION_VERSION_CHAIN = (1, *range(13, 97))\n",
+    )
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+@pytest.mark.parametrize(
+    "catalog_content",
+    [
+        "OTHER_VALUE = (1, 2, 3)\n",
+        "MIGRATION_VERSION_CHAIN = (1, '96')\n",
+        "MIGRATION_VERSION_CHAIN = __import__('os').system('echo unsafe')\n",
+        "MIGRATION_VERSION_CHAIN = (1, *range(0, 1000000))\n",
+    ],
+)
+def test_target_schema_version_rejects_missing_invalid_or_unsafe_chain(
+    tmp_path, catalog_content
+):
+    root = tmp_path / "target"
+    marker = tmp_path / "unsafe"
+    _write(root / "modules/migrations.py", "LATEST_VERSION = calculate_version()\n")
+    _write(
+        root / "modules/migration_catalog.py",
+        catalog_content.replace("echo unsafe", f"touch {marker.as_posix()}"),
+    )
+
+    with pytest.raises(RuntimeError, match="migration version"):
+        code_only_release._target_schema_version(root)
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize(
     "changed_path",
     [
@@ -211,6 +275,220 @@ def test_code_only_preflight_rejects_migrations_frontend_and_runtime_changes(
     )
 
     with pytest.raises(RuntimeError, match="out-of-scope paths"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_approved_task4_operation_adapter_blobs_match_reviewed_release():
+    root = Path(__file__).resolve().parents[1]
+
+    for path, approved_blob in (
+        code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS.items()
+    ):
+        assert code_only_release._blob_oid(root, "HEAD", path) == approved_blob
+
+
+def test_task4_facade_release_paths_pass_code_only_preflight(tmp_path, monkeypatch):
+    changed_paths = [
+        "deploy.sh",
+        "modules/application/operations_migrations.py",
+        "scripts/migrate_payroll_history.py",
+        "scripts/migrate_performance_history.py",
+        "scripts/plan_migrations.py",
+    ]
+    repository, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_paths
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            path: _git(repository, "rev-parse", f"{target}:{path}")
+            for path in changed_paths
+        },
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == sorted(changed_paths)
+    assert result["database"]["user_version"] == 96
+    assert result["target_schema_version"] == 96
+
+
+@pytest.mark.parametrize(
+    ("changed_path", "unsafe_content"),
+    [
+        ("deploy.sh", "bash scripts/publish-frontend.sh\n"),
+        (
+            "modules/application/operations_migrations.py",
+            "class Unsafe:\n    def apply(self):\n        run_migrations()\n",
+        ),
+        (
+            "scripts/migrate_payroll_history.py",
+            "import importlib\nimportlib.import_module('modules.services.secret')\n",
+        ),
+        (
+            "scripts/migrate_performance_history.py",
+            "__import__('modules.repositories.secret')\n",
+        ),
+        ("scripts/plan_migrations.py", "from modules.migrations import run_migrations\n"),
+    ],
+)
+def test_task4_facade_release_paths_reject_unapproved_content_through_preflight(
+    tmp_path, monkeypatch, changed_path, unsafe_content
+):
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, unsafe_content)
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "unreviewed adapter change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="does not match approved content"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_binary_content_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "deploy.sh"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, b"#!/bin/sh\x00run-migrations\n")
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "binary adapter change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="does not match approved content"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_missing_target_blob_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "scripts/plan_migrations.py"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    (repository / changed_path).unlink()
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "delete adapter")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="cannot verify approved operation adapter blob"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_renamed_adapter_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "scripts/plan_migrations.py"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    renamed_path = "modules/application/renamed_migration_adapter.py"
+    (repository / renamed_path).parent.mkdir(parents=True, exist_ok=True)
+    (repository / changed_path).rename(repository / renamed_path)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "--quiet", "-m", "rename adapter")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="cannot verify approved operation adapter blob"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_path", code_only_release.PROTECTED_RELEASE_CONTROL_PATHS
+)
+def test_code_only_preflight_rejects_release_control_self_modification(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    with pytest.raises(RuntimeError, match="cannot change trusted release control"):
         code_only_release.validate_code_only_release(
             tool,
             production,
@@ -508,4 +786,19 @@ def test_code_only_shell_path_has_no_migration_or_frontend_steps_and_keeps_evide
     assert "if [[ \"$PRESERVE_EXISTING_BACKUPS\" == \"0\" ]]" in backup
     assert 'DEPLOYMENT_MANIFEST_TOOL_SOURCE="${DEPLOYMENT_MANIFEST_TOOL_SOURCE:-$QR_PROJECT_ROOT/scripts/deployment_manifest.py}"' in backup
     assert 'python3 "$DEPLOYMENT_MANIFEST_TOOL_SOURCE"' in backup
+
+
+def test_code_only_shell_uses_production_trust_root_and_separate_target_tool():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "deploy-code-only.sh").read_text(encoding="utf-8")
+
+    assert "--tool-root TARGET_WORKTREE" in script
+    assert 'SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"' in script
+    assert '"$SCRIPT_ROOT" != "$PROJECT_ROOT"' in script
+    assert '"$TOOL_ROOT" == "$PROJECT_ROOT"' in script
+    assert 'TRUST_ROOT="$TMP_DIR/trusted-controls"' in script
+    assert 'install -m 0700 "$PROJECT_ROOT/scripts/$control"' in script
+    assert 'python3 "$code_only_release" preflight' in script
+    assert 'bash "$backup_script"' in script
+    assert 'bash "$rollback_script"' in script
 
