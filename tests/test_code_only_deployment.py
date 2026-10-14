@@ -42,10 +42,14 @@ def _create_database(path, version=96):
 
 
 def _create_release_repositories(
-    tmp_path, changed_path="modules/services/sample.py", target_overrides=None
+    tmp_path,
+    changed_path="modules/services/sample.py",
+    target_overrides=None,
+    baseline_overrides=None,
 ):
     changed_paths = [changed_path] if isinstance(changed_path, str) else list(changed_path)
     target_overrides = target_overrides or {}
+    baseline_overrides = baseline_overrides or {}
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "--quiet", "--initial-branch=master")
@@ -64,7 +68,7 @@ def _create_release_repositories(
     for path in code_only_release.PROTECTED_RELEASE_CONTROL_PATHS:
         _write(repository / path, "TRUSTED_CONTROL = True\n")
     for path in changed_paths:
-        _write(repository / path, "VALUE = 1\n")
+        _write(repository / path, baseline_overrides.get(path, "VALUE = 1\n"))
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "baseline")
     before = _git(repository, "rev-parse", "HEAD")
@@ -260,7 +264,6 @@ def test_code_only_preflight_allows_non_schema_history_migration_code_and_tests(
     [
         "frontend/src/App.vue",
         "public/static/app.js",
-        "modules/migration_catalog.py",
         "modules/migrations.py",
         "scripts/migrate-records.sh",
         "deploy/qr-system.service",
@@ -275,6 +278,88 @@ def test_code_only_preflight_rejects_migrations_frontend_and_runtime_changes(
     )
 
     with pytest.raises(RuntimeError, match="out-of-scope paths"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_code_only_preflight_allows_migration_catalog_docstring_only_change(
+    tmp_path, monkeypatch
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        "modules/migration_catalog.py",
+        baseline_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Baseline catalog docs."""\nVALUE = 1\n'
+            )
+        },
+        target_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Updated catalog composition-root docs."""\nVALUE = 1\n'
+            )
+        },
+    )
+
+    baseline_source = '"""Baseline catalog docs."""\nVALUE = 1\n'
+    target_source = '"""Updated catalog composition-root docs."""\nVALUE = 1\n'
+    assert code_only_release._module_docstring_only_sources(
+        baseline_source, target_source
+    )
+
+    real_git = code_only_release._git
+
+    def fake_git(repository, *args, check=True):
+        if args and args[0] == "show":
+            commit, path = args[1].split(":", 1)
+            source = {
+                before: baseline_source,
+                target: target_source,
+            }[commit]
+            return SimpleNamespace(
+                returncode=0,
+                stdout=source.encode("utf-8"),
+                stderr=b"",
+            )
+        return real_git(repository, *args, check=check)
+
+    monkeypatch.setattr(code_only_release, "_git", fake_git)
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == ["modules/migration_catalog.py"]
+
+
+def test_code_only_preflight_rejects_migration_catalog_logic_change(tmp_path):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        "modules/migration_catalog.py",
+        baseline_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Baseline catalog docs."""\nVALUE = 1\n'
+            )
+        },
+        target_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Updated catalog docs."""\nVALUE = 2\n'
+            )
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="documentation exception changed executable content",
+    ):
         code_only_release.validate_code_only_release(
             tool,
             production,

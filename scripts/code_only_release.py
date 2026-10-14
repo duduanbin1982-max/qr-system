@@ -65,6 +65,7 @@ APPROVED_FRONTEND_TOOLING_PATHS = frozenset(
         "package-lock.json",
     }
 )
+DOCUMENTATION_ONLY_PATHS = frozenset({"modules/migration_catalog.py"})
 
 
 def _blob_oid(repository, commit, path):
@@ -205,6 +206,47 @@ def _path_is_forbidden(path):
     if lower.startswith("public/") or lower.startswith("frontend/"):
         return True
     return False
+
+
+def _module_executable_body(source):
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, TypeError):
+        return None
+    if not tree.body:
+        return None
+    first = tree.body[0]
+    if not (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        return None
+    return ast.dump(
+        ast.Module(body=tree.body[1:], type_ignores=tree.type_ignores),
+        annotate_fields=True,
+        include_attributes=False,
+    )
+
+
+def _module_docstring_only_sources(before_source, target_source):
+    """Return true only when a module's executable AST is unchanged."""
+    before_body = _module_executable_body(before_source)
+    target_body = _module_executable_body(target_source)
+    return before_body is not None and before_body == target_body
+
+
+def _module_docstring_only(repository, before_commit, target_commit, path):
+    try:
+        before_source = _git(repository, "show", f"{before_commit}:{path}").stdout.decode(
+            "utf-8"
+        )
+        target_source = _git(repository, "show", f"{target_commit}:{path}").stdout.decode(
+            "utf-8"
+        )
+    except (UnicodeError, RuntimeError):
+        return False
+    return _module_docstring_only_sources(before_source, target_source)
 
 
 def _assert_runtime_fence_unchanged(repository, before_commit, target_commit):
@@ -349,7 +391,27 @@ def validate_code_only_release(tool_root, project_root, database, before_commit,
     _assert_release_controls_unchanged(tool_root, before_commit, target_commit)
     _assert_runtime_fence_unchanged(tool_root, before_commit, target_commit)
     _assert_operation_adapter_content(tool_root, target_commit, changed)
-    forbidden = [path for path in changed if _path_is_forbidden(path)]
+    documentation_only = {
+        path
+        for path in changed
+        if path in DOCUMENTATION_ONLY_PATHS
+        and _module_docstring_only(tool_root, before_commit, target_commit, path)
+    }
+    invalid_documentation_exceptions = [
+        path
+        for path in changed
+        if path in DOCUMENTATION_ONLY_PATHS and path not in documentation_only
+    ]
+    if invalid_documentation_exceptions:
+        raise RuntimeError(
+            "code-only documentation exception changed executable content: "
+            + ", ".join(invalid_documentation_exceptions)
+        )
+    forbidden = [
+        path
+        for path in changed
+        if _path_is_forbidden(path) and path not in documentation_only
+    ]
     if forbidden:
         raise RuntimeError("code-only release contains out-of-scope paths: " + ", ".join(forbidden))
 
