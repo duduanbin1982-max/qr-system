@@ -1,4 +1,10 @@
-"""Schema definitions."""
+"""Schema composition root and public schema registry.
+
+The package initializer intentionally assembles the schema fragments exposed by
+the application.  Its fan-out is governed as an explicit composition-root
+exception; schema fragments must remain leaf modules and must not import
+business services or this registry in the reverse direction.
+"""
 
 from modules.schemas.approvals import approvals_schemas
 from modules.schemas.auth import auth_schemas
