@@ -204,6 +204,32 @@ test('baseline manifest rejects extension and base drift', () => {
   ])
 })
 
+const reportInventory = JSON.parse(readFileSync(new URL('../../../docs/technical-debt/20261015-task0/frontend-dependency-inventory.json', import.meta.url), 'utf8'))
+const reportEdges = reportInventory.entries.filter(entry => entry.batch === '2C')
+const reportConsumers = [...new Set(reportEdges.map(entry => entry.consumer))]
+
+test('Task 2C keeps all 41 tracked edges across 22 consumers', () => {
+  assert.equal(reportEdges.length, 41)
+  assert.equal(reportConsumers.length, 22)
+})
+
+for (const consumer of reportConsumers) {
+  test(`Task 2C blocks restoring historical dependencies in ${consumer}`, () => {
+    const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
+    const from = consumer.slice('frontend/src/'.length)
+    for (const entry of reportEdges.filter(entry => entry.consumer === consumer)) {
+      const to = entry.target.slice('frontend/src/'.length)
+      const edge = `${from} -> ${to}`
+      assert.equal(Object.hasOwn(baseline, edge), false, edge)
+      const restored = fixture({
+        [from]: `import * as historical from '@/${to}'`,
+        [to]: 'export const placeholder = () => {}',
+      })
+      assert.ok(restored.violations.some(violation => violation.startsWith(`${edge}:`)), restored.violations.join('\n'))
+    }
+  })
+}
+
 test('a whitelisted presentation utility loses its exception if it gains imports', () => {
   const result = fixture({
     'lib/productionTime.js': `import { api } from './api.js'; export const productionDate = () => api.domains.orders.listOrders()`,

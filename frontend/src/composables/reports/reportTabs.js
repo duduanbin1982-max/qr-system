@@ -1,10 +1,3 @@
-import { ref } from 'vue'
-import { api } from '@/lib/api.js'
-import { showToast } from '@/lib/store.js'
-import { statusLabel, buildParams, exportCSV, createLoader, createExporter } from '@/lib/report-utils.js'
-
-export { statusLabel, buildParams, exportCSV, createLoader, createExporter }
-
 export const TABS = [
   { k: 'dashboard', l: '📊 综合看板' },
   { k: 'trend',     l: '📈 产量趋势' },

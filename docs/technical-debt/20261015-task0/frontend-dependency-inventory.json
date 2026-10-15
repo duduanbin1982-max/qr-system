@@ -326,7 +326,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-024",
@@ -336,7 +337,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-025",
@@ -346,7 +348,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-026",
@@ -588,7 +591,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-050",
@@ -598,7 +602,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-051",
@@ -708,7 +713,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-062",
@@ -718,7 +724,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-063",
@@ -768,7 +775,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-068",
@@ -778,7 +786,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-069",
@@ -788,7 +797,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-070",
@@ -798,7 +808,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-071",
@@ -808,7 +819,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-072",
@@ -818,7 +830,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-073",
@@ -828,7 +841,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-074",
@@ -838,7 +852,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-075",
@@ -848,7 +863,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-076",
@@ -858,7 +874,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-077",
@@ -868,7 +885,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-078",
@@ -878,7 +896,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-079",
@@ -888,7 +907,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-080",
@@ -898,7 +918,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-081",
@@ -908,7 +929,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-082",
@@ -918,7 +940,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-083",
@@ -928,7 +951,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-084",
@@ -938,7 +962,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-085",
@@ -978,7 +1003,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-089",
@@ -988,7 +1014,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-090",
@@ -998,7 +1025,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-091",
@@ -1008,7 +1036,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-092",
@@ -1018,7 +1047,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-093",
@@ -1028,7 +1058,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-094",
@@ -1038,7 +1069,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-095",
@@ -1048,7 +1080,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-096",
@@ -1058,7 +1091,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-097",
@@ -1068,7 +1102,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-098",
@@ -1078,7 +1113,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-099",
@@ -1088,7 +1124,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-100",
@@ -1098,7 +1135,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-101",
@@ -1108,7 +1146,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-102",
@@ -1118,7 +1157,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-103",
@@ -1128,7 +1168,8 @@
       "batch": "2C",
       "owner_role": "报表前端维护角色",
       "target_milestone": "Task 2C PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2c-report-layers.md"
     },
     {
       "id": "D05-104",
