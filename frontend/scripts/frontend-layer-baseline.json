@@ -1,5 +1,4 @@
 {
-  "components/inventory/ProductInventoryDrawer.vue -> lib/api.js": "bffab10df19d1fa7a509c3c164a8eb95b9b1ebd6bde600bec5e6ab2b22344b9d",
   "components/master-data/ReleaseBatchPanel.vue -> lib/auth.js": "ccd82dd4e144090defd4a1416d8b325e2e6839e3dc3075239f2dfe16ee7e893e",
   "components/master-data/ReleaseBatchPanel.vue -> lib/store.js": "fbfd305012c26350192d9f21cce7143b3d79fd090e6b8206c6f7db42e7f2559f",
   "components/ProcessQualityTaskDisposal.vue -> lib/api.js": "87f1e14ac5c6a55c74d11dd308573bbfd8363d253232acfa3495912c2b3ffd3c",
