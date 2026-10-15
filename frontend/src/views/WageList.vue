@@ -29,7 +29,6 @@
 </template>
 
 <script>
-import { useWage } from '@/composables/useWage.js'
 import PieceworkTab from '@/views/wage/PieceworkTab.vue'
 import MonthlyTab from '@/views/wage/MonthlyTab.vue'
 import ProcessWageTab from '@/views/wage/ProcessWageTab.vue'
@@ -42,22 +41,12 @@ import PayrollLedgerTab from '@/views/wage/PayrollLedgerTab.vue'
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PriceVersionTab from '@/views/wage/PriceVersionTab.vue'
 import MyPayrollTab from '@/views/wage/MyPayrollTab.vue'
-import { router } from '@/lib/router.js'
+import { useWageWorkspace } from '@/composables/wage/useWageWorkspace.js'
 
 export default {
   components: { PayrollLedgerTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
   setup() {
-    const wage = useWage()
-    const params = router.params || {}
-    if (params.wage_tab === 'priceversions') wage.switchTab('priceversions')
-    return {
-      ...wage,
-      priceIntent: {
-        route_version_id: Number(params.route_version_id) || null,
-        process_version_id: Number(params.process_version_id) || null,
-        create_price: Boolean(params.create_price),
-      },
-    }
+    return useWageWorkspace()
   }
 }
 </script>

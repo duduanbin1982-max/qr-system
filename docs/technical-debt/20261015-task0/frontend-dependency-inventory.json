@@ -103,7 +103,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-002",
@@ -113,7 +114,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-003",
@@ -123,7 +125,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-004",
@@ -186,7 +189,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-010",
@@ -196,7 +200,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-011",
@@ -206,7 +211,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-012",
@@ -381,7 +387,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-029",
@@ -391,7 +398,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-030",
@@ -431,7 +439,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-034",
@@ -441,7 +450,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-035",
@@ -451,7 +461,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-036",
@@ -461,7 +472,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-037",
@@ -471,7 +483,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-038",
@@ -521,7 +534,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-043",
@@ -531,7 +545,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-044",
@@ -541,7 +556,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-045",
@@ -561,7 +577,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-047",
@@ -571,7 +588,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-048",
@@ -581,7 +599,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-049",
@@ -613,7 +632,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-052",
@@ -623,7 +643,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-053",
@@ -633,7 +654,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-054",
@@ -755,7 +777,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-066",
@@ -765,7 +788,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-067",
@@ -1179,7 +1203,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-105",
@@ -1189,7 +1214,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-106",
@@ -1199,7 +1225,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-107",
@@ -1209,7 +1236,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-108",
@@ -1219,7 +1247,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-109",
@@ -1229,7 +1258,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-110",
@@ -1239,7 +1269,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-111",
@@ -1249,7 +1280,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-112",
@@ -1259,7 +1291,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-113",
@@ -1269,7 +1302,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-114",
@@ -1279,7 +1313,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-115",
@@ -1289,7 +1324,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-116",
@@ -1299,7 +1335,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-117",
@@ -1309,7 +1346,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-118",
@@ -1319,7 +1357,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-119",
@@ -1329,7 +1368,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-120",
@@ -1339,7 +1379,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-121",
@@ -1349,7 +1390,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-122",
@@ -1359,7 +1401,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-123",
@@ -1369,7 +1412,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-124",
@@ -1379,7 +1423,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-125",
@@ -1389,7 +1434,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-126",
@@ -1399,7 +1445,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     },
     {
       "id": "D05-127",
@@ -1409,7 +1456,8 @@
       "batch": "2D",
       "owner_role": "绩效质量前端维护角色",
       "target_milestone": "Task 2D PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2d-performance-quality-layers.md"
     }
   ]
 }
