@@ -133,7 +133,8 @@
       "batch": "2A",
       "owner_role": "库存前端维护角色",
       "target_milestone": "Task 2A PR 合并",
-      "status": "frozen"
+      "status": "local_verified_pending_review",
+      "evidence": "docs/technical-debt/20261015-task2a-inventory-layers.md"
     },
     {
       "id": "D05-005",

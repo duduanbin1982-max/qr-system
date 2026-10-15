@@ -135,6 +135,24 @@ test('frozen exception must refer to an existing, exact edge', () => {
   }, edges).violations.includes(`legacy import or references changed: ${edge}`))
 })
 
+test('the migrated inventory drawer cannot regain its direct API dependency', () => {
+  const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
+  const component = 'components/inventory/ProductInventoryDrawer.vue'
+  const composable = 'composables/inventory/useProductInventoryDrawer.js'
+  assert.equal(Object.hasOwn(baseline, `${component} -> lib/api.js`), false)
+  const files = {
+    [component]: readFileSync(new URL(`../../src/${component}`, import.meta.url), 'utf8'),
+    [composable]: readFileSync(new URL(`../../src/${composable}`, import.meta.url), 'utf8'),
+    'lib/api.js': 'export const api = {}',
+  }
+  assert.deepEqual(fixture(files).violations, [])
+  const restored = fixture({
+    ...files,
+    [component]: files[component].replace('<script setup>', `<script setup>\nimport { api } from '@/lib/api.js'`),
+  })
+  assert.ok(restored.violations.some(violation => violation.includes('cannot depend on api-facade')))
+})
+
 test('baseline manifest rejects extension and base drift', () => {
   const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
   assert.doesNotThrow(() => validateBaselineManifest(baseline))
