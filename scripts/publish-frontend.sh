@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+node frontend/scripts/check-toolchain.mjs
 STATIC_DIR="$PROJECT_ROOT/public/static"
 RETENTION_DAYS="${STATIC_ASSET_RETENTION_DAYS:-7}"
 STAGING_DIR="$(mktemp -d "$PROJECT_ROOT/data/frontend-build.XXXXXX")"
@@ -11,7 +13,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cd "$PROJECT_ROOT"
 npm run build -- --outDir "$STAGING_DIR" --emptyOutDir
 test -s "$STAGING_DIR/index.html"
 

@@ -9,4 +9,5 @@ if [[ -d "$USER_LIB_DIR" ]]; then
 fi
 
 cd "$PROJECT_ROOT"
+node frontend/scripts/check-toolchain.mjs
 exec npx playwright test --config playwright.config.js "$@"
