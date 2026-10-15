@@ -164,7 +164,8 @@
       "batch": "2B",
       "owner_role": "排程前端维护角色",
       "target_milestone": "Task 2B PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2b-schedule-layers.md"
     },
     {
       "id": "D05-008",
@@ -174,7 +175,8 @@
       "batch": "2B",
       "owner_role": "排程前端维护角色",
       "target_milestone": "Task 2B PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2b-schedule-layers.md"
     },
     {
       "id": "D05-009",
@@ -354,7 +356,8 @@
       "batch": "2B",
       "owner_role": "排程前端维护角色",
       "target_milestone": "Task 2B PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2b-schedule-layers.md"
     },
     {
       "id": "D05-027",
@@ -364,7 +367,8 @@
       "batch": "2B",
       "owner_role": "排程前端维护角色",
       "target_milestone": "Task 2B PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261015-task2b-schedule-layers.md"
     },
     {
       "id": "D05-028",
