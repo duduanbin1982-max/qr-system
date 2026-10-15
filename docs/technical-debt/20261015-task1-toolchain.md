@@ -5,7 +5,7 @@
 - 实施日期：2026-10-15，Asia/Shanghai。
 - 从实施时核实的 GitHub `master` 创建分支；基线为 Task 0 / PR #99 的合并提交 `3b8487a019494937700e02be1a78ebbae23a535f`。
 - 独立分支：`codex/brooks-debt-task1-toolchain`。
-- 对应台账：D07 工具链不一致。本地实现、验证和正式 diff 审核已完成，审核通过，当前进入提交准备；D07 尚未关闭，未标记为已合并或生产已发布。
+- 对应台账：D07 工具链不一致。本地实现、验证和正式 diff 审核已完成，已提交、推送并创建 PR #100。本修复提交时等待远端复验和合并，D07 尚未关闭，未标记为生产已发布。
 - 本阶段固定前端构建/测试工具链，不升级应用依赖，不更改业务代码、数据库、附件、架构例外或发布授权边界。
 
 ## 版本选择及执行入口
@@ -31,7 +31,7 @@
 | `verify:frontend` | 统一运行工具链 fixture、架构/API/导入环/分层、全量前端、隔离 E2E 和生产构建 |
 | GitHub Actions | Windows 与 Ubuntu 24.04 从 `.nvmrc` 选取版本，再运行锁文件安装及同一验证入口 |
 
-CI 固定 Python `3.12.10` 和 pytest `9.0.3` 以满足现有架构及 E2E 服务依赖。工作流 YAML 已解析验证，远端 Windows/Linux job 尚未执行；本地通过不替代远端 CI 结果。
+CI 固定 Python `3.12.10` 和 pytest `9.0.3` 以满足现有架构及 E2E 服务依赖。首轮远端执行 Ubuntu 通过，Windows 在加载 `Asia/Shanghai` 时因缺少 `tzdata` 失败；原安装步骤只读取 `requirements.txt`，漏装了已有开发依赖。本次改为统一安装 `requirements-dev.txt`，复用其中的生产依赖、固定 pytest 和时区数据依赖。工作流 YAML、两平台矩阵及原验证入口已核对，本地以空 `PYTHONTZPATH` 验证应用时区能从 `tzdata` 包加载。本修复仍须由远端两平台检查确认，本地通过不替代远端 CI 结果。
 
 ## 实际验证结果
 
@@ -78,6 +78,6 @@ CI 固定 Python `3.12.10` 和 pytest `9.0.3` 以满足现有架构及 E2E 服�
 
 原始日志和隔离发行包保存在 `C:/Users/dubin/Documents/生产管理系统升级版/.architecture-audits/20261015-task1-toolchain/`，不进入提交。关键日志为 `npm-ci.log`、`verify-frontend.log`、`toolchain-final.log`、`contracts.log`、`contracts-final.log`、`wrong-node.log` 和 `wrong-npm.log`。
 
-Task 1 正式本地 diff 审核已通过，未发现阻断问题。审核覆盖本阶段全部 17 个文件，并复核新工作流、精确版本阻断、安装前失败和构建门禁顺序；审核阶段工具链测试 21 passed、部署/API 契约测试 40 passed，Shell 语法及空白检查通过。远端 Windows/Linux CI 尚未运行，本 Task 未重跑全量后端，这两项验证边界仍然保留。提交、推送、PR 和合并分别登记实际结果后再关闭 D07。后续 Task 2A–2F 使用同一精确工具链验证前端依赖迁移。
+Task 1 正式本地 diff 审核已通过，未发现阻断问题。审核覆盖本阶段全部 17 个文件，并复核新工作流、精确版本阻断、安装前失败和构建门禁顺序；审核阶段工具链测试 21 passed、部署/API 契约测试 40 passed，Shell 语法及空白检查通过。该轮本地审核时远端 CI 尚未运行，之后发现的 Windows 依赖缺失及修复已记录于上文。本 Task 未重跑全量后端，未将历史后端全量数计入本次。提交、推送、PR 和合并分别登记实际结果后再关闭 D07。后续 Task 2A–2F 使用同一精确工具链验证前端依赖迁移。
 
-提交准备仅暂存本 Task 的 17 个文件，排除 `.brooks-lint-history.json`、Task 0 报告、原始审计报告、`.tmp-*`、临时部署脚本、日志、构建产物和隔离运行时。本次未 commit、push、创建 PR 或生产部署。原代码-only 发布边界、写入围栏、备份和回退流程不变；未来前端发布需要单独选择相同构建工具链并取得部署授权。
+提交范围仅包含本 Task 的 17 个文件，排除 `.brooks-lint-history.json`、Task 0 报告、原始审计报告、`.tmp-*`、临时部署脚本、日志、构建产物和隔离运行时。代码及本次 CI 修复的提交、检查和合并结果以 PR #100 为准。本次未执行生产部署；原代码-only 发布边界、写入围栏、备份和回退流程不变。未来前端发布需要单独选择相同构建工具链并取得部署授权。
