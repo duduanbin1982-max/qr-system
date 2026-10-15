@@ -33,6 +33,8 @@
 
 CI 固定 Python `3.12.10` 和 pytest `9.0.3` 以满足现有架构及 E2E 服务依赖。首轮远端执行 Ubuntu 通过，Windows 在加载 `Asia/Shanghai` 时因缺少 `tzdata` 失败；原安装步骤只读取 `requirements.txt`，漏装了已有开发依赖。本次改为统一安装 `requirements-dev.txt`，复用其中的生产依赖、固定 pytest 和时区数据依赖。工作流 YAML、两平台矩阵及原验证入口已核对，本地以空 `PYTHONTZPATH` 验证应用时区能从 `tzdata` 包加载。本修复仍须由远端两平台检查确认，本地通过不替代远端 CI 结果。
 
+第二轮远端运行 `38726912742` 中 Ubuntu 继续通过，Windows 已通过时区加载、架构门禁、前端单元测试和 E2E 构建，随后因 E2E 默认数据库路径 `/tmp/qr_system_e2e.db` 的父目录不存在而无法启动测试服务。CI 现显式将 `E2E_DB_PATH` 设置为 `${{ runner.temp }}/qr_system_e2e.db`，复用每个平台已有且按 job 隔离的临时目录；不依赖机器预先创建 `/tmp`。本次只调整 CI 环境，保留原 E2E 断言、用例数量、超时及生产代码。本地 Windows 使用新建临时目录中的原生绝对路径复验 `npm run test:e2e`：25 passed，0 failed / skipped，E2E 用时 1.7 分钟；日志为 `e2e-runner-temp.log`。工作流 YAML、双平台矩阵及临时路径配置验证通过，仍待新提交的远端双平台检查。
+
 ## 实际验证结果
 
 下列均为本 Task 实际运行结果，未将 Task 0 的后端全量数重复计为本次结果。所有测试仅使用本地临时数据，没有连接生产主机。

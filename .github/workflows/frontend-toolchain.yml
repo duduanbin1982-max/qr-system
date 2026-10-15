@@ -34,3 +34,5 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: npx playwright install --with-deps chromium
       - run: npm run verify:frontend
+        env:
+          E2E_DB_PATH: ${{ runner.temp }}/qr_system_e2e.db
