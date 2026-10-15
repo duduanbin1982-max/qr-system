@@ -44,10 +44,14 @@ def test_production_facade_exposes_legacy_lines_as_read_only_compatibility():
     assert "deleteProductionLine" not in production_api
 
 
-def test_frontend_build_runs_api_facade_gate_first():
+def test_frontend_build_checks_toolchain_then_api_before_compilation():
     root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
 
-    assert root_package["scripts"]["build"].startswith("npm run check:api &&")
+    steps = [step.strip() for step in root_package["scripts"]["build"].split("&&")]
+    assert steps[:2] == [
+        "node frontend/scripts/check-toolchain.mjs", "npm run check:api",
+    ]
+    assert steps[-1] == "vite build"
     assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
 
 

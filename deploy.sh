@@ -96,6 +96,8 @@ trap rollback_on_error ERR
 
 cd "$PROJECT_ROOT"
 
+node frontend/scripts/check-toolchain.mjs
+
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
     echo "Deployment refused: Git worktree is not clean" >&2
     git status --short >&2

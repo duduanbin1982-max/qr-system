@@ -4,21 +4,30 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.19 <21"
+    "node": "24.22.0",
+    "npm": "11.19.1"
   },
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@11.19.1",
+  "devEngines": {
+    "runtime": { "name": "node", "version": "24.22.0", "onFail": "error" },
+    "packageManager": { "name": "npm", "version": "11.19.1", "onFail": "error" }
+  },
   "scripts": {
-    "dev": "vite",
-    "check:api": "node frontend/scripts/check-api-facade.mjs",
-    "check:imports": "node frontend/scripts/check-import-cycles.mjs",
-    "check:layers": "node --test frontend/tests/architecture/frontend-layers.test.mjs && node frontend/scripts/check-frontend-layers.mjs",
-    "check:architecture": "python -m pytest -q tests/test_architecture_imports.py && npm run check:api && npm run check:imports && npm run check:layers",
-    "test:unit": "vitest run --config vitest.config.js",
-    "test:unit:coverage": "vitest run --config vitest.config.js --coverage",
+    "preinstall": "node frontend/scripts/check-toolchain.mjs",
+    "check:toolchain": "node frontend/scripts/check-toolchain.mjs",
+    "test:toolchain": "node frontend/scripts/check-toolchain.mjs && node --test frontend/tests/toolchain/*.test.mjs",
+    "dev": "node frontend/scripts/check-toolchain.mjs && vite",
+    "check:api": "node frontend/scripts/check-toolchain.mjs && node frontend/scripts/check-api-facade.mjs",
+    "check:imports": "node frontend/scripts/check-toolchain.mjs && node frontend/scripts/check-import-cycles.mjs",
+    "check:layers": "node frontend/scripts/check-toolchain.mjs && node --test frontend/tests/architecture/frontend-layers.test.mjs && node frontend/scripts/check-frontend-layers.mjs",
+    "check:architecture": "npm run test:toolchain && python -m pytest -q tests/test_architecture_imports.py && npm run check:api && npm run check:imports && npm run check:layers",
+    "test:unit": "node frontend/scripts/check-toolchain.mjs && vitest run --config vitest.config.js",
+    "test:unit:coverage": "node frontend/scripts/check-toolchain.mjs && vitest run --config vitest.config.js --coverage",
     "test:e2e": "bash scripts/test-e2e.sh",
     "test:frontend": "npm run test:unit && npm run test:e2e",
-    "build": "npm run check:api && npm run check:imports && npm run check:layers && vite build",
-    "preview": "vite preview"
+    "verify:frontend": "npm run check:architecture && npm run test:unit && npm run test:e2e && npm run build",
+    "build": "node frontend/scripts/check-toolchain.mjs && npm run check:api && npm run check:imports && npm run check:layers && vite build",
+    "preview": "node frontend/scripts/check-toolchain.mjs && vite preview"
   },
   "devDependencies": {
     "@babel/parser": "7.29.7",

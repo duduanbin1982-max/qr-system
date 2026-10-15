@@ -25,6 +25,9 @@ def test_deploy_script_has_required_release_gates():
     assert "scripts/check_secrets.py" in content
     assert '"$PYTEST_BIN" -q' in content
     assert "npm ci --ignore-scripts --no-audit --no-fund" in content
+    toolchain_index = content.index("node frontend/scripts/check-toolchain.mjs")
+    assert toolchain_index < content.index('"${1:-}" == "--check-only"')
+    assert toolchain_index < content.index("npm ci --ignore-scripts --no-audit --no-fund")
     assert "bash scripts/install-playwright-runtime.sh" in content
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
@@ -648,6 +651,17 @@ def test_playwright_runtime_installer_prepares_browser_and_user_libraries():
     assert "playwright-debs/root" in installer
     assert "playwright-debs/root" in runner
     assert "LD_LIBRARY_PATH" in runner
+
+
+def test_frontend_shell_entries_check_toolchain_before_side_effects():
+    for filename, first_action in (
+        ("test-e2e.sh", 'E2E_PUBLIC_DIR="$(mktemp'),
+        ("publish-frontend.sh", 'STAGING_DIR="$(mktemp'),
+        ("run-playwright.sh", "exec npx playwright"),
+        ("install-playwright-runtime.sh", 'DOWNLOAD_DIR="$(mktemp'),
+    ):
+        content = (PROJECT_ROOT / "scripts" / filename).read_text(encoding="utf-8")
+        assert content.index("node frontend/scripts/check-toolchain.mjs") < content.index(first_action)
 
 
 def test_pytest_suite_declares_test_layers():
