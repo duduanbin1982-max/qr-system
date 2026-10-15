@@ -153,6 +153,38 @@ test('the migrated inventory drawer cannot regain its direct API dependency', ()
   assert.ok(restored.violations.some(violation => violation.includes('cannot depend on api-facade')))
 })
 
+for (const [consumer, composable] of [
+  ['components/schedule/ScheduleCapacityDashboard.vue', 'composables/gantt/useScheduleRevisionComparison.js'],
+  ['views/GanttChart.vue', 'composables/gantt/useSchedulePriority.js'],
+]) {
+  test(`the migrated ${consumer} cannot regain its API or store dependency`, () => {
+    const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
+    const files = {
+      [consumer]: readFileSync(new URL(`../../src/${consumer}`, import.meta.url), 'utf8'),
+      [composable]: readFileSync(new URL(`../../src/${composable}`, import.meta.url), 'utf8'),
+      'lib/api.js': 'export const api = {}',
+      'lib/store.js': 'export const showToast = () => {}',
+    }
+    const script = files[consumer].match(/<script[^>]*>([\s\S]*?)<\/script>/)[1]
+    for (const specifier of importSpecifiers(script)) {
+      if (!specifier.startsWith('@/')) continue
+      const dependency = specifier.slice(2)
+      if (!Object.hasOwn(files, dependency)) {
+        files[dependency] = dependency.endsWith('.vue') ? '<template><div/></template>' : 'export const placeholder = () => {}'
+      }
+    }
+    assert.deepEqual(fixture(files).violations, [])
+    for (const [target, imported] of [['lib/api.js', 'api'], ['lib/store.js', 'showToast']]) {
+      assert.equal(Object.hasOwn(baseline, `${consumer} -> ${target}`), false)
+      const restored = fixture({
+        ...files,
+        [consumer]: files[consumer].replace(/<script(?: setup)?>/, `$&\nimport { ${imported} } from '@/${target}'`),
+      })
+      assert.ok(restored.violations.some(violation => violation.includes(`${consumer} -> ${target}`)), restored.violations.join('\n'))
+    }
+  })
+}
+
 test('baseline manifest rejects extension and base drift', () => {
   const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
   assert.doesNotThrow(() => validateBaselineManifest(baseline))
