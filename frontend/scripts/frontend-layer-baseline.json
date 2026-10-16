@@ -1,16 +1,2 @@
 {
-  "views/AppLayout.vue -> lib/auth.js": "15acaa2e8d24ca92499f317dfbd7cb4012bfdd5b3a4d2ffd6487c8d42b2619f4",
-  "views/AppLayout.vue -> lib/router.js": "0d7c48b927a38fda979987e9fce4dd5b766e6e707fe51f0160376304c22a7a70",
-  "views/AppLayout.vue -> lib/store.js": "4be9c07bcc1ee23181ec77f6bad6246664f9ba74509ff4ea637a557d06a22a4c",
-  "views/AppLayout.vue -> lib/api.js": "389bddf19128f5231ceb9eec4612b3049cc09eeefdc286f6e1b5c3554fd3f94a",
-  "views/ApprovalPage.vue -> lib/api.js": "275d498aba21dba2672bb1db9a513ac38dfca60030e00bd79ed3d186f3d1b4fe",
-  "views/ApprovalPage.vue -> lib/store.js": "f81bd7e70d9d1209c429f64824f351fc335ec6d81d5c3653193ed89940033d92",
-  "views/ApprovalPage.vue -> lib/auth.js": "4e389db23377b60898617c9edc0add7ea74d6e3a73616cb96cb51c0ff5c6dae0",
-  "views/LoginPage.vue -> lib/auth.js": "1963be743abf4ffed2dfc2bd144f3d22fb0b5d968602a10c7b68dc69ccd32b64",
-  "views/LoginPage.vue -> lib/router.js": "8a40a53d5a8c8320bb3138795b30dd90905e4e4bcbf57fbc2f3a32c95493e61f",
-  "views/LoginPage.vue -> lib/permissions.js": "2d004f7b545d614ff0091bf27fe154c32775bf23f73b813c0c7f30ae60a7172e",
-  "views/ScanReport.vue -> lib/api.js": "a077417779c14243bc7adbe56d5d52bf40152ce00e197f152e5038b87b348208",
-  "views/ScanReport.vue -> lib/store.js": "eeb39b7ba40f15d5a23739e8c6333cde10bbf7fac58ee7d2a806f7562b0c9f87",
-  "views/TracePage.vue -> lib/api.js": "b77a41bac4353e4ddec5f3844a25ff206fc34eb45238569804dc7f6a42a10114",
-  "views/TracePage.vue -> lib/store.js": "87da0da971320defe512b7006792db5330550bf659d63f42a92f0f66663dde50"
 }
