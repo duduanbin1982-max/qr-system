@@ -1,0 +1,439 @@
+{
+  "baseline_sha": "d81ba2b30af21bc2af3ed05b92b3d214cf8e39c6",
+  "cases": {
+    "tie_reversed_nodes": {
+      "sha256": "9cd6b6bf3bef5c92158dddb6f5962a4d15c20dda3e7559926236a14a25648622",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "earlier_completion_before_node_id": {
+      "sha256": "c5dad33f8d95d803a5dad8af3ef6e2463c8113f00b9cf2cf1ce9310d6b82c83d",
+      "outcome": "ok",
+      "selected": [
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "ceil_splitting_and_flatten_order": {
+      "sha256": "068b2daa70fffff1b1a8d18c4f1d2e102fccd8cfd3d54a8c2672dc77b52a00d1",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          6
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 8
+    },
+    "setup_only_once": {
+      "sha256": "89edaaee350ba0c9172f6510736907ec58bdefd9521294870c69e42bf65127e5",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 8
+    },
+    "fractional_minutes": {
+      "sha256": "a0674f1efe7df152c89942e76954b2696f9e52a7323c9679cdfd4ada7fbc60b0",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 8
+    },
+    "minimum_duration_and_factor": {
+      "sha256": "5d76626f122fdb654a16d65ef7573026310842a718eddcfe6de4d6b6814d3517",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 6
+    },
+    "duplicate_node_last_value_first_position": {
+      "sha256": "48a86cfce00cb08d00deabbb723c86588301668ea614242a7209d569d63f8fb3",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 6
+    },
+    "serial_whole_group": {
+      "sha256": "95a6172eac696b52d916ead09a147607b7815bbe04b112c6b33271164cf39e6e",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "serial_duplicate": {
+      "sha256": "be14e7a1badb15eaf127211d361432e386491c9f4999ef10b17ac911b9b13be5",
+      "outcome": "SERIAL_ITEM_SPLIT_FORBIDDEN",
+      "selected": [],
+      "calls": 0
+    },
+    "serial_count_mismatch": {
+      "sha256": "14f19ddf2d99e88482663e905742c3865ffe4d194eb23377ec3e4de49460a59f",
+      "outcome": "SERIAL_ITEM_SPLIT_FORBIDDEN",
+      "selected": [],
+      "calls": 0
+    },
+    "blank_serials_use_quantity_split": {
+      "sha256": "d63f24e51c4f1f32c758c7063a265dd7c4a0805f233872e235e28797f9549609",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 4
+    },
+    "serial_batch_fallback_to_exclusive": {
+      "sha256": "2df3d42c66901dd6e389c96406178aa8b345085fb5021b1baa03dc8f69b2cf56",
+      "outcome": "ok",
+      "selected": [
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 1
+    },
+    "serial_batch_too_small": {
+      "sha256": "036ce2fc2e921666a0fe9aa7c9ce34c4c66c8ba5fb08b9aae0f32e7d7fa5163e",
+      "outcome": "SERIAL_ITEM_SPLIT_FORBIDDEN",
+      "selected": [],
+      "calls": 0
+    },
+    "serial_batch_changeover": {
+      "sha256": "020389422026e11ef8ce0a1a45d8fabd340eecb25be71df701257cb9604381ce",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 1
+    },
+    "serial_exclusive_changeover_metadata": {
+      "sha256": "095d2677a87e0fd7a8b928f68534daff9a25e360f0478c249b0214a670c27af3",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 1
+    },
+    "batch_limit_changeover_once": {
+      "sha256": "0f870ce77177ea4ea09827408e5818309bb9d2441b598eed427c7ef79e5cb22b",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          3
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "calls": 3
+    },
+    "mixed_batch_and_exclusive": {
+      "sha256": "58f151b064e3e2a15d6a7054e91af30068abf3d1b46888ad277b0ae5c58531c3",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          7
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 8
+    },
+    "capability_lowest_id": {
+      "sha256": "53aac4bba1be18e6bdf82190871d8237f94062974ae0e16367fce4c0d63d0e17",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          3
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "batch_bad_size": {
+      "sha256": "7dd24d00d622adc245dd9ea9b4ae5ac58dfef96c3f62f5db30bf053e8a11c7c8",
+      "outcome": "BATCH_CAPACITY_EXCEEDED",
+      "selected": [],
+      "calls": 0
+    },
+    "batch_bad_changeover": {
+      "sha256": "cd4fd47360c05c345f5a6b5953fd993975edb6e3c75622c37c76cec7c1388e02",
+      "outcome": "BATCH_CAPACITY_EXCEEDED",
+      "selected": [],
+      "calls": 0
+    },
+    "serial_invalid_batch_config_propagates": {
+      "sha256": "2844c0d7ded94931b12ad413ec811cee73209bfb7e59df185c2bc46a30ba8385",
+      "outcome": "BATCH_CAPACITY_EXCEEDED",
+      "selected": [],
+      "calls": 0
+    },
+    "zero_before_node_validation": {
+      "sha256": "912289efb3ea4e7f2a56820e8efd98c1b141d2c194adda7a3e53ad9484315248",
+      "outcome": "ok",
+      "selected": [],
+      "calls": 0
+    },
+    "negative_quantity": {
+      "sha256": "912289efb3ea4e7f2a56820e8efd98c1b141d2c194adda7a3e53ad9484315248",
+      "outcome": "ok",
+      "selected": [],
+      "calls": 0
+    },
+    "no_nodes": {
+      "sha256": "e328e07531bd1e00d2c269420997741a026345ac6ff1e079161b28775e445ce1",
+      "outcome": "NO_COMPATIBLE_NODE",
+      "selected": [],
+      "calls": 0
+    },
+    "unavailable_calendar": {
+      "sha256": "d56ab471a0bfa43a239d2f829a4f0303d664b4c0cf05e2e3b1e3f7ae11285835",
+      "outcome": "NODE_CALENDAR_UNAVAILABLE",
+      "selected": [],
+      "calls": 2
+    },
+    "serial_unavailable_calendar": {
+      "sha256": "ea3aa41fbd063e8c63fca3137b835379d04acecef3cd77ff496db24fccf188be",
+      "outcome": "SERIAL_ITEM_SPLIT_FORBIDDEN",
+      "selected": [],
+      "calls": 2
+    },
+    "candidate_domain_error_skipped": {
+      "sha256": "bbe1a39870b83c0322eafe7c11eba31c5b8138a6030fb834b2df73bf35d46afd",
+      "outcome": "ok",
+      "selected": [
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 4
+    },
+    "partial_calendar_failure_has_occupancy": {
+      "sha256": "75485239ac17efd23eb8e9ca523fcb8fdbc1dca754389eb6cfe10c083e40c4f8",
+      "outcome": "NODE_CALENDAR_UNAVAILABLE",
+      "selected": [],
+      "calls": 2
+    },
+    "partial_unexpected_failure_has_occupancy": {
+      "sha256": "042d20ead31ec15044171a8f7b795531b2a01df4967bd440442ed3fd92d873b0",
+      "outcome": "RuntimeError",
+      "selected": [],
+      "calls": 2
+    },
+    "empty_callback_preserves_index_error": {
+      "sha256": "40cfac4b80420bf86063087a4d70c8e9eadd812e5a4ce675cc1adb24fef6f1fc",
+      "outcome": "IndexError",
+      "selected": [],
+      "calls": 1
+    },
+    "malformed_callback_timestamp_legacy_passthrough": {
+      "sha256": "1fe520d6c9c657c958b85b7a4dcc3fd4224138c4717b941ee5fcadbbd54ebd2e",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "fractional_quantity_conservation_failure": {
+      "sha256": "798b2411e26f3121ba24ab16555a841018075ceb63ca88b1a111788e1506c0f2",
+      "outcome": "QUANTITY_CONSERVATION_FAILED",
+      "selected": [],
+      "calls": 4
+    },
+    "serial_normalized_quantity_compatibility": {
+      "sha256": "805ecd429213cd3288ff65c18e0985151e8b734c08bd97a6d0ced0e26f640ffd",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "calls": 2
+    },
+    "shift_day_weekend_and_downtime": {
+      "sha256": "e6fe629f87c90968eb95094457e7baed26f6569d792e4fa03d9137812661ff93",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          9
+        ]
+      ],
+      "calls": 1
+    },
+    "nested_segment_metadata": {
+      "sha256": "df2718406e5e1559cae2a2a632abbcad6ee02409e8374e7ceb75c6ebd5b6aa2f",
+      "outcome": "ok",
+      "selected": [
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "calls": 4
+    }
+  }
+}
