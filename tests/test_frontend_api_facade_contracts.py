@@ -69,8 +69,21 @@ def test_process_quality_page_only_loads_stats_with_permission():
     page = (
         PROJECT_ROOT / "frontend" / "src" / "views" / "ProcessQualityEvaluationPage.vue"
     ).read_text(encoding="utf-8")
+    composable = (
+        PROJECT_ROOT
+        / "frontend"
+        / "src"
+        / "composables"
+        / "quality"
+        / "useProcessQualityEvaluation.js"
+    ).read_text(encoding="utf-8")
 
-    assert "if (can('process_quality_evaluation:stats')) await loadStats()" in page
+    assert (
+        "import { useProcessQualityEvaluation } from "
+        "'@/composables/quality/useProcessQualityEvaluation.js'"
+    ) in page
+    assert "} = useProcessQualityEvaluation()" in page
+    assert "if (can('process_quality_evaluation:stats')) await loadStats()" in composable
 
 
 def test_frontend_client_uses_cookie_auth_and_domain_error_shape():

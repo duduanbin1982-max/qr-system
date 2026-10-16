@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProcessQualityTaskDisposal from '@/components/ProcessQualityTaskDisposal.vue'
 import ProcessQualityEvaluationPage from '@/views/ProcessQualityEvaluationPage.vue'
@@ -14,7 +15,7 @@ const wrappers = []
 const render = (component, options) => { const wrapper = mount(component, options); wrappers.push(wrapper); return wrapper }
 const state = wrapper => wrapper.vm.$.setupState
 beforeEach(() => {
-  localStorage.clear(); mocks.permissions = new Set(); mocks.toast.mockReset()
+  localStorage.clear(); mocks.permissions = reactive(new Set()); mocks.toast.mockReset()
   for (const name of ['qualityEvaluationTaskDisposalSummary', 'qualityEvaluationTasks', 'qualityEvaluationTaskAudits', 'previewQualityEvaluationTaskWaiver', 'waiveQualityEvaluationTasks', 'qualityEvaluationRecords', 'qualityEvaluationAppeals', 'qualityEvaluationStats', 'reviewQualityEvaluation', 'reviewQualityEvaluationAppeal']) mocks.evaluations[name] = vi.fn().mockResolvedValue({})
   for (const name of ['qualityReferences', 'qualityDashboard', 'qualityStandards', 'qualityNcr', 'disposeQualityNcr', 'qualityTask', 'inspectQualityTask', 'qualityTasks']) mocks.management[name] = vi.fn().mockResolvedValue({})
   for (const name of ['listInspections', 'inspectionStats', 'deleteInspection']) mocks.quality[name] = vi.fn().mockResolvedValue({})
@@ -85,6 +86,31 @@ describe('Task 2D quality Vue consumers', () => {
     await vm.changeStatus()
     expect(mocks.evaluations.qualityEvaluationTaskAudits).toHaveBeenCalledWith({ keyword: '新', page: 1, per_page: 50 })
     expect(vm.selectedTaskIds).toEqual([])
+  })
+
+  it.each([false, true])('only requests quality statistics with permission (%s)', async withPermission => {
+    if (withPermission) mocks.permissions.add('process_quality_evaluation:stats')
+    mocks.evaluations.qualityEvaluationStats.mockResolvedValue({ summary: { total: 9 } })
+    const wrapper = render(ProcessQualityEvaluationPage)
+    await flushPromises()
+    const vm = state(wrapper)
+    expect(vm.visibleTabs.some(tab => tab.key === 'stats')).toBe(withPermission)
+    expect(mocks.evaluations.qualityEvaluationStats).toHaveBeenCalledTimes(withPermission ? 1 : 0)
+    expect(vm.statsSummary).toEqual(withPermission ? { total: 9 } : {})
+
+    await vm.switchTab('records')
+    expect(mocks.evaluations.qualityEvaluationStats).toHaveBeenCalledTimes(withPermission ? 2 : 0)
+    vm.yearMonth = '2026-10'
+    await vm.loadActive()
+    expect(mocks.evaluations.qualityEvaluationStats).toHaveBeenCalledTimes(withPermission ? 3 : 0)
+    if (withPermission) {
+      expect(mocks.evaluations.qualityEvaluationStats).toHaveBeenLastCalledWith({ year_month: '2026-10' })
+    }
+
+    mocks.permissions.delete('process_quality_evaluation:stats')
+    await vm.loadActive()
+    expect(mocks.evaluations.qualityEvaluationStats).toHaveBeenCalledTimes(withPermission ? 3 : 0)
+    expect(vm.visibleTabs.some(tab => tab.key === 'stats')).toBe(false)
   })
 
   it('keeps quality-evaluation permission tabs, review commands and failure state', async () => {

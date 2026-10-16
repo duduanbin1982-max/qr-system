@@ -764,6 +764,9 @@ def test_package_manifest_is_the_application_version_authority():
     login_page = (
         PROJECT_ROOT / "frontend" / "src" / "views" / "LoginPage.vue"
     ).read_text(encoding="utf-8")
+    login_composable = (
+        PROJECT_ROOT / "frontend" / "src" / "composables" / "auth" / "useLoginPage.js"
+    ).read_text(encoding="utf-8")
     legacy_index = (PROJECT_ROOT / "public" / "index.html").read_text(encoding="utf-8")
     service_worker = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
@@ -777,7 +780,11 @@ def test_package_manifest_is_the_application_version_authority():
     assert "package.json" in vite_config
     assert "__APP_VERSION__" in vite_config
     assert "%APP_VERSION%" in frontend_index
-    assert "__APP_VERSION__" in login_page
+    assert "const appVersion = __APP_VERSION__" in login_composable
+    assert "return { appVersion," in login_composable
+    assert "import { useLoginPage } from '@/composables/auth/useLoginPage.js'" in login_page
+    assert "return useLoginPage()" in login_page
+    assert "v{{ appVersion }}" in login_page
     assert "生产管理系统 v3" not in legacy_index
     assert manifest["version"] not in service_worker
     assert "CACHE_REVISION" in service_worker

@@ -421,13 +421,54 @@ def test_code_only_preflight_rejects_unapproved_frontend_and_package_paths(
         )
 
 
-def test_approved_task4_operation_adapter_blobs_match_reviewed_release():
-    root = Path(__file__).resolve().parents[1]
+def test_approved_task4_operation_adapter_manifest_stays_pinned():
+    # Approval is for historical content, not every later HEAD of these paths.
+    assert code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS == {
+        "deploy.sh": "954b03b3b4ad4b90faa917a93c3f5cf6c5c3b908",
+        "modules/application/operations_migrations.py": (
+            "94914a8a8eb42a46d718739a8fbef6888d9baa11"
+        ),
+        "scripts/migrate_payroll_history.py": (
+            "4ad27f86c823430a005abd84b2bc8a516af0c131"
+        ),
+        "scripts/migrate_performance_history.py": (
+            "042c13abed6cad1e17247c9bb72f14949cd1f660"
+        ),
+        "scripts/plan_migrations.py": "9cd4781dbd547fb25b4c5ec6d93527b1517da290",
+    }
 
-    for path, approved_blob in (
-        code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS.items()
-    ):
-        assert code_only_release._blob_oid(root, "HEAD", path) == approved_blob
+
+@pytest.mark.parametrize(
+    "path", sorted(code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS)
+)
+def test_current_operation_adapter_content_requires_reviewed_blob(path):
+    root = Path(__file__).resolve().parents[1]
+    approved_blob = code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS[path]
+    target_blob = code_only_release._blob_oid(root, "HEAD", path)
+
+    if target_blob == approved_blob:
+        code_only_release._assert_operation_adapter_content(root, "HEAD", [path])
+    else:
+        with pytest.raises(RuntimeError, match="does not match approved content"):
+            code_only_release._assert_operation_adapter_content(root, "HEAD", [path])
+
+
+def test_current_deploy_script_is_not_implicitly_approved_for_code_only(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    content = (root / "deploy.sh").read_text(encoding="utf-8")
+    assert "node frontend/scripts/check-toolchain.mjs" in content
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, "deploy.sh", target_overrides={"deploy.sh": content}
+    )
+
+    with pytest.raises(RuntimeError, match="does not match approved content: deploy.sh"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
 
 
 def test_task4_facade_release_paths_pass_code_only_preflight(tmp_path, monkeypatch):
