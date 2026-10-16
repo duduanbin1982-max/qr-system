@@ -95,6 +95,7 @@ import { useApprovalPage } from '@/composables/approval/useApprovalPage.js'
 import { useLoginPage } from '@/composables/auth/useLoginPage.js'
 import { useScanReport } from '@/composables/scan/useScanReport.js'
 import { useTracePage } from '@/composables/trace/useTracePage.js'
+import LoginPage from '@/views/LoginPage.vue'
 import { auth } from '@/lib/auth.js'
 import { router } from '@/lib/router.js'
 
@@ -110,6 +111,16 @@ beforeEach(() => {
 })
 
 describe('Task 2F application context composables', () => {
+  it('renders the build-time application version through the login composable', () => {
+    const wrapper = mount(LoginPage)
+    try {
+      expect(useLoginPage().appVersion).toBe('test')
+      expect(wrapper.get('.login-footer').text()).toBe('vtest · Hanyun')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('keeps login validation and forced password change behavior', async () => {
     const loginPage = useLoginPage()
     await loginPage.handleSubmit()
