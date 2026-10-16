@@ -43,6 +43,97 @@ def thaw_planning_value(value: Any) -> Any:
     return _thaw(value)
 
 
+def copy_planning_runtime_value(value: Any) -> Any:
+    """Copy frozen stage values without serializing datetime or resource IDs.
+
+    JSON summaries use ``thaw_planning_value``; allocation adapters need native
+    datetime intervals and integer keys to feed the next calendar evaluation.
+    """
+    if isinstance(value, Mapping):
+        return {key: copy_planning_runtime_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [copy_planning_runtime_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return set(value)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityAllocationFacts:
+    """Immutable worktime and capability-match facts for one allocation."""
+
+    earliest: Any
+    standard: Mapping[str, Any] | None
+    operation: Mapping[str, Any]
+    order: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        for name in ("standard", "operation", "order"):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityNodeFacts:
+    """A node's progress before evaluating the next allocation decision."""
+
+    node: Mapping[str, Any]
+    allocated_quantity: int
+    occupancy: tuple[tuple[datetime, datetime], ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node", _freeze(self.node))
+        object.__setattr__(self, "occupancy", _freeze(self.occupancy))
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityDemand:
+    """Quantity and occupied minutes proposed before calendar evaluation."""
+
+    quantity: int
+    duration: float
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityCandidate:
+    """An evaluated node alternative shared by allocation strategies."""
+
+    completion: datetime | None
+    node_id: Any
+    segments: tuple[Mapping[str, Any], ...]
+    quantity: int
+    capability: Mapping[str, Any]
+    capacity_mode: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "segments", _freeze(self.segments))
+        object.__setattr__(self, "capability", _freeze(self.capability))
+
+    def mutable_segments(self) -> list[dict[str, Any]]:
+        return copy_planning_runtime_value(self.segments)
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityAllocationResult:
+    """Frozen allocation output, converted only at the legacy policy boundary."""
+
+    segments: tuple[Mapping[str, Any], ...]
+    allocations: tuple[Mapping[str, Any], ...]
+    occupancy_additions: Mapping[Any, tuple[tuple[datetime, datetime], ...]]
+
+    def __post_init__(self) -> None:
+        for name in ("segments", "allocations", "occupancy_additions"):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+    def as_legacy_result(self) -> dict[str, Any]:
+        return {
+            "segments": copy_planning_runtime_value(self.segments),
+            "allocations": copy_planning_runtime_value(self.allocations),
+            "occupancy_additions": {
+                key: list(intervals) for key, intervals in self.occupancy_additions.items()
+            },
+        }
+
+
 def _digest(value: Any) -> str:
     payload = json.dumps(
         _thaw(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
