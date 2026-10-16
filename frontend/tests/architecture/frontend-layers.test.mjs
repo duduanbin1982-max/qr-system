@@ -255,6 +255,31 @@ for (const consumer of performanceQualityConsumers) {
   })
 }
 
+const masterDataSettingsEdges = reportInventory.entries.filter(entry => entry.batch === '2E')
+const masterDataSettingsConsumers = [...new Set(masterDataSettingsEdges.map(entry => entry.consumer))]
+
+test('Task 2E keeps all 19 tracked edges across 9 consumers', () => {
+  assert.equal(masterDataSettingsEdges.length, 19)
+  assert.equal(masterDataSettingsConsumers.length, 9)
+})
+
+for (const consumer of masterDataSettingsConsumers) {
+  test(`Task 2E blocks restoring historical dependencies in ${consumer}`, () => {
+    const baseline = JSON.parse(readFileSync(new URL('../../scripts/frontend-layer-baseline.json', import.meta.url), 'utf8'))
+    const from = consumer.slice('frontend/src/'.length)
+    for (const entry of masterDataSettingsEdges.filter(entry => entry.consumer === consumer)) {
+      const to = entry.target.slice('frontend/src/'.length)
+      const edge = `${from} -> ${to}`
+      assert.equal(Object.hasOwn(baseline, edge), false, edge)
+      const restored = fixture({
+        [from]: `import * as historical from '@/${to}'`,
+        [to]: 'export const placeholder = () => {}',
+      })
+      assert.ok(restored.violations.some(violation => violation.startsWith(`${edge}:`)), restored.violations.join('\n'))
+    }
+  })
+}
+
 test('a whitelisted presentation utility loses its exception if it gains imports', () => {
   const result = fixture({
     'lib/productionTime.js': `import { api } from './api.js'; export const productionDate = () => api.domains.orders.listOrders()`,

@@ -147,7 +147,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-006",
@@ -157,7 +158,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-007",
@@ -292,7 +294,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-020",
@@ -302,7 +305,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-021",
@@ -312,7 +316,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-022",
@@ -322,7 +327,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-023",
@@ -494,7 +500,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-039",
@@ -504,7 +511,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-040",
@@ -514,7 +522,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-041",
@@ -524,7 +533,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-042",
@@ -567,7 +577,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-046",
@@ -665,7 +676,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-055",
@@ -675,7 +687,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-056",
@@ -685,7 +698,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-057",
@@ -695,7 +709,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-058",
@@ -725,7 +740,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-061",
@@ -997,7 +1013,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-086",
@@ -1007,7 +1024,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-087",
@@ -1017,7 +1035,8 @@
       "batch": "2E",
       "owner_role": "主数据前端维护角色",
       "target_milestone": "Task 2E PR 合并",
-      "status": "frozen"
+      "status": "implemented_pending_local_review",
+      "evidence": "docs/technical-debt/20261016-task2e-master-data-settings-layers.md"
     },
     {
       "id": "D05-088",
