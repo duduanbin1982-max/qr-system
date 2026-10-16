@@ -224,7 +224,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-013",
@@ -234,7 +235,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-014",
@@ -244,7 +246,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-015",
@@ -254,7 +257,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-016",
@@ -264,7 +268,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-017",
@@ -274,7 +279,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-018",
@@ -284,7 +290,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-019",
@@ -415,7 +422,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-031",
@@ -425,7 +433,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-032",
@@ -435,7 +444,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-033",
@@ -720,7 +730,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-059",
@@ -730,7 +741,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-060",
@@ -773,7 +785,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-064",
@@ -783,7 +796,8 @@
       "batch": "2F",
       "owner_role": "应用上下文前端维护角色",
       "target_milestone": "Task 2F PR 合并",
-      "status": "frozen"
+      "status": "local_reviewed_pending_commit",
+      "evidence": "docs/technical-debt/20261016-task2f-app-context-flows.md"
     },
     {
       "id": "D05-065",

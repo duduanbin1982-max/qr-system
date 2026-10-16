@@ -93,12 +93,9 @@
 </template>
 
 <script>
-import { auth, restoreSession, logout } from '@/lib/auth.js'
-import { navigate, requestedNavigation, restoreNavState, router } from '@/lib/router.js'
-import { store, showToast } from '@/lib/store.js'
-import { api } from '@/lib/api.js'
-import { usePageAccess, loadPageAccessCatalog } from '@/composables/usePageAccess.js'
-import { ref, onMounted, computed, reactive, defineAsyncComponent, h } from 'vue'
+import { usePageAccess } from '@/composables/usePageAccess.js'
+import { useAppLayout } from '@/composables/application/useAppLayout.js'
+import { defineAsyncComponent, h } from 'vue'
 
 const CHUNK_LOAD_ERROR_RE = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk [\dA-Za-z_-]+ failed|ChunkLoadError|error loading dynamically imported module/i
 const TRANSIENT_LOAD_ERROR_RE = /fetch|network|timeout|load failed/i
@@ -135,7 +132,7 @@ const NoPermissionPage = {
     const { landingPage } = usePageAccess()
 
     function goHome() {
-      navigate(landingPage(auth.user))
+      window.A?.navigate(landingPage(window.A?.auth?.user))
     }
 
     return () => h('div', { style: 'padding:var(--space-6)' }, [
@@ -179,7 +176,7 @@ function definePageAsyncComponent(pageName, loader) {
       try {
         if (isChunkLoadError && !sessionStorage.getItem(reloadKey)) {
           sessionStorage.setItem(reloadKey, '1')
-          showToast(`${pageName}资源已更新，正在自动刷新…`, 'warning')
+          window.A?.showToast(`${pageName}资源已更新，正在自动刷新…`, 'warning')
           window.location.reload()
           return
         }
@@ -225,9 +222,6 @@ const PerformancePage = definePageAsyncComponent('绩效管理', () => import('.
 const WorkTimePage = definePageAsyncComponent('工时管理', () => import('./WorkTimePage.vue'))
 const ProcessQualityEvaluationPage = definePageAsyncComponent('工序质量评价', () => import('./ProcessQualityEvaluationPage.vue'))
 
-// Expose globals for template compatibility
-window.A = { auth, router, store, showToast, navigate, logout, api }
-
 export default {
   components: {
     LoginPage,
@@ -261,91 +255,7 @@ export default {
     NoPermissionPage
   },
   setup() {
-    const ready = ref(false)
-    const menuOpen = reactive({})
-    const showSessions = ref(false)
-    const sessions = ref([])
-    const sessionsLoading = ref(false)
-    const pageAccess = usePageAccess()
-
-    const visibleSidebar = computed(() =>
-      pageAccess.sidebarItems.value.filter(item => pageAccess.canOpen(auth.user, item.page))
-    )
-
-    function toggleMenu(key) { menuOpen[key] = !menuOpen[key] }
-
-    function isMenuActive(item) {
-      return item.page === router.page
-    }
-
-    const currentView = computed(() => {
-      const map = {
-        'login': 'LoginPage', 'dashboard': 'DashboardPage',
-        'customers': 'CustomerList', 'orders': 'OrderList',
-        'products': 'ProductList', 'all-products': 'ProductList',
-        'structure-products': 'ProductList', 'machining-products': 'ProductList',
-        'users': 'UserList', 'processes': 'ProcessList',
-        'all-processes': 'ProcessList', 'structure-processes': 'ProcessList',
-        'machining-processes': 'ProcessList', 'inventory': 'InventoryList',
-        'materials': 'MaterialList', 'schedule': 'GanttChart',
-        'rework': 'ReworkList', 'quality': 'QualityManagementPage', 'quality-management': 'QualityManagementPage',
-        'wages': 'WageList', 'performance': 'PerformancePage', 'work-time': 'WorkTimePage',
-        'process-quality-evaluation': 'ProcessQualityEvaluationPage', 'prices': 'PriceList',
-        'all-prices': 'PriceList', 'structure-prices': 'PriceList',
-        'machining-prices': 'PriceList', 'routes': 'RouteList',
-        'scan': 'ScanReport', 'shipments': 'ShipmentList',
-        'stats': 'StatsPage', 'trace': 'TracePage',
-        'approvals': 'ApprovalPage', 'settings': 'SettingsPage',
-        'basic-settings': 'BasicSettings', 'production': 'ProductionSettings',
-        'reports': 'ReportsPage', 'board': 'BoardPage',
-        'no-permission': 'NoPermissionPage',
-      }
-      if (router.page !== 'login' && router.page !== 'no-permission' && !pageAccess.canOpen(auth.user, router.page)) {
-        return 'NoPermissionPage'
-      }
-      return map[router.page] || 'NoPermissionPage'
-    })
-
-    onMounted(async () => {
-      if (await restoreSession()) {
-        await loadPageAccessCatalog()
-        restoreNavState()
-        const requested = requestedNavigation()
-        if (requested.settingsTab) {
-          localStorage.setItem('settingsTab', requested.settingsTab)
-        }
-        if (requested.wageTab) {
-          localStorage.setItem('wageActiveTab', requested.wageTab)
-          router.params = {
-            ...router.params,
-            wage_tab: requested.wageTab,
-            route_version_id: requested.routeVersionId,
-            process_version_id: requested.processVersionId,
-          }
-        }
-        const saved = localStorage.getItem('currentPage')
-        if (requested.page && pageAccess.canOpen(auth.user, requested.page)) {
-          router.page = requested.page
-        }
-        else if (saved === 'quality') {
-          localStorage.setItem('currentPage', 'quality-management')
-          router.page = 'quality-management'
-        }
-        else if (saved && saved !== 'login') router.page = saved
-        else router.page = pageAccess.landingPage(auth.user)
-        if (!pageAccess.canOpen(auth.user, router.page)) {
-          router.page = pageAccess.landingPage(auth.user)
-        }
-      }
-      ready.value = true
-      store.loading = false
-    })
-
-    const A = { auth, router, store, showToast, navigate, logout, api }
-    return {
-      A, ready, currentView, visibleSidebar, menuOpen, toggleMenu, isMenuActive,
-      showSessions, sessions, sessionsLoading, auth, router, navigate, logout, store
-    }
+    return useAppLayout()
   }
 }
 </script>
