@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from modules.domain import evidence_protocol
+from modules.services import performance_quality_planning
 
 
 MANIFEST_FORMAT = "performance_history_migration_manifest_v1"
@@ -323,251 +324,30 @@ def _plan_work(inputs, *, record, calendar_month, production_month):
     )
 
 
-def _plan_quality(inputs, *, record, json_object, calendar_month, production_month):
-    """Plan quality sources, canonical events, and ambiguity evidence."""
-    records = []
-    ambiguity_rows = inputs.ambiguity_rows
-    ambiguity_keys = {
-        (str(row.get("source_type") or ""), int(row.get("source_id") or 0))
-        for row in ambiguity_rows
-    }
-    cross_quality = []
-    cross_quality_user_ids = set()
-    multi_source_quality_user_ids = set()
-    virtual_ambiguity_keys = set()
-    normalized_quality_source_keys = set()
-
-    for evaluation in inputs.quality_evaluations:
-        user_id = evaluation.get("target_user_id") or evaluation.get(
-            "handoff_target_user_id"
-        )
-        source_key = ("process_quality_evaluation", int(evaluation["id"]))
-        normalized_quality_source_keys.add(source_key)
-        requires_confirmation = (
-            source_key in ambiguity_keys
-            or (
-                evaluation.get("target_work_record_id") is None
-                and user_id is None
-            )
-        )
-        if requires_confirmation:
-            virtual_ambiguity_keys.add(source_key)
-        boundary = calendar_month(evaluation.get("created_at")) != production_month
-        classification = (
-            "production_month_boundary"
-            if boundary
-            else "production_month_quality_evaluation"
-        )
-        if requires_confirmation:
-            classification += "+quality_source_confirmation_required"
-        if evaluation.get("source_handoff_review_id"):
-            classification += "+explicit_source_relation"
-            if user_id is not None:
-                multi_source_quality_user_ids.add(int(user_id))
-        if boundary:
-            cross_quality.append(evaluation)
-            if user_id is not None:
-                cross_quality_user_ids.add(int(user_id))
-        records.append(
-            record(
-                "process_quality_evaluation",
-                evaluation["id"],
-                classification,
-                {
-                    "order_id": evaluation.get("order_id"),
-                    "target_process_id": evaluation.get("target_process_id"),
-                    "target_work_record_id": evaluation.get("target_work_record_id"),
-                    "target_user_id": evaluation.get("target_user_id"),
-                    "handoff_target_user_id": evaluation.get(
-                        "handoff_target_user_id"
-                    ),
-                    "quantity": evaluation.get("quantity") or 0,
-                    "total_score": evaluation.get("total_score"),
-                    "grade": evaluation.get("grade") or "",
-                    "status": evaluation.get("status") or "",
-                    "source_handoff_review_id": evaluation.get(
-                        "source_handoff_review_id"
-                    ),
-                    "created_at": evaluation.get("created_at") or "",
-                    "updated_at": evaluation.get("updated_at") or "",
-                },
-                user_id=user_id,
-                business_at=evaluation.get("created_at") or "",
-            )
-        )
-
-    for source_type, event_type, source_rows in (
-        ("scrap_record", "scrap", inputs.scrap_records),
-        ("rework_record", "rework", inputs.rework_records),
-    ):
-        for source in source_rows:
-            source_key = (source_type, int(source["id"]))
-            normalized_quality_source_keys.add(source_key)
-            business_at = source.get("created_at") or ""
-            boundary = calendar_month(business_at) != production_month
-            classification = (
-                "production_month_boundary"
-                if boundary
-                else "production_month_" + event_type
-            )
-            if source_type == "rework_record" and source.get("source_ncr_id"):
-                classification += "+explicit_source_relation"
-                if source.get("user_id") is not None:
-                    multi_source_quality_user_ids.add(int(source["user_id"]))
-            if boundary and source.get("user_id") is not None:
-                cross_quality_user_ids.add(int(source["user_id"]))
-            records.append(
-                record(
-                    source_type,
-                    source["id"],
-                    classification,
-                    {
-                        "event_type": event_type,
-                        "order_id": source.get("order_id"),
-                        "process_id": source.get("process_id"),
-                        "user_id": source.get("user_id"),
-                        "quantity": source.get("quantity") or 0,
-                        "reason": source.get("reason") or "",
-                        "source_ncr_id": source.get("source_ncr_id"),
-                        "created_at": business_at,
-                    },
-                    user_id=source.get("user_id"),
-                    business_at=business_at,
-                )
-            )
-
-    for inspection in inputs.inspections:
-        source_key = ("quality_inspection", int(inspection["id"]))
-        normalized_quality_source_keys.add(source_key)
-        candidates = inputs.inspection_candidates.get(
-            (inspection.get("order_id"), inspection.get("process_id")), []
-        )
-        candidate_user_ids = sorted(
-            {
-                int(item["user_id"])
-                for item in candidates
-                if item.get("user_id") is not None
-            }
-        )
-        user_id = candidate_user_ids[0] if len(candidate_user_ids) == 1 else None
-        requires_confirmation = (
-            source_key in ambiguity_keys or len(candidate_user_ids) != 1
-        )
-        if requires_confirmation:
-            virtual_ambiguity_keys.add(source_key)
-        business_at = inspection.get("business_at") or ""
-        boundary = calendar_month(business_at) != production_month
-        classification = (
-            "production_month_boundary"
-            if boundary
-            else "production_month_quality_inspection"
-        )
-        if requires_confirmation:
-            classification += "+quality_source_confirmation_required"
-        related_ncr_ids = sorted(
-            int(value)
-            for value in str(inspection.get("related_ncr_ids") or "").split(",")
-            if value
-        )
-        if related_ncr_ids:
-            classification += "+explicit_source_relation"
-            if user_id is not None:
-                multi_source_quality_user_ids.add(user_id)
-        if boundary and user_id is not None:
-            cross_quality_user_ids.add(user_id)
-        records.append(
-            record(
-                "quality_inspection",
-                inspection["id"],
-                classification,
-                {
-                    "order_id": inspection.get("order_id"),
-                    "process_id": inspection.get("process_id"),
-                    "quantity_failed": inspection.get("quantity_failed") or 0,
-                    "defect_quantity": inspection.get("defect_quantity") or 0,
-                    "result": inspection.get("result") or "",
-                    "business_at": business_at,
-                    "candidate_work_record_ids": [
-                        int(item["id"]) for item in candidates
-                    ],
-                    "candidate_user_ids": candidate_user_ids,
-                    "related_ncr_ids": related_ncr_ids,
-                },
-                user_id=user_id,
-                business_at=business_at,
-            )
-        )
-
-    for event in inputs.quality_events:
-        sources = sorted(
-            event.get("sources") or [],
-            key=lambda item: (item["source_type"], int(item["source_id"])),
-        )
-        event_snapshot = json_object(event.get("snapshot_json"))
-        if event_snapshot.get("historical_migration"):
-            continue
-        boundary = calendar_month(event.get("business_at")) != production_month
-        classification = (
-            "canonical_quality_event_boundary" if boundary else "canonical_quality_event"
-        )
-        if len(sources) > 1 and event.get("user_id") is not None:
-            multi_source_quality_user_ids.add(int(event["user_id"]))
-        if boundary and event.get("user_id") is not None:
-            cross_quality_user_ids.add(int(event["user_id"]))
-        records.append(
-            record(
-                "quality_event",
-                event["id"],
-                classification,
-                {
-                    "event_type": event.get("event_type") or "",
-                    "quantity": event.get("quantity") or 0,
-                    "order_id": event.get("order_id"),
-                    "process_id": event.get("process_id"),
-                    "user_id": event.get("user_id"),
-                    "business_at": event.get("business_at") or "",
-                    "event_digest": event.get("event_digest") or "",
-                    "snapshot": event_snapshot,
-                },
-                user_id=event.get("user_id"),
-                business_at=event.get("business_at") or "",
-            )
-        )
-
-    quality_ambiguity_ids = []
-    for exception in ambiguity_rows:
-        snapshot = json_object(exception.get("snapshot_json"))
-        quality_ambiguity_ids.append(int(exception["id"]))
-        source_type = str(exception.get("source_type") or "")
-        source_id = int(exception.get("source_id") or 0)
-        if (source_type, source_id) in normalized_quality_source_keys:
-            continue
-        records.append(
-            record(
-                "quality_ambiguity_" + source_type,
-                source_id,
-                "quality_source_confirmation_required",
-                {
-                    "user_id": exception.get("user_id"),
-                    "source_type": source_type,
-                    "source_id": source_id,
-                    "status": exception.get("status") or "pending",
-                    "snapshot": snapshot,
-                },
-                user_id=exception.get("user_id"),
-                business_at=snapshot.get("business_at")
-                or exception.get("created_at")
-                or "",
-            )
-        )
+def plan_quality_facts(
+    inputs, *, record, json_object, calendar_month, production_month
+):
+    """Adapt immutable source commands to the historical result contract."""
+    aggregation = performance_quality_planning.plan_quality_sources(
+        quality_evaluations=inputs.quality_evaluations,
+        scrap_records=inputs.scrap_records,
+        rework_records=inputs.rework_records,
+        inspections=inputs.inspections,
+        inspection_candidates=inputs.inspection_candidates,
+        quality_events=inputs.quality_events,
+        ambiguity_rows=inputs.ambiguity_rows,
+        json_object=json_object,
+        calendar_month=calendar_month,
+        production_month=production_month,
+    )
     return QualityPlanningResult(
-        records=tuple(records),
-        cross_month_quality_count=len(cross_quality),
-        cross_month_quality_ids=tuple(int(row["id"]) for row in cross_quality),
-        quality_ambiguity_count=len(ambiguity_keys | virtual_ambiguity_keys),
-        quality_ambiguity_ids=tuple(quality_ambiguity_ids),
-        cross_month_quality_user_ids=tuple(sorted(cross_quality_user_ids)),
-        multi_source_quality_user_ids=tuple(sorted(multi_source_quality_user_ids)),
+        records=tuple(command.materialize(record) for command in aggregation.commands),
+        cross_month_quality_count=len(aggregation.cross_month_ids),
+        cross_month_quality_ids=aggregation.cross_month_ids,
+        quality_ambiguity_count=aggregation.quality_ambiguity_count,
+        quality_ambiguity_ids=aggregation.quality_ambiguity_ids,
+        cross_month_quality_user_ids=aggregation.cross_month_user_ids,
+        multi_source_quality_user_ids=aggregation.multi_source_user_ids,
     )
 
 
@@ -663,19 +443,6 @@ def plan_work_time_facts(inputs, *, record, calendar_month, production_month):
     return _plan_work(
         inputs,
         record=record,
-        calendar_month=calendar_month,
-        production_month=production_month,
-    )
-
-
-def plan_quality_facts(
-    inputs, *, record, json_object, calendar_month, production_month
-):
-    """Public pure stage for quality facts and source ambiguity."""
-    return _plan_quality(
-        inputs,
-        record=record,
-        json_object=json_object,
         calendar_month=calendar_month,
         production_month=production_month,
     )
