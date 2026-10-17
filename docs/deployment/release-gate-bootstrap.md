@@ -10,9 +10,18 @@ PR #111 对 `scripts/code_only_release.py` 的修改。本入口只安装已审�
 `2451adc20d00fc4841638961111f8815b1eabadd` →
 `f619adedac535e03735f98f40adaa049b6eb9c1b`，目标提交固定为
 `8f928c2e6040346b986dac97d10fd50eb659140e`。其余四个发布控制文件和围栏运行时
-必须不变。差异只能包含 `scripts/code_only_release.py` 与其已审核测试文件；
-拒绝 bootstrap 自修改、业务代码、数据库、附件、前端、依赖变更、文件删除、
-符号链接和模式变化。
+必须不变。差异只能包含以下六个已审核文件，并且每个文件都必须匹配目标 blob：
+
+| 路径 | 模式 | 目标 blob |
+| --- | --- | --- |
+| `scripts/code_only_release.py` | `100644` | `f619adedac535e03735f98f40adaa049b6eb9c1b` |
+| `tests/test_code_only_deployment.py` | `100644` | `bf64ed5ec08b5a77a9ce81c678562016c2875630` |
+| `modules/repositories/performance_history_migration_repository.py` | `100644` | `183a566e992623b781a8bb94633783fb4bfce767` |
+| `modules/repositories/performance_ledger_repository.py` | `100644` | `46661899eb83f653e6fe0cb7e89695e1bdc48f27` |
+| `tests/test_architecture_imports.py` | `100644` | `78ca8db55c74c824893a1ea41a135213c9704110` |
+| `tests/test_performance_repository_ownership.py` | `100644` | `1f6fcc8dbfb9abfb0355781883a6456e58e019af` |
+
+门禁只接受上述精确路径、模式和 blob，并拒绝 bootstrap 自修改、业务代码、数据库、附件、前端、依赖变更、文件删除、符号链接和模式变化；
 
 ## 信任与审核
 

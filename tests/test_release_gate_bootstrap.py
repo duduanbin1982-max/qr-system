@@ -66,12 +66,18 @@ def transition(tmp_path, monkeypatch):
     stage(repository, "modules/migrations.py")
     write(repository, "tests/test_code_only_deployment.py", "# baseline tests\n")
     stage(repository, "tests/test_code_only_deployment.py")
+    for name in (
+        "modules/repositories/performance_history_migration_repository.py",
+        "modules/repositories/performance_ledger_repository.py",
+        "tests/test_architecture_imports.py",
+    ):
+        write(repository, name, git(ROOT, "show", f"{bootstrap.BEFORE}:{name}"))
+        stage(repository, name)
     git(repository, "commit", "--quiet", "-m", "approved production")
     before = git(repository, "rev-parse", "HEAD").decode().strip()
-    write(repository, bootstrap.POLICY_PATH, (ROOT / bootstrap.POLICY_PATH).read_bytes())
-    write(repository, "tests/test_code_only_deployment.py", (ROOT / "tests/test_code_only_deployment.py").read_bytes())
-    stage(repository, bootstrap.POLICY_PATH)
-    stage(repository, "tests/test_code_only_deployment.py")
+    for name in bootstrap.ALLOWED_CHANGES:
+        write(repository, name, (ROOT / name).read_bytes())
+        stage(repository, name)
     git(repository, "commit", "--quiet", "-m", "approved gate upgrade")
     target = git(repository, "rev-parse", "HEAD").decode().strip()
     project = tmp_path / "production"
