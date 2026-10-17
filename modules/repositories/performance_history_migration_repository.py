@@ -1,6 +1,8 @@
 """Read models and evidence access for controlled performance history migration."""
 
 from modules.repositories.context import resolve_db
+from modules.repositories.performance_fact_repository import PerformanceFactRepository
+from modules.repositories.performance_ledger_repository import PerformanceLedgerRepository
 
 
 class PerformanceHistoryMigrationRepository:
@@ -227,19 +229,10 @@ class PerformanceHistoryMigrationRepository:
 
     @staticmethod
     def insert_historical_quality_ambiguity(payload, db=None):
-        db = resolve_db(db)
-        cursor = db.execute(
-            "INSERT INTO performance_data_exceptions ("
-            "batch_id,user_id,exception_type,source_type,source_id,status,snapshot_json"
-            ") VALUES (NULL,?,'ambiguous_quality_source',?,?,'pending',?)",
-            (
-                payload.get("user_id"),
-                payload["source_type"],
-                payload["source_id"],
-                payload["snapshot_json"],
-            ),
+        return PerformanceFactRepository.insert_historical_quality_exception(
+            payload,
+            resolve_db(db),
         )
-        return cursor.lastrowid
 
     @staticmethod
     def quality_ambiguities(period_start, period_end, db=None):
@@ -333,13 +326,9 @@ class PerformanceHistoryMigrationRepository:
 
     @staticmethod
     def next_version(production_month, db=None):
-        db = resolve_db(db)
-        return int(
-            db.execute(
-                "SELECT COALESCE(MAX(version),0)+1 FROM performance_batches "
-                "WHERE production_month=?",
-                (production_month,),
-            ).fetchone()[0]
+        return PerformanceLedgerRepository.next_version(
+            production_month,
+            db=resolve_db(db),
         )
 
     @staticmethod

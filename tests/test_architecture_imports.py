@@ -1061,7 +1061,24 @@ def test_architecture_gate_runs_backend_and_frontend_boundary_checks():
 
 
 def test_repositories_do_not_depend_on_other_repositories():
-    compatibility_facade_imports = {}
+    # These are the only sanctioned compatibility delegates. The target
+    # repository remains the single owner of the SQL decision; callers keep
+    # their historical public entry point while forwarding the same db object.
+    compatibility_facade_imports = {
+        "modules/repositories/performance_history_migration_repository.py": {
+            "modules.repositories.performance_fact_repository": frozenset(
+                {"PerformanceFactRepository"}
+            ),
+            "modules.repositories.performance_ledger_repository": frozenset(
+                {"PerformanceLedgerRepository"}
+            ),
+        },
+        "modules/repositories/performance_ledger_repository.py": {
+            "modules.repositories.performance_fact_repository": frozenset(
+                {"PerformanceFactRepository"}
+            ),
+        },
+    }
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
     for path in _architecture_files(repository_root, layer="repositories"):
@@ -1078,13 +1095,51 @@ def test_repositories_do_not_depend_on_other_repositories():
                 if owned_namespace and module.startswith(owned_namespace + "."):
                     continue
                 relative_path = path.relative_to(PROJECT_ROOT).as_posix()
-                if module in compatibility_facade_imports.get(relative_path, set()):
+                allowed_names = compatibility_facade_imports.get(relative_path, {}).get(
+                    module
+                )
+                imported_names = {alias.name for alias in node.names}
+                if allowed_names is not None and imported_names <= allowed_names:
                     continue
                 violations.append(
                     f"{relative_path} -> {module}"
                 )
 
     assert violations == [], f"repositories must not depend on peer repositories: {violations}"
+
+
+def test_performance_repository_peer_imports_are_delegate_only():
+    expected_calls = {
+        "modules/repositories/performance_history_migration_repository.py": {
+            "PerformanceFactRepository.insert_historical_quality_exception",
+            "PerformanceLedgerRepository.next_version",
+        },
+        "modules/repositories/performance_ledger_repository.py": {
+            "PerformanceFactRepository.insert_batch_exception",
+        },
+    }
+    for relative_path, calls in expected_calls.items():
+        owning_class = (
+            "PerformanceHistoryMigrationRepository"
+            if relative_path.endswith("performance_history_migration_repository.py")
+            else "PerformanceLedgerRepository"
+        )
+        tree = ast.parse(
+            (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        )
+        peer_calls = {
+            f"{node.func.value.id}.{node.func.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in {"PerformanceFactRepository", "PerformanceLedgerRepository"}
+            and node.func.value.id != owning_class
+        }
+        assert peer_calls == calls, (
+            f"{relative_path} has an unsanctioned peer-repository call: "
+            f"{sorted(peer_calls - calls)}"
+        )
 
 
 def test_quality_management_facades_stay_thin():
