@@ -438,6 +438,83 @@ def test_approved_task4_operation_adapter_manifest_stays_pinned():
     }
 
 
+def test_approved_task5_repository_manifest_stays_pinned():
+    assert code_only_release.APPROVED_TASK5_REPOSITORY_BLOBS == {
+        "modules/repositories/performance_history_migration_repository.py": (
+            "183a566e992623b781a8bb94633783fb4bfce767"
+        ),
+        "modules/repositories/performance_ledger_repository.py": (
+            "46661899eb83f653e6fe0cb7e89695e1bdc48f27"
+        ),
+    }
+
+
+def test_code_only_preflight_allows_reviewed_task5_repository_paths(
+    tmp_path, monkeypatch
+):
+    changed_paths = [
+        "modules/repositories/performance_history_migration_repository.py",
+        "modules/repositories/performance_ledger_repository.py",
+    ]
+    repository, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_paths
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_TASK5_REPOSITORY_BLOBS",
+        {
+            path: _git(repository, "rev-parse", f"{target}:{path}")
+            for path in changed_paths
+        },
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == sorted(changed_paths)
+
+
+def test_code_only_preflight_rejects_unreviewed_task5_repository_content(
+    tmp_path, monkeypatch
+):
+    changed_path = "modules/repositories/performance_ledger_repository.py"
+    repository, production, tool, before, reviewed_target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_TASK5_REPOSITORY_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, "VALUE = 3\n")
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "unreviewed Task 5 repository change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Task 5 repository content does not match approved content",
+    ):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
 @pytest.mark.parametrize(
     "path", sorted(code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS)
 )
