@@ -69,9 +69,9 @@ def transition(tmp_path, monkeypatch):
     git(repository, "commit", "--quiet", "-m", "approved production")
     before = git(repository, "rev-parse", "HEAD").decode().strip()
     write(repository, bootstrap.POLICY_PATH, (ROOT / bootstrap.POLICY_PATH).read_bytes())
-    write(repository, bootstrap.BOOTSTRAP_PATH, (ROOT / bootstrap.BOOTSTRAP_PATH).read_bytes())
+    write(repository, "tests/test_code_only_deployment.py", (ROOT / "tests/test_code_only_deployment.py").read_bytes())
     stage(repository, bootstrap.POLICY_PATH)
-    stage(repository, bootstrap.BOOTSTRAP_PATH)
+    stage(repository, "tests/test_code_only_deployment.py")
     git(repository, "commit", "--quiet", "-m", "approved gate upgrade")
     target = git(repository, "rev-parse", "HEAD").decode().strip()
     project = tmp_path / "production"
@@ -86,6 +86,15 @@ def transition(tmp_path, monkeypatch):
         connection.execute("INSERT INTO facts VALUES (12)")
         connection.execute("PRAGMA user_version=96")
     monkeypatch.setattr(bootstrap, "BEFORE", before)
+    monkeypatch.setattr(bootstrap, "APPROVED_TARGET_COMMIT", target)
+    monkeypatch.setattr(
+        bootstrap,
+        "APPROVED_TARGET_ENTRIES",
+        {
+            path: tuple(bootstrap._entry(repository, target, path))
+            for path in bootstrap.ALLOWED_CHANGES
+        },
+    )
     return SimpleNamespace(repository=repository, project=project, tool=tool, before=before, target=target, database=database)
 
 
@@ -144,13 +153,13 @@ def test_ordinary_gate_rejects_self_upgrade_but_exact_bootstrap_accepts_without_
 ])
 def test_bootstrap_rejects_business_migration_frontend_data_and_control_changes(transition, path):
     amend(transition, path, "UNAPPROVED = True\n")
-    with pytest.raises(RuntimeError, match="unapproved paths"):
+    with pytest.raises(RuntimeError, match="changed paths mismatch"):
         approve(transition)
 
 
 def test_bootstrap_rejects_any_unreviewed_validator_byte(transition):
     amend(transition, bootstrap.POLICY_PATH, (ROOT / bootstrap.POLICY_PATH).read_bytes() + b"# drift\n")
-    with pytest.raises(RuntimeError, match="unapproved release control"):
+    with pytest.raises(RuntimeError, match="regular, retained"):
         approve(transition)
 
 
@@ -160,13 +169,13 @@ def test_bootstrap_rejects_modified_production_controls(transition):
         approve(transition)
 
 
-def test_bootstrap_rejects_target_bootstrap_different_from_running_artifact(transition):
+def test_bootstrap_rejects_target_bootstrap_change(transition):
     amend(transition, bootstrap.BOOTSTRAP_PATH, "raise RuntimeError('target authorized itself')\n")
-    with pytest.raises(RuntimeError, match="running bootstrap does not match"):
+    with pytest.raises(RuntimeError, match="changed paths mismatch"):
         approve(transition)
 
 
-@pytest.mark.parametrize("path", [bootstrap.POLICY_PATH, bootstrap.BOOTSTRAP_PATH])
+@pytest.mark.parametrize("path", [bootstrap.POLICY_PATH])
 def test_bootstrap_rejects_executable_mode_changes(transition, path):
     git(transition.tool, "update-index", "--chmod=+x", path)
     git(transition.tool, "commit", "--quiet", "-m", "mode change")
