@@ -38,6 +38,26 @@ APPROVED_TARGET_ENTRIES = {
         "blob",
         "bf64ed5ec08b5a77a9ce81c678562016c2875630",
     ),
+    "modules/repositories/performance_history_migration_repository.py": (
+        "100644",
+        "blob",
+        "183a566e992623b781a8bb94633783fb4bfce767",
+    ),
+    "modules/repositories/performance_ledger_repository.py": (
+        "100644",
+        "blob",
+        "46661899eb83f653e6fe0cb7e89695e1bdc48f27",
+    ),
+    "tests/test_architecture_imports.py": (
+        "100644",
+        "blob",
+        "78ca8db55c74c824893a1ea41a135213c9704110",
+    ),
+    "tests/test_performance_repository_ownership.py": (
+        "100644",
+        "blob",
+        "1f6fcc8dbfb9abfb0355781883a6456e58e019af",
+    ),
 }
 ALLOWED_CHANGES = frozenset(APPROVED_TARGET_ENTRIES)
 
@@ -179,7 +199,7 @@ def prepare_overlay(overlay_root, approval):
         "    _assert_bootstrap_approval(tool_root, project_root, before_commit, target_commit)\n")
     source = _replace_once(source,
         "        if _path_is_forbidden(path) and path not in documentation_only\n",
-        "        if path != " + repr(POLICY_PATH) + " and _path_is_forbidden(path) and path not in documentation_only\n")
+        "        if path not in BOOTSTRAP_APPROVAL[\"target_entries\"] and _path_is_forbidden(path) and path not in documentation_only\n")
     policy.write_text(source, encoding="utf-8", newline="\n")
     launcher = scripts / "deploy-code-only.sh"
     source = launcher.read_text(encoding="utf-8")
