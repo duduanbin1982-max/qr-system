@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""One-time, independently approved upgrade of the c4c7291 release validator.
+"""One-time, independently approved upgrade of the current release validator.
 
 Run an externally verified copy, never the target's validator. Only the exact
-reviewed validator transition is permitted; the current launcher, fence, backup
+Task 5 validator transition is permitted; the current launcher, fence, backup
 and rollback controls remain the authority throughout the release.
 """
 
@@ -19,24 +19,27 @@ import tempfile
 from pathlib import Path
 
 
-BEFORE = "c4c72914b99098566cbd21c3cec94e68927dbf79"
+BEFORE = "787319edbdfa6ce2c17c23eeeb5e2fdeaa68598d"
+APPROVED_TARGET_COMMIT = "8f928c2e6040346b986dac97d10fd50eb659140e"
 POLICY_PATH = "scripts/code_only_release.py"
 BOOTSTRAP_PATH = "scripts/bootstrap_release_gate.py"
 CONTROL_ENTRIES = {
-    POLICY_PATH: ("100644", "b205d49eae1a30382019d5724c1b172843be80a1"),
+    POLICY_PATH: ("100644", "2451adc20d00fc4841638961111f8815b1eabadd"),
     "scripts/deploy-code-only.sh": ("100644", "f916286b10611284f279ce1a722b0c2874d10258"),
     "scripts/deployment_manifest.py": ("100644", "4ab0cf4e0b834426e22e10f24f11611313f0f494"),
     "scripts/backup-db.sh": ("100755", "0a8af7990690f6153731a3d67123ffa230df9aa6"),
     "scripts/rollback-deployment.sh": ("100644", "aa8591c6c3a97424c07e74fd45e8d5f1b4abed99"),
 }
-APPROVED_POLICY_BLOB = "2451adc20d00fc4841638961111f8815b1eabadd"
-ALLOWED_CHANGES = frozenset({
-    POLICY_PATH,
-    BOOTSTRAP_PATH,
-    "tests/test_code_only_deployment.py",
-    "tests/test_release_gate_bootstrap.py",
-    "docs/deployment/release-gate-bootstrap.md",
-})
+APPROVED_POLICY_BLOB = "f619adedac535e03735f98f40adaa049b6eb9c1b"
+APPROVED_TARGET_ENTRIES = {
+    POLICY_PATH: ("100644", "blob", APPROVED_POLICY_BLOB),
+    "tests/test_code_only_deployment.py": (
+        "100644",
+        "blob",
+        "bf64ed5ec08b5a77a9ce81c678562016c2875630",
+    ),
+}
+ALLOWED_CHANGES = frozenset(APPROVED_TARGET_ENTRIES)
 
 
 def _git(root, *arguments):
@@ -87,11 +90,13 @@ def validate_transition(project_root, tool_root, target_commit):
     changed = sorted(filter(None, _git(
         tool_root, "diff", "--no-renames", "--name-only", "-z", BEFORE, target_commit, "--",
     ).decode("utf-8").split("\0")))
-    if not {POLICY_PATH, BOOTSTRAP_PATH}.issubset(changed) or set(changed) - ALLOWED_CHANGES:
-        raise RuntimeError(f"bootstrap contains unapproved paths: {changed}")
+    if changed != sorted(ALLOWED_CHANGES):
+        raise RuntimeError(f"bootstrap changed paths mismatch: {changed}")
     for path in changed:
-        if _entry(tool_root, target_commit, path)[:2] != ["100644", "blob"]:
+        if _entry(tool_root, target_commit, path) != list(APPROVED_TARGET_ENTRIES[path]):
             raise RuntimeError(f"bootstrap requires regular, retained text files: {path}")
+    if target_commit != APPROVED_TARGET_COMMIT:
+        raise RuntimeError("target commit is not the independently approved Task 5 release")
     controls = {}
     for path, (mode, before_oid) in CONTROL_ENTRIES.items():
         before_entry = [mode, "blob", before_oid]
@@ -101,23 +106,23 @@ def validate_transition(project_root, tool_root, target_commit):
         if _blob(_regular_file(project_root, path)) != before_oid:
             raise RuntimeError(f"production release control modified: {path}")
         controls[path] = [before_entry, target_entry]
-    bootstrap_bytes = Path(__file__).read_bytes()
-    if _entry(tool_root, target_commit, BOOTSTRAP_PATH)[2] != _blob(bootstrap_bytes):
-        raise RuntimeError("running bootstrap does not match the approved target blob")
     return {
         "before_commit": BEFORE,
         "target_commit": target_commit,
         "project_root": str(project_root),
         "tool_root": str(tool_root),
         "changed_paths": changed,
+        "target_entries": {
+            path: list(entry) for path, entry in APPROVED_TARGET_ENTRIES.items()
+        },
         "controls": controls,
-        "bootstrap_sha256": hashlib.sha256(bootstrap_bytes).hexdigest(),
+        "bootstrap_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
 
 
 # Executed by the CURRENT production validator, both before tests and immediately
 # before acquiring the fence. It rechecks the complete, exact approval each time.
-OVERLAY_GUARD = '''
+OVERLAY_GUARD = r'''
 def _assert_bootstrap_approval(tool_root, project_root, before_commit, target_commit):
     import hashlib
     approval = BOOTSTRAP_APPROVAL
@@ -128,16 +133,23 @@ def _assert_bootstrap_approval(tool_root, project_root, before_commit, target_co
         raise RuntimeError("bootstrap approval commit or root mismatch")
     if _changed_paths(tool_root, before_commit, target_commit) != approval["changed_paths"]:
         raise RuntimeError("bootstrap approval changed paths mismatch")
+    if target_commit != approval["target_commit"]:
+        raise RuntimeError("bootstrap approval commit or root mismatch")
+    for path, expected in approval["target_entries"].items():
+        actual = _git(tool_root, "ls-tree", target_commit, "--", path).stdout
+        metadata, name = actual.rstrip(b"\n").split(b"\t", 1)
+        if metadata.decode("ascii").split() != expected or name.decode("utf-8") != path:
+            raise RuntimeError("bootstrap target entry mismatch: " + path)
     for path, entries in approval["controls"].items():
         for commit, expected in zip((before_commit, target_commit), entries):
             actual = _git(tool_root, "ls-tree", commit, "--", path).stdout
-            if actual.split(b"\\t", 1)[0].decode("ascii").split() != expected:
+            if actual.split(b"\t", 1)[0].decode("ascii").split() != expected:
                 raise RuntimeError("bootstrap release control Git entry mismatch: " + path)
         candidate = project_root / path
         if not candidate.is_file() or any(part.is_symlink() for part in (candidate, *candidate.parents)):
             raise RuntimeError("unsafe bootstrap release control: " + path)
         content = candidate.read_bytes()
-        oid = hashlib.sha1(b"blob " + str(len(content)).encode("ascii") + b"\\0" + content).hexdigest()
+        oid = hashlib.sha1(b"blob " + str(len(content)).encode("ascii") + b"\0" + content).hexdigest()
         if oid != entries[0][2]:
             raise RuntimeError("bootstrap production release control modified: " + path)
 
@@ -166,8 +178,8 @@ def prepare_overlay(overlay_root, approval):
         "    _assert_release_controls_unchanged(tool_root, before_commit, target_commit)\n",
         "    _assert_bootstrap_approval(tool_root, project_root, before_commit, target_commit)\n")
     source = _replace_once(source,
-        "forbidden = [path for path in changed if _path_is_forbidden(path)]",
-        "forbidden = [path for path in changed if path != " + repr(POLICY_PATH) + " and _path_is_forbidden(path)]")
+        "        if _path_is_forbidden(path) and path not in documentation_only\n",
+        "        if path != " + repr(POLICY_PATH) + " and _path_is_forbidden(path) and path not in documentation_only\n")
     policy.write_text(source, encoding="utf-8", newline="\n")
     launcher = scripts / "deploy-code-only.sh"
     source = launcher.read_text(encoding="utf-8")
