@@ -51,6 +51,18 @@ APPROVED_OPERATION_ADAPTER_BLOBS = {
     "scripts/plan_migrations.py": "9cd4781dbd547fb25b4c5ec6d93527b1517da290",
 }
 
+# Task 5 moves the performance persistence decision to two reviewed repository
+# owners. These files are allowed through the migration-name guard only when
+# their target blobs are exactly the independently reviewed content.
+APPROVED_TASK5_REPOSITORY_BLOBS = {
+    "modules/repositories/performance_history_migration_repository.py": (
+        "183a566e992623b781a8bb94633783fb4bfce767"
+    ),
+    "modules/repositories/performance_ledger_repository.py": (
+        "46661899eb83f653e6fe0cb7e89695e1bdc48f27"
+    ),
+}
+
 # Task 5 changes only the reviewed frontend architecture tooling and its
 # package metadata. These paths are not runtime frontend assets and may be
 # carried by a code-only release; every other frontend path remains forbidden.
@@ -89,6 +101,19 @@ def _assert_operation_adapter_content(repository, target_commit, changed):
             raise RuntimeError(
                 "code-only release operation adapter does not match approved content: "
                 f"{path}"
+            )
+
+
+def _assert_task5_repository_content(repository, target_commit, changed):
+    for path in changed:
+        approved_blob = APPROVED_TASK5_REPOSITORY_BLOBS.get(path)
+        if approved_blob is None:
+            continue
+        target_blob = _blob_oid(repository, target_commit, path)
+        if target_blob != approved_blob:
+            raise RuntimeError(
+                "code-only release Task 5 repository content does not match "
+                f"approved content: {path}"
             )
 
 
@@ -158,6 +183,8 @@ def _path_is_forbidden(path):
     basename = parts[-1].lower() if parts else ""
     if not parts:
         return True
+    if normalized in APPROVED_TASK5_REPOSITORY_BLOBS:
+        return False
     if normalized in APPROVED_OPERATION_ADAPTER_BLOBS:
         return False
     if normalized in APPROVED_FRONTEND_TOOLING_PATHS:
@@ -391,6 +418,7 @@ def validate_code_only_release(tool_root, project_root, database, before_commit,
     _assert_release_controls_unchanged(tool_root, before_commit, target_commit)
     _assert_runtime_fence_unchanged(tool_root, before_commit, target_commit)
     _assert_operation_adapter_content(tool_root, target_commit, changed)
+    _assert_task5_repository_content(tool_root, target_commit, changed)
     documentation_only = {
         path
         for path in changed
