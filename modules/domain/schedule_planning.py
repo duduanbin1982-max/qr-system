@@ -227,6 +227,26 @@ class PlanningFactsSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ConflictDetectionSnapshot:
+    """Detached facts shared by every detector in a single assessment.
+
+    Equal-candidate positions are captured before freezing collections so legacy
+    pair suppression still distinguishes a caller's list from a tuple.
+    """
+
+    candidate_intervals: tuple[Mapping[str, Any], ...]
+    occupied_intervals: tuple[Mapping[str, Any], ...]
+    unavailable_intervals: tuple[Mapping[str, Any], ...]
+    invalid_candidate_intervals: tuple[Mapping[str, Any], ...]
+    operations: tuple[Mapping[str, Any], ...]
+    equal_candidate_positions: tuple[int | None, ...]
+
+    def __post_init__(self) -> None:
+        for name in self.__dataclass_fields__:
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True, slots=True)
 class PlanningAssessmentFacts:
     """A single immutable input for conflict and deadline-risk decisions."""
 
@@ -1054,6 +1074,7 @@ __all__ = [
     "NodeCandidateSet",
     "OperationPlanningContext",
     "PlanningDecision",
+    "ConflictDetectionSnapshot",
     "PlanningAssessmentFacts",
     "PlanningEvidence",
     "PlanningFactsSnapshot",
