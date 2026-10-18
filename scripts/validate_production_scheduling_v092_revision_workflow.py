@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,13 +17,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules import config  # noqa: E402
-from modules.domain.production_node_scheduling import NodeSchedulingError  # noqa: E402
-from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_revision_repository import (  # noqa: E402
-    ScheduleRevisionRepository,
-)
-from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 def _rows(db, sql, params=()):
@@ -94,22 +90,28 @@ def _candidate_orders(db, requested_order_id=None):
     ).fetchall()
 
 
+@OperationsFacade.schedule_flags(
+    PRODUCTION_NODE_QUERY_ENABLED=True,
+    PRODUCTION_NODE_COMPAT_AUDIT_ENABLED=True,
+    PRODUCTION_NODE_WRITE_ENABLED=True,
+    PRODUCTION_NODE_ENGINE_ENABLED=True,
+)
 def validate(source, output, operator_login, approver_login, order_id=None):
     source = Path(source).resolve()
     output = Path(output).resolve()
     if source == output:
         raise RuntimeError("source and output database paths must differ")
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, output)
+    OperationsFacade.copy_database_replica(source, output)
 
     db = sqlite3.connect(output)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     try:
         before_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        executed = run_migrations(db)
+        executed = OperationsFacade.migrate_database(db)
         after_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        if after_version != LATEST_VERSION or after_version < 92:
+        if after_version != OperationsFacade.latest_schema_version() or after_version < 92:
             raise RuntimeError(f"unexpected migrated version: {after_version}")
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise RuntimeError("database quick_check failed")
@@ -122,10 +124,6 @@ def validate(source, output, operator_login, approver_login, order_id=None):
         if operator_id == approver_id:
             raise RuntimeError("operator and independent approver must differ")
 
-        config.PRODUCTION_NODE_QUERY_ENABLED = True
-        config.PRODUCTION_NODE_COMPAT_AUDIT_ENABLED = True
-        config.PRODUCTION_NODE_WRITE_ENABLED = True
-        config.PRODUCTION_NODE_ENGINE_ENABLED = True
 
         selected = None
         generated = None
@@ -135,7 +133,7 @@ def validate(source, output, operator_login, approver_login, order_id=None):
         for order in _candidate_orders(db, requested_order_id=order_id):
             snapshot = _formal_snapshot(db, order["id"])
             try:
-                generated = ScheduleCapacityService.generate_order_schedule(
+                generated = OperationsFacade.generate_order_schedule(
                     order["id"],
                     start_date=order["plan_start"],
                     schedule_run_key=f"v092-validation-order-{order['id']}",
@@ -161,12 +159,12 @@ def validate(source, output, operator_login, approver_login, order_id=None):
         formal_after_draft = _formal_snapshot(db, selected["id"])
         if _digest(formal_before) != _digest(formal_after_draft):
             raise RuntimeError("draft generation changed the formal schedule projection")
-        revision = ScheduleRevisionRepository.find_revision(revision_id, db=db)
+        revision = OperationsFacade.find_schedule_revision(revision_id, db=db)
         if not revision or not revision["content_digest"]:
             raise RuntimeError("draft revision content digest was not frozen")
-        ScheduleRevisionRepository.assert_revision_integrity(revision_id, db=db)
+        OperationsFacade.assert_revision_integrity(revision_id, db=db)
 
-        ScheduleCapacityService.submit_revision(
+        OperationsFacade.submit_revision(
             revision_id,
             "V092 disposable-copy submission validation",
             f"v092-validation-submit-{revision_id}",
@@ -175,19 +173,19 @@ def validate(source, output, operator_login, approver_login, order_id=None):
         )
         self_approval_blocked = False
         try:
-            ScheduleCapacityService.approve_revision(
+            OperationsFacade.approve_revision(
                 revision_id,
                 "self approval must fail",
                 f"v092-validation-self-approve-{revision_id}",
                 operator_id,
                 db=db,
             )
-        except NodeSchedulingError as exc:
+        except ScheduleOperationError as exc:
             self_approval_blocked = exc.code == "INDEPENDENT_APPROVER_REQUIRED"
         if not self_approval_blocked:
             raise RuntimeError("independent approval guard did not block the creator")
 
-        ScheduleCapacityService.approve_revision(
+        OperationsFacade.approve_revision(
             revision_id,
             "V092 independent approval validation",
             f"v092-validation-approve-{revision_id}",
@@ -195,14 +193,14 @@ def validate(source, output, operator_login, approver_login, order_id=None):
             db=db,
         )
         publish_key = f"v092-validation-publish-{revision_id}"
-        published = ScheduleCapacityService.publish_revision(
+        published = OperationsFacade.publish_revision(
             revision_id,
             "V092 immutable publication validation",
             publish_key,
             operator_id,
             db=db,
         )
-        replay = ScheduleCapacityService.publish_revision(
+        replay = OperationsFacade.publish_revision(
             revision_id,
             "V092 immutable publication validation",
             publish_key,

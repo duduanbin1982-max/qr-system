@@ -17,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
 
@@ -53,6 +52,8 @@ ACCOUNT_EXPECTATIONS = {
 }
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(description="Post-cutover production V2 smoke test")
     parser.add_argument("--system-root", required=True)
@@ -63,7 +64,7 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _sha256(path):
@@ -189,11 +190,6 @@ def run(args):
     os.environ[QUERY_KEY] = "true"
     os.environ.setdefault("SECRET_KEY", "offline-production-v2-post-cutover-smoke")
     sys.path.insert(0, str(root))
-    from flask import Flask
-    from modules.access_policy import collect_permission_codes
-    from modules.repositories.access_policy_repository import AccessPolicyRepository
-    from modules.services.performance_ledger_service import PerformanceLedgerService
-    from modules.services.performance_service import PerformanceService
 
     db = _open_ro(db_path)
     try:
@@ -205,10 +201,10 @@ def run(args):
         if payroll_before != EXPECTED_PAYROLL:
             raise RuntimeError("冒烟前工资台账指纹不一致")
         actors = {
-            username: _actor(db, username, AccessPolicyRepository, collect_permission_codes)
+            username: _actor(db, username, OperationsFacade, OperationsFacade.collect_permission_codes)
             for username in ACCOUNT_EXPECTATIONS
         }
-        legacy_admin = _admin_actor(db, AccessPolicyRepository, collect_permission_codes)
+        legacy_admin = _admin_actor(db, OperationsFacade, OperationsFacade.collect_permission_codes)
         machine_id = int(_scalar(db, "SELECT id FROM departments WHERE name='机加工班组' AND status='active'"))
         expected_scopes = list(range(1, 9)) + [machine_id]
         account_results = {}
@@ -239,36 +235,35 @@ def run(args):
                 "department_scope_ids": scopes,
             }
 
-        app = Flask("performance-v2-post-cutover-smoke")
         v2_results = {}
         legacy_fallback_results = {}
         integrity_results = {}
         outside_scope = {}
-        with app.app_context():
-            app.config[QUERY_KEY] = True
+        with OperationsFacade.verification_context("performance-v2-post-cutover-smoke") as verification_config:
+            verification_config[QUERY_KEY] = True
             for month, batch_id, count in (("2026-06", 3, 27), ("2026-07", 4, 37)):
-                result = PerformanceService.list_scores(month, page=1, per_page=200, actor=actors["1000_perf"], db=db)
+                result = OperationsFacade.performance_list_scores(month, page=1, per_page=200, actor=actors["1000_perf"], db=db)
                 if result["result_source"] != "ledger_v2" or int(result["batch_id"]) != batch_id or int(result["total"]) != count or result["batch_status"] != "approved":
                     raise RuntimeError(f"{month} V2 正式查询不正确")
                 v2_results[month] = {"batch_id": result["batch_id"], "score_count": result["total"], "result_source": result["result_source"], "status": result["batch_status"]}
-                integrity = PerformanceLedgerService.check_batch_integrity(batch_id, db=db, include_current=True)
+                integrity = OperationsFacade.performance_workflow_check_batch_integrity(batch_id, db=db, include_current=True)
                 if not integrity.get("complete"):
                     raise RuntimeError(f"{month} V2 批次完整性不通过")
                 integrity_results[month] = {"complete": integrity["complete"], "issue_count": len(integrity.get("issues") or [])}
             for username, actor in actors.items():
                 try:
-                    PerformanceService.list_scores("2026-07", department_id=9, page=1, per_page=200, actor=actor, db=db)
+                    OperationsFacade.performance_list_scores("2026-07", department_id=9, page=1, per_page=200, actor=actor, db=db)
                 except PermissionError:
                     outside_scope[username] = True
                 else:
                     raise RuntimeError(f"{username} 意外通过范围外部门查询")
-            app.config[QUERY_KEY] = False
+            verification_config[QUERY_KEY] = False
             for month, batch_id, count in (("2026-06", 1, 27), ("2026-07", 2, 37)):
-                result = PerformanceService.list_scores(month, page=1, per_page=200, actor=legacy_admin, db=db)
+                result = OperationsFacade.performance_list_scores(month, page=1, per_page=200, actor=legacy_admin, db=db)
                 if result["result_source"] != "legacy_v1" or int(result["batch_id"]) != batch_id or int(result["total"]) != count or result["batch_status"] != "superseded":
                     raise RuntimeError(f"{month} Legacy 回退查询不正确")
                 legacy_fallback_results[month] = {"batch_id": result["batch_id"], "score_count": result["total"], "result_source": result["result_source"], "status": result["batch_status"]}
-            app.config[QUERY_KEY] = True
+            verification_config[QUERY_KEY] = True
     finally:
         db.close()
 

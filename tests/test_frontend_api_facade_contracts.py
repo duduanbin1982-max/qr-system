@@ -44,19 +44,46 @@ def test_production_facade_exposes_legacy_lines_as_read_only_compatibility():
     assert "deleteProductionLine" not in production_api
 
 
-def test_frontend_build_runs_api_facade_gate_first():
+def test_frontend_build_checks_toolchain_then_api_before_compilation():
     root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
 
-    assert root_package["scripts"]["build"].startswith("npm run check:api &&")
+    steps = [step.strip() for step in root_package["scripts"]["build"].split("&&")]
+    assert steps[:2] == [
+        "node frontend/scripts/check-toolchain.mjs", "npm run check:api",
+    ]
+    assert steps[-1] == "vite build"
     assert not (PROJECT_ROOT / "frontend" / "package.json").exists()
+
+
+def test_frontend_layer_gate_runs_in_architecture_and_production_build():
+    root_package = json.loads((PROJECT_ROOT / "package.json").read_text(encoding="utf-8"))
+    scripts = root_package["scripts"]
+
+    for entrypoint in ("build", "check:architecture"):
+        assert "npm run check:layers" in scripts[entrypoint]
+    assert "node --test frontend/tests/architecture/frontend-layers.test.mjs" in scripts["check:layers"]
+    assert "node frontend/scripts/check-frontend-layers.mjs" in scripts["check:layers"]
 
 
 def test_process_quality_page_only_loads_stats_with_permission():
     page = (
         PROJECT_ROOT / "frontend" / "src" / "views" / "ProcessQualityEvaluationPage.vue"
     ).read_text(encoding="utf-8")
+    composable = (
+        PROJECT_ROOT
+        / "frontend"
+        / "src"
+        / "composables"
+        / "quality"
+        / "useProcessQualityEvaluation.js"
+    ).read_text(encoding="utf-8")
 
-    assert "if (can('process_quality_evaluation:stats')) await loadStats()" in page
+    assert (
+        "import { useProcessQualityEvaluation } from "
+        "'@/composables/quality/useProcessQualityEvaluation.js'"
+    ) in page
+    assert "} = useProcessQualityEvaluation()" in page
+    assert "if (can('process_quality_evaluation:stats')) await loadStats()" in composable
 
 
 def test_frontend_client_uses_cookie_auth_and_domain_error_shape():

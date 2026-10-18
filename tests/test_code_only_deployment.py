@@ -23,7 +23,10 @@ def _git(path, *args):
 
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8")
 
 
 def _create_database(path, version=96):
@@ -38,7 +41,15 @@ def _create_database(path, version=96):
         db.close()
 
 
-def _create_release_repositories(tmp_path, changed_path="modules/services/sample.py"):
+def _create_release_repositories(
+    tmp_path,
+    changed_path="modules/services/sample.py",
+    target_overrides=None,
+    baseline_overrides=None,
+):
+    changed_paths = [changed_path] if isinstance(changed_path, str) else list(changed_path)
+    target_overrides = target_overrides or {}
+    baseline_overrides = baseline_overrides or {}
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "--quiet", "--initial-branch=master")
@@ -54,10 +65,15 @@ def _create_release_repositories(tmp_path, changed_path="modules/services/sample
     _write(repository / "modules/runtime_version.py", "VERSION = True\n")
     _write(repository / "modules/migrations.py", "LATEST_VERSION = 96\n")
     _write(repository / "modules/services/sample.py", "VALUE = 1\n")
+    for path in code_only_release.PROTECTED_RELEASE_CONTROL_PATHS:
+        _write(repository / path, "TRUSTED_CONTROL = True\n")
+    for path in changed_paths:
+        _write(repository / path, baseline_overrides.get(path, "VALUE = 1\n"))
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "baseline")
     before = _git(repository, "rev-parse", "HEAD")
-    _write(repository / changed_path, "VALUE = 2\n")
+    for path in changed_paths:
+        _write(repository / path, target_overrides.get(path, "VALUE = 2\n"))
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "target")
     target = _git(repository, "rev-parse", "HEAD")
@@ -166,6 +182,58 @@ def test_code_only_preflight_accepts_clean_backend_change_and_untracked_data(tmp
     assert result["changed_paths"] == ["modules/services/sample.py"]
 
 
+def test_target_schema_version_reads_real_repository_without_importing_target_code():
+    root = Path(__file__).resolve().parents[1]
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+def test_target_schema_version_accepts_integer_literal_fixture(tmp_path):
+    root = tmp_path / "target"
+    _write(root / "modules/migrations.py", "LATEST_VERSION = 96\n")
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+def test_target_schema_version_safely_parses_restricted_version_chain(tmp_path):
+    root = tmp_path / "target"
+    _write(
+        root / "modules/migrations.py",
+        "LATEST_VERSION = max(version for version in MIGRATIONS)\n",
+    )
+    _write(
+        root / "modules/migration_catalog.py",
+        "MIGRATION_VERSION_CHAIN = (1, *range(13, 97))\n",
+    )
+
+    assert code_only_release._target_schema_version(root) == 96
+
+
+@pytest.mark.parametrize(
+    "catalog_content",
+    [
+        "OTHER_VALUE = (1, 2, 3)\n",
+        "MIGRATION_VERSION_CHAIN = (1, '96')\n",
+        "MIGRATION_VERSION_CHAIN = __import__('os').system('echo unsafe')\n",
+        "MIGRATION_VERSION_CHAIN = (1, *range(0, 1000000))\n",
+    ],
+)
+def test_target_schema_version_rejects_missing_invalid_or_unsafe_chain(
+    tmp_path, catalog_content
+):
+    root = tmp_path / "target"
+    marker = tmp_path / "unsafe"
+    _write(root / "modules/migrations.py", "LATEST_VERSION = calculate_version()\n")
+    _write(
+        root / "modules/migration_catalog.py",
+        catalog_content.replace("echo unsafe", f"touch {marker.as_posix()}"),
+    )
+
+    with pytest.raises(RuntimeError, match="migration version"):
+        code_only_release._target_schema_version(root)
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize(
     "changed_path",
     [
@@ -196,7 +264,6 @@ def test_code_only_preflight_allows_non_schema_history_migration_code_and_tests(
     [
         "frontend/src/App.vue",
         "public/static/app.js",
-        "modules/migration_catalog.py",
         "modules/migrations.py",
         "scripts/migrate-records.sh",
         "deploy/qr-system.service",
@@ -211,6 +278,472 @@ def test_code_only_preflight_rejects_migrations_frontend_and_runtime_changes(
     )
 
     with pytest.raises(RuntimeError, match="out-of-scope paths"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_code_only_preflight_allows_migration_catalog_docstring_only_change(
+    tmp_path, monkeypatch
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        "modules/migration_catalog.py",
+        baseline_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Baseline catalog docs."""\nVALUE = 1\n'
+            )
+        },
+        target_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Updated catalog composition-root docs."""\nVALUE = 1\n'
+            )
+        },
+    )
+
+    baseline_source = '"""Baseline catalog docs."""\nVALUE = 1\n'
+    target_source = '"""Updated catalog composition-root docs."""\nVALUE = 1\n'
+    assert code_only_release._module_docstring_only_sources(
+        baseline_source, target_source
+    )
+
+    real_git = code_only_release._git
+
+    def fake_git(repository, *args, check=True):
+        if args and args[0] == "show":
+            commit, path = args[1].split(":", 1)
+            source = {
+                before: baseline_source,
+                target: target_source,
+            }[commit]
+            return SimpleNamespace(
+                returncode=0,
+                stdout=source.encode("utf-8"),
+                stderr=b"",
+            )
+        return real_git(repository, *args, check=check)
+
+    monkeypatch.setattr(code_only_release, "_git", fake_git)
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == ["modules/migration_catalog.py"]
+
+
+def test_code_only_preflight_rejects_migration_catalog_logic_change(tmp_path):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        "modules/migration_catalog.py",
+        baseline_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Baseline catalog docs."""\nVALUE = 1\n'
+            )
+        },
+        target_overrides={
+            "modules/migration_catalog.py": (
+                b'"""Updated catalog docs."""\nVALUE = 2\n'
+            )
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="documentation exception changed executable content",
+    ):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_path",
+    sorted(code_only_release.APPROVED_FRONTEND_TOOLING_PATHS),
+)
+def test_code_only_preflight_allows_reviewed_frontend_architecture_tooling(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == [changed_path]
+
+
+@pytest.mark.parametrize(
+    "changed_path",
+    [
+        "frontend/src/App.vue",
+        "frontend/src/composables/useInventory.js",
+        "frontend/components/UnknownWidget.vue",
+        "frontend/scripts/unknown-release-helper.mjs",
+        "frontend/tests/unknown-runtime.test.mjs",
+        "public/static/app.js",
+        "dist/index.js",
+        "package.json.bak",
+    ],
+)
+def test_code_only_preflight_rejects_unapproved_frontend_and_package_paths(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    with pytest.raises(RuntimeError, match="out-of-scope paths"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_approved_task4_operation_adapter_manifest_stays_pinned():
+    # Approval is for historical content, not every later HEAD of these paths.
+    assert code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS == {
+        "deploy.sh": "954b03b3b4ad4b90faa917a93c3f5cf6c5c3b908",
+        "modules/application/operations_migrations.py": (
+            "94914a8a8eb42a46d718739a8fbef6888d9baa11"
+        ),
+        "scripts/migrate_payroll_history.py": (
+            "4ad27f86c823430a005abd84b2bc8a516af0c131"
+        ),
+        "scripts/migrate_performance_history.py": (
+            "042c13abed6cad1e17247c9bb72f14949cd1f660"
+        ),
+        "scripts/plan_migrations.py": "9cd4781dbd547fb25b4c5ec6d93527b1517da290",
+    }
+
+
+def test_approved_task5_repository_manifest_stays_pinned():
+    assert code_only_release.APPROVED_TASK5_REPOSITORY_BLOBS == {
+        "modules/repositories/performance_history_migration_repository.py": (
+            "183a566e992623b781a8bb94633783fb4bfce767"
+        ),
+        "modules/repositories/performance_ledger_repository.py": (
+            "46661899eb83f653e6fe0cb7e89695e1bdc48f27"
+        ),
+    }
+
+
+def test_code_only_preflight_allows_reviewed_task5_repository_paths(
+    tmp_path, monkeypatch
+):
+    changed_paths = [
+        "modules/repositories/performance_history_migration_repository.py",
+        "modules/repositories/performance_ledger_repository.py",
+    ]
+    repository, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_paths
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_TASK5_REPOSITORY_BLOBS",
+        {
+            path: _git(repository, "rev-parse", f"{target}:{path}")
+            for path in changed_paths
+        },
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == sorted(changed_paths)
+
+
+def test_code_only_preflight_rejects_unreviewed_task5_repository_content(
+    tmp_path, monkeypatch
+):
+    changed_path = "modules/repositories/performance_ledger_repository.py"
+    repository, production, tool, before, reviewed_target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_TASK5_REPOSITORY_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, "VALUE = 3\n")
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "unreviewed Task 5 repository change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Task 5 repository content does not match approved content",
+    ):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    "path", sorted(code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS)
+)
+def test_current_operation_adapter_content_requires_reviewed_blob(path):
+    root = Path(__file__).resolve().parents[1]
+    approved_blob = code_only_release.APPROVED_OPERATION_ADAPTER_BLOBS[path]
+    target_blob = code_only_release._blob_oid(root, "HEAD", path)
+
+    if target_blob == approved_blob:
+        code_only_release._assert_operation_adapter_content(root, "HEAD", [path])
+    else:
+        with pytest.raises(RuntimeError, match="does not match approved content"):
+            code_only_release._assert_operation_adapter_content(root, "HEAD", [path])
+
+
+def test_current_deploy_script_is_not_implicitly_approved_for_code_only(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    content = (root / "deploy.sh").read_text(encoding="utf-8")
+    assert "node frontend/scripts/check-toolchain.mjs" in content
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, "deploy.sh", target_overrides={"deploy.sh": content}
+    )
+
+    with pytest.raises(RuntimeError, match="does not match approved content: deploy.sh"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_paths_pass_code_only_preflight(tmp_path, monkeypatch):
+    changed_paths = [
+        "deploy.sh",
+        "modules/application/operations_migrations.py",
+        "scripts/migrate_payroll_history.py",
+        "scripts/migrate_performance_history.py",
+        "scripts/plan_migrations.py",
+    ]
+    repository, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_paths
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            path: _git(repository, "rev-parse", f"{target}:{path}")
+            for path in changed_paths
+        },
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == sorted(changed_paths)
+    assert result["database"]["user_version"] == 96
+    assert result["target_schema_version"] == 96
+
+
+@pytest.mark.parametrize(
+    ("changed_path", "unsafe_content"),
+    [
+        ("deploy.sh", "bash scripts/publish-frontend.sh\n"),
+        (
+            "modules/application/operations_migrations.py",
+            "class Unsafe:\n    def apply(self):\n        run_migrations()\n",
+        ),
+        (
+            "scripts/migrate_payroll_history.py",
+            "import importlib\nimportlib.import_module('modules.services.secret')\n",
+        ),
+        (
+            "scripts/migrate_performance_history.py",
+            "__import__('modules.repositories.secret')\n",
+        ),
+        ("scripts/plan_migrations.py", "from modules.migrations import run_migrations\n"),
+    ],
+)
+def test_task4_facade_release_paths_reject_unapproved_content_through_preflight(
+    tmp_path, monkeypatch, changed_path, unsafe_content
+):
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, unsafe_content)
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "unreviewed adapter change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="does not match approved content"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_binary_content_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "deploy.sh"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    _write(repository / changed_path, b"#!/bin/sh\x00run-migrations\n")
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "binary adapter change")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="does not match approved content"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_missing_target_blob_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "scripts/plan_migrations.py"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    (repository / changed_path).unlink()
+    _git(repository, "add", changed_path)
+    _git(repository, "commit", "--quiet", "-m", "delete adapter")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="cannot verify approved operation adapter blob"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task4_facade_release_path_rejects_renamed_adapter_through_preflight(
+    tmp_path, monkeypatch
+):
+    changed_path = "scripts/plan_migrations.py"
+    repository, production, tool, before, reviewed_target = (
+        _create_release_repositories(tmp_path, changed_path)
+    )
+    monkeypatch.setattr(
+        code_only_release,
+        "APPROVED_OPERATION_ADAPTER_BLOBS",
+        {
+            changed_path: _git(
+                repository, "rev-parse", f"{reviewed_target}:{changed_path}"
+            )
+        },
+    )
+    renamed_path = "modules/application/renamed_migration_adapter.py"
+    (repository / renamed_path).parent.mkdir(parents=True, exist_ok=True)
+    (repository / changed_path).rename(repository / renamed_path)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "--quiet", "-m", "rename adapter")
+    target = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "worktree", "remove", "--force", str(tool))
+    _git(repository, "worktree", "add", "--quiet", "--detach", str(tool), target)
+
+    with pytest.raises(RuntimeError, match="cannot verify approved operation adapter blob"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_path", code_only_release.PROTECTED_RELEASE_CONTROL_PATHS
+)
+def test_code_only_preflight_rejects_release_control_self_modification(
+    tmp_path, changed_path
+):
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path, changed_path
+    )
+
+    with pytest.raises(RuntimeError, match="cannot change trusted release control"):
         code_only_release.validate_code_only_release(
             tool,
             production,
@@ -523,4 +1056,19 @@ def test_code_only_release_checks_isolate_frontend_dependencies_in_temporary_wor
     assert 'cd "$TEST_WORKTREE"' in script
     assert '"$NPM_BIN" run "$check_script"' in script
     assert '"$PROJECT_ROOT/node_modules"' not in script
+
+
+def test_code_only_shell_uses_production_trust_root_and_separate_target_tool():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "deploy-code-only.sh").read_text(encoding="utf-8")
+
+    assert "--tool-root TARGET_WORKTREE" in script
+    assert 'SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"' in script
+    assert '"$SCRIPT_ROOT" != "$PROJECT_ROOT"' in script
+    assert '"$TOOL_ROOT" == "$PROJECT_ROOT"' in script
+    assert 'TRUST_ROOT="$TMP_DIR/trusted-controls"' in script
+    assert 'install -m 0700 "$PROJECT_ROOT/scripts/$control"' in script
+    assert 'python3 "$code_only_release" preflight' in script
+    assert 'bash "$backup_script"' in script
+    assert 'bash "$rollback_script"' in script
 

@@ -155,6 +155,87 @@ describe('useMasterDataReleases', () => {
     expect(approve.attributes('disabled')).toBeUndefined()
   })
 
+  it('uses the latest reactive route and only its exact draft prices when creating a batch', async () => {
+    mocks.permissions = new Set(['master_data_releases:view', 'master_data_releases:create'])
+    mocks.createReleaseBatch.mockResolvedValue(batch({ status: 'draft' }))
+    const wrapper = mount(ReleaseBatchPanel, {
+      props: { defaultRouteVersion: { id: 1, name: '旧路线', version: 1, items: [] } },
+    })
+    await flushPromises()
+    await wrapper.setProps({
+      defaultRouteVersion: {
+        id: 82, name: '标准机加工路线', version: 2,
+        items: [
+          { process_version_id: 72, process_version_status: 'pending_approval' },
+          { process_version_id: 72, process_version_status: 'pending_approval' },
+          { process_version_id: 73, process_version_status: 'published' },
+        ],
+      },
+      defaultPriceVersions: [
+        { id: 92, route_version_id: 82, process_version_id: 72, status: 'draft' },
+        { id: 93, route_version_id: 1, process_version_id: 72, status: 'draft' },
+        { id: 94, route_version_id: 82, process_version_id: 99, status: 'draft' },
+        { id: 95, route_version_id: 82, process_version_id: 72, status: 'approved' },
+      ],
+    })
+
+    await wrapper.findAll('button').find(button => button.text() === '新建发布批次').trigger('click')
+    expect(wrapper.find('.create-scope').text()).toContain('工序版本 1')
+    await wrapper.findAll('button').find(button => button.text() === '创建草稿批次').trigger('click')
+    await flushPromises()
+
+    expect(mocks.createReleaseBatch).toHaveBeenCalledWith(expect.objectContaining({
+      revision_reason: '发布路线 标准机加工路线 V2',
+      process_version_ids: [72], route_version_ids: [82], price_version_ids: [92],
+      idempotency_key: expect.stringMatching(/^release-create:/),
+    }))
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('emits publication only after a successful approval (failure=%s)', async failure => {
+    const published = batch({ status: 'published', row_version: 3 })
+    if (failure) mocks.approveReleaseBatch.mockRejectedValue(new Error('发布依赖校验失败'))
+    else mocks.approveReleaseBatch.mockResolvedValue(published)
+    const wrapper = mount(ReleaseBatchPanel)
+    await flushPromises()
+    await wrapper.find('.batch-row').trigger('click')
+    await flushPromises()
+    await wrapper.find('.disposition-row select').setValue('price_version')
+    await wrapper.findAll('.disposition-row select')[1].setValue('92')
+    await wrapper.findAll('button').find(button => button.text() === '批准并原子发布').trigger('click')
+    await flushPromises()
+
+    expect(mocks.approveReleaseBatch).toHaveBeenCalledWith(41, expect.objectContaining({
+      row_version: 2,
+      price_dispositions: [{ process_id: 7, disposition: 'price_version', price_version_id: 92 }],
+      idempotency_key: expect.stringMatching(/^release-approve:/),
+    }))
+    if (failure) {
+      expect(wrapper.emitted('published')).toBeUndefined()
+      expect(wrapper.text()).toContain('发布依赖校验失败')
+      expect(mocks.showToast).toHaveBeenCalledWith('发布依赖校验失败', 'error')
+    } else {
+      expect(wrapper.emitted('published')).toEqual([[published]])
+      expect(mocks.showToast).toHaveBeenCalledWith('主数据批次已原子发布')
+    }
+    wrapper.unmount()
+  })
+
+  it('hides command controls from a viewer with no create or approval permission', async () => {
+    mocks.permissions = new Set(['master_data_releases:view'])
+    const wrapper = mount(ReleaseBatchPanel)
+    await flushPromises()
+    await wrapper.find('.batch-row').trigger('click')
+    await flushPromises()
+
+    const labels = wrapper.findAll('button').map(button => button.text())
+    expect(labels).not.toContain('新建发布批次')
+    expect(labels).not.toContain('批准并原子发布')
+    expect(labels).not.toContain('驳回')
+    expect(mocks.approveReleaseBatch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('names invalid draft members and blocks submit until repaired', async () => {
     mocks.permissions = new Set(['master_data_releases:view', 'master_data_releases:submit'])
     const invalid = batch({

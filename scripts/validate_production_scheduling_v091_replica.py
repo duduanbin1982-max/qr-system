@@ -17,11 +17,10 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from modules.domain.production_node_scheduling import NodeSchedulingError
-from modules.repositories.schedule_planning_repository import (
-    SchedulePlanningRepository,
-)
-from modules.services.schedule_capacity_service import ScheduleCapacityService
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 FORMAL_TABLES = (
@@ -64,7 +63,7 @@ def _active_orders(db):
 
 def _formal_digests(db, orders):
     return {
-        str(int(order["id"])): SchedulePlanningRepository.formal_schedule_digest(
+        str(int(order["id"])): OperationsFacade.formal_schedule_digest(
             int(order["id"]), db=db
         )
         for order in orders
@@ -250,7 +249,7 @@ def run(args):
                 "deadline": order["deadline"] or "",
             }
             try:
-                result = ScheduleCapacityService.generate_shadow_order_schedule(
+                result = OperationsFacade.generate_shadow_order_schedule(
                     order_id,
                     f"{args.run_key_prefix}-order-{order_id}",
                     start_date=args.start_date,
@@ -305,7 +304,7 @@ def run(args):
                         ],
                     }
                 )
-            except NodeSchedulingError as exc:
+            except ScheduleOperationError as exc:
                 exception_codes[exc.code] += 1
                 entry.update(
                     {

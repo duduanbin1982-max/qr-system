@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "verification_date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "baseline": {
+    "branch": "codex/brooks-debt-task0-baseline",
+    "remote": "github",
+    "ref": "refs/heads/master",
+    "commit": "d62a4eb95ccbf4273d1adfc3277b27fb00259abc",
+    "tree": "33aa6018a833c59a7e4f75b84ad07086e64219b9",
+    "remote_reverified_at_local": "2026-10-15T13:05+08:00",
+    "remote_unchanged": true,
+    "full_backend_scope": "Unmodified master tests collected before the ten Task 0 cases were added; supplemental run is reported separately and overlaps existing tests.",
+    "historical_1900_passed_used_as_current_result": false,
+    "production_access": false
+  },
+  "toolchain": {
+    "os": "Windows 11 10.0.26200 AMD64",
+    "shell": "Git Bash",
+    "git": "2.55.0.windows.2",
+    "python": "3.12.10",
+    "pytest": "9.0.3",
+    "sqlite": "3.49.1",
+    "node": "25.2.1",
+    "npm": "11.6.2",
+    "vite": "8.2.0",
+    "vitest": "4.1.10",
+    "playwright": "1.62.1",
+    "vue": "3.5.38",
+    "declared_node": ">=20.19 <21",
+    "declared_npm": "10.8.2",
+    "matches_project_declaration": false,
+    "debt": "D07",
+    "follow_up": "Task 1 must select and pin the supported toolchain and repeat frontend unit, E2E and build validation."
+  },
+  "runs": [
+    {
+      "id": "dependency-install",
+      "command": "npm ci --no-audit --no-fund",
+      "started_at": null,
+      "finished_at": null,
+      "timing_note": "Command timestamps were not captured; no timestamps have been inferred from file modification times.",
+      "exit_code": 0,
+      "installed_packages": 186,
+      "artifacts": [
+        "npm-ci.log"
+      ],
+      "observations": [
+        "EBADENGINE: actual Node/npm differ from package.json declarations",
+        "glob@10.5.0 deprecation notice"
+      ]
+    },
+    {
+      "id": "backend-master-baseline",
+      "command": "python -m pytest -q -ra tests --junitxml=\"../../.architecture-audits/20261015-task0-baseline/backend-baseline.xml\"",
+      "started_at": "2026-10-15T12:52:46+08:00",
+      "finished_at": "2026-10-15T13:05:25+08:00",
+      "exit_code": 0,
+      "duration_seconds_reported": 749.9,
+      "result": {
+        "tests": 1900,
+        "passed": 1894,
+        "failed": [],
+        "errors": [],
+        "skipped": [
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_bootstrap_receipt_is_exclusive_and_preserves_approval",
+            "reason": "Linux production durability contract",
+            "type": "pytest.skip"
+          },
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_bootstrap_rejects_symlinked_production_control",
+            "reason": "Linux production filesystem contract",
+            "type": "pytest.skip"
+          },
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_receipt_persistence_failure_prevents_release_and_preserves_production",
+            "reason": "Linux production durability contract",
+            "type": "pytest.skip"
+          },
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_locked_test_dependencies_are_only_linked_into_temporary_test_checkout",
+            "reason": "Linux executable test runner",
+            "type": "pytest.skip"
+          },
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_real_launcher_preserves_facts_and_evidence_on_acceptance_and_rollback[accepted]",
+            "reason": "Linux release rehearsal",
+            "type": "pytest.skip"
+          },
+          {
+            "node_id": "tests/test_release_gate_bootstrap.py::test_real_launcher_preserves_facts_and_evidence_on_acceptance_and_rollback[rollback]",
+            "reason": "Linux release rehearsal",
+            "type": "pytest.skip"
+          }
+        ],
+        "xfailed": [],
+        "xpassed": [],
+        "suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "6",
+            "tests": "1900",
+            "time": "749.807",
+            "timestamp": "2026-10-15T12:52:55.034513+08:00",
+            "hostname": "Dooley"
+          }
+        ]
+      },
+      "artifacts": [
+        "backend-baseline.log",
+        "backend-baseline.xml"
+      ],
+      "warning_summary_present": false,
+      "skip_follow_up": {
+        "owner_role": "发布工具维护角色",
+        "target_milestone": "Task 9 Linux 隔离验收",
+        "required": "Run all six skipped Linux-only durability/filesystem/release-rehearsal cases on Linux before claiming full cross-platform release validation."
+      }
+    },
+    {
+      "id": "frontend-unit",
+      "command": "npm run test:unit -- --reporter=default --reporter=json --outputFile=\"../../.architecture-audits/20261015-task0-baseline/frontend-baseline.json\"",
+      "started_at": "2026-10-15T12:55:34+08:00",
+      "finished_at": "2026-10-15T12:56:11+08:00",
+      "exit_code": 0,
+      "duration_seconds_reported": 31.97,
+      "test_files": 55,
+      "total": 339,
+      "passed": 339,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "failed_tests": [],
+      "skipped_tests": [],
+      "expected_failures": [],
+      "vitest_json_suite_count": 121,
+      "suite_count_note": "Vitest's 121 JSON suites are nested suites, not the 55 test files.",
+      "artifacts": [
+        "frontend-unit.log",
+        "frontend-baseline.json"
+      ]
+    },
+    {
+      "id": "e2e",
+      "command": "E2E_PORT=4187 npm run test:e2e",
+      "started_at": "2026-10-15T12:56:07+08:00",
+      "finished_at": "2026-10-15T12:58:09+08:00",
+      "exit_code": 0,
+      "duration_reported": "1.7m",
+      "total": 25,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "failed_tests": [],
+      "skipped_tests": [],
+      "expected_failures": [],
+      "isolation": "Local application, isolated test database and separate e2e static build; no production database.",
+      "artifacts": [
+        "e2e-baseline.log",
+        "playwright-report/index.html"
+      ]
+    },
+    {
+      "id": "production-build",
+      "command": "npm run build",
+      "started_at": "2026-10-15T12:55:34+08:00",
+      "finished_at": "2026-10-15T12:55:47+08:00",
+      "exit_code": 0,
+      "vite_duration_seconds_reported": 1.52,
+      "includes": [
+        "API facade check",
+        "Frontend import-cycle check",
+        "Frontend layer check",
+        "Vite production build"
+      ],
+      "artifacts": [
+        "build.log"
+      ]
+    },
+    {
+      "id": "architecture",
+      "command": "npm run check:architecture",
+      "started_at": "2026-10-15T12:55:34+08:00",
+      "finished_at": "2026-10-15T12:56:20+08:00",
+      "exit_code": 0,
+      "backend": {
+        "passed": 32,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds_reported": 28.11
+      },
+      "frontend_layer_fixtures": {
+        "passed": 34,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "api_facade": {
+        "namespaces": 34,
+        "unique_domain_methods": 455
+      },
+      "frontend_import_graph": {
+        "files": 219,
+        "edges": 532,
+        "cycles": 0
+      },
+      "frontend_layer_graph": {
+        "files": 219,
+        "edges": 531,
+        "frozen_legacy_edges": 127
+      },
+      "artifacts": [
+        "architecture.log"
+      ]
+    },
+    {
+      "id": "supplemental-protections",
+      "command": "python -m pytest -q -ra tests/test_user_service_extended.py tests/test_production_node_legacy_write_guard.py --junitxml=\"../../.architecture-audits/20261015-task0-baseline/supplemental-protections.xml\"",
+      "started_at": "2026-10-15T12:57:29+08:00",
+      "finished_at": "2026-10-15T12:57:46+08:00",
+      "exit_code": 0,
+      "duration_seconds_reported": 8.29,
+      "result": {
+        "tests": 27,
+        "passed": 27,
+        "failed": [],
+        "errors": [],
+        "skipped": [],
+        "xfailed": [],
+        "xpassed": [],
+        "suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "27",
+            "time": "8.254",
+            "timestamp": "2026-10-15T12:57:37.612133+08:00",
+            "hostname": "Dooley"
+          }
+        ]
+      },
+      "new_test_cases": 10,
+      "existing_test_cases": 17,
+      "additive_to_full_backend_total": false,
+      "artifacts": [
+        "supplemental-protections.log",
+        "supplemental-protections.xml"
+      ]
+    }
+  ],
+  "inventory_verification": {
+    "status": "passed",
+    "edges": 127,
+    "consumers": 60,
+    "unique_ids": 127,
+    "unassigned": 0,
+    "source_hashes_match": true,
+    "single_batch_per_consumer": true,
+    "batches": [
+      {
+        "id": "2A",
+        "edges": 1,
+        "consumers": 1
+      },
+      {
+        "id": "2B",
+        "edges": 4,
+        "consumers": 2
+      },
+      {
+        "id": "2C",
+        "edges": 41,
+        "consumers": 22
+      },
+      {
+        "id": "2D",
+        "edges": 48,
+        "consumers": 21
+      },
+      {
+        "id": "2E",
+        "edges": 19,
+        "consumers": 9
+      },
+      {
+        "id": "2F",
+        "edges": 14,
+        "consumers": 5
+      }
+    ],
+    "method": "Reconstruct the original frontend-layer-baseline mapping from every inventory consumer/target/reference SHA; assert exact equality, unique IDs, complete batches, consistent owners/milestones and per-target/per-batch counts.",
+    "original_manifest": "frontend/scripts/frontend-layer-baseline.json",
+    "inventory": "docs/technical-debt/20261015-task0/frontend-dependency-inventory.json",
+    "runtime_gate_or_baseline_changed": false
+  },
+  "non_failure_observations": [
+    {
+      "observation": "98 Vue warnings from GanttChartProductionNodes.spec.js using incomplete mocked useGantt state; undefined rendering properties and missing form prop.",
+      "owner_role": "排程前端维护角色",
+      "target_milestone": "Task 2B",
+      "disposition": "Preserved; verify mocks and behavior assertions before migration. Do not silence warnings as a substitute for correction."
+    },
+    {
+      "observation": "One jsdom Window.open() not implemented message during inventory-composable.spec.js.",
+      "owner_role": "库存前端维护角色",
+      "target_milestone": "Task 2A",
+      "disposition": "Preserved; verify export/window behavior and the test substitute before migration."
+    },
+    {
+      "observation": "E2E NO_COLOR ignored because FORCE_COLOR is set.",
+      "disposition": "Environment notice; not a failed or skipped test."
+    }
+  ],
+  "artifact_root": "C:/Users/dubin/Documents/生产管理系统升级版/.architecture-audits/20261015-task0-baseline",
+  "artifact_retention": "Raw local evidence is retained outside the commit. The Playwright report is retained under the worktree; each artifact is pinned by SHA-256 below.",
+  "artifacts": [
+    {
+      "name": "npm-ci.log",
+      "bytes": 540,
+      "sha256": "bcabe19b5d3751481efebe8d7ed3fb27e2387fb5360c716fad364c79b45e0628"
+    },
+    {
+      "name": "backend-baseline.log",
+      "bytes": 2752,
+      "sha256": "eae2940708825e83c7f9243225c463c7dd8fe3afbdceb570720a068ac3162276"
+    },
+    {
+      "name": "backend-baseline.xml",
+      "bytes": 279705,
+      "sha256": "1f5c8178d3aacd46c3fd038aa6e960dacb41d0cb6f8be8e7dcc6a3d77e0fcb10"
+    },
+    {
+      "name": "frontend-unit.log",
+      "bytes": 21346,
+      "sha256": "c3ad839a9d3e12324f4b8644a7aa4622f1af57426e0decbd70635e38ad3e8b21"
+    },
+    {
+      "name": "frontend-baseline.json",
+      "bytes": 121448,
+      "sha256": "e6f2705213cde435758a693dccc5032cd865dc839f5d43b319e175be427a7163"
+    },
+    {
+      "name": "e2e-baseline.log",
+      "bytes": 70901,
+      "sha256": "3761665de6a35a2fc995030375afa0a75df8e38543c3521a9e6dc97380469ac7"
+    },
+    {
+      "name": "build.log",
+      "bytes": 7971,
+      "sha256": "5cc33c776ce0e8a1b028deea27b6a7648a03ab0744456730e9b21e59ceaf5edf"
+    },
+    {
+      "name": "architecture.log",
+      "bytes": 3020,
+      "sha256": "390e85e5c69f6c05c57a567c6e70de29fbdc8d86e816d376ed7c8739cc520c77"
+    },
+    {
+      "name": "supplemental-protections.log",
+      "bytes": 101,
+      "sha256": "00656a6d59b3e6d8d5365949d48f3d2f2c7357d963f6fc4fedcd6fe1e8e5ed6d"
+    },
+    {
+      "name": "supplemental-protections.xml",
+      "bytes": 4291,
+      "sha256": "349fa8c9e70acb9e002697d469bca921aa5dcf2eb2dab700d85f78e89f690c4d"
+    },
+    {
+      "name": "playwright-report/index.html",
+      "location": "worktree",
+      "bytes": 581863,
+      "sha256": "ee9eac1adea565094577f6217f1272f51a6b9cfe0ea1dbdb0f4602d23b8b68d8"
+    }
+  ],
+  "frozen_input_and_protection_files": [
+    {
+      "name": "tests/test_user_service_extended.py",
+      "bytes": 25905,
+      "sha256": "334d4484bc33e5d4b6cddb4f481fe72ddfa5ef6618bcc1af2f671c13038d96ae"
+    },
+    {
+      "name": "tests/test_production_node_legacy_write_guard.py",
+      "bytes": 7880,
+      "sha256": "28b2c1da302838cb44db2b9a3246dc4ad5bc03919e8039375424185f108ec1a9"
+    },
+    {
+      "name": "tests/schedule_capacity_behavior_v1.json",
+      "bytes": 9299,
+      "sha256": "e7cbab5f52611d6dbca933ae80294cf61567392ffd585729f5d30596a6f21bd2"
+    },
+    {
+      "name": "frontend/scripts/frontend-layer-baseline.json",
+      "bytes": 14828,
+      "sha256": "b50285a2f086067687be024599a6963e6d2abc3459d29c4fa44d77c9c51423b9"
+    },
+    {
+      "name": "docs/technical-debt/20261015-task0/frontend-dependency-inventory.json",
+      "bytes": 51752,
+      "sha256": "3091ac2fff0f04e522eed885284f530c6c68b72b65214b1185f38e4a3d9fca5c"
+    }
+  ],
+  "boundaries": {
+    "runtime_code_changed": false,
+    "architecture_exceptions_expanded": false,
+    "golden_fixture_updated": false,
+    "commit_performed": false,
+    "push_performed": false,
+    "production_write_performed": false
+  }
+}

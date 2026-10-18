@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+node frontend/scripts/check-toolchain.mjs
+mkdir -p "$PROJECT_ROOT/data"
 E2E_PUBLIC_DIR="$(mktemp -d "$PROJECT_ROOT/data/e2e-public.XXXXXX")"
 
 cleanup() {
@@ -9,7 +12,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cd "$PROJECT_ROOT"
 cp -a "$PROJECT_ROOT/public"/. "$E2E_PUBLIC_DIR"/
 rm -rf "$E2E_PUBLIC_DIR/static"
 npm run build -- --outDir "$E2E_PUBLIC_DIR/static" --emptyOutDir

@@ -17,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
 
@@ -75,6 +74,8 @@ DIFFERENCE_COMPONENTS = {
 }
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(
         description="Read-only production V2 historical performance preflight"
@@ -89,11 +90,11 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value):
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _sha256(path):
@@ -469,15 +470,6 @@ def run(args):
 
     sys.path.insert(0, str(system_root))
     os.environ.setdefault("SECRET_KEY", "offline-production-read-only-preflight")
-    from modules.repositories.performance_assignment_repository import (
-        PerformanceAssignmentRepository,
-    )
-    from modules.repositories.performance_history_migration_repository import (
-        PerformanceHistoryMigrationRepository,
-    )
-    from modules.services.performance_history_migration_service import (
-        PerformanceHistoryMigrationService,
-    )
 
     started_at = datetime.now().astimezone()
     metadata = {
@@ -497,15 +489,15 @@ def run(args):
     before_db = _open_read_only(db_path)
     try:
         before = _fingerprint(
-            before_db, PerformanceHistoryMigrationRepository.payroll_fingerprint
+            before_db, OperationsFacade.performance_history_facts_payroll_fingerprint
         )
         _validate_fingerprint(before)
-        plan = PerformanceHistoryMigrationService.analyze(
+        plan = OperationsFacade.performance_history_analyze(
             before_db, args.from_month, args.to_month
         )
-        _validate_plan(plan, PerformanceHistoryMigrationService)
+        _validate_plan(plan, OperationsFacade)
         coverage = _assignment_coverage(
-            plan, PerformanceAssignmentRepository, before_db
+            plan, OperationsFacade, before_db
         )
         if coverage["missing_assignment_history"] != 0:
             raise RuntimeError("V2 来源仍存在缺失任职历史")
@@ -515,13 +507,13 @@ def run(args):
     after_db = _open_read_only(db_path)
     try:
         after = _fingerprint(
-            after_db, PerformanceHistoryMigrationRepository.payroll_fingerprint
+            after_db, OperationsFacade.performance_history_facts_payroll_fingerprint
         )
         _validate_fingerprint(after)
-        verification_plan = PerformanceHistoryMigrationService.analyze(
+        verification_plan = OperationsFacade.performance_history_analyze(
             after_db, args.from_month, args.to_month
         )
-        _validate_plan(verification_plan, PerformanceHistoryMigrationService)
+        _validate_plan(verification_plan, OperationsFacade)
     finally:
         after_db.close()
 

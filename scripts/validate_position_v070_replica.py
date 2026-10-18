@@ -17,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-position-v070-replica-validation")
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts.preflight_position_v070 import preflight  # noqa: E402
 from scripts.recover_position_processes import (  # noqa: E402
     apply_exact_recovery_manifest,
@@ -45,12 +44,14 @@ BUSINESS_FACT_TABLES = (
 )
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _canonical(value: Any) -> str:
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value: Any) -> str:
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _table_exists(db: sqlite3.Connection, table: str) -> bool:
@@ -358,8 +359,8 @@ def validate_replica(
     *,
     recovery_manifest: str | Path | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from modules.migration_position_versioning import m070_position_versioning
-    from modules.migrations import LATEST_VERSION, run_migrations
+
+
 
     source = Path(source_db).resolve()
     replica = Path(replica_db).resolve()
@@ -384,7 +385,7 @@ def validate_replica(
         before_migration = _snapshot_tables(db, EXACT_PROTECTED_TABLES)
         assignment_before = _assignment_source_snapshot(db)
 
-        executed = int(run_migrations(db))
+        executed = int(OperationsFacade.migrate_database(db))
         db.commit()
         after_migration = _snapshot_tables(
             db, EXACT_PROTECTED_TABLES, columns_by_table=source_columns
@@ -405,9 +406,9 @@ def validate_replica(
         checks = _database_checks(db)
         first_snapshot = _logical_database_snapshot(db)
 
-        m070_position_versioning(db)
+        OperationsFacade.replay_migration_step(db, 70)
         db.commit()
-        m070_position_versioning(db)
+        OperationsFacade.replay_migration_step(db, 70)
         db.commit()
         replay_snapshot = _logical_database_snapshot(db)
         replay_checks = _database_checks(db)
@@ -417,7 +418,7 @@ def validate_replica(
     source_after = {"sha256": file_sha256(source), "size": source.stat().st_size}
     source_unchanged = source_state == source_after
     failures = []
-    if checks["user_version"] != LATEST_VERSION or LATEST_VERSION < 70:
+    if checks["user_version"] != OperationsFacade.latest_schema_version() or OperationsFacade.latest_schema_version() < 70:
         failures.append("schema version did not reach V070/latest")
     if checks["integrity_check"] != "ok" or checks["foreign_key_violations"]:
         failures.append("database integrity or foreign-key validation failed")
@@ -445,7 +446,7 @@ def validate_replica(
         "recovery": {"applied": applied_recovery, "applied_count": len(applied_recovery)},
         "migration": {
             "executed_migrations": executed,
-            "expected_version": LATEST_VERSION,
+            "expected_version": OperationsFacade.latest_schema_version(),
             "checks": checks,
         },
         "protected_comparison": protected_comparison,

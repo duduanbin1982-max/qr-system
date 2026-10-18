@@ -16,6 +16,11 @@ the regular Python test suite:
   may import the implementation modules under `frontend/src/lib/api/`; direct network
   transports and low-level client exports are forbidden outside the API implementation.
 - Backend and frontend import graphs are checked for cycles.
+- `modules/migration_catalog.py` and `modules/schemas/__init__.py` are explicit
+  composition roots/registries. Their high fan-out is intentional and is
+  allowlisted by path; they may only assemble leaf modules and must not import
+  business services. Ordinary modules remain subject to the 30-dependency
+  fan-out gate, so a new high-fan-out business module fails architecture checks.
 - `schedule_capacity_service.py` has a decision-complexity budget of 413, measured at
   the Task 7 baseline (`0efb204`). This is a non-growth ratchet: refactors may reduce
   the score, but new branching, loops, or conditional rules must be implemented in a

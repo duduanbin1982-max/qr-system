@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api.js', () => ({ api: { domains: { stats: { dailyStats: mocks.dailyStats } } } }))
 vi.mock('@/lib/auth.js', () => ({ can: mocks.can }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
-vi.mock('@/views/stats/shared.js', () => ({ exportCSV: mocks.exportCSV }))
+vi.mock('@/composables/reports/reportSupport.js', () => ({ exportCSV: mocks.exportCSV }))
 
 const headers = ['员工姓名', '工号', '岗位', '报工时间', '订单号/序列号', '产品编码', '正常数量', '返修数量', '报废数量']
 const group = {

@@ -10,7 +10,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import statistics
 import sys
@@ -21,14 +20,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ.setdefault("SECRET_KEY", "task8-v094-final-acceptance-only")
 
-from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_planning_repository import (  # noqa: E402
-    SchedulePlanningRepository,
-)
-import modules.services.schedule_capacity_service as schedule_service_module  # noqa: E402
-from modules.services.schedule_capacity_service import (  # noqa: E402
-    ScheduleCapacityService,
-)
 from scripts.validate_production_scheduling_v091_batch_replica import (  # noqa: E402
     _calendar_metrics,
     _conflict_metrics,
@@ -38,6 +29,10 @@ from scripts.validate_production_scheduling_v091_batch_replica import (  # noqa:
     _node_capacity_metrics,
     _operation_metrics,
 )
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 def _parse_args(argv=None):
@@ -53,7 +48,7 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--expected-version",
         type=int,
-        default=LATEST_VERSION,
+        default=OperationsFacade.latest_schema_version(),
         help="Expected migrated schema version; defaults to the current latest version",
     )
     return parser.parse_args(argv)
@@ -153,7 +148,7 @@ def _historical_replay(db, order, actor_id, index, planning_now=None):
             "WHERE order_id=?",
             (order_id,),
         )
-        result = ScheduleCapacityService.generate_order_schedule(
+        result = OperationsFacade.generate_order_schedule(
             order_id,
             start_date=start_date,
             schedule_run_key=f"task8-history-{order_id}-{index}",
@@ -391,7 +386,7 @@ def run(args):
     output.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     source_before_digest = _file_digest(source)
-    shutil.copy2(source, output)
+    OperationsFacade.copy_database_replica(source, output)
 
     planning_now = datetime.fromisoformat(args.planning_now)
     db = sqlite3.connect(str(output), timeout=120)
@@ -400,15 +395,15 @@ def run(args):
     db.execute("PRAGMA busy_timeout=120000")
     try:
         before_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        run_migrations(db)
+        OperationsFacade.migrate_database(db)
         after_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        if after_version != LATEST_VERSION or after_version != args.expected_version:
+        if after_version != OperationsFacade.latest_schema_version() or after_version != args.expected_version:
             raise RuntimeError(
                 f"V{args.expected_version:03d} required; observed V{after_version}"
             )
 
         actor = _actor(db, args.actor_username)
-        queue_before = SchedulePlanningRepository.list_schedulable_orders(
+        queue_before = OperationsFacade.list_schedulable_orders(
             1000, db=db, now=planning_now
         )
         active_count = int(db.execute(
@@ -417,31 +412,13 @@ def run(args):
         ).fetchone()[0])
         execution_before = _execution_fingerprint(db)
 
-        original_flags = {
-            "PRODUCTION_NODE_QUERY_ENABLED": getattr(
-                schedule_service_module.config,
-                "PRODUCTION_NODE_QUERY_ENABLED", False,
-            ),
-            "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED": getattr(
-                schedule_service_module.config,
-                "PRODUCTION_NODE_COMPAT_AUDIT_ENABLED", False,
-            ),
-            "PRODUCTION_NODE_WRITE_ENABLED": getattr(
-                schedule_service_module.config,
-                "PRODUCTION_NODE_WRITE_ENABLED", False,
-            ),
-            "PRODUCTION_NODE_ENGINE_ENABLED": getattr(
-                schedule_service_module.config,
-                "PRODUCTION_NODE_ENGINE_ENABLED", False,
-            ),
-        }
-
-        schedule_service_module.config.PRODUCTION_NODE_QUERY_ENABLED = True
-        schedule_service_module.config.PRODUCTION_NODE_COMPAT_AUDIT_ENABLED = True
-        schedule_service_module.config.PRODUCTION_NODE_WRITE_ENABLED = True
-        schedule_service_module.config.PRODUCTION_NODE_ENGINE_ENABLED = True
-        try:
-            batch = ScheduleCapacityService.auto_plan_orders(
+        with OperationsFacade.schedule_flags(
+            PRODUCTION_NODE_QUERY_ENABLED=True,
+            PRODUCTION_NODE_COMPAT_AUDIT_ENABLED=True,
+            PRODUCTION_NODE_WRITE_ENABLED=True,
+            PRODUCTION_NODE_ENGINE_ENABLED=True,
+        ):
+            batch = OperationsFacade.auto_plan_orders(
                 start_date=args.start_date,
                 auto_plan_key=args.auto_plan_key,
                 limit=1000,
@@ -458,9 +435,6 @@ def run(args):
                 )
                 for index, row in enumerate(historical_candidates, start=1)
             ]
-        finally:
-            for name, value in original_flags.items():
-                setattr(schedule_service_module.config, name, value)
 
         execution_after = _execution_fingerprint(db)
         order_results = batch.get("orders") or []

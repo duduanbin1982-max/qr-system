@@ -15,7 +15,6 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 
 
 SOURCE_VERSION = 73
@@ -51,6 +50,8 @@ REQUIRED_TABLES = (
 )
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def database_sha256(path: str | Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -60,7 +61,7 @@ def database_sha256(path: str | Path) -> str:
 
 
 def canonical_sha256(value: Any) -> str:
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _open_read_only(path: str | Path) -> sqlite3.Connection:
@@ -448,7 +449,6 @@ def _failed_replica_report(
 def validate_replica(
     source_path: str | Path, replica_path: str | Path
 ) -> dict[str, Any]:
-    from modules.migrations import MIGRATIONS, pending_migrations
 
     source_path = Path(source_path).resolve()
     replica_path = Path(replica_path).resolve()
@@ -485,10 +485,11 @@ def validate_replica(
     try:
         current_version = int(replica_db.execute("PRAGMA user_version").fetchone()[0])
         executed = 0
-        for version, _description, migration in pending_migrations(current_version):
+        for step in OperationsFacade.pending_migration_steps(current_version):
+            version = step.version
             if version > TARGET_VERSION:
                 break
-            migration(replica_db)
+            OperationsFacade.replay_migration_step(replica_db, version)
             replica_db.execute(f"PRAGMA user_version={version}")
             replica_db.commit()
             executed += 1
@@ -635,7 +636,6 @@ def validate_pending_price_flag_transition(
 
 
 def _migration_plan(path: str | Path) -> dict[str, Any]:
-    from modules.migrations import pending_migrations
 
     source = Path(path).resolve()
     before = database_sha256(source)
@@ -643,8 +643,8 @@ def _migration_plan(path: str | Path) -> dict[str, Any]:
     try:
         version = int(db.execute("PRAGMA user_version").fetchone()[0])
         plan = [
-            {"version": migration_version, "description": description}
-            for migration_version, description, _ in pending_migrations(version)
+            {"version": step.version, "description": step.description}
+            for step in OperationsFacade.pending_migration_steps(version)
         ]
     finally:
         db.close()

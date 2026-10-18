@@ -2,22 +2,23 @@
 from datetime import datetime, timedelta
 
 from modules.config import SESSION_IDLE_MINUTES, SESSION_TIMEOUT_HOURS
-from modules.db import get_setting
 from modules.repositories.auth_repository import AuthRepository
 from modules.services import BaseService
+from modules.setting_reader import get_setting
 
 
 class AuthSessionService:
     """Validate and maintain request sessions behind a service boundary."""
 
+    setting_reader = staticmethod(get_setting)
     TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
     MAX_TOUCH_INTERVAL = timedelta(minutes=5)
     MIN_TOUCH_INTERVAL = timedelta(seconds=30)
 
-    @staticmethod
-    def _setting_int(key, default):
+    @classmethod
+    def _setting_int(cls, key, default):
         try:
-            raw_value = get_setting(key, "")
+            raw_value = cls.setting_reader(key, "")
             if raw_value in (None, ""):
                 return default
             value = int(raw_value)

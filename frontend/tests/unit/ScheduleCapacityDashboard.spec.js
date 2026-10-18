@@ -1,5 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ScheduleCapacityDashboard from '@/components/schedule/ScheduleCapacityDashboard.vue'
 
@@ -60,8 +60,10 @@ const operations = [{
   }],
 }]
 
+let dashboard
+
 function mountDashboard() {
-  return mount(ScheduleCapacityDashboard, {
+  dashboard = mount(ScheduleCapacityDashboard, {
     attachTo: document.body,
     props: {
       operations,
@@ -99,11 +101,20 @@ function mountDashboard() {
       downtime: [],
     },
   })
+  return dashboard
+}
+
+async function openRevisionDialog() {
+  const wrapper = mountDashboard()
+  await wrapper.findAll('.schedule-dashboard__tabs button').find(button => button.text() === '版本与差异').trigger('click')
+  await wrapper.get('.schedule-dashboard__revision-grid button').trigger('click')
+  await flushPromises()
+  return new DOMWrapper(document.body.querySelector('.schedule-revision-dialog'))
 }
 
 describe('ScheduleCapacityDashboard', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     document.body.innerHTML = ''
     mocks.listOrderScheduleRevisions.mockResolvedValue({
       revisions: [
@@ -129,6 +140,12 @@ describe('ScheduleCapacityDashboard', () => {
     }))
   })
 
+  afterEach(() => {
+    dashboard?.unmount()
+    dashboard = null
+    document.body.innerHTML = ''
+  })
+
   it('renders minute timeline and node capacity with downtime and overtime evidence', async () => {
     const wrapper = mountDashboard()
     await flushPromises()
@@ -142,7 +159,6 @@ describe('ScheduleCapacityDashboard', () => {
 
     await wrapper.get('[data-test="timeline-group-mode"]').setValue('order')
     expect(wrapper.text()).toContain('26092201')
-    wrapper.unmount()
   })
 
   it('shows bottleneck, risk, replan and locked-task work queues', async () => {
@@ -153,7 +169,6 @@ describe('ScheduleCapacityDashboard', () => {
     expect(wrapper.text()).toContain('交期风险订单')
     expect(wrapper.text()).toContain('新增返工')
     expect(wrapper.text()).toContain('人工锁定任务')
-    wrapper.unmount()
   })
 
   it('loads immutable revision history and compares the selected version', async () => {
@@ -167,6 +182,95 @@ describe('ScheduleCapacityDashboard', () => {
     expect(mocks.getScheduleRevision).toHaveBeenCalledWith(76, { limit: 1000 })
     expect(document.body.textContent).toContain('排程版本与差异')
     expect(document.body.textContent).toContain('production_node_id')
-    wrapper.unmount()
+  })
+
+  it('switches to the first immutable revision without loading a predecessor', async () => {
+    const dialog = await openRevisionDialog()
+    mocks.getScheduleRevision.mockClear()
+    await dialog.get('select').setValue('76')
+    await flushPromises()
+
+    expect(mocks.getScheduleRevision).toHaveBeenCalledExactlyOnceWith('76', { limit: 1000 })
+    expect(dialog.get('select').element.value).toBe('76')
+    expect(dialog.get('.schedule-revision-dialog__diffs').text()).toContain('新增')
+    expect(dialog.text()).not.toContain('正在加载排程版本')
+  })
+
+  it.each(['history', 'detail'])('releases loading and reports %s failure, then allows reopening', async (phase) => {
+    const target = phase === 'history' ? mocks.listOrderScheduleRevisions : mocks.getScheduleRevision
+    target.mockRejectedValueOnce(new Error('排程查询失败'))
+    const dialog = await openRevisionDialog()
+
+    expect(mocks.showToast).toHaveBeenCalledExactlyOnceWith('排程查询失败', 'error')
+    expect(dialog.text()).not.toContain('正在加载排程版本')
+    await dialog.get('header button').trigger('click')
+    await dashboard.get('.schedule-dashboard__revision-grid button').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('.schedule-revision-dialog__diffs').textContent).toContain('production_node_id')
+  })
+
+  it('uses saved dynamic-replan evidence ahead of inferred item differences', async () => {
+    mocks.getScheduleRevision.mockResolvedValue({
+      revision: { id: 77, revision_no: 2 },
+      items: [{ order_process_id: 999, production_node_id: 1 }],
+      replan_differences: [{
+        id: 31, order_process_id: 99, change_type: 'node_changed',
+        before: { production_node_id: 42, quantity: 3 },
+        after: { production_node_id: 41, quantity: 3 },
+      }],
+    })
+    const dialog = await openRevisionDialog()
+    const differences = dialog.get('.schedule-revision-dialog__diffs')
+    expect(differences.findAll('article')).toHaveLength(1)
+    expect(differences.text()).toContain('订单工序 #99')
+    expect(differences.text()).toContain('node_changed')
+    expect(differences.text()).toContain('节点 42')
+    expect(differences.text()).toContain('节点 41')
+    expect(differences.text()).not.toContain('#999')
+  })
+
+  it('preserves payload compatibility, top-level precedence and added or removed operations', async () => {
+    mocks.getScheduleRevision.mockImplementation(async (id) => ({
+      revision: { id: Number(id), revision_no: Number(id) === 77 ? 2 : 1 },
+      items: Number(id) === 77 ? [
+        { order_process_id: 99, production_node_id: 41, payload_json: JSON.stringify({ production_node_id: 999, quantity: 3 }) },
+        { order_process_id: 101, process_name_snapshot: '新增工序', payload_json: '{broken json' },
+        { order_process_id: 102, production_node_id: 50 },
+      ] : [
+        { order_process_id: 99, payload_json: JSON.stringify({ production_node_id: 42, quantity: 3 }) },
+        { order_process_id: 100, process_name_snapshot: '移除工序', payload_json: '{}' },
+        { order_process_id: 102, production_node_id: 50 },
+      ],
+    }))
+    const dialog = await openRevisionDialog()
+    const differences = dialog.get('.schedule-revision-dialog__diffs')
+    expect(differences.findAll('article')).toHaveLength(3)
+    expect(differences.text()).toContain('production_node_id')
+    expect(differences.text()).toContain('节点 42')
+    expect(differences.text()).toContain('节点 41')
+    expect(differences.text()).not.toContain('节点 999')
+    expect(differences.text()).toContain('移除工序移除')
+    expect(differences.text()).toContain('新增工序新增')
+    expect(differences.text()).not.toContain('#102')
+    expect(mocks.showToast).not.toHaveBeenCalled()
+  })
+
+  it('keeps equivalent UTC and Shanghai times on the same production date in revision evidence', async () => {
+    mocks.getScheduleRevision.mockImplementation(async (id) => ({
+      revision: { id: Number(id), revision_no: Number(id) === 77 ? 2 : 1 },
+      items: [{
+        order_process_id: 99,
+        planned_start_at: Number(id) === 77 ? '2026-09-21T16:30:00Z' : '2026-09-22T00:30:00+08:00',
+        planned_end_at: '2026-09-22T01:00:00+08:00', quantity: 3,
+      }],
+    }))
+    const dialog = await openRevisionDialog()
+    const versions = dialog.findAll('.schedule-revision-dialog__diffs article > div')
+    expect(versions).toHaveLength(2)
+    for (const version of versions) {
+      expect(version.text()).toContain('09-22 00:30')
+      expect(version.text()).toContain('09-22 01:00')
+      expect(version.text()).not.toContain('09-21')
+    }
   })
 })

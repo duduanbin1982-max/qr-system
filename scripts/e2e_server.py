@@ -40,16 +40,9 @@ def remove_database():
 
 def run_e2e_migrations(db):
     """Build the browser-test schema from the approved production baseline."""
-    from modules import migrations
+    from modules.application.operations_facade import OperationsFacade
 
-    catalog = migrations.MIGRATIONS
-    pre_process_versioning = [migration for migration in catalog if migration[0] < 60]
-    migrations.MIGRATIONS = pre_process_versioning
-    try:
-        migrations.run_migrations(db)
-    finally:
-        migrations.MIGRATIONS = catalog
-
+    OperationsFacade.prepare_e2e_schema(db)
     columns = {row[1] for row in db.execute("PRAGMA table_info(processes)")}
     for name, (description, sequence) in E2E_APPROVED_CORE_PROCESSES.items():
         if "process_code" in columns:
@@ -66,7 +59,7 @@ def run_e2e_migrations(db):
                 (name, description, sequence),
             )
     db.commit()
-    migrations.run_migrations(db)
+    OperationsFacade.migrate_database(db)
 
 
 def insert_published_process(db, name, sequence, created_by):
@@ -223,12 +216,10 @@ def insert_order(db, order_no, process_ids, *, status="producing", qr_mode="", r
 
 
 def insert_work_record(db, order_id, process_id, user_id, serial_no):
-    from modules.process_fact_projection import capture_process_fact_binding
+    from modules.application.operations_facade import OperationsFacade
 
-    binding = capture_process_fact_binding(
-        db,
-        order_id=order_id,
-        process_id=process_id,
+    binding = OperationsFacade.capture_work_fact_binding(
+        db, order_id=order_id, process_id=process_id
     )
     return db.execute(
         "INSERT INTO work_records ("
@@ -272,9 +263,7 @@ def insert_serial(db, order_id, order_no, serial_no, current_process_id, status=
 
 def prepare_database():
     remove_database()
-    from modules.domain.work_report import WorkReportCommand
-    from modules.services.performance_scoring_policy import PerformanceScoringPolicy
-    from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
+    from modules.application.operations_facade import OperationsFacade
     from factory_auth import TEST_HASH, ensure_user
 
     db = sqlite3.connect(E2E_DB)
@@ -302,7 +291,7 @@ def prepare_database():
             (position_id, worker_id, previous_worker_id),
         )
         production_month = datetime.now().strftime("%Y-%m")
-        rules = PerformanceScoringPolicy.rules()
+        rules = OperationsFacade.performance_rules()
         db.execute(
             "INSERT INTO performance_rule_versions ("
             "version_code,name,weights_json,warning_levels_json,scoring_parameters_json,"
@@ -420,18 +409,16 @@ def prepare_database():
             worker_id,
             "E2E-HANDOFF-001",
         )
-        ProcessQualityEvaluationService.generate_tasks(
-            WorkReportCommand(
-                report_type="normal",
-                order_id=handoff_order_id,
-                process_id=process_ids[1],
-                user_id=worker_id,
-                user_name="E2E Current Worker",
-                quantity=1,
-                serial_no="E2E-HANDOFF-001",
-            ),
-            trigger_work_record_id,
-            db,
+        OperationsFacade.generate_quality_tasks(
+            db=db,
+            trigger_work_record_id=trigger_work_record_id,
+            report_type="normal",
+            order_id=handoff_order_id,
+            process_id=process_ids[1],
+            user_id=worker_id,
+            user_name="E2E Current Worker",
+            quantity=1,
+            serial_no="E2E-HANDOFF-001",
         )
         db.execute(
             "UPDATE product_items SET current_process_id = ? WHERE serial_no = 'E2E-HANDOFF-001'",
@@ -467,18 +454,16 @@ def prepare_database():
             race_worker_id,
             "E2E-HANDOFF-RACE-001",
         )
-        ProcessQualityEvaluationService.generate_tasks(
-            WorkReportCommand(
-                report_type="normal",
-                order_id=race_handoff_order_id,
-                process_id=process_ids[1],
-                user_id=race_worker_id,
-                user_name="E2E Race Worker",
-                quantity=1,
-                serial_no="E2E-HANDOFF-RACE-001",
-            ),
-            race_trigger_work_record_id,
-            db,
+        OperationsFacade.generate_quality_tasks(
+            db=db,
+            trigger_work_record_id=race_trigger_work_record_id,
+            report_type="normal",
+            order_id=race_handoff_order_id,
+            process_id=process_ids[1],
+            user_id=race_worker_id,
+            user_name="E2E Race Worker",
+            quantity=1,
+            serial_no="E2E-HANDOFF-RACE-001",
         )
         db.execute(
             "UPDATE product_items SET current_process_id = ? "
@@ -520,14 +505,10 @@ def prepare_database():
 prepare_database()
 atexit.register(remove_database)
 
-from server import app
-
+from modules.application.operations_facade import OperationsFacade
 
 if __name__ == "__main__":
-    app.run(
+    OperationsFacade.run_e2e_server(
         host="127.0.0.1",
         port=int(os.environ.get("E2E_PORT", "4173")),
-        debug=False,
-        use_reloader=False,
-        threaded=True,
     )

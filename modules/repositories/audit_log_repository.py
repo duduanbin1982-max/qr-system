@@ -6,9 +6,7 @@ import json
 import uuid
 
 from modules.repositories.context import resolve_db
-from modules.audit_action_catalog import describe_action
 from modules.audit_policy import sanitize_audit_detail
-from modules.audit_writer import insert_audit_log
 
 
 class AuditLogRepository:
@@ -18,27 +16,37 @@ class AuditLogRepository:
     # Operation Logs
     # ============================================================
     @staticmethod
-    def insert_log(
-        user_id,
-        action,
-        target_type="",
-        target_id=0,
-        detail="",
-        db=None,
-        *,
-        event_id=None,
-        request_id="",
-    ):
-        db = resolve_db(db)
-        return insert_audit_log(
-            db,
-            user_id,
-            action,
-            target_type,
-            target_id,
-            detail,
-            event_id=event_id,
-            request_id=request_id,
+    def _insert_values(values, *, db, ignore_existing=False):
+        insert = "INSERT OR IGNORE" if ignore_existing else "INSERT"
+        cursor = db.execute(
+            insert + " INTO audit_logs "
+            "(event_id,user_id,action,target_type,target_id,detail,category,severity,"
+            "mandatory,schema_version,redaction_version,request_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            values,
+        )
+        return cursor.lastrowid
+
+    @staticmethod
+    def insert_command(command, *, db):
+        if db is None:
+            raise ValueError("audit persistence needs an explicit transaction")
+        return AuditLogRepository._insert_values(
+            (
+                command.event_id,
+                command.user_id,
+                command.action,
+                command.target_type,
+                command.target_id,
+                command.detail,
+                command.category,
+                command.severity,
+                command.mandatory,
+                command.schema_version,
+                command.redaction_version,
+                command.request_id,
+            ),
+            db=db,
         )
 
     @staticmethod
@@ -50,37 +58,11 @@ class AuditLogRepository:
         return dict(row) if row else None
 
     @staticmethod
-    def enqueue_event_txn(
-        user_id,
-        action,
-        target_type="",
-        target_id=0,
-        detail=None,
-        db=None,
-        *,
-        event_id=None,
-        request_id="",
-    ):
+    def enqueue_event_txn(command, *, db):
         """Persist a durable event envelope inside the caller's transaction."""
 
-        db = resolve_db(db)
-        metadata = describe_action(action)
-        event_id = event_id or uuid.uuid4().hex
         payload = json.dumps(
-            {
-                "event_id": event_id,
-                "user_id": user_id,
-                "action": action,
-                "target_type": target_type,
-                "target_id": target_id,
-                "detail": sanitize_audit_detail(detail),
-                "category": metadata.category,
-                "severity": metadata.severity,
-                "mandatory": int(metadata.mandatory),
-                "schema_version": 1,
-                "redaction_version": 1,
-                "request_id": request_id or "",
-            },
+            command.to_payload(),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -88,9 +70,9 @@ class AuditLogRepository:
         db.execute(
             "INSERT OR IGNORE INTO audit_event_outbox "
             "(event_id, action, category, payload) VALUES (?,?,?,?)",
-            (event_id, action, metadata.category, payload),
+            (command.event_id, command.action, command.category, payload),
         )
-        return event_id
+        return command.event_id
 
     @staticmethod
     def publish_pending_events(limit=100, db=None):
@@ -109,11 +91,7 @@ class AuditLogRepository:
         for row in rows:
             try:
                 payload = json.loads(row["payload"] or "{}")
-                db.execute(
-                    "INSERT OR IGNORE INTO audit_logs "
-                    "(event_id,user_id,action,target_type,target_id,detail,category,"
-                    "severity,mandatory,schema_version,redaction_version,request_id) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                AuditLogRepository._insert_values(
                     (
                         payload["event_id"],
                         payload.get("user_id"),
@@ -128,6 +106,8 @@ class AuditLogRepository:
                         int(payload.get("redaction_version", 1)),
                         payload.get("request_id", ""),
                     ),
+                    db=db,
+                    ignore_existing=True,
                 )
                 db.execute(
                     "UPDATE audit_event_outbox SET status='published', attempts=attempts+1, "

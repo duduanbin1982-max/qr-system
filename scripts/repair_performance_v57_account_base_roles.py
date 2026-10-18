@@ -15,10 +15,6 @@ PROJECT_ROOT = Path(os.environ.get("QR_SYSTEM_ROOT") or Path(__file__).resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-production-repair-only")
 
-from modules.migrations import LATEST_VERSION
-from modules.repositories.performance_history_migration_repository import (
-    PerformanceHistoryMigrationRepository,
-)
 from scripts.validate_performance_v57_replica import (
     DEDICATED_ACCOUNT_BASE_ROLE,
     DEDICATED_ACCOUNTS,
@@ -34,6 +30,8 @@ EXPECTED_USER_IDS = {
     "reassessor": 10338,
 }
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _parser():
     parser = argparse.ArgumentParser(
@@ -124,7 +122,7 @@ def _business_fingerprint(db):
     return {
         "database": _database_checks(db),
         "performance_batches": _batch_fingerprint(db),
-        "payroll": PerformanceHistoryMigrationRepository.payroll_fingerprint(db),
+        "payroll": OperationsFacade.performance_history_facts_payroll_fingerprint(db),
         "approved_department_revisions": int(
             db.execute(
                 "SELECT COUNT(*) FROM performance_assignment_department_revisions "
@@ -208,7 +206,7 @@ def main():
     db.execute("PRAGMA foreign_keys=ON")
     try:
         before_fingerprint = _business_fingerprint(db)
-        if before_fingerprint["database"]["user_version"] != LATEST_VERSION:
+        if before_fingerprint["database"]["user_version"] != OperationsFacade.latest_schema_version():
             raise RuntimeError("数据库版本不是当前 V57")
         if before_fingerprint["database"]["integrity_check"] != "ok":
             raise RuntimeError("生产数据库完整性校验失败")

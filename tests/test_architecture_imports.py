@@ -1,10 +1,18 @@
 import ast
+import hashlib
 import json
 import re
 from collections import defaultdict
+from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
+
+
+def test_operations_scripts_use_the_stable_application_boundary():
+    from test_operations_script_boundary import assert_script_boundaries
+
+    assert_script_boundaries()
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +36,11 @@ ARCHITECTURE_FILE_ALLOWLIST = {
     "routes": frozenset(),
     "services": frozenset({"modules/services/__init__.py"}),
 }
+ORDINARY_MODULE_FANOUT_LIMIT = 30
+COMPOSITION_ROOT_FANOUT_ALLOWLIST = {
+    "modules/migration_catalog.py": "migration registry composition root",
+    "modules/schemas/__init__.py": "schema registry composition root",
+}
 GENERATED_PYTHON_FILE_PATTERNS = (
     "*.generated.py",
     "*_generated.py",
@@ -37,6 +50,20 @@ GENERATED_PYTHON_FILE_PATTERNS = (
 GENERATED_PYTHON_DIRECTORY_NAMES = frozenset(
     {"__generated__", "_generated", "generated"}
 )
+
+# Task 0 ratchet: these are the only pre-existing service-to-database seams
+# accepted while the infrastructure boundary is being migrated. New imports
+# must be removed or explicitly reviewed instead of silently expanding this set.
+SERVICE_DATABASE_IMPORT_BASELINE = {
+    "modules/services/approval_policy_service.py": frozenset(
+        {"modules.db_unit_of_work"}
+    ),
+    "modules/services/department_service.py": frozenset(
+        {"modules.db_unit_of_work"}
+    ),
+}
+MIDDLEWARE_SQL_BASELINE = frozenset()
+MIDDLEWARE_SQL_FINGERPRINT_BASELINE = {}
 
 
 def _is_generated_python_file(path):
@@ -69,6 +96,61 @@ def _display_path(path, root=PROJECT_ROOT):
 
 def _source_files():
     yield from _architecture_files(PROJECT_ROOT)
+
+
+def _direct_internal_imports(path, *, source_root=PROJECT_ROOT):
+    """Return direct internal module imports without counting imported symbols."""
+    relative = path.relative_to(source_root).with_suffix("")
+    package_parts = list(relative.parts[:-1])
+    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "modules" or alias.name.startswith("modules."):
+                    yield alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base_parts = package_parts[: max(0, len(package_parts) - node.level + 1)]
+                if node.module:
+                    base_parts = [*base_parts, *node.module.split(".")]
+                module_name = ".".join(base_parts)
+            else:
+                module_name = node.module or ""
+            if module_name == "modules" or module_name.startswith("modules."):
+                yield module_name
+
+
+def _module_fanout(path, *, source_root=PROJECT_ROOT):
+    return frozenset(_direct_internal_imports(path, source_root=source_root))
+
+
+def _fanout_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        fanout = _module_fanout(path, source_root=source_root)
+        if relative_path in COMPOSITION_ROOT_FANOUT_ALLOWLIST:
+            continue
+        if len(fanout) > ORDINARY_MODULE_FANOUT_LIMIT:
+            violations.append(
+                f"{relative_path}: fan-out {len(fanout)} exceeds "
+                f"{ORDINARY_MODULE_FANOUT_LIMIT}"
+            )
+    return violations
+
+
+def _composition_root_service_import_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        if relative_path not in COMPOSITION_ROOT_FANOUT_ALLOWLIST:
+            continue
+        for lineno, module_name in _imported_modules(path, source_root):
+            if _matches_module_prefix(module_name, ("modules.services",)):
+                violations.append(
+                    f"{relative_path}:{lineno} -> {module_name}"
+                )
+    return violations
 
 
 def _module_map():
@@ -171,6 +253,53 @@ def test_backend_modules_have_no_import_cycles():
     cycles = _strongly_connected_components(graph, known_modules)
 
     assert cycles == [], f"backend import graph contains cycles: {cycles}"
+
+
+def test_high_fanout_is_limited_to_documented_composition_roots():
+    migration_catalog = PROJECT_ROOT / "modules" / "migration_catalog.py"
+    schema_registry = PROJECT_ROOT / "modules" / "schemas" / "__init__.py"
+
+    assert set(COMPOSITION_ROOT_FANOUT_ALLOWLIST) == {
+        "modules/migration_catalog.py",
+        "modules/schemas/__init__.py",
+    }
+    assert len(_module_fanout(migration_catalog)) == 37
+    assert len(_module_fanout(schema_registry)) == 19
+    assert _fanout_violations(tuple(_source_files())) == []
+    assert _composition_root_service_import_violations(
+        (migration_catalog, schema_registry)
+    ) == []
+
+
+def test_new_ordinary_high_fanout_and_registry_reverse_import_are_rejected(tmp_path):
+    fixture_root = tmp_path / "fixture_project"
+    ordinary_module = fixture_root / "modules" / "services" / "new_hotspot.py"
+    ordinary_module.parent.mkdir(parents=True, exist_ok=True)
+    ordinary_module.write_text(
+        "\n".join(
+            f"from modules.leaf_{index} import value" for index in range(31)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry_module = fixture_root / "modules" / "migration_catalog.py"
+    registry_module.parent.mkdir(parents=True, exist_ok=True)
+    registry_module.write_text(
+        "from modules.services.order_service import OrderService\n",
+        encoding="utf-8",
+    )
+
+    paths = tuple(_architecture_files(fixture_root))
+    assert any(
+        "new_hotspot.py" in violation
+        for violation in _fanout_violations(paths, source_root=fixture_root)
+    )
+    assert any(
+        "migration_catalog.py" in violation
+        for violation in _composition_root_service_import_violations(
+            paths, source_root=fixture_root
+        )
+    )
 
 def test_source_files_do_not_have_utf8_bom():
     bom_files = [
@@ -319,6 +448,55 @@ def _service_migration_import_violations(paths, *, source_root=PROJECT_ROOT):
     return violations
 
 
+def _service_database_imports(paths, *, source_root=PROJECT_ROOT):
+    imports = defaultdict(set)
+    for path in paths:
+        relative_path = _display_path(path, source_root)
+        for _, module_name in _imported_modules(path, source_root):
+            if module_name in {"modules.db", "modules.db_unit_of_work"}:
+                imports[relative_path].add(module_name)
+    return {path: frozenset(values) for path, values in imports.items()}
+
+
+def _middleware_sql_violations(paths, *, source_root=PROJECT_ROOT):
+    violations = []
+    database_methods = {"execute", "executemany", "executescript", "cursor"}
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in database_methods
+            ):
+                violations.append(
+                    f"{_display_path(path, source_root)}:{node.lineno} -> .{node.func.attr}()"
+                )
+    return violations
+
+
+def _middleware_sql_fingerprints(paths, *, source_root=PROJECT_ROOT):
+    fingerprints = defaultdict(list)
+    database_methods = {"execute", "executemany", "executescript", "cursor"}
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        relative_path = _display_path(path, source_root)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in database_methods
+            ):
+                semantic_shape = ast.dump(
+                    node, annotate_fields=True, include_attributes=False
+                )
+                digest = hashlib.sha256(semantic_shape.encode("utf-8")).hexdigest()
+                fingerprints[relative_path].append((node.func.attr, digest))
+    return {
+        path: tuple(sorted(values)) for path, values in fingerprints.items()
+    }
+
+
 SERVICE_SQL_PATTERN = re.compile(
     r"\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\s+[A-Za-z_]\w*\s+SET|DELETE\s+FROM)\b",
     re.IGNORECASE | re.DOTALL,
@@ -329,13 +507,25 @@ REPOSITORY_DDL_PATTERN = re.compile(
 )
 
 
-def _string_literal_violations(paths, pattern, *, source_root=PROJECT_ROOT):
+def _string_literal_violations(paths, pattern, *, source_root=PROJECT_ROOT,
+                               ignore_docstrings=False):
     violations = []
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        docstrings = set()
+        if ignore_docstrings:
+            for owner in ast.walk(tree):
+                if not isinstance(owner, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                          ast.AsyncFunctionDef)):
+                    continue
+                if owner.body and isinstance(owner.body[0], ast.Expr):
+                    first = owner.body[0].value
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        docstrings.add(first)
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
+                and node not in docstrings
                 and isinstance(node.value, str)
                 and pattern.search(node.value)
             ):
@@ -430,6 +620,9 @@ def nested_architecture_violation_tree(tmp_path):
         "modules/services/quality_management/bad_business_sql.py": (
             'QUERY = "SELECT id FROM orders"\n'
         ),
+        "modules/services/quality_management/bad_db_boundary.py": (
+            "from modules.db import get_db\n"
+        ),
         "modules/services/quality_management/ignored.generated.py": "import sqlite3\n",
         "modules/services/quality_management/__init__.py": "import sqlite3\n",
         "modules/repositories/quality_management/bad_service_dependency.py": (
@@ -443,6 +636,9 @@ def nested_architecture_violation_tree(tmp_path):
         ),
         "modules/routes/inventory/nested/bad_database_route.py": (
             "from modules.db import get_db\n"
+        ),
+        "modules/middleware/bad_sql_boundary.py": (
+            "def write_badly(db):\n    db.execute(\"UPDATE orders SET status = 'x'\")\n"
         ),
     }
     for relative_path, source in fixture_sources.items():
@@ -494,6 +690,10 @@ def test_nested_architecture_violations_are_rejected(nested_architecture_violati
             service_paths, source_root=fixture_root
         )
     )
+    service_database_imports = _service_database_imports(
+        service_paths, source_root=fixture_root
+    )
+    assert "modules/services/quality_management/bad_db_boundary.py" in service_database_imports
     assert any(
         "bad_service_dependency.py" in violation
         for violation in _repository_service_dependency_violations(
@@ -511,42 +711,274 @@ def test_nested_architecture_violations_are_rejected(nested_architecture_violati
     )
     assert any("bad_repository_route.py" in violation for violation in route_violations)
     assert any("bad_database_route.py" in violation for violation in route_violations)
+    middleware_violations = _middleware_sql_violations(
+        _architecture_files(fixture_root / "modules" / "middleware"),
+        source_root=fixture_root,
+    )
+    assert any("bad_sql_boundary.py" in violation for violation in middleware_violations)
 
 
-def test_schedule_capacity_allocator_is_database_independent():
-    path = PROJECT_ROOT / "modules" / "domain" / "schedule_capacity_allocation.py"
+def _domain_import_is_forbidden(module_name):
     forbidden_imports = (
         "flask",
+        "flask_sqlalchemy",
         "sqlite3",
+        "sqlalchemy",
+        "aiosqlite",
+        "psycopg",
+        "psycopg2",
+        "pymysql",
         "modules.app",
         "modules.db",
         "modules.db_unit_of_work",
+        "modules.migrations",
         "modules.repositories",
         "modules.routes",
         "modules.services",
     )
-    tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
-    violations = [
-        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{lineno} -> {module_name}"
-        for lineno, module_name in _expanded_imports(tree, ["modules", "domain"])
-        if _matches_module_prefix(module_name, forbidden_imports)
-    ]
+    return (
+        _matches_module_prefix(module_name, forbidden_imports)
+        or module_name.startswith("modules.migration_")
+    )
 
+
+def _call_argument(call, position, keyword):
+    if len(call.args) > position:
+        return call.args[position]
+    return next((item.value for item in call.keywords if item.arg == keyword), None)
+
+
+def _import_package_value(node, source_package):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name) and node.id == "__package__":
+        return source_package
+    return None
+
+
+def _builtin_import_package(globals_arg, source_package):
+    if (
+        isinstance(globals_arg, ast.Call)
+        and isinstance(globals_arg.func, ast.Name)
+        and globals_arg.func.id == "globals"
+        and not globals_arg.args
+        and not globals_arg.keywords
+    ):
+        return source_package
+    if isinstance(globals_arg, ast.Dict):
+        for key, value in zip(globals_arg.keys, globals_arg.values):
+            if isinstance(key, ast.Constant) and key.value == "__package__":
+                return _import_package_value(value, source_package)
+    return None
+
+
+def _dynamic_import_name(call, *, builtin, source_package):
+    """Normalize literal import targets without importing or executing source."""
+    name = _call_argument(call, 0, "name")
+    if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+        return None
+    module_name = name.value
+    if builtin:
+        level_arg = _call_argument(call, 4, "level")
+        level = 0 if level_arg is None else (
+            level_arg.value if isinstance(level_arg, ast.Constant) else None
+        )
+        if not isinstance(level, int) or level < 0:
+            return None
+        if level == 0:
+            return module_name
+        package = _builtin_import_package(
+            _call_argument(call, 1, "globals"), source_package,
+        )
+        module_name = "." * level + module_name
+    elif module_name.startswith("."):
+        package = _import_package_value(
+            _call_argument(call, 1, "package"), source_package,
+        )
+    else:
+        return module_name
+    if not package:
+        return None
+    try:
+        return resolve_name(module_name, package)
+    except (ImportError, ValueError):
+        # An invalid relative import cannot load a forbidden dependency.
+        return None
+
+
+def _domain_database_violations(paths, *, source_root=PROJECT_ROOT):
+    paths = tuple(paths)
+    violations = []
     database_methods = {"execute", "executemany", "executescript", "cursor", "commit", "rollback"}
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in database_methods
-        ):
-            violations.append(
-                f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno} -> .{node.func.attr}()"
+    for path in paths:
+        for lineno, module_name in _imported_modules(path, source_root):
+            if _domain_import_is_forbidden(module_name):
+                violations.append(f"{_display_path(path, source_root)}:{lineno} -> {module_name}")
+        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        # The parent path is the package for both ordinary modules and __init__.py.
+        source_package = ".".join(path.relative_to(source_root).parts[:-1])
+        import_functions = set()
+        builtin_import_functions = {"__import__"}
+        import_modules = {"importlib"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                import_modules.update(alias.asname or alias.name for alias in node.names if alias.name == "importlib")
+            elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+                import_functions.update(alias.asname or alias.name for alias in node.names if alias.name == "import_module")
+            elif isinstance(node, ast.ImportFrom) and node.module == "builtins":
+                builtin_import_functions.update(alias.asname or alias.name for alias in node.names if alias.name == "__import__")
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute) and node.func.attr in database_methods:
+                violations.append(f"{_display_path(path, source_root)}:{node.lineno} -> .{node.func.attr}()")
+            dynamic_import = (
+                isinstance(node.func, ast.Name) and node.func.id in import_functions | builtin_import_functions
+                or isinstance(node.func, ast.Attribute) and node.func.attr == "import_module"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id in import_modules
             )
+            if dynamic_import:
+                module_name = _dynamic_import_name(
+                    node,
+                    builtin=isinstance(node.func, ast.Name) and node.func.id in builtin_import_functions,
+                    source_package=source_package,
+                )
+                if module_name is not None and _domain_import_is_forbidden(module_name):
+                    violations.append(f"{_display_path(path, source_root)}:{node.lineno} -> dynamic {module_name}")
+    for pattern in (SERVICE_SQL_PATTERN, REPOSITORY_DDL_PATTERN):
+        violations.extend(_string_literal_violations(
+            paths, pattern, source_root=source_root, ignore_docstrings=True,
+        ))
+    return violations
 
+
+def test_schedule_capacity_allocator_is_database_independent():
+    # Scan the whole domain tree, including future allocation subpackages/DTOs;
+    # an exact-file whitelist would silently miss an extracted strategy.
+    violations = _domain_database_violations(_architecture_files(PROJECT_ROOT / "modules" / "domain"))
     assert violations == [], (
         "capacity allocation must remain a pure policy with no database/framework access: "
         f"{violations}"
     )
+
+
+@pytest.mark.parametrize("source", [
+    "import sqlite3", "from modules.repositories import schedule_planning_repository",
+    "from ...services import schedule_capacity_service", "conn.execute('query')",
+    "conn.executemany('query', [])", "conn.executescript('query')", "conn.cursor()",
+    "conn.commit()", "conn.rollback()", "sql = 'SELECT id FROM orders'",
+    "sql = 'CREATE TABLE forbidden (id INTEGER)'",
+    "__import__('sqlite3')", "import importlib as loader; loader.import_module('modules.db')",
+    "from importlib import import_module as load; load('modules.services.schedule_capacity_service')",
+    "def allocate():\n    return 'SELECT id FROM orders'",
+    "def allocate():\n    '''Select nodes from supplied facts.'''\n    sql = 'DELETE FROM orders'",
+])
+def test_nested_domain_strategy_database_access_is_rejected(tmp_path, source):
+    path = tmp_path / "modules" / "domain" / "allocation" / "unexpected_strategy.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding="utf-8")
+    violations = _domain_database_violations(
+        _architecture_files(tmp_path / "modules" / "domain"), source_root=tmp_path,
+    )
+    assert violations, source
+    assert all("allocation/unexpected_strategy.py:" in item for item in violations)
+
+
+@pytest.mark.parametrize("source, forbidden_module", [
+    ("from modules.migration_schedule_capacity import m076_schedule_capacity",
+     "modules.migration_schedule_capacity"),
+    ("import modules.migration_inventory_product_views",
+     "modules.migration_inventory_product_views"),
+    ("from modules import migration_catalog", "modules.migration_catalog"),
+    ("from ...migration_helpers import table_exists", "modules.migration_helpers"),
+    ("__import__('modules.migration_schedule_capacity')",
+     "modules.migration_schedule_capacity"),
+    ("import importlib; importlib.import_module('modules.migration_inventory_product_views')",
+     "modules.migration_inventory_product_views"),
+])
+def test_domain_rejects_actual_migration_modules(tmp_path, source, forbidden_module):
+    assert (PROJECT_ROOT / (forbidden_module.replace(".", "/") + ".py")).is_file()
+    path = tmp_path / "modules/domain/allocation/strategy.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding="utf-8")
+
+    violations = _domain_database_violations([path], source_root=tmp_path)
+
+    assert any(forbidden_module in item for item in violations), source
+
+
+@pytest.mark.parametrize("filename", ["strategy.py", "__init__.py"])
+@pytest.mark.parametrize("source, forbidden_module", [
+    ("import importlib; importlib.import_module('...repositories.schedule_planning_repository', __package__)",
+     "modules.repositories.schedule_planning_repository"),
+    ("import importlib as loader; loader.import_module(name='...services.schedule_capacity_service', package=__package__)",
+     "modules.services.schedule_capacity_service"),
+    ("from importlib import import_module as load; load('...migration_catalog', package='modules.domain.allocation')",
+     "modules.migration_catalog"),
+    ("from importlib import import_module; import_module(name='modules.repositories.schedule_planning_repository')",
+     "modules.repositories.schedule_planning_repository"),
+    ("from importlib import import_module as load; load(package='modules.domain.allocation', name='...migration_helpers')",
+     "modules.migration_helpers"),
+    ("__import__(name='modules.repositories.schedule_planning_repository')",
+     "modules.repositories.schedule_planning_repository"),
+    ("__import__('repositories.schedule_planning_repository', globals(), level=3)",
+     "modules.repositories.schedule_planning_repository"),
+    ("__import__(name='migration_schedule_capacity', globals={'__package__': __package__}, level=3)",
+     "modules.migration_schedule_capacity"),
+    ("__import__('services', {'__package__': 'modules.domain.allocation'}, None, (), 3)",
+     "modules.services"),
+    ("from builtins import __import__ as load; load(name='migration_catalog', globals=globals(), level=3)",
+     "modules.migration_catalog"),
+])
+def test_domain_rejects_relative_and_keyword_dynamic_imports(
+    tmp_path, filename, source, forbidden_module,
+):
+    path = tmp_path / "modules/domain/allocation" / filename
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding="utf-8")
+
+    violations = _domain_database_violations([path], source_root=tmp_path)
+
+    assert any(f"dynamic {forbidden_module}" in item for item in violations), source
+    assert all(f"allocation/{filename}:" in item for item in violations)
+
+
+@pytest.mark.parametrize("source", [
+    "from modules.domain import schedule_planning",
+    "from modules.domain import migration_policy",
+    "from ...domain import schedule_capacity_allocation",
+    "import importlib; importlib.import_module(name='decimal')",
+    "from importlib import import_module as load; load('..schedule_planning', __package__)",
+    "import importlib as loader; loader.import_module(package=__package__, name='..schedule_capacity_allocation')",
+    "__import__(name='decimal')",
+    "__import__('schedule_planning', globals(), level=2)",
+    "__import__('schedule_planning', {'__package__': 'modules.domain.allocation'}, level=2)",
+    "from builtins import __import__ as load; load(name='decimal')",
+    "import importlib; importlib.import_module('.schedule_planning', package='modules.domain')",
+])
+def test_domain_allows_pure_static_and_dynamic_imports(tmp_path, source):
+    path = tmp_path / "modules/domain/allocation/strategy.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding="utf-8")
+
+    assert _domain_database_violations([path], source_root=tmp_path) == []
+
+
+def test_domain_decision_docstrings_do_not_count_as_executable_sql(tmp_path):
+    path = tmp_path / "modules" / "domain" / "allocation" / "decision.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "'''Select candidate nodes from a supplied fact map.'''\n"
+        "class Decision:\n"
+        "    '''Select nodes from immutable candidates.'''\n"
+        "    def select(self):\n"
+        "        '''Select earliest completion from candidates.'''\n"
+        "        return ()\n",
+        encoding="utf-8",
+    )
+    assert _domain_database_violations(
+        _architecture_files(tmp_path / "modules" / "domain"), source_root=tmp_path,
+    ) == []
 
 
 def test_schedule_services_only_execute_transaction_control_sql():
@@ -629,7 +1061,24 @@ def test_architecture_gate_runs_backend_and_frontend_boundary_checks():
 
 
 def test_repositories_do_not_depend_on_other_repositories():
-    compatibility_facade_imports = {}
+    # These are the only sanctioned compatibility delegates. The target
+    # repository remains the single owner of the SQL decision; callers keep
+    # their historical public entry point while forwarding the same db object.
+    compatibility_facade_imports = {
+        "modules/repositories/performance_history_migration_repository.py": {
+            "modules.repositories.performance_fact_repository": frozenset(
+                {"PerformanceFactRepository"}
+            ),
+            "modules.repositories.performance_ledger_repository": frozenset(
+                {"PerformanceLedgerRepository"}
+            ),
+        },
+        "modules/repositories/performance_ledger_repository.py": {
+            "modules.repositories.performance_fact_repository": frozenset(
+                {"PerformanceFactRepository"}
+            ),
+        },
+    }
     violations = []
     repository_root = PROJECT_ROOT / "modules" / "repositories"
     for path in _architecture_files(repository_root, layer="repositories"):
@@ -646,13 +1095,51 @@ def test_repositories_do_not_depend_on_other_repositories():
                 if owned_namespace and module.startswith(owned_namespace + "."):
                     continue
                 relative_path = path.relative_to(PROJECT_ROOT).as_posix()
-                if module in compatibility_facade_imports.get(relative_path, set()):
+                allowed_names = compatibility_facade_imports.get(relative_path, {}).get(
+                    module
+                )
+                imported_names = {alias.name for alias in node.names}
+                if allowed_names is not None and imported_names <= allowed_names:
                     continue
                 violations.append(
                     f"{relative_path} -> {module}"
                 )
 
     assert violations == [], f"repositories must not depend on peer repositories: {violations}"
+
+
+def test_performance_repository_peer_imports_are_delegate_only():
+    expected_calls = {
+        "modules/repositories/performance_history_migration_repository.py": {
+            "PerformanceFactRepository.insert_historical_quality_exception",
+            "PerformanceLedgerRepository.next_version",
+        },
+        "modules/repositories/performance_ledger_repository.py": {
+            "PerformanceFactRepository.insert_batch_exception",
+        },
+    }
+    for relative_path, calls in expected_calls.items():
+        owning_class = (
+            "PerformanceHistoryMigrationRepository"
+            if relative_path.endswith("performance_history_migration_repository.py")
+            else "PerformanceLedgerRepository"
+        )
+        tree = ast.parse(
+            (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        )
+        peer_calls = {
+            f"{node.func.value.id}.{node.func.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in {"PerformanceFactRepository", "PerformanceLedgerRepository"}
+            and node.func.value.id != owning_class
+        }
+        assert peer_calls == calls, (
+            f"{relative_path} has an unsanctioned peer-repository call: "
+            f"{sorted(peer_calls - calls)}"
+        )
 
 
 def test_quality_management_facades_stay_thin():
@@ -747,6 +1234,60 @@ def test_services_do_not_import_sqlite_driver_directly():
     )
 
     assert violations == [], f"service layer must not import sqlite3 directly: {violations}"
+
+
+def test_service_database_imports_match_frozen_task0_baseline():
+    service_root = PROJECT_ROOT / "modules" / "services"
+    actual = _service_database_imports(
+        _architecture_files(service_root, layer="services")
+    )
+
+    assert actual == SERVICE_DATABASE_IMPORT_BASELINE, (
+        "service-to-database imports changed; remove the new seam or update the architecture "
+        f"plan explicitly: expected {SERVICE_DATABASE_IMPORT_BASELINE}, actual {actual}"
+    )
+
+
+def test_middleware_sql_access_matches_frozen_task0_baseline():
+    middleware_root = PROJECT_ROOT / "modules" / "middleware"
+    paths = tuple(_architecture_files(middleware_root))
+    violations = _middleware_sql_violations(paths, source_root=PROJECT_ROOT)
+    actual_files = frozenset(item.split(":", 1)[0] for item in violations)
+
+    assert actual_files <= MIDDLEWARE_SQL_BASELINE, (
+        f"middleware must delegate persistence to an adapter: {violations}"
+    )
+    actual_fingerprints = _middleware_sql_fingerprints(
+        paths, source_root=PROJECT_ROOT
+    )
+    assert actual_fingerprints == MIDDLEWARE_SQL_FINGERPRINT_BASELINE, (
+        "middleware SQL calls changed; update the audit boundary instead of silently changing "
+        f"the baseline: expected {MIDDLEWARE_SQL_FINGERPRINT_BASELINE}, "
+        f"actual {actual_fingerprints}"
+    )
+
+
+def test_audit_middleware_only_adapts_request_context():
+    path = PROJECT_ROOT / "modules" / "middleware" / "audit.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "get_db" not in source
+    assert ".execute(" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
+    assert "AuditCommand.create" in source
+    assert "AuditWriter.best_effort" in source
+    assert "AuditWriter.required" in source
+
+
+def test_audit_repository_only_persists_caller_owned_commands():
+    path = PROJECT_ROOT / "modules" / "repositories" / "audit_log_repository.py"
+    source = path.read_text(encoding="utf-8", errors="replace")
+
+    assert "def insert_command(" in source
+    assert "def insert_log(" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
 
 
 def test_services_do_not_depend_on_migrations():

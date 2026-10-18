@@ -158,7 +158,7 @@ def test_role_create_rolls_back_when_audit_write_fails(client, monkeypatch):
         def fail_audit(*args, **kwargs):
             raise RuntimeError("audit unavailable")
 
-        monkeypatch.setattr(AuditLogRepository, "insert_log", fail_audit)
+        monkeypatch.setattr(AuditLogRepository, "insert_command", fail_audit)
         with pytest.raises(RuntimeError, match="audit unavailable"):
             RoleService.create_role(
                 {"name": "应回滚角色", "code": "rollback_role"}, actor_id

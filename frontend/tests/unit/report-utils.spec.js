@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatCSVCell } from '@/lib/report-utils.js'
+import { formatCSVCell } from '@/composables/reports/reportSupport.js'
 
 
 describe('formatCSVCell', () => {

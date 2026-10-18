@@ -16,7 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.domain import evidence_protocol  # noqa: E402
 from scripts import production_operations  # noqa: E402
 
 
@@ -37,6 +36,8 @@ EXPECTED_COUNTS = {
 }
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(
         description="Controlled production V2 draft generation"
@@ -52,11 +53,11 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _digest(value):
-    return evidence_protocol.sha256_digest_v1(value)
+    return OperationsFacade.sha256_digest_v1(value)
 
 
 def _sha256(path):
@@ -232,12 +233,6 @@ def run(args):
         raise RuntimeError("V2 查询开关必须保持关闭")
     os.environ.setdefault("SECRET_KEY", "offline-production-v2-apply")
     sys.path.insert(0, str(system_root))
-    from modules.repositories.performance_history_migration_repository import (
-        PerformanceHistoryMigrationRepository,
-    )
-    from modules.services.performance_history_migration_service import (
-        PerformanceHistoryMigrationService,
-    )
 
     started_at = datetime.now().astimezone()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
@@ -254,10 +249,10 @@ def run(args):
         pre_batches = _batch_fingerprint(source_ro)
         pre_payroll = _payroll_fingerprint(source_ro)
         pre_quality = _quality_fingerprint(source_ro)
-        pre_plan = PerformanceHistoryMigrationService.analyze(
+        pre_plan = OperationsFacade.performance_history_analyze(
             source_ro, args.from_month, args.to_month
         )
-        PerformanceHistoryMigrationService.validate_counts(pre_plan, EXPECTED_COUNTS)
+        OperationsFacade.performance_history_validate_counts(pre_plan, EXPECTED_COUNTS)
         if pre_plan["totals"].get("quality_ambiguity_count") or pre_plan["totals"].get("missing_target_count"):
             raise RuntimeError("生产写入前存在未清除质量歧义或岗位目标缺口")
         _backup(db_path, backup_path)
@@ -281,7 +276,7 @@ def run(args):
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA busy_timeout=10000")
     try:
-        applied = PerformanceHistoryMigrationService.apply(
+        applied = OperationsFacade.performance_history_apply(
             db,
             args.from_month,
             args.to_month,
@@ -294,10 +289,10 @@ def run(args):
     post_db = _open_ro(db_path)
     try:
         post = _post_summary(post_db)
-        post_plan = PerformanceHistoryMigrationService.analyze(
+        post_plan = OperationsFacade.performance_history_analyze(
             post_db, args.from_month, args.to_month
         )
-        PerformanceHistoryMigrationService.validate_counts(post_plan, EXPECTED_COUNTS)
+        OperationsFacade.performance_history_validate_counts(post_plan, EXPECTED_COUNTS)
     finally:
         post_db.close()
     if post["checks"] != {"user_version": 57, "integrity_check": "ok", "foreign_key_violations": 0, "query_only": 1}:

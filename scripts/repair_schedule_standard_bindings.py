@@ -18,7 +18,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from modules.migrations import run_migrations
 
 
 APPROVED_BINDINGS = (
@@ -27,6 +26,8 @@ APPROVED_BINDINGS = (
     {"target_route_version_id": 69, "source_standard_ids": (1, 2, 74, 75, 76, 77)},
 )
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _row_dict(row):
     return dict(row) if row is not None else None
@@ -281,7 +282,7 @@ def run(db_path, *, apply=False, idempotency_key="", operator_id=None, approver_
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
     try:
-        run_migrations(db)
+        OperationsFacade.migrate_database(db)
         plan = build_plan(db, idempotency_key, operator_id, approver_id)
         blocked = [item for item in plan if item["status"] == "blocked"]
         if apply and blocked:

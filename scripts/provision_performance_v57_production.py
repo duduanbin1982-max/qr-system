@@ -18,15 +18,6 @@ PROJECT_ROOT = Path(os.environ.get("QR_SYSTEM_ROOT") or Path(__file__).resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-production-provisioning-only")
 
-from modules.repositories.performance_assignment_department_repository import (  # noqa: E402
-    PerformanceAssignmentDepartmentRepository,
-)
-from modules.repositories.performance_history_migration_repository import (  # noqa: E402
-    PerformanceHistoryMigrationRepository,
-)
-from modules.services.performance_assignment_department_service import (  # noqa: E402
-    PerformanceAssignmentDepartmentService,
-)
 from scripts.validate_performance_v57_replica import (  # noqa: E402
     DEDICATED_ACCOUNT_BASE_ROLE,
     DEDICATED_ACCOUNTS,
@@ -43,6 +34,8 @@ from scripts.validate_performance_v57_replica import (  # noqa: E402
     _validate_source_actors,
 )
 
+
+from modules.application.operations_facade import OperationsFacade
 
 def _parser():
     parser = argparse.ArgumentParser(
@@ -221,7 +214,7 @@ def _provision_department_revisions(db, assignments):
             "performance-v57:department-supplement:assignment:"
             f"{assignment['id']}:department:{department_id}"
         )
-        existing = PerformanceAssignmentDepartmentRepository.revision_by_source_key(
+        existing = OperationsFacade.assignment_department_revision_by_source_key(
             source_key, db=db
         )
         if existing:
@@ -236,7 +229,7 @@ def _provision_department_revisions(db, assignments):
             approved = existing
             reused += 1
         else:
-            draft = PerformanceAssignmentDepartmentService.create_revision(
+            draft = OperationsFacade.assignment_department_workflow_create_revision(
                 {
                     "assignment_id": assignment["id"],
                     "department_id": department_id,
@@ -247,7 +240,7 @@ def _provision_department_revisions(db, assignments):
                 preparer,
                 db=db,
             )
-            approved = PerformanceAssignmentDepartmentService.approve_revision(
+            approved = OperationsFacade.assignment_department_workflow_approve_revision(
                 draft["id"], approver, draft["row_version"], db=db
             )
             created += 1
@@ -293,7 +286,7 @@ def run(args):
         if len(assignments_before) != 37:
             raise RuntimeError("已确认任职记录不是 37 条")
         assignment_digest_before = _assignment_digest(assignments_before)
-        payroll_before = PerformanceHistoryMigrationRepository.payroll_fingerprint(db)
+        payroll_before = OperationsFacade.performance_history_facts_payroll_fingerprint(db)
         batches_before = _batch_fingerprint(db)
         if batches_before["v2_batches"] != 0:
             raise RuntimeError("生产库已存在 V2 批次，停止自动配置")
@@ -307,7 +300,7 @@ def run(args):
             assignment_digest_after = _assignment_digest(assignments_after)
             if assignment_digest_after != assignment_digest_before:
                 raise RuntimeError("原任职记录被修改")
-            payroll_during = PerformanceHistoryMigrationRepository.payroll_fingerprint(db)
+            payroll_during = OperationsFacade.performance_history_facts_payroll_fingerprint(db)
             if payroll_during != payroll_before:
                 raise RuntimeError("部门和权限配置不得写工资台账")
             audit_detail = {
@@ -339,7 +332,7 @@ def run(args):
             raise
 
         checks_after = _database_checks(db)
-        payroll_after = PerformanceHistoryMigrationRepository.payroll_fingerprint(db)
+        payroll_after = OperationsFacade.performance_history_facts_payroll_fingerprint(db)
         batches_after = _batch_fingerprint(db)
         preflight_after = _historical_preflight(db, "2026-06", "2026-07")
         if checks_after["integrity_check"] != "ok" or checks_after["foreign_key_violations"]:

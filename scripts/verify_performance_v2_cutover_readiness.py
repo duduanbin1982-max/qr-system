@@ -11,6 +11,8 @@ import sqlite3
 import sys
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(description="Read-only V2 cutover readiness check")
     parser.add_argument("--system-root", required=True)
@@ -63,7 +65,6 @@ def run(args):
         raise RuntimeError("验证阶段 V2 查询开关必须保持关闭")
     os.environ.setdefault("SECRET_KEY", "offline-v2-cutover-readiness")
     sys.path.insert(0, str(root))
-    from modules.repositories.performance_repository import PerformanceRepository
 
     uri = "file:" + db_path.as_posix() + "?mode=ro"
     db = sqlite3.connect(uri, uri=True)
@@ -85,8 +86,8 @@ def run(args):
             ("2026-06", 1, 3, 27),
             ("2026-07", 2, 4, 37),
         ):
-            legacy = PerformanceRepository.formal_result_batch(month, False, db=db)
-            v2 = PerformanceRepository.formal_result_batch(month, True, db=db)
+            legacy = OperationsFacade.performance_results_formal_result_batch(month, False, db=db)
+            v2 = OperationsFacade.performance_results_formal_result_batch(month, True, db=db)
             if not legacy or int(legacy["id"]) != expected_legacy or legacy["status"] != "superseded" or not int(legacy["legacy_imported"]):
                 raise RuntimeError(f"{month} Legacy 回退选择不正确")
             if not v2 or int(v2["id"]) != expected_v2 or v2["status"] != "approved" or int(v2["legacy_imported"]):

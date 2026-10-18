@@ -81,6 +81,8 @@ SUM_COLUMNS = (
 )
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def canonical_json(value: Any) -> str:
     return json.dumps(
         value,
@@ -262,13 +264,9 @@ def collect_category_mismatches(db: sqlite3.Connection) -> list[dict]:
 
 
 def collect_reference_coverage(db: sqlite3.Connection) -> dict:
-    from modules.master_data_references import (
-        MASTER_DATA_REFERENCES,
-        find_unregistered_reference_columns,
-    )
 
     entries = []
-    for spec in MASTER_DATA_REFERENCES:
+    for spec in OperationsFacade.master_data_references():
         columns = _columns(db, spec.table)
         if not columns:
             continue
@@ -339,7 +337,7 @@ def collect_reference_coverage(db: sqlite3.Connection) -> dict:
         "cataloged_non_null_rows": sum(item["rows"] for item in entries),
         "unregistered_columns": [
             {"table": table, "column": column}
-            for table, column in find_unregistered_reference_columns(db)
+            for table, column in OperationsFacade.find_unregistered_reference_columns(db)
         ],
         "price_route_references": price_route_references,
     }
@@ -358,7 +356,7 @@ def _migration_exceptions(db: sqlite3.Connection) -> list[dict]:
 
 
 def simulate_migrations(source: sqlite3.Connection) -> dict:
-    from modules.migrations import LATEST_VERSION, run_migrations
+
 
     replica = sqlite3.connect(":memory:")
     replica.row_factory = sqlite3.Row
@@ -368,14 +366,14 @@ def simulate_migrations(source: sqlite3.Connection) -> dict:
     executed = 0
     try:
         replica.execute("PRAGMA foreign_keys=ON")
-        executed = int(run_migrations(replica))
+        executed = int(OperationsFacade.migrate_database(replica))
     except Exception as exc:
         error = str(exc)
     after = int(_scalar(replica, "PRAGMA user_version"))
     result = {
-        "status": "passed" if not error and after == LATEST_VERSION else "failed",
+        "status": "passed" if not error and after == OperationsFacade.latest_schema_version() else "failed",
         "source_version": before,
-        "target_version": LATEST_VERSION,
+        "target_version": OperationsFacade.latest_schema_version(),
         "result_version": after,
         "executed_migrations": executed,
         "error": error,
@@ -517,7 +515,7 @@ def online_backup(source_path: str | Path, target_path: str | Path) -> None:
 def migrate_database(
     path: str | Path, *, expected_preflight_sha256: str | None = None
 ) -> dict:
-    from modules.migrations import LATEST_VERSION, run_migrations
+
 
     database_path = Path(path).resolve()
     preflight = run_preflight(database_path)
@@ -531,18 +529,18 @@ def migrate_database(
     try:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA busy_timeout=10000")
-        executed = int(run_migrations(db))
+        executed = int(OperationsFacade.migrate_database(db))
         checks = database_checks(db)
     finally:
         db.close()
-    if checks["user_version"] != LATEST_VERSION:
-        raise RuntimeError(f"migration stopped at v{checks['user_version']}, expected v{LATEST_VERSION}")
+    if checks["user_version"] != OperationsFacade.latest_schema_version():
+        raise RuntimeError(f"migration stopped at v{checks['user_version']}, expected v{OperationsFacade.latest_schema_version()}")
     if checks["integrity_check"] != "ok" or checks["foreign_key_violations"]:
         raise RuntimeError(f"post-migration database checks failed: {checks}")
     return {
         "status": "passed",
         "source_version": preflight["database"]["user_version"],
-        "target_version": LATEST_VERSION,
+        "target_version": OperationsFacade.latest_schema_version(),
         "executed_migrations": executed,
         "preflight_summary_sha256": preflight["summary_sha256"],
         "database_sha256_before": before_sha256,
@@ -571,12 +569,8 @@ def _flatten_differences(source: Any, candidate: Any, prefix="") -> list[dict]:
 def _authorized_price_resolution_comparison(
     source_path: str | Path, candidate_path: str | Path
 ) -> dict:
-    from modules.process_v2_price_resolution_manifest import (
-        load_price_binding_resolution_manifest,
-        topology_sha256,
-    )
 
-    manifest = load_price_binding_resolution_manifest()
+    manifest = OperationsFacade.load_price_binding_resolution_manifest()
     source = _open_read_only(source_path)
     candidate = _open_read_only(candidate_path)
     try:
@@ -705,7 +699,7 @@ def _authorized_price_resolution_comparison(
                         (route_version_id,),
                     ).fetchall()
                 ]
-                if route_row is None or topology_sha256(route_row[0], nodes) != event[
+                if route_row is None or OperationsFacade.topology_sha256(route_row[0], nodes) != event[
                     "topology_sha256"
                 ]:
                     raise RuntimeError(

@@ -1,54 +1,20 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { dirname, extname, join, relative, resolve } from 'node:path'
+import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readSource, resolveSourceImport, sourceFiles } from './frontend-source-graph.mjs'
 
 
 const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
-const sourceExtensions = new Set(['.js', '.vue'])
-
-function sourceFiles(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) return sourceFiles(path)
-    return sourceExtensions.has(extname(entry.name)) ? [resolve(path)] : []
-  })
-}
 
 const files = sourceFiles(sourceRoot)
 const knownFiles = new Set(files)
 
-function resolveSourceImport(importer, specifier) {
-  let basePath
-  if (specifier.startsWith('@/')) {
-    basePath = resolve(sourceRoot, specifier.slice(2))
-  } else if (specifier.startsWith('.')) {
-    basePath = resolve(dirname(importer), specifier)
-  } else {
-    return null
-  }
-
-  const candidates = extname(basePath)
-    ? [basePath]
-    : [basePath, `${basePath}.js`, `${basePath}.vue`, join(basePath, 'index.js'), join(basePath, 'index.vue')]
-  return candidates.find((candidate) => knownFiles.has(candidate) && existsSync(candidate)) || null
-}
-
-function importSpecifiers(path) {
-  const content = readFileSync(path, 'utf8')
-  const specifiers = new Set()
-  const staticImport = /(?:import|export)\s+(?:[^'\"]*?\s+from\s*)?['\"]([^'\"]+)['\"]/g
-  const dynamicImport = /import\s*\(\s*['\"]([^'\"]+)['\"]\s*\)/g
-  for (const pattern of [staticImport, dynamicImport]) {
-    for (const match of content.matchAll(pattern)) specifiers.add(match[1])
-  }
-  return specifiers
-}
-
 const graph = new Map(files.map((path) => [path, new Set()]))
 for (const path of files) {
-  for (const specifier of importSpecifiers(path)) {
-    const dependency = resolveSourceImport(path, specifier)
-    if (dependency) graph.get(path).add(dependency)
+  const source = readSource(path)
+  if (source.issues.length) throw new Error(`${path}: ${source.issues.join('; ')}`)
+  for (const { specifier } of source.imports) {
+    const dependency = resolveSourceImport(sourceRoot, path, specifier, knownFiles)
+    if (dependency?.path) graph.get(path).add(dependency.path)
   }
 }
 

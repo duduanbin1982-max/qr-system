@@ -96,6 +96,8 @@ trap rollback_on_error ERR
 
 cd "$PROJECT_ROOT"
 
+node frontend/scripts/check-toolchain.mjs
+
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
     echo "Deployment refused: Git worktree is not clean" >&2
     git status --short >&2
@@ -142,7 +144,7 @@ npm run test:unit
 log "running critical browser suite"
 npm run test:e2e
 
-target_database_version="$(python3 -c "from modules.bootstrap import load_environment; load_environment(); from modules.migrations import LATEST_VERSION; print(LATEST_VERSION)")"
+target_database_version="$(python3 -c "from modules.application.operations_facade import OperationsFacade; OperationsFacade.load_environment(); print(OperationsFacade.latest_schema_version())")"
 if [[ ! "$target_database_version" =~ ^[0-9]+$ ]]; then
     echo "Deployment refused: target database version is invalid" >&2
     exit 1
@@ -195,8 +197,8 @@ log "copying legacy employee documents into managed attachment storage"
 bash scripts/migrate-employee-documents.sh
 
 log "running production database migrations"
-python3 -c "from modules.bootstrap import load_environment; load_environment(); from modules.migrations import run_migrations; run_migrations()"
-schema_version="$(python3 -c "from modules.bootstrap import load_environment; load_environment(); from modules.db import verify_schema; print(verify_schema())")"
+python3 -c "from modules.application.operations_facade import OperationsFacade; OperationsFacade.load_environment(); OperationsFacade.migrate_default_database()"
+schema_version="$(python3 -c "from modules.application.operations_facade import OperationsFacade; OperationsFacade.load_environment(); print(OperationsFacade.verify_schema())")"
 if [[ "$schema_version" != "$target_database_version" ]]; then
     echo "Deployment failed: migrated schema version does not match target" >&2
     false

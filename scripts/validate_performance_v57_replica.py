@@ -24,33 +24,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("SECRET_KEY", "offline-replica-validation-only")
 
-from modules.access_policy import collect_permission_codes  # noqa: E402
-from modules.domain import evidence_protocol  # noqa: E402
-from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.access_policy_repository import (  # noqa: E402
-    AccessPolicyRepository,
-)
-from modules.repositories.performance_history_migration_repository import (  # noqa: E402
-    PerformanceHistoryMigrationRepository,
-)
-from modules.repositories.performance_ledger_repository import (  # noqa: E402
-    PerformanceLedgerRepository,
-)
-from modules.services.performance_assignment_department_service import (  # noqa: E402
-    PerformanceAssignmentDepartmentService,
-)
-from modules.services.performance_authorization_service import (  # noqa: E402
-    PerformanceAuthorizationService,
-)
-from modules.services.performance_history_migration_service import (  # noqa: E402
-    PerformanceHistoryMigrationService,
-)
-from modules.services.performance_improvement_service import (  # noqa: E402
-    PerformanceImprovementService,
-)
-from modules.services.performance_ledger_service import (  # noqa: E402
-    PerformanceLedgerService,
-)
 from scripts import production_operations  # noqa: E402
 
 
@@ -120,6 +93,8 @@ POSITION_DEPARTMENTS = {
 }
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(
         description="Run the full V57 performance acceptance flow on a new replica."
@@ -138,7 +113,7 @@ def _parser():
 
 
 def _canonical(value):
-    return evidence_protocol.canonical_json_v1(value)
+    return OperationsFacade.canonical_json_v1(value)
 
 
 def _sha256(path):
@@ -290,8 +265,8 @@ def _actor(db, user_id):
     if not row:
         raise RuntimeError(f"actor {user_id} does not exist")
     actor = dict(row)
-    actor["_permissions"] = collect_permission_codes(
-        AccessPolicyRepository.get_permission_rows(user_id, db=db),
+    actor["_permissions"] = OperationsFacade.collect_permission_codes(
+        OperationsFacade.access_get_permission_rows(user_id, db=db),
         user_id=user_id,
     )
     return actor
@@ -366,7 +341,7 @@ def _apply_department_revisions(db, assignments):
             "performance-v57:department-supplement:assignment:"
             f"{assignment['id']}:department:{department_id}"
         )
-        draft = PerformanceAssignmentDepartmentService.create_revision(
+        draft = OperationsFacade.assignment_department_workflow_create_revision(
             {
                 "assignment_id": assignment["id"],
                 "department_id": department_id,
@@ -377,7 +352,7 @@ def _apply_department_revisions(db, assignments):
             preparer,
             db=db,
         )
-        approved = PerformanceAssignmentDepartmentService.approve_revision(
+        approved = OperationsFacade.assignment_department_workflow_approve_revision(
             draft["id"], approver, draft["row_version"], db=db
         )
         created.append(approved)
@@ -403,8 +378,8 @@ def _assert_revision_immutable(db, revision_id):
 
 
 def _historical_preflight(db, start_month, end_month):
-    plan = PerformanceHistoryMigrationService.analyze(db, start_month, end_month)
-    PerformanceHistoryMigrationService.validate_counts(plan, EXPECTED_COUNTS)
+    plan = OperationsFacade.performance_history_analyze(db, start_month, end_month)
+    OperationsFacade.performance_history_validate_counts(plan, EXPECTED_COUNTS)
     if int(plan.get("quality_ambiguity_count") or 0) != 0:
         raise RuntimeError("historical quality sources are ambiguous")
     if int(plan.get("missing_target_count") or 0) != 0:
@@ -421,7 +396,7 @@ def _preflight_summary(plan):
 
 
 def _latest_scores(db, batch_id):
-    return PerformanceLedgerRepository.latest_score_revisions(batch_id, db=db)
+    return OperationsFacade.performance_ledger_latest_score_revisions(batch_id, db=db)
 
 
 def _review_and_approve_batches(db, applied, reviewer_actor):
@@ -436,9 +411,9 @@ def _review_and_approve_batches(db, applied, reviewer_actor):
     reviewed = []
     for item in applied["months"]:
         batch_id = int(item["batch"]["id"])
-        batch = PerformanceLedgerRepository.batch(batch_id, db=db)
+        batch = OperationsFacade.performance_ledger_batch(batch_id, db=db)
         if batch["status"] == "draft":
-            submitted = PerformanceLedgerService.submit_supervisor_review(
+            submitted = OperationsFacade.performance_workflow_submit_supervisor_review(
                 batch_id,
                 {
                     "expected_row_version": batch["row_version"],
@@ -447,18 +422,18 @@ def _review_and_approve_batches(db, applied, reviewer_actor):
                 preparer,
                 db=db,
             )
-            batch = PerformanceLedgerRepository.batch(submitted["batch_id"], db=db)
+            batch = OperationsFacade.performance_ledger_batch(submitted["batch_id"], db=db)
         scores = _latest_scores(db, batch_id)
         if not scores:
             raise RuntimeError(f"V2 batch {batch_id} has no scores")
         for score in scores:
-            if not PerformanceAuthorizationService.can_review_member(
+            if not OperationsFacade.performance_authorization_can_review_member(
                 reviewer_actor, batch_id, int(score["user_id"]), db=db
             ):
                 raise RuntimeError(
                     f"reviewer cannot review batch {batch_id} user {score['user_id']}"
                 )
-            summary = PerformanceLedgerService.save_supervisor_review(
+            summary = OperationsFacade.performance_workflow_save_supervisor_review(
                 {
                     "batch_id": batch_id,
                     "user_id": int(score["user_id"]),
@@ -472,8 +447,8 @@ def _review_and_approve_batches(db, applied, reviewer_actor):
                 reviewer_actor,
                 db=db,
             )
-            batch = PerformanceLedgerRepository.batch(summary["batch_id"], db=db)
-        submitted = PerformanceLedgerService.submit_approval(
+            batch = OperationsFacade.performance_ledger_batch(summary["batch_id"], db=db)
+        submitted = OperationsFacade.performance_workflow_submit_approval(
             batch_id,
             {
                 "expected_row_version": batch["row_version"],
@@ -482,8 +457,8 @@ def _review_and_approve_batches(db, applied, reviewer_actor):
             preparer,
             db=db,
         )
-        batch = PerformanceLedgerRepository.batch(submitted["batch_id"], db=db)
-        approved = PerformanceLedgerService.approve_batch(
+        batch = OperationsFacade.performance_ledger_batch(submitted["batch_id"], db=db)
+        approved = OperationsFacade.performance_workflow_approve_batch(
             batch_id,
             {
                 "expected_row_version": batch["row_version"],
@@ -517,7 +492,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
     if not score:
         raise RuntimeError("no approved V2 score is available for plan acceptance")
     score = dict(score)
-    plan = PerformanceImprovementService.create_plan(
+    plan = OperationsFacade.performance_improvement_create_plan(
         {
             "score_revision_id": score["id"],
             "user_id": score["user_id"],
@@ -533,7 +508,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
         manager_actor,
         db=db,
     )
-    active = PerformanceImprovementService.transition(
+    active = OperationsFacade.performance_improvement_transition(
         plan["plan_id"],
         {
             "row_version": plan["row_version"],
@@ -543,7 +518,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
         manager_actor,
         db=db,
     )
-    evidence = PerformanceImprovementService.add_evidence(
+    evidence = OperationsFacade.performance_improvement_add_evidence(
         plan["plan_id"],
         {
             "row_version": active["row_version"],
@@ -554,7 +529,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
         manager_actor,
         db=db,
     )
-    pending = PerformanceImprovementService.transition(
+    pending = OperationsFacade.performance_improvement_transition(
         plan["plan_id"],
         {
             "row_version": evidence["row_version"],
@@ -564,7 +539,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
         manager_actor,
         db=db,
     )
-    closed = PerformanceImprovementService.reassess(
+    closed = OperationsFacade.performance_improvement_reassess(
         plan["plan_id"],
         {
             "row_version": pending["row_version"],
@@ -581,7 +556,7 @@ def _exercise_improvement_plan(db, manager_actor, reassessor_actor, outside_depa
         (reassessor_actor, "reassessor"),
     ):
         try:
-            PerformanceAuthorizationService.require_department_action_scope(
+            OperationsFacade.performance_authorization_require_department_action_scope(
                 actor,
                 outside_department,
                 "V57 replica outside-scope probe",
@@ -674,12 +649,12 @@ def run(args):
         if len(assignments_before) != 37:
             raise RuntimeError("confirmed assignment baseline must contain exactly 37 rows")
         assignment_digest_before = _assignment_digest(assignments_before)
-        payroll_before = PerformanceHistoryMigrationRepository.payroll_fingerprint(db)
+        payroll_before = OperationsFacade.performance_history_facts_payroll_fingerprint(db)
         batches_before = _batch_fingerprint(db)
         preflight_before = _historical_preflight(db, args.from_month, args.to_month)
 
-        migrations_run = run_migrations(db)
-        if int(_scalar(db, "PRAGMA user_version")) != LATEST_VERSION:
+        migrations_run = OperationsFacade.migrate_database(db)
+        if int(_scalar(db, "PRAGMA user_version")) != OperationsFacade.latest_schema_version():
             raise RuntimeError("replica did not reach the latest database version")
 
         db.execute("BEGIN IMMEDIATE")
@@ -730,7 +705,7 @@ def run(args):
         preflight_after_departments = _historical_preflight(
             db, args.from_month, args.to_month
         )
-        applied = PerformanceHistoryMigrationService.apply(
+        applied = OperationsFacade.performance_history_apply(
             db,
             args.from_month,
             args.to_month,
@@ -783,7 +758,7 @@ def run(args):
         final_checks = _database_checks(db)
         if final_checks["integrity_check"] != "ok" or final_checks["foreign_key_violations"]:
             raise RuntimeError("final replica integrity validation failed")
-        payroll_after = PerformanceHistoryMigrationRepository.payroll_fingerprint(db)
+        payroll_after = OperationsFacade.performance_history_facts_payroll_fingerprint(db)
         if payroll_after != payroll_before:
             raise RuntimeError("performance validation changed the payroll ledger")
         batches_after = _batch_fingerprint(db)
@@ -820,7 +795,7 @@ def run(args):
             "source_baseline": source_checks,
             "source_actors": source_actors,
             "migrations_run": migrations_run,
-            "target_version": LATEST_VERSION,
+            "target_version": OperationsFacade.latest_schema_version(),
             "authorization": authorization,
             "assignment_history": {
                 "confirmed_rows": len(assignments_before),
