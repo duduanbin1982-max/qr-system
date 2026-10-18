@@ -3,7 +3,9 @@ qr-system - ScheduleService (Refactored: SQL -> ScheduleRepository)
 """
 from datetime import datetime, timedelta
 from modules import config
-from modules.domain.errors import LegacyProcessLineWriteBlockedError
+from modules.domain.legacy_process_line_admission import (
+    assert_legacy_process_line_write_allowed,
+)
 from modules.services import BaseService
 from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
 from modules.repositories.production_line_repository import ProductionLineRepository
@@ -28,15 +30,10 @@ class ScheduleService:
 
     @staticmethod
     def assert_no_legacy_production_line_write(data):
-        if (
-            config.LEGACY_PROCESS_LINE_WRITE_BLOCKED
-            and isinstance(data, dict)
-            and "production_line_id" in data
-        ):
-            raise LegacyProcessLineWriteBlockedError(
-                "Legacy 订单产线写入已关闭，请使用生产节点排程接口",
-                details={"fields": ["production_line_id"]},
-            )
+        return assert_legacy_process_line_write_allowed(
+            data,
+            legacy_write_blocked=config.LEGACY_PROCESS_LINE_WRITE_BLOCKED,
+        )
 
     @staticmethod
     def _normalize_scope(schedule_scope):
