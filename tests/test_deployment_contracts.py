@@ -71,6 +71,22 @@ def test_deploy_script_has_required_release_gates():
     )
 
 
+def test_code_only_release_installs_frontend_dependencies_only_in_isolated_worktree():
+    content = (PROJECT_ROOT / "scripts" / "deploy-code-only.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'TEST_WORKTREE="$TMP_DIR/target-worktree"' in content
+    assert 'NPM_CACHE_DIR="$TMP_DIR/npm-cache"' in content
+    assert 'NPM_USER_CONFIG="$TMP_DIR/npmrc"' in content
+    assert '"$NPM_BIN" ci --ignore-scripts --no-audit --no-fund' in content
+    assert 'NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG"' in content
+    assert 'NPM_CONFIG_CACHE="$NPM_CACHE_DIR"' in content
+    assert 'cd "$TEST_WORKTREE"' in content
+    assert '"$NPM_BIN" run "$check_script"' in content
+    assert '"$PROJECT_ROOT/node_modules"' not in content
+
+
 def test_production_node_operations_and_runbook_define_safe_cutover_contract():
     operations = (
         PROJECT_ROOT / "scripts" / "production_node_operations.py"

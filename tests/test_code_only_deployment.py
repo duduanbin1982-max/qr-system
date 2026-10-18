@@ -1036,11 +1036,26 @@ def test_code_only_shell_path_has_no_migration_or_frontend_steps_and_keeps_evide
     assert "scripts/migrate-employee-documents.sh" not in script
     assert "run_migrations" not in script
     assert "publish-frontend.sh" not in script
-    assert "npm " not in script
+    assert '"$NPM_BIN" ci --ignore-scripts --no-audit --no-fund' in script
     assert "cleanup skipped" in backup
     assert "if [[ \"$PRESERVE_EXISTING_BACKUPS\" == \"0\" ]]" in backup
     assert 'DEPLOYMENT_MANIFEST_TOOL_SOURCE="${DEPLOYMENT_MANIFEST_TOOL_SOURCE:-$QR_PROJECT_ROOT/scripts/deployment_manifest.py}"' in backup
     assert 'python3 "$DEPLOYMENT_MANIFEST_TOOL_SOURCE"' in backup
+
+
+def test_code_only_release_checks_isolate_frontend_dependencies_in_temporary_worktree():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "deploy-code-only.sh").read_text(encoding="utf-8")
+
+    assert 'TEST_WORKTREE="$TMP_DIR/target-worktree"' in script
+    assert 'NPM_CACHE_DIR="$TMP_DIR/npm-cache"' in script
+    assert 'NPM_USER_CONFIG="$TMP_DIR/npmrc"' in script
+    assert '"$NPM_BIN" ci --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE_DIR"' in script
+    assert 'NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG"' in script
+    assert 'NPM_CONFIG_CACHE="$NPM_CACHE_DIR"' in script
+    assert 'cd "$TEST_WORKTREE"' in script
+    assert '"$NPM_BIN" run "$check_script"' in script
+    assert '"$PROJECT_ROOT/node_modules"' not in script
 
 
 def test_code_only_shell_uses_production_trust_root_and_separate_target_tool():

@@ -76,8 +76,11 @@ RELEASE_BACKUP="$BACKUP_DIR/release_${DEPLOYMENT_KEY}.tar.gz"
 HEALTH_URL="${HEALTH_URL:-https://127.0.0.1/api/health}"
 GUNICORN_BIN="${GUNICORN_BIN:-$HOME/.local/bin/gunicorn}"
 PYTEST_BIN="${PYTEST_BIN:-$HOME/.local/bin/pytest}"
+NPM_BIN="${NPM_BIN:-npm}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/qr-code-only-${DEPLOYMENT_KEY}.XXXXXX")"
 TEST_WORKTREE="$TMP_DIR/target-worktree"
+NPM_CACHE_DIR="$TMP_DIR/npm-cache"
+NPM_USER_CONFIG="$TMP_DIR/npmrc"
 TRUST_ROOT="$TMP_DIR/trusted-controls"
 install -d -m 0700 "$TRUST_ROOT/scripts"
 for control in code_only_release.py deployment_manifest.py rollback-deployment.sh backup-db.sh; do
@@ -265,6 +268,56 @@ run_preflight() {
         --target-commit "$TARGET_COMMIT"
 }
 
+prepare_test_dependencies() {
+    if [[ ! -f package.json ]]; then
+        log "release-check dependency install skipped: target has no package.json"
+        return 0
+    fi
+    if [[ ! -f package-lock.json ]]; then
+        echo "Release checks refused: package.json exists but package-lock.json is missing" >&2
+        return 1
+    fi
+    if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+        echo "Release checks refused: npm is required for a target with frontend tooling" >&2
+        return 1
+    fi
+
+    install -d -m 0700 "$NPM_CACHE_DIR"
+    cat > "$NPM_USER_CONFIG" <<EOF
+cache=$NPM_CACHE_DIR
+fund=false
+audit=false
+update-notifier=false
+EOF
+    log "installing locked frontend dependencies in isolated release-check worktree"
+    NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG" \
+    NPM_CONFIG_CACHE="$NPM_CACHE_DIR" \
+        "$NPM_BIN" ci --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE_DIR"
+}
+
+run_frontend_architecture_checks() {
+    if [[ ! -f package.json ]]; then
+        return 0
+    fi
+    if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+        return 1
+    fi
+    local check_script script_definition
+    for check_script in check:api check:imports; do
+        script_definition="$("$NPM_BIN" pkg get "scripts.$check_script" 2>/dev/null || true)"
+        if [[ -z "$script_definition" || "$script_definition" == "null" ]]; then
+            echo "Release checks refused: package is missing npm script $check_script" >&2
+            return 1
+        fi
+    done
+    log "running frontend architecture checks in isolated release-check worktree"
+    for check_script in check:api check:imports; do
+        NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG" \
+        NPM_CONFIG_CACHE="$NPM_CACHE_DIR" \
+            "$NPM_BIN" run "$check_script"
+    done
+}
+
 run_release_checks() {
     local snapshot_db="$TMP_DIR/production-snapshot.db"
     python3 -c 'import sqlite3,sys; source=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True); target=sqlite3.connect(sys.argv[2]); source.backup(target); target.close(); source.close()' \
@@ -272,6 +325,7 @@ run_release_checks() {
     git -C "$TOOL_ROOT" worktree add --quiet --detach "$TEST_WORKTREE" "$TARGET_COMMIT"
     (
         cd "$TEST_WORKTREE"
+        prepare_test_dependencies
         python3 scripts/check_secrets.py
         SECRET_KEY="code-only-preflight-not-a-production-secret" \
         DEPLOYMENT_WRITE_FENCE_PATH="$TMP_DIR/no-write-fence.json" \
@@ -280,6 +334,7 @@ run_release_checks() {
         SECRET_KEY="code-only-preflight-not-a-production-secret" \
         DEPLOYMENT_WRITE_FENCE_PATH="$TMP_DIR/no-write-fence.json" \
         DB_PATH="$snapshot_db" "$PYTEST_BIN" -q
+        run_frontend_architecture_checks
     )
 }
 
