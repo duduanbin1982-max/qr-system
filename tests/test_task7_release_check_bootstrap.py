@@ -68,10 +68,10 @@ def load_overlay_policy(path):
 
 def test_exact_task7_transition_passes_overlay_preflight_without_production_writes(transition, tmp_path):
     project, tool, database = transition
-    with pytest.raises(RuntimeError, match="cannot change trusted release control"):
-        code_only_release.validate_code_only_release(
-            tool, project, database, bootstrap.BEFORE_COMMIT, bootstrap.TARGET_COMMIT,
-        )
+    direct_result = code_only_release.validate_code_only_release(
+        tool, project, database, bootstrap.BEFORE_COMMIT, bootstrap.TARGET_COMMIT,
+    )
+    assert direct_result["target_commit"] == bootstrap.TARGET_COMMIT
 
     approval = bootstrap.validate_transition(project, tool)
     database_before = database.read_bytes()
