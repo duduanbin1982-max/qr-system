@@ -32,6 +32,12 @@ PROTECTED_RELEASE_CONTROL_PATHS = (
     "scripts/rollback-deployment.sh",
     "scripts/backup-db.sh",
 )
+APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS = {
+    "scripts/deploy-code-only.sh": (
+        "f916286b10611284f279ce1a722b0c2874d10258",
+        "98868bc7b612e59bae7b923085a1b8567a60a739",
+    ),
+}
 
 # Task 4 moved operational entry points behind OperationsFacade. These executable
 # adapters are allowed in a code-only release only while their target Git blobs
@@ -189,6 +195,8 @@ def _path_is_forbidden(path):
         return False
     if normalized in APPROVED_FRONTEND_TOOLING_PATHS:
         return False
+    if normalized in APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS:
+        return False
     if parts[0] in {"data", "frontend", "public", "uploads", "dist"}:
         return True
     if normalized in {
@@ -288,10 +296,22 @@ def _assert_release_controls_unchanged(repository, before_commit, target_commit)
     for path in PROTECTED_RELEASE_CONTROL_PATHS:
         before = _git(repository, "rev-parse", f"{before_commit}:{path}", check=False)
         target = _git(repository, "rev-parse", f"{target_commit}:{path}", check=False)
-        if before.returncode or target.returncode or before.stdout.strip() != target.stdout.strip():
+        before_blob = before.stdout.decode("ascii", errors="replace").strip()
+        target_blob = target.stdout.decode("ascii", errors="replace").strip()
+        if before.returncode or target.returncode or not before_blob or not target_blob:
             raise RuntimeError(
                 f"code-only release cannot change trusted release control: {path}"
             )
+        if before_blob == target_blob:
+            continue
+        if APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS.get(path) == (
+            before_blob,
+            target_blob,
+        ):
+            continue
+        raise RuntimeError(
+            f"code-only release cannot change trusted release control: {path}"
+        )
 
 
 def _parse_python_file(path, label):

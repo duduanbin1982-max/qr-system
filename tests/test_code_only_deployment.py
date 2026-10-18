@@ -21,6 +21,25 @@ def _git(path, *args):
     ).stdout.strip()
 
 
+def _git_bytes(path, *args):
+    return subprocess.run(
+        ["git", "-C", str(path), *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+
+
+def _git_blob(content):
+    return subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        input=content,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.decode("ascii").strip()
+
+
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(content, bytes):
@@ -741,6 +760,89 @@ def test_code_only_preflight_rejects_release_control_self_modification(
 ):
     _, production, tool, before, target = _create_release_repositories(
         tmp_path, changed_path
+    )
+
+    with pytest.raises(RuntimeError, match="cannot change trusted release control"):
+        code_only_release.validate_code_only_release(
+            tool,
+            production,
+            production / "data/production.db",
+            before,
+            target,
+        )
+
+
+def test_task7_launcher_transition_is_pinned_to_reviewed_blobs():
+    assert code_only_release.APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS == {
+        "scripts/deploy-code-only.sh": (
+            "f916286b10611284f279ce1a722b0c2874d10258",
+            "98868bc7b612e59bae7b923085a1b8567a60a739",
+        ),
+    }
+
+
+def test_code_only_preflight_accepts_exact_task7_launcher_transition(tmp_path):
+    repository_root = Path(__file__).resolve().parents[1]
+    path = "scripts/deploy-code-only.sh"
+    before_content = _git_bytes(
+        repository_root,
+        "show",
+        f"7f9b5e0c1968eb5913e4f9176efe690741ae38b8:{path}",
+    )
+    target_content = _git_bytes(
+        repository_root,
+        "show",
+        f"dd97f9ffeee558299d8b83c3f86d86a3097ca962:{path}",
+    )
+    assert _git_blob(before_content) == (
+        code_only_release.APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS[path][0]
+    )
+    assert _git_blob(target_content) == (
+        code_only_release.APPROVED_RELEASE_CONTROL_BLOB_TRANSITIONS[path][1]
+    )
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        path,
+        baseline_overrides={path: before_content},
+        target_overrides={path: target_content},
+    )
+
+    result = code_only_release.validate_code_only_release(
+        tool,
+        production,
+        production / "data/production.db",
+        before,
+        target,
+    )
+
+    assert result["changed_paths"] == [path]
+
+
+@pytest.mark.parametrize("mutated_side", ["baseline", "target"])
+def test_code_only_preflight_rejects_task7_launcher_blob_drift(
+    tmp_path, mutated_side
+):
+    repository_root = Path(__file__).resolve().parents[1]
+    path = "scripts/deploy-code-only.sh"
+    before_content = _git_bytes(
+        repository_root,
+        "show",
+        f"7f9b5e0c1968eb5913e4f9176efe690741ae38b8:{path}",
+    )
+    target_content = _git_bytes(
+        repository_root,
+        "show",
+        f"dd97f9ffeee558299d8b83c3f86d86a3097ca962:{path}",
+    )
+    if mutated_side == "baseline":
+        before_content += b"# unreviewed baseline drift\n"
+    else:
+        target_content += b"# unreviewed target drift\n"
+    _, production, tool, before, target = _create_release_repositories(
+        tmp_path,
+        path,
+        baseline_overrides={path: before_content},
+        target_overrides={path: target_content},
     )
 
     with pytest.raises(RuntimeError, match="cannot change trusted release control"):
