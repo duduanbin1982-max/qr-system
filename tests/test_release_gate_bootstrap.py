@@ -76,7 +76,14 @@ def transition(tmp_path, monkeypatch):
     git(repository, "commit", "--quiet", "-m", "approved production")
     before = git(repository, "rev-parse", "HEAD").decode().strip()
     for name in bootstrap.ALLOWED_CHANGES:
-        write(repository, name, (ROOT / name).read_bytes())
+        # The fixture represents the independently approved Task 5 target.
+        # Read its exact bytes from that commit instead of the current checkout,
+        # which may already contain a later release-control revision.
+        write(
+            repository,
+            name,
+            git(ROOT, "show", f"{bootstrap.APPROVED_TARGET_COMMIT}:{name}"),
+        )
         stage(repository, name)
     git(repository, "commit", "--quiet", "-m", "approved gate upgrade")
     target = git(repository, "rev-parse", "HEAD").decode().strip()
