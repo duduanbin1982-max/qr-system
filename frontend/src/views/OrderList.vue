@@ -601,7 +601,17 @@
         <div class="modal-body" style="max-height:70vh;overflow:auto">
           <div v-if="progressLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>
           <div v-else-if="progressData">
-            <div class="summary-bar" style="margin-bottom:var(--space-4);flex-wrap:wrap">
+            <div v-if="isOrderTracking" style="background:var(--bg-table-header);border-left:3px solid var(--primary-accent);padding:8px 12px;border-radius:6px;margin-bottom:var(--space-3);font-size:var(--text-xs);color:var(--text-secondary)">
+              该订单为「订单模式」（整单二维码），系统未生成单件工件；下方按工序汇总显示整单进度，单件级卡点需使用序列号模式。
+            </div>
+            <div v-if="isOrderTracking" class="summary-bar" style="margin-bottom:var(--space-4);flex-wrap:wrap">
+              <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ progressData.quantity }}</div><div class="s-label">订单数量</div></div></div>
+              <div class="summary-item"><span class="s-icon">🧭</span><div><div class="s-val">{{ progressData.summary.total_processes }}</div><div class="s-label">工序总数</div></div></div>
+              <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ progressData.summary.completed_processes }}</div><div class="s-label">已完成工序</div></div></div>
+              <div class="summary-item"><span class="s-icon">📈</span><div><div class="s-val" style="color:var(--primary-accent)">{{ progressData.summary.order_progress_pct }}%</div><div class="s-label">整单进度</div></div></div>
+              <div class="summary-item"><span class="s-icon">⏱️</span><div><div class="s-val">{{ progressData.summary.estimated_remaining_hours ?? '-' }}</div><div class="s-label">剩余工时</div></div></div>
+            </div>
+            <div v-else class="summary-bar" style="margin-bottom:var(--space-4);flex-wrap:wrap">
               <div class="summary-item"><span class="s-icon">📦</span><div><div class="s-val">{{ progressData.summary.total_workpieces }}</div><div class="s-label">工件总数</div></div></div>
               <div class="summary-item"><span class="s-icon">✅</span><div><div class="s-val text-success">{{ progressData.summary.completed_workpieces }}</div><div class="s-label">已完成</div></div></div>
               <div class="summary-item"><span class="s-icon">🔄</span><div><div class="s-val" style="color:var(--warning)">{{ progressData.summary.in_progress_workpieces }}</div><div class="s-label">进行中</div></div></div>
@@ -645,15 +655,16 @@
             </div>
             <div style="margin-bottom:var(--space-4)">
               <div style="font-weight:600;font-size:var(--text-sm);margin-bottom:var(--space-2)">各工序完成情况</div>
-              <div v-for="ps in progressData.summary.process_stats" :key="ps.process_id" style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1)">
+              <div v-for="ps in progressBars" :key="ps.process_id" style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1)">
                 <span style="width:50px;font-size:var(--text-xs);text-align:right;color:var(--text-placeholder)">{{ ps.process_name }}</span>
                 <div style="flex:1;height:20px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
-                  <div :style="{width:(ps.completed/ps.total*100)+'%',height:'100%',background:ps.completed===ps.total?'var(--success)':'var(--primary-accent)',borderRadius:'4px'}"></div>
+                  <div :style="{width:barPercent(ps)+'%',height:'100%',background:ps.total > 0 && ps.completed>=ps.total?'var(--success)':'var(--primary-accent)',borderRadius:'4px'}"></div>
                 </div>
                 <span style="width:40px;font-size:var(--text-xs);text-align:right">{{ ps.completed }}/{{ ps.total }}</span>
               </div>
+              <div v-if="!progressBars.length" style="font-size:var(--text-xs);color:var(--text-placeholder);padding:4px 0">暂无工序数据</div>
             </div>
-            <div class="table-wrap" style="max-height:400px;overflow:auto">
+            <div v-if="progressData.progress.length" class="table-wrap" style="max-height:400px;overflow:auto">
               <table class="data-table" style="font-size:var(--text-xs);min-width:600px">
                 <thead><tr>
                   <th style="position:sticky;left:0;background:white;z-index:1;min-width:70px">工件</th>
@@ -672,6 +683,9 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div v-else style="text-align:center;padding:16px;color:var(--text-placeholder);font-size:var(--text-xs)">
+              该订单为订单模式，无单件工件明细
             </div>
           </div>
         </div>

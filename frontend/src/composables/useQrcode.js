@@ -6,7 +6,7 @@ import { showToast } from '@/lib/store.js'
 export function useQrcode() {
   const showQrPrint = ref(false)
   const qrPrintOrder = ref(null)
-  const qrMode = ref('order')
+  const qrMode = ref('serial')
   const qrCodes = ref([])
   const qrPrintLoading = ref(false)
   const qrPrintCopies = ref(1)
@@ -32,7 +32,7 @@ export function useQrcode() {
   function openQrPrint(o) {
     qrPrintOrder.value = o
     const existingMode = (o.qr_mode || '').trim()
-    qrMode.value = existingMode || 'order'
+    qrMode.value = existingMode || 'serial'
     qrCodes.value = []
     qrPrintCopies.value = 1
     showQrPrint.value = true

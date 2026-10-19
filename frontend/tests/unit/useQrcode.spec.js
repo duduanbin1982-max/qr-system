@@ -48,7 +48,7 @@ describe('useQrcode print status', () => {
 
     expect(window.print).toHaveBeenCalledOnce()
     expect(mocks.recordQrPrint).toHaveBeenCalledWith(9, {
-      mode: 'order',
+      mode: 'serial',
       copies: 1,
       label_count: 1,
     })
