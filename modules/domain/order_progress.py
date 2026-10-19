@@ -164,6 +164,33 @@ class BottleneckPolicy:
         )[:limit]
 
 
+class OrderProcessStatsPolicy:
+    """Order-level per-process completion derived from order_processes facts.
+
+    Used when the order tracks workpieces at order level (single QR per order)
+    and has no per-piece ``product_items`` records, so the progress dialog can
+    still show meaningful process-level completion instead of an empty table.
+    """
+
+    @staticmethod
+    def build(processes, order_quantity):
+        total = int(order_quantity or 0)
+        stats = []
+        for process in processes:
+            completed = int(process.get("completed") or 0)
+            stats.append({
+                "process_id": process["process_id"],
+                "process_name": process["process_name"],
+                "seq_order": process["seq_order"],
+                "status": process.get("status") or "pending",
+                "completed": completed,
+                "total": total,
+                "backlog": max(total - completed, 0),
+                "completion_pct": round(completed / total * 100, 1) if total else 0.0,
+            })
+        return stats
+
+
 class DeadlineRiskPolicy:
     @staticmethod
     def evaluate(deadline_text, now, total, completed, estimated_hours, stuck_items):
@@ -200,7 +227,10 @@ class ProgressRecommendationPolicy:
         completed = summary["completed_workpieces"]
         remaining = summary["remaining_workpieces"]
         if tracking_mode == "order":
-            recommendations.append("当前订单未生成单件序列号，无法定位每件工件卡点；建议后续订单使用序列号模式。")
+            recommendations.append(
+                "当前订单未生成单件序列号（订单模式），无法定位每件工件卡点；"
+                "已按工序汇总显示整单进度，如需单件级进度请在新订单打印二维码时选择序列号模式。"
+            )
         if 0 < completed < total:
             recommendations.append(f"已有 {completed} 件完成，可按业务规则先入库或安排部分发货，剩余 {remaining} 件继续生产。")
         if bottlenecks:
@@ -226,10 +256,16 @@ class OrderProgressPolicy:
             parse_datetime(order.get("created_at")),
         )
         process_stats = WorkpieceProgressCalculator.process_stats(progress, processes, standards, sources)
+        order_process_stats = OrderProcessStatsPolicy.build(processes, order.get("quantity"))
         total = len(progress)
         completed = sum(1 for item in progress if item["status"] == "completed")
         in_progress = sum(1 for item in progress if item["status"] == "in_progress")
         total_steps = total * len(processes)
+        order_steps_target = sum(stat["total"] for stat in order_process_stats)
+        order_steps_completed = sum(min(stat["completed"], stat["total"]) for stat in order_process_stats)
+        completed_processes = sum(
+            1 for stat in order_process_stats if stat["total"] and stat["completed"] >= stat["total"]
+        )
         estimated_hours = None
         if progress and any(not item["missing_standard"] for item in progress):
             estimated_hours = round(sum(item["estimated_remaining_minutes"] for item in progress) / 60, 1)
@@ -243,9 +279,11 @@ class OrderProgressPolicy:
             "stuck_workpieces": len(stuck_items),
             "remaining_workpieces": max(total - completed, 0),
             "total_processes": len(processes),
+            "completed_processes": completed_processes,
             "total_remaining_steps": sum(item["remaining_steps"] for item in progress),
             "estimated_remaining_hours": estimated_hours,
             "overall_progress_pct": round(sum(item["completed_steps"] for item in progress) / max(total_steps, 1) * 100, 1),
+            "order_progress_pct": round(order_steps_completed / max(order_steps_target, 1) * 100, 1),
             "process_stats": process_stats,
         }
         deadline_text = order.get("deadline") or order.get("plan_end") or ""
@@ -262,6 +300,7 @@ class OrderProgressPolicy:
             "deadline": deadline_text,
             "progress": progress,
             "summary": summary,
+            "order_process_stats": order_process_stats,
             "processes": [
                 {"process_id": process["process_id"], "name": process["process_name"], "seq_order": process["seq_order"]}
                 for process in processes

@@ -56,6 +56,32 @@ def test_order_progress_policy_handles_order_mode_without_serial_items():
     assert "未生成单件序列号" in result["analysis"]["recommendations"][0]
 
 
+def test_order_progress_policy_reports_order_level_process_stats():
+    result = OrderProgressPolicy.build(
+        order_id=9,
+        order={"order_no": "ORDER-9", "quantity": 20, "deadline": "2026-02-01"},
+        items=[],
+        processes=[
+            {"process_id": 1, "process_name": "Cut", "seq_order": 1, "completed": 20, "status": "completed"},
+            {"process_id": 2, "process_name": "Weld", "seq_order": 2, "completed": 0, "status": "pending"},
+        ],
+        work_records=[],
+        standards={},
+        sources={},
+        now=datetime(2026, 1, 2, 12, 0, 0),
+        threshold=24,
+    )
+
+    assert result["analysis"]["tracking_mode"] == "order"
+    assert result["summary"]["total_workpieces"] == 0
+    stats = result["order_process_stats"]
+    assert [stat["completed"] for stat in stats] == [20, 0]
+    assert stats[0]["completion_pct"] == 100.0
+    assert stats[1]["backlog"] == 20
+    assert result["summary"]["completed_processes"] == 1
+    assert result["summary"]["order_progress_pct"] == 50.0
+
+
 def test_order_focus_policy_builds_hard_block_warning():
     warning = OrderFocusPolicy.priority_warning(
         {
