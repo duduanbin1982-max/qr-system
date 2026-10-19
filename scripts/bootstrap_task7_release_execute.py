@@ -79,11 +79,14 @@ def _write_receipt(path, approval, deployment_key, operator_user_id, approver_us
         except FileNotFoundError:
             pass
         raise
-    directory = os.open(receipt.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    # Directory fsync strengthens durability on POSIX, but O_DIRECTORY is
+    # unavailable on Windows; the file fsync above remains the portable floor.
+    if hasattr(os, "O_DIRECTORY"):
+        directory = os.open(receipt.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 def run_execute(
