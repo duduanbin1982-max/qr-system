@@ -127,6 +127,17 @@ class ScheduleCapacityService:
             )
             results = []
             errors = []
+            # Keep generated exclusive-node segments visible to later orders
+            # in this queue. Published compatibility rows are intentionally
+            # preserved, so they cannot represent a newly generated draft.
+            batch_occupancy = {}
+            queue_order_ids = tuple(int(order["id"]) for order in queue)
+            published_order_ids = {
+                int(row["id"])
+                for row in txn.execute(
+                    "SELECT id FROM orders WHERE current_schedule_revision_id IS NOT NULL"
+                ).fetchall()
+            }.intersection(queue_order_ids)
             for order in queue:
                 order_id = int(order["id"])
                 order_run_key = f"{run_key}:{order_id}"
@@ -138,7 +149,20 @@ class ScheduleCapacityService:
                         actor_id=actor_id,
                         db=txn,
                         planning_now=effective_now,
+                        additional_occupancy=batch_occupancy,
                     )
+                    if order_id in published_order_ids:
+                        occupancy_key = (
+                            "production_node_id"
+                            if getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False)
+                            else "process_line_id"
+                        )
+                        for resource_id, intervals in (
+                            ScheduleCapacityService._exclusive_batch_occupancy(
+                                generated, occupancy_key
+                            ).items()
+                        ):
+                            batch_occupancy.setdefault(resource_id, []).extend(intervals)
                     results.append({
                         "order_id": order_id,
                         "order_no": order.get("order_no") or "",
@@ -419,6 +443,48 @@ class ScheduleCapacityService:
         return occupancy
 
     @staticmethod
+    def _exclusive_batch_occupancy(generated, occupancy_key):
+        """Return only valid intervals assigned to exclusive-capacity nodes."""
+        additions = {}
+        for operation in generated.get("operations") or ():
+            if operation.get("status") != "planned":
+                continue
+            if operation.get("execution_mode") in {"outsourced", "non_scheduled"}:
+                continue
+            node_modes = {
+                int(node["production_node_id"]): node.get("capacity_mode") or "exclusive"
+                for node in operation.get("nodes") or ()
+                if node.get("production_node_id") not in (None, "")
+            }
+            if operation.get("production_node_id") not in (None, ""):
+                node_modes.setdefault(
+                    int(operation["production_node_id"]),
+                    operation.get("capacity_mode_snapshot") or "exclusive",
+                )
+            for segment in operation.get("segments") or ():
+                resource_id = segment.get(occupancy_key)
+                if resource_id in (None, ""):
+                    resource_id = operation.get(occupancy_key)
+                if resource_id in (None, ""):
+                    continue
+                resource_id = int(resource_id)
+                capacity_mode = node_modes.get(
+                    resource_id,
+                    operation.get("capacity_mode_snapshot") or "exclusive",
+                )
+                if capacity_mode != "exclusive":
+                    continue
+                start = ScheduleCapacityService._parse_timestamp(
+                    segment.get("start_at") or segment.get("segment_start_at")
+                )
+                end = ScheduleCapacityService._parse_timestamp(
+                    segment.get("end_at") or segment.get("segment_end_at")
+                )
+                if start and end and end > start:
+                    additions.setdefault(resource_id, []).append((start, end))
+        return additions
+
+    @staticmethod
     def _finalize_generation(
         *,
         order_id,
@@ -624,7 +690,7 @@ class ScheduleCapacityService:
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None,
                                 actor_id=None, use_node_engine_override=None,
-                                planning_now=None):
+                                planning_now=None, additional_occupancy=None):
         # Phase 1: a deferred read snapshot.  No schedule rows or ledgers are
         # written while matching standards and allocating capacity.
         use_node_engine = (
@@ -658,6 +724,8 @@ class ScheduleCapacityService:
             occupancy = ScheduleCapacityService._load_generation_occupancy(
                 order_id, use_node_engine, snapshot_db
             )
+            for resource_id, intervals in (additional_occupancy or {}).items():
+                occupancy.setdefault(int(resource_id), []).extend(intervals)
             planning_occupancy = occupancy
             facts_snapshot = PlanningFactsSnapshot.create(
                 order=dict(order),
