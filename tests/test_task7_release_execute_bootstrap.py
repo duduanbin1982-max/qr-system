@@ -50,6 +50,20 @@ def test_receipt_is_immutable_and_binds_code_only_scope(tmp_path):
         bootstrap._write_receipt(receipt, approval, "release-key", 1000, 1004)
 
 
+def test_receipt_write_does_not_require_directory_fsync_flag(tmp_path, monkeypatch):
+    approval = {
+        "before_commit": "a" * 40,
+        "target_commit": "b" * 40,
+        "changed_paths": ["modules/services/user_service.py"],
+        "launcher_target_blob": "c" * 40,
+        "bootstrap_sha256": "d" * 64,
+    }
+    monkeypatch.delattr(bootstrap.os, "O_DIRECTORY", raising=False)
+    receipt = tmp_path / "data" / "deployments" / "portable.bootstrap.json"
+    bootstrap._write_receipt(receipt, approval, "portable-key", 1000, 1004)
+    assert receipt.is_file()
+
+
 def test_execute_path_invokes_pinned_launcher_in_execute_mode():
     content = (ROOT / "scripts/bootstrap_task7_release_execute.py").read_text(
         encoding="utf-8"
