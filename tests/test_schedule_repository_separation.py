@@ -47,6 +47,7 @@ PLANNING_METHODS = {
     "list_line_occupancy",
     "list_node_occupancy_for_adjustment",
     "list_order_serial_ids",
+    "list_published_order_ids",
     "list_process_lines",
     "list_schedulable_orders",
     "list_schedule_allocations",

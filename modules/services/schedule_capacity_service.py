@@ -132,12 +132,11 @@ class ScheduleCapacityService:
             # preserved, so they cannot represent a newly generated draft.
             batch_occupancy = {}
             queue_order_ids = tuple(int(order["id"]) for order in queue)
-            published_order_ids = {
-                int(row["id"])
-                for row in txn.execute(
-                    "SELECT id FROM orders WHERE current_schedule_revision_id IS NOT NULL"
-                ).fetchall()
-            }.intersection(queue_order_ids)
+            published_order_ids = set(
+                SchedulePlanningRepository.list_published_order_ids(
+                    queue_order_ids, db=txn,
+                )
+            )
             for order in queue:
                 order_id = int(order["id"])
                 order_run_key = f"{run_key}:{order_id}"

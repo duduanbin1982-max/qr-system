@@ -272,6 +272,9 @@ def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
             ).fetchall()
         ]
         assert [row["id"] for row in queue] == [first["order_id"], second_order_id]
+        assert SchedulePlanningRepository.list_published_order_ids(
+            [first["order_id"], second_order_id], db=db
+        ) == (first["order_id"],)
         monkeypatch.setattr(
             SchedulePlanningRepository, "list_schedulable_orders",
             lambda limit, db=None, now=None: queue,
