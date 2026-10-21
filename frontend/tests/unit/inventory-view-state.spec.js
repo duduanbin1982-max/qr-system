@@ -72,7 +72,7 @@ describe('inventory product view state binding', () => {
     localStorage.setItem('inventory-workbench:v1:view', 'product')
     const { api } = await import('@/lib/api.js')
     const rows = [{ product_id: 22, product_code: 'PRODUCT-22' }]
-    api.domains.inventory.listProductGroups.mockResolvedValue({ items: rows, total: 1 })
+    api.domains.inventory.listProductGroups.mockResolvedValueOnce({ items: rows, total: 1 })
     let product
     const wrapper = mount({
       setup() {
