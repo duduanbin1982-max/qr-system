@@ -271,10 +271,12 @@ def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
                 (first["order_id"], second_order_id),
             ).fetchall()
         ]
-        assert [row["id"] for row in queue] == [first["order_id"], second_order_id]
+        assert [row["id"] for row in queue] == [first["order_id"], second_order_id], (
+            "the fixture queue must keep the published order before the new order"
+        )
         assert SchedulePlanningRepository.list_published_order_ids(
             [first["order_id"], second_order_id], db=db
-        ) == (first["order_id"],)
+        ) == (first["order_id"],), "only the first order should have a published revision"
         monkeypatch.setattr(
             SchedulePlanningRepository, "list_schedulable_orders",
             lambda limit, db=None, now=None: queue,
@@ -291,7 +293,7 @@ def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
             limit=2, actor_id=creator_id,
             planning_now=ScheduleCapacityService._parse_timestamp("2026-10-20 08:00"),
         )
-        assert batch["status"] == "completed"
+        assert batch["status"] == "completed", "the batch should complete without planning errors"
         first_operation = next(
             item for item in batch["orders"][0]["operations"]
             if item["status"] == "planned"
@@ -300,10 +302,14 @@ def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
             item for item in batch["orders"][1]["operations"]
             if item["status"] == "planned"
         )
-        assert first_operation["production_node_id"] == second_operation["production_node_id"]
+        assert first_operation["production_node_id"] == second_operation["production_node_id"], (
+            "the constrained fixture should assign both orders to the same node"
+        )
         assert ScheduleCapacityService._parse_timestamp(
             second_operation["planned_start_at"]
-        ) >= ScheduleCapacityService._parse_timestamp(first_operation["planned_end_at"])
+        ) >= ScheduleCapacityService._parse_timestamp(first_operation["planned_end_at"]), (
+            "the second draft must start after the first draft releases its exclusive node"
+        )
 
         after_rows = [
             tuple(row) for row in db.execute(
@@ -323,8 +329,8 @@ def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
                 (first["order_id"],),
             ).fetchall()
         ]
-        assert after_rows == published_rows
-        assert after_segments == published_segments
+        assert after_rows == published_rows, "auto-plan must preserve the published schedule rows"
+        assert after_segments == published_segments, "auto-plan must preserve published schedule segments"
 
 
 def test_batch_nodes_are_not_added_to_exclusive_queue_occupancy():
@@ -347,7 +353,9 @@ def test_batch_nodes_are_not_added_to_exclusive_queue_occupancy():
     assert ScheduleCapacityService._exclusive_batch_occupancy(
         generated, "production_node_id"
     ) == {10: [(ScheduleCapacityService._parse_timestamp("2026-10-20 08:00"),
-                ScheduleCapacityService._parse_timestamp("2026-10-20 09:00"))]}
+                ScheduleCapacityService._parse_timestamp("2026-10-20 09:00"))]}, (
+        "only exclusive nodes should be added to the queue occupancy"
+    )
 
 
 def test_lock_replay_unlock_and_dynamic_replan_preserves_lock(client, monkeypatch):
