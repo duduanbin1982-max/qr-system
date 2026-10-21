@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, isReactive, reactive, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -64,6 +64,29 @@ describe('inventory product view state binding', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(api.domains.inventory.listProductGroups).toHaveBeenCalledWith(expect.objectContaining({ limit: 200, page: 1 }))
+    wrapper.unmount()
+    localStorage.removeItem('inventory-workbench:v1:view')
+  })
+
+  it('keeps immutable catalogue rows outside deep reactivity while replacing snapshots reactively', async () => {
+    localStorage.setItem('inventory-workbench:v1:view', 'product')
+    const { api } = await import('@/lib/api.js')
+    const rows = [{ product_id: 22, product_code: 'PRODUCT-22' }]
+    api.domains.inventory.listProductGroups.mockResolvedValue({ items: rows, total: 1 })
+    let product
+    const wrapper = mount({
+      setup() {
+        product = useInventoryProductGroups()
+        return {}
+      },
+      template: '<div />',
+    })
+
+    await flushPromises()
+    expect(product.state.groups.value).toEqual(rows)
+    expect(isReactive(product.state.groups.value)).toBe(false)
+    expect(isReactive(product.state.groups.value[0])).toBe(false)
+
     wrapper.unmount()
     localStorage.removeItem('inventory-workbench:v1:view')
   })
