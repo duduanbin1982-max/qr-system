@@ -15,6 +15,8 @@ from modules import config
 from modules.db import get_db
 from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.migration_production_nodes import m089_schedule_revision_workflow
+from modules.repositories.production_node_repository import ProductionNodeRepository
+from modules.repositories.schedule_planning_repository import SchedulePlanningRepository
 from modules.repositories.schedule_revision_repository import (
     ScheduleRevisionRepository,
 )
@@ -202,6 +204,158 @@ def test_v089_adds_workflow_schema_and_backfills_published_revisions(
                 "WHERE revision_id=?",
                 (revision_id,),
             )
+
+
+def test_auto_plan_reserves_new_draft_when_published_projection_is_preserved(
+    client, monkeypatch
+):
+    """Later queue items see drafts that cannot replace a published projection."""
+    _enable_node_engine(monkeypatch)
+    with client.application.app_context():
+        db = get_db()
+        creator_id, reviewer_id = _actors(db)
+        first, _ = _seed_schedule(
+            db, actor_id=creator_id, route_name="Batch published projection first",
+            plan_start="2026-09-21", unit_minutes=60,
+        )
+        _approve(
+            first["schedule_revision_id"], creator_id, reviewer_id,
+            "batch-published-projection-first",
+        )
+        ScheduleCapacityService.publish_revision(
+            first["schedule_revision_id"], "preserve existing formal projection",
+            "batch-published-projection-publish", creator_id,
+        )
+        published_rows = [
+            tuple(row) for row in db.execute(
+                "SELECT id,order_process_id,process_line_id,production_node_id,status,"
+                "plan_start,plan_end,planned_start_at,planned_end_at "
+                "FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (first["order_id"],),
+            ).fetchall()
+        ]
+        published_segments = [
+            tuple(row) for row in db.execute(
+                "SELECT ss.id,ss.schedule_id,ss.production_node_id,"
+                "ss.segment_start_at,ss.segment_end_at "
+                "FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "WHERE s.order_id=? ORDER BY ss.id",
+                (first["order_id"],),
+            ).fetchall()
+        ]
+
+        route_id = db.execute(
+            "SELECT route_id FROM orders WHERE id=?", (first["order_id"],)
+        ).fetchone()["route_id"]
+        process_id = db.execute(
+            "SELECT process_id FROM order_processes WHERE order_id=? ORDER BY seq_order LIMIT 1",
+            (first["order_id"],),
+        ).fetchone()["process_id"]
+        second_order_id = create_order(
+            db, [process_id], quantity=1,
+            product_code=f"BATCH-PUBLISHED-{uuid.uuid4().hex[:8]}",
+        )
+        db.execute(
+            "UPDATE orders SET route_id=?,plan_start='2026-09-21' WHERE id=?",
+            (route_id, second_order_id),
+        )
+        bind_order_process_versions(db, second_order_id)
+        db.commit()
+
+        queue = [
+            dict(row) for row in db.execute(
+                "SELECT id,order_no,quantity,priority_level AS effective_priority_level,"
+                "is_expedited AS effective_is_expedited,priority_version,schedule_policy "
+                "FROM orders WHERE id IN (?,?) ORDER BY id",
+                (first["order_id"], second_order_id),
+            ).fetchall()
+        ]
+        assert [row["id"] for row in queue] == [first["order_id"], second_order_id], (
+            "the fixture queue must keep the published order before the new order"
+        )
+        assert SchedulePlanningRepository.list_published_order_ids(
+            [first["order_id"], second_order_id], db=db
+        ) == (first["order_id"],), "only the first order should have a published revision"
+        monkeypatch.setattr(
+            SchedulePlanningRepository, "list_schedulable_orders",
+            lambda limit, db=None, now=None: queue,
+        )
+        original_list = ProductionNodeRepository.list_compatible_nodes
+        monkeypatch.setattr(
+            ProductionNodeRepository, "list_compatible_nodes",
+            lambda *args, **kwargs: original_list(*args, **kwargs)[:1],
+        )
+
+        batch = ScheduleCapacityService.auto_plan_orders(
+            start_date="2026-10-20",
+            auto_plan_key=f"batch-published-projection-{uuid.uuid4().hex}",
+            limit=2, actor_id=creator_id,
+            planning_now=ScheduleCapacityService._parse_timestamp("2026-10-20 08:00"),
+        )
+        assert batch["status"] == "completed", "the batch should complete without planning errors"
+        first_operation = next(
+            item for item in batch["orders"][0]["operations"]
+            if item["status"] == "planned"
+        )
+        second_operation = next(
+            item for item in batch["orders"][1]["operations"]
+            if item["status"] == "planned"
+        )
+        assert first_operation["production_node_id"] == second_operation["production_node_id"], (
+            "the constrained fixture should assign both orders to the same node"
+        )
+        assert ScheduleCapacityService._parse_timestamp(
+            second_operation["planned_start_at"]
+        ) >= ScheduleCapacityService._parse_timestamp(first_operation["planned_end_at"]), (
+            "the second draft must start after the first draft releases its exclusive node"
+        )
+
+        after_rows = [
+            tuple(row) for row in db.execute(
+                "SELECT id,order_process_id,process_line_id,production_node_id,status,"
+                "plan_start,plan_end,planned_start_at,planned_end_at "
+                "FROM order_process_schedules WHERE order_id=? ORDER BY id",
+                (first["order_id"],),
+            ).fetchall()
+        ]
+        after_segments = [
+            tuple(row) for row in db.execute(
+                "SELECT ss.id,ss.schedule_id,ss.production_node_id,"
+                "ss.segment_start_at,ss.segment_end_at "
+                "FROM order_process_schedule_segments ss "
+                "JOIN order_process_schedules s ON s.id=ss.schedule_id "
+                "WHERE s.order_id=? ORDER BY ss.id",
+                (first["order_id"],),
+            ).fetchall()
+        ]
+        assert after_rows == published_rows, "auto-plan must preserve the published schedule rows"
+        assert after_segments == published_segments, "auto-plan must preserve published schedule segments"
+
+
+def test_batch_nodes_are_not_added_to_exclusive_queue_occupancy():
+    generated = {
+        "operations": [{
+            "status": "planned",
+            "execution_mode": "internal",
+            "production_node_id": 10,
+            "capacity_mode_snapshot": "exclusive",
+            "nodes": [
+                {"production_node_id": 10, "capacity_mode": "exclusive"},
+                {"production_node_id": 11, "capacity_mode": "batch"},
+            ],
+            "segments": [
+                {"production_node_id": 10, "start_at": "2026-10-20 08:00", "end_at": "2026-10-20 09:00"},
+                {"production_node_id": 11, "start_at": "2026-10-20 08:00", "end_at": "2026-10-20 09:00"},
+            ],
+        }]
+    }
+    assert ScheduleCapacityService._exclusive_batch_occupancy(
+        generated, "production_node_id"
+    ) == {10: [(ScheduleCapacityService._parse_timestamp("2026-10-20 08:00"),
+                ScheduleCapacityService._parse_timestamp("2026-10-20 09:00"))]}, (
+        "only exclusive nodes should be added to the queue occupancy"
+    )
 
 
 def test_lock_replay_unlock_and_dynamic_replan_preserves_lock(client, monkeypatch):

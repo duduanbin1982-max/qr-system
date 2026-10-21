@@ -386,6 +386,26 @@ class SchedulePlanningRepository:
             })
             queue.append(row)
         return ScheduleOrderPriorityPolicy.order_queue(queue, now=now)[:bounded_limit]
+
+    @staticmethod
+    def list_published_order_ids(order_ids, db=None):
+        """Return the requested orders with a current published revision."""
+        db = resolve_db(db)
+        normalized_ids = tuple(dict.fromkeys(int(order_id) for order_id in order_ids))
+        if not normalized_ids:
+            return ()
+        published_ids = []
+        for offset in range(0, len(normalized_ids), 500):
+            batch = normalized_ids[offset:offset + 500]
+            placeholders = ",".join("?" for _ in batch)
+            rows = db.execute(
+                "SELECT id FROM orders WHERE current_schedule_revision_id IS NOT NULL "
+                f"AND id IN ({placeholders}) ORDER BY id",
+                batch,
+            ).fetchall()
+            published_ids.extend(int(row["id"]) for row in rows)
+        return tuple(sorted(published_ids))
+
     @staticmethod
     def find_order(order_id, db):
         return db.execute(
