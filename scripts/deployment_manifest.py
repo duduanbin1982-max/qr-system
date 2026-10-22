@@ -26,6 +26,11 @@ DEPLOYMENT_SCHEMA = "qr-system-deployment/v2"
 WRITE_FENCE_SCHEMA = "qr-system-write-fence/v1"
 DEPLOYMENT_SCOPE_FULL = "full"
 DEPLOYMENT_SCOPE_CODE_ONLY = "code_only"
+DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC = "backend_frontend_static"
+NON_DATA_RELEASE_SCOPES = {
+    DEPLOYMENT_SCOPE_CODE_ONLY,
+    DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+}
 
 
 def utc_now():
@@ -96,21 +101,30 @@ def sqlite_evidence(path):
         connection.close()
 
 
-def sqlite_logical_digest(path):
-    """Hash a consistent SQLite SQL dump, including committed WAL contents."""
+def sqlite_logical_digest(path, *, include_schema_version=True):
+    """Hash a consistent SQL snapshot, optionally excluding the backup schema cookie.
+
+    SQLite backup can change schema_version without changing schema or facts.
+    Keep the cookie in stored state evidence for compatibility and drift checks;
+    exclude it only when comparing a source database with its verified backup.
+    """
     database = Path(path).resolve()
     if not database.is_file():
         raise RuntimeError(f"database does not exist: {database}")
     connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
     digest = hashlib.sha256()
     try:
+        connection.execute("BEGIN")
         for statement in connection.iterdump():
             digest.update(statement.encode("utf-8"))
             digest.update(b"\n")
         schema_identity = {
             "user_version": int(connection.execute("PRAGMA user_version").fetchone()[0]),
-            "schema_version": int(connection.execute("PRAGMA schema_version").fetchone()[0]),
         }
+        if include_schema_version:
+            schema_identity["schema_version"] = int(
+                connection.execute("PRAGMA schema_version").fetchone()[0]
+            )
         digest.update(canonical_digest(schema_identity).encode("ascii"))
         return digest.hexdigest()
     finally:
@@ -277,39 +291,43 @@ def verify_backup_metadata(path):
 def prepare_deployment_manifest(args):
     output = Path(args.output).resolve()
     scope = getattr(args, "scope", DEPLOYMENT_SCOPE_FULL)
-    if scope not in {DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_CODE_ONLY}:
+    if scope not in {
+        DEPLOYMENT_SCOPE_FULL,
+        DEPLOYMENT_SCOPE_CODE_ONLY,
+        DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+    }:
         raise RuntimeError(f"unsupported deployment scope: {scope!r}")
     existing = None
     if output.exists():
-        if scope != DEPLOYMENT_SCOPE_CODE_ONLY:
+        if scope not in NON_DATA_RELEASE_SCOPES:
             raise RuntimeError(f"deployment manifest already exists: {output}")
         existing = require_schema(
             read_json(output), DEPLOYMENT_SCHEMA, "deployment manifest"
         )
         if (
-            existing.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY
+            existing.get("scope") != scope
             or existing.get("deployment_key") != args.deployment_key
             or existing.get("before_commit") != args.before_commit
             or existing.get("target_commit") != args.target_commit
             or existing.get("status") != "fenced"
         ):
-            raise RuntimeError("code-only preparation manifest does not match request")
+            raise RuntimeError("preparation manifest does not match request")
         if existing.get("backup") is not None:
-            raise RuntimeError("code-only backup evidence is already attached")
-    elif scope == DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("code-only deployment requires a started audit manifest")
+            raise RuntimeError("backup evidence is already attached")
+    elif scope in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("non-data deployment requires a started audit manifest")
 
     backup = verify_backup_metadata(args.backup_metadata)
     source_database_version = int(backup["database"]["user_version"])
     target_database_version = args.target_database_version
-    if scope == DEPLOYMENT_SCOPE_CODE_ONLY:
+    if scope in NON_DATA_RELEASE_SCOPES:
         if target_database_version is None:
             raise RuntimeError(
-                "code-only deployment requires an explicit target database version"
+                "non-data deployment requires an explicit target database version"
             )
         if int(target_database_version) != source_database_version:
             raise RuntimeError(
-                "code-only deployment cannot change the database schema version"
+                "non-data deployment cannot change the database schema version"
             )
     elif target_database_version is None:
         raise RuntimeError("full deployment requires a target database version")
@@ -318,6 +336,19 @@ def prepare_deployment_manifest(args):
         raise RuntimeError(f"release backup does not exist: {release_backup}")
     with tarfile.open(release_backup, "r:gz") as archive:
         safe_tar_members(archive, MANAGED_RELEASE_ROOTS)
+    target_static = None
+    if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC:
+        target_static_path = Path(args.target_static_backup).resolve()
+        if not target_static_path.is_file():
+            raise RuntimeError("built frontend static backup does not exist")
+        target_static = {
+            "path": str(target_static_path),
+            "sha256": sha256_file(target_static_path),
+            "size_bytes": target_static_path.stat().st_size,
+            "inventory": archive_inventory(
+                target_static_path, MANAGED_RELEASE_ROOTS
+            ),
+        }
     write_fence_path = _resolve_without_symlinks(args.write_fence)
     write_fence = require_schema(
         read_json(write_fence_path), WRITE_FENCE_SCHEMA, "deployment write fence"
@@ -337,7 +368,8 @@ def prepare_deployment_manifest(args):
         "operations": {
             "database_migration": scope == DEPLOYMENT_SCOPE_FULL,
             "attachment_migration": scope == DEPLOYMENT_SCOPE_FULL,
-            "frontend_publish": scope == DEPLOYMENT_SCOPE_FULL,
+            "frontend_publish": scope
+            in {DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC},
             "code_switch": True,
             "service_restart": True,
         },
@@ -353,6 +385,7 @@ def prepare_deployment_manifest(args):
             "sha256": sha256_file(release_backup),
             "size_bytes": release_backup.stat().st_size,
         },
+        "target_static": target_static,
         "fact_watermark": {
             "captured_at": backup["created_at"],
             "database_sha256": backup["database"]["sha256"],
@@ -372,6 +405,7 @@ def prepare_deployment_manifest(args):
         "rollback": {
             "automatic_restore_allowed": True,
             "restore_scope_verified": False,
+            "static_restore_verified": False,
             "failure_snapshot": None,
         },
         "code_only_state": (existing or {}).get("code_only_state"),
@@ -406,18 +440,21 @@ def begin_code_only_deployment(args):
         for char in args.deployment_key
     ):
         raise RuntimeError("invalid code-only deployment key")
+    scope = getattr(args, "scope", DEPLOYMENT_SCOPE_CODE_ONLY)
+    if scope not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("unsupported non-data deployment scope")
     if args.source_database_version != args.target_database_version:
-        raise RuntimeError("code-only deployment requires an unchanged database version")
+        raise RuntimeError("non-data deployment requires an unchanged database version")
     fence_path = str(Path(args.write_fence).resolve())
     now = utc_now()
     payload = {
         "schema": DEPLOYMENT_SCHEMA,
         "deployment_key": args.deployment_key,
-        "scope": DEPLOYMENT_SCOPE_CODE_ONLY,
+        "scope": scope,
         "operations": {
             "database_migration": False,
             "attachment_migration": False,
-            "frontend_publish": False,
+            "frontend_publish": scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
             "code_switch": True,
             "service_restart": True,
         },
@@ -440,6 +477,7 @@ def begin_code_only_deployment(args):
         "rollback": {
             "automatic_restore_allowed": True,
             "restore_scope_verified": False,
+            "static_restore_verified": False,
             "failure_snapshot": None,
         },
         "code_only_state": None,
@@ -447,7 +485,11 @@ def begin_code_only_deployment(args):
             {
                 "status": "preparing",
                 "at": now,
-                "detail": "code-only deployment requested; database, attachments, and frontend are excluded",
+                "detail": (
+                    "backend plus static assets requested; database and attachment migration are prohibited"
+                    if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC
+                    else "code-only deployment requested; database, attachments, and frontend are excluded"
+                ),
             }
         ],
     }
@@ -460,8 +502,8 @@ def record_code_only_fence(args):
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
     fence_path, fence = _active_fence_for_manifest(manifest)
-    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("fence recording requires code_only scope")
+    if manifest.get("scope") not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("fence recording requires a non-data deployment scope")
     if fence.get("deployment_key") != manifest.get("deployment_key"):
         raise RuntimeError("write fence does not match deployment key")
     if manifest.get("status") != "preparing":
@@ -553,8 +595,8 @@ def capture_code_only_state(args):
     manifest = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
-    if manifest.get("scope", DEPLOYMENT_SCOPE_FULL) != DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("code-only state capture requires code_only scope")
+    if manifest.get("scope", DEPLOYMENT_SCOPE_FULL) not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("non-data state capture requires a supported scope")
     _active_fence_for_manifest(manifest)
     if manifest.get("code_only_state"):
         raise RuntimeError("code-only baseline already exists")
@@ -564,9 +606,10 @@ def capture_code_only_state(args):
     backup = manifest.get("backup")
     if not isinstance(backup, dict):
         raise RuntimeError("code-only deployment backup evidence is missing")
+    backup_database = verify_file_evidence(backup["database"], "database backup")
     if (
-        state["database"]["logical_sha256"]
-        != backup["database"].get("logical_sha256")
+        sqlite_logical_digest(args.database, include_schema_version=False)
+        != sqlite_logical_digest(backup_database, include_schema_version=False)
     ):
         raise RuntimeError("production database differs from its final backup")
     if (
@@ -589,7 +632,7 @@ def capture_code_only_state(args):
         {
             "status": "code_only_baseline_captured",
             "at": manifest["updated_at"],
-            "detail": "database, managed attachments, and frontend fingerprints captured",
+            "detail": "database, managed attachments, and pre-release static fingerprints captured",
             "database_sha256": state["database"]["sha256"],
             "attachment_manifest_sha256": state["attachments"]["manifest_sha256"],
             "release_manifest_sha256": state["release"]["manifest_sha256"],
@@ -603,13 +646,43 @@ def verify_code_only_state(args):
     manifest = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
-    if manifest.get("scope", DEPLOYMENT_SCOPE_FULL) != DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("code-only state verification requires code_only scope")
+    scope = manifest.get("scope", DEPLOYMENT_SCOPE_FULL)
+    if scope not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("non-data state verification requires a supported scope")
     expected = manifest.get("code_only_state")
     if not isinstance(expected, dict):
         raise RuntimeError("code-only immutable baseline is missing")
     observed = code_only_state(args.database, args.project_root)
-    if observed != expected:
+    static_before_switch = manifest.get("status") in {
+        "preparing",
+        "fenced",
+        "prepared",
+        "backup_verified",
+        "deployment_failed",
+        "abort_release_authorized",
+    }
+    static_rollback = bool(manifest.get("rollback", {}).get("static_restore_verified"))
+    if (
+        scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC
+        and not static_rollback
+        and not static_before_switch
+    ):
+        if (
+            observed["database"] != expected["database"]
+            or observed["attachments"] != expected["attachments"]
+        ):
+            raise RuntimeError(
+                "database or attachment invariant drift detected; keep service fenced for review"
+            )
+        target_static = manifest.get("target_static")
+        if not isinstance(target_static, dict):
+            raise RuntimeError("target static asset evidence is missing")
+        verify_file_evidence(target_static, "target static asset archive")
+        if observed["release"] != target_static["inventory"]:
+            raise RuntimeError(
+                "published static assets differ from the target build; keep service fenced for review"
+            )
+    elif observed != expected:
         raise RuntimeError(
             "code-only invariant drift detected; keep service fenced for review"
         )
@@ -618,7 +691,11 @@ def verify_code_only_state(args):
         {
             "status": "code_only_state_verified",
             "at": manifest["updated_at"],
-            "detail": "database, managed attachments, and frontend match the fenced baseline",
+            "detail": (
+                "database and managed attachments match the fenced baseline; published static assets match the locked target build"
+                if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC
+                else "database, managed attachments, and frontend match the fenced baseline"
+            ),
             "state_sha256": canonical_digest(observed),
         }
     )
@@ -630,8 +707,8 @@ def authorize_code_only_abort(args):
     manifest = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
-    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("pre-switch abort requires code_only scope")
+    if manifest.get("scope") not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("pre-switch abort requires a non-data deployment scope")
     _active_fence_for_manifest(manifest)
     if manifest.get("status") not in {"fenced", "prepared", "deployment_failed"}:
         raise RuntimeError("pre-switch abort is not allowed after code switching began")
@@ -674,8 +751,8 @@ def authorize_code_only_rollback_release(args):
     manifest = require_schema(
         read_json(args.manifest), DEPLOYMENT_SCHEMA, "deployment manifest"
     )
-    if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
-        raise RuntimeError("code-only rollback authorization requires code_only scope")
+    if manifest.get("scope") not in NON_DATA_RELEASE_SCOPES:
+        raise RuntimeError("non-data rollback authorization requires a supported scope")
     _active_fence_for_manifest(manifest)
     if manifest.get("status") != "rollback_accepted_fenced":
         raise RuntimeError("code-only rollback release requires fenced health acceptance")
@@ -761,6 +838,16 @@ def manifest_field(args):
 
 def print_database_evidence(args):
     print(json.dumps(sqlite_evidence(args.database), separators=(",", ":")))
+
+
+def print_non_data_state_evidence(args):
+    print(
+        json.dumps(
+            code_only_state(args.database, args.project_root),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def write_deployed_commit(args):
@@ -898,8 +985,8 @@ def release_write_fence(args):
         status = "succeeded"
         detail = "write fence released after fenced health acceptance"
     elif mode == "rollback":
-        code_only = manifest.get("scope", DEPLOYMENT_SCOPE_FULL) == DEPLOYMENT_SCOPE_CODE_ONLY
-        rollback_ready_status = "rollback_accepted_fenced" if code_only else "data_restored"
+        non_data = manifest.get("scope", DEPLOYMENT_SCOPE_FULL) in NON_DATA_RELEASE_SCOPES
+        rollback_ready_status = "rollback_accepted_fenced" if non_data else "data_restored"
         if not manifest["rollback"].get("restore_scope_verified"):
             raise RuntimeError("rollback fence release requires durable scope verification")
         accepted_statuses = {
@@ -907,8 +994,9 @@ def release_write_fence(args):
             "rollback_accepted_fenced",
             "rollback_release_failed",
         }
-        if code_only:
+        if non_data:
             accepted_statuses.add("rollback_code_only")
+            accepted_statuses.add("rollback_backend_frontend_static")
         if manifest.get("status") in accepted_statuses:
             now = utc_now()
             manifest["rollback"]["automatic_restore_allowed"] = False
@@ -932,15 +1020,19 @@ def release_write_fence(args):
             raise RuntimeError(
                 "rollback fence release requires durable automatic-restore disablement"
             )
-        if code_only:
-            status = "rollback_code_only"
-            detail = "write fence released after verified code-only rollback"
+        if non_data:
+            status = (
+                "rollback_backend_frontend_static"
+                if manifest.get("scope") == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC
+                else "rollback_code_only"
+            )
+            detail = "write fence released after verified non-data rollback"
         else:
             status = "rollback_data_restored"
             detail = "write fence released after verified rollback data restoration"
     else:
-        if manifest.get("scope") != DEPLOYMENT_SCOPE_CODE_ONLY:
-            raise RuntimeError("pre-switch abort is only supported for code-only deployment")
+        if manifest.get("scope") not in NON_DATA_RELEASE_SCOPES:
+            raise RuntimeError("pre-switch abort is only supported for non-data deployment")
         if manifest.get("status") != "abort_release_authorized":
             raise RuntimeError("code-only abort fence release has not been authorized")
         if manifest["rollback"].get("automatic_restore_allowed"):
@@ -1143,7 +1235,7 @@ def restore_deployment(args):
     scope = manifest.get("scope", DEPLOYMENT_SCOPE_FULL)
     if (
         not manifest["rollback"].get("automatic_restore_allowed")
-        and scope != DEPLOYMENT_SCOPE_CODE_ONLY
+        and scope not in NON_DATA_RELEASE_SCOPES
     ):
         raise RuntimeError(
             "automatic restore refused: production writes may have been released"
@@ -1163,9 +1255,36 @@ def restore_deployment(args):
     if observed["user_version"] != manifest["source_database_version"]:
         raise RuntimeError("database backup version no longer matches deployment manifest")
 
-    if scope == DEPLOYMENT_SCOPE_CODE_ONLY:
+    if scope in NON_DATA_RELEASE_SCOPES:
         if manifest["target_database_version"] != manifest["source_database_version"]:
-            raise RuntimeError("code-only rollback cannot restore a changed schema version")
+            raise RuntimeError("non-data rollback cannot restore a changed schema version")
+        if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC:
+            expected_state = manifest.get("code_only_state")
+            observed_state = code_only_state(args.database, args.project_root)
+            if (
+                not isinstance(expected_state, dict)
+                or observed_state["database"] != expected_state["database"]
+                or observed_state["attachments"] != expected_state["attachments"]
+            ):
+                raise RuntimeError(
+                    "database or attachment invariant drift detected; refusing static-only rollback"
+                )
+            release_backup = verify_file_evidence(
+                manifest["release"], "previous static release backup"
+            )
+            restore_archive(
+                release_backup, Path(args.project_root).resolve(), MANAGED_RELEASE_ROOTS
+            )
+            manifest["rollback"]["static_restore_verified"] = True
+            manifest["updated_at"] = utc_now()
+            manifest.setdefault("events", []).append(
+                {
+                    "status": "static_rollback_restored",
+                    "at": manifest["updated_at"],
+                    "detail": "previous static release restored from the verified pre-release archive",
+                }
+            )
+            atomic_write_json(args.manifest, manifest)
         verify_code_only_state(
             argparse.Namespace(
                 manifest=args.manifest,
@@ -1176,7 +1295,11 @@ def restore_deployment(args):
         record_verified_rollback_scope(
             args.manifest,
             "code_only_data_preserved",
-            "code-only rollback data fingerprints are unchanged; no database, attachment, or frontend restore was performed",
+            (
+                "static-only rollback restored the prior frontend release; database and attachments were not restored or modified"
+                if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC
+                else "code-only rollback data fingerprints are unchanged; no database, attachment, or frontend restore was performed"
+            ),
             observed["user_version"],
         )
         return
@@ -1226,6 +1349,7 @@ def build_parser():
     prepare.add_argument("--output", required=True)
     prepare.add_argument("--backup-metadata", required=True)
     prepare.add_argument("--release-backup", required=True)
+    prepare.add_argument("--target-static-backup")
     prepare.add_argument("--deployment-key", required=True)
     prepare.add_argument("--before-commit", required=True)
     prepare.add_argument("--target-commit", required=True)
@@ -1233,7 +1357,11 @@ def build_parser():
     prepare.add_argument("--write-fence", required=True)
     prepare.add_argument(
         "--scope",
-        choices=(DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_CODE_ONLY),
+        choices=(
+            DEPLOYMENT_SCOPE_FULL,
+            DEPLOYMENT_SCOPE_CODE_ONLY,
+            DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+        ),
         default=DEPLOYMENT_SCOPE_FULL,
     )
     prepare.set_defaults(handler=prepare_deployment_manifest)
@@ -1258,6 +1386,11 @@ def build_parser():
     begin_code_only.add_argument("--source-database-version", required=True, type=int)
     begin_code_only.add_argument("--target-database-version", required=True, type=int)
     begin_code_only.add_argument("--write-fence", required=True)
+    begin_code_only.add_argument(
+        "--scope",
+        choices=tuple(sorted(NON_DATA_RELEASE_SCOPES)),
+        default=DEPLOYMENT_SCOPE_CODE_ONLY,
+    )
     begin_code_only.set_defaults(handler=begin_code_only_deployment)
 
     record_fence = commands.add_parser("record-code-only-fence")
@@ -1283,6 +1416,11 @@ def build_parser():
     database_evidence = commands.add_parser("database-evidence")
     database_evidence.add_argument("--database", required=True)
     database_evidence.set_defaults(handler=print_database_evidence)
+
+    state_evidence = commands.add_parser("non-data-state-evidence")
+    state_evidence.add_argument("--database", required=True)
+    state_evidence.add_argument("--project-root", required=True)
+    state_evidence.set_defaults(handler=print_non_data_state_evidence)
 
     deployed_marker = commands.add_parser("write-commit-marker")
     deployed_marker.add_argument("--project-root", required=True)
