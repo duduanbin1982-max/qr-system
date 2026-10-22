@@ -4,6 +4,10 @@ import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 
 
+const INVENTORY_SEARCH_DEBOUNCE_MS = 250
+const INVENTORY_SEARCH_LIMIT = 50
+
+
 function createEmptyForm() {
   return {
     shipment_no: '',
@@ -27,6 +31,8 @@ function createEmptyItem() {
     remark: '',
     _search: '',
     _showDrop: false,
+    _options: null,
+    _loading: false,
   }
 }
 
@@ -38,6 +44,22 @@ export function useShipmentEditor({ reload }) {
   const modalId = ref(null)
   const form = ref(createEmptyForm())
   const items = ref([])
+
+  // Search timers/sequences live outside the reactive item payload so the
+  // picker keeps rendering only plain data.
+  const searchTimers = new WeakMap()
+  const searchSequences = new WeakMap()
+
+  function cancelPendingSearch(item) {
+    if (!item) return
+    const timer = searchTimers.get(item)
+    if (timer) {
+      clearTimeout(timer)
+      searchTimers.delete(item)
+    }
+    // Invalidate any in-flight response for this item.
+    searchSequences.set(item, (searchSequences.get(item) || 0) + 1)
+  }
 
   async function loadInventory() {
     try {
@@ -91,12 +113,16 @@ export function useShipmentEditor({ reload }) {
   }
 
   function resetItem(index) {
-    if (!items.value[index]) return
+    const current = items.value[index]
+    if (!current) return
+    cancelPendingSearch(current)
     items.value[index] = createEmptyItem()
     updateReceivable()
   }
 
   function removeItem(index) {
+    const current = items.value[index]
+    if (current) cancelPendingSearch(current)
     items.value.splice(index, 1)
     updateReceivable()
   }
@@ -111,10 +137,52 @@ export function useShipmentEditor({ reload }) {
     }, 150)
   }
 
+  /**
+   * Search inventory on the server side.
+   *
+   * The picker used to filter only the first inventory page (100 rows sorted by
+   * updated_at desc), so any inventory row outside that window (for example a
+   * completed order that has not been touched for months) could never be
+   * selected when creating a shipment. The keyword search below hits
+   * GET /api/inventory, whose SQL also matches orders.order_no.
+   */
   function updateItemSearch(index, value) {
-    if (!items.value[index]) return
-    items.value[index]._search = value
-    items.value[index]._showDrop = true
+    const current = items.value[index]
+    if (!current) return
+    const keyword = String(value || '').trim()
+    current._search = value
+    current._showDrop = true
+    cancelPendingSearch(current)
+    if (!keyword) {
+      current._options = null
+      current._loading = false
+      return
+    }
+    const sequence = (searchSequences.get(current) || 0) + 1
+    searchSequences.set(current, sequence)
+    current._loading = true
+    const timer = setTimeout(async () => {
+      searchTimers.delete(current)
+      try {
+        const data = await api.domains.inventory.listInventory({
+          keyword,
+          limit: INVENTORY_SEARCH_LIMIT,
+        })
+        if (searchSequences.get(current) !== sequence) return
+        if (String(current._search || '').trim() !== keyword) return
+        current._options = data.items || []
+      } catch (error) {
+        if (searchSequences.get(current) === sequence) {
+          current._options = []
+        }
+        showToast('库存搜索失败', 'warn')
+      } finally {
+        if (searchSequences.get(current) === sequence) {
+          current._loading = false
+        }
+      }
+    }, INVENTORY_SEARCH_DEBOUNCE_MS)
+    searchTimers.set(current, timer)
   }
 
   function updateItemQuantity(index, value) {
@@ -126,12 +194,15 @@ export function useShipmentEditor({ reload }) {
   function selectInventory(index, inventoryItem) {
     const current = items.value[index]
     if (!current) return
+    cancelPendingSearch(current)
     current.inventory_id = inventoryItem.id
     current.product_model = inventoryItem.product_model
     current.product_name = inventoryItem.product_name || ''
     current.unit = inventoryItem.unit || '件'
     current._showDrop = false
     current._search = ''
+    current._options = null
+    current._loading = false
     updateReceivable()
   }
 
