@@ -46,6 +46,12 @@ export function useRouteList() {
 
   const showReleaseModal = ref(false)
 
+  const releaseOperationBusy = ref(false)
+
+  const releaseRefreshBusy = ref(false)
+
+  const releaseBusy = computed(() => releaseOperationBusy.value || releaseRefreshBusy.value)
+
   const commandType = ref('')
 
   const commandReason = ref('')
@@ -181,6 +187,11 @@ export function useRouteList() {
 
   function closeDetail() { showDetailModal.value = false; showApprovalModal.value = false; state.reset() }
 
+  function closeReleaseModal() {
+    if (releaseBusy.value) return
+    showReleaseModal.value = false
+  }
+
   async function chooseVersion(version) { await state.selectVersion(version) }
 
   async function chooseHistory(versionId) { if (versionId) await state.selectVersion(versionId) }
@@ -230,7 +241,15 @@ export function useRouteList() {
     } catch (error) { showToast(error.message || '发布失败', 'error') }
   }
 
-  async function afterBatchPublished() { if (root.value?.id) await state.loadRoute(root.value.id); await load() }
+  async function handleBatchPublished() {
+    releaseRefreshBusy.value = true
+    try {
+      if (root.value?.id) await state.loadRoute(root.value.id)
+      await load()
+    } finally {
+      releaseRefreshBusy.value = false
+    }
+  }
 
   onMounted(async () => { await Promise.all([loadProcesses(), load()]) })
 
@@ -264,6 +283,8 @@ export function useRouteList() {
     showCommandModal,
     showApprovalModal,
     showReleaseModal,
+    releaseOperationBusy,
+    releaseBusy,
     commandType,
     commandReason,
     editorForm,
@@ -303,6 +324,7 @@ export function useRouteList() {
     saveNewRoute,
     openDetail,
     closeDetail,
+    closeReleaseModal,
     chooseVersion,
     chooseHistory,
     startRevisionFromRow,
@@ -313,7 +335,7 @@ export function useRouteList() {
     submitVersion,
     openApproval,
     approveVersion,
-    afterBatchPublished,
+    handleBatchPublished,
     routeLifecycleLabel,
     routeVersionStatusLabel
   }

@@ -28,8 +28,9 @@ def write(path, content):
 def transition(tmp_path):
     project = tmp_path / "production"
     tool = tmp_path / "tool"
-    git(ROOT, "worktree", "add", "--quiet", "--detach", str(project), bootstrap.BEFORE_COMMIT)
-    git(ROOT, "worktree", "add", "--quiet", "--detach", str(tool), bootstrap.TARGET_COMMIT)
+    # Preserve committed bytes without changing the developer's Git configuration.
+    git(ROOT, "-c", "core.autocrlf=false", "worktree", "add", "--quiet", "--detach", str(project), bootstrap.BEFORE_COMMIT)
+    git(ROOT, "-c", "core.autocrlf=false", "worktree", "add", "--quiet", "--detach", str(tool), bootstrap.TARGET_COMMIT)
     try:
         write(project / ".deployed_commit", bootstrap.BEFORE_COMMIT + "\n")
         database = project / "data/production.db"

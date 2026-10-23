@@ -17,7 +17,7 @@ export async function loginAdmin(page) {
   await page.getByPlaceholder('请输入用户名').fill('e2eadmin')
   await page.getByPlaceholder('请输入密码').fill(TEST_PASSWORD)
   await page.getByRole('button', { name: '登 录' }).click()
-  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(page.locator('.sidebar')).toBeVisible({ timeout: 15_000 })
 }
 
 export async function loginWorkerMobile(page, username = 'e2eworker') {

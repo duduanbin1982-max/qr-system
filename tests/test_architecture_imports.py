@@ -29,6 +29,7 @@ IGNORED_PARTS = {
     "node_modules",
     "ssl_backup",
     "uploads",
+    ".worktrees",
 }
 
 ARCHITECTURE_FILE_ALLOWLIST = {
@@ -80,7 +81,9 @@ def _architecture_files(root, *, layer=None):
         relative = path.relative_to(root)
         project_relative = _display_path(path)
         relative_parts = set(relative.parts)
-        if relative_parts.intersection(IGNORED_PARTS):
+        if relative_parts.intersection(IGNORED_PARTS) or any(
+            part.startswith(".tmp") for part in relative.parts
+        ):
             continue
         if project_relative in allowlisted_paths or _is_generated_python_file(path):
             continue

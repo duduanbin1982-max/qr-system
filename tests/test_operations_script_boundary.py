@@ -129,13 +129,19 @@ def _extract_python_fragments(source):
 
 
 def _operation_script_paths(root):
-    yield from sorted(root.glob("*.sh"))
-    yield from sorted((root / "scripts").rglob("*.sh"))
+    yield from sorted(path for path in root.glob("*.sh") if not path.name.startswith(".tmp"))
+    yield from sorted(
+        path for path in (root / "scripts").rglob("*.sh")
+        if not any(part == ".worktrees" or part.startswith(".tmp") for part in path.relative_to(root).parts)
+    )
 
 
 def assert_script_boundaries(root=ROOT):
     errors = []
-    for path in sorted((root / "scripts").rglob("*.py")):
+    for path in sorted(
+        path for path in (root / "scripts").rglob("*.py")
+        if not any(part == ".worktrees" or part.startswith(".tmp") for part in path.relative_to(root).parts)
+    ):
         source = path.read_text(encoding="utf-8-sig")
         violations = _violations(source)
         if violations:

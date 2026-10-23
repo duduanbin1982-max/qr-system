@@ -40,6 +40,8 @@ def transition(tmp_path, monkeypatch):
     git(repository, "init", "--quiet", "--initial-branch=master")
     git(repository, "config", "user.name", "Bootstrap Test")
     git(repository, "config", "user.email", "bootstrap@example.invalid")
+    # Byte-level release contracts must not inherit Windows checkout conversion.
+    git(repository, "config", "core.autocrlf", "false")
     write(repository, ".gitignore", ".deployed_commit\n")
     stage(repository, ".gitignore")
     for path, (mode, _) in bootstrap.CONTROL_ENTRIES.items():

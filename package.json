@@ -25,6 +25,7 @@
     "test:unit:coverage": "node frontend/scripts/check-toolchain.mjs && vitest run --config vitest.config.js --coverage",
     "test:e2e": "bash scripts/test-e2e.sh",
     "test:frontend": "npm run test:unit && npm run test:e2e",
+    "test:full": "node scripts/test-full.mjs",
     "verify:frontend": "npm run check:architecture && npm run test:unit && npm run test:e2e && npm run build",
     "build": "node frontend/scripts/check-toolchain.mjs && npm run check:api && npm run check:imports && npm run check:layers && vite build",
     "preview": "node frontend/scripts/check-toolchain.mjs && vite preview"

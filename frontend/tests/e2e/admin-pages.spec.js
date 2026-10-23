@@ -104,9 +104,36 @@ test('order list renders active and archived E2E orders', async ({ page }) => {
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.locator('.order-table')).toContainText('E2E-ORDER-001')
 
+  // Hold the previous active-list response until the completed filter has
+  // rendered, reproducing the request ordering seen on the Ubuntu runner.
+  let releaseActive
+  const activeGate = new Promise(resolve => { releaseActive = resolve })
+  await page.route('**/api/orders?**', async route => {
+    const params = new URL(route.request().url()).searchParams
+    if (params.get('archive') === 'active' && !params.has('keyword')) {
+      const response = await route.fetch()
+      await activeGate
+      await route.fulfill({ response })
+    } else {
+      await route.continue()
+    }
+  })
+  const activeRequest = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/orders'
+      && url.searchParams.get('archive') === 'active'
+      && !url.searchParams.has('keyword')
+  })
   await page.getByPlaceholder('搜索订单号/产品/客户...').fill('')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await activeRequest
   await page.locator('.filter-select').first().selectOption('completed')
+  try {
+    await expect(page.locator('.order-table')).toContainText('E2E-COMPLETE-ORDER')
+  } finally {
+    releaseActive()
+  }
+  await page.unrouteAll({ behavior: 'wait' })
   await expect(page.locator('.order-table')).toContainText('E2E-COMPLETE-ORDER')
   expect(failures).toEqual([])
 })

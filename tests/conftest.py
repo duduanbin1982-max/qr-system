@@ -247,9 +247,22 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.integration)
 
 
-@pytest.fixture(autouse=True)
-def isolated_test_db():
+@pytest.fixture
+def db_isolated():
+    """Reset the SQLite test database for tests that cross persistence boundaries."""
     _reset_test_db()
+    clear_settings_cache()
+    reset_rate_limiters()
+    yield
+    clear_settings_cache()
+    reset_rate_limiters()
+
+
+@pytest.fixture(autouse=True)
+def isolated_test_db(request):
+    """Keep unit tests free of database setup while preserving integration isolation."""
+    if request.node.get_closest_marker("unit") is None:
+        request.getfixturevalue("db_isolated")
     clear_settings_cache()
     reset_rate_limiters()
     yield

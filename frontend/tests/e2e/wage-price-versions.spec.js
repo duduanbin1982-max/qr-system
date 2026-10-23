@@ -457,6 +457,12 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
     approved_by: releaseActors.approver.id,
   })
 
+  // The fixture records the POST as soon as it is received, while the UI still
+  // has to finish loading the batch and emit the publication refresh event.
+  // Wait for the user-visible completion signal before closing the workbench;
+  // otherwise a slower runner can unmount it before the route refresh starts.
+  await expect(page.locator('.toast')).toContainText('主数据批次已原子发布')
+  await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
   await releaseModal.getByRole('button', { name: '关闭' }).click()
   await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
   const historySelect = routeDetail.getByLabel('历史版本')

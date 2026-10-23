@@ -121,12 +121,28 @@ function createState() {
     capacityRiskFilter: 'all',
     processOptions: [{ id: 7, name: '焊接' }],
     capacityNodes: [node],
+    operationSchedules: [],
     capacitySummary: { total: 1, planned: 0, blocked: 1, conflicts: 0, minutes: 0 },
     conflictAudit: { line_conflicts: 0, conflicts: [], risk_counts: {}, risk_orders: [] },
     generationOrderId: '',
     generationStartDate: '2026-09-19',
     capacityOrders: [],
+    showEditModal: false,
+    editForm: {
+      order_id: null,
+      planned_start_at: '',
+      planned_end_at: '',
+      reason: '',
+    },
     selectedReplanOrder: null,
+    orderDrawerOpen: false,
+    selectedScheduleOrder: null,
+    selectedOrderOperations: [],
+    selectedOrderRevisions: [],
+    orderDrawerLoading: false,
+    orderDrawerError: '',
+    openOrderDrawer: fn(),
+    closeOrderDrawer: fn(),
     prepareGeneration: fn(),
     generateSchedule: fn(),
     replanOrderId: ref(''),
@@ -268,18 +284,25 @@ function createState() {
     saveCapabilities: fn(),
     showAdjustmentModal: false,
     adjustmentForm: { production_node_id: '', planned_start_at: '', reason: '', idempotency_key: '' },
+    undoLastDrag: fn(),
+    saveEditDates: fn(),
     saveOperationAdjustment: fn(),
   }
 }
 
 describe('GanttChart production-node UX', () => {
+  let consoleWarn
+
   beforeEach(() => {
     vi.resetAllMocks()
     ganttState = createState()
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mocks.updateScheduleOrderPriority.mockResolvedValue({})
   })
 
   afterEach(() => {
+    expect(consoleWarn).not.toHaveBeenCalled()
+    consoleWarn.mockRestore()
     wrapper?.unmount()
     wrapper = null
     document.body.innerHTML = ''

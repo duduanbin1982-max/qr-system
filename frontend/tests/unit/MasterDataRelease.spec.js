@@ -218,6 +218,7 @@ describe('useMasterDataReleases', () => {
       expect(wrapper.emitted('published')).toEqual([[published]])
       expect(mocks.showToast).toHaveBeenCalledWith('主数据批次已原子发布')
     }
+    expect(wrapper.emitted('busy-change')).toEqual([[false], [true], [false]])
     wrapper.unmount()
   })
 

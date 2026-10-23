@@ -141,7 +141,7 @@ const props = defineProps({
   defaultRouteVersion: { type: Object, default: null },
   defaultPriceVersions: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['published'])
+const emit = defineEmits(['published', 'busy-change'])
 
 const {
   batches,
