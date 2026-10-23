@@ -82,7 +82,9 @@ export function useOrderQuery() {
     return new Date(order.plan_end) < today && order.status !== 'completed'
   }
 
+  let latestRequest = 0
   async function load() {
+    const requestId = ++latestRequest
     loading.value = true
     try {
       const params = { page: page.value, limit: limit.value, archive: archiveFilter.value }
@@ -90,23 +92,29 @@ export function useOrderQuery() {
       if (searchKeyword.value.trim()) params.keyword = searchKeyword.value.trim()
       if (filterCustomer.value.trim()) params.customer = filterCustomer.value.trim()
       const data = await api.domains.orders.listOrders(params)
+      if (requestId !== latestRequest) return
       orders.value = data.orders || []
       total.value = data.total || 0
       pendingCount.value = data.pending ?? 0
       producingCount.value = data.producing ?? 0
       completedCount.value = data.completed ?? 0
     } catch (error) {
+      if (requestId !== latestRequest) return
       showToast(error.message || '加载失败', 'error')
     } finally {
-      loading.value = false
+      if (requestId === latestRequest) loading.value = false
     }
   }
 
   let searchTimer = null
-  function searchAndLoad() { page.value = 1; load() }
-  function archiveChange() { page.value = 1; load() }
-  function statusChange() { page.value = 1; load() }
-  function customerChange() { page.value = 1; load() }
+  function searchAndLoad() {
+    clearTimeout(searchTimer)
+    page.value = 1
+    return load()
+  }
+  function archiveChange() { return searchAndLoad() }
+  function statusChange() { return searchAndLoad() }
+  function customerChange() { return searchAndLoad() }
   function debouncedSearch() {
     if (searchTimer) clearTimeout(searchTimer)
     searchTimer = setTimeout(() => { page.value = 1; load() }, 300)
