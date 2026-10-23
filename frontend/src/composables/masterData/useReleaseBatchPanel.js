@@ -9,6 +9,8 @@ export function useReleaseBatchPanel(props, emit) {
 
   const { batches, selectedBatch, loading, busy, operationError } = state
 
+  watch(busy, value => emit('busy-change', value), { immediate: true })
+
   const statusFilter = ref('')
 
   const showCreate = ref(false)
