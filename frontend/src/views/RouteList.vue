@@ -190,10 +190,10 @@
       </div>
     </div>
 
-    <div v-if="showReleaseModal" class="modal-overlay" @click.self="showReleaseModal = false">
+    <div v-if="showReleaseModal" class="modal-overlay" @click.self="closeReleaseModal">
       <div class="modal release-workbench-modal">
-        <div class="modal-header"><span>主数据成组发布</span><button type="button" class="modal-close" aria-label="关闭" @click="showReleaseModal = false">×</button></div>
-        <div class="modal-body"><ReleaseBatchPanel :default-route-version="selectedVersion" :default-price-versions="priceVersions" @published="afterBatchPublished" /></div>
+        <div class="modal-header"><span>主数据成组发布</span><button type="button" class="modal-close" aria-label="关闭" :disabled="releaseBusy" @click="closeReleaseModal">×</button></div>
+        <div class="modal-body"><ReleaseBatchPanel :default-route-version="selectedVersion" :default-price-versions="priceVersions" @published="handleBatchPublished" @busy-change="releaseOperationBusy = $event" /></div>
       </div>
     </div>
   </div>
@@ -238,6 +238,8 @@ const {
   showCommandModal,
   showApprovalModal,
   showReleaseModal,
+  releaseOperationBusy,
+  releaseBusy,
   commandType,
   commandReason,
   editorForm,
@@ -277,6 +279,7 @@ const {
   saveNewRoute,
   openDetail,
   closeDetail,
+  closeReleaseModal,
   chooseVersion,
   chooseHistory,
   startRevisionFromRow,
@@ -287,7 +290,7 @@ const {
   submitVersion,
   openApproval,
   approveVersion,
-  afterBatchPublished,
+  handleBatchPublished,
   routeLifecycleLabel,
   routeVersionStatusLabel
 } = useRouteList()
