@@ -15,7 +15,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -42,6 +44,25 @@ TARGET_ENTRIES = {
     "tests/test_performance_quality_planning.py": ("100644", "ac11e90da54abba4e259553efe23f699ec9f8c67"),
     "tests/test_release_gate_bootstrap.py": ("100644", "4dcfa2eaa1f568125a08c8537c4a865c623afd4f"),
 }
+
+
+def _bash_executable():
+    """Use Git Bash on Windows instead of the WSL bash launcher."""
+    if sys.platform != "win32":
+        return "bash"
+    for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        directory = os.environ.get(variable)
+        if directory:
+            candidate = Path(directory) / "Git" / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate.resolve())
+    candidate = shutil.which("bash")
+    if candidate:
+        executable = Path(candidate)
+        excluded = {"windowsapps", "system32", "sysnative"}
+        if not excluded.intersection(part.casefold() for part in executable.parts) and executable.is_file():
+            return str(executable.resolve())
+    raise RuntimeError("Git Bash is required on Windows; WSL and WindowsApps bash launchers are unsupported")
 
 
 def _git(root, *args, check=True):
@@ -196,7 +217,7 @@ def prepare_overlay(overlay_root, approval, project_root, tool_root):
     )
     launcher.write_text(source, encoding="utf-8", newline="\n")
     launcher.chmod(0o700)
-    subprocess.run(["bash", "-n", str(launcher)], check=True)
+    subprocess.run([_bash_executable(), "-n", str(launcher)], check=True)
     return launcher
 
 
@@ -267,7 +288,7 @@ def run_check_only(*, project_root, tool_root, target_commit, deployment_key, op
         _add_target_worktree(tool_root, target_worktree)
         try:
             command = [
-                "bash", str(launcher),
+                _bash_executable(), str(launcher),
                 "--project-root", str(Path(project_root).resolve()),
                 "--tool-root", str(target_worktree),
                 "--expected-before", BEFORE,

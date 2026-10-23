@@ -14,7 +14,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -100,6 +102,25 @@ RUNTIME_PATHS = (
     "modules/deployment_write_fence.py",
     "modules/runtime_version.py",
 )
+
+
+def _bash_executable():
+    """Use Git Bash on Windows instead of the WSL bash launcher."""
+    if sys.platform != "win32":
+        return "bash"
+    for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        directory = os.environ.get(variable)
+        if directory:
+            candidate = Path(directory) / "Git" / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate.resolve())
+    candidate = shutil.which("bash")
+    if candidate:
+        executable = Path(candidate)
+        excluded = {"windowsapps", "system32", "sysnative"}
+        if not excluded.intersection(part.casefold() for part in executable.parts) and executable.is_file():
+            return str(executable.resolve())
+    raise RuntimeError("Git Bash is required on Windows; WSL and WindowsApps bash launchers are unsupported")
 
 
 def _git(root, *arguments, check=True):
@@ -324,7 +345,7 @@ def prepare_overlay(overlay_root, approval, project_root, tool_root):
     )
     launcher.write_text(launcher_source, encoding="utf-8", newline="\n")
     launcher.chmod(0o700)
-    subprocess.run(["bash", "-n", str(launcher)], check=True)
+    subprocess.run([_bash_executable(), "-n", str(launcher)], check=True)
     return launcher
 
 
@@ -389,7 +410,7 @@ def _invoke_launcher(*, project, tool, approval, deployment_key, mode, temporary
     _git(tool, "worktree", "add", "--quiet", "--detach", str(target_worktree), TARGET_COMMIT)
     try:
         command = [
-            "bash",
+            _bash_executable(),
             str(launcher),
             "--project-root",
             str(project),
