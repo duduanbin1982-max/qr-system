@@ -16,6 +16,7 @@
     "test:unit:coverage": "vitest run --config vitest.config.js --coverage",
     "test:e2e": "bash scripts/test-e2e.sh",
     "test:frontend": "npm run test:unit && npm run test:e2e",
+    "test:full": "node scripts/test-full.mjs",
     "build": "npm run check:api && npm run check:imports && vite build",
     "preview": "vite preview"
   },

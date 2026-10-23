@@ -1,0 +1,70 @@
+name: Full Test Matrix
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  full-test:
+    name: Full tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.1'
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install Playwright browser
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
+
+      - name: Run full test matrix
+        env:
+          FULL_TEST_ARTIFACT_DIR: test-results/full-${{ matrix.os }}
+        run: npm run test:full
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-test-${{ matrix.os }}
+          path: |
+            test-results/full-${{ matrix.os }}
+            test-results/playwright
+            playwright-report
+          if-no-files-found: ignore
