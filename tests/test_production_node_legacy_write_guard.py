@@ -26,6 +26,42 @@ def _order_payload(prefix="LEGACY-GUARD"):
     }
 
 
+@pytest.mark.parametrize("blocked", [False, True], ids=["cutover-off", "cutover-on"])
+@pytest.mark.parametrize(
+    "payload,has_legacy_field",
+    [
+        ({}, False),
+        ({"plan_start": "2026-10-15"}, False),
+        ({"production_line_id": None}, True),
+        ({"production_line_id": 17}, True),
+    ],
+    ids=["empty", "date-only", "explicit-null", "explicit-id"],
+)
+def test_order_and_schedule_guard_have_identical_cutover_contract(
+    monkeypatch, blocked, payload, has_legacy_field
+):
+    """Both existing entry points must keep the same public rejection protocol."""
+    monkeypatch.setattr(config, "LEGACY_PROCESS_LINE_WRITE_BLOCKED", blocked)
+    original = dict(payload)
+    for guard in (
+        OrderService._assert_no_legacy_production_line_write,
+        ScheduleService.assert_no_legacy_production_line_write,
+    ):
+        if blocked and has_legacy_field:
+            with pytest.raises(LegacyProcessLineWriteBlockedError) as caught:
+                guard(payload)
+            assert caught.value.status_code == 409
+            assert caught.value.to_payload() == {
+                "error": "Legacy 订单产线写入已关闭，请使用生产节点排程接口",
+                "code": "LEGACY_PROCESS_LINE_WRITE_BLOCKED",
+                "details": {"fields": ["production_line_id"]},
+                "action": "use_production_node_api",
+            }
+        else:
+            assert guard(payload) is None
+        assert payload == original
+
+
 def test_legacy_line_api_is_read_only_regardless_of_cutover_flag(
     client, auth_headers, monkeypatch
 ):

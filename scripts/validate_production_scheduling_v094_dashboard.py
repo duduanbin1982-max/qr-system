@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import sys
 
@@ -17,19 +16,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ.setdefault("SECRET_KEY", "task7-v094-dashboard-validation-only")
 
-from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.production_node_repository import (  # noqa: E402
-    ProductionNodeRepository,
-)
-from modules.repositories.schedule_evidence_repository import (  # noqa: E402
-    ScheduleEvidenceRepository,
-)
-from modules.repositories.schedule_planning_repository import (  # noqa: E402
-    SchedulePlanningRepository,
-)
-from modules.repositories.schedule_revision_repository import (  # noqa: E402
-    ScheduleRevisionRepository,
-)
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 FORMAL_TABLES = (
@@ -69,7 +59,7 @@ def _formal_digest(db):
 
 def _candidate_items(db):
     rows = []
-    for item in ScheduleRevisionRepository.list_latest_candidate_revision_items(
+    for item in OperationsFacade.list_latest_candidate_revision_items(
         limit=1000, db=db
     ):
         normalized = dict(item)
@@ -84,15 +74,15 @@ def _candidate_items(db):
 def _formal_operations(db):
     operations = [
         {**dict(row), "candidate_revision": False}
-        for row in SchedulePlanningRepository.list_scheduled_operations(1000, db=db)
+        for row in OperationsFacade.list_scheduled_operations(1000, db=db)
     ]
     schedule_ids = [row.get("id") for row in operations]
     segments = {}
-    for row in SchedulePlanningRepository.list_schedule_segments(schedule_ids, db=db):
+    for row in OperationsFacade.list_schedule_segments(schedule_ids, db=db):
         segment = dict(row)
         segments.setdefault(segment["schedule_id"], []).append(segment)
     allocations = {}
-    for row in SchedulePlanningRepository.list_schedule_allocations(schedule_ids, db=db):
+    for row in OperationsFacade.list_schedule_allocations(schedule_ids, db=db):
         allocation = dict(row)
         allocations.setdefault(allocation["schedule_id"], []).append(allocation)
     for operation in operations:
@@ -143,15 +133,15 @@ def validate(source_db, output_db):
     source = Path(source_db).resolve()
     output = Path(output_db).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, output)
+    OperationsFacade.copy_database_replica(source, output)
 
     db = sqlite3.connect(output)
     db.row_factory = sqlite3.Row
     try:
         before_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        run_migrations(db)
+        OperationsFacade.migrate_database(db)
         after_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        if after_version != LATEST_VERSION or after_version != 94:
+        if after_version != OperationsFacade.latest_schema_version() or after_version < 94:
             raise RuntimeError(
                 f"dashboard replica migration incomplete: {after_version}"
             )
@@ -169,19 +159,19 @@ def validate(source_db, output_db):
             not in candidate_keys
         ] + candidate_operations
         intervals = _intervals(display_operations)
-        nodes = ProductionNodeRepository.list_nodes(db=db, full=True)
-        calendars = SchedulePlanningRepository.list_calendars(db=db)
+        nodes = OperationsFacade.list_production_nodes(db=db, full=True)
+        calendars = OperationsFacade.list_calendars(db=db)
         unavailable = [
             dict(row)
-            for row in SchedulePlanningRepository.list_capacity_unavailability(db=db)
+            for row in OperationsFacade.list_capacity_unavailability(db=db)
         ]
         overrides = [
             dict(row)
-            for row in SchedulePlanningRepository.list_capacity_overrides(db=db)
+            for row in OperationsFacade.list_capacity_overrides(db=db)
         ]
         risks = [
             dict(row)
-            for row in ScheduleEvidenceRepository.list_schedule_risk_inputs(
+            for row in OperationsFacade.list_schedule_risk_inputs(
                 limit=1000, db=db
             )
         ]

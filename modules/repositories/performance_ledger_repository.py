@@ -1,6 +1,7 @@
 """Persistence for versioned performance batches and score revisions."""
 
 from modules.repositories.context import resolve_db
+from modules.repositories.performance_fact_repository import PerformanceFactRepository
 
 
 class PerformanceLedgerRepository:
@@ -389,20 +390,7 @@ class PerformanceLedgerRepository:
 
     @staticmethod
     def insert_exception(payload, db):
-        cursor = db.execute(
-            "INSERT OR IGNORE INTO performance_data_exceptions ("
-            "batch_id,user_id,exception_type,source_type,source_id,status,snapshot_json"
-            ") VALUES (?,?,?,?,?,'pending',?)",
-            (
-                payload["batch_id"],
-                payload.get("user_id"),
-                payload["exception_type"],
-                payload.get("source_type", ""),
-                payload.get("source_id", 0),
-                payload.get("snapshot_json", "{}"),
-            ),
-        )
-        return cursor.lastrowid
+        return PerformanceFactRepository.insert_batch_exception(payload, db)
 
     @staticmethod
     def pending_exception_counts(batch_id, db=None):

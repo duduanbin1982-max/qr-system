@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { computed, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -110,6 +110,41 @@ describe('ProcessConfig view', () => {
 
     expect(wrapper.text()).toContain('制单人不能审批或驳回自己的修订版')
     expect(wrapper.findAll('button').some(button => button.text() === '批准并发布')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves the public dirty-state method used by the parent tab guard', () => {
+    let dirty = true
+    mocks.state.hasUnsavedChanges = vi.fn(() => dirty)
+    const wrapper = mount(ProcessConfig)
+
+    expect(wrapper.vm.hasUnsavedChanges()).toBe(true)
+    dirty = false
+    expect(wrapper.vm.hasUnsavedChanges()).toBe(false)
+    expect(mocks.state.hasUnsavedChanges).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('retains a failed rejection reason for retry and clears it only after success', async () => {
+    mocks.state = stateFor({ openRevision: { id: 11, status: 'pending_approval', created_by: 1004 } })
+    mocks.state.rejectRevision.mockRejectedValueOnce(new Error('修订版已变化')).mockResolvedValueOnce({})
+    const wrapper = mount(ProcessConfig)
+    const reason = wrapper.find('.reject-reason input')
+    await reason.setValue('需要重新核对报工策略')
+    const reject = wrapper.findAll('button').find(button => button.text() === '驳回')
+
+    await reject.trigger('click')
+    await flushPromises()
+    expect(mocks.state.rejectRevision).toHaveBeenLastCalledWith('需要重新核对报工策略')
+    expect(reason.element.value).toBe('需要重新核对报工策略')
+    expect(mocks.showToast).toHaveBeenCalledWith('修订版已变化', 'error')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('工艺修订版已驳回')
+
+    await reject.trigger('click')
+    await flushPromises()
+    expect(mocks.state.rejectRevision).toHaveBeenCalledTimes(2)
+    expect(reason.element.value).toBe('')
+    expect(mocks.showToast).toHaveBeenCalledWith('工艺修订版已驳回')
     wrapper.unmount()
   })
 })

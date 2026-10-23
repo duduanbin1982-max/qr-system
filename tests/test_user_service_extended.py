@@ -348,6 +348,87 @@ def test_privileged_import_requires_admin_and_rolls_back_file(client, tmp_path):
         ).fetchone() is None
 
 
+def test_user_import_preserves_mixed_row_errors_and_successes(client, tmp_path):
+    """Freeze the public partial-success contract before splitting UserService."""
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "mixed-users.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["username", "name", "password", "role", "position_name"])
+    worksheet.append(["baselinefirst", "基线员工一", "Worker123", "worker", ""])
+    worksheet.append(["baselinefirst", "重复账号", "Worker123", "worker", ""])
+    worksheet.append(["", "", "", "", ""])
+    worksheet.append(["baselinerole", "无效角色", "Worker123", "missing-role", ""])
+    worksheet.append(["baselineposition", "无效岗位", "Worker123", "worker", "missing-position"])
+    worksheet.append(["baselinelast", "基线员工二", "Worker123", "worker", ""])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    with client.application.app_context():
+        db = get_db()
+        admin_id = _admin_id(db)
+        result = UserService.import_users(str(workbook_path), caller_id=admin_id)
+        errors = [
+            "Row 3: username baselinefirst already exists",
+            "Row 4: empty username and name",
+            "Row 5: Unknown or inactive role: missing-role",
+            "Row 6: unknown position missing-position",
+        ]
+        assert result == {
+            "success": 2,
+            "skipped": 4,
+            "total": 6,
+            "errors": errors,
+            "error_summary": "; ".join(errors),
+        }
+        users = db.execute(
+            "SELECT username FROM users WHERE username LIKE 'baseline%' ORDER BY username"
+        ).fetchall()
+        assert [row["username"] for row in users] == ["baselinefirst", "baselinelast"]
+        assignments = db.execute(
+            "SELECT u.username,h.source_type,h.valid_to FROM performance_assignment_history h "
+            "JOIN users u ON u.id=h.user_id WHERE u.username LIKE 'baseline%' "
+            "ORDER BY u.username"
+        ).fetchall()
+        assert [tuple(row) for row in assignments] == [
+            ("baselinefirst", "user_imported", ""),
+            ("baselinelast", "user_imported", ""),
+        ]
+        audit = db.execute(
+            "SELECT user_id,detail FROM audit_logs WHERE action='import_users' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert tuple(audit) == (admin_id, "created=2; skipped=4")
+
+
+def test_user_import_bounds_error_details_without_losing_total(client, tmp_path):
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "invalid-users.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["username", "name", "password", "role"])
+    for index in range(25):
+        worksheet.append([f"baselineinvalid{index}", "无效角色", "Worker123", "missing-role"])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    with client.application.app_context():
+        db = get_db()
+        result = UserService.import_users(str(workbook_path), caller_id=_admin_id(db))
+        errors = [f"Row {row}: Unknown or inactive role: missing-role" for row in range(2, 27)]
+        assert result == {
+            "success": 0,
+            "skipped": 25,
+            "total": 25,
+            "errors": errors[:20],
+            "error_summary": "; ".join(errors[:5]),
+        }
+        assert db.execute(
+            "SELECT COUNT(*) FROM users WHERE username LIKE 'baselineinvalid%'"
+        ).fetchone()[0] == 0
+
+
 def test_reset_password_validates_strength_and_unlocks_account(client):
     with client.application.app_context():
         db = get_db()

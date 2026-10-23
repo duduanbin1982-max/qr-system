@@ -1,4 +1,10 @@
-"""Authoritative migration catalog and explicit linear dependency contract."""
+"""Authoritative migration registry and explicit linear dependency contract.
+
+This module is a composition root for schema migrations.  Its intentionally high
+fan-out is the single place where migration modules are assembled into the
+authoritative registry; migration implementations must not import services or
+depend on this registry in the reverse direction.
+"""
 
 from modules.migration_approval_policy import MIGRATIONS as APPROVAL_POLICY_MIGRATIONS
 from modules.migration_approval_workflow import MIGRATIONS as APPROVAL_WORKFLOW_MIGRATIONS

@@ -25,12 +25,15 @@ def test_deploy_script_has_required_release_gates():
     assert "scripts/check_secrets.py" in content
     assert '"$PYTEST_BIN" -q' in content
     assert "npm ci --ignore-scripts --no-audit --no-fund" in content
+    toolchain_index = content.index("node frontend/scripts/check-toolchain.mjs")
+    assert toolchain_index < content.index('"${1:-}" == "--check-only"')
+    assert toolchain_index < content.index("npm ci --ignore-scripts --no-audit --no-fund")
     assert "bash scripts/install-playwright-runtime.sh" in content
     assert "npm run test:unit" in content
     assert "npm run test:e2e" in content
     assert "scripts/backup-db.sh" in content
-    assert "from modules.bootstrap import load_environment" in content
-    assert "from modules.migrations import run_migrations" in content
+    assert "OperationsFacade.load_environment()" in content
+    assert "OperationsFacade.migrate_default_database()" in content
     assert "scripts/publish-frontend.sh" in content
     assert "systemctl --user stop qr-system.service" in content
     assert "systemctl --user start qr-system.service" in content
@@ -53,7 +56,7 @@ def test_deploy_script_has_required_release_gates():
     stop_index = content.index("systemctl --user stop qr-system.service")
     backup_index = content.index("scripts/backup-db.sh")
     attachment_migration_index = content.index("scripts/migrate-employee-documents.sh")
-    migration_index = content.index("from modules.migrations import run_migrations")
+    migration_index = content.index("OperationsFacade.migrate_default_database()")
     build_index = content.rindex("scripts/publish-frontend.sh")
     marker_index = content.rindex('atomic_write_deployed_commit "$commit"')
     start_index = content.rindex("systemctl --user start qr-system.service")
@@ -66,6 +69,22 @@ def test_deploy_script_has_required_release_gates():
         < marker_index
         < start_index
     )
+
+
+def test_code_only_release_installs_frontend_dependencies_only_in_isolated_worktree():
+    content = (PROJECT_ROOT / "scripts" / "deploy-code-only.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'TEST_WORKTREE="$TMP_DIR/target-worktree"' in content
+    assert 'NPM_CACHE_DIR="$TMP_DIR/npm-cache"' in content
+    assert 'NPM_USER_CONFIG="$TMP_DIR/npmrc"' in content
+    assert '"$NPM_BIN" ci --ignore-scripts --no-audit --no-fund' in content
+    assert 'NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG"' in content
+    assert 'NPM_CONFIG_CACHE="$NPM_CACHE_DIR"' in content
+    assert 'cd "$TEST_WORKTREE"' in content
+    assert '"$NPM_BIN" run "$check_script"' in content
+    assert '"$PROJECT_ROOT/node_modules"' not in content
 
 
 def test_production_node_operations_and_runbook_define_safe_cutover_contract():
@@ -650,6 +669,17 @@ def test_playwright_runtime_installer_prepares_browser_and_user_libraries():
     assert "LD_LIBRARY_PATH" in runner
 
 
+def test_frontend_shell_entries_check_toolchain_before_side_effects():
+    for filename, first_action in (
+        ("test-e2e.sh", 'E2E_PUBLIC_DIR="$(mktemp'),
+        ("publish-frontend.sh", 'STAGING_DIR="$(mktemp'),
+        ("run-playwright.sh", "exec npx playwright"),
+        ("install-playwright-runtime.sh", 'DOWNLOAD_DIR="$(mktemp'),
+    ):
+        content = (PROJECT_ROOT / "scripts" / filename).read_text(encoding="utf-8")
+        assert content.index("node frontend/scripts/check-toolchain.mjs") < content.index(first_action)
+
+
 def test_pytest_suite_declares_test_layers():
     config = (PROJECT_ROOT / "pytest.ini").read_text(encoding="utf-8")
     conftest = (PROJECT_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
@@ -674,12 +704,12 @@ def test_user_service_has_working_reload_and_restart_policy():
 def test_build_restart_runs_migrations_before_restarting_service():
     content = (PROJECT_ROOT / "scripts" / "build.sh").read_text(encoding="utf-8")
 
-    assert "from modules.db import init_db" in content
-    assert "from dotenv import load_dotenv" in content
-    assert "from modules.migrations import LATEST_VERSION" in content
+    assert "OperationsFacade.initialize_database()" in content
+    assert "OperationsFacade.load_environment()" in content
+    assert "OperationsFacade.verify_schema()" in content
     assert "systemctl --user restart qr-system.service" in content
     assert "reload-or-restart" not in content
-    assert content.index("init_db") < content.index("systemctl --user restart")
+    assert content.index("initialize_database") < content.index("systemctl --user restart")
 
 
 def test_gunicorn_startup_only_verifies_schema_and_never_runs_migrations():
@@ -750,6 +780,9 @@ def test_package_manifest_is_the_application_version_authority():
     login_page = (
         PROJECT_ROOT / "frontend" / "src" / "views" / "LoginPage.vue"
     ).read_text(encoding="utf-8")
+    login_composable = (
+        PROJECT_ROOT / "frontend" / "src" / "composables" / "auth" / "useLoginPage.js"
+    ).read_text(encoding="utf-8")
     legacy_index = (PROJECT_ROOT / "public" / "index.html").read_text(encoding="utf-8")
     service_worker = (PROJECT_ROOT / "public" / "sw.js").read_text(encoding="utf-8")
 
@@ -763,7 +796,11 @@ def test_package_manifest_is_the_application_version_authority():
     assert "package.json" in vite_config
     assert "__APP_VERSION__" in vite_config
     assert "%APP_VERSION%" in frontend_index
-    assert "__APP_VERSION__" in login_page
+    assert "const appVersion = __APP_VERSION__" in login_composable
+    assert "return { appVersion," in login_composable
+    assert "import { useLoginPage } from '@/composables/auth/useLoginPage.js'" in login_page
+    assert "return useLoginPage()" in login_page
+    assert "v{{ appVersion }}" in login_page
     assert "生产管理系统 v3" not in legacy_index
     assert manifest["version"] not in service_worker
     assert "CACHE_REVISION" in service_worker

@@ -1,8 +1,25 @@
-import { mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 
 import GanttChart from '@/views/GanttChart.vue'
 
+const mocks = vi.hoisted(() => ({
+  updateScheduleOrderPriority: vi.fn(),
+  listOrderScheduleRevisions: vi.fn(),
+  getScheduleRevision: vi.fn(),
+  showToast: vi.fn(),
+}))
+
+vi.mock('@/lib/api.js', () => ({
+  api: { domains: { production: {
+    updateScheduleOrderPriority: mocks.updateScheduleOrderPriority,
+    listOrderScheduleRevisions: mocks.listOrderScheduleRevisions,
+    getScheduleRevision: mocks.getScheduleRevision,
+  } } },
+}))
+
+vi.mock('@/lib/store.js', () => ({ showToast: mocks.showToast }))
 
 let ganttState
 let wrapper
@@ -76,7 +93,7 @@ function createState() {
     stats: { total: 1, producing: 1, pending: 0, completed: 0 },
     riskSummary: { overdue: 0, high: 0, medium: 0, delayed: 0, totalDelayMinutes: 0 },
     riskFilter: 'all',
-    viewMode: 'operations',
+    viewMode: ref('operations'),
     scheduleScope: 'active',
     canViewNodes: true,
     canManageNodes: true,
@@ -92,11 +109,12 @@ function createState() {
     canRejectSchedules: true,
     canPublishSchedules: true,
     canEdit: true,
-    setViewMode: fn(),
+    setViewMode: vi.fn(mode => { ganttState.viewMode.value = mode }),
     setScheduleScope: fn(),
     zoomOut: fn(),
     zoomIn: fn(),
     exportImage: fn(),
+    exportScheduleCsv: fn(),
     capacityProcessFilter: '',
     capacityNodeFilter: '',
     capacityOrderFilter: '',
@@ -127,7 +145,7 @@ function createState() {
     closeOrderDrawer: fn(),
     prepareGeneration: fn(),
     generateSchedule: fn(),
-    replanOrderId: '',
+    replanOrderId: ref(''),
     replanStartAt: '2026-09-19T08:00',
     replanReason: '',
     replanResult: null,
@@ -149,6 +167,7 @@ function createState() {
     loadDowntime: fn(),
     cancelDowntime: fn(),
     capacityLoading: false,
+    operationSchedules: [],
     filteredOperations: [{
       id: 501,
       order_id: 12,
@@ -195,8 +214,38 @@ function createState() {
     revisionStatusLabel: () => '草稿',
     loading: false,
     filteredOrders: [],
+    orders: [],
+    ganttData: { totalDays: 0, days: [] },
+    dayWidth: 30,
+    orderKeyword: '',
+    productKeyword: '',
+    priorityFilter: 'all',
+    statusFilter: 'all',
+    lockedFilter: 'all',
+    deadlineFrom: '',
+    deadlineTo: '',
+    savedFilters: [],
+    saveFilter: fn(),
+    applySavedFilter: fn(),
+    deleteSavedFilter: fn(),
+    resetFilters: fn(),
+    batchDays: 1,
+    batchShift: fn(),
+    shiftDays: fn(),
     selectedOrderIds: [],
     showEditModal: false,
+    editForm: { plan_start: '', plan_end: '' },
+    undoLastDrag: fn(),
+    saveEditDates: fn(),
+    orderDrawerOpen: ref(false),
+    selectedScheduleOrder: ref(null),
+    selectedOrderOperations: [],
+    selectedOrderRevisions: [],
+    orderDrawerLoading: false,
+    orderDrawerError: '',
+    openOrderDrawer: fn(),
+    closeOrderDrawer: vi.fn(() => { ganttState.orderDrawerOpen.value = false }),
+    load: fn(),
     showNodeMgr: true,
     productionNodeManager,
     nodesLoading: false,
@@ -245,8 +294,10 @@ describe('GanttChart production-node UX', () => {
   let consoleWarn
 
   beforeEach(() => {
+    vi.resetAllMocks()
     ganttState = createState()
     consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mocks.updateScheduleOrderPriority.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -256,6 +307,7 @@ describe('GanttChart production-node UX', () => {
     wrapper = null
     document.body.innerHTML = ''
     document.body.style.overflow = ''
+    vi.restoreAllMocks()
   })
 
   it('delegates production-node management to the viewport workbench', () => {
@@ -282,6 +334,107 @@ describe('GanttChart production-node UX', () => {
     expect(wrapper.text()).not.toContain('停机产线')
     expect(wrapper.find('[data-test="locked-task"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="blocked-code-NO_COMPATIBLE_NODE"]').text()).toContain('没有满足能力要求的生产节点')
+  })
+
+  async function openPriorityDrawer(order = { id: 12, order_no: '26091901', priority_level: 3, priority_version: 7 }) {
+    ganttState.orderDrawerOpen.value = true
+    ganttState.selectedScheduleOrder.value = order
+    wrapper = mount(GanttChart, { attachTo: document.body })
+    const orderDrawer = new DOMWrapper(document.body.querySelector('.schedule-order-drawer'))
+    await orderDrawer.findAll('button').find(button => button.text() === '调整优先级').trigger('click')
+    return new DOMWrapper(document.body.querySelector('.schedule-priority-drawer'))
+  }
+
+  it('renders complete drawer props without Vue warnings', () => {
+    const warn = vi.spyOn(console, 'warn')
+    const error = vi.spyOn(console, 'error')
+    wrapper = mount(GanttChart, { attachTo: document.body })
+    expect(warn).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it('submits priority with its version once and refreshes both views after success', async () => {
+    let resolveSave
+    mocks.updateScheduleOrderPriority.mockReturnValue(new Promise(resolve => { resolveSave = resolve }))
+    const drawer = await openPriorityDrawer()
+    expect(ganttState.closeOrderDrawer).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('.schedule-order-drawer')).toBeNull()
+    expect(drawer.get('select').element.value).toBe('3')
+    expect(drawer.get('button[type="submit"]').element.disabled).toBe(true)
+
+    await drawer.get('select').setValue('1')
+    await drawer.get('input[type="checkbox"]').setValue(true)
+    await drawer.get('textarea').setValue('  客户交期提前  ')
+    await drawer.get('form').trigger('submit')
+    await drawer.get('form').trigger('submit')
+
+    expect(mocks.updateScheduleOrderPriority).toHaveBeenCalledExactlyOnceWith(12, {
+      priority_level: 1,
+      is_expedited: true,
+      schedule_change_reason: '客户交期提前',
+      expected_priority_version: 7,
+    })
+    expect(drawer.get('button[type="submit"]').element.disabled).toBe(true)
+    expect(ganttState.load).not.toHaveBeenCalled()
+    resolveSave({})
+    await flushPromises()
+    expect(document.body.querySelector('.schedule-priority-drawer')).toBeNull()
+    expect(ganttState.load).toHaveBeenCalledOnce()
+    expect(ganttState.loadCapacity).toHaveBeenCalledOnce()
+    expect(mocks.showToast).toHaveBeenCalledWith('订单优先级已更新，已标记为待重新排程')
+  })
+
+  it('retains priority inputs after failure and allows retry with the legacy default version', async () => {
+    mocks.updateScheduleOrderPriority.mockRejectedValueOnce(new Error('优先级版本已变化'))
+    const drawer = await openPriorityDrawer({ id: 12, order_no: '26091901', priority: 2, is_expedited: 1 })
+    expect(drawer.get('select').element.value).toBe('2')
+    expect(drawer.get('input[type="checkbox"]').element.checked).toBe(true)
+    await drawer.get('textarea').setValue('保留原因用于重试')
+    await drawer.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.showToast).toHaveBeenCalledWith('优先级版本已变化', 'error')
+    expect(document.body.querySelector('.schedule-priority-drawer')).not.toBeNull()
+    expect(drawer.get('textarea').element.value).toBe('保留原因用于重试')
+    expect(drawer.get('button[type="submit"]').element.disabled).toBe(false)
+    expect(ganttState.load).not.toHaveBeenCalled()
+    expect(ganttState.loadCapacity).not.toHaveBeenCalled()
+
+    await drawer.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.updateScheduleOrderPriority).toHaveBeenLastCalledWith(12, {
+      priority_level: 2, is_expedited: true,
+      schedule_change_reason: '保留原因用于重试', expected_priority_version: 1,
+    })
+    expect(document.body.querySelector('.schedule-priority-drawer')).toBeNull()
+  })
+
+  it('hides priority adjustment from users without schedule adjustment permission', () => {
+    ganttState.canAdjustSchedules = false
+    ganttState.orderDrawerOpen.value = true
+    ganttState.selectedScheduleOrder.value = { id: 12, order_no: '26091901' }
+    wrapper = mount(GanttChart, { attachTo: document.body })
+    const orderDrawer = new DOMWrapper(document.body.querySelector('.schedule-order-drawer'))
+    expect(orderDrawer.text()).not.toContain('调整优先级')
+    expect(mocks.updateScheduleOrderPriority).not.toHaveBeenCalled()
+  })
+
+  it('preserves replan and operation actions when moving priority coordination out of the view', async () => {
+    ganttState.orderDrawerOpen.value = true
+    ganttState.selectedScheduleOrder.value = { id: 12, order_no: '26091901' }
+    ganttState.selectedOrderOperations = [{ id: 501, process_id: 7, process_name: '焊接' }]
+    wrapper = mount(GanttChart, { attachTo: document.body })
+    const orderDrawer = new DOMWrapper(document.body.querySelector('.schedule-order-drawer'))
+    await orderDrawer.findAll('button').find(button => button.text() === '模拟重排').trigger('click')
+    expect(ganttState.replanOrderId.value).toBe(12)
+    expect(ganttState.prepareDynamicReplan).toHaveBeenCalledWith(12)
+
+    ganttState.viewMode.value = 'orders'
+    await orderDrawer.findAll('button').find(button => button.text() === '查看工序进度').trigger('click')
+    await orderDrawer.findAll('button').find(button => button.text() === '查看操作').trigger('click')
+    await flushPromises()
+    expect(ganttState.viewMode.value).toBe('operations')
+    expect(mocks.updateScheduleOrderPriority).not.toHaveBeenCalled()
   })
 
   it.each([

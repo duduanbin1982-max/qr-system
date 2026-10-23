@@ -12,7 +12,6 @@ from modules import config
 from modules.services import BaseService
 from modules.domain.errors import (
     ConflictError,
-    LegacyProcessLineWriteBlockedError,
     NotFoundError,
     ValidationError,
 )
@@ -21,6 +20,9 @@ from modules.domain.order_lifecycle import (
     REOPEN_STATUSES,
     VALID_TRANSITIONS,
     OrderLifecycle,
+)
+from modules.domain.legacy_process_line_admission import (
+    assert_legacy_process_line_write_allowed,
 )
 from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
 from modules.services.query_utils import paginate, build_sort_clause
@@ -129,15 +131,10 @@ class OrderService:
 
     @staticmethod
     def _assert_no_legacy_production_line_write(data):
-        if (
-            config.LEGACY_PROCESS_LINE_WRITE_BLOCKED
-            and isinstance(data, dict)
-            and 'production_line_id' in data
-        ):
-            raise LegacyProcessLineWriteBlockedError(
-                'Legacy 订单产线写入已关闭，请使用生产节点排程接口',
-                details={'fields': ['production_line_id']},
-            )
+        return assert_legacy_process_line_write_allowed(
+            data,
+            legacy_write_blocked=config.LEGACY_PROCESS_LINE_WRITE_BLOCKED,
+        )
 
     # ============================================================
     # 辅助 — 根据 route_id 或 process_ids 分配工序

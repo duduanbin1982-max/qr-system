@@ -431,8 +431,7 @@ import OrderScheduleDrawer from '@/components/schedule/OrderScheduleDrawer.vue'
 import ScheduleCommandDrawer from '@/components/schedule/ScheduleCommandDrawer.vue'
 import SchedulePriorityDrawer from '@/components/schedule/SchedulePriorityDrawer.vue'
 import { useGantt } from '@/composables/useGantt.js'
-import { api } from '@/lib/api.js'
-import { showToast } from '@/lib/store.js'
+import { useSchedulePriority } from '@/composables/gantt/useSchedulePriority.js'
 
 export default {
   components: { ProductionNodeWorkbench, ScheduleCapacityDashboard, OrderScheduleDrawer, ScheduleCommandDrawer, SchedulePriorityDrawer },
@@ -440,9 +439,11 @@ export default {
     const gantt = useGantt()
     const savedFilterName = ref('')
     const activeSavedFilter = ref('')
-    const priorityDrawerOpen = ref(false)
-    const priorityOrder = ref(null)
-    const prioritySaving = ref(false)
+    const priority = useSchedulePriority({
+      closeOrderDrawer: gantt.closeOrderDrawer,
+      load: gantt.load,
+      loadCapacity: gantt.loadCapacity,
+    })
     function saveCurrentFilter() {
       if (gantt.saveFilter?.(savedFilterName.value)) {
         activeSavedFilter.value = savedFilterName.value.trim()
@@ -464,29 +465,10 @@ export default {
       }
       if (event?.action === 'operation') gantt.viewMode.value = 'operations'
       if (event?.action === 'priority' && event.order?.id) {
-        priorityOrder.value = event.order
-        gantt.closeOrderDrawer?.()
-        priorityDrawerOpen.value = true
+        priority.openPriorityDrawer(event.order)
       }
     }
-    async function savePriorityChange(payload) {
-      if (!priorityOrder.value?.id || prioritySaving.value) return
-      prioritySaving.value = true
-      try {
-        await api.domains.production.updateScheduleOrderPriority(priorityOrder.value.id, {
-          ...payload,
-          expected_priority_version: Number(priorityOrder.value.priority_version || 1),
-        })
-        priorityDrawerOpen.value = false
-        showToast('订单优先级已更新，已标记为待重新排程')
-        await Promise.all([gantt.load(), gantt.loadCapacity?.()])
-      } catch (error) {
-        showToast(error.message || '调整优先级失败', 'error')
-      } finally {
-        prioritySaving.value = false
-      }
-    }
-    return { ...gantt, handleOrderDrawerAction, savePriorityChange, priorityDrawerOpen, priorityOrder, prioritySaving, savedFilterName, activeSavedFilter, saveCurrentFilter, applySavedFilterFromUi, removeSavedFilter }
+    return { ...gantt, ...priority, handleOrderDrawerAction, savedFilterName, activeSavedFilter, saveCurrentFilter, applySavedFilterFromUi, removeSavedFilter }
   }
 }
 </script>

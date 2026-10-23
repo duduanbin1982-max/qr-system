@@ -2,11 +2,12 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+node frontend/scripts/check-toolchain.mjs
 RUNTIME_ROOT="$HOME/.local/playwright-debs/root"
 DOWNLOAD_DIR="$(mktemp -d)"
 trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
-cd "$PROJECT_ROOT"
 npx playwright install chromium
 
 mkdir -p "$RUNTIME_ROOT"

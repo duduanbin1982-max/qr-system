@@ -41,17 +41,19 @@ if [[ ! "$before_commit" =~ ^[0-9a-f]{40}$ ]]; then
     exit 1
 fi
 deployment_scope="$(field scope)"
+deployment_key="$(field deployment_key)"
 
 rollback_supports_runtime_fence=false
 if git -C "$PROJECT_ROOT" cat-file -e "$before_commit:modules/deployment_write_fence.py" 2>/dev/null; then
     rollback_supports_runtime_fence=true
 fi
-if [[ "$deployment_scope" == "code_only" && "$rollback_supports_runtime_fence" != true ]]; then
+if [[ "$deployment_scope" == "code_only" || "$deployment_scope" == "backend_frontend_static" ]] \
+    && [[ "$rollback_supports_runtime_fence" != true ]]; then
     python3 "$MANIFEST_TOOL_SNAPSHOT" update \
         --manifest "$MANIFEST_PATH" \
         --status rollback_failed \
-        --detail "code-only rollback refused because the original commit cannot enforce the active write fence"
-    echo "Code-only rollback refused: original commit lacks write-fence support" >&2
+        --detail "non-data rollback refused because the original commit cannot enforce the active write fence"
+    echo "Non-data rollback refused: original commit lacks write-fence support" >&2
     exit 1
 fi
 
@@ -76,7 +78,7 @@ python3 "$MANIFEST_TOOL_SNAPSHOT" write-commit-marker \
     --expected-current "$(field target_commit)" \
     --commit "$before_commit"
 
-if [[ "$deployment_scope" != "code_only" ]]; then
+if [[ "$deployment_scope" != "code_only" && "$deployment_scope" != "backend_frontend_static" ]]; then
     install -D -m 0644 "$UNIT_SOURCE" "$UNIT_TARGET"
     systemctl --user daemon-reload
 fi
@@ -86,6 +88,13 @@ for _ in {1..20}; do
     health_payload="$(curl -ksSf --max-time 5 "$HEALTH_URL" 2>/dev/null || true)"
     if [[ -n "$health_payload" ]] && printf '%s' "$health_payload" \
         | python3 -c 'import json,sys; raise SystemExit(json.load(sys.stdin).get("status") != "ok")'; then
+        if [[ "$deployment_scope" == "backend_frontend_static" ]] \
+            && ! printf '%s' "$health_payload" \
+                | python3 -c 'import json,sys; p=json.load(sys.stdin); raise SystemExit(p.get("db") != "connected" or p.get("commit") != sys.argv[1] or p.get("write_fenced") is not True or p.get("deployment_key") != sys.argv[2])' \
+                    "$before_commit" "$deployment_key"; then
+            sleep 1
+            continue
+        fi
         if [[ "$rollback_supports_runtime_fence" == true ]]; then
             if ! printf '%s' "$health_payload" \
                 | python3 -c 'import json,sys; raise SystemExit(json.load(sys.stdin).get("write_fenced") is not True)'; then
@@ -96,7 +105,7 @@ for _ in {1..20}; do
                 --manifest "$MANIFEST_PATH" \
                 --status rollback_accepted_fenced \
                 --detail "rollback health passed while writes remained fenced"
-            if [[ "$deployment_scope" == "code_only" ]]; then
+            if [[ "$deployment_scope" == "code_only" || "$deployment_scope" == "backend_frontend_static" ]]; then
                 python3 "$MANIFEST_TOOL_SNAPSHOT" authorize-code-only-rollback-release \
                     --manifest "$MANIFEST_PATH" \
                     --database "$DB_PATH" \
@@ -113,8 +122,8 @@ for _ in {1..20}; do
                 exit 1
             fi
         fi
-        if [[ "$deployment_scope" == "code_only" ]]; then
-            # release-fence already wrote the terminal rollback_code_only state.
+        if [[ "$deployment_scope" == "code_only" || "$deployment_scope" == "backend_frontend_static" ]]; then
+            # release-fence already wrote the terminal non-data rollback state.
             exit 0
         fi
         python3 "$MANIFEST_TOOL_SNAPSHOT" update \

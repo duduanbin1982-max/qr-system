@@ -31,11 +31,11 @@
               style="width:100%;font-size:var(--text-sm);padding:6px 8px"
             >
             <div
-              v-if="item._showDrop && getFilteredInventory(item._search).length"
+              v-if="item._showDrop && visibleOptions(item).length"
               class="shipment-items__dropdown"
             >
               <div
-                v-for="inventoryItem in getFilteredInventory(item._search)"
+                v-for="inventoryItem in visibleOptions(item)"
                 :key="inventoryItem.id"
                 class="shipment-items__option"
                 @mousedown.prevent="$emit('select-inventory', idx, inventoryItem)"
@@ -45,7 +45,13 @@
               </div>
             </div>
             <div
-              v-if="item._showDrop && item._search && !getFilteredInventory(item._search).length"
+              v-else-if="item._showDrop && item._loading"
+              class="shipment-items__empty"
+            >
+              搜索中…
+            </div>
+            <div
+              v-else-if="item._showDrop && item._search && !visibleOptions(item).length"
               class="shipment-items__empty"
             >
               无匹配产品
@@ -98,7 +104,14 @@ export default {
       )
     }
 
-    return { getFilteredInventory }
+    // Prefer server-side search results when present; fall back to the
+    // preloaded first page while a request is in flight (or on empty keyword).
+    function visibleOptions(item) {
+      if (Array.isArray(item._options)) return item._options
+      return getFilteredInventory(item._search)
+    }
+
+    return { getFilteredInventory, visibleOptions }
   }
 }
 </script>

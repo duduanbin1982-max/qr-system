@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import sys
 
@@ -16,13 +15,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ.setdefault("SECRET_KEY", "task6-v094-local-validation-only")
 
-from modules import config  # noqa: E402
-from modules.migrations import LATEST_VERSION, run_migrations  # noqa: E402
-from modules.repositories.schedule_evidence_repository import (  # noqa: E402
-    ScheduleEvidenceRepository,
-)
-from modules.services.rework_service import ReworkService  # noqa: E402
-from modules.services.schedule_capacity_service import ScheduleCapacityService  # noqa: E402
+
+
+from modules.application.operations_facade import OperationsFacade
+from modules.application.operations_dto import ScheduleOperationError
 
 
 def _rows(db, sql, params=()):
@@ -110,21 +106,27 @@ def _select_fixture(db):
     ).fetchone()
 
 
+@OperationsFacade.schedule_flags(
+    PRODUCTION_NODE_QUERY_ENABLED=True,
+    PRODUCTION_NODE_COMPAT_AUDIT_ENABLED=True,
+    PRODUCTION_NODE_WRITE_ENABLED=True,
+    PRODUCTION_NODE_ENGINE_ENABLED=True,
+)
 def validate(source_db, output_db):
     source = Path(source_db).resolve()
     output = Path(output_db).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, output)
+    OperationsFacade.copy_database_replica(source, output)
 
     db = sqlite3.connect(output)
     db.row_factory = sqlite3.Row
     try:
         before_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        run_migrations(db)
+        OperationsFacade.migrate_database(db)
         after_version = int(db.execute("PRAGMA user_version").fetchone()[0])
-        if after_version != LATEST_VERSION or after_version != 94:
+        if after_version != OperationsFacade.latest_schema_version() or after_version < 94:
             raise RuntimeError(
-                f"V094 migration incomplete: {after_version} != {LATEST_VERSION}"
+                f"V094 migration incomplete: {after_version} != {OperationsFacade.latest_schema_version()}"
             )
 
         fixture = _select_fixture(db)
@@ -138,13 +140,9 @@ def validate(source_db, output_db):
             raise RuntimeError("生产副本没有可用于验收的活动用户")
         actor_id = int(actor["id"])
 
-        config.PRODUCTION_NODE_QUERY_ENABLED = True
-        config.PRODUCTION_NODE_COMPAT_AUDIT_ENABLED = True
-        config.PRODUCTION_NODE_WRITE_ENABLED = True
-        config.PRODUCTION_NODE_ENGINE_ENABLED = True
 
         formal_before = _formal_projection(db, fixture["order_id"])
-        rework_id = ReworkService.create_rework(
+        rework_id = OperationsFacade.create_rework(
             fixture["order_id"],
             fixture["process_id"],
             actor_id,
@@ -152,7 +150,7 @@ def validate(source_db, output_db):
             "V094 生产只读副本动态重排演练",
             db=db,
         )
-        downtime = ScheduleCapacityService.create_downtime_event(
+        downtime = OperationsFacade.create_downtime_event(
             fixture["production_node_id"],
             fixture["planned_start_at"],
             fixture["planned_end_at"],
@@ -163,7 +161,7 @@ def validate(source_db, output_db):
         execution_before_replan = _execution_facts(db, fixture["order_id"])
 
         run_key = f"task6-v094-replica-{fixture['order_id']}"
-        result = ScheduleCapacityService.dynamic_replan_order(
+        result = OperationsFacade.dynamic_replan_order(
             fixture["order_id"],
             start_at=fixture["planned_start_at"],
             schedule_run_key=run_key,
@@ -179,11 +177,11 @@ def validate(source_db, output_db):
             _digest(execution_before_replan) == _digest(execution_after_replan)
         )
         revision_id = int(result["schedule_revision_id"])
-        summary, differences = ScheduleEvidenceRepository.get_replan_evidence(
+        summary, differences = OperationsFacade.get_replan_evidence(
             revision_id, db=db
         )
         triggers = [
-            dict(row) for row in ScheduleEvidenceRepository.list_replan_triggers(
+            dict(row) for row in OperationsFacade.list_replan_triggers(
                 fixture["order_id"], db=db
             )
         ]

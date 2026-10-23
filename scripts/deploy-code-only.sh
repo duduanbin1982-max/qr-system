@@ -5,18 +5,23 @@ umask 077
 usage() {
     cat <<'EOF'
 Usage:
-  bash scripts/deploy-code-only.sh --project-root PATH --expected-before SHA \
+  bash /path/to/current-production/scripts/deploy-code-only.sh \
+    --project-root PATH --tool-root TARGET_WORKTREE --expected-before SHA \
     --target-commit SHA --deployment-key KEY --check-only
-  bash scripts/deploy-code-only.sh --project-root PATH --expected-before SHA \
+  bash /path/to/current-production/scripts/deploy-code-only.sh \
+    --project-root PATH --tool-root TARGET_WORKTREE --expected-before SHA \
     --target-commit SHA --deployment-key KEY --execute
 
 The code-only path never runs database migrations, attachment migrations, or
-frontend builds/publication. It requires the release tool checkout to be clean
-and exactly at --target-commit. --execute is an explicit production write.
+frontend builds/publication. The launcher and all release controls must come
+from the current production checkout at --expected-before. The separate release
+tool checkout must be clean and exactly at --target-commit. --execute is an
+explicit production write.
 EOF
 }
 
 PROJECT_ROOT=""
+TOOL_ROOT=""
 EXPECTED_BEFORE=""
 TARGET_COMMIT=""
 DEPLOYMENT_KEY=""
@@ -24,6 +29,7 @@ MODE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --project-root) PROJECT_ROOT="${2:?missing --project-root value}"; shift 2 ;;
+        --tool-root) TOOL_ROOT="${2:?missing --tool-root value}"; shift 2 ;;
         --expected-before) EXPECTED_BEFORE="${2:?missing --expected-before value}"; shift 2 ;;
         --target-commit) TARGET_COMMIT="${2:?missing --target-commit value}"; shift 2 ;;
         --deployment-key) DEPLOYMENT_KEY="${2:?missing --deployment-key value}"; shift 2 ;;
@@ -35,7 +41,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$PROJECT_ROOT" || -z "$EXPECTED_BEFORE" || -z "$TARGET_COMMIT" || -z "$DEPLOYMENT_KEY" || -z "$MODE" ]]; then
+if [[ -z "$PROJECT_ROOT" || -z "$TOOL_ROOT" || -z "$EXPECTED_BEFORE" || -z "$TARGET_COMMIT" || -z "$DEPLOYMENT_KEY" || -z "$MODE" ]]; then
     usage >&2
     exit 2
 fi
@@ -48,8 +54,17 @@ if [[ ${#DEPLOYMENT_KEY} -gt 128 ]]; then
     exit 2
 fi
 
-TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PROJECT_ROOT="$(realpath -e "$PROJECT_ROOT")"
+TOOL_ROOT="$(realpath -e "$TOOL_ROOT")"
+if [[ "$SCRIPT_ROOT" != "$PROJECT_ROOT" ]]; then
+    echo "Deployment refused: code-only launcher must come from the current production checkout" >&2
+    exit 1
+fi
+if [[ "$TOOL_ROOT" == "$PROJECT_ROOT" ]]; then
+    echo "Deployment refused: target tool checkout must be separate from production" >&2
+    exit 1
+fi
 DB_PATH="$PROJECT_ROOT/data/production.db"
 BACKUP_DIR="$PROJECT_ROOT/data/backups"
 DEPLOYMENT_DIR="$PROJECT_ROOT/data/deployments"
@@ -61,9 +76,20 @@ RELEASE_BACKUP="$BACKUP_DIR/release_${DEPLOYMENT_KEY}.tar.gz"
 HEALTH_URL="${HEALTH_URL:-https://127.0.0.1/api/health}"
 GUNICORN_BIN="${GUNICORN_BIN:-$HOME/.local/bin/gunicorn}"
 PYTEST_BIN="${PYTEST_BIN:-$HOME/.local/bin/pytest}"
+NPM_BIN="${NPM_BIN:-npm}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/qr-code-only-${DEPLOYMENT_KEY}.XXXXXX")"
 TEST_WORKTREE="$TMP_DIR/target-worktree"
-deployment_manifest="$TOOL_ROOT/scripts/deployment_manifest.py"
+NPM_CACHE_DIR="$TMP_DIR/npm-cache"
+NPM_USER_CONFIG="$TMP_DIR/npmrc"
+TRUST_ROOT="$TMP_DIR/trusted-controls"
+install -d -m 0700 "$TRUST_ROOT/scripts"
+for control in code_only_release.py deployment_manifest.py rollback-deployment.sh backup-db.sh; do
+    install -m 0700 "$PROJECT_ROOT/scripts/$control" "$TRUST_ROOT/scripts/$control"
+done
+deployment_manifest="$TRUST_ROOT/scripts/deployment_manifest.py"
+code_only_release="$TRUST_ROOT/scripts/code_only_release.py"
+rollback_script="$TRUST_ROOT/scripts/rollback-deployment.sh"
+backup_script="$TRUST_ROOT/scripts/backup-db.sh"
 fence_owned=false
 service_stopped=false
 manifest_started=false
@@ -210,7 +236,7 @@ rollback_on_error() {
                     QR_PROJECT_ROOT="$PROJECT_ROOT" \
                     DB_PATH="$DB_PATH" \
                     DEPLOYMENT_MANIFEST_TOOL_SOURCE="$deployment_manifest" \
-                        bash "$TOOL_ROOT/scripts/rollback-deployment.sh" "$MANIFEST_PATH"
+                        bash "$rollback_script" "$MANIFEST_PATH"
                     local rollback_code=$?
                     if [[ $rollback_code -eq 0 ]]; then
                         fence_owned=false
@@ -234,12 +260,62 @@ rollback_on_error() {
 }
 
 run_preflight() {
-    python3 "$TOOL_ROOT/scripts/code_only_release.py" preflight \
+    python3 "$code_only_release" preflight \
         --tool-root "$TOOL_ROOT" \
         --project-root "$PROJECT_ROOT" \
         --database "$DB_PATH" \
         --before-commit "$EXPECTED_BEFORE" \
         --target-commit "$TARGET_COMMIT"
+}
+
+prepare_test_dependencies() {
+    if [[ ! -f package.json ]]; then
+        log "release-check dependency install skipped: target has no package.json"
+        return 0
+    fi
+    if [[ ! -f package-lock.json ]]; then
+        echo "Release checks refused: package.json exists but package-lock.json is missing" >&2
+        return 1
+    fi
+    if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+        echo "Release checks refused: npm is required for a target with frontend tooling" >&2
+        return 1
+    fi
+
+    install -d -m 0700 "$NPM_CACHE_DIR"
+    cat > "$NPM_USER_CONFIG" <<EOF
+cache=$NPM_CACHE_DIR
+fund=false
+audit=false
+update-notifier=false
+EOF
+    log "installing locked frontend dependencies in isolated release-check worktree"
+    NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG" \
+    NPM_CONFIG_CACHE="$NPM_CACHE_DIR" \
+        "$NPM_BIN" ci --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE_DIR"
+}
+
+run_frontend_architecture_checks() {
+    if [[ ! -f package.json ]]; then
+        return 0
+    fi
+    if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+        return 1
+    fi
+    local check_script script_definition
+    for check_script in check:api check:imports; do
+        script_definition="$("$NPM_BIN" pkg get "scripts.$check_script" 2>/dev/null || true)"
+        if [[ -z "$script_definition" || "$script_definition" == "null" ]]; then
+            echo "Release checks refused: package is missing npm script $check_script" >&2
+            return 1
+        fi
+    done
+    log "running frontend architecture checks in isolated release-check worktree"
+    for check_script in check:api check:imports; do
+        NPM_CONFIG_USERCONFIG="$NPM_USER_CONFIG" \
+        NPM_CONFIG_CACHE="$NPM_CACHE_DIR" \
+            "$NPM_BIN" run "$check_script"
+    done
 }
 
 run_release_checks() {
@@ -249,6 +325,7 @@ run_release_checks() {
     git -C "$TOOL_ROOT" worktree add --quiet --detach "$TEST_WORKTREE" "$TARGET_COMMIT"
     (
         cd "$TEST_WORKTREE"
+        prepare_test_dependencies
         python3 scripts/check_secrets.py
         SECRET_KEY="code-only-preflight-not-a-production-secret" \
         DEPLOYMENT_WRITE_FENCE_PATH="$TMP_DIR/no-write-fence.json" \
@@ -257,6 +334,7 @@ run_release_checks() {
         SECRET_KEY="code-only-preflight-not-a-production-secret" \
         DEPLOYMENT_WRITE_FENCE_PATH="$TMP_DIR/no-write-fence.json" \
         DB_PATH="$snapshot_db" "$PYTEST_BIN" -q
+        run_frontend_architecture_checks
     )
 }
 
@@ -337,7 +415,7 @@ DEPLOYMENT_MANIFEST_TOOL_SOURCE="$deployment_manifest" \
 QR_PROJECT_ROOT="$PROJECT_ROOT" \
 DB_PATH="$DB_PATH" \
 BACKUP_DIR="$BACKUP_DIR" \
-    bash "$TOOL_ROOT/scripts/backup-db.sh"
+    bash "$backup_script"
 
 release_backup_temporary="$RELEASE_BACKUP.partial.$$"
 if [[ -d "$PROJECT_ROOT/public/static" ]]; then

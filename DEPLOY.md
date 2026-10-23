@@ -61,20 +61,24 @@ Use this path only when the approved change is backend/application code and the
 database schema, attachments, frontend assets, service unit, and runtime write
 fence implementation are all unchanged. The release tool must be a clean
 worktree at the exact target commit, and that commit must already exist in the
-production checkout's Git object database. `data/` may remain untracked in the
-production checkout; every other tracked or untracked local change is rejected.
+production checkout's Git object database. The launcher, preflight policy,
+backup, manifest and rollback tools always come from the current production
+checkout and cannot change in a code-only release. `data/` may remain untracked
+in the production checkout; every other tracked or untracked local change is rejected.
 
 Run the read-only preflight first, using the production checkout's actual
 `.deployed_commit` as `EXPECTED_BEFORE` and the full merge SHA as `TARGET_COMMIT`:
 
 ```bash
 SYSTEM_ROOT=/home/dubin/qr-system
+RELEASE_ROOT=/home/dubin/qr-system-release
 EXPECTED_BEFORE=<verified-current-production-sha>
 TARGET_COMMIT=<approved-target-sha>
 DEPLOYMENT_KEY=<unique-idempotency-key>
 
-bash scripts/deploy-code-only.sh \
+bash "$SYSTEM_ROOT/scripts/deploy-code-only.sh" \
   --project-root "$SYSTEM_ROOT" \
+  --tool-root "$RELEASE_ROOT" \
   --expected-before "$EXPECTED_BEFORE" \
   --target-commit "$TARGET_COMMIT" \
   --deployment-key "$DEPLOYMENT_KEY" \
@@ -105,6 +109,11 @@ This path does not run database migrations, attachment migrations, frontend
 builds/publication, dependency installation, or service-unit installation.
 The existing `deploy.sh` remains the separate full-release path and must be
 used when any of those areas need to change.
+
+Changes to the code-only launcher, preflight policy, deployment manifest,
+backup or rollback tools cannot bootstrap themselves through this path. Such a
+trust-root update requires a separately reviewed controlled full release; only
+subsequent releases may rely on the newly installed code-only trust root.
 
 ## Process V2 controlled cutover
 

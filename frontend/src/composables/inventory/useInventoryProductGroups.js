@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { createInventoryQueryCoordinator } from './inventoryQueryCoordinator.js'
@@ -37,7 +37,9 @@ export function useInventoryProductGroups() {
   const storedFilters = readJson(FILTER_KEY, {})
   const capabilities = ref({ product_query_enabled: false })
   const viewMode = ref(localStorage.getItem(VIEW_KEY) || 'order')
-  const groups = ref([])
+  // Group rows are immutable API snapshots and are replaced as a whole. Avoid
+  // recursively proxying every field in the large table response.
+  const groups = shallowRef([])
   const total = ref(0)
   const page = ref(1)
   // The production catalogue currently exceeds 50 product groups. Prefer the

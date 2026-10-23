@@ -99,6 +99,7 @@ describe('inventory composable contracts', () => {
   })
 
   it('exports the current order view to native CSV with active filters and sorting', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     const harness = mountHarness()
     const inventory = harness.state
     inventory.searchKeyword.value = '泵'
@@ -114,6 +115,8 @@ describe('inventory composable contracts', () => {
       keyword: '泵', low_stock: '', location: '', specification: '加厚,标准',
       quality_status: 'qualified', sort_by: 'quantity', sort_dir: 'asc', inventory_id: '7,9',
     })
+    expect(open).toHaveBeenCalledExactlyOnceWith('/api/inventory/export.csv?keyword=待出库', '_blank')
+    harness.wrapper.unmount()
   })
 
   it('normalizes an empty order id on create and strips audited fields on edit', async () => {
@@ -175,7 +178,7 @@ describe('inventory composable contracts', () => {
     inventory.setFilter({ key: 'keyword', value: '待出库' })
     inventory.setFilter({ key: 'location', value: '东库' })
     inventory.setFilter({ key: 'specifications', value: ['标准'] })
-    window.open = vi.fn()
+    vi.spyOn(window, 'open').mockImplementation(() => null)
 
     inventory.exportExcel()
 

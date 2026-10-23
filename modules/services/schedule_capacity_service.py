@@ -1,31 +1,22 @@
 """工序级、多产线、工时驱动的排程策略。"""
 
 import hashlib
-import heapq
 import json
-import math
-from collections import Counter
-from contextlib import contextmanager
-from datetime import timedelta
 
 from modules.services import BaseService
+from modules.services.schedule_query_service import ScheduleQueryService
+from modules.services.schedule_unit_of_work import ScheduleUnitOfWork
+from modules.services.schedule_assessment_service import ScheduleAssessmentService
+from modules.domain.schedule_planning_assessment import SchedulePlanningAssessment
+from modules.domain.schedule_pure_planner import SchedulePurePlanner
 from modules import config
-from modules.domain.schedule_conflict import ScheduleConflictPolicy
-from modules.domain.schedule_deadline_risk import ScheduleDeadlineRiskPolicy
-from modules.domain.schedule_dynamic_replan import ScheduleDynamicReplanPolicy
 from modules.domain.schedule_planning import (
     PlanningFactsSnapshot,
-    build_blocked_payload,
-    build_completed_payload,
-    build_external_payload,
-    build_operation_context,
-    decide_operation_planning,
-    build_manifest,
+    build_planning_evidence,
     decode_run_result_payload,
-    derive_stage_bundle,
     summarize_schedule_result,
 )
-from modules.domain.production_node_scheduling import NodeSchedulingError, ProductionNodePolicy
+from modules.domain.production_node_scheduling import NodeSchedulingError
 from modules.domain.schedule_capacity_allocation import ScheduleCapacityAllocationPolicy
 from modules.domain.errors import NotFoundError, ProductionNodeWriteDisabledError
 from modules.domain.production_time import (
@@ -33,8 +24,6 @@ from modules.domain.production_time import (
     parse_api_timestamp,
     parse_database_timestamp,
     parse_production_date,
-    production_midnight,
-    production_now,
     resolve_planning_now,
 )
 from modules.repositories.schedule_evidence_repository import ScheduleEvidenceRepository
@@ -56,33 +45,19 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _limit(value, default=500):
-        """Validate bounded query limits instead of silently truncating them."""
-        if value is None:
-            value = default
-        try:
-            value = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("limit必须是整数") from exc
-        if value < 1 or value > 1000:
-            raise ValueError("limit必须在1到1000之间")
-        return value
+        return ScheduleQueryService.limit(value, default)
 
     @staticmethod
     def list_lines(process_id=None, limit=500):
-        limit = ScheduleCapacityService._limit(limit)
-        return {"lines": [dict(row) for row in SchedulePlanningRepository.list_process_lines(process_id, limit=limit)]}
+        return ScheduleQueryService.list_lines(process_id, limit)
 
     @staticmethod
     def list_calendars():
-        return {"ok": True, "calendars": SchedulePlanningRepository.list_calendars()}
+        return ScheduleQueryService.list_calendars()
 
     @staticmethod
     def list_schedulable_orders(limit=500, now=None):
-        limit = ScheduleCapacityService._limit(limit)
-        return {
-            "ok": True,
-            "orders": SchedulePlanningRepository.list_schedulable_orders(limit, now=now),
-        }
+        return ScheduleQueryService.list_schedulable_orders(limit, now)
 
     @staticmethod
     def auto_plan_orders(
@@ -152,6 +127,16 @@ class ScheduleCapacityService:
             )
             results = []
             errors = []
+            # Keep generated exclusive-node segments visible to later orders
+            # in this queue. Published compatibility rows are intentionally
+            # preserved, so they cannot represent a newly generated draft.
+            batch_occupancy = {}
+            queue_order_ids = tuple(int(order["id"]) for order in queue)
+            published_order_ids = set(
+                SchedulePlanningRepository.list_published_order_ids(
+                    queue_order_ids, db=txn,
+                )
+            )
             for order in queue:
                 order_id = int(order["id"])
                 order_run_key = f"{run_key}:{order_id}"
@@ -163,7 +148,20 @@ class ScheduleCapacityService:
                         actor_id=actor_id,
                         db=txn,
                         planning_now=effective_now,
+                        additional_occupancy=batch_occupancy,
                     )
+                    if order_id in published_order_ids:
+                        occupancy_key = (
+                            "production_node_id"
+                            if getattr(config, "PRODUCTION_NODE_ENGINE_ENABLED", False)
+                            else "process_line_id"
+                        )
+                        for resource_id, intervals in (
+                            ScheduleCapacityService._exclusive_batch_occupancy(
+                                generated, occupancy_key
+                            ).items()
+                        ):
+                            batch_occupancy.setdefault(resource_id, []).extend(intervals)
                     results.append({
                         "order_id": order_id,
                         "order_no": order.get("order_no") or "",
@@ -231,44 +229,12 @@ class ScheduleCapacityService:
         return dict(standard) if standard is not None else None
 
     @staticmethod
-    @contextmanager
     def _transaction(db=None):
-        """Use the request UoW in production or an explicit clone connection in preflight."""
-        if db is None:
-            with BaseService.transaction() as txn:
-                yield txn
-            return
-        started = False
-        if not db.in_transaction:
-            db.execute("BEGIN IMMEDIATE")
-            started = True
-        try:
-            yield db
-            if started:
-                db.commit()
-        except Exception:
-            if started:
-                db.rollback()
-            raise
+        return ScheduleUnitOfWork.transaction(db)
 
     @staticmethod
-    @contextmanager
     def _read_transaction(db=None):
-        """Open a deferred snapshot transaction for planning-only work."""
-        if db is None:
-            db = BaseService.db()
-        started = False
-        if not db.in_transaction:
-            db.execute("BEGIN")
-            started = True
-        try:
-            yield db
-            if started:
-                db.commit()
-        except Exception:
-            if started:
-                db.rollback()
-            raise
+        return ScheduleUnitOfWork.read_transaction(db)
 
     @staticmethod
     def _parse_timestamp(value):
@@ -281,229 +247,21 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _revision_operations(revision_id, db):
-        operations = []
-        for row in ScheduleEvidenceRepository.list_revision_conflict_items(
-            revision_id, db=db
-        ):
-            item = dict(row)
-            try:
-                payload = json.loads(item.get("payload_json") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            operation = dict(payload)
-            operation.update({
-                "revision_item_id": item["id"],
-                "order_id": item["order_id"],
-                "order_process_id": item["order_process_id"],
-                "process_id": item["process_id"],
-                "process_name": item.get("process_name") or payload.get("process_name") or "",
-                "seq_order": item.get("seq_order") or payload.get("seq_order") or 0,
-                "status": item.get("status") or payload.get("status") or "blocked",
-                "production_node_id": item.get("production_node_id") or payload.get("production_node_id"),
-                "process_line_id": item.get("process_line_id") or payload.get("process_line_id"),
-                "planned_start_at": item.get("planned_start_at") or payload.get("planned_start_at") or "",
-                "planned_end_at": item.get("planned_end_at") or payload.get("planned_end_at") or "",
-                "occupied_minutes": item.get("occupied_minutes") or payload.get("occupied_minutes") or 0,
-                "execution_mode": item.get("execution_mode") or payload.get("execution_mode") or "internal",
-                "locked": bool(item.get("locked")),
-            })
-            operations.append(operation)
-        return operations
+        return ScheduleAssessmentService.revision_operations(revision_id, db)
 
-    @staticmethod
-    def _candidate_capacity_intervals(operations):
-        intervals = []
-        for operation in operations:
-            if operation.get("status") == "blocked":
-                continue
-            if operation.get("execution_mode", "internal") in {
-                "outsourced", "non_scheduled",
-            }:
-                continue
-            segments = operation.get("segments") or []
-            if not segments:
-                segments = [{
-                    "production_node_id": operation.get("production_node_id"),
-                    "process_line_id": operation.get("process_line_id"),
-                    "start_at": operation.get("planned_start_at"),
-                    "end_at": operation.get("planned_end_at"),
-                }]
-            for segment in segments:
-                intervals.append({
-                    "order_id": operation.get("order_id"),
-                    "order_process_id": operation.get("order_process_id"),
-                    "process_id": operation.get("process_id"),
-                    "process_name": operation.get("process_name") or "",
-                    "revision_item_id": operation.get("revision_item_id"),
-                    "schedule_id": operation.get("id"),
-                    "production_node_id": segment.get("production_node_id") or operation.get("production_node_id"),
-                    "process_line_id": segment.get("process_line_id") or operation.get("process_line_id"),
-                    "node_name": operation.get("node_name") or operation.get("node_name_snapshot") or "",
-                    "capacity_mode": operation.get("capacity_mode") or operation.get("capacity_mode_snapshot") or "exclusive",
-                    "start_at": segment.get("start_at") or segment.get("segment_start_at") or operation.get("planned_start_at"),
-                    "end_at": segment.get("end_at") or segment.get("segment_end_at") or operation.get("planned_end_at"),
-                    "locked": bool(operation.get("locked")),
-                })
-        return intervals
+    _candidate_capacity_intervals = staticmethod(SchedulePlanningAssessment.candidate_capacity_intervals)
 
     @staticmethod
     def _revision_conflict_input(revision_id, db):
-        order = ScheduleRevisionRepository.find_revision_order(revision_id, db=db)
-        if order is None:
-            raise ValueError("排程版本所属订单不存在")
-        operations = ScheduleCapacityService._revision_operations(revision_id, db)
-        candidate = ScheduleCapacityService._candidate_capacity_intervals(operations)
-        occupied = [
-            dict(row)
-            for row in SchedulePlanningRepository.list_effective_capacity_intervals(
-                exclude_order_id=order["order_id"], db=db
-            )
-        ]
-        unavailable = [
-            dict(row)
-            for row in SchedulePlanningRepository.list_capacity_unavailability(db=db)
-        ]
-        snapshot = {
-            "revision_id": int(revision_id),
-            "order_id": int(order["order_id"]),
-            "operations": operations,
-            "candidate_intervals": candidate,
-            "occupied_intervals": occupied,
-            "unavailable_intervals": unavailable,
-        }
-        encoded = json.dumps(
-            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        return (
-            dict(order), operations, candidate, occupied, unavailable,
-            hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
-        )
+        return ScheduleAssessmentService.revision_conflict_input(revision_id, db)
 
     @staticmethod
-    def _assess_revision_conflicts(
-        revision_id, check_stage, db, *, freeze_risk=False, persist=True,
-        planning_now=None,
-    ):
-        (
-            order, operations, candidate, occupied, unavailable, input_digest,
-        ) = ScheduleCapacityService._revision_conflict_input(revision_id, db)
-        conflicts = ScheduleConflictPolicy.detect(
-            candidate_intervals=candidate,
-            occupied_intervals=occupied,
-            unavailable_intervals=unavailable,
-            operations=operations,
-        )
-        summary = ScheduleConflictPolicy.summarize(conflicts)
-        check = None
-        if persist:
-            check = ScheduleEvidenceRepository.record_revision_conflict_check(
-                revision_id, check_stage, input_digest, summary, conflicts, db=db
-            )
-
-        risk = None
-        if freeze_risk:
-            planned = [
-                operation for operation in operations
-                if operation.get("status") != "blocked"
-            ]
-            projected_values = [
-                str(operation.get("planned_end_at") or "").strip()
-                for operation in planned
-                if str(operation.get("planned_end_at") or "").strip()
-            ]
-            projected_completion = max(projected_values, default="")
-            blocked = [
-                operation for operation in operations
-                if operation.get("status") == "blocked"
-            ]
-            blocked_reasons = tuple(
-                str(
-                    operation.get("blocked_reason")
-                    or operation.get("reason")
-                    or "前置条件不满足"
-                ).strip()
-                for operation in blocked
-            )
-            bottleneck = max(
-                planned,
-                key=lambda operation: float(operation.get("occupied_minutes") or 0),
-                default={},
-            )
-            quantity = int(order.get("quantity") or 0)
-            completed = int(order.get("completed") or 0)
-            is_completed = order.get("order_status") == "completed" or (
-                quantity > 0 and completed >= quantity
-            )
-            risk = ScheduleDeadlineRiskPolicy.evaluate(
-                deadline_text=order.get("deadline") or "",
-                projected_completion_at=projected_completion,
-                plan_end=order.get("plan_end") or "",
-                now=resolve_planning_now(planning_now),
-                completed=is_completed,
-                blocked_count=len(blocked),
-                blocked_reasons=blocked_reasons,
-                conflict_count=summary["blocking_count"],
-                conflict_details=conflicts,
-                bottleneck_process=bottleneck.get("process_name") or "",
-                bottleneck_node=(
-                    bottleneck.get("node_name")
-                    or bottleneck.get("node_name_snapshot")
-                    or ""
-                ),
-            )
-            assessed_at = format_database_timestamp(resolve_planning_now(planning_now))
-            ScheduleEvidenceRepository.set_revision_risk_snapshot(
-                revision_id, risk, assessed_at, db
-            )
-            evidence_payload = {
-                "risk": risk,
-                "conflict_check_digest": check["result_digest"] if check else "",
-                "input_digest": input_digest,
-            }
-            evidence_json = json.dumps(
-                evidence_payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            ScheduleEvidenceRepository.record_revision_risk_assessment(
-                revision_id,
-                "generation",
-                risk,
-                {
-                    "conflict_summary": summary,
-                    "conflicts": conflicts,
-                    "projected_operation_count": len(planned),
-                },
-                hashlib.sha256(evidence_json.encode("utf-8")).hexdigest(),
-                db=db,
-            )
-        return {
-            "check": dict(check) if check else None,
-            "summary": summary,
-            "conflicts": conflicts,
-            "risk": risk,
-        }
+    def _assess_revision_conflicts(revision_id, check_stage, db, *, freeze_risk=False, persist=True, planning_now=None):
+        return ScheduleAssessmentService.assess_revision_conflicts(revision_id, check_stage, db, freeze_risk=freeze_risk, persist=persist, planning_now=planning_now)
 
     @staticmethod
     def _assert_revision_conflict_gate(revision_id, check_stage, db):
-        assessment = ScheduleCapacityService._assess_revision_conflicts(
-            revision_id, check_stage, db, freeze_risk=False
-        )
-        if assessment["summary"]["blocking_count"]:
-            raise NodeSchedulingError(
-                "SCHEDULE_CONFLICT_GATE_FAILED",
-                "排程版本存在生产节点冲突，禁止进入下一审批或发布状态",
-                {
-                    "revision_id": int(revision_id),
-                    "check_stage": check_stage,
-                    **assessment["summary"],
-                    "conflicts": assessment["conflicts"][:20],
-                },
-            )
-        return assessment
+        return ScheduleAssessmentService.assert_revision_conflict_gate(revision_id, check_stage, db)
 
     @staticmethod
     def _merge_intervals(intervals):
@@ -512,175 +270,27 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _calendar_snapshot(calendar, shifts):
-        return {
-            "calendar_id": calendar["id"],
-            "calendar_code": calendar["calendar_code"],
-            "calendar_name": calendar["calendar_name"],
-            "timezone": calendar["timezone"],
-            "weekly_workdays": calendar["weekly_workdays"],
-            "shifts": [
-                {
-                    "id": shift["id"],
-                    "code": shift["shift_code"],
-                    "name": shift["shift_name"],
-                    "start_minute": shift["start_minute"],
-                    "end_minute": shift["end_minute"],
-                }
-                for shift in shifts
-            ],
-        }
+        return SchedulePlanningStrategy.calendar_snapshot(calendar, shifts)
 
     @staticmethod
     def _calendar_slots(db, calendar, shifts, start_date, daily_minutes=None, max_days=3660):
-        weekly = {
-            int(item.strip())
-            for item in str(calendar["weekly_workdays"] or "").split(",")
-            if item.strip().isdigit()
-        }
-        shift_map = {shift["id"]: shift for shift in shifts}
-        for day_offset in range(max_days):
-            work_date = start_date.date() + timedelta(days=day_offset)
-            date_text = work_date.strftime("%Y-%m-%d")
-            exception = SchedulePlanningRepository.get_calendar_exception(
-                calendar["id"], date_text, db=db
-            )
-            if exception is not None:
-                if not int(exception["is_working_day"]):
-                    continue
-                selected_ids = [
-                    int(item.strip()) for item in str(exception["shift_ids"] or "").split(",")
-                    if item.strip().isdigit()
-                ]
-                selected = [shift_map[item] for item in selected_ids if item in shift_map]
-                selected = selected or list(shifts)
-            elif (work_date.weekday() + 1) not in weekly:
-                continue
-            else:
-                selected = list(shifts)
-            daily_remaining = float(daily_minutes) if daily_minutes else None
-            for shift in selected:
-                if daily_remaining is not None and daily_remaining <= 0:
-                    break
-                midnight = production_midnight(work_date)
-                begin = midnight + timedelta(minutes=int(shift["start_minute"]))
-                end = midnight + timedelta(minutes=int(shift["end_minute"]))
-                if daily_remaining is not None:
-                    shift_minutes = (end - begin).total_seconds() / 60
-                    end = begin + timedelta(minutes=min(shift_minutes, daily_remaining))
-                    daily_remaining -= (end - begin).total_seconds() / 60
-                if end <= begin:
-                    continue
-                yield {
-                    "shift_id": shift["id"],
-                    "shift_code": shift["shift_code"],
-                    "shift_name": shift["shift_name"],
-                    "start": begin,
-                    "end": end,
-                }
+        from modules.domain.schedule_planning import PlanningResourceFacts
+
+        facts = PlanningResourceFacts({}, dict(calendar), tuple(dict(row) for row in shifts),
+            tuple(dict(row) for row in SchedulePlanningRepository.list_calendar_exceptions(calendar["id"], db=db)))
+        return SchedulePurePlanner.calendar_slots(facts, start_date, daily_minutes, max_days)
 
     @staticmethod
     def _allocate_on_line(db, calendar, shifts, daily_minutes, earliest, duration, occupied):
-        """Allocate one operation across free portions of one line's shifts."""
-        slots = ScheduleCapacityService._calendar_slots(
-            db, calendar, shifts, earliest, daily_minutes=daily_minutes
-        )
-        return ScheduleCapacityService._allocate_from_slots(
-            slots, earliest, duration, occupied
-        )
+        return SchedulePlanningStrategy.allocate_on_line(db, calendar, shifts, daily_minutes, earliest, duration, occupied)
 
     @staticmethod
     def _allocate_from_slots(slots, earliest, duration, occupied):
-        """Allocate minutes from an ordered stream of available capacity slots."""
-        return ScheduleCapacityAllocationPolicy.allocate_from_slots(
-            slots,
-            earliest,
-            duration,
-            occupied,
-            ScheduleCapacityService._format_timestamp,
-        )
+        return SchedulePurePlanner.allocate_from_slots(slots, earliest, duration, occupied)
 
     @staticmethod
-    def _allocate_split_on_lines(
-        db, lines, earliest, quantity, standard, occupancy,
-    ):
-        """Allocate one operation's quantity across parallel process lines.
-
-        Each line receives whole units and its own setup time.  Allocation is
-        greedy by projected completion time, while every call still uses the
-        calendar-aware minute allocator, so a single operation can span shifts
-        and dates on several lines without overlap.
-        """
-        remaining_quantity = max(int(quantity or 0), 0)
-        if remaining_quantity <= 0:
-            return []
-        line_state = {
-            line["id"]: {
-                "line": line,
-                "calendar": SchedulePlanningRepository.get_calendar(line["calendar_id"], db=db)
-                    or SchedulePlanningRepository.get_calendar(db=db),
-                "shifts": [],
-                "segments": [],
-                "quantity": 0,
-            }
-            for line in lines
-        }
-        for state in line_state.values():
-            if state["calendar"]:
-                state["shifts"] = SchedulePlanningRepository.list_calendar_shifts(
-                    state["calendar"]["id"], db=db
-                )
-        line_state = {
-            line_id: state for line_id, state in line_state.items()
-            if state["calendar"] and state["shifts"]
-        }
-        if not line_state:
-            raise ValueError("未配置有效工作日历或班次")
-
-        epsilon = 1e-7
-        while remaining_quantity > 0:
-            available = []
-            chunk = max(1, int(math.ceil(remaining_quantity / len(line_state))))
-            for line_id, state in line_state.items():
-                include_setup = state["quantity"] == 0
-                duration = ScheduleCapacityService._duration_minutes(
-                    chunk, standard if include_setup else {**dict(standard), "setup_minutes": 0}
-                )
-                try:
-                    candidate_segments = ScheduleCapacityService._allocate_on_line(
-                        db, state["calendar"], state["shifts"],
-                        float(state["line"]["daily_minutes"] or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
-                        earliest, duration, occupancy.get(line_id, []),
-                    )
-                except ValueError:
-                    continue
-                end = ScheduleCapacityService._parse_timestamp(candidate_segments[-1]["end_at"])
-                available.append((end, line_id, candidate_segments, chunk, duration))
-            if not available:
-                raise ValueError("工作日历在可搜索范围内没有足够产能")
-            _, line_id, candidate_segments, allocated_quantity, duration = (
-                ScheduleCapacityAllocationPolicy.choose_earliest_completion(available)
-            )
-            for index, segment in enumerate(candidate_segments):
-                segment["process_line_id"] = line_id
-                # Quantity is recorded once per allocation batch; continuation
-                # segments across later shifts carry zero to avoid double count.
-                segment["quantity"] = allocated_quantity if index == 0 else 0
-                state = line_state[line_id]
-                state["segments"].append(segment)
-            state = line_state[line_id]
-            state["quantity"] += allocated_quantity
-            ScheduleCapacityService._add_segments_to_occupancy(
-                occupancy, line_id, candidate_segments
-            )
-            remaining_quantity -= allocated_quantity
-
-        result = []
-        for state in line_state.values():
-            if not state["segments"]:
-                continue
-            for segment in state["segments"]:
-                result.append(segment)
-        return result
+    def _allocate_split_on_lines(db, lines, earliest, quantity, standard, occupancy):
+        return SchedulePlanningStrategy.allocate_split_on_lines(db, lines, earliest, quantity, standard, occupancy)
 
     @staticmethod
     def _add_segments_to_occupancy(occupancy, line_id, segments):
@@ -703,125 +313,15 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _allocate_on_node(db, node, earliest, duration, occupancy):
-        """Allocate one operation on one physical node."""
-        calendar = SchedulePlanningRepository.get_calendar(node.get("calendar_id"), db=db)
-        shifts = (
-            SchedulePlanningRepository.list_calendar_shifts(calendar["id"], db=db)
-            if calendar else []
-        )
-        if not calendar or not shifts:
-            raise NodeSchedulingError(
-                "NODE_CALENDAR_UNAVAILABLE", "生产节点日历没有可用时间",
-                {"production_node_id": node.get("id")},
-            )
-        daily_minutes = sum(
-            max(int(shift["end_minute"]) - int(shift["start_minute"]), 0)
-            for shift in shifts
-        )
-        # Subtractive overrides are modeled as busy intervals. Overtime is a
-        # real additive capacity slot and must never be treated as downtime.
-        busy = list(occupancy.get(node["id"], []))
-        overtime_slots = []
-        for override in ProductionNodeRepository.list_node_calendar_overrides(
-            node["id"], db=db
-        ):
-            override = dict(override)
-            start = ScheduleCapacityService._parse_timestamp(override.get("start_at"))
-            end = ScheduleCapacityService._parse_timestamp(override.get("end_at"))
-            if start and end and end > start:
-                if override.get("override_type") == "overtime":
-                    overtime_slots.append({
-                        "shift_id": None,
-                        "shift_code": "OVERTIME",
-                        "shift_name": "加班",
-                        "start": start,
-                        "end": end,
-                    })
-                else:
-                    busy.append((start, end))
-        base_slots = ScheduleCapacityService._calendar_slots(
-            db, calendar, shifts, earliest, daily_minutes=daily_minutes
-        )
-        combined = heapq.merge(
-            base_slots,
-            sorted(overtime_slots, key=lambda item: (item["start"], item["end"])),
-            key=lambda item: (item["start"], item["end"]),
-        )
-
-        def merged_slots():
-            current = None
-            for slot in combined:
-                if current is None:
-                    current = dict(slot)
-                    continue
-                if slot["start"] < current["end"]:
-                    if slot["end"] > current["end"]:
-                        # The overlap is already represented by ``current``.
-                        # Keep only the extending tail with the incoming slot's
-                        # metadata so overtime outside a normal shift remains
-                        # identifiable as overtime instead of inheriting the
-                        # preceding shift id.
-                        tail = dict(slot)
-                        tail["start"] = current["end"]
-                        yield current
-                        current = tail
-                    continue
-                yield current
-                current = dict(slot)
-            if current is not None:
-                yield current
-
-        segments = ScheduleCapacityService._allocate_from_slots(
-            merged_slots(), earliest, duration, busy
-        )
-        for segment in segments:
-            segment["production_node_id"] = node["id"]
-            segment["process_line_id"] = node.get("legacy_process_line_id")
-        return segments
+        return SchedulePlanningStrategy.allocate_on_node(db, node, earliest, duration, occupancy)
 
     @staticmethod
-    def _allocate_split_on_nodes(
-        db, nodes, earliest, quantity, standard, occupancy, *,
-        operation=None, order=None, serial_ids=None, allocation_key_prefix="",
-        return_allocations=False,
-    ):
-        """Adapt repository-backed node facts to the pure allocator."""
-        def candidate_allocator(node, requested_earliest, duration, additions):
-            facts = {
-                node["id"]: [
-                    *occupancy.get(node["id"], []),
-                    *additions,
-                ]
-            }
-            return ScheduleCapacityService._allocate_on_node(
-                db, node, requested_earliest, duration, facts
-            )
-
-        def apply_additions(additions):
-            for node_id, intervals in additions.items():
-                occupancy.setdefault(node_id, []).extend(intervals)
-
-        try:
-            result = ScheduleCapacityAllocationPolicy.allocate_split_on_nodes(
-                nodes=nodes,
-                earliest=earliest,
-                quantity=quantity,
-                standard=standard,
-                operation=operation,
-                order=order,
-                serial_ids=serial_ids,
-                allocation_key_prefix=allocation_key_prefix,
-                candidate_allocator=candidate_allocator,
-            )
-        except (ValueError, NodeSchedulingError) as exc:
-            apply_additions(
-                getattr(exc, "capacity_occupancy_additions", {})
-            )
-            raise
-        apply_additions(result["occupancy_additions"])
-        if return_allocations:
-            return result["segments"], result["allocations"]
-        return result["segments"]
+    def _allocate_split_on_nodes(db, nodes, earliest, quantity, standard, occupancy, *, operation=None, order=None, serial_ids=None, allocation_key_prefix="", return_allocations=False):
+        return SchedulePlanningStrategy.allocate_split_on_nodes(
+            db, nodes, earliest, quantity, standard, occupancy, operation=operation, order=order,
+            serial_ids=serial_ids, allocation_key_prefix=allocation_key_prefix,
+            return_allocations=return_allocations,
+        )
 
     @staticmethod
     def _prepare_generation_request(
@@ -942,6 +442,48 @@ class ScheduleCapacityService:
         return occupancy
 
     @staticmethod
+    def _exclusive_batch_occupancy(generated, occupancy_key):
+        """Return only valid intervals assigned to exclusive-capacity nodes."""
+        additions = {}
+        for operation in generated.get("operations") or ():
+            if operation.get("status") != "planned":
+                continue
+            if operation.get("execution_mode") in {"outsourced", "non_scheduled"}:
+                continue
+            node_modes = {
+                int(node["production_node_id"]): node.get("capacity_mode") or "exclusive"
+                for node in operation.get("nodes") or ()
+                if node.get("production_node_id") not in (None, "")
+            }
+            if operation.get("production_node_id") not in (None, ""):
+                node_modes.setdefault(
+                    int(operation["production_node_id"]),
+                    operation.get("capacity_mode_snapshot") or "exclusive",
+                )
+            for segment in operation.get("segments") or ():
+                resource_id = segment.get(occupancy_key)
+                if resource_id in (None, ""):
+                    resource_id = operation.get(occupancy_key)
+                if resource_id in (None, ""):
+                    continue
+                resource_id = int(resource_id)
+                capacity_mode = node_modes.get(
+                    resource_id,
+                    operation.get("capacity_mode_snapshot") or "exclusive",
+                )
+                if capacity_mode != "exclusive":
+                    continue
+                start = ScheduleCapacityService._parse_timestamp(
+                    segment.get("start_at") or segment.get("segment_start_at")
+                )
+                end = ScheduleCapacityService._parse_timestamp(
+                    segment.get("end_at") or segment.get("segment_end_at")
+                )
+                if start and end and end > start:
+                    additions.setdefault(resource_id, []).append((start, end))
+        return additions
+
+    @staticmethod
     def _finalize_generation(
         *,
         order_id,
@@ -981,43 +523,16 @@ class ScheduleCapacityService:
             revision_id, "generation", txn, freeze_risk=True,
             planning_now=planning_now,
         )
-        planning_result = {
-            "operations": result,
-            "conflicts": conflict_assessment["conflicts"],
-            "risk": conflict_assessment["risk"],
-        }
-        stage_bundle = derive_stage_bundle(
+        effective_input_digest = input_digest or facts_snapshot.input_digest
+        evidence = build_planning_evidence(
             facts_snapshot,
             result,
+            input_digest=effective_input_digest,
             conflicts=conflict_assessment["conflicts"],
             risk=conflict_assessment["risk"],
         )
-        effective_input_digest = input_digest or facts_snapshot.input_digest
-        summary = summarize_schedule_result(
-            planning_result,
-            input_digest=effective_input_digest,
-        )
-        manifest = build_manifest(
-            input_digest=effective_input_digest,
-            stage_outputs=stage_bundle.manifest_stages(),
-            result={"operations": result, "summary": summary},
-        )
-        summary["manifest_digest"] = hashlib.sha256(
-            json.dumps(
-                manifest.as_dict(),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        summary["summary_digest"] = hashlib.sha256(
-            json.dumps(
-                summary,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        summary = evidence.summary_dict()
+        manifest = evidence.manifest
         ScheduleEvidenceRepository.save_planning_evidence(
             revision_id,
             summary,
@@ -1057,16 +572,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def persist_operation_payload(payload, txn, *, persist=True):
-        """Persist one operation only in the short write phase."""
-        if not persist:
-            result = dict(payload)
-            result.pop("id", None)
-            return result
-        result = dict(payload)
-        result["id"] = ScheduleRevisionRepository.insert_operation_schedule(
-            result, txn
-        )
-        return result
+        return ScheduleUnitOfWork.persist_operation_payload(payload, txn, persist=persist)
 
     @staticmethod
     def _materialize_generation_result(result, run_id, revision_id, run_key, txn):
@@ -1148,318 +654,42 @@ class ScheduleCapacityService:
         txn,
         persist=True,
     ):
-        """Plan and persist each operation in route order.
+        """Delegate generation decisions to the shared immutable pure planner."""
+        from modules.services.schedule_planning_facts import (
+            SchedulePlanningFactsLoader,
+        )
 
-        This is the operation-level phase of generation. Transaction lifecycle,
-        idempotency, occupancy loading, and revision finalization stay in the
-        use-case entrypoint so this method can be tested independently.
-        """
-        result = []
-        blocked = False
-        for operation in operations:
-            route_version_id = operation["route_version_id"]
-            process_version_id = operation["process_version_id"]
-            process_snapshot = operation["process_name_snapshot"] or operation["process_name"] or ""
-            route_snapshot = operation["route_name_snapshot"] or order["route_name_snapshot"] or ""
-            completed = max(int(operation["completed"] or 0), 0)
-            rework = max(int(operation["rework"] or 0), 0)
-            remaining = max(int(order["quantity"] or 0) - completed, 0) + rework
-            planning_context = build_operation_context(
-                order={**dict(order), "id": order_id},
-                operation=operation,
-                remaining_quantity=remaining,
-                completed_quantity=completed,
-                rework_quantity=rework,
-                cursor=cursor,
-                run_key=run_key,
-                run_id=run_id,
-                revision_id=revision_id,
-            )
-            common = planning_context.common
-            decision = decide_operation_planning(planning_context)
-            if decision.disposition == "completed":
-                payload = build_completed_payload(
-                    planning_context,
-                    plan_start=cursor.strftime("%Y-%m-%d"),
-                    plan_end=cursor.strftime("%Y-%m-%d"),
-                    reason="已完成，无剩余排程量",
-                    include_allocations=True,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(
-                    payload, txn, persist=persist
-                )
-                result.append({
-                    **payload,
-                    "line_name": None,
-                    "process_name": process_snapshot,
-                               "reason": payload["reason"],
-                })
-                continue
-            decision = decide_operation_planning(
-                planning_context, upstream_blocked=blocked
-            )
-            if decision.disposition == "blocked":
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code=decision.blocked_code,
-                    reason=decision.blocked_reason,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-
-            execution_policy = SchedulePlanningRepository.find_execution_policy(
-                route_version_id, process_version_id, txn,
-            )
-            decision = decide_operation_planning(
-                planning_context, execution_policy=execution_policy
-            )
-            if decision.disposition == "external":
-                lead_minutes = decision.external_lead_minutes
-                begin = cursor
-                end = begin + timedelta(minutes=lead_minutes)
-                payload = build_external_payload(
-                    planning_context,
-                    execution_mode=decision.execution_mode,
-                    lead_minutes=lead_minutes,
-                    begin_at=ScheduleCapacityService._format_timestamp(begin),
-                    end_at=ScheduleCapacityService._format_timestamp(end),
-                    begin_date=begin.strftime("%Y-%m-%d"),
-                    end_date=end.strftime("%Y-%m-%d"),
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                cursor = end
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-
-            standard = SchedulePlanningStrategy.find_standard(
-                txn, order["route_id"], route_version_id, operation["process_id"],
-                process_version_id, order["product_id"], order["product_code"],
-                standard_as_of,
-            )
-            decision = decide_operation_planning(
-                planning_context,
-                standard=standard,
-                standard_resolved=True,
-            )
-            if decision.disposition == "blocked":
-                blocked = True
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code=decision.blocked_code,
-                    reason=decision.blocked_reason,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-            if use_node_engine:
-                resources = ProductionNodeRepository.list_compatible_nodes(
-                    operation, order, at_time=cursor, db=txn,
-                )
-                no_resource_code = "NO_COMPATIBLE_NODE"
-                no_resource_reason = "没有满足能力要求的生产节点"
-            else:
-                resources = [line for line in SchedulePlanningRepository.list_process_lines(
-                    operation["process_id"], db=txn
-                ) if line["status"] == "active"]
-                no_resource_code = "NO_COMPATIBLE_NODE"
-                no_resource_reason = "工序未配置可用产线"
-            decision = decide_operation_planning(
-                planning_context,
-                standard=standard,
-                standard_resolved=True,
-                candidates=resources,
-                candidate_blocked_code=no_resource_code,
-                candidate_blocked_reason=no_resource_reason,
-            )
-            if decision.disposition == "blocked":
-                blocked = True
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code=decision.blocked_code,
-                    reason=decision.blocked_reason,
-                    standard=standard,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-
-            try:
-                serial_ids = (
-                    order_serial_ids
-                    if order_serial_ids and len(order_serial_ids) == remaining
-                    and remaining == int(order["quantity"] or 0)
-                    else None
-                )
-                if use_node_engine:
-                    segments, allocations = SchedulePlanningStrategy.allocate_split_on_nodes(
-                        txn, resources, cursor, remaining, standard, occupancy,
-                        # Policy matching is mapping-based.  SQLite
-                        # rows support keyed indexing but not ``get``;
-                        # normalize facts at this service boundary so
-                        # capability-constrained nodes work for both
-                        # real database rows and test/facade mappings.
-                        operation=dict(operation), order=dict(order),
-                        serial_ids=serial_ids,
-                        allocation_key_prefix=f"{order_id}:{operation['order_process_id']}",
-                        return_allocations=True,
-                    )
-                else:
-                    segments = SchedulePlanningStrategy.allocate_split_on_lines(
-                        txn, resources, cursor, remaining, standard, occupancy,
-                    )
-                    allocations = []
-            except NodeSchedulingError as exc:
-                blocked = True
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code=exc.code,
-                    reason=exc.message,
-                    standard=standard,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-            except ValueError as exc:
-                blocked = True
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code="NODE_CALENDAR_UNAVAILABLE",
-                    reason=str(exc) or "未配置有效工作日历或班次",
-                    standard=standard,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-                result.append({**payload, "line_name": None, "process_name": process_snapshot,
-                               "reason": payload["reason"]})
-                continue
-            if not segments:
-                blocked = True
-                payload = build_blocked_payload(
-                    planning_context,
-                    cursor_date=cursor.strftime("%Y-%m-%d"),
-                    code="NODE_CALENDAR_UNAVAILABLE",
-                    reason="生产节点未生成可用排程分段",
-                    standard=standard,
-                )
-                payload = ScheduleCapacityService.persist_operation_payload(
-                    payload, txn, persist=persist
-                )
-                result.append({
-                    **payload,
-                    "line_name": None,
-                    "process_name": process_snapshot,
-                    "reason": payload["reason"],
-                })
-                continue
-            begin = min(
-                ScheduleCapacityService._parse_timestamp(segment["start_at"])
-                for segment in segments
-            )
-            end = max(
-                ScheduleCapacityService._parse_timestamp(segment["end_at"])
-                for segment in segments
-            )
-            resource_key = "production_node_id" if use_node_engine else "process_line_id"
-            resource_ids = sorted({segment[resource_key] for segment in segments})
-            resource_by_id = {
-                resource["id"]: dict(resource) for resource in resources
-            }
-            primary_resource = max(
-                resource_ids,
-                key=lambda resource_id: (
-                    sum(float(segment["occupied_minutes"]) for segment in segments
-                        if segment[resource_key] == resource_id),
-                    -resource_id,
-                ),
-            )
-            resource_snapshots = []
-            for resource_id in resource_ids:
-                resource = resource_by_id[resource_id]
-                calendar = SchedulePlanningRepository.get_calendar(
-                    resource["calendar_id"], db=txn
-                ) or SchedulePlanningRepository.get_calendar(db=txn)
-                shifts = SchedulePlanningRepository.list_calendar_shifts(
-                    calendar["id"], db=txn
-                ) if calendar else []
-                snapshot = SchedulePlanningStrategy.calendar_snapshot(calendar, shifts)
-                snapshot.update({
-                    resource_key: resource_id,
-                    "process_line_id": resource.get("legacy_process_line_id", resource_id),
-                    "line_code": resource.get("line_code", resource.get("node_code", "")),
-                    "line_name": resource.get("line_name", resource.get("node_name", "")),
-                    "daily_minutes": float(resource.get("daily_minutes") or resource.get("capacity_minutes") or ScheduleCapacityService.DEFAULT_DAILY_MINUTES),
-                    "quantity": sum(
-                        int(segment.get("quantity") or 0)
-                        for segment in segments if segment[resource_key] == resource_id
-                    ),
-                })
-                if use_node_engine:
-                    snapshot.update({
-                        "production_node_id": resource_id,
-                        "node_code": resource.get("node_code", ""),
-                        "node_name": resource.get("node_name", ""),
-                        "capacity_mode": resource.get("capacity_mode", "exclusive"),
-                        "capabilities": resource.get("capabilities", []),
-                    })
-                resource_snapshots.append(snapshot)
-            primary_snapshot = next(item for item in resource_snapshots if item[resource_key] == primary_resource)
-            total_duration = sum(float(segment["occupied_minutes"]) for segment in segments)
-            capacity_snapshot = {
-                **primary_snapshot,
-                "line_count": len(resource_snapshots),
-                "lines": resource_snapshots,
-                "node_count": len(resource_snapshots) if use_node_engine else 0,
-                "nodes": resource_snapshots if use_node_engine else [],
-            }
-            primary_resource_row = resource_by_id[primary_resource]
-            payload = {**common,
-                       "process_line_id": primary_resource_row.get("legacy_process_line_id", primary_resource) if use_node_engine else primary_resource,
-                       "production_node_id": primary_resource if use_node_engine else None,
-                       "node_code_snapshot": primary_resource_row.get("node_code", "") if use_node_engine else "",
-                       "node_name_snapshot": primary_resource_row.get("node_name", "") if use_node_engine else "",
-                       "capacity_mode_snapshot": primary_resource_row.get("capacity_mode", "") if use_node_engine else "",
-                       "node_calendar_snapshot_json": json.dumps(primary_snapshot, ensure_ascii=False, sort_keys=True) if use_node_engine else "{}",
-                       "node_capability_snapshot_json": json.dumps(primary_resource_row.get("capabilities", []), ensure_ascii=False, sort_keys=True) if use_node_engine else "[]",
-                       "standard_id": standard["id"],
-                       "standard_version": standard["version"],
-                       "standard_minutes_per_unit": standard["standard_minutes_per_unit"],
-                       "setup_minutes": standard["setup_minutes"], "difficulty_factor": standard["difficulty_factor"],
-                       "planned_minutes": total_duration, "occupied_minutes": total_duration, "status": "planned",
-                       "standard_match_scope": standard["match_scope"],
-                       "planned_start_at": ScheduleCapacityService._format_timestamp(begin),
-                       "planned_end_at": ScheduleCapacityService._format_timestamp(end),
-                       "capacity_snapshot_json": json.dumps(capacity_snapshot, ensure_ascii=False, sort_keys=True),
-                       "shift_snapshot_json": json.dumps(
-                           [shift for snapshot in resource_snapshots for shift in snapshot["shifts"]],
-                           ensure_ascii=False, sort_keys=True,
-                       ),
-                       "calendar_id": primary_snapshot["calendar_id"],
-                       "line_name_snapshot": primary_snapshot["line_name"],
-                       "segments": segments, "allocations": allocations,
-                       "plan_start": begin.strftime("%Y-%m-%d"), "plan_end": end.strftime("%Y-%m-%d")}
-            payload = ScheduleCapacityService.persist_operation_payload(payload, txn, persist=persist)
-            cursor = end
-            result.append({**payload, "line_name": primary_snapshot["line_name"],
-                           "line_count": len(resource_snapshots), "lines": resource_snapshots,
-                           "node_count": len(resource_snapshots) if use_node_engine else 0,
-                           "nodes": resource_snapshots if use_node_engine else [],
-                           "process_name": process_snapshot})
-        return result, blocked, cursor
+        facts = PlanningFactsSnapshot.create(
+            order={**dict(order), "id": order_id},
+            operations=tuple(dict(item) for item in operations),
+            order_serial_ids=tuple(order_serial_ids),
+            cursor=cursor,
+            standard_as_of=standard_as_of,
+            use_node_engine=use_node_engine,
+            occupancy=occupancy,
+        )
+        operation_facts = SchedulePlanningFactsLoader.generation(
+            dict(facts.order),
+            tuple(dict(item) for item in facts.operations),
+            cursor,
+            standard_as_of,
+            use_node_engine,
+            txn,
+        )
+        decision = SchedulePlanningStrategy.plan(
+            facts,
+            operation_facts,
+            run_key=run_key,
+            run_id=run_id,
+            revision_id=revision_id,
+            mode="generation",
+        )
+        return decision.operation_dicts(), decision.blocked, decision.final_cursor
 
     @staticmethod
     def generate_order_schedule(order_id, start_date=None, schedule_run_key="", db=None,
                                 actor_id=None, use_node_engine_override=None,
-                                planning_now=None):
+                                planning_now=None, additional_occupancy=None):
         # Phase 1: a deferred read snapshot.  No schedule rows or ledgers are
         # written while matching standards and allocating capacity.
         use_node_engine = (
@@ -1493,6 +723,8 @@ class ScheduleCapacityService:
             occupancy = ScheduleCapacityService._load_generation_occupancy(
                 order_id, use_node_engine, snapshot_db
             )
+            for resource_id, intervals in (additional_occupancy or {}).items():
+                occupancy.setdefault(int(resource_id), []).extend(intervals)
             planning_occupancy = occupancy
             facts_snapshot = PlanningFactsSnapshot.create(
                 order=dict(order),
@@ -1825,10 +1057,7 @@ class ScheduleCapacityService:
 
     @staticmethod
     def _locked_task_segments(lock, payload):
-        """Compatibility facade for the extracted replan service."""
-        from modules.services.schedule_replan_service import ScheduleReplanService
-
-        return ScheduleReplanService._locked_task_segments(lock, payload)
+        return SchedulePurePlanner.locked_task_segments(lock, payload)
 
     @staticmethod
     def dynamic_replan_order(order_id, start_at=None, schedule_run_key="", reason="", db=None,
@@ -2020,54 +1249,15 @@ class ScheduleCapacityService:
 
     @staticmethod
     def list_order_schedule(order_id, limit=500):
-        limit = ScheduleCapacityService._limit(limit)
-        return {"ok": True, "order_id": order_id, "operations": [dict(row) for row in SchedulePlanningRepository.find_order_operations(order_id, limit=limit)]}
+        return ScheduleQueryService.list_order_schedule(order_id, limit)
 
     @staticmethod
     def list_order_revisions(order_id, limit=100):
-        limit = ScheduleCapacityService._limit(limit, default=100)
-        return {
-            "ok": True,
-            "order_id": order_id,
-            "revisions": [dict(row) for row in ScheduleRevisionRepository.list_revisions(order_id, limit=limit)],
-        }
+        return ScheduleQueryService.list_order_revisions(order_id, limit)
 
     @staticmethod
     def get_revision(revision_id, limit=1000):
-        limit = ScheduleCapacityService._limit(limit, default=1000)
-        revision = ScheduleRevisionRepository.find_revision(revision_id)
-        if revision is None:
-            raise ValueError("排程版本不存在")
-        conflict_assessment = SchedulePlanningStrategy.assess_revision_conflicts(
-            revision_id, "detail", BaseService.db(), freeze_risk=False, persist=False
-        )
-        risk_assessment = ScheduleEvidenceRepository.find_revision_risk_assessment(
-            revision_id
-        )
-        replan_summary, replan_differences = (
-            ScheduleEvidenceRepository.get_replan_evidence(revision_id)
-        )
-        normalized_differences = []
-        for row in replan_differences:
-            item = dict(row)
-            for field in ("before_json", "after_json"):
-                try:
-                    item[field.removesuffix("_json")] = json.loads(
-                        item.get(field) or "{}"
-                    )
-                except (TypeError, json.JSONDecodeError):
-                    item[field.removesuffix("_json")] = {}
-            normalized_differences.append(item)
-        return {
-            "ok": True,
-            "revision": dict(revision),
-            "items": [dict(row) for row in ScheduleRevisionRepository.list_revision_items(revision_id, limit=limit)],
-            "conflict_summary": conflict_assessment["summary"],
-            "conflicts": conflict_assessment["conflicts"][:limit],
-            "risk_assessment": dict(risk_assessment) if risk_assessment else None,
-            "replan_summary": dict(replan_summary) if replan_summary else None,
-            "replan_differences": normalized_differences[:limit],
-        }
+        return ScheduleQueryService.get_revision(revision_id, limit)
 
     @staticmethod
     def _workflow_input(reason, idempotency_key, actor_id):
@@ -2171,236 +1361,8 @@ class ScheduleCapacityService:
 
     @staticmethod
     def list_schedules(limit=500):
-        limit = ScheduleCapacityService._limit(limit)
-        operations = [
-            dict(row)
-            for row in SchedulePlanningRepository.list_scheduled_operations(limit)
-        ]
-        for operation in operations:
-            operation["candidate_revision"] = False
-        candidate_operations = []
-        for item in ScheduleRevisionRepository.list_latest_candidate_revision_items(
-            limit=limit
-        ):
-            try:
-                payload = json.loads(item["payload_json"] or "{}")
-            except (TypeError, json.JSONDecodeError):
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            candidate = dict(payload)
-            candidate.update({
-                "id": None,
-                "order_id": item["order_id"],
-                "order_no": item["order_no"],
-                "product_name": item["product_name"],
-                "process_name": item["process_name"],
-                "schedule_revision_id": item["revision_id"],
-                "revision_item_id": item["id"],
-                "revision_item_row_version": item["row_version"],
-                "revision_status": item["revision_status"],
-                "revision_approval_status": item["revision_approval_status"],
-                "risk_level": item["revision_risk_level"],
-                "delay_minutes": item["revision_delay_minutes"],
-                "risk_reason": item["revision_risk_reason"],
-                "locked": bool(item["locked"]),
-                "task_lock_id": item["task_lock_id"],
-                "candidate_revision": True,
-                "node_code": payload.get("node_code")
-                or payload.get("node_code_snapshot")
-                or "",
-                "node_name": payload.get("node_name")
-                or payload.get("node_name_snapshot")
-                or "",
-            })
-            candidate_operations.append(candidate)
-        if candidate_operations:
-            candidate_keys = {
-                (item.get("order_id"), item.get("order_process_id"))
-                for item in candidate_operations
-            }
-            operations = [
-                item for item in operations
-                if (item.get("order_id"), item.get("order_process_id"))
-                not in candidate_keys
-            ] + candidate_operations
-        allocations_by_schedule = {}
-        for row in SchedulePlanningRepository.list_schedule_allocations(
-            [operation.get("id") for operation in operations]
-        ):
-            allocation = dict(row)
-            allocations_by_schedule.setdefault(allocation["schedule_id"], []).append(
-                allocation
-            )
-        segments_by_schedule = {}
-        for row in SchedulePlanningRepository.list_schedule_segments(
-            [operation.get("id") for operation in operations]
-        ):
-            segment = dict(row)
-            segments_by_schedule.setdefault(segment["schedule_id"], []).append(segment)
-        for operation in operations:
-            # V089 stores a legacy schedule-level ``locked`` flag and also
-            # exposes the active revision-item lock through ``task_lock_id``.
-            # SQLite rows keep the first duplicate column name from ``s.*``,
-            # so normalize both sources here for old and versioned schedules.
-            operation["locked"] = bool(
-                operation.get("locked") or operation.get("task_lock_id")
-            )
-            if not operation.get("candidate_revision"):
-                operation["allocations"] = allocations_by_schedule.get(
-                    operation.get("id"), []
-                )
-                operation["segments"] = segments_by_schedule.get(
-                    operation.get("id"), []
-                )
-        formal_conflicts = [
-            dict(row) for row in ScheduleEvidenceRepository.list_schedule_conflicts()
-        ]
-        formal_by_schedule = {}
-        for conflict in formal_conflicts:
-            for key in ("first_schedule_id", "second_schedule_id"):
-                schedule_id = conflict.get(key)
-                if schedule_id not in (None, ""):
-                    formal_by_schedule.setdefault(int(schedule_id), []).append(conflict)
-        revision_conflicts = {}
-        for revision_id in {
-            int(operation["schedule_revision_id"])
-            for operation in operations
-            if operation.get("candidate_revision")
-            and operation.get("schedule_revision_id") not in (None, "")
-        }:
-            revision_conflicts[revision_id] = [
-                dict(row)
-                for row in ScheduleEvidenceRepository.list_revision_conflicts(
-                    revision_id
-                )
-            ]
-        for operation in operations:
-            if operation.get("candidate_revision"):
-                conflicts = [
-                    conflict
-                    for conflict in revision_conflicts.get(
-                        int(operation.get("schedule_revision_id") or 0), []
-                    )
-                    if operation.get("order_process_id") in {
-                        conflict.get("first_order_process_id"),
-                        conflict.get("second_order_process_id"),
-                    }
-                ]
-            else:
-                conflicts = formal_by_schedule.get(int(operation.get("id") or 0), [])
-            operation["conflicts"] = conflicts
-            operation["conflict_count"] = len(conflicts)
-            operation["conflict_reason"] = (
-                conflicts[0].get("reason") if conflicts else ""
-            )
-        return {"ok": True, "operations": operations}
+        return ScheduleQueryService.list_schedules(limit)
 
     @staticmethod
     def audit_schedule_capacity(limit=1000, now=None):
-        """Summarize persisted precision facts and detect line overlaps."""
-        limit = ScheduleCapacityService._limit(limit)
-        rows = [dict(row) for row in SchedulePlanningRepository.list_scheduled_operations(limit)]
-        planned = [row for row in rows if row.get("status") == "planned"]
-        blocked = [row for row in rows if row.get("status") == "blocked"]
-        conflicts = [dict(row) for row in ScheduleEvidenceRepository.list_schedule_conflicts()]
-        conflicts_by_order = {}
-        for conflict in conflicts:
-            for key in ("first_order_id", "second_order_id"):
-                order_id = conflict.get(key)
-                if order_id not in (None, ""):
-                    conflicts_by_order.setdefault(int(order_id), []).append(conflict)
-        line_loads = [dict(row) for row in SchedulePlanningRepository.list_line_loads()]
-        conflict_counts = Counter(row.get("process_line_id") for row in conflicts)
-        for line in line_loads:
-            line["conflict_count"] = conflict_counts.get(line.get("process_line_id"), 0)
-        risk_orders = []
-        risk_counts = Counter()
-        for raw_row in ScheduleEvidenceRepository.list_schedule_risk_inputs(limit=limit):
-            row = dict(raw_row)
-            quantity = int(row.get("quantity") or 0)
-            completed = int(row.get("completed") or 0)
-            is_completed = row.get("order_status") == "completed" or (
-                quantity > 0 and completed >= quantity
-            )
-            blocked_reasons = tuple(
-                reason.strip()
-                for reason in str(row.get("blocked_reasons") or "").split("；")
-                if reason.strip()
-            )
-            risk = ScheduleDeadlineRiskPolicy.evaluate(
-                deadline_text=row.get("deadline") or "",
-                projected_completion_at=row.get("projected_completion_at") or "",
-                plan_end=row.get("plan_end") or "",
-                now=now,
-                completed=is_completed,
-                blocked_count=row.get("blocked_count") or 0,
-                blocked_reasons=blocked_reasons,
-                conflict_count=row.get("conflict_count") or 0,
-                conflict_details=conflicts_by_order.get(int(row["order_id"]), ()),
-            )
-            risk_counts[risk["level"]] += 1
-            if risk["level"] in ("high", "overdue"):
-                risk_orders.append({
-                    "order_id": row["order_id"],
-                    "order_no": row["order_no"],
-                    "risk_level": risk["level"],
-                    "risk_reason": risk["reason"],
-                    "delay_minutes": risk["delay_minutes"],
-                    "slack_minutes": risk["slack_minutes"],
-                    "deadline_at": risk["deadline_at"],
-                    "projected_completion_at": risk["projected_completion_at"],
-                    "primary_risk_source": risk.get("primary_source", ""),
-                    "suggested_actions": risk.get("suggested_actions", []),
-                })
-        risk_orders.sort(
-            key=lambda item: (
-                0 if item["risk_level"] == "overdue" else 1,
-                -int(item["delay_minutes"] or 0),
-                item["order_no"] or "",
-            )
-        )
-        delay_values = [int(item["delay_minutes"] or 0) for item in risk_orders]
-        match_scope_counts = Counter(
-            row.get("standard_match_scope") or "未匹配"
-            for row in planned
-        )
-        blocked_reason_counts = Counter(
-            row.get("blocked_reason") or "未说明"
-            for row in blocked
-        )
-        return {
-            "ok": True,
-            "limit": limit,
-            "operations": len(rows),
-            "planned_operations": len(planned),
-            "blocked_operations": len(blocked),
-            "precision_operations": sum(1 for row in planned if row.get("planned_start_at")),
-            "occupied_minutes": round(sum(float(row.get("occupied_minutes") or 0) for row in planned), 2),
-            "match_scope_counts": dict(sorted(match_scope_counts.items())),
-            "blocked_reason_counts": dict(sorted(blocked_reason_counts.items())),
-            "risk_counts": dict(sorted(risk_counts.items())),
-            "risk_orders": risk_orders[:limit],
-            "risk_order_count": len(risk_orders),
-            "delayed_order_count": sum(1 for item in risk_orders if item["delay_minutes"] > 0),
-            "total_delay_minutes": sum(delay_values),
-            "max_delay_minutes": max(delay_values, default=0),
-            "line_conflicts": len(conflicts),
-            "node_conflicts": len(conflicts),
-            "conflicts": conflicts[:limit],
-            "line_loads": line_loads,
-            "calendars": SchedulePlanningRepository.list_calendars(),
-            "capacity_unavailability": [
-                dict(row)
-                for row in SchedulePlanningRepository.list_capacity_unavailability()
-            ],
-            "capacity_overrides": [
-                dict(row)
-                for row in SchedulePlanningRepository.list_capacity_overrides()
-            ],
-        }
-
-
-# Register the compatibility implementation after the class is fully defined;
-# the strategy module itself stays free of a static service import.
-SchedulePlanningStrategy.bind(ScheduleCapacityService)
+        return ScheduleQueryService.audit_schedule_capacity(limit, now)

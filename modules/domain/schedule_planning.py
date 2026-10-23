@@ -38,6 +38,102 @@ def _thaw(value: Any) -> Any:
     return value
 
 
+def thaw_planning_value(value: Any) -> Any:
+    """Expose JSON-compatible copies at the pure-planner serialization edge."""
+    return _thaw(value)
+
+
+def copy_planning_runtime_value(value: Any) -> Any:
+    """Copy frozen stage values without serializing datetime or resource IDs.
+
+    JSON summaries use ``thaw_planning_value``; allocation adapters need native
+    datetime intervals and integer keys to feed the next calendar evaluation.
+    """
+    if isinstance(value, Mapping):
+        return {key: copy_planning_runtime_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [copy_planning_runtime_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return set(value)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityAllocationFacts:
+    """Immutable worktime and capability-match facts for one allocation."""
+
+    earliest: Any
+    standard: Mapping[str, Any] | None
+    operation: Mapping[str, Any]
+    order: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        for name in ("standard", "operation", "order"):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityNodeFacts:
+    """A node's progress before evaluating the next allocation decision."""
+
+    node: Mapping[str, Any]
+    allocated_quantity: int
+    occupancy: tuple[tuple[datetime, datetime], ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node", _freeze(self.node))
+        object.__setattr__(self, "occupancy", _freeze(self.occupancy))
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityDemand:
+    """Quantity and occupied minutes proposed before calendar evaluation."""
+
+    quantity: int
+    duration: float
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityCandidate:
+    """An evaluated node alternative shared by allocation strategies."""
+
+    completion: datetime | None
+    node_id: Any
+    segments: tuple[Mapping[str, Any], ...]
+    quantity: int
+    capability: Mapping[str, Any]
+    capacity_mode: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "segments", _freeze(self.segments))
+        object.__setattr__(self, "capability", _freeze(self.capability))
+
+    def mutable_segments(self) -> list[dict[str, Any]]:
+        return copy_planning_runtime_value(self.segments)
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityAllocationResult:
+    """Frozen allocation output, converted only at the legacy policy boundary."""
+
+    segments: tuple[Mapping[str, Any], ...]
+    allocations: tuple[Mapping[str, Any], ...]
+    occupancy_additions: Mapping[Any, tuple[tuple[datetime, datetime], ...]]
+
+    def __post_init__(self) -> None:
+        for name in ("segments", "allocations", "occupancy_additions"):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+    def as_legacy_result(self) -> dict[str, Any]:
+        return {
+            "segments": copy_planning_runtime_value(self.segments),
+            "allocations": copy_planning_runtime_value(self.allocations),
+            "occupancy_additions": {
+                key: list(intervals) for key, intervals in self.occupancy_additions.items()
+            },
+        }
+
+
 def _digest(value: Any) -> str:
     payload = json.dumps(
         _thaw(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -128,6 +224,162 @@ class PlanningFactsSnapshot:
             "occupancy": _thaw(self.occupancy),
             "input_digest": self.input_digest,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ConflictDetectionSnapshot:
+    """Detached facts shared by every detector in a single assessment.
+
+    Equal-candidate positions are captured before freezing collections so legacy
+    pair suppression still distinguishes a caller's list from a tuple.
+    """
+
+    candidate_intervals: tuple[Mapping[str, Any], ...]
+    occupied_intervals: tuple[Mapping[str, Any], ...]
+    unavailable_intervals: tuple[Mapping[str, Any], ...]
+    invalid_candidate_intervals: tuple[Mapping[str, Any], ...]
+    operations: tuple[Mapping[str, Any], ...]
+    equal_candidate_positions: tuple[int | None, ...]
+
+    def __post_init__(self) -> None:
+        for name in self.__dataclass_fields__:
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningAssessmentFacts:
+    """A single immutable input for conflict and deadline-risk decisions."""
+
+    order: Mapping[str, Any]
+    operations: tuple[Mapping[str, Any], ...]
+    candidate_intervals: tuple[Mapping[str, Any], ...]
+    occupied_intervals: tuple[Mapping[str, Any], ...]
+    unavailable_intervals: tuple[Mapping[str, Any], ...]
+    now: datetime
+
+    def __post_init__(self) -> None:
+        for name in (
+            "order", "operations", "candidate_intervals", "occupied_intervals",
+            "unavailable_intervals",
+        ):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningResourceFacts:
+    """Immutable capacity facts for one candidate line or production node."""
+
+    resource: Mapping[str, Any]
+    calendar: Mapping[str, Any]
+    shifts: tuple[Mapping[str, Any], ...]
+    exceptions: tuple[Mapping[str, Any], ...] = ()
+    overrides: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "resource", _freeze(self.resource))
+        object.__setattr__(self, "calendar", _freeze(self.calendar))
+        object.__setattr__(
+            self, "shifts", tuple(_freeze(item) for item in self.shifts)
+        )
+        object.__setattr__(
+            self, "exceptions", tuple(_freeze(item) for item in self.exceptions)
+        )
+        object.__setattr__(
+            self, "overrides", tuple(_freeze(item) for item in self.overrides)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningOperationFacts:
+    """All pre-resolved facts required to plan one operation without I/O."""
+
+    operation: Mapping[str, Any]
+    remaining_quantity: int
+    completed_quantity: int
+    rework_quantity: int
+    execution_policy: Mapping[str, Any]
+    standard: Mapping[str, Any] | None
+    resources: tuple[PlanningResourceFacts, ...]
+    previous: Mapping[str, Any]
+    locked_task: Mapping[str, Any]
+    locked_overrides: tuple[Mapping[str, Any], ...] = ()
+    downtime: tuple[Mapping[str, Any], ...] = ()
+    standard_candidates: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "operation", _freeze(self.operation))
+        object.__setattr__(self, "execution_policy", _freeze(self.execution_policy))
+        object.__setattr__(self, "standard", _freeze(self.standard or {}))
+        object.__setattr__(self, "resources", tuple(self.resources))
+        object.__setattr__(self, "standard_candidates", tuple(_freeze(item) for item in self.standard_candidates))
+        object.__setattr__(self, "previous", _freeze(self.previous or {}))
+        object.__setattr__(self, "locked_task", _freeze(self.locked_task or {}))
+        object.__setattr__(
+            self,
+            "locked_overrides",
+            tuple(_freeze(item) for item in self.locked_overrides),
+        )
+        object.__setattr__(
+            self, "downtime", tuple(_freeze(item) for item in self.downtime)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningOperationResult:
+    """Immutable phase result joining one operation to its successors."""
+
+    operation: Mapping[str, Any]
+    conflicts: tuple[Mapping[str, Any], ...]
+    blocked: bool
+    cursor: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "operation", _freeze(self.operation))
+        object.__setattr__(self, "conflicts", _freeze(self.conflicts))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningDecision:
+    """Immutable output from the shared pure generation/replan planner."""
+
+    operations: tuple[Mapping[str, Any], ...]
+    conflicts: tuple[Mapping[str, Any], ...]
+    blocked: bool
+    final_cursor: Any
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "operations", tuple(_freeze(item) for item in self.operations)
+        )
+        object.__setattr__(
+            self, "conflicts", tuple(_freeze(item) for item in self.conflicts)
+        )
+
+    def operation_dicts(self) -> list[dict[str, Any]]:
+        return list(_thaw(self.operations))
+
+    def conflict_dicts(self) -> list[dict[str, Any]]:
+        return list(_thaw(self.conflicts))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningEvidence:
+    """Immutable evidence envelope kept outside legacy result_json."""
+
+    summary: Mapping[str, Any]
+    manifest: PlanningManifest
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "summary", _freeze(self.summary))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "summary": _thaw(self.summary),
+            "manifest": self.manifest.as_dict(),
+        }
+
+    def summary_dict(self) -> dict[str, Any]:
+        return _thaw(self.summary)
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,16 +1030,63 @@ def build_manifest(
     )
 
 
+def build_planning_evidence(
+    facts: PlanningFactsSnapshot,
+    operations: Sequence[Mapping[str, Any]],
+    *,
+    input_digest: str,
+    conflicts: Sequence[Mapping[str, Any]] = (),
+    risk: Mapping[str, Any] | None = None,
+    extra_stages: Mapping[str, Any] | None = None,
+    algorithm: str = "schedule-pure-planning-v1",
+) -> PlanningEvidence:
+    """Build the shared summary/manifest evidence without persistence."""
+    planning_result = {
+        "operations": list(operations),
+        "conflicts": list(conflicts),
+        "risk": dict(risk or {}),
+    }
+    bundle = derive_stage_bundle(
+        facts,
+        operations,
+        conflicts=conflicts,
+        risk=risk or {},
+    )
+    summary = summarize_schedule_result(
+        planning_result,
+        input_digest=input_digest,
+    )
+    stages = bundle.manifest_stages()
+    stages.update(dict(extra_stages or {}))
+    manifest = build_manifest(
+        input_digest=input_digest,
+        stage_outputs=stages,
+        result={"operations": list(operations), "summary": summary},
+        algorithm=algorithm,
+    )
+    summary["manifest_digest"] = _digest(manifest.as_dict())
+    summary["summary_digest"] = _digest(summary)
+    return PlanningEvidence(summary=summary, manifest=manifest)
+
+
 __all__ = [
     "BlockedPlanningResult",
     "NodeCandidateSet",
     "OperationPlanningContext",
+    "PlanningDecision",
+    "ConflictDetectionSnapshot",
+    "PlanningAssessmentFacts",
+    "PlanningEvidence",
     "PlanningFactsSnapshot",
     "PlanningManifest",
+    "PlanningOperationFacts",
+    "PlanningOperationResult",
+    "PlanningResourceFacts",
     "PlanningStageBundle",
     "WorkTimeMatch",
     "blocked_results",
     "build_manifest",
+    "build_planning_evidence",
     "build_blocked_payload",
     "build_completed_payload",
     "build_external_payload",
@@ -797,4 +1096,5 @@ __all__ = [
     "match_work_times",
     "select_node_candidates",
     "summarize_schedule_result",
+    "thaw_planning_value",
 ]

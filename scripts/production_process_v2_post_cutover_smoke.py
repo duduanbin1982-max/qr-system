@@ -24,6 +24,8 @@ from scripts.process_v2_operations import (  # noqa: E402
 )
 
 
+from modules.application.operations_facade import OperationsFacade
+
 def _parser():
     parser = argparse.ArgumentParser(
         description="Post-cutover health, permission, Legacy and V2 process smoke checks"
@@ -65,7 +67,7 @@ def _request(base_url, path, token="", method="GET", payload=None):
 
 
 def _historical_snapshot_status(db):
-    from modules.migration_process_versioning import PROCESS_FACT_BINDINGS
+
 
     checks = (
         ("order_processes", "process_id", "process_version_id", "process_name_snapshot"),
@@ -80,7 +82,7 @@ def _historical_snapshot_status(db):
             f'SELECT COUNT(*) FROM "{table}" WHERE "{root}" IS NOT NULL '
             f'AND ("{version}" IS NULL OR TRIM(COALESCE("{snapshot}",\'\'))=\'\')'
         ).fetchone()[0]
-    for spec in PROCESS_FACT_BINDINGS:
+    for spec in OperationsFacade.process_fact_bindings():
         table = spec["table"]
         columns = {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}
         for role in spec["roles"]:

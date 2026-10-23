@@ -386,6 +386,26 @@ class SchedulePlanningRepository:
             })
             queue.append(row)
         return ScheduleOrderPriorityPolicy.order_queue(queue, now=now)[:bounded_limit]
+
+    @staticmethod
+    def list_published_order_ids(order_ids, db=None):
+        """Return the requested orders with a current published revision."""
+        db = resolve_db(db)
+        normalized_ids = tuple(dict.fromkeys(int(order_id) for order_id in order_ids))
+        if not normalized_ids:
+            return ()
+        published_ids = []
+        for offset in range(0, len(normalized_ids), 500):
+            batch = normalized_ids[offset:offset + 500]
+            placeholders = ",".join("?" for _ in batch)
+            rows = db.execute(
+                "SELECT id FROM orders WHERE current_schedule_revision_id IS NOT NULL "
+                f"AND id IN ({placeholders}) ORDER BY id",
+                batch,
+            ).fetchall()
+            published_ids.extend(int(row["id"]) for row in rows)
+        return tuple(sorted(published_ids))
+
     @staticmethod
     def find_order(order_id, db):
         return db.execute(
@@ -413,72 +433,25 @@ class SchedulePlanningRepository:
         route_id, route_version_id, process_id, process_version_id,
         product_id, product_code, as_of_date, db
     ):
-        """Resolve a standard without ever borrowing another product's value.
+        from modules.domain.schedule_standard_matching import ScheduleStandardMatchingPolicy
 
-        The precedence is exact route/process revision, route-level, then
-        process-generic. Within each level, an exact product row wins over a
-        genuinely generic row. Product-specific rows for any other product are
-        deliberately ignored instead of being treated as a fallback.
-        """
-        effective_date = (as_of_date or "").strip() or None
-        base = (
+        return ScheduleStandardMatchingPolicy.select(
+            SchedulePlanningRepository.list_active_standard_candidates(process_id, db),
+            route_id=route_id, route_version_id=route_version_id, process_id=process_id,
+            process_version_id=process_version_id, product_id=product_id,
+            product_code=product_code, as_of_date=as_of_date,
+        )
+
+    @staticmethod
+    def list_active_standard_candidates(process_id, db):
+        """Read raw facts; product/scope/effective-date decisions belong to the domain."""
+        return [dict(row) for row in db.execute(
             "SELECT id,version,setup_minutes,standard_minutes_per_unit,difficulty_factor,"
             "route_id,route_version_id,process_id,process_version_id,product_id,product_code,"
-            "{scope} AS match_scope FROM work_time_standards WHERE process_id=? AND status='active' "
-            "AND standard_minutes_per_unit>0 "
-            "AND (effective_from='' OR effective_from IS NULL OR (? IS NULL OR effective_from<=?)) "
-            "AND (effective_to='' OR effective_to IS NULL OR (? IS NULL OR effective_to>=?)) "
-        )
-        params = (process_id, effective_date, effective_date, effective_date, effective_date)
+            "effective_from,effective_to,status FROM work_time_standards "
+            "WHERE process_id=? AND status='active' ORDER BY version DESC,id DESC", (process_id,),
+        ).fetchall()]
 
-        if product_id is not None:
-            product_condition = "product_id=?"
-            product_params = (product_id,)
-        elif product_code:
-            product_condition = "product_id IS NULL AND product_code=?"
-            product_params = (product_code,)
-        else:
-            product_condition = "0=1"
-            product_params = ()
-        generic_condition = "COALESCE(product_id,0)=0 AND COALESCE(product_code,'')=''"
-
-        scopes = []
-        if route_version_id and process_version_id:
-            scopes.append((
-                "route_version",
-                "AND route_version_id=? AND process_version_id=?",
-                (route_version_id, process_version_id),
-            ))
-        if route_id:
-            scopes.append((
-                "route",
-                "AND route_id=? AND (route_version_id IS NULL OR route_version_id=?)",
-                (route_id, route_version_id),
-            ))
-        scopes.append((
-            "process",
-            "AND route_id IS NULL AND route_version_id IS NULL "
-            "AND (process_version_id IS NULL OR process_version_id=?)",
-            (process_version_id,),
-        ))
-
-        # Product-specific standards always win over generic standards, even
-        # when the generic row is scoped to a more specific route revision.
-        # This makes the business rule deterministic: exact product first,
-        # then generic; scope specificity only breaks ties within a class.
-        for match_kind, condition, condition_params in (
-            ("product", product_condition, product_params),
-            ("generic", generic_condition, ()),
-        ):
-            for level, relation, relation_params in scopes:
-                candidate = db.execute(
-                    base.format(scope=f"'{level}:{match_kind}'") + relation + " AND " + condition +
-                    " ORDER BY version DESC,id DESC LIMIT 1",
-                    params + relation_params + condition_params,
-                ).fetchone()
-                if candidate:
-                    return candidate
-        return None
     @staticmethod
     def find_execution_policy(route_version_id, process_version_id, db):
         if not route_version_id or not process_version_id:
@@ -881,6 +854,18 @@ class SchedulePlanningRepository:
             ).fetchone()
         except sqlite3.OperationalError:
             return None
+    @staticmethod
+    def list_calendar_exceptions(calendar_id, db=None):
+        """Return immutable calendar exception facts for pure planning."""
+        db = resolve_db(db)
+        try:
+            return db.execute(
+                "SELECT * FROM schedule_calendar_exceptions WHERE calendar_id=? "
+                "ORDER BY work_date,id",
+                (calendar_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
     @staticmethod
     def list_calendars(db=None):
         db = resolve_db(db)

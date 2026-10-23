@@ -239,4 +239,91 @@ describe('shipment composables', () => {
     expect(printDocument.close).toHaveBeenCalledTimes(1)
     open.mockRestore()
   })
+
+  it('searches inventory on the server when the item keyword changes', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.listInventory.mockResolvedValue({
+        items: [{
+          id: 59,
+          product_model: '外壳-SB81-JY-360-20-折弯款',
+          product_name: '外壳',
+          order_no: '26070805',
+          quantity: 7,
+        }],
+      })
+      const editor = useShipmentEditor({ reload: vi.fn() })
+      editor.addItem()
+      editor.updateItemSearch(0, '26070805')
+
+      await vi.advanceTimersByTimeAsync(250)
+
+      expect(mocks.listInventory).toHaveBeenCalledWith({ keyword: '26070805', limit: 50 })
+      expect(editor.items.value[0]._options).toHaveLength(1)
+      expect(editor.items.value[0]._options[0].order_no).toBe('26070805')
+      expect(editor.items.value[0]._loading).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not hit the network for an empty keyword and clears stale options', async () => {
+    vi.useFakeTimers()
+    try {
+      const editor = useShipmentEditor({ reload: vi.fn() })
+      editor.addItem()
+      editor.items.value[0]._options = [{ id: 1 }]
+      editor.updateItemSearch(0, '   ')
+
+      await vi.advanceTimersByTimeAsync(300)
+
+      expect(mocks.listInventory).not.toHaveBeenCalled()
+      expect(editor.items.value[0]._options).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores a stale inventory search response', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = { promise: null, resolve: null }
+      first.promise = new Promise((resolve) => { first.resolve = resolve })
+      const second = { promise: null, resolve: null }
+      second.promise = new Promise((resolve) => { second.resolve = resolve })
+      mocks.listInventory
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise)
+      const editor = useShipmentEditor({ reload: vi.fn() })
+      editor.addItem()
+
+      editor.updateItemSearch(0, 'OLD')
+      await vi.advanceTimersByTimeAsync(250)
+      editor.updateItemSearch(0, '26070805')
+      await vi.advanceTimersByTimeAsync(250)
+
+      second.resolve({ items: [{ id: 59, order_no: '26070805' }] })
+      await vi.advanceTimersByTimeAsync(0)
+      first.resolve({ items: [{ id: 1, order_no: 'OLD' }] })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(editor.items.value[0]._options).toEqual([{ id: 59, order_no: '26070805' }])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears search state after selecting an inventory row', () => {
+    const editor = useShipmentEditor({ reload: vi.fn() })
+    editor.addItem()
+    editor.items.value[0]._options = [{ id: 59 }]
+    editor.updateItemSearch(0, '26070805')
+
+    editor.selectInventory(0, { id: 59, product_model: 'MODEL', product_name: '外壳', unit: '件' })
+
+    expect(editor.items.value[0].inventory_id).toBe(59)
+    expect(editor.items.value[0]._search).toBe('')
+    expect(editor.items.value[0]._options).toBeNull()
+    expect(editor.items.value[0]._loading).toBe(false)
+  })
 })
