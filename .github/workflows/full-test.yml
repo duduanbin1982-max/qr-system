@@ -64,6 +64,7 @@ jobs:
       - name: Run full test matrix
         env:
           FULL_TEST_ARTIFACT_DIR: test-results/full-${{ matrix.os }}
+          E2E_DB_PATH: ${{ runner.temp }}/qr_system_e2e.db
         run: npm run test:full
 
       - name: Upload test evidence
