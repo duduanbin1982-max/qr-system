@@ -459,9 +459,10 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
 
   // The fixture records the POST as soon as it is received, while the UI still
   // has to finish loading the batch and emit the publication refresh event.
-  // Wait for the user-visible completion signal before closing the workbench;
-  // otherwise a slower runner can unmount it before the route refresh starts.
-  await expect(page.locator('.toast')).toContainText('主数据批次已原子发布')
+  // Windows runners can take longer to finish that async refresh, so wait for
+  // the user-visible completion signal instead of sampling the previous submit
+  // toast after the request capture has already fired.
+  await expect(page.locator('.toast')).toContainText('主数据批次已原子发布', { timeout: 15_000 })
   await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
   await releaseModal.getByRole('button', { name: '关闭' }).click()
   await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
