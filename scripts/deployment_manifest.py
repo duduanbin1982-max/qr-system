@@ -19,6 +19,8 @@ MANAGED_ATTACHMENT_ROOTS = (
     PurePosixPath("uploads/employee_docs"),
 )
 MANAGED_RELEASE_ROOTS = (PurePosixPath("public/static"),)
+PUBLIC_STATIC_DIRECTORY_MODE = 0o755
+PUBLIC_STATIC_FILE_MODE = 0o644
 
 BACKUP_SCHEMA_V1 = "qr-system-backup-evidence/v1"
 BACKUP_SCHEMA = "qr-system-backup-evidence/v2"
@@ -1206,10 +1208,34 @@ def restore_archive(archive_path, project_root, managed_roots):
                 shutil.rmtree(managed)
         for member in members:
             target = project_root.joinpath(*PurePosixPath(member.name).parts)
+            is_public_static = PurePosixPath(member.name).parts[:2] == (
+                "public",
+                "static",
+            )
             if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
+                target.mkdir(
+                    mode=(
+                        PUBLIC_STATIC_DIRECTORY_MODE
+                        if is_public_static
+                        else member.mode & 0o777
+                    ),
+                    parents=True,
+                    exist_ok=True,
+                )
+                if is_public_static:
+                    target.chmod(PUBLIC_STATIC_DIRECTORY_MODE)
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
+            target.parent.mkdir(
+                mode=(
+                    PUBLIC_STATIC_DIRECTORY_MODE
+                    if is_public_static
+                    else 0o777
+                ),
+                parents=True,
+                exist_ok=True,
+            )
+            if is_public_static:
+                target.parent.chmod(PUBLIC_STATIC_DIRECTORY_MODE)
             source = archive.extractfile(member)
             if source is None:
                 raise RuntimeError(
@@ -1220,7 +1246,11 @@ def restore_archive(archive_path, project_root, managed_roots):
                 with source, temporary.open("wb") as destination:
                     shutil.copyfileobj(source, destination)
                 try:
-                    temporary.chmod(member.mode & 0o777)
+                    temporary.chmod(
+                        PUBLIC_STATIC_FILE_MODE
+                        if is_public_static
+                        else member.mode & 0o777
+                    )
                 except OSError:
                     pass
                 os.replace(temporary, target)

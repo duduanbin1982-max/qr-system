@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tarfile
@@ -537,6 +538,83 @@ def test_swapped_out_static_tree_matches_verified_archive_inventory(tmp_path):
     _write(exchanged / "assets/app.js", "window.changed = true;\n")
     with pytest.raises(RuntimeError, match="differs from its verified backup"):
         release.verify_static_backup(exchanged, archive)
+
+
+def test_static_archive_normalizes_public_file_mode_in_tar(tmp_path):
+    source = tmp_path / "source"
+    file_path = source / "assets" / "app.js"
+    _write(file_path, "window.release = true;\n")
+    _write(source / "index.html", "<html></html>\n")
+    if os.name != "nt":
+        file_path.chmod(0o600)
+
+    archive = tmp_path / "release.tar.gz"
+    release.create_static_archive(source, archive)
+
+    with tarfile.open(archive, "r:gz") as tar:
+        members = tar.getmembers()
+        assert [member.name for member in members] == [
+            "public/static/assets/app.js",
+            "public/static/index.html",
+        ]
+        assert all(member.mode == release.STATIC_FILE_MODE for member in members)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode semantics are required")
+def test_static_extract_normalizes_tree_modes_under_restrictive_umask(tmp_path):
+    source = tmp_path / "source"
+    file_path = source / "assets" / "app.js"
+    _write(file_path, "window.release = true;\n")
+    _write(source / "index.html", "<html></html>\n")
+    source.chmod(0o700)
+    (source / "assets").chmod(0o700)
+    file_path.chmod(0o600)
+    archive = tmp_path / "release.tar.gz"
+    release.create_static_archive(source, archive)
+
+    destination = tmp_path / "staged"
+    previous_umask = os.umask(0o077)
+    try:
+        release.extract_target_static(archive, destination)
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(destination.stat().st_mode) == release.STATIC_DIRECTORY_MODE
+    assert stat.S_IMODE((destination / "assets").stat().st_mode) == release.STATIC_DIRECTORY_MODE
+    assert stat.S_IMODE(file_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE((destination / "assets" / "app.js").stat().st_mode) == release.STATIC_FILE_MODE
+    assert release.static_directory_inventory(destination)["files"] == release.static_directory_inventory(source)["files"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode semantics are required")
+def test_static_restore_normalizes_tree_modes_under_restrictive_umask(tmp_path):
+    source = tmp_path / "source"
+    file_path = source / "assets" / "app.js"
+    _write(file_path, "window.release = true;\n")
+    _write(source / "index.html", "<html></html>\n")
+    source.chmod(0o700)
+    (source / "assets").chmod(0o700)
+    file_path.chmod(0o600)
+    archive = tmp_path / "release.tar.gz"
+    release.create_static_archive(source, archive)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    previous_umask = os.umask(0o077)
+    try:
+        deployment_manifest.restore_archive(
+            archive,
+            project,
+            deployment_manifest.MANAGED_RELEASE_ROOTS,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    restored = project / "public" / "static"
+    assert stat.S_IMODE(restored.stat().st_mode) == 0o755
+    assert stat.S_IMODE((restored / "assets").stat().st_mode) == 0o755
+    assert stat.S_IMODE((restored / "assets" / "app.js").stat().st_mode) == 0o644
+    assert release.static_directory_inventory(restored)["files"] == release.static_directory_inventory(source)["files"]
 
 
 def test_static_release_shell_keeps_migrations_out_of_path_and_uses_isolated_build(tmp_path):
