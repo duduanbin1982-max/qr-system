@@ -592,6 +592,15 @@ def test_static_extract_normalizes_tree_modes_under_restrictive_umask(tmp_path):
     assert release.static_directory_inventory(destination)["files"] == release.static_directory_inventory(source)["files"]
 
 
+def test_static_extract_rejects_destination_outside_public_root(tmp_path):
+    with pytest.raises(RuntimeError, match="must be under public"):
+        release.extract_target_static(
+            tmp_path / "missing.tar.gz",
+            tmp_path / "unmanaged" / "staged",
+        )
+    assert not (tmp_path / "unmanaged").exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode semantics are required")
 def test_static_restore_normalizes_tree_modes_under_restrictive_umask(tmp_path):
     source = tmp_path / "source"

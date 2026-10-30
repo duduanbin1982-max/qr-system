@@ -298,6 +298,8 @@ def extract_target_static(archive_path, destination):
     destination = Path(destination)
     if ".." in destination.parts:
         raise RuntimeError("static staging destination cannot contain parent traversal")
+    if destination.parent.name != "public" or not destination.parent.is_dir():
+        raise RuntimeError("static staging destination must be under public")
     parent = destination.absolute().parent
     cursor = parent
     while cursor != cursor.parent:
