@@ -19,6 +19,8 @@ MANAGED_ATTACHMENT_ROOTS = (
     PurePosixPath("uploads/employee_docs"),
 )
 MANAGED_RELEASE_ROOTS = (PurePosixPath("public/static"),)
+PUBLIC_STATIC_DIRECTORY_MODE = 0o755
+PUBLIC_STATIC_FILE_MODE = 0o644
 
 BACKUP_SCHEMA_V1 = "qr-system-backup-evidence/v1"
 BACKUP_SCHEMA = "qr-system-backup-evidence/v2"
@@ -901,6 +903,29 @@ def safe_tar_members(archive, allowed_roots):
     return members
 
 
+def normalize_directory_chain(directory, root, mode):
+    directory = Path(directory)
+    root = Path(root)
+    try:
+        relative = directory.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"directory normalization path escapes root: {directory}"
+        ) from exc
+    if ".." in relative.parts:
+        raise RuntimeError(f"directory normalization path escapes root: {directory}")
+
+    chain = [root]
+    current = root
+    for part in relative.parts:
+        current = current / part
+        chain.append(current)
+    for current in chain:
+        if current.is_symlink() or not current.is_dir():
+            raise RuntimeError(f"directory normalization path is unsafe: {current}")
+        current.chmod(mode)
+
+
 def acquire_write_fence(args):
     path = _resolve_without_symlinks(args.path)
     payload = {
@@ -1184,6 +1209,7 @@ def capture_failure_state(manifest_path, database, project_root):
 
 
 def restore_archive(archive_path, project_root, managed_roots):
+    public_root = project_root / "public"
     managed_paths = [
         (project_root / Path(*root.parts)).resolve() for root in managed_roots
     ]
@@ -1206,10 +1232,42 @@ def restore_archive(archive_path, project_root, managed_roots):
                 shutil.rmtree(managed)
         for member in members:
             target = project_root.joinpath(*PurePosixPath(member.name).parts)
+            is_public_static = PurePosixPath(member.name).parts[:2] == (
+                "public",
+                "static",
+            )
             if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
+                target.mkdir(
+                    mode=(
+                        PUBLIC_STATIC_DIRECTORY_MODE
+                        if is_public_static
+                        else 0o777
+                    ),
+                    parents=True,
+                    exist_ok=True,
+                )
+                if is_public_static:
+                    normalize_directory_chain(
+                        target,
+                        public_root,
+                        PUBLIC_STATIC_DIRECTORY_MODE,
+                    )
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
+            target.parent.mkdir(
+                mode=(
+                    PUBLIC_STATIC_DIRECTORY_MODE
+                    if is_public_static
+                    else 0o777
+                ),
+                parents=True,
+                exist_ok=True,
+            )
+            if is_public_static:
+                normalize_directory_chain(
+                    target.parent,
+                    public_root,
+                    PUBLIC_STATIC_DIRECTORY_MODE,
+                )
             source = archive.extractfile(member)
             if source is None:
                 raise RuntimeError(
@@ -1220,7 +1278,11 @@ def restore_archive(archive_path, project_root, managed_roots):
                 with source, temporary.open("wb") as destination:
                     shutil.copyfileobj(source, destination)
                 try:
-                    temporary.chmod(member.mode & 0o777)
+                    temporary.chmod(
+                        PUBLIC_STATIC_FILE_MODE
+                        if is_public_static
+                        else member.mode & 0o777
+                    )
                 except OSError:
                     pass
                 os.replace(temporary, target)

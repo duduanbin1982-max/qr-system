@@ -11,7 +11,15 @@ from pathlib import Path, PurePosixPath
 
 from scripts import code_only_release, deployment_manifest
 from scripts.deployment_manifest import sqlite_evidence
-from scripts.deployment_manifest import MANAGED_RELEASE_ROOTS, safe_tar_members
+from scripts.deployment_manifest import (
+    MANAGED_RELEASE_ROOTS,
+    normalize_directory_chain,
+    safe_tar_members,
+)
+
+
+STATIC_DIRECTORY_MODE = 0o755
+STATIC_FILE_MODE = 0o644
 
 
 ALLOWED_ROOTS = {"modules", "frontend", "tests", "docs"}
@@ -290,6 +298,8 @@ def extract_target_static(archive_path, destination):
     destination = Path(destination)
     if ".." in destination.parts:
         raise RuntimeError("static staging destination cannot contain parent traversal")
+    if destination.parent.name != "public" or not destination.parent.is_dir():
+        raise RuntimeError("static staging destination must be under public")
     parent = destination.absolute().parent
     cursor = parent
     while cursor != cursor.parent:
@@ -298,7 +308,8 @@ def extract_target_static(archive_path, destination):
         cursor = cursor.parent
     if destination.exists() or destination.is_symlink():
         raise RuntimeError("static staging destination already exists or is unsafe")
-    destination.mkdir(mode=0o755, parents=False)
+    destination.mkdir(mode=STATIC_DIRECTORY_MODE, parents=False)
+    destination.chmod(STATIC_DIRECTORY_MODE)
     try:
         with tarfile.open(archive_path, "r:gz") as archive:
             members = safe_tar_members(archive, MANAGED_RELEASE_ROOTS)
@@ -309,15 +320,33 @@ def extract_target_static(archive_path, destination):
                     raise RuntimeError("static archive path is outside public/static")
                 target = destination / relative
                 if member.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
+                    target.mkdir(
+                        mode=STATIC_DIRECTORY_MODE,
+                        parents=True,
+                        exist_ok=True,
+                    )
+                    normalize_directory_chain(
+                        target,
+                        destination.parent,
+                        STATIC_DIRECTORY_MODE,
+                    )
                     continue
-                target.parent.mkdir(parents=True, exist_ok=True)
+                target.parent.mkdir(
+                    mode=STATIC_DIRECTORY_MODE,
+                    parents=True,
+                    exist_ok=True,
+                )
+                normalize_directory_chain(
+                    target.parent,
+                    destination.parent,
+                    STATIC_DIRECTORY_MODE,
+                )
                 source = archive.extractfile(member)
                 if source is None:
                     raise RuntimeError(f"static archive entry cannot be read: {member.name}")
                 with source, target.open("xb") as output:
                     output.write(source.read())
-                target.chmod(member.mode & 0o755)
+                target.chmod(STATIC_FILE_MODE)
         if not (destination / "index.html").is_file():
             raise RuntimeError("built static release is missing index.html")
         return str(destination)
@@ -381,7 +410,7 @@ def create_static_archive(source_directory, archive_path):
             relative = item.relative_to(source).as_posix()
             member = tarfile.TarInfo(f"public/static/{relative}")
             member.size = item.stat().st_size
-            member.mode = item.stat().st_mode & 0o755
+            member.mode = STATIC_FILE_MODE
             member.mtime = int(item.stat().st_mtime)
             with item.open("rb") as content:
                 archive.addfile(member, content)

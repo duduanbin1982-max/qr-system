@@ -439,6 +439,10 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
   })
   await releaseModal.getByRole('button', { name: '提交审批' }).click()
   await expect.poll(() => state.captures.submittedBatch?.row_version).toBe(0)
+  // The request capture fires before the async refresh and success toast.
+  // Wait for that handler to finish before starting the approval operation;
+  // otherwise a slower Windows runner can publish the stale submit toast last.
+  await expect(page.locator('.toast')).toContainText('发布批次已提交审批', { timeout: 15_000 })
 
   const disposition = releaseModal.locator('.disposition-row').first()
   await disposition.locator('select').first().selectOption('price_version')
@@ -459,9 +463,10 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
 
   // The fixture records the POST as soon as it is received, while the UI still
   // has to finish loading the batch and emit the publication refresh event.
-  // Wait for the user-visible completion signal before closing the workbench;
-  // otherwise a slower runner can unmount it before the route refresh starts.
-  await expect(page.locator('.toast')).toContainText('主数据批次已原子发布')
+  // Windows runners can take longer to finish that async refresh, so wait for
+  // the user-visible completion signal instead of sampling the previous submit
+  // toast after the request capture has already fired.
+  await expect(page.locator('.toast')).toContainText('主数据批次已原子发布', { timeout: 15_000 })
   await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
   await releaseModal.getByRole('button', { name: '关闭' }).click()
   await expect(routeDetail.getByRole('button', { name: '当前版本 V2' })).toBeVisible()
