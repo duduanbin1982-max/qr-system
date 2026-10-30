@@ -439,6 +439,10 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
   })
   await releaseModal.getByRole('button', { name: '提交审批' }).click()
   await expect.poll(() => state.captures.submittedBatch?.row_version).toBe(0)
+  // The request capture fires before the async refresh and success toast.
+  // Wait for that handler to finish before starting the approval operation;
+  // otherwise a slower Windows runner can publish the stale submit toast last.
+  await expect(page.locator('.toast')).toContainText('发布批次已提交审批', { timeout: 15_000 })
 
   const disposition = releaseModal.locator('.disposition-row').first()
   await disposition.locator('select').first().selectOption('price_version')
