@@ -635,6 +635,51 @@ def test_static_restore_normalizes_tree_modes_under_restrictive_umask(tmp_path):
     assert release.static_directory_inventory(restored)["files"] == release.static_directory_inventory(source)["files"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode semantics are required")
+@pytest.mark.parametrize("directory_mode", [0o555, 0o500])
+def test_attachment_restore_keeps_directories_writable_and_file_mode_unchanged(
+    tmp_path, directory_mode
+):
+    source = tmp_path / "source"
+    attachment_root = source / "data" / "attachments"
+    file_path = attachment_root / "nested" / "document.txt"
+    _write(file_path, "protected attachment\n")
+    file_path.chmod(0o600)
+    archive = tmp_path / "attachments.tar.gz"
+
+    def readonly_directory(member):
+        if member.isdir():
+            member.mode = directory_mode
+        return member
+
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(
+            attachment_root,
+            arcname="data/attachments",
+            filter=readonly_directory,
+        )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    previous_umask = os.umask(0o077)
+    try:
+        deployment_manifest.restore_archive(
+            archive,
+            project,
+            deployment_manifest.MANAGED_ATTACHMENT_ROOTS,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    restored_root = project / "data" / "attachments"
+    restored_file = restored_root / "nested" / "document.txt"
+    assert stat.S_IMODE(restored_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE((restored_root / "nested").stat().st_mode) == 0o700
+    assert stat.S_IMODE(restored_file.stat().st_mode) == 0o600
+    assert restored_file.read_bytes() == file_path.read_bytes()
+    assert not (project / "public").exists()
+
+
 def test_static_release_shell_keeps_migrations_out_of_path_and_uses_isolated_build(tmp_path):
     root = Path(__file__).resolve().parents[1]
     script = (root / "scripts/deploy-backend-frontend-static.sh").read_text(encoding="utf-8")

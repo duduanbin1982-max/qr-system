@@ -1241,7 +1241,7 @@ def restore_archive(archive_path, project_root, managed_roots):
                     mode=(
                         PUBLIC_STATIC_DIRECTORY_MODE
                         if is_public_static
-                        else member.mode & 0o777
+                        else 0o777
                     ),
                     parents=True,
                     exist_ok=True,
