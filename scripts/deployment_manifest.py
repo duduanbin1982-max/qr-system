@@ -903,6 +903,29 @@ def safe_tar_members(archive, allowed_roots):
     return members
 
 
+def normalize_directory_chain(directory, root, mode):
+    directory = Path(directory)
+    root = Path(root)
+    try:
+        relative = directory.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"directory normalization path escapes root: {directory}"
+        ) from exc
+    if ".." in relative.parts:
+        raise RuntimeError(f"directory normalization path escapes root: {directory}")
+
+    chain = [root]
+    current = root
+    for part in relative.parts:
+        current = current / part
+        chain.append(current)
+    for current in chain:
+        if current.is_symlink() or not current.is_dir():
+            raise RuntimeError(f"directory normalization path is unsafe: {current}")
+        current.chmod(mode)
+
+
 def acquire_write_fence(args):
     path = _resolve_without_symlinks(args.path)
     payload = {
@@ -1186,6 +1209,7 @@ def capture_failure_state(manifest_path, database, project_root):
 
 
 def restore_archive(archive_path, project_root, managed_roots):
+    public_root = project_root / "public"
     managed_paths = [
         (project_root / Path(*root.parts)).resolve() for root in managed_roots
     ]
@@ -1223,7 +1247,11 @@ def restore_archive(archive_path, project_root, managed_roots):
                     exist_ok=True,
                 )
                 if is_public_static:
-                    target.chmod(PUBLIC_STATIC_DIRECTORY_MODE)
+                    normalize_directory_chain(
+                        target,
+                        public_root,
+                        PUBLIC_STATIC_DIRECTORY_MODE,
+                    )
                 continue
             target.parent.mkdir(
                 mode=(
@@ -1235,7 +1263,11 @@ def restore_archive(archive_path, project_root, managed_roots):
                 exist_ok=True,
             )
             if is_public_static:
-                target.parent.chmod(PUBLIC_STATIC_DIRECTORY_MODE)
+                normalize_directory_chain(
+                    target.parent,
+                    public_root,
+                    PUBLIC_STATIC_DIRECTORY_MODE,
+                )
             source = archive.extractfile(member)
             if source is None:
                 raise RuntimeError(

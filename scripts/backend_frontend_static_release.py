@@ -11,7 +11,11 @@ from pathlib import Path, PurePosixPath
 
 from scripts import code_only_release, deployment_manifest
 from scripts.deployment_manifest import sqlite_evidence
-from scripts.deployment_manifest import MANAGED_RELEASE_ROOTS, safe_tar_members
+from scripts.deployment_manifest import (
+    MANAGED_RELEASE_ROOTS,
+    normalize_directory_chain,
+    safe_tar_members,
+)
 
 
 STATIC_DIRECTORY_MODE = 0o755
@@ -319,14 +323,22 @@ def extract_target_static(archive_path, destination):
                         parents=True,
                         exist_ok=True,
                     )
-                    target.chmod(STATIC_DIRECTORY_MODE)
+                    normalize_directory_chain(
+                        target,
+                        destination.parent,
+                        STATIC_DIRECTORY_MODE,
+                    )
                     continue
                 target.parent.mkdir(
                     mode=STATIC_DIRECTORY_MODE,
                     parents=True,
                     exist_ok=True,
                 )
-                target.parent.chmod(STATIC_DIRECTORY_MODE)
+                normalize_directory_chain(
+                    target.parent,
+                    destination.parent,
+                    STATIC_DIRECTORY_MODE,
+                )
                 source = archive.extractfile(member)
                 if source is None:
                     raise RuntimeError(f"static archive entry cannot be read: {member.name}")
