@@ -41,6 +41,28 @@ PINNED_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "d61b9b957ed6d1e88a0ba9afcffb7db3a3cdd877"),
     ),
 }
+# PR #134 support files accompany this exact business release only. The
+# independently reviewed tool update remains outside the production target.
+PAYROLL_SUPPORT_BASELINE = "df7a6e398ab82eef02160d1efd143e1676d3db08"
+PAYROLL_SUPPORT_TARGET = "a1bdb0a4fa3d6aec1139a8db1e2f72707646f1ef"
+PINNED_PAYROLL_SUPPORT_TRANSITIONS = {
+    "frontend/tests/e2e/payroll-audit-regressions.spec.js": (
+        None,
+        ("100644", "blob", "ed6750eb656cfcb1a629a574fdfc5f4cf96f8001"),
+    ),
+    "frontend/tests/unit/payroll-audit-behavior.spec.js": (
+        None,
+        ("100644", "blob", "2702ffd5f36046d77f0bcadffb99083f189c9cc4"),
+    ),
+    "frontend/tests/unit/task2d-wage-layers.spec.js": (
+        ("100644", "blob", "cfbac7e5c500dbdd35cbd2492eee14d97a8ea535"),
+        ("100644", "blob", "b6feeff88072b824641f51a14bc29678699f27bc"),
+    ),
+    "scripts/bootstrap_task132_release_control.py": (
+        None,
+        ("100644", "blob", "4651cd756bd9f162c444e8c918ecc09d209f15f0"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -110,9 +132,14 @@ def _tree_entry(repository, commit, path):
 
 
 def _validate_support_transition(repository, before, target, path):
-    if before != SUPPORT_BASELINE:
-        raise RuntimeError(f"support exception requires the reviewed baseline: {path}")
-    expected_before, expected_target = PINNED_SUPPORT_TRANSITIONS[path]
+    if path in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
+        if (before, target) != (PAYROLL_SUPPORT_BASELINE, PAYROLL_SUPPORT_TARGET):
+            raise RuntimeError(f"payroll support exception requires the reviewed baseline and target: {path}")
+        expected_before, expected_target = PINNED_PAYROLL_SUPPORT_TRANSITIONS[path]
+    else:
+        if before != SUPPORT_BASELINE:
+            raise RuntimeError(f"support exception requires the reviewed baseline: {path}")
+        expected_before, expected_target = PINNED_SUPPORT_TRANSITIONS[path]
     if (
         _tree_entry(repository, before, path) != expected_before
         or _tree_entry(repository, target, path) != expected_target
@@ -134,7 +161,7 @@ def _validate_paths(repository, before, target, changed):
             raise RuntimeError(f"release contains a path outside backend/frontend scope: {path}")
         if target_path.is_symlink():
             raise RuntimeError(f"release cannot change a symlinked path: {path}")
-        if normalized in PINNED_SUPPORT_TRANSITIONS:
+        if normalized in PINNED_SUPPORT_TRANSITIONS or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
             _validate_support_transition(repository, before, target, normalized)
             continue
         if parts[0] not in ALLOWED_ROOTS:
