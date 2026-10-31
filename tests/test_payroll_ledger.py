@@ -227,8 +227,10 @@ def test_missing_price_requires_exception_and_dual_approval(client):
         })
         with pytest.raises(ValueError, match="不同"):
             PayrollWorkflowService.approve_exception(exception_id, preparer)
-        PayrollWorkflowService.approve_exception(exception_id, approver)
-        regenerated = PayrollWorkflowService.regenerate(batch["id"], preparer, batch["row_version"])
+        approval = PayrollWorkflowService.approve_exception(exception_id, approver)
+        regenerated = PayrollWorkflowService.regenerate(
+            batch["id"], preparer, approval["batch_row_version"]
+        )
         assert regenerated["status"] == "draft"
         assert regenerated["payable_wage_cents"] == 300
 
@@ -339,7 +341,7 @@ def test_manual_rework_rate_resolution_persists_into_revision(client):
                 "resolution_reason": "按已审批返工倍率 50%",
             },
         )
-        PayrollWorkflowService.approve_exception(exception["id"], approver)
+        approval = PayrollWorkflowService.approve_exception(exception["id"], approver)
         resolution = db.execute(
             "SELECT * FROM payroll_work_price_resolutions WHERE work_record_id=?",
             (exception["work_record_id"],),
@@ -348,7 +350,7 @@ def test_manual_rework_rate_resolution_persists_into_revision(client):
         assert resolution["override_rework_rate_basis_points"] == 5000
 
         regenerated = PayrollWorkflowService.regenerate(
-            batch["id"], preparer, batch["row_version"]
+            batch["id"], preparer, approval["batch_row_version"]
         )
         assert regenerated["status"] == "draft"
         assert regenerated["payable_wage_cents"] == 188

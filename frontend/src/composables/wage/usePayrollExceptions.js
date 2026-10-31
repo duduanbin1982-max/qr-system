@@ -73,7 +73,7 @@ export function usePayrollExceptions() {
   async function approve(item) {
     if (!window.confirm('批准后将形成不可变的报工价格解析，是否继续？')) return
     working.value=true
-    try { await api.domains.wages.approvePayrollException(item.id); showToast('异常方案已批准'); await load() }
+    try { await api.domains.wages.approvePayrollException(item.id); showToast('异常方案已批准，请返回台账重算'); await load() }
     catch (error) { showToast(error.message || '批准失败','error') }
     finally { working.value=false }
   }

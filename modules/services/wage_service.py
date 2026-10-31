@@ -1,5 +1,8 @@
 """qr-system — 工资计算 + 日报 + 生产进度 Service 层"""
 import json
+from decimal import Decimal
+
+from modules.domain.payroll_policy import work_amount_cents
 from modules.services import BaseService
 from modules.repositories.wage_repository import WageRepository
 
@@ -21,7 +24,11 @@ class WageService:
             wr_where_parts.append('wr.created_at <= ?'); wr_params.append(date_to + ' 23:59:59')
         wr_where = ' AND '.join(wr_where_parts)
 
-        user_rows, total = WageRepository.get_worker_paged_by_role(employee_id, page=page, limit=limit)
+        user_rows, total = WageRepository.get_worker_paged_by_role(
+            employee_id, page=page, limit=limit,
+            matching_work_where=wr_where if hide_zero else "",
+            matching_work_params=wr_params if hide_zero else None,
+        )
         user_map = {row['id']: {'employee_name': row['name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': row['position_name'] or ''} for row in user_rows}
         user_ids = list(user_map.keys())
         if not user_ids:
@@ -29,18 +36,31 @@ class WageService:
 
         rows = WageRepository.get_wage_rows_for_workers(wr_where, wr_params, user_ids)
         wages = {}
+        wage_totals_cents = {}
         for uid, info in user_map.items():
             wages[uid] = {'employee_id': uid, 'employee_name': info['employee_name'], 'employee_no': info['employee_no'], 'position_name': info['position_name'], 'total_quantity': 0, 'total_wage': 0, 'details': []}
+            wage_totals_cents[uid] = 0
         for row in rows:
             emp_id = row['user_id']
             if row['wr_id'] is not None:
                 qty = row['quantity'] or 0
                 up = row['unit_price'] or 0
-                wage = qty * up
+                price_match_reason = row['price_match_reason'] or '未匹配到工价'
+                try:
+                    rate = None
+                    if row['work_type'] == 'rework':
+                        if row['rework_rate_configured'] != 1 or row['rework_rate_basis_points'] is None:
+                            raise ValueError("未配置返工倍率")
+                        rate = row['rework_rate_basis_points']
+                    wage_cents = work_amount_cents(qty, row['unit_price_micros'], rate)
+                except (ValueError, TypeError, OverflowError) as exc:
+                    wage_cents = 0
+                    price_match_reason = f"{exc}，未计入估算"
                 if emp_id not in wages:
                     wages[emp_id] = {'employee_id': emp_id, 'employee_name': row['employee_name'] or 'unknown', 'employee_no': row['employee_no'] or '', 'position_name': '', 'total_quantity': 0, 'total_wage': 0, 'details': []}
+                    wage_totals_cents[emp_id] = 0
                 wages[emp_id]['total_quantity'] += qty
-                wages[emp_id]['total_wage'] += wage
+                wage_totals_cents[emp_id] += wage_cents
                 wages[emp_id]['details'].append({
                     'date': row['created_at'],
                     'order_no': row['order_no'] or '',
@@ -49,14 +69,13 @@ class WageService:
                     'process_name': row['process_name'],
                     'quantity': qty,
                     'unit_price': up,
-                    'wage': wage,
+                    'wage': wage_cents / 100,
                     'price_version_id': row['price_version_id'],
                     'price_source': row['price_source'] or 'missing',
-                    'price_match_reason': row['price_match_reason'] or '未匹配到工价',
+                    'price_match_reason': price_match_reason,
                 })
-        if hide_zero:
-            wages = {uid: w for uid, w in wages.items() if w['total_quantity'] > 0}
-            total = len(wages)
+        for uid, wage in wages.items():
+            wage['total_wage'] = wage_totals_cents[uid] / 100
         return {'wages': list(wages.values()), 'total': total, 'page': page, 'limit': limit}
 
     @staticmethod
@@ -113,11 +132,11 @@ class WageService:
     def process_wage_summary(year_month):
         """按工序维度的工资汇总（用于分析各工序工资支出）。"""
         rows = WageRepository.get_process_wage_summary(year_month)
-        grand_total = sum(r['total_wage'] or 0 for r in rows)
+        grand_total_cents = sum(int(Decimal(str(r['total_wage'] or 0)) * 100) for r in rows)
         return {
             'year_month': year_month,
             'summary': [dict(r) for r in rows],
-            'grand_total_wage': grand_total,
+            'grand_total_wage': grand_total_cents / 100,
         }
 
     # -- P0: snapshots --
@@ -228,8 +247,8 @@ class WageService:
     @staticmethod
     def position_summary(year_month):
         rows = WageRepository.get_position_summary(year_month)
-        grand_total = sum(r["total_wage"] or 0 for r in rows)
-        return {"year_month": year_month, "summary": [dict(r) for r in rows], "grand_total_wage": grand_total}
+        grand_total_cents = sum(int(Decimal(str(r["total_wage"] or 0)) * 100) for r in rows)
+        return {"year_month": year_month, "summary": [dict(r) for r in rows], "grand_total_wage": grand_total_cents / 100}
 
     @staticmethod
     def wage_prediction(months=6):

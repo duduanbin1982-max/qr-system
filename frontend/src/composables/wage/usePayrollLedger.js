@@ -44,7 +44,7 @@ export function usePayrollLedger() {
 
   function editable(batch) { return ['draft', 'exceptions_pending'].includes(batch.status) && !batch.legacy_imported }
 
-  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported }
+  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported && !batch.input_changed }
 
   function idempotency(prefix) { return `${prefix}:${Date.now()}:${Math.random().toString(16).slice(2)}` }
 
@@ -76,7 +76,13 @@ export function usePayrollLedger() {
 
   function regenerate(batch) { return act(() => api.domains.wages.regeneratePayrollBatch(batch.id, batch.row_version), '批次已重算') }
 
-  function submit(batch) { return act(() => api.domains.wages.submitPayrollBatch(batch.id, batch.row_version), '批次已提交复核') }
+  function submit(batch) {
+    if (!canSubmit(batch)) {
+      showToast(batch.input_changed ? '输入已变化，请重算后提交' : '当前批次不可提交', 'error')
+      return
+    }
+    return act(() => api.domains.wages.submitPayrollBatch(batch.id, batch.row_version), '批次已提交复核')
+  }
 
   function lock(batch) { return act(() => api.domains.wages.lockPayrollBatch(batch.id, batch.row_version), '批次已锁定') }
 

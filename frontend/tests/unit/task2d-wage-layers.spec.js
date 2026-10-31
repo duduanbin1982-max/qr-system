@@ -167,7 +167,7 @@ describe('Task 2D exact pricing and navigation consumers', () => {
     await flushPromises()
     expect(mocks.wages.getRoutePriceVersionReference).not.toHaveBeenCalled()
     reader.unmount()
-    mocks.permissions.add('wages:view_all')
+    mocks.permissions.add('wages:prepare')
     mocks.wages.getRoutePriceVersionReference.mockResolvedValue({ items: [{ route_version_id: 81, process_version_id: 71 }, { route_version_id: 82, process_version_id: 71 }] })
     mocks.wages.listRoutePriceVersions.mockResolvedValue({ versions: [{ id: 1, route_version_id: 81, process_version_id: 71, status: 'approved' }] })
     const viewer = render(ProcessWageTab)

@@ -1,13 +1,45 @@
 """
 qr-system — WageRepository（工资核算数据访问层）
 """
+from datetime import datetime
+
 from modules.repositories.context import resolve_db
-from modules.domain.reporting_day import reporting_day_bounds
+from modules.domain.payroll_policy import (
+    validate_payroll_month,
+    work_amount_cents,
+    yuan_to_micros,
+)
+from modules.domain.reporting_day import (
+    REPORTING_DAY_START_HOUR,
+    current_reporting_day,
+    reporting_day_bounds,
+    reporting_month_bounds,
+)
 from modules.process_fact_projection import (
     process_value_sql,
     process_version_join,
     warn_legacy_fact_rows,
 )
+
+
+def _estimate_amount_cents(quantity, unit_price_micros, rework_rate_basis_points):
+    """Invalid/unsettleable facts contribute no money to a live estimate.
+
+    Formal payroll keeps such facts blocking in its exception workflow.  The
+    estimate must neither pay their normal rate nor let a SQLite callback turn
+    invalid source data into an unhandled OperationalError.
+    """
+    try:
+        return work_amount_cents(quantity, unit_price_micros, rework_rate_basis_points)
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def _legacy_price_micros(value):
+    try:
+        return yuan_to_micros(value or 0)
+    except (ValueError, TypeError, OverflowError):
+        return 0
 
 
 class WageRepository:
@@ -45,11 +77,14 @@ class WageRepository:
                 "AND (COALESCE(p.valid_to,'')='' OR p.valid_to>{work}.created_at)"
             ).format(work=work_alias)
             exact_exists = f"EXISTS (SELECT 1 FROM route_price_versions p WHERE {exact_where})"
-            exact_value = (
-                f"(SELECT p.normal_unit_price_micros / 10000.0 "
-                f"FROM route_price_versions p WHERE {exact_where} "
-                "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
-            )
+            def exact_field(field):
+                return (
+                    f"(SELECT p.{field} FROM route_price_versions p WHERE {exact_where} "
+                    "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
+                )
+
+            exact_micros = exact_field("normal_unit_price_micros")
+            exact_value = f"({exact_micros} / 10000.0)"
             exact_id = (
                 f"(SELECT p.id FROM route_price_versions p WHERE {exact_where} "
                 "ORDER BY p.valid_from DESC,p.id DESC LIMIT 1)"
@@ -72,6 +107,17 @@ class WageRepository:
             )
             return {
                 "unit_price": unit_price,
+                "unit_price_micros": (
+                    f"CASE WHEN {exact_bound} THEN COALESCE({exact_micros},0) ELSE 0 END"
+                ),
+                "rework_rate_basis_points": (
+                    f"CASE WHEN {exact_bound} THEN {exact_field('rework_rate_basis_points')} "
+                    "ELSE NULL END"
+                ),
+                "rework_rate_configured": (
+                    f"CASE WHEN {exact_bound} "
+                    f"THEN COALESCE({exact_field('rework_rate_configured')},0) ELSE 0 END"
+                ),
                 "price_version_id": price_version_id,
                 "price_source": price_source,
                 "price_match_reason": price_match_reason,
@@ -86,8 +132,12 @@ class WageRepository:
             f"(SELECT rp.unit_price FROM route_prices rp WHERE {legacy_where} "
             "ORDER BY rp.effective_date DESC,rp.id DESC LIMIT 1)"
         )
+        db.create_function("wage_legacy_price_micros", 1, _legacy_price_micros, deterministic=True)
         return {
             "unit_price": f"COALESCE({legacy_value},0)",
+            "unit_price_micros": f"wage_legacy_price_micros({legacy_value})",
+            "rework_rate_basis_points": "NULL",
+            "rework_rate_configured": "0",
             "price_version_id": "NULL",
             "price_source": f"CASE WHEN {legacy_exists} THEN 'legacy' ELSE 'missing' END",
             "price_match_reason": (
@@ -95,6 +145,22 @@ class WageRepository:
                 f"WHEN {legacy_exists} THEN '按旧工价表匹配' ELSE '未匹配到工价' END"
             ),
         }
+
+    @classmethod
+    def _work_amount_expr(cls, db, price=None, work_alias="wr", order_alias="o"):
+        """Round each fact in integer cents before any SQL aggregation."""
+        db.create_function("wage_estimate_amount_cents", 3, _estimate_amount_cents, deterministic=True)
+        price = price or cls._price_projection(db, work_alias, order_alias)
+        rate = (
+            f"CASE WHEN {work_alias}.type='rework' THEN "
+            f"CASE WHEN {price['rework_rate_configured']}=1 "
+            f"THEN COALESCE({price['rework_rate_basis_points']},-1) ELSE -1 END "
+            "ELSE NULL END"
+        )
+        return (
+            f"wage_estimate_amount_cents({work_alias}.quantity,"
+            f"{price['unit_price_micros']},{rate})"
+        )
 
     @classmethod
     def _unit_price_expr(cls, db=None, work_alias="wr", order_alias="o"):
@@ -145,7 +211,10 @@ class WageRepository:
         return rows, total
 
     @classmethod
-    def get_worker_paged_by_role(cls, employee_id="", db=None, page=1, limit=50):
+    def get_worker_paged_by_role(
+        cls, employee_id="", db=None, page=1, limit=50,
+        matching_work_where="", matching_work_params=None,
+    ):
         db = resolve_db(db)
         user_where = (
             "u.status = 'active' "
@@ -158,6 +227,12 @@ class WageRepository:
         if employee_id:
             user_where += " AND u.id = ?"
             user_params.append(employee_id)
+        if matching_work_where:
+            user_where += (
+                " AND COALESCE((SELECT SUM(wr.quantity) FROM work_records wr "
+                "WHERE wr.user_id=u.id AND " + matching_work_where + "),0)>0"
+            )
+            user_params.extend(matching_work_params or [])
         return cls.get_worker_paged(user_where, user_params, db, page, limit)
 
     @classmethod
@@ -170,7 +245,7 @@ class WageRepository:
         process_name = process_value_sql("wr", "process_version", "p")
         query = (
             """SELECT u.id as user_id, u.name as employee_name, u.employee_no,
-                   wr.quantity, wr.created_at, wr.id as wr_id,wr.process_id,
+                   wr.quantity, wr.type as work_type,wr.created_at, wr.id as wr_id,wr.process_id,
                    wr.process_version_id,"""
             + process_name
             + """ as process_name,
@@ -178,6 +253,12 @@ class WageRepository:
                    """
             + price["unit_price"]
             + " as unit_price, "
+            + price["unit_price_micros"]
+            + " as unit_price_micros, "
+            + price["rework_rate_basis_points"]
+            + " as rework_rate_basis_points, "
+            + price["rework_rate_configured"]
+            + " as rework_rate_configured, "
             + price["price_version_id"]
             + " as price_version_id, "
             + price["price_source"]
@@ -294,54 +375,54 @@ class WageRepository:
     @classmethod
     def get_monthly_summary(cls, year_month, page=1, limit=100, db=None):
         db = resolve_db(db)
-        month_start = year_month + "-01"
-        unit_price = cls._unit_price_expr(db)
+        month_start, month_end = reporting_month_bounds(validate_payroll_month(year_month))
+        amount_cents = cls._work_amount_expr(db)
         rows = db.execute(
             """
             SELECT wr.user_id, u.name as employee_name, u.employee_no,
                    SUM(wr.quantity) as total_quantity,
-                   SUM(wr.quantity * """
-            + unit_price
-            + """) as total_wage
+                   SUM("""
+            + amount_cents
+            + """) / 100.0 as total_wage
             FROM work_records wr
             JOIN users u ON wr.user_id = u.id
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+              AND wr.created_at >= ? AND wr.created_at < ?
             GROUP BY wr.user_id
             ORDER BY total_wage DESC
             LIMIT ? OFFSET ?
             """,
-            (month_start, month_start, limit, (page - 1) * limit),
+            (month_start, month_end, limit, (page - 1) * limit),
         ).fetchall()
         total_count = db.execute(
             """
             SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+              AND wr.created_at >= ? AND wr.created_at < ?
             """,
-            (month_start, month_start),
+            (month_start, month_end),
         ).fetchone()[0]
         grand_total = db.execute(
             """
             SELECT COALESCE(SUM(wr.quantity),0) as total_qty,
-                   COALESCE(SUM(wr.quantity * """
-            + unit_price
-            + """),0) as total_wage
+                   COALESCE(SUM("""
+            + amount_cents
+            + """),0) / 100.0 as total_wage
             FROM work_records wr
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+              AND wr.created_at >= ? AND wr.created_at < ?
             """,
-            (month_start, month_start),
+            (month_start, month_end),
         ).fetchone()
         return rows, total_count, grand_total
 
     @classmethod
     def get_process_wage_summary(cls, year_month, db=None):
         db = resolve_db(db)
-        month_start = year_month + "-01"
-        unit_price = cls._unit_price_expr(db)
+        month_start, month_end = reporting_month_bounds(validate_payroll_month(year_month))
+        amount_cents = cls._work_amount_expr(db)
         process_name = process_value_sql("wr", "process_version", "p")
         process_category = process_value_sql(
             "wr", "process_version", "p", field="category"
@@ -354,9 +435,9 @@ class WageRepository:
             + process_category
             + """ as category,
                    SUM(wr.quantity) as total_quantity,
-                   SUM(wr.quantity * """
-            + unit_price
-            + """) as total_wage,
+                   SUM("""
+            + amount_cents
+            + """) / 100.0 as total_wage,
                    COUNT(DISTINCT wr.user_id) as worker_count
             FROM work_records wr
             JOIN processes p ON wr.process_id = p.id
@@ -365,7 +446,7 @@ class WageRepository:
             + """
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month')
+              AND wr.created_at >= ? AND wr.created_at < ?
             GROUP BY wr.process_id,wr.process_version_id,"""
             + process_name
             + ","
@@ -373,7 +454,7 @@ class WageRepository:
             + """
             ORDER BY total_wage DESC
             """,
-            (month_start, month_start),
+            (month_start, month_end),
         ).fetchall()
         warn_legacy_fact_rows("work_records", rows)
         return rows
@@ -496,39 +577,47 @@ class WageRepository:
     @classmethod
     def get_live_wage_trends(cls, months=12, db=None):
         db = resolve_db(db)
-        unit_price = cls._unit_price_expr(db)
+        months = max(1, int(months))
+        current = datetime.strptime(current_reporting_day(), "%Y-%m-%d")
+        month_index = current.year * 12 + current.month - months
+        month_start, _ = reporting_month_bounds(f"{month_index // 12:04d}-{month_index % 12 + 1:02d}")
+        _, month_end = reporting_month_bounds(current.strftime("%Y-%m"))
+        amount_cents = cls._work_amount_expr(db)
+        reporting_month = (
+            f"strftime('%Y-%m',wr.created_at,'-{REPORTING_DAY_START_HOUR} hours')"
+        )
         return db.execute(
-            "SELECT strftime('%Y-%m', wr.created_at) as year_month, "
+            "SELECT " + reporting_month + " as year_month, "
             "COALESCE(SUM(wr.quantity),0) as total_quantity, "
-            "COALESCE(SUM(wr.quantity * " + unit_price + "),0) as total_wage, "
+            "COALESCE(SUM(" + amount_cents + "),0) / 100.0 as total_wage, "
             "COUNT(DISTINCT wr.user_id) as employee_count "
             "FROM work_records wr "
             "LEFT JOIN orders o ON wr.order_id = o.id "
             + " "
             "WHERE wr.status = 'approved' AND wr.type = 'normal' "
-            "AND wr.created_at >= date('now','-" + str(months) + " months') "
-            "GROUP BY strftime('%Y-%m', wr.created_at) "
-            "ORDER BY year_month ASC LIMIT ?",
-            (months,),
+            "AND wr.created_at >= ? AND wr.created_at < ? "
+            "GROUP BY " + reporting_month + " "
+            "ORDER BY year_month ASC",
+            (month_start, month_end),
         ).fetchall()
 
     @classmethod
     def get_position_summary(cls, year_month, db=None):
         db = resolve_db(db)
-        month_start = year_month + "-01"
-        unit_price = cls._unit_price_expr(db)
+        month_start, month_end = reporting_month_bounds(validate_payroll_month(year_month))
+        amount_cents = cls._work_amount_expr(db)
         return db.execute(
             "SELECT COALESCE(pos.name, '未分配') as position_name, COUNT(DISTINCT wr.user_id) as employee_count, "
-            "SUM(wr.quantity) as total_quantity, SUM(wr.quantity * "
-            + unit_price
-            + ") as total_wage FROM work_records wr "
+            "SUM(wr.quantity) as total_quantity, SUM("
+            + amount_cents
+            + ") / 100.0 as total_wage FROM work_records wr "
             "JOIN users u ON wr.user_id = u.id "
             "LEFT JOIN positions pos ON u.position_id = pos.id "
             "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
             + " WHERE wr.status = 'approved' AND wr.type = 'normal' "
-            "AND wr.created_at >= ? AND wr.created_at < date(?, 'start of month', '+1 month') "
+            "AND wr.created_at >= ? AND wr.created_at < ? "
             "GROUP BY pos.name ORDER BY total_wage DESC",
-            (month_start, month_start),
+            (month_start, month_end),
         ).fetchall()
 
     @staticmethod

@@ -19,7 +19,17 @@ from modules.route_decorators import (
 )
 from modules.services.price_service import RoutePriceService
 from modules.services.wage_service import WageService
+from modules.services.payroll_read_service import PayrollReadService
+from modules.domain.errors import DomainError
 from modules.domain.reporting_day import current_reporting_day
+
+
+def _wage_employee_scope(argument):
+    return PayrollReadService.employee_scope(
+        g.current_user.get("id"),
+        request.args.get(argument),
+        can_view_all=has_permission(g.current_user, "wages:view_all"),
+    )
 
 
 def _legacy_wage_write_disabled(
@@ -84,14 +94,10 @@ def get_route_price_history(route_id):
 @check_auth
 @check_permission('wages:view')
 def calculate_wages():
-    employee_id = request.args.get('employee_id', type=int)
-    # Row-level access control: non-admin users can only see their own wages
-    if not has_permission(g.current_user, 'wages:view_all'):
-        # Force to current user's own employee_id.
-        current_uid = g.current_user.get('id')
-        if employee_id and employee_id != current_uid:
-            return jsonify({'error': '无权限查看他人工资'}), 403
-        employee_id = current_uid
+    try:
+        employee_id = _wage_employee_scope("employee_id")
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     export = request.args.get('export', '')
@@ -130,7 +136,7 @@ def calculate_wages():
 
 @app.route('/api/daily-report', methods=['GET'])
 @check_auth
-@check_permission('wages:view')
+@check_permission('wages:view_all')
 def daily_report():
     date = request.args.get('date', '') or current_reporting_day()
     export = request.args.get('export', '')
@@ -164,7 +170,7 @@ def production_progress():
 
 @app.route('/api/wages/monthly-summary', methods=['GET'])
 @check_auth
-@check_permission('wages:view')
+@check_permission('wages:view_all')
 def monthly_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
     page = max(request.args.get('page', 1, type=int), 1)
@@ -173,7 +179,7 @@ def monthly_summary():
 
 @app.route('/api/wages/process-summary', methods=['GET'])
 @check_auth
-@check_permission('wages:view')
+@check_permission('wages:view_all')
 def process_wage_summary():
     year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
     return jsonify(WageService.process_wage_summary(year_month))
@@ -182,7 +188,10 @@ def process_wage_summary():
 @check_auth
 @check_permission('wages:view')
 def list_wage_adjustments():
-    user_id = request.args.get("user_id")
+    try:
+        user_id = _wage_employee_scope("user_id")
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     year_month = request.args.get("year_month")
     return jsonify(WageService.list_adjustments(user_id=user_id, year_month=year_month))
 
@@ -202,7 +211,10 @@ def delete_wage_adjustment(adj_id):
 @check_auth
 @check_permission('wages:view')
 def get_adjustments_total():
-    user_id = request.args.get("user_id")
+    try:
+        user_id = _wage_employee_scope("user_id")
+    except DomainError as exc:
+        return jsonify(exc.to_payload()), exc.status_code
     year_month = request.args.get("year_month")
     return jsonify(WageService.get_adjustments_total(
         user_id=int(user_id) if user_id else 0, year_month=year_month or ""
@@ -210,7 +222,7 @@ def get_adjustments_total():
 
 @app.route("/api/wages/trends", methods=["GET"])
 @check_auth
-@check_permission("wages:view")
+@check_permission("wages:view_all")
 def wage_trends():
     months = request.args.get("months", 12, type=int)
     return jsonify(WageService.wage_trends(months=min(months, 36)))
@@ -223,7 +235,7 @@ def confirm_wage_snapshot():
 
 @app.route("/api/wages/snapshot-status", methods=["GET"])
 @check_auth
-@check_permission("wages:view")
+@check_permission("wages:view_all")
 def wage_snapshot_status():
     year_month = request.args.get("year_month", "")
     if not year_month:
@@ -244,7 +256,7 @@ def lock_wage_snapshot():
 
 @app.route("/api/wages/position-summary", methods=["GET"])
 @check_auth
-@check_permission("wages:view")
+@check_permission("wages:view_all")
 def position_wage_summary():
     year_month = request.args.get("year_month", "")
     if not year_month:
@@ -254,7 +266,7 @@ def position_wage_summary():
 
 @app.route("/api/wages/prediction", methods=["GET"])
 @check_auth
-@check_permission("wages:view")
+@check_permission("wages:view_all")
 def wage_prediction():
     months = request.args.get("months", 6, type=int)
     return jsonify(WageService.wage_prediction(months=min(months, 24)))

@@ -6,6 +6,7 @@ import {
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
+import { formatUnitPrice as unitPrice } from '@/composables/wage/payrollFormat.js'
 
 export function usePriceVersionWorkspace(props) {
   const {
@@ -116,10 +117,6 @@ export function usePriceVersionWorkspace(props) {
 
   function approvalMode(row) {
     return row.pricing_mode === 'pending_group_release' ? '成组发布批准' : '独立审批'
-  }
-
-  function unitPrice(value) {
-    return `¥${(Number(value || 0) / 10000).toFixed(4)}`
   }
 
   function formatDateTime(value) {

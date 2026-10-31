@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { formatUnitPrice as unitPrice } from '@/composables/wage/payrollFormat.js'
 
 export function useHistoricalPriceConfirmation(props, emit) {
   const selectedReview = ref(null)
@@ -30,8 +31,6 @@ export function useHistoricalPriceConfirmation(props, emit) {
   function closeEditor() { if (!busy.value) editorOpen.value = false }
 
   function draftFor(review) { return (review?.drafts || []).find(draft => draft.status === 'draft') || null }
-
-  function unitPrice(value) { return `¥${(Number(value || 0) / 10000).toFixed(4)}` }
 
   function formatDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '-' }
 

@@ -34,7 +34,10 @@
         <tbody>
           <tr v-for="batch in batches" :key="batch.id" :class="{selected:selectedId===batch.id}">
             <td><strong>{{ batch.payroll_month }} / V{{ batch.version }}</strong></td>
-            <td><span class="payroll-status" :class="'status-'+batch.status">{{ statusLabel(batch.status) }}</span></td>
+            <td>
+              <span class="payroll-status" :class="'status-'+batch.status">{{ statusLabel(batch.status) }}</span>
+              <p v-if="batch.input_changed" class="text-warning">输入已变化，请重算后提交</p>
+            </td>
             <td>{{ batch.legacy_imported ? 'Legacy 快照' : '版本化计算' }}</td>
             <td>{{ batch.priced_record_count }} / {{ batch.source_record_count }}</td>
             <td :class="{'text-warning':batch.exception_count}">{{ batch.exception_count }}</td>
@@ -61,6 +64,7 @@
         <div>
           <h3>{{ detail.batch.payroll_month }} / V{{ detail.batch.version }} 明细</h3>
           <p>{{ detail.batch.period_start }} 至 {{ detail.batch.period_end }}，数据截止 {{ detail.batch.source_cutoff_at }}</p>
+          <p v-if="detail.batch.input_changed" class="text-warning">输入已变化，请重算后提交</p>
         </div>
         <button class="btn-default btn-sm" @click="detail=null;selectedId=null">关闭</button>
       </div>
