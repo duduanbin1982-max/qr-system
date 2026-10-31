@@ -428,7 +428,7 @@ def test_rejects_target_mode_drift(transition, path, monkeypatch):
     target = git(tool, "rev-parse", "HEAD").decode().strip()
     reviewed = commit_review_followup(tool)
     monkeypatch.setattr(bootstrap, "TARGET_COMMIT", target)
-    with pytest.raises(RuntimeError, match="entry mismatch|mode"):
+    with pytest.raises(RuntimeError, match="entry mismatch|mode|worktree is not clean"):
         bootstrap.validate_transition(transition[0], tool, target, tool_commit=reviewed)
 
 
