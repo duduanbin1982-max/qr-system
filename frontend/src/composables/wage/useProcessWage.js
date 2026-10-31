@@ -3,6 +3,7 @@ import { useWage } from '@/composables/useWage.js'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
+import { formatUnitPrice as money } from '@/composables/wage/payrollFormat.js'
 
 export function useProcessWage() {
   const wage = useWage()
@@ -15,7 +16,7 @@ export function useProcessWage() {
 
   const priceVersions = ref([])
 
-  const canViewCoverage = computed(() => can('wages:view_all') || can('wages:prepare') || can('wages:approve'))
+  const canViewCoverage = computed(() => can('wages:prepare') || can('wages:approve'))
 
   const coverageRows = computed(() => routeReferences.value.map(reference => {
     const exact = priceVersions.value.filter(price => (
@@ -41,8 +42,6 @@ export function useProcessWage() {
   const coveredCount = computed(() => coverageRows.value.filter(row => row.approvedPrice).length)
 
   const missingCount = computed(() => coverageRows.value.length - coveredCount.value)
-
-  function money(micros) { return `¥${(Number(micros || 0) / 1000000).toFixed(4)}` }
 
   async function loadCoverage() {
     if (!canViewCoverage.value) return

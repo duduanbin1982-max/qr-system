@@ -18,12 +18,12 @@
         实时工资预估
       </h3>
       <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="includeRework" @change="load"> 含返工</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="hideZero" @change="load"> 隐藏未报工</label>
-        <input v-model="dateFrom" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
+        <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="includeRework" @change="load(1)"> 含返工</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);cursor:pointer"><input type="checkbox" v-model="hideZero" @change="load(1)"> 隐藏未报工</label>
+        <input v-model="dateFrom" type="date" aria-label="预估开始日期" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load(1)">
         <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
-        <input v-model="dateTo" type="date" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load">
-        <button class="btn-default btn-sm" @click="load()" style="margin-left:4px">查询</button>
+        <input v-model="dateTo" type="date" aria-label="预估结束日期" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load(1)">
+        <button class="btn-default btn-sm" @click="load(1)" style="margin-left:4px">查询</button>
         <button class="btn-primary btn-sm" @click="exportCSV" style="margin-left:4px;background:var(--success);border-color:var(--success)">📥 导出CSV</button>
       </div>
     </div>

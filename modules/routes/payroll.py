@@ -9,6 +9,7 @@ from modules.middleware.auth import has_permission
 from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
 from modules.services.payroll_service import PayrollWorkflowService
+from modules.services.payroll_read_service import PayrollReadService
 from modules.services.price_version_service import PriceVersionService
 from modules.services.historical_price_binding_service import HistoricalPriceBindingService
 from modules.domain.payroll_policy import PayrollConflictError
@@ -89,15 +90,20 @@ def payroll_batch_detail(batch_id):
 @app.route("/api/payroll/batches/<int:batch_id>/lines", methods=["GET"])
 @check_auth
 def payroll_batch_lines(batch_id):
-    employee_id = request.args.get("employee_id", type=int)
-    if _allowed("wages:view_all", "wages:prepare", "wages:approve"):
-        pass
-    elif _allowed("wages:view_self") and employee_id == _actor().get("id"):
-        pass
-    else:
+    can_view_all = _allowed("wages:view_all", "wages:prepare", "wages:approve")
+    if not can_view_all and not _allowed("wages:view_self"):
         return _deny()
     try:
-        return jsonify(PayrollWorkflowService.batch_detail(batch_id, employee_id))
+        employee_id = PayrollReadService.employee_scope(
+            _actor().get("id"),
+            request.args.get("employee_id"),
+            can_view_all=can_view_all,
+        )
+        if can_view_all:
+            result = PayrollWorkflowService.batch_detail(batch_id, employee_id)
+        else:
+            result = PayrollReadService.confirmed_employee_detail(batch_id, employee_id)
+        return jsonify(result)
     except ValueError as exc:
         return _json_error(exc)
 

@@ -345,6 +345,18 @@ class PayrollRepository:
         )
 
     @staticmethod
+    def invalidate_draft_calculation(batch_id, expected_row_version, db):
+        cursor = db.execute(
+            "UPDATE payroll_batches SET status='exceptions_pending',"
+            "row_version=row_version+1,updated_at=datetime('now','localtime') "
+            "WHERE id=? AND row_version=? AND status IN ('draft','exceptions_pending') "
+            "AND legacy_imported=0",
+            (batch_id, expected_row_version),
+        )
+        if cursor.rowcount != 1:
+            raise PayrollConflictError("工资批次版本冲突，请刷新后重试")
+
+    @staticmethod
     def transition_batch(batch_id, expected_row_version, status, fields, db):
         allowed = {
             "status", "submitted_at", "locked_by", "locked_by_name", "locked_at",
@@ -444,6 +456,16 @@ class PayrollRepository:
         return [dict(row) for row in db.execute(
             "SELECT * FROM payroll_events WHERE batch_id=? ORDER BY id", (batch_id,)
         ).fetchall()]
+
+    @staticmethod
+    def latest_calculation_event(batch_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_events WHERE batch_id=? "
+            "AND event_type IN ('generated','regenerated') ORDER BY id DESC LIMIT 1",
+            (batch_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def list_exceptions(month="", batch_id=None, status="", db=None):

@@ -30,14 +30,14 @@
       </div>
     </section>
 
+    <div class="analysis-heading">
+      <h3>工序工资分布</h3>
+      <input v-model="processMonth" type="month" aria-label="工序分析月份" class="form-input month-input" @change="loadProcess">
+    </div>
     <div v-if="processLoading" class="analysis-empty">加载中...</div>
     <div v-else-if="!processData.summary.length" class="analysis-empty">暂无工序分析数据</div>
     <div v-else class="analysis-grid">
       <div class="card analysis-panel">
-        <div class="analysis-heading">
-          <h3>工序工资分布</h3>
-          <input v-model="processMonth" type="month" class="form-input month-input" @change="loadProcess">
-        </div>
         <div class="distribution-list">
           <div v-for="(process, index) in processData.summary" :key="process.process_id || index" class="distribution-row">
             <div class="rank-dot" :style="{ background: processColor(index) }">{{ index + 1 }}</div>

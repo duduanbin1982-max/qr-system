@@ -2,6 +2,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
+import { formatLocalMonth } from '@/composables/wage/payrollFormat.js'
 
 const PROCESS_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1']
 
@@ -25,8 +26,6 @@ let _instance = null
 
 export function useWage() {
   if (_instance) return _instance
-const preferredTab = localStorage.getItem('wageActiveTab')
-const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepare') || can('wages:approve') ? "ledger" : "my"))
     const tabs = computed(() => [
       { id:"ledger", label:"批次台账", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
       { id:"exceptions", label:"异常处理", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
@@ -34,13 +33,18 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
       { id:"priceversions", label:"工价版本", show:can('wages:prepare') || can('wages:approve') },
       { id:"my", label:"我的工资", show:can('wages:view_self') || can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
       { id:"piece", label:"实时预估", show:can('wages:view') },
-      { id:"monthly", label:"月度汇总", icon:"📊" },
-      { id:"process", label:"工序分析", icon:"🔧" },
-      { id:"compare", label:"工资对比", icon:"📈" },
-      { id:"trend", label:"历史趋势", icon:"📈" },
-      { id:"position", label:"岗位汇总", icon:"👥" },
-      { id:"predict", label:"工资预测", icon:"🔮" }
+      { id:"monthly", label:"月度汇总", icon:"📊", show:can('wages:view_all') },
+      { id:"process", label:"工序分析", icon:"🔧", show:can('wages:view_all') },
+      { id:"compare", label:"工资对比", icon:"📈", show:can('wages:view_all') },
+      { id:"trend", label:"历史趋势", icon:"📈", show:can('wages:view_all') },
+      { id:"position", label:"岗位汇总", icon:"👥", show:can('wages:view_all') },
+      { id:"predict", label:"工资预测", icon:"🔮", show:can('wages:view_all') }
     ].filter(tab => tab.show !== false))
+    const preferredTab = localStorage.getItem('wageActiveTab')
+    const activeTab = ref(tabs.value.some(tab => tab.id === preferredTab)
+      ? preferredTab
+      : tabs.value[0]?.id || 'my')
+    let mounted = false
 
     // --- piece wage state ---
     const wages = ref([])
@@ -74,7 +78,8 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
     }
 
     async function load(pg) {
-      if (pg !== undefined) page.value = pg
+      const requestedPage = pg === undefined ? page.value : pg
+      page.value = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
       loading.value = true
       const params = {}
       if (dateFrom.value) params.date_from = dateFrom.value
@@ -192,8 +197,9 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
     // --- compare state ---
     const compareData = ref([])
     const compareLoading = ref(false)
-    const compareMonthA = ref(new Date(new Date().getFullYear(),new Date().getMonth()-1,1).toISOString().slice(0,7))
-    const compareMonthB = ref(new Date().toISOString().slice(0,7))
+    const compareNow = new Date()
+    const compareMonthA = ref(formatLocalMonth(new Date(compareNow.getFullYear(), compareNow.getMonth() - 1, 1)))
+    const compareMonthB = ref(formatLocalMonth(compareNow))
 
     async function loadCompare() {
       if (!compareMonthA.value || !compareMonthB.value) { showToast("请选择两个月份","error"); return }
@@ -304,9 +310,7 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
       finally { predLoading.value = false }
     }
 
-    function switchTab(tabId) {
-      activeTab.value = tabId
-      localStorage.setItem('wageActiveTab', tabId)
+    function loadTab(tabId) {
       if (tabId==="piece") load()
       if (tabId==="monthly" && !monthlyData.value.summary.length) loadMonthly()
       if (tabId==="process" && !processData.value.summary.length) loadProcess()
@@ -315,11 +319,16 @@ const activeTab = ref(preferredTab || (can('wages:view_all') || can('wages:prepa
       if (tabId==="predict" && !predData.value.predicted_wage) loadPrediction()
     }
 
+    function switchTab(tabId) {
+      if (!tabs.value.some(tab => tab.id === tabId)) return
+      activeTab.value = tabId
+      localStorage.setItem('wageActiveTab', tabId)
+      if (mounted) loadTab(tabId)
+    }
+
     if (!_instance) { onMounted(() => {
-      if (!tabs.value.some(tab => tab.id === activeTab.value)) {
-        activeTab.value = tabs.value[0]?.id || 'piece'
-      }
-      if (activeTab.value === "piece") load()
+      mounted = true
+      loadTab(activeTab.value)
       _refreshTimer = setInterval(() => { if (activeTab.value === "piece") load() }, 60000)
     }) }
     if (!_instance) { onBeforeUnmount(() => { if (_refreshTimer) clearInterval(_refreshTimer); _instance = null }) }

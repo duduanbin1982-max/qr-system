@@ -52,6 +52,144 @@ def _fixed_snapshot(value):
 
 class PayrollCalculationService:
     @staticmethod
+    def collect_inputs(batch, db, cutoff=None):
+        """Read the inputs and effective decisions from one database view."""
+        cutoff = cutoff or batch["source_cutoff_at"]
+        rows = PayrollRepository.source_work_records(
+            batch["period_start"], batch["period_end"], cutoff, db
+        )
+        adjustments = PayrollRepository.adjustments_for_month(
+            batch["payroll_month"], cutoff, db
+        )
+        resolved = []
+        for row in rows:
+            price, approved_exception, error = PayrollCalculationService._resolve(
+                row, batch, db
+            )
+            resolved.append({
+                "row": row,
+                "price": price,
+                "error": error,
+                "approved_exception_id": (
+                    approved_exception["id"] if approved_exception else None
+                ),
+            })
+        digest = hashlib.sha256(_fixed_snapshot({
+            "work": [
+                {
+                    "source": _snapshot(item["row"]),
+                    "price": item["price"],
+                    "error": item["error"],
+                    "approved_exception_id": item["approved_exception_id"],
+                }
+                for item in resolved
+            ],
+            "adjustments": adjustments,
+        }).encode("utf-8")).hexdigest()
+        return resolved, adjustments, digest
+
+    @staticmethod
+    def input_changed(batch, db):
+        if batch["status"] not in ("draft", "exceptions_pending") or batch["legacy_imported"]:
+            return False
+        _rows, _adjustments, digest = PayrollCalculationService.collect_inputs(
+            batch, db, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+        return digest != batch["input_digest"]
+
+    @staticmethod
+    def snapshot_digest(batch, lines, details):
+        fields = (
+            "id", "payroll_month", "version", "period_start", "period_end",
+            "prepared_by", "supersedes_batch_id", "legacy_imported",
+            "source_cutoff_at", "input_digest", "source_record_count", "priced_record_count",
+            "exception_count", "normal_wage_cents", "rework_wage_cents",
+            "bonus_cents", "allowance_cents", "deduction_cents", "payable_wage_cents",
+        )
+        return hashlib.sha256(_fixed_snapshot({
+            "batch": {key: batch[key] for key in fields},
+            "lines": lines,
+            "details": details,
+        }).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def require_complete_snapshot(batch, db, inputs=None):
+        """Validate saved coverage and money without consulting mutable sources."""
+        if batch["legacy_imported"]:
+            return
+        lines = PayrollRepository.list_lines(batch["id"], db=db)
+        details = PayrollRepository.list_details(batch["id"], db=db)
+        event = PayrollRepository.latest_calculation_event(batch["id"], db)
+        saved_digest = json.loads(event["payload_json"]).get("snapshot_digest") if event else None
+        if saved_digest and saved_digest != PayrollCalculationService.snapshot_digest(batch, lines, details):
+            raise ValueError("工资结算快照不完整或已变化，请重新生成")
+        work = [row for row in details if row["source_type"] in ("normal_work", "rework_work")]
+        work_ids = [row["work_record_id"] for row in work]
+        if (
+            batch["exception_count"]
+            or batch["source_record_count"] != batch["priced_record_count"]
+            or len(work) != batch["source_record_count"]
+            or None in work_ids
+            or len(set(work_ids)) != len(work_ids)
+        ):
+            raise ValueError("工资来源结算明细不完整，请重新生成")
+        if inputs is not None:
+            resolved, adjustments, _digest = inputs
+            expected_work = {
+                (item["row"]["work_record_id"], item["row"]["work_type"] + "_work")
+                for item in resolved
+            }
+            expected_adjustments = {(item["id"], item["adjustment_type"]) for item in adjustments}
+            if (
+                {(row["work_record_id"], row["source_type"]) for row in work} != expected_work
+                or {(row["source_id"], row["source_type"]) for row in details
+                    if row["source_type"] not in ("normal_work", "rework_work")}
+                != expected_adjustments
+            ):
+                raise ValueError("工资来源结算明细不完整，请重新生成")
+        fields = (
+            "normal_wage_cents", "rework_wage_cents", "bonus_cents",
+            "allowance_cents", "deduction_cents", "payable_wage_cents",
+        )
+        totals = {key: 0 for key in fields}
+        by_line = {line["id"]: {
+            **{key: 0 for key in fields},
+            "normal_quantity": 0, "rework_quantity": 0,
+        } for line in lines}
+        try:
+            for detail in details:
+                line = by_line[detail["employee_line_id"]]
+                source_type = detail["source_type"]
+                amount = detail["amount_cents"]
+                if source_type in ("normal_work", "rework_work"):
+                    if detail["source_id"] != detail["work_record_id"] or detail["quantity"] <= 0:
+                        raise ValueError("work source")
+                    expected_amount = work_amount_cents(
+                        detail["quantity"], detail["unit_price_micros"],
+                        detail["rework_rate_basis_points"] if source_type == "rework_work" else None,
+                    )
+                    if amount != expected_amount:
+                        raise ValueError("work amount")
+                    prefix = "normal" if source_type == "normal_work" else "rework"
+                    line[prefix + "_wage_cents"] += amount
+                    line[prefix + "_quantity"] += detail["quantity"]
+                elif source_type in ("bonus", "allowance", "deduction"):
+                    line[source_type + "_cents"] += -amount if source_type == "deduction" else amount
+                else:
+                    raise ValueError("source type")
+                line["payable_wage_cents"] += amount
+            for saved in lines:
+                expected = by_line[saved["id"]]
+                if saved["exception_count"] or any(saved[key] != value for key, value in expected.items()):
+                    raise ValueError("employee totals")
+                for key in fields:
+                    totals[key] += expected[key]
+            if any(batch[key] != value for key, value in totals.items()):
+                raise ValueError("batch totals")
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("工资结算快照不完整或金额不一致，请重新生成") from exc
+
+    @staticmethod
     def _exception(batch, row, exception_type, db):
         PayrollRepository.insert_exception(
             {
@@ -164,16 +302,11 @@ class PayrollCalculationService:
     @staticmethod
     def populate(batch, actor, db):
         PayrollRepository.delete_draft_calculation(batch["id"], db)
-        rows = PayrollRepository.source_work_records(
-            batch["period_start"], batch["period_end"], batch["source_cutoff_at"], db
-        )
-        adjustments = PayrollRepository.adjustments_for_month(
-            batch["payroll_month"], batch["source_cutoff_at"], db
-        )
+        resolved, adjustments, digest = PayrollCalculationService.collect_inputs(batch, db)
         employees = {}
         details = []
-        digest_items = []
         priced_count = 0
+        failed_work_ids = []
 
         def employee_bucket(row, employee_id=None):
             employee_id = row.get("user_id") if employee_id is None else employee_id
@@ -191,18 +324,13 @@ class PayrollCalculationService:
                 }
             return employees[key]
 
-        for row in rows:
-            digest_items.append({
-                "id": row["work_record_id"], "type": row["work_type"], "quantity": row["quantity"],
-                "created_at": row["work_recorded_at"], "route_id": row.get("route_id"),
-                "route_version_id": row.get("route_version_id"),
-                "process_id": row.get("process_id"),
-                "process_version_id": row.get("process_version_id"),
-            })
-            price, approved_exception, exception_type = PayrollCalculationService._resolve(row, batch, db)
+        for item in resolved:
+            row, price, exception_type = item["row"], item["price"], item["error"]
             bucket = employee_bucket(row)
             if exception_type:
                 PayrollCalculationService._exception(batch, row, exception_type, db)
+                bucket["exception_count"] += 1
+                failed_work_ids.append(row["work_record_id"])
                 continue
             try:
                 if row["quantity"] is None or int(row["quantity"]) <= 0:
@@ -213,6 +341,8 @@ class PayrollCalculationService:
                 )
             except (TypeError, ValueError, OverflowError):
                 PayrollCalculationService._exception(batch, row, "invalid_amount", db)
+                bucket["exception_count"] += 1
+                failed_work_ids.append(row["work_record_id"])
                 continue
             priced_count += 1
             if row["work_type"] == "rework":
@@ -271,10 +401,6 @@ class PayrollCalculationService:
                 bucket["deduction_cents"] += amount
                 source_type = "deduction"
                 detail_amount = -amount
-            digest_items.append({
-                "adjustment_id": adjustment["id"], "type": adjustment["adjustment_type"],
-                "amount_cents": adjustment["amount_cents"], "reversal_of_id": adjustment.get("reversal_of_id"),
-            })
             details.append({
                 "bucket": bucket, "source_type": source_type, "source_id": adjustment["id"],
                 "quantity": 0, "amount_cents": detail_amount,
@@ -302,12 +428,8 @@ class PayrollCalculationService:
             detail["employee_line_id"] = detail["bucket"]["line_id"]
             detail.pop("bucket", None)
             PayrollRepository.insert_detail_line(detail, db)
-        PayrollRepository.update_line_exception_counts(batch["id"], db)
-        pending_count = len(PayrollRepository.list_exceptions(batch_id=batch["id"], status="pending", db=db))
-        proposed_count = len(PayrollRepository.list_exceptions(batch_id=batch["id"], status="proposed", db=db))
-        exception_count = pending_count + proposed_count
+        exception_count = len(failed_work_ids)
         status = "exceptions_pending" if exception_count else "draft"
-        digest = hashlib.sha256(_fixed_snapshot(digest_items).encode("utf-8")).hexdigest()
         totals = {
             "status": status, "input_digest": digest, "source_cutoff_at": batch["source_cutoff_at"],
             "normal_wage_cents": sum(item["normal_wage_cents"] for item in employees.values()),
@@ -316,10 +438,18 @@ class PayrollCalculationService:
             "allowance_cents": sum(item["allowance_cents"] for item in employees.values()),
             "deduction_cents": sum(item["deduction_cents"] for item in employees.values()),
             "payable_wage_cents": sum(item["payable_wage_cents"] for item in employees.values()),
-            "source_record_count": len(rows), "priced_record_count": priced_count, "exception_count": exception_count,
+            "source_record_count": len(resolved), "priced_record_count": priced_count, "exception_count": exception_count,
         }
         PayrollRepository.update_batch_calculation(batch["id"], batch["row_version"], totals, db)
-        return {"batch_id": batch["id"], **totals, "employee_count": len(employees), "detail_count": len(details)}
+        return {
+            "batch_id": batch["id"], **totals, "employee_count": len(employees),
+            "detail_count": len(details), "unsettled_work_record_ids": failed_work_ids,
+            "snapshot_digest": PayrollCalculationService.snapshot_digest(
+                PayrollRepository.get_batch(batch["id"], db),
+                PayrollRepository.list_lines(batch["id"], db=db),
+                PayrollRepository.list_details(batch["id"], db=db),
+            ),
+        }
 
 
 class PayrollWorkflowService:
@@ -409,6 +539,7 @@ class PayrollWorkflowService:
                 raise PayrollConflictError("工资批次版本冲突")
             if PayrollRepository.list_exceptions(batch_id=batch_id, status="pending", db=db) or PayrollRepository.list_exceptions(batch_id=batch_id, status="proposed", db=db):
                 raise ValueError("仍有未处理工资异常")
+            PayrollCalculationService.require_complete_snapshot(batch, db)
             old_id = batch.get("supersedes_batch_id")
             if old_id:
                 old = PayrollRepository.get_batch(old_id, db)
@@ -461,17 +592,24 @@ class PayrollWorkflowService:
         expected_row_version = require_row_version(expected_row_version)
         with BaseService.transaction() as db:
             batch = PayrollRepository.get_batch(batch_id, db)
+            if batch and batch["row_version"] != expected_row_version:
+                raise PayrollConflictError("工资批次版本冲突")
             if status == "review_pending":
-                if not batch or batch["status"] not in ("draft", "exceptions_pending"):
-                    raise ValueError("只有草稿可以提交复核")
+                if not batch or batch["status"] != "draft":
+                    raise ValueError("只有完整重算的草稿可以提交复核")
                 if batch.get("prepared_by") not in (None, actor_id):
                     raise ValueError("只能由制单人提交该批次")
                 if PayrollRepository.list_exceptions(batch_id=batch_id, status="pending", db=db) or PayrollRepository.list_exceptions(batch_id=batch_id, status="proposed", db=db):
                     raise ValueError("存在未处理工资异常，不能提交复核")
+                inputs = PayrollCalculationService.collect_inputs(
+                    batch, db, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+                if inputs[2] != batch["input_digest"]:
+                    raise PayrollConflictError("工资输入已变化，请重新生成后提交")
+                PayrollCalculationService.require_complete_snapshot(batch, db, inputs)
             else:
                 PayrollWorkflowService._check_approval(batch, actor_id, "review_pending")
-            if batch["row_version"] != expected_row_version:
-                raise PayrollConflictError("工资批次版本冲突")
+                PayrollCalculationService.require_complete_snapshot(batch, db)
             fields = {}
             if status == "review_pending":
                 fields["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -497,6 +635,7 @@ class PayrollWorkflowService:
             exception = next((row for row in PayrollRepository.list_exceptions(db=db) if row["id"] == exception_id), None)
             if not exception:
                 raise ValueError("工资异常不存在")
+            PayrollWorkflowService._require_editable_exception_batch(exception, db)
             if exception["status"] not in ("pending", "rejected"):
                 raise ValueError("当前异常状态不能提出处理方案")
             snapshot = json.loads(exception.get("snapshot_json") or "{}")
@@ -532,6 +671,7 @@ class PayrollWorkflowService:
             exception = next((row for row in PayrollRepository.list_exceptions(db=db) if row["id"] == exception_id), None)
             if not exception:
                 raise ValueError("工资异常不存在")
+            batch = PayrollWorkflowService._require_editable_exception_batch(exception, db)
             if exception["status"] != "proposed":
                 raise ValueError("只有待审批异常可以批准")
             if exception.get("proposed_by") == actor_id:
@@ -565,12 +705,23 @@ class PayrollWorkflowService:
             PayrollRepository.approve_exception(exception_id, "proposed", {
                 "approved_by": actor_id, "approved_by_name": actor_name,
             }, db)
+            PayrollRepository.invalidate_draft_calculation(batch["id"], batch["row_version"], db)
             PayrollRepository.insert_event({
                 "batch_id": exception["batch_id"], "event_type": "exception_approved",
                 "operator_id": actor_id, "operator_name": actor_name,
-                "payload": {"exception_id": exception_id},
+                "payload": {"exception_id": exception_id, "requires_regeneration": True},
             }, db)
-            return {"ok": True, "exception_id": exception_id, "status": "approved"}
+            return {
+                "ok": True, "exception_id": exception_id, "status": "approved",
+                "batch_row_version": batch["row_version"] + 1,
+            }
+
+    @staticmethod
+    def _require_editable_exception_batch(exception, db):
+        batch = PayrollRepository.get_batch(exception["batch_id"], db)
+        if not batch or batch["status"] not in ("draft", "exceptions_pending") or batch["legacy_imported"]:
+            raise ValueError("只有草稿或待异常处理批次可以处理异常")
+        return batch
 
     @staticmethod
     def create_adjustment(actor_user, data):
@@ -639,15 +790,19 @@ class PayrollWorkflowService:
 
     @staticmethod
     def batch_detail(batch_id, employee_id=None):
-        batch = PayrollRepository.get_batch(batch_id)
+        db = BaseService.db()
+        batch = PayrollRepository.get_batch(batch_id, db)
         if not batch:
             raise ValueError("工资批次不存在")
         return {
-            "batch": PayrollWorkflowService.serialize_batch(batch),
-            "lines": PayrollRepository.list_lines(batch_id, employee_id),
-            "details": PayrollRepository.list_details(batch_id, employee_id),
-            "exceptions": PayrollRepository.list_exceptions(batch_id=batch_id),
-            "events": PayrollRepository.list_events(batch_id),
+            "batch": {
+                **PayrollWorkflowService.serialize_batch(batch),
+                "input_changed": PayrollCalculationService.input_changed(batch, db),
+            },
+            "lines": PayrollRepository.list_lines(batch_id, employee_id, db),
+            "details": PayrollRepository.list_details(batch_id, employee_id, db),
+            "exceptions": PayrollRepository.list_exceptions(batch_id=batch_id, db=db),
+            "events": PayrollRepository.list_events(batch_id, db),
         }
 
     @staticmethod
@@ -662,7 +817,11 @@ class PayrollWorkflowService:
 
     @staticmethod
     def list_batches(month="", status=""):
-        return {"batches": PayrollRepository.list_batches(month, status)}
+        db = BaseService.db()
+        return {"batches": [
+            {**batch, "input_changed": PayrollCalculationService.input_changed(batch, db)}
+            for batch in PayrollRepository.list_batches(month, status, db)
+        ]}
 
     @staticmethod
     def compare_batches(batch_id, other_id):

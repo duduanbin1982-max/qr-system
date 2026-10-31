@@ -1,6 +1,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { showToast } from '@/lib/store.js'
 import { useRoutePriceVersions } from '@/composables/useRoutePriceVersions.js'
+import { formatUnitPrice as unitPrice } from '@/composables/wage/payrollFormat.js'
 
 export function usePriceVersionEditor(props, emit) {
   const { busy, createDraft, voidDraft } = useRoutePriceVersions()
@@ -64,10 +65,6 @@ export function usePriceVersionEditor(props, emit) {
       ? (Number(source.rework_rate_basis_points || 0) / 100).toFixed(2)
       : ''
     form.remark = source.remark || ''
-  }
-
-  function unitPrice(value) {
-    return `¥${(Number(value || 0) / 10000).toFixed(4)}`
   }
 
   function formatDateTime(value) {
