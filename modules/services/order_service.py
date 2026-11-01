@@ -38,6 +38,13 @@ from modules.setting_reader import get_setting
 _logger = logging.getLogger(__name__)
 
 
+class BatchOrderImportError(RuntimeError):
+    """Expose an interrupted import to legacy callers without leaking internals."""
+
+    def __init__(self, result):
+        super().__init__('批量导入因内部错误中止')
+        self.result = result
+
 
 # ============================================================
 # 订单号生成（模块级工具函数，含事务锁防竞态）
@@ -511,6 +518,15 @@ class OrderService:
                 data,
                 txn,
             )
+            product_name = normalized_data.get('product_name')
+            if not isinstance(product_name, str) or not product_name.strip():
+                raise ValidationError('产品名称不能为空')
+            product_name = product_name.strip()
+            quantity = normalized_data.get('quantity')
+            if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+                raise ValidationError('订单数量必须是正整数')
+            normalized_data['product_name'] = product_name
+            normalized_data['quantity'] = quantity
             normalized_data = OrderService._normalize_priority_data(normalized_data, create=True)
             order_no = OrderService._allocate_create_order_no(
                 order_no,
@@ -969,36 +985,84 @@ class OrderService:
         return existing['order_no']
 
     @staticmethod
-    def batch_create(orders_data):
-        """批量创建订单。返回 (created_count, errors_list)。"""
-        for item in orders_data if isinstance(orders_data, list) else ():
+    def batch_create(orders_data, user_id=None, user_name=None, return_details=False):
+        """批量创建订单，保留旧 tuple 返回并支持结构化导入结果。"""
+        if not isinstance(orders_data, list):
+            raise ValidationError('订单导入数据必须是列表')
+        for item in orders_data:
             OrderService._assert_no_legacy_production_line_write(item)
         created = 0
         errors = []
-        for item in orders_data:
+        error_rows = []
+        created_order_ids = []
+        infrastructure_error = None
+        for row_number, item in enumerate(orders_data, start=1):
+            order_no = str(item.get('order_no') or '').strip() if isinstance(item, dict) else ''
             try:
-                OrderService.create_order(item)
+                if not isinstance(item, dict):
+                    raise ValidationError('订单数据必须是对象')
+                order_id, _ = OrderService.create_order(
+                    item,
+                    user_id=user_id,
+                    user_name=user_name,
+                )
                 created += 1
-            except Exception as e:
-                errors.append(str(e))
+                created_order_ids.append(order_id)
+            except Exception as exc:
+                # Existing order/process assignment APIs also use ValueError
+                # for invalid routes/processes. Wrapped DB errors are not input.
+                is_input_error = (
+                    isinstance(exc, ValueError)
+                    and not BaseService.is_database_error(exc)
+                )
+                message = str(exc) if is_input_error else '内部错误，批量导入已中止'
+                errors.append(message)
+                row_error = {
+                    'row': row_number,
+                    'index': row_number - 1,
+                    'order_no': order_no,
+                    'error': message,
+                }
+                error_rows.append(row_error)
+                if not is_input_error:
+                    _logger.exception('batch order import stopped at row %s', row_number)
+                    infrastructure_error = row_error
+                    break
+        result = {
+            'created': created,
+            'errors': errors,
+            'error_rows': error_rows,
+            'created_order_ids': created_order_ids,
+            'partial_success': bool(created and error_rows),
+            'infrastructure_error': bool(infrastructure_error),
+        }
+        if return_details:
+            return result
+        if infrastructure_error:
+            raise BatchOrderImportError(result)
         return created, errors
 
     @staticmethod
     def purge_order(oid):
         repository = OrderService._repository()
-        existing = repository.find_including_deleted(oid)
-        if not existing:
-            raise ValueError('订单不存在')
-        if not existing['deleted_at']:
-            raise ValueError('只能彻底删除回收站中的订单')
         # Whitelist of child tables for cascading delete (verified safe)
         _PURGE_CHILD_TABLES = [
-            "order_attachments", "order_remark_history",
+            "order_remark_history",
             "order_materials", "order_processes", "product_items",
-            "work_records", "scrap_records", "rework_records",
-            "quality_inspections"
         ]
         with OrderService._unit_of_work().transaction() as txn:
+            existing = repository.find_including_deleted(oid, db=txn)
+            if not existing:
+                raise ValueError('订单不存在')
+            if not existing['deleted_at']:
+                raise ValueError('只能彻底删除回收站中的订单')
+            protected_count = repository.count_protected_facts(oid, db=txn)
+            if protected_count:
+                raise ConflictError(
+                    '订单存在生产、质量事实或附件，只能保留软删除状态'
+                )
+            # Runtime exceptions are disposable state; immutable events/audits stay.
+            repository.delete_completion_focus_exceptions(oid, db=txn)
             repository.detach_preserved_order_references(
                 oid,
                 existing['order_no'] or '',
@@ -1033,6 +1097,11 @@ class OrderService:
             raise ValidationError('物料 ID 不能为空')
         repository = OrderService._material_repository()
         with OrderService._unit_of_work().transaction() as txn:
+            current_order = OrderService._repository().find_by_id(order_id, db=txn)
+            if not current_order:
+                raise NotFoundError('订单不存在')
+            if current_order['status'] == 'completed':
+                raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
             if repository.find_duplicate(order_id, material_id, process_id, db=txn):
                 raise ConflictError('该物料已存在于订单物料配方中')
             new_id = repository.insert(
@@ -1046,7 +1115,9 @@ class OrderService:
         material_repository = OrderService._material_repository()
         with OrderService._unit_of_work().transaction() as txn:
             order = OrderService._repository().find_by_id(order_id, db=txn)
-            if order and order['status'] == 'completed':
+            if not order:
+                raise NotFoundError('订单不存在')
+            if order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
             if not material_repository.find_by_id_and_order(
                 item_id, order_id, db=txn

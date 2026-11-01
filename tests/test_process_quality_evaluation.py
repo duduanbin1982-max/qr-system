@@ -2,11 +2,13 @@
 
 import json
 import uuid
+from datetime import datetime
 
 import pytest
 
 from modules.db import get_db
 from modules.domain.errors import ConflictError
+from modules.domain.reporting_day import current_reporting_day
 from modules.domain.work_report import WorkReportCommand
 from modules.services.process_quality_evaluation_service import ProcessQualityEvaluationService
 from modules.services.quality_management_service import QualityManagementService
@@ -115,6 +117,16 @@ def _login_headers(client, username):
     return {"Authorization": f"Bearer {response.get_json()['user']['token']}"}
 
 
+def _evaluation_reporting_month(client, evaluation_id):
+    """Use the persisted evaluation's 07:00 reporting month, not its task date."""
+    with client.application.app_context():
+        created_at = get_db().execute(
+            "SELECT created_at FROM process_quality_evaluations WHERE id = ?",
+            (evaluation_id,),
+        ).fetchone()["created_at"]
+    return current_reporting_day(datetime.fromisoformat(created_at))[:7]
+
+
 def test_approved_report_creates_all_upstream_evaluation_tasks(client, worker_auth_headers):
     flow = _seed_serial_flow(client)
     response = _complete_serial_report(client, worker_auth_headers, flow)
@@ -180,8 +192,9 @@ def test_low_score_requires_reason_and_enters_verification(client, auth_headers,
         json={"status": "confirmed", "note": "现场复核属实"},
     )
     assert reviewed.status_code == 200, reviewed.get_json()
+    month = _evaluation_reporting_month(client, result["id"])
     stats = client.get(
-        f"/api/process-quality-evaluations/stats?year_month={task['created_at'][:7]}",
+        f"/api/process-quality-evaluations/stats?year_month={month}",
         headers=auth_headers,
     )
     assert stats.status_code == 200, stats.get_json()
@@ -205,7 +218,7 @@ def test_confirmed_full_process_score_is_available_to_performance(client, worker
 
     ProcessQualityEvaluationService.save_rules({"minimum_samples_for_performance": 1})
     metrics = ProcessQualityEvaluationService.monthly_metrics(
-        target_task["created_at"][:7]
+        _evaluation_reporting_month(client, created.get_json()["items"][0]["id"])
     )
     assert metrics[flow["upstream_users"][0]]["review_count"] == 1
     assert metrics[flow["upstream_users"][0]]["avg_rating"] == 4
@@ -812,7 +825,7 @@ def test_pending_appeal_is_excluded_from_performance_and_can_be_accepted(
         headers=worker_auth_headers,
         json=_score_payload(task["id"], 4),
     ).get_json()["items"][0]
-    month = task["created_at"][:7]
+    month = _evaluation_reporting_month(client, created["id"])
     assert flow["upstream_users"][0] in ProcessQualityEvaluationService.monthly_metrics(month)
 
     target_headers = _login_headers(client, flow["upstream_usernames"][0])
@@ -854,9 +867,67 @@ def test_single_confirmed_evaluation_does_not_enter_performance_before_minimum_s
         json=_score_payload(task["id"], 4),
     )
     assert submitted.status_code == 200, submitted.get_json()
-    assert flow["upstream_users"][0] not in ProcessQualityEvaluationService.monthly_metrics(
-        task["created_at"][:7]
-    )
+    month = _evaluation_reporting_month(client, submitted.get_json()["items"][0]["id"])
+    from modules.repositories.process_quality_evaluation_repository import ProcessQualityEvaluationRepository
+
+    confirmed = ProcessQualityEvaluationRepository.monthly_metrics(month, minimum_samples=1)
+    assert len(confirmed) == 1
+    assert confirmed[0]["user_id"] == flow["upstream_users"][0]
+    assert confirmed[0]["review_count"] == 1
+    assert flow["upstream_users"][0] not in ProcessQualityEvaluationService.monthly_metrics(month)
+
+
+@pytest.mark.parametrize("boundary_date,previous_month,current_month", [
+    ("2026-11-01", "2026-10", "2026-11"),
+    ("2026-01-01", "2025-12", "2026-01"),
+])
+def test_evaluation_monthly_queries_use_seven_am_boundary(
+    client, auth_headers, worker_auth_headers,
+    boundary_date, previous_month, current_month,
+):
+    flow = _seed_serial_flow(client)
+    ProcessQualityEvaluationService.save_rules({"minimum_samples_for_performance": 1})
+    _complete_serial_report(client, worker_auth_headers, flow)
+    tasks = client.get(
+        "/api/process-quality-evaluations/tasks", headers=worker_auth_headers
+    ).get_json()["items"]
+    evaluation_ids = []
+    for process_id in flow["process_ids"][:2]:
+        task = next(item for item in tasks if item["target_process_id"] == process_id)
+        submitted = client.post(
+            "/api/process-quality-evaluations", headers=worker_auth_headers,
+            json=_score_payload(task["id"], 4),
+        )
+        assert submitted.status_code == 200, submitted.get_json()
+        evaluation_ids.append(submitted.get_json()["items"][0]["id"])
+    with client.application.app_context():
+        db = get_db()
+        db.executemany(
+            "UPDATE process_quality_evaluations SET created_at = ? WHERE id = ?",
+            [
+                (f"{boundary_date} 06:59:59", evaluation_ids[0]),
+                (f"{boundary_date} 07:00:00", evaluation_ids[1]),
+            ],
+        )
+        db.commit()
+    assert _evaluation_reporting_month(client, evaluation_ids[0]) == previous_month
+    assert _evaluation_reporting_month(client, evaluation_ids[1]) == current_month
+    for month, index in ((previous_month, 0), (current_month, 1)):
+        stats = client.get(
+            f"/api/process-quality-evaluations/stats?year_month={month}",
+            headers=auth_headers,
+        )
+        assert stats.status_code == 200, stats.get_json()
+        assert stats.get_json()["summary"]["total"] == 1
+        listed = client.get(
+            f"/api/process-quality-evaluations?year_month={month}", headers=auth_headers
+        )
+        assert listed.status_code == 200, listed.get_json()
+        assert [item["id"] for item in listed.get_json()["items"]] == [evaluation_ids[index]]
+        metrics = ProcessQualityEvaluationService.monthly_metrics(month)
+        assert set(metrics) == {flow["upstream_users"][index]}
+        assert metrics[flow["upstream_users"][index]]["review_count"] == 1
+        assert metrics[flow["upstream_users"][index]]["avg_rating"] == 4
 
 
 def test_critical_evaluation_creates_hard_quality_verification_task(

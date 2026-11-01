@@ -8,6 +8,7 @@ export function useOrderProgress() {
   const progressOrder = ref(null)
   const progressLoading = ref(false)
   const progressData = ref(null)
+  let progressRequestToken = 0
 
   const isOrderTracking = computed(
     () => progressData.value?.analysis?.tracking_mode === 'order'
@@ -33,17 +34,30 @@ export function useOrderProgress() {
   }
 
   async function openProgress(order) {
+    const requestToken = ++progressRequestToken
     progressOrder.value = order
     progressLoading.value = true
     progressData.value = null
     try {
-      progressData.value = await api.domains.orders.getWorkpieceProgress(order.id)
+      const data = await api.domains.orders.getWorkpieceProgress(order.id)
+      if (requestToken !== progressRequestToken) return
+      progressData.value = data
     } catch (error) {
+      if (requestToken !== progressRequestToken) return
       showToast(`加载进度失败: ${error.message || ''}`, 'error')
       progressOrder.value = null
     } finally {
-      progressLoading.value = false
+      if (requestToken === progressRequestToken) {
+        progressLoading.value = false
+      }
     }
+  }
+
+  function closeProgress() {
+    progressRequestToken += 1
+    progressOrder.value = null
+    progressLoading.value = false
+    progressData.value = null
   }
 
   return {
@@ -54,5 +68,6 @@ export function useOrderProgress() {
     progressBars,
     barPercent,
     openProgress,
+    closeProgress,
   }
 }

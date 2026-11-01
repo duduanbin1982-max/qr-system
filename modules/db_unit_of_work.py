@@ -28,6 +28,17 @@ class BaseService:
     """Shared database helpers used by services and repositories."""
 
     @staticmethod
+    def is_database_error(exc):
+        """Recognize storage faults even when transaction() wraps the exception."""
+        seen = set()
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            if isinstance(exc, sqlite3.Error):
+                return True
+            exc = exc.__cause__ or exc.__context__
+        return False
+
+    @staticmethod
     def db():
         """Get the current request database connection."""
         return get_db()

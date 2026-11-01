@@ -119,7 +119,7 @@ class OrderFocusService:
         return any(has_permission(user, perm) for perm in COMPLETION_FOCUS_BYPASS_PERMISSIONS)
 
     @staticmethod
-    def _record_event(event_type, order_id=None, process_id=None, warning=None, user=None, reason="", detail="", db=None):
+    def _record_event(event_type, order_id=None, process_id=None, warning=None, user=None, reason="", detail="", db=None, strict=False):
         warning = warning or {}
         user = user or {}
         try:
@@ -140,6 +140,8 @@ class OrderFocusService:
             )
         except Exception:
             _logger.exception("failed to record completion-focus event: %s", event_type)
+            if strict:
+                raise
             return None
 
     @staticmethod
@@ -196,17 +198,20 @@ class OrderFocusService:
             exception = CompletionFocusRepository.find_exception_by_id(exception_id, db=txn)
             if not exception:
                 raise ValueError("集中完工例外不存在")
-            CompletionFocusRepository.cancel_exception(
+            changed = CompletionFocusRepository.cancel_exception(
                 exception_id, user.get("id"), cancel_reason, db=txn
             )
-            OrderFocusService._record_event(
-                EVENT_EXCEPTION_CANCELLED,
-                order_id=exception["order_id"] if exception else None,
-                user=user,
-                reason=cancel_reason,
-                detail=f"exception_id={exception_id}",
-                db=txn,
-            )
+            if changed:
+                OrderFocusService._record_event(
+                    EVENT_EXCEPTION_CANCELLED,
+                    order_id=exception["order_id"] if exception else None,
+                    user=user,
+                    reason=cancel_reason,
+                    detail=f"exception_id={exception_id}",
+                    db=txn,
+                    strict=True,
+                )
+            return bool(changed)
 
     @staticmethod
     def _first_backlog_process(process_stats):

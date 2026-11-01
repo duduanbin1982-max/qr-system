@@ -596,7 +596,7 @@
       <div class="modal" style="max-width:900px;width:95%">
         <div class="modal-header">
           <span>📊 工件进度 — {{ progressOrder.order_no }} {{ progressOrder.product_name }}</span>
-          <span class="modal-close" @click="progressOrder=null">&times;</span>
+          <span class="modal-close" @click="closeProgress">&times;</span>
         </div>
         <div class="modal-body" style="max-height:70vh;overflow:auto">
           <div v-if="progressLoading" style="text-align:center;padding:40px;color:var(--text-placeholder)">⏳ 加载中...</div>

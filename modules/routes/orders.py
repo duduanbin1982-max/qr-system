@@ -1,6 +1,6 @@
 """qr-system — 订单管理路由 (Refactored: all SQL → OrderService)"""
 from flask import request, jsonify, g
-from modules.domain.errors import LegacyProcessLineWriteBlockedError
+from modules.domain.errors import DomainError, LegacyProcessLineWriteBlockedError
 from modules.route_decorators import (
     app,
     check_auth,
@@ -212,6 +212,8 @@ def purge_order(oid):
         order_no = OrderService.purge_order(oid)
         safe_audit_log('purge_order', 'order', oid, f'order_no={order_no}')
         return jsonify({'message': f'订单 {order_no} 已彻底删除'})
+    except DomainError as e:
+        return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -250,13 +252,46 @@ def batch_create_orders():
     data = get_json_body()
     orders_data = data.get('orders', data.get('items', []))
     try:
-        created, errors = OrderService.batch_create(orders_data)
-        return jsonify({
-            'message': f'导入完成：成功{created}条，跳过{len(errors)}条',
-            'created': created,
-            'errors': errors,
-            'detail': errors[:20] if errors else []
-        })
+        uname = g.current_user.get('name', g.current_user.get('username', ''))
+        result = OrderService.batch_create(
+            orders_data,
+            user_id=g.current_user.get('id'),
+            user_name=uname,
+            return_details=True,
+        )
+        for order_id in result.get('created_order_ids', []):
+            safe_audit_log(
+                'batch_create_order_row',
+                'order',
+                order_id,
+                f"batch_created_by={g.current_user.get('id')}",
+            )
+        for row in result.get('error_rows', []):
+            safe_audit_log(
+                'batch_create_order_row_error',
+                'order',
+                0,
+                f"row={row['row']}; order_no={row.get('order_no','')}; error={row['error']}",
+            )
+        safe_audit_log(
+            'batch_create_orders',
+            'order_batch',
+            0,
+            f"created={result['created']}; errors={len(result['errors'])}; "
+            f"partial_success={result['partial_success']}",
+        )
+        payload = {
+            'message': f"导入完成：成功{result['created']}条，跳过{len(result['errors'])}条",
+            'created': result['created'],
+            'errors': result['errors'],
+            'detail': result['errors'][:20] if result['errors'] else [],
+            'error_rows': result['error_rows'],
+            'partial_success': result['partial_success'],
+        }
+        if result['infrastructure_error']:
+            payload['error'] = '批量导入因内部错误中止'
+            return jsonify(payload), 500
+        return jsonify(payload)
     except LegacyProcessLineWriteBlockedError as e:
         return jsonify(e.to_payload()), e.status_code
     except ValueError as e:
@@ -322,12 +357,13 @@ def cancel_completion_focus_exception(exception_id):
         return jsonify({'error': '集中完工例外不存在'}), 404
     if not _check_order_data_scope(order_id):
         return jsonify({"error": "无权限访问此订单"}), 403
-    OrderFocusService.cancel_exception(
+    changed = OrderFocusService.cancel_exception(
         exception_id,
         g.current_user,
         (data.get('reason') or '').strip(),
     )
-    safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
+    if changed:
+        safe_audit_log('completion_focus_exception_cancel', 'completion_focus_exception', exception_id, '')
     return jsonify({'message': '已取消集中完工例外'})
 
 

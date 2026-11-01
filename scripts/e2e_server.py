@@ -290,7 +290,6 @@ def prepare_database():
             "UPDATE users SET position_id = ? WHERE id IN (?, ?)",
             (position_id, worker_id, previous_worker_id),
         )
-        production_month = datetime.now().strftime("%Y-%m")
         rules = OperationsFacade.performance_rules()
         db.execute(
             "INSERT INTO performance_rule_versions ("
@@ -321,7 +320,9 @@ def prepare_database():
             (
                 position_id,
                 "E2E Production Position",
-                production_month,
+                # Like the rule and assignment fixtures, this target predates
+                # every test month and must not depend on the runner's clock.
+                "2000-01",
                 admin_id,
                 "E2E Administrator",
                 admin_id,

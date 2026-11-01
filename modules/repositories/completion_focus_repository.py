@@ -147,7 +147,7 @@ class CompletionFocusRepository:
     @staticmethod
     def cancel_exception(exception_id, user_id, cancel_reason="", db=None):
         db = resolve_db(db)
-        db.execute(
+        cursor = db.execute(
             """
             UPDATE order_completion_focus_exceptions
             SET status = 'cancelled',
@@ -158,6 +158,7 @@ class CompletionFocusRepository:
             """,
             (user_id, cancel_reason, exception_id),
         )
+        return cursor.rowcount
 
     @staticmethod
     def find_exception_by_id(exception_id, db=None):

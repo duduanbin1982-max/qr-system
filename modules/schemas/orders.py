@@ -9,7 +9,8 @@ orders_schemas = {
                                                     'plan_end': {'maxLength': 32, 'type': 'string'},
                                                     'plan_start': {'maxLength': 32, 'type': 'string'},
                                                     'product_name': {'maxLength': 128, 'type': 'string'},
-                                                    'quantity': {'maximum': 99999, 'minimum': 1, 'type': 'integer'},
+                                                    # Positive quantity is checked per row by OrderService.
+                                                    'quantity': {'maximum': 99999, 'type': 'integer'},
                                                     'remark': {'maxLength': 1024, 'type': 'string'},
                                                     'priority_level': {'maximum': 5, 'minimum': 1, 'type': 'integer'},
                                                     'is_expedited': {'type': ['boolean', 'integer']},

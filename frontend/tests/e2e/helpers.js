@@ -3,6 +3,19 @@ import { expect } from '@playwright/test'
 
 export const TEST_PASSWORD = 'Test@1234'
 
+export function productionMonthForServerTimestamp(timestamp) {
+  // /api/system/health returns the server's naive local wall clock, matching
+  // SQLite localtime and the ledger's 07:00 production-month boundary. Do not
+  // convert it through the browser's timezone or UTC.
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):\d{2}:\d{2}$/.exec(timestamp)
+  if (!match) throw new Error(`Invalid server timestamp: ${timestamp}`)
+  const [, year, month, day, hour] = match
+  if (day !== '01' || Number(hour) >= 7) return `${year}-${month}`
+  return Number(month) === 1
+    ? `${Number(year) - 1}-12`
+    : `${year}-${String(Number(month) - 1).padStart(2, '0')}`
+}
+
 export function observeRuntimeFailures(page) {
   const failures = []
   page.on('pageerror', error => failures.push(`pageerror: ${error.message}`))

@@ -1,6 +1,17 @@
 import { expect, test } from '@playwright/test'
 
-import { loginAdmin, observeRuntimeFailures, openSidebarPage } from './helpers.js'
+import { loginAdmin, observeRuntimeFailures, openSidebarPage, productionMonthForServerTimestamp } from './helpers.js'
+
+
+for (const [timestamp, expectedMonth] of [
+  ['2026-11-01 06:59:59', '2026-10'],
+  ['2026-11-01 07:00:00', '2026-11'],
+  ['2027-01-01 06:59:59', '2026-12'],
+]) {
+  test(`server production month is ${expectedMonth} at ${timestamp}`, () => {
+    expect(productionMonthForServerTimestamp(timestamp)).toBe(expectedMonth)
+  })
+}
 
 
 test('administrator can open all previously blank critical pages', async ({ page }) => {
@@ -155,16 +166,46 @@ test('employee list renders assigned processes without administrator accounts', 
   expect(failures).toEqual([])
 })
 
-test('performance page creates a V2 draft and opens immutable score evidence', async ({ page }) => {
+test('performance page creates a ledger V1 draft and opens immutable score evidence', async ({ page }) => {
   const failures = observeRuntimeFailures(page)
+  const health = await page.request.get('/api/system/health')
+  expect(health.status()).toBe(200)
+  const productionMonth = productionMonthForServerTimestamp((await health.json()).timestamp)
+  // Exercise month selection on every runner, not only before 07:00 on day 1.
+  // This affects the browser clock only; the server and ledger use real time.
+  const [year, month] = productionMonth.split('-').map(Number)
+  await page.clock.setFixedTime(new Date(Date.UTC(year, month, 15, 12)))
   await loginAdmin(page)
+  const overviewLoaded = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/performance/overview',
+  )
   await openSidebarPage(page, '\u7ee9\u6548\u7ba1\u7406', '\u7ee9\u6548\u7ba1\u7406')
+  await overviewLoaded
 
   const main = page.locator('.main-content')
+  const monthInput = main.locator('input[type="month"]')
+  if (await monthInput.inputValue() !== productionMonth) {
+    await Promise.all([
+      page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/performance/overview'
+          && url.searchParams.get('year_month') === productionMonth
+      }),
+      monthInput.fill(productionMonth),
+    ])
+  }
+  await expect(monthInput).toHaveValue(productionMonth)
   await expect(main).not.toContainText('\u751f\u6210/\u91cd\u7b97\u672c\u6708\u8bc4\u5206')
   await expect(main).not.toContainText('\u5c97\u4f4d\u6700\u9ad8\u4ea7\u91cf')
   await main.getByRole('button', { name: '\u6279\u6b21\u5ba1\u6279', exact: true }).click()
+  const batchCreated = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/performance/batches'
+      && response.request().method() === 'POST',
+  )
   await main.getByRole('button', { name: '\u65b0\u5efa\u6708\u5ea6\u8349\u7a3f', exact: true }).click()
+  const createdResponse = await batchCreated
+  expect(createdResponse.status(), await createdResponse.text()).toBe(200)
+  expect(createdResponse.request().postDataJSON().production_month).toBe(productionMonth)
 
   await expect(main).toContainText('\u8349\u7a3f')
   await expect(main).toContainText('V1')
