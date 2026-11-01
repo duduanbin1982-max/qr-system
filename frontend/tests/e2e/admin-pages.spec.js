@@ -171,6 +171,10 @@ test('performance page creates a ledger V1 draft and opens immutable score evide
   const health = await page.request.get('/api/system/health')
   expect(health.status()).toBe(200)
   const productionMonth = productionMonthForServerTimestamp((await health.json()).timestamp)
+  // Exercise month selection on every runner, not only before 07:00 on day 1.
+  // This affects the browser clock only; the server and ledger use real time.
+  const [year, month] = productionMonth.split('-').map(Number)
+  await page.clock.setFixedTime(new Date(Date.UTC(year, month, 15, 12)))
   await loginAdmin(page)
   const overviewLoaded = page.waitForResponse(response =>
     new URL(response.url()).pathname === '/api/performance/overview',
@@ -181,14 +185,13 @@ test('performance page creates a ledger V1 draft and opens immutable score evide
   const main = page.locator('.main-content')
   const monthInput = main.locator('input[type="month"]')
   if (await monthInput.inputValue() !== productionMonth) {
-    await monthInput.fill(productionMonth)
     await Promise.all([
       page.waitForResponse(response => {
         const url = new URL(response.url())
         return url.pathname === '/api/performance/overview'
           && url.searchParams.get('year_month') === productionMonth
       }),
-      monthInput.press('Tab'),
+      monthInput.fill(productionMonth),
     ])
   }
   await expect(monthInput).toHaveValue(productionMonth)
