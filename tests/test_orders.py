@@ -719,6 +719,72 @@ class TestOrderDeleteFlow:
                 (shipment_id,),
             ).fetchone() is not None
 
+    def test_purge_removes_runtime_exception_but_keeps_event_history(
+        self, client, auth_headers, test_order_id
+    ):
+        exception_response = client.post(
+            f"/api/orders/{test_order_id}/completion-focus-exception",
+            headers=auth_headers,
+            json={"reason": "缺料", "detail": "purge fixture", "expires_at": "2099-01-01 00:00"},
+        )
+        assert exception_response.status_code == 200, exception_response.get_json()
+        exception_id = exception_response.get_json()["exception"]["id"]
+        before_events = _focus_event_count(client, "exception_created", test_order_id)
+
+        assert client.delete(f"/api/orders/{test_order_id}", headers=auth_headers).status_code == 200
+        purge_response = client.delete(
+            f"/api/orders/{test_order_id}/purge",
+            headers=auth_headers,
+        )
+        assert purge_response.status_code == 200, purge_response.get_json()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            assert db.execute(
+                "SELECT id FROM order_completion_focus_exceptions WHERE id = ?",
+                (exception_id,),
+            ).fetchone() is None
+            assert db.execute(
+                "SELECT COUNT(*) FROM order_completion_focus_events "
+                "WHERE order_id = ? AND event_type = 'exception_created'",
+                (test_order_id,),
+            ).fetchone()[0] == before_events
+
+    def test_purge_rejects_orders_with_protected_production_facts(
+        self, client, auth_headers, test_order_id
+    ):
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            process_id = db.execute(
+                "SELECT process_id FROM order_processes WHERE order_id = ? LIMIT 1",
+                (test_order_id,),
+            ).fetchone()["process_id"]
+            user_id = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()["id"]
+            db.execute(
+                "INSERT INTO work_records "
+                "(order_id, process_id, user_id, type, quantity, status, serial_no) "
+                "VALUES (?, ?, ?, 'normal', 1, 'approved', ?)",
+                (test_order_id, process_id, user_id, f"PURGE-PROTECTED-{uuid.uuid4().hex}"),
+            )
+            db.commit()
+
+        assert client.delete(f"/api/orders/{test_order_id}", headers=auth_headers).status_code == 200
+        purge_response = client.delete(
+            f"/api/orders/{test_order_id}/purge",
+            headers=auth_headers,
+        )
+        assert purge_response.status_code == 409, purge_response.get_json()
+        assert "只能保留软删除状态" in purge_response.get_json()["error"]
+        with client.application.app_context():
+            from modules.db import get_db
+
+            assert get_db().execute(
+                "SELECT id FROM orders WHERE id = ?", (test_order_id,)
+            ).fetchone() is not None
+
     def test_trash_list(self, client, auth_headers):
         resp = client.get("/api/orders/trash", headers=auth_headers)
         assert resp.status_code == 200
@@ -936,3 +1002,662 @@ class TestOrderEdgeCases:
         )
         assert cancel_resp.status_code == 200, cancel_resp.get_json()
         assert _focus_event_count(client, "exception_cancelled", test_order_id) == 1
+
+    def test_duplicate_completion_focus_cancel_is_idempotent(self, client, auth_headers, test_order_id):
+        create_resp = client.post(
+            f"/api/orders/{test_order_id}/completion-focus-exception",
+            headers=auth_headers,
+            json={"reason": "缺料", "detail": "first detail", "expires_at": "2099-01-01 00:00"},
+        )
+        assert create_resp.status_code == 200, create_resp.get_json()
+        exception_id = create_resp.get_json()["exception"]["id"]
+
+        first = client.delete(
+            f"/api/orders/completion-focus-exceptions/{exception_id}",
+            headers=auth_headers,
+            json={"reason": "first cancel"},
+        )
+        assert first.status_code == 200, first.get_json()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            first_cancellation = tuple(get_db().execute(
+                "SELECT cancel_reason, cancelled_by, cancelled_at "
+                "FROM order_completion_focus_exceptions WHERE id = ?",
+                (exception_id,),
+            ).fetchone())
+        second = client.delete(
+            f"/api/orders/completion-focus-exceptions/{exception_id}",
+            headers=auth_headers,
+            json={"reason": "replayed cancel"},
+        )
+        assert second.status_code == 200, second.get_json()
+        assert _focus_event_count(client, "exception_cancelled", test_order_id) == 1
+        with client.application.app_context():
+            from modules.db import get_db
+
+            row = get_db().execute(
+                "SELECT cancel_reason, cancelled_by, cancelled_at "
+                "FROM order_completion_focus_exceptions WHERE id = ?",
+                (exception_id,),
+            ).fetchone()
+            audit_count = get_db().execute(
+                "SELECT COUNT(*) FROM audit_logs "
+                "WHERE action = 'completion_focus_exception_cancel' "
+                "AND target_id = ?",
+                (exception_id,),
+            ).fetchone()[0]
+        assert row["cancel_reason"] == "first cancel"
+        assert row["cancelled_by"] is not None
+        assert tuple(row) == first_cancellation
+        assert audit_count == 1
+
+    def test_completion_focus_cancel_event_failure_rolls_back(
+        self, client, auth_headers, test_order_id, monkeypatch
+    ):
+        create_resp = client.post(
+            f"/api/orders/{test_order_id}/completion-focus-exception",
+            headers=auth_headers,
+            json={"reason": "缺料", "detail": "rollback fixture", "expires_at": "2099-01-01 00:00"},
+        )
+        assert create_resp.status_code == 200, create_resp.get_json()
+        exception_id = create_resp.get_json()["exception"]["id"]
+
+        from modules.repositories.completion_focus_repository import CompletionFocusRepository
+        from modules.services.order_focus_service import OrderFocusService
+
+        def fail_event(*_args, **_kwargs):
+            raise RuntimeError("event sink unavailable")
+
+        monkeypatch.setattr(CompletionFocusRepository, "insert_event", staticmethod(fail_event))
+        with client.application.app_context():
+            with pytest.raises(RuntimeError, match="event sink unavailable"):
+                OrderFocusService.cancel_exception(
+                    exception_id,
+                    {"id": 1, "name": "Test Runner"},
+                    "rollback cancel",
+                )
+            from modules.db import get_db
+
+            row = get_db().execute(
+                "SELECT status, cancel_reason FROM order_completion_focus_exceptions WHERE id = ?",
+                (exception_id,),
+            ).fetchone()
+        assert row["status"] == "active"
+        assert row["cancel_reason"] in (None, "")
+
+    def test_batch_create_reports_row_context_and_actor(self, client, auth_headers):
+        order_no = f"BATCH-VALID-{uuid.uuid4().hex[:8]}"
+        response = client.post(
+            "/api/orders/batch",
+            headers=auth_headers,
+            json={
+                "orders": [
+                    {
+                        "order_no": order_no,
+                        "product_name": "Batch Product",
+                        "quantity": 2,
+                    },
+                    {
+                        "order_no": f"BATCH-INVALID-{uuid.uuid4().hex[:8]}",
+                        "product_name": "",
+                        "quantity": 0,
+                    },
+                ]
+            },
+        )
+        assert response.status_code == 200, response.get_json()
+        payload = response.get_json()
+        assert payload["created"] == 1
+        assert payload["partial_success"] is True
+        assert payload["error_rows"][0]["row"] == 2
+        assert payload["error_rows"][0]["order_no"].startswith("BATCH-INVALID-")
+        assert payload["detail"] == payload["errors"][:20]
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            actor = db.execute(
+                "SELECT id, name FROM users WHERE username = 'testrunner'"
+            ).fetchone()
+            order = db.execute(
+                "SELECT id, priority_changed_by, priority_changed_by_name "
+                "FROM orders WHERE order_no = ?", (order_no,)
+            ).fetchone()
+            history = db.execute(
+                "SELECT changed_by, changed_by_name FROM order_priority_history "
+                "WHERE order_id = ? AND event_type = 'created'", (order['id'],)
+            ).fetchone()
+            row_audit = db.execute(
+                "SELECT user_id, detail FROM audit_logs "
+                "WHERE action = 'batch_create_order_row' AND target_id = ?",
+                (order['id'],),
+            ).fetchone()
+            failure_audit = db.execute(
+                "SELECT user_id, detail FROM audit_logs "
+                "WHERE action = 'batch_create_order_row_error' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            batch_audit = db.execute(
+                "SELECT user_id, detail FROM audit_logs "
+                "WHERE action = 'batch_create_orders' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        assert tuple(order)[1:] == (actor['id'], actor['name'])
+        assert tuple(history) == (actor['id'], actor['name'])
+        assert row_audit['user_id'] == actor['id']
+        assert f"batch_created_by={actor['id']}" in row_audit['detail']
+        assert failure_audit['user_id'] == actor['id']
+        assert 'row=2' in failure_audit['detail']
+        assert payload['error_rows'][0]['order_no'] in failure_audit['detail']
+        assert batch_audit['user_id'] == actor['id']
+        assert 'created=1; errors=1; partial_success=True' in batch_audit['detail']
+
+    def test_create_order_rejects_non_production_defaults(self, client, auth_headers):
+        missing_name = client.post(
+            "/api/orders",
+            headers=auth_headers,
+            json={"order_no": f"NO-NAME-{uuid.uuid4().hex[:8]}", "quantity": 1},
+        )
+        assert missing_name.status_code == 400, missing_name.get_json()
+
+        zero_quantity = client.post(
+            "/api/orders",
+            headers=auth_headers,
+            json={
+                "order_no": f"ZERO-QTY-{uuid.uuid4().hex[:8]}",
+                "product_name": "Invalid Quantity",
+                "quantity": 0,
+            },
+        )
+        assert zero_quantity.status_code == 400, zero_quantity.get_json()
+
+
+class TestOrderAuditRegression:
+    @pytest.mark.parametrize('invalid_assignment', [
+        {'process_ids': [999999]},
+        {'route_id': 999999},
+    ])
+    def test_batch_assignment_validation_keeps_later_valid_row(
+        self, client, auth_headers, invalid_assignment
+    ):
+        prefix = f"BATCH-ASSIGN-{uuid.uuid4().hex[:8]}"
+        response = client.post(
+            '/api/orders/batch', headers=auth_headers,
+            json={'orders': [
+                {'order_no': f'{prefix}-BAD', 'product_name': 'Invalid assignment',
+                 'quantity': 1, **invalid_assignment},
+                {'order_no': f'{prefix}-GOOD', 'product_name': 'Valid later row',
+                 'quantity': 1},
+            ]},
+        )
+        assert response.status_code == 200, response.get_json()
+        payload = response.get_json()
+        assert payload['created'] == 1
+        assert len(payload['errors']) == 1
+        assert payload['detail'] == payload['errors']
+        assert payload['error_rows'][0]['row'] == 1
+        assert payload['error_rows'][0]['index'] == 0
+        assert payload['error_rows'][0]['order_no'] == f'{prefix}-BAD'
+        with client.application.app_context():
+            from modules.db import get_db
+
+            rows = get_db().execute(
+                'SELECT order_no FROM orders WHERE order_no LIKE ?', (prefix + '%',)
+            ).fetchall()
+        assert [row['order_no'] for row in rows] == [f'{prefix}-GOOD']
+
+    @pytest.mark.parametrize('adapter', ['http', 'legacy_service'])
+    def test_batch_infrastructure_failure_stops_and_rolls_back_only_failed_row(
+        self, client, auth_headers, monkeypatch, adapter
+    ):
+        from modules.services.order_service import BatchOrderImportError, OrderService
+
+        prefix = f'BATCH-STOP-{uuid.uuid4().hex[:8]}'
+        orders = [
+            {'order_no': f'{prefix}-{index}', 'product_name': 'Interrupted import',
+             'quantity': 1}
+            for index in range(1, 4)
+        ]
+        original_assignment = OrderService._assign_processes
+        attempted = []
+
+        def assignment_with_failure(db, order_id, *args, **kwargs):
+            order_no = db.execute(
+                'SELECT order_no FROM orders WHERE id = ?', (order_id,)
+            ).fetchone()['order_no']
+            attempted.append(order_no)
+            original_assignment(db, order_id, *args, **kwargs)
+            if order_no == orders[1]['order_no']:
+                raise RuntimeError('sensitive-db-path-and-password-must-not-leak')
+
+        monkeypatch.setattr(OrderService, '_assign_processes', staticmethod(assignment_with_failure))
+        if adapter == 'http':
+            response = client.post(
+                '/api/orders/batch', headers=auth_headers, json={'orders': orders}
+            )
+            assert response.status_code == 500, response.get_json()
+            payload = response.get_json()
+            assert payload['error'] == '批量导入因内部错误中止'
+            assert 'sensitive-db-path-and-password' not in response.get_data(as_text=True)
+        else:
+            with client.application.app_context():
+                with pytest.raises(BatchOrderImportError, match='批量导入因内部错误中止') as raised:
+                    OrderService.batch_create(orders)
+            payload = raised.value.result
+            assert 'sensitive-db-path-and-password' not in str(raised.value)
+            assert payload['infrastructure_error'] is True
+        assert payload['created'] == 1
+        assert payload['partial_success'] is True
+        assert payload['error_rows'] == [{
+            'row': 2, 'index': 1, 'order_no': orders[1]['order_no'],
+            'error': '内部错误，批量导入已中止',
+        }]
+        assert attempted == [orders[0]['order_no'], orders[1]['order_no']]
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            surviving_orders = db.execute(
+                'SELECT id, order_no FROM orders WHERE order_no LIKE ?', (prefix + '%',)
+            ).fetchall()
+            assert [row['order_no'] for row in surviving_orders] == [orders[0]['order_no']]
+            assert db.execute(
+                'SELECT COUNT(*) FROM order_processes WHERE order_id = ?',
+                (surviving_orders[0]['id'],),
+            ).fetchone()[0] > 0
+            assert db.execute(
+                'SELECT COUNT(*) FROM order_priority_history WHERE order_no_snapshot LIKE ?',
+                (prefix + '%',),
+            ).fetchone()[0] == 1
+
+    @pytest.mark.parametrize('selection', ['product_id', 'product_code'])
+    def test_create_resolves_blank_name_from_selected_product(
+        self, client, auth_headers, selection
+    ):
+        suffix = uuid.uuid4().hex[:8]
+        product_code = f'NORMALIZE-{suffix}'
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            product_id = ensure_product(db, product_code, f'Canonical product {suffix}')
+            db.commit()
+        response = client.post(
+            '/api/orders', headers=auth_headers,
+            json={
+                'order_no': f'NORMALIZE-ORDER-{suffix}', 'product_name': '',
+                'quantity': 2, selection: product_id if selection == 'product_id' else product_code,
+            },
+        )
+        assert response.status_code == 200, response.get_json()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            order = get_db().execute(
+                'SELECT product_id, product_code, product_name, quantity FROM orders WHERE id = ?',
+                (response.get_json()['id'],),
+            ).fetchone()
+        assert tuple(order) == (product_id, product_code, f'Canonical product {suffix}', 2)
+
+    @pytest.mark.parametrize('invalid_fields', [
+        {'quantity': 1},
+        {'product_name': '   ', 'quantity': 1},
+        {'product_name': 9, 'quantity': 1},
+        {'product_name': 'Missing quantity'},
+        {'product_name': 'Invalid quantity', 'quantity': True},
+        {'product_name': 'Invalid quantity', 'quantity': False},
+        {'product_name': 'Invalid quantity', 'quantity': 1.5},
+        {'product_name': 'Invalid quantity', 'quantity': '2'},
+        {'product_name': 'Invalid quantity', 'quantity': 0},
+    ])
+    def test_direct_create_rejects_invalid_required_values(self, client, invalid_fields):
+        from modules.domain.errors import ValidationError
+        from modules.services.order_service import OrderService
+
+        order_no = f'INVALID-DIRECT-{uuid.uuid4().hex[:8]}'
+        with client.application.app_context():
+            with pytest.raises(ValidationError):
+                OrderService.create_order({'order_no': order_no, **invalid_fields})
+            from modules.db import get_db
+
+            assert get_db().execute(
+                'SELECT id FROM orders WHERE order_no = ?', (order_no,)
+            ).fetchone() is None
+
+    @pytest.mark.parametrize('missing_fields', [
+        {'quantity': 1}, {'product_name': 'Missing quantity'},
+    ])
+    def test_batch_missing_required_values_are_row_errors(
+        self, client, auth_headers, missing_fields
+    ):
+        suffix = uuid.uuid4().hex[:8]
+        response = client.post(
+            '/api/orders/batch', headers=auth_headers,
+            json={'orders': [
+                {'order_no': f'MISSING-{suffix}', **missing_fields},
+                {'order_no': f'VALID-{suffix}', 'product_name': 'Valid after missing', 'quantity': 1},
+            ]},
+        )
+        assert response.status_code == 200, response.get_json()
+        payload = response.get_json()
+        assert payload['created'] == 1
+        assert payload['error_rows'][0]['row'] == 1
+        assert len(payload['errors']) == 1
+
+    def test_recycled_order_materials_reject_add_and_delete(
+        self, client, auth_headers, test_order_id
+    ):
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            material_id = create_material(db, name=f'Trash recipe {uuid.uuid4().hex[:8]}')
+            db.commit()
+        created = client.post(
+            f'/api/orders/{test_order_id}/materials', headers=auth_headers,
+            json={'material_id': material_id, 'quantity_per_unit': 1},
+        )
+        assert created.status_code == 201, created.get_json()
+        item_id = created.get_json()['material']['id']
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+        added = client.post(
+            f'/api/orders/{test_order_id}/materials', headers=auth_headers,
+            json={'material_id': material_id, 'quantity_per_unit': 2},
+        )
+        removed = client.delete(
+            f'/api/orders/{test_order_id}/materials/{item_id}', headers=auth_headers,
+        )
+        assert added.status_code == 404, added.get_json()
+        assert removed.status_code == 404, removed.get_json()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            row = get_db().execute(
+                'SELECT quantity_per_unit FROM order_materials WHERE id = ?', (item_id,)
+            ).fetchone()
+        assert row['quantity_per_unit'] == 1
+
+    def test_manual_nonconformance_blocks_purge_without_other_facts(
+        self, client, auth_headers, test_order_id
+    ):
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            ncr_id = db.execute(
+                'INSERT INTO quality_nonconformances '
+                '(ncr_no, order_id, source_type, description) VALUES (?, ?, ?, ?)',
+                (f'MANUAL-NCR-{uuid.uuid4().hex[:8]}', test_order_id, 'manual', 'Retain manual fact'),
+            ).lastrowid
+            db.commit()
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+        response = client.delete(f'/api/orders/{test_order_id}/purge', headers=auth_headers)
+        assert response.status_code == 409, response.get_json()
+        assert '只能保留软删除状态' in response.get_json()['error']
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            assert db.execute('SELECT id FROM orders WHERE id = ?', (test_order_id,)).fetchone()
+            assert db.execute(
+                'SELECT order_id FROM quality_nonconformances WHERE id = ?', (ncr_id,)
+            ).fetchone()['order_id'] == test_order_id
+
+    @pytest.mark.parametrize('adapter', ['http', 'legacy_service'])
+    def test_real_sqlite_integrity_error_is_safe_import_interruption(
+        self, client, auth_headers, monkeypatch, adapter
+    ):
+        from modules.services.order_service import BatchOrderImportError, OrderService
+
+        prefix = f'BATCH-SQLITE-{uuid.uuid4().hex[:8]}'
+        orders = [
+            {'order_no': f'{prefix}-{index}', 'product_name': 'SQLite rollback product',
+             'quantity': 1}
+            for index in range(1, 4)
+        ]
+        attempts = []
+        original_create = OrderService.create_order
+
+        def trace_create(data, *args, **kwargs):
+            attempts.append(data['order_no'])
+            return original_create(data, *args, **kwargs)
+
+        monkeypatch.setattr(OrderService, 'create_order', staticmethod(trace_create))
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            before_process_count = db.execute('SELECT COUNT(*) FROM order_processes').fetchone()[0]
+            db.execute(
+                "CREATE TRIGGER test_fail_second_import_history "
+                "BEFORE INSERT ON order_priority_history "
+                f"WHEN NEW.order_no_snapshot = '{orders[1]['order_no']}' "
+                "BEGIN SELECT RAISE(ABORT, 'secret-internal-database-location'); END"
+            )
+            db.commit()
+
+        if adapter == 'http':
+            response = client.post(
+                '/api/orders/batch', headers=auth_headers, json={'orders': orders}
+            )
+            assert response.status_code == 500, response.get_json()
+            payload = response.get_json()
+            assert payload['error'] == '批量导入因内部错误中止'
+            assert 'secret-internal-database-location' not in response.get_data(as_text=True)
+            assert '数据完整性约束违反' not in response.get_data(as_text=True)
+        else:
+            with client.application.app_context():
+                with pytest.raises(BatchOrderImportError) as raised:
+                    OrderService.batch_create(orders)
+            payload = raised.value.result
+            assert 'secret-internal-database-location' not in str(raised.value)
+            assert payload['infrastructure_error'] is True
+
+        assert attempts == [orders[0]['order_no'], orders[1]['order_no']]
+        assert payload['created'] == 1
+        assert payload['partial_success'] is True
+        assert payload['error_rows'] == [{
+            'row': 2, 'index': 1, 'order_no': orders[1]['order_no'],
+            'error': '内部错误，批量导入已中止',
+        }]
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            surviving = db.execute(
+                'SELECT id, order_no FROM orders WHERE order_no LIKE ?', (prefix + '%',)
+            ).fetchall()
+            assert [row['order_no'] for row in surviving] == [orders[0]['order_no']]
+            surviving_process_count = db.execute(
+                'SELECT COUNT(*) FROM order_processes WHERE order_id = ?', (surviving[0]['id'],)
+            ).fetchone()[0]
+            assert surviving_process_count > 0
+            assert db.execute('SELECT COUNT(*) FROM order_processes').fetchone()[0] == (
+                before_process_count + surviving_process_count
+            )
+            assert db.execute(
+                'SELECT COUNT(*) FROM order_priority_history WHERE order_no_snapshot LIKE ?',
+                (prefix + '%',),
+            ).fetchone()[0] == 1
+
+    @pytest.mark.parametrize('fact_table', [
+        'work_records', 'scrap_records', 'rework_records', 'quality_inspections',
+        'process_quality_evaluations', 'quality_inspection_tasks',
+    ])
+    def test_each_independent_fact_prevents_purge(
+        self, client, auth_headers, test_order_id, fact_table
+    ):
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            process_id = db.execute(
+                'SELECT process_id FROM order_processes WHERE order_id = ? LIMIT 1',
+                (test_order_id,),
+            ).fetchone()['process_id']
+            actor_id = db.execute('SELECT id FROM users ORDER BY id LIMIT 1').fetchone()['id']
+            if fact_table in ('work_records', 'scrap_records', 'rework_records'):
+                fact_id = db.execute(
+                    f'INSERT INTO {fact_table} (order_id, process_id, user_id, quantity) '
+                    'VALUES (?, ?, ?, 1)', (test_order_id, process_id, actor_id),
+                ).lastrowid
+            elif fact_table == 'quality_inspections':
+                fact_id = db.execute(
+                    'INSERT INTO quality_inspections (order_id, process_id, inspector_id) '
+                    'VALUES (?, ?, ?)', (test_order_id, process_id, actor_id),
+                ).lastrowid
+            elif fact_table == 'process_quality_evaluations':
+                fact_id = db.execute(
+                    'INSERT INTO process_quality_evaluations '
+                    '(order_id,target_process_id,evaluator_process_id,evaluator_user_id,'
+                    'processing_quality,dimensional_accuracy,appearance_quality,'
+                    'process_continuity,cleanliness_protection,total_score,grade) '
+                    'VALUES (?, ?, ?, ?, 5, 5, 5, 5, 5, 100, ?)',
+                    (test_order_id, process_id, process_id, actor_id, 'A'),
+                ).lastrowid
+            else:
+                suffix = uuid.uuid4().hex[:8]
+                fact_id = db.execute(
+                    'INSERT INTO quality_inspection_tasks '
+                    '(task_no,trigger_key,order_id,inspection_type,trigger_type) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (f'MANUAL-TASK-{suffix}', f'manual-test-{suffix}',
+                     test_order_id, 'process', 'manual'),
+                ).lastrowid
+            db.commit()
+            before_fact = tuple(db.execute(
+                f'SELECT * FROM {fact_table} WHERE id = ?', (fact_id,)
+            ).fetchone())
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+        response = client.delete(f'/api/orders/{test_order_id}/purge', headers=auth_headers)
+        assert response.status_code == 409, response.get_json()
+        assert '只能保留软删除状态' in response.get_json()['error']
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            assert tuple(db.execute(
+                f'SELECT * FROM {fact_table} WHERE id = ?', (fact_id,)
+            ).fetchone()) == before_fact
+            assert db.execute(
+                'SELECT deleted_at FROM orders WHERE id = ?', (test_order_id,)
+            ).fetchone()['deleted_at']
+
+    @pytest.mark.parametrize('storage', ['blob', 'file'])
+    def test_attachments_block_purge_and_preserve_bytes_and_metadata(
+        self, client, auth_headers, test_order_id, tmp_path, storage
+    ):
+        payload = b'protected attachment\x00\xff\r\noriginal bytes'
+        file_path = tmp_path / 'protected-attachment.bin'
+        if storage == 'file':
+            file_path.write_bytes(payload)
+        with client.application.app_context():
+            from modules.db import get_db
+
+            db = get_db()
+            attachment_id = db.execute(
+                'INSERT INTO order_attachments '
+                '(order_id,file_name,file_type,file_size,file_data,file_path,uploaded_by) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (test_order_id, file_path.name, 'application/octet-stream', len(payload),
+                 payload if storage == 'blob' else None,
+                 str(file_path) if storage == 'file' else '', 'evidence owner'),
+            ).lastrowid
+            db.commit()
+            before_attachment = tuple(db.execute(
+                'SELECT * FROM order_attachments WHERE id = ?', (attachment_id,)
+            ).fetchone())
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+        response = client.delete(f'/api/orders/{test_order_id}/purge', headers=auth_headers)
+        assert response.status_code == 409, response.get_json()
+        with client.application.app_context():
+            from modules.db import get_db
+
+            row = get_db().execute(
+                'SELECT * FROM order_attachments WHERE id = ?', (attachment_id,)
+            ).fetchone()
+        assert tuple(row) == before_attachment
+        if storage == 'file':
+            assert row['file_path'] == str(file_path)
+            assert file_path.read_bytes() == payload
+        else:
+            assert row['file_data'] == payload
+
+    def test_purge_rechecks_restored_order_inside_transaction(
+        self, client, auth_headers, test_order_id, monkeypatch
+    ):
+        from contextlib import contextmanager
+        from modules.db import get_db
+        from modules.services import BaseService
+        from modules.services.order_service import OrderService
+
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+
+        class RestoreBeforePurgeUnitOfWork:
+            @staticmethod
+            @contextmanager
+            def transaction():
+                db = get_db()
+                db.execute(
+                    "UPDATE orders SET deleted_at = NULL, status = 'pending' WHERE id = ?",
+                    (test_order_id,),
+                )
+                db.commit()
+                with BaseService.transaction() as txn:
+                    yield txn
+
+        monkeypatch.setattr(OrderService, 'unit_of_work', RestoreBeforePurgeUnitOfWork)
+        with client.application.app_context():
+            with pytest.raises(ValueError, match='只能彻底删除回收站中的订单'):
+                OrderService.purge_order(test_order_id)
+            order = get_db().execute(
+                'SELECT id, deleted_at FROM orders WHERE id = ?', (test_order_id,)
+            ).fetchone()
+            assert order is not None
+            assert order['deleted_at'] is None
+
+    def test_purge_failure_rolls_back_runtime_exception_and_preserved_references(
+        self, client, auth_headers, test_order_id, monkeypatch
+    ):
+        from modules.db import get_db
+        from modules.repositories.order_repository import OrderRepository
+        from modules.services.order_service import OrderService
+
+        exception_response = client.post(
+            f'/api/orders/{test_order_id}/completion-focus-exception',
+            headers=auth_headers,
+            json={'reason': '缺料', 'detail': 'rollback evidence'},
+        )
+        assert exception_response.status_code == 200, exception_response.get_json()
+        exception_id = exception_response.get_json()['exception']['id']
+        with client.application.app_context():
+            db = get_db()
+            inventory_id = db.execute(
+                'INSERT INTO inventory (product_model,product_name,quantity,order_id,remark) '
+                'VALUES (?, ?, 3, ?, ?)',
+                (f'PURGE-ROLLBACK-{uuid.uuid4().hex[:8]}', 'Preserved stock', test_order_id, 'original remark'),
+            ).lastrowid
+            db.commit()
+        assert client.delete(f'/api/orders/{test_order_id}', headers=auth_headers).status_code == 200
+        original_purge = OrderRepository.purge_with_children
+
+        def fail_after_delete(order_id, child_tables, db=None):
+            original_purge(order_id, child_tables, db=db)
+            raise RuntimeError('forced final purge failure')
+
+        monkeypatch.setattr(OrderRepository, 'purge_with_children', staticmethod(fail_after_delete))
+        with client.application.app_context():
+            with pytest.raises(RuntimeError, match='forced final purge failure'):
+                OrderService.purge_order(test_order_id)
+            db = get_db()
+            assert db.execute(
+                'SELECT deleted_at FROM orders WHERE id = ?', (test_order_id,)
+            ).fetchone()['deleted_at']
+            assert db.execute(
+                'SELECT status FROM order_completion_focus_exceptions WHERE id = ?', (exception_id,)
+            ).fetchone()['status'] == 'active'
+            assert tuple(db.execute(
+                'SELECT order_id,quantity,remark FROM inventory WHERE id = ?', (inventory_id,)
+            ).fetchone()) == (test_order_id, 3, 'original remark')
+            assert db.execute(
+                'SELECT COUNT(*) FROM order_processes WHERE order_id = ?', (test_order_id,)
+            ).fetchone()[0] > 0

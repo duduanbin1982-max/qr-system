@@ -404,6 +404,32 @@ class OrderRepository:
         db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
 
     @staticmethod
+    def delete_completion_focus_exceptions(order_id, db=None):
+        """Remove active/runtime focus exceptions while retaining immutable events."""
+        db = resolve_db(db)
+        db.execute(
+            "DELETE FROM order_completion_focus_exceptions WHERE order_id = ?",
+            (order_id,),
+        )
+
+    @staticmethod
+    def count_protected_facts(order_id, db=None):
+        """Return production/quality evidence that makes hard purge unsafe."""
+        db = resolve_db(db)
+        total = 0
+        for table in (
+            "work_records", "scrap_records", "rework_records", "quality_inspections",
+            "quality_nonconformances", "process_quality_evaluations",
+            "quality_inspection_tasks", "order_attachments",
+        ):
+            row = db.execute(
+                f"SELECT COUNT(*) AS cnt FROM {table} WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+            total += int(row["cnt"] if row else 0)
+        return total
+
+    @staticmethod
     def detach_preserved_order_references(order_id, order_no, db=None):
         """Preserve stock and shipment history while removing their order foreign keys."""
         db = resolve_db(db)
