@@ -63,6 +63,32 @@ PINNED_PAYROLL_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "4651cd756bd9f162c444e8c918ecc09d209f15f0"),
     ),
 }
+# PR #136 support changes are approved only for these exact production and
+# business merge trees. The tool fix that grants this approval is separate.
+ORDERS_SUPPORT_BASELINE = "a1bdb0a4fa3d6aec1139a8db1e2f72707646f1ef"
+ORDERS_SUPPORT_TARGET = "971a7a3deb307efe0cae765d71abf833e6bf03aa"
+PINNED_ORDERS_SUPPORT_TRANSITIONS = {
+    "frontend/tests/e2e/admin-pages.spec.js": (
+        ("100644", "blob", "888ee644a26c129d87d5d90ffe29ed50f733a2c4"),
+        ("100644", "blob", "8c6fd85b8046c176a38ba0db6ad810b3123f9f92"),
+    ),
+    "frontend/tests/e2e/helpers.js": (
+        ("100644", "blob", "234c7ab405955c81c0679e34a3080788c08f3c9d"),
+        ("100644", "blob", "5ed81ed951880c0e3355232359adc9222fcbdafb"),
+    ),
+    "frontend/tests/unit/order-mode-progress.spec.js": (
+        ("100644", "blob", "e4ef8a40666efb461c9527565dc88c706a962494"),
+        ("100644", "blob", "a185211584c3634bc735a2a543041c465ca2ef96"),
+    ),
+    "scripts/e2e_server.py": (
+        ("100755", "blob", "bfe2ae31b011a6b9f9e809c1d2aa8acd4383bdde"),
+        ("100755", "blob", "f223a157124f5ec41e0a23f5d7a36fb762bfb7fa"),
+    ),
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "8303fb9cd6fee5bb658fe57f92a1e0df6f203599"),
+        ("100644", "blob", "d0abe1a02d23bee4b9327b0eaaaaaccb8e4f37ce"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -132,7 +158,11 @@ def _tree_entry(repository, commit, path):
 
 
 def _validate_support_transition(repository, before, target, path):
-    if path in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
+    if path in PINNED_ORDERS_SUPPORT_TRANSITIONS:
+        if (before, target) != (ORDERS_SUPPORT_BASELINE, ORDERS_SUPPORT_TARGET):
+            raise RuntimeError(f"orders support exception requires the reviewed baseline and target: {path}")
+        expected_before, expected_target = PINNED_ORDERS_SUPPORT_TRANSITIONS[path]
+    elif path in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
         if (before, target) != (PAYROLL_SUPPORT_BASELINE, PAYROLL_SUPPORT_TARGET):
             raise RuntimeError(f"payroll support exception requires the reviewed baseline and target: {path}")
         expected_before, expected_target = PINNED_PAYROLL_SUPPORT_TRANSITIONS[path]
@@ -161,7 +191,11 @@ def _validate_paths(repository, before, target, changed):
             raise RuntimeError(f"release contains a path outside backend/frontend scope: {path}")
         if target_path.is_symlink():
             raise RuntimeError(f"release cannot change a symlinked path: {path}")
-        if normalized in PINNED_SUPPORT_TRANSITIONS or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
+        if (
+            normalized in PINNED_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
+            or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
+        ):
             _validate_support_transition(repository, before, target, normalized)
             continue
         if parts[0] not in ALLOWED_ROOTS:
