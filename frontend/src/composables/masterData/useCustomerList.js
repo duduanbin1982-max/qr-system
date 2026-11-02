@@ -1,4 +1,4 @@
-import { ref, onMounted, computed } from "vue"
+import { ref, onMounted, onUnmounted, computed } from "vue"
 import { api } from "@/lib/api.js"
 import { showToast } from "@/lib/store.js"
 import { can } from "@/lib/auth.js"
@@ -59,29 +59,51 @@ export function useCustomerList() {
     detailPage, detailTotal, detailPageSize,
     viewDetail, loadDetailOrders, detailPrevPage, detailNextPage, closeDetail,
   } = useCustomerDetails(canViewOrders)
+  let requestSequence = 0
+  let disposed = false
+
+  function isCurrentRequest(requestId) {
+    return !disposed && requestId === requestSequence
+  }
 
   async function load() {
+    if (disposed) return
+    const requestId = ++requestSequence
+    const kw = searchKeyword.value.trim()
+    const tg = tagFilter.value
+    const params = { limit: pageSize }
+    if (kw) params.keyword = kw
+    if (tg) params.tag = tg
+    let requestedPage = page.value
     loading.value = true
     loadError.value = ""
     try {
-      const kw = searchKeyword.value.trim()
-      const tg = tagFilter.value
-      const params = { page: page.value, limit: pageSize }
-      if (kw) params.keyword = kw
-      if (tg) params.tag = tg
-      const d = await api.domains.customers.listCustomers(params)
-      customers.value = d.customers || []
-      total.value = d.total || 0
-      summary.value = d.summary || { total: total.value, with_orders: 0, with_contact: 0, with_email: 0 }
-      allTags.value = d.available_tags || []
+      while (isCurrentRequest(requestId)) {
+        const d = await api.domains.customers.listCustomers({ ...params, page: requestedPage })
+        if (!isCurrentRequest(requestId)) return
+        const nextTotal = d.total || 0
+        const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize))
+        if (requestedPage > lastPage) {
+          requestedPage = lastPage
+          page.value = requestedPage
+          continue
+        }
+        page.value = requestedPage
+        customers.value = d.customers || []
+        total.value = nextTotal
+        summary.value = d.summary || { total: nextTotal, with_orders: 0, with_contact: 0, with_email: 0 }
+        allTags.value = d.available_tags || []
+        return
+      }
     } catch(e) {
+      if (!isCurrentRequest(requestId)) return
       customers.value = []
       total.value = 0
       summary.value = { total: 0, with_orders: 0, with_contact: 0, with_email: 0 }
       loadError.value = e.message || "客户数据加载失败"
       showToast(loadError.value, "error")
     }
-    finally { loading.value = false }
+    finally { if (isCurrentRequest(requestId)) loading.value = false }
   }
 
   function searchAndLoad() { page.value = 1; load() }
@@ -120,6 +142,10 @@ export function useCustomerList() {
     catch(e) { showToast(e.message || "删除失败", "error") }
   }
   onMounted(() => load())
+  onUnmounted(() => {
+    disposed = true
+    requestSequence++
+  })
 
   return {
     customers, loading, loadError, searchKeyword, load, searchAndLoad, filterAndLoad,

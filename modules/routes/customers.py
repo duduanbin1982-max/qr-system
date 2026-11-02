@@ -13,7 +13,6 @@ from modules.route_decorators import (
     get_user_process_ids,
     get_json_body,
     has_permission,
-    safe_audit_log,
     validate_json,
 )
 from modules.services.customer_service import CustomerService
@@ -99,9 +98,10 @@ def create_customer():
       - Bearer: []
     """
     data = get_json_body()
-    cid = CustomerService.create_customer(data)
-    safe_audit_log(
-        'create_customer', 'customer', cid, {'changed_fields': sorted(data)}
+    cid = CustomerService.create_customer(
+        data,
+        actor_id=g.current_user['id'],
+        request_id=request.headers.get('X-Request-ID', '')[:120],
     )
     return jsonify({'message': '创建成功', 'id': cid})
 
@@ -150,9 +150,11 @@ def update_customer(cid):
       - Bearer: []
     """
     data = get_json_body()
-    CustomerService.update_customer(cid, data)
-    safe_audit_log(
-        'update_customer', 'customer', cid, {'changed_fields': sorted(data)}
+    CustomerService.update_customer(
+        cid,
+        data,
+        actor_id=g.current_user['id'],
+        request_id=request.headers.get('X-Request-ID', '')[:120],
     )
     return jsonify({'message': '更新成功'})
 
@@ -182,10 +184,13 @@ def delete_customer(cid):
       - Bearer: []
     """
     try:
-        CustomerService.delete_customer(cid)
+        CustomerService.delete_customer(
+            cid,
+            actor_id=g.current_user['id'],
+            request_id=request.headers.get('X-Request-ID', '')[:120],
+        )
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    safe_audit_log('delete_customer', 'customer', cid)
     return jsonify({'message': '删除成功'})
 
 
