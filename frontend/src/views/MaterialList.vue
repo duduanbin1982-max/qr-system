@@ -251,7 +251,7 @@
             <div class="form-group" style="flex:1">
               <label>订单关联</label>
               <div class="combobox">
-                <input v-model="orderSearch" @input="searchOrders" @focus="searchOrders" placeholder="搜索订单号..." class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)">
+                <input v-model="orderSearch" @input="onOrderSearchInput" @focus="searchOrders" placeholder="搜索订单号..." class="form-input" style="width:100%;box-sizing:border-box;font-size:var(--text-sm)">
                 <div v-if="orderDropdown && orderResults.length" class="combobox-dropdown">
                   <div v-for="o in orderResults" :key="o.id" class="combobox-item" @click="selectOrder(o)">
                     <span style="font-weight:600;color:var(--primary)">{{ o.order_no }}</span>
@@ -320,12 +320,12 @@
           <div v-if="detailLoading" style="text-align:center;padding:24px;color:var(--text-placeholder)">正在加载消耗趋势...</div>
           <div v-else-if="detailError" style="text-align:center;padding:24px;color:var(--danger)">{{ detailError }}</div>
           <template v-else>
-          <h4 style="margin-bottom:12px;font-size:14px">📈 消耗趋势</h4>
+          <h4 style="margin-bottom:12px;font-size:14px">📈 消耗趋势（最近20条记录，仅有效消耗）</h4>
           <canvas ref="trendChart" style="max-height:250px;margin-bottom:16px"></canvas>
           <div v-if="detailConsumptions.length" style="border-top:1px solid var(--bg-hover);padding-top:12px">
             <h4 style="margin-bottom:8px;font-size:14px">📝 近期消耗记录</h4>
             <table class="data-table" style="font-size:var(--text-xs)">
-              <thead><tr><th>日期</th><th>订单</th><th>数量</th><th>操作人</th><th>备注</th></tr></thead>
+              <thead><tr><th>日期</th><th>订单</th><th>数量</th><th>操作人</th><th>备注</th><th>状态</th></tr></thead>
               <tbody>
                 <tr v-for="c in detailConsumptions" :key="c.id">
                   <td>{{ fmtDate(c.created_at) }}</td>
@@ -333,6 +333,7 @@
                   <td style="color:var(--danger);font-weight:600">-{{ c.quantity }}</td>
                   <td>{{ c.operator_name || "-" }}</td>
                   <td style="color:var(--text-placeholder)">{{ c.notes || "-" }}</td>
+                  <td><span class="badge" :class="c.status === 'reversed' ? 'badge-info' : 'badge-success'">{{ c.status === 'reversed' ? '已撤销' : '有效' }}</span><div v-if="c.reversal_reason" style="color:var(--text-placeholder)">{{ c.reversal_reason }}</div></td>
                 </tr>
               </tbody>
             </table>

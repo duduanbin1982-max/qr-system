@@ -1,6 +1,7 @@
 """Pure material requirement and shortage policies for work reports."""
 
-from modules.domain.errors import ConflictError, ValidationError
+from modules.domain.errors import ConflictError
+from modules.domain.material_values import finite_number
 
 
 class MaterialRequirementPolicy:
@@ -17,19 +18,25 @@ class MaterialRequirementPolicy:
     def calculate(cls, material_rows, report_quantity):
         requirements = []
         shortages = []
+        report_quantity = finite_number(report_quantity, "报工数量", positive=True)
         for material in material_rows:
             material_id = cls._value(material, "material_id")
-            required_quantity = float(report_quantity) * float(
-                cls._value(material, "quantity_per_unit", 0) or 0
-            )
             material_name = (
                 cls._value(material, "material_name") or f"物料#{material_id}"
             )
             unit = cls._value(material, "unit") or ""
-            if required_quantity <= 0:
-                raise ValidationError(f"物料「{material_name}」的工序用量必须大于 0")
-            available_quantity = float(
-                cls._value(material, "stock_qty", 0) or 0
+            per_unit = finite_number(
+                cls._value(material, "quantity_per_unit"),
+                f"物料「{material_name}」的工序用量",
+                positive=True,
+            )
+            required_quantity = finite_number(
+                report_quantity * per_unit, "物料需求量", positive=True
+            )
+            available_quantity = finite_number(
+                cls._value(material, "stock_qty"),
+                f"物料「{material_name}」的库存",
+                nonnegative=True,
             )
             requirement = {
                 "material_id": material_id,
@@ -42,6 +49,26 @@ class MaterialRequirementPolicy:
             if available_quantity < required_quantity:
                 shortages.append(requirement)
         return requirements, shortages
+
+    @staticmethod
+    def combined_shortages(requirements):
+        """Check common and process demand together before either is written."""
+        combined = {}
+        for requirement in requirements:
+            material_id = requirement["material_id"]
+            if material_id not in combined:
+                combined[material_id] = dict(requirement)
+            else:
+                combined[material_id]["required_quantity"] = finite_number(
+                    combined[material_id]["required_quantity"]
+                    + requirement["required_quantity"],
+                    "合计物料需求量",
+                    positive=True,
+                )
+        return [
+            item for item in combined.values()
+            if item["available_quantity"] < item["required_quantity"]
+        ]
 
     @staticmethod
     def assert_sufficient(shortages):

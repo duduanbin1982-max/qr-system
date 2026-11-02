@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { loadAllMaterialOptions } from '@/composables/material/loadMaterialOptions.js'
 import { positiveBomQuantity } from './productForm.js'
 
 
@@ -153,6 +154,7 @@ export function useProductBom(currentProductId, productForm) {
   const bomForm = ref({ material_id: '', quantity: 1, process_id: null })
   const materialOptions = ref([])
   const processOptions = ref([])
+  let materialOptionsSequence = 0
 
   function resetBomForm() {
     const weight = Number(productForm.value.weight)
@@ -172,10 +174,13 @@ export function useProductBom(currentProductId, productForm) {
     }
   }
   async function loadMaterialOptions() {
+    const requestId = ++materialOptionsSequence
     try {
-      const data = await api.domains.materials.listMaterials()
-      materialOptions.value = data.materials || []
+      const materials = await loadAllMaterialOptions()
+      if (requestId !== materialOptionsSequence) return
+      materialOptions.value = materials
     } catch (error) {
+      if (requestId !== materialOptionsSequence) return
       materialOptions.value = []
       showToast(error.message || '加载物料选项失败', 'error')
     }

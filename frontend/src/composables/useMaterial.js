@@ -30,6 +30,9 @@ export function useMaterial() {
   const orderSearch = ref('')
   const orderResults = ref([])
   const orderDropdown = ref(false)
+  let stockSession = 0
+  let consumeSession = 0
+  let orderSearchSequence = 0
 
   const canEdit = computed(() => can('materials:edit'))
   const canDelete = computed(() => can('materials:delete'))
@@ -126,6 +129,13 @@ export function useMaterial() {
         showToast(`该物料正在被 ${impact.refs} 个地方引用，无法删除`, 'error')
         return
       }
+      if (impact?.can_delete === false) {
+        const reasons = []
+        if (Number(impact.inventory_quantity || 0) !== 0) reasons.push('库存非零')
+        if (Number(impact.stock_log_count || 0) > 0) reasons.push('存在历史流水')
+        showToast(reasons.length ? `该物料${reasons.join('且')}，无法删除` : '该物料暂不允许删除', 'error')
+        return
+      }
       await api.domains.materials.deleteMaterial(material.id)
       showToast('已删除')
       await catalog.refreshAfterDelete()
@@ -135,6 +145,7 @@ export function useMaterial() {
   }
 
   function openStock(material) {
+    stockSession += 1
     selectedMaterial.value = material
     stockForm.value = { type: 'in', quantity: 0, remark: '' }
     showStock.value = true
@@ -146,14 +157,19 @@ export function useMaterial() {
       showToast('数量必须大于0', 'error')
       return
     }
+    const material = selectedMaterial.value
+    const session = stockSession
+    const payload = { ...stockForm.value }
     stockSaving.value = true
     try {
       const result = await api.domains.materials.materialStockChange(
-        selectedMaterial.value.id,
-        stockForm.value,
+        material.id,
+        payload,
       )
-      selectedMaterial.value.quantity = result.new_quantity
-      showStock.value = false
+      if (session === stockSession && showStock.value && selectedMaterial.value === material) {
+        material.quantity = result.new_quantity
+        showStock.value = false
+      }
       showToast('操作成功')
       await catalog.load()
     } catch (error) {
@@ -164,6 +180,8 @@ export function useMaterial() {
   }
 
   function openConsume(material) {
+    consumeSession += 1
+    orderSearchSequence += 1
     consumeForm.value = { order_id: null, process_id: null, quantity: 0, notes: '' }
     orderSearch.value = ''
     orderResults.value = []
@@ -172,27 +190,45 @@ export function useMaterial() {
   }
 
   async function searchOrders() {
-    if (!orderSearch.value.trim()) {
+    const requestId = ++orderSearchSequence
+    const session = consumeSession
+    const keyword = orderSearch.value.trim()
+    const isCurrent = () => (
+      requestId === orderSearchSequence
+      && session === consumeSession
+      && activity.showConsume.value
+      && keyword === orderSearch.value.trim()
+    )
+    if (!keyword) {
       orderResults.value = []
       orderDropdown.value = false
       return
     }
     try {
       const result = await api.domains.orders.listOrders({
-        keyword: orderSearch.value.trim(),
+        keyword,
         limit: 8,
       })
+      if (!isCurrent()) return
       orderResults.value = result.orders || []
       orderDropdown.value = true
     } catch {
+      if (!isCurrent()) return
       orderResults.value = []
       orderDropdown.value = false
     }
   }
 
+  function onOrderSearchInput() {
+    consumeForm.value.order_id = null
+    return searchOrders()
+  }
+
   function selectOrder(order) {
+    orderSearchSequence += 1
     consumeForm.value.order_id = order.id
     orderSearch.value = `${order.order_no} ${order.product_name || ''}`.trim()
+    orderResults.value = []
     orderDropdown.value = false
   }
 
@@ -202,17 +238,24 @@ export function useMaterial() {
       showToast('数量必须大于0', 'error')
       return
     }
+    const material = selectedMaterial.value
+    const session = consumeSession
+    const payload = { ...consumeForm.value }
     consumeSaving.value = true
     try {
       const result = await api.domains.materials.createMaterialConsumption(
-        selectedMaterial.value.id,
-        consumeForm.value,
+        material.id,
+        payload,
       )
-      selectedMaterial.value.quantity = result.new_quantity
       showToast('消耗已记录')
-      consumeForm.value.quantity = 0
-      consumeForm.value.notes = ''
-      await Promise.all([activity.refreshConsumptions(), catalog.load()])
+      const refreshes = [catalog.load()]
+      if (session === consumeSession && activity.showConsume.value && selectedMaterial.value === material) {
+        material.quantity = result.new_quantity
+        consumeForm.value.quantity = 0
+        consumeForm.value.notes = ''
+        refreshes.push(activity.refreshConsumptions())
+      }
+      await Promise.all(refreshes)
     } catch (error) {
       showToast(error.message || '消耗记录失败', 'error')
     } finally {
@@ -227,14 +270,20 @@ export function useMaterial() {
       showToast('请填写撤销原因', 'error')
       return
     }
+    const material = selectedMaterial.value
+    const session = consumeSession
     try {
       const result = await api.domains.materials.deleteMaterialConsumption(
         consumption.id,
         { reason: reason.trim() },
       )
-      selectedMaterial.value.quantity = result.new_quantity
       showToast('已撤销')
-      await Promise.all([activity.refreshConsumptions(), catalog.load()])
+      const refreshes = [catalog.load()]
+      if (session === consumeSession && activity.showConsume.value && selectedMaterial.value === material) {
+        material.quantity = result.new_quantity
+        refreshes.push(activity.refreshConsumptions())
+      }
+      await Promise.all(refreshes)
     } catch (error) {
       showToast(error.message || '撤销失败', 'error')
     }
@@ -345,6 +394,7 @@ export function useMaterial() {
     doStock,
     openConsume,
     searchOrders,
+    onOrderSearchInput,
     selectOrder,
     doConsume,
     undoConsume,

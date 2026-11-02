@@ -2,6 +2,7 @@ import { ref } from 'vue'
 
 import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
+import { loadAllMaterialOptions } from '@/composables/material/loadMaterialOptions.js'
 
 
 export function useOrderMaterials({ modalId, products }) {
@@ -9,6 +10,7 @@ export function useOrderMaterials({ modalId, products }) {
   const orderMatForm = ref({ material_id: '', quantity_per_unit: 1, process_id: null })
   const materialOptions = ref([])
   const processOptions = ref([])
+  let materialOptionsSequence = 0
 
   async function loadOrderMaterials(orderId) {
     try {
@@ -20,10 +22,13 @@ export function useOrderMaterials({ modalId, products }) {
   }
 
   async function loadMaterialOptions() {
+    const requestId = ++materialOptionsSequence
     try {
-      const data = await api.domains.materials.listMaterials()
-      materialOptions.value = data.materials || []
+      const materials = await loadAllMaterialOptions()
+      if (requestId !== materialOptionsSequence) return
+      materialOptions.value = materials
     } catch (error) {
+      if (requestId !== materialOptionsSequence) return
       materialOptions.value = []
       showToast(error.message || '加载物料选项失败', 'error')
     }

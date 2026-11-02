@@ -1,8 +1,11 @@
 """Order material snapshot helpers."""
 
+from modules.domain.errors import ConflictError
+from modules.domain.material_recipe import MaterialRecipePolicy
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.repositories.product_repository import ProductRepository
+from modules.services.order_material_state_service import OrderMaterialStateService
 
 
 class OrderMaterialSnapshotService:
@@ -21,26 +24,31 @@ class OrderMaterialSnapshotService:
 
     @staticmethod
     def copy_product_bom(order_id, product_id, db):
-        if not product_id:
-            return 0
+        OrderMaterialStateService.assert_can_initialize(order_id, db)
         copied = 0
-        for bom in ProductBomRepository.list_by_product(product_id, db=db):
-            process_id = bom["process_id"] if bom["process_id"] else None
+        bom_rows = (
+            ProductBomRepository.list_by_product(product_id, db=db)
+            if product_id else []
+        )
+        for bom in bom_rows:
+            normalized = MaterialRecipePolicy.normalize(dict(bom))
+            process_id = normalized["process_id"]
             duplicate = OrderMaterialRepository.find_duplicate(
                 order_id,
-                bom["material_id"],
+                normalized["material_id"],
                 process_id,
                 db=db,
             )
             if duplicate:
-                continue
+                raise ConflictError("产品物料配方存在重复项，禁止生成不完整的订单快照")
             OrderMaterialRepository.insert(
                 order_id,
-                bom["material_id"],
-                bom["quantity_per_unit"],
+                normalized["material_id"],
+                normalized["quantity_per_unit"],
                 process_id,
                 "auto",
                 db=db,
             )
             copied += 1
+        OrderMaterialStateService.mark_initialized(order_id, product_id, copied, db)
         return copied

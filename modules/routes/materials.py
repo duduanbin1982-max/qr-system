@@ -89,7 +89,7 @@ def material_logs(mid):
 def material_stock(mid):
     data = get_json_body()
     change_type = data.get('type', '').strip()
-    quantity = float(data.get('quantity', 0))
+    quantity = data.get('quantity', 0)
     remark = data.get('remark', '').strip()
     operator_name = g.current_user.get('name') or g.current_user.get('username', '')
     operator_id = g.current_user.get('id')
@@ -126,15 +126,15 @@ def create_consumption(mid):
     data = get_json_body()
     order_id = data.get('order_id') or None
     process_id = data.get('process_id') or None
-    quantity = float(data.get('quantity', 0))
+    quantity = data.get('quantity', 0)
     notes = data.get('notes', '').strip()
     uname = g.current_user.get('name', g.current_user.get('username', ''))
     uid = g.current_user.get('id')
     new_qty = MaterialService.create_consumption(
         mid, order_id, process_id, quantity,
-        notes=notes, operator_name=uname, user_id=uid
+        notes=notes, operator_name=uname, user_id=uid,
+        request_id=request.headers.get('X-Request-ID', ''),
     )
-    safe_audit_log('consume', 'material', mid, f'consumed {quantity}, remaining: {new_qty}')
     return jsonify({'ok': True, 'new_quantity': new_qty})
 
 

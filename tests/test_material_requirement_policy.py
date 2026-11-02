@@ -56,3 +56,30 @@ def test_material_requirement_policy_rejects_nonpositive_bom_quantity():
             ],
             1,
         )
+
+
+@pytest.mark.parametrize("quantity", [True, "NaN", "Infinity", "1e309", -1, "text"])
+def test_material_requirement_policy_rejects_invalid_raw_quantity(quantity):
+    with pytest.raises(ValidationError):
+        MaterialRequirementPolicy.calculate(
+            [{"material_id": 1, "quantity_per_unit": quantity, "stock_qty": 20}], 1
+        )
+
+
+def test_material_requirement_policy_rejects_product_overflow():
+    with pytest.raises(ValidationError, match="物料需求量必须是有限数值"):
+        MaterialRequirementPolicy.calculate(
+            [{"material_id": 1, "quantity_per_unit": 1e200, "stock_qty": 1e300}], 1e200
+        )
+
+
+def test_material_requirement_policy_checks_combined_common_and_process_demand():
+    common, _ = MaterialRequirementPolicy.calculate(
+        [{"material_id": 1, "quantity_per_unit": 2, "stock_qty": 12}], 5
+    )
+    process, _ = MaterialRequirementPolicy.calculate(
+        [{"material_id": 1, "quantity_per_unit": 1, "stock_qty": 12}], 3
+    )
+    shortages = MaterialRequirementPolicy.combined_shortages(common + process)
+    assert shortages[0]["required_quantity"] == 13
+    assert shortages[0]["available_quantity"] == 12

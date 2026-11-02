@@ -25,10 +25,13 @@ from modules.domain.legacy_process_line_admission import (
     assert_legacy_process_line_write_allowed,
 )
 from modules.domain.schedule_order_priority import ScheduleOrderPriorityPolicy
+from modules.domain.material_recipe import MaterialRecipePolicy
 from modules.services.query_utils import paginate, build_sort_clause
 from modules.repositories.order_repository import OrderRepository
 from modules.repositories.order_material_repository import OrderMaterialRepository
 from modules.services.order_material_snapshot_service import OrderMaterialSnapshotService
+from modules.services.order_material_state_service import OrderMaterialStateService
+from modules.repositories.product_bom_repository import ProductBomRepository
 from modules.services.order_process_sync_service import OrderProcessSyncService
 from modules.services.order_completion_service import OrderCompletionService
 from modules.services.order_product_identity_service import OrderProductIdentityService
@@ -625,6 +628,8 @@ class OrderService:
         OrderService._validate_quantity_against_serial_items(
             oid, current_order, data, txn
         )
+        if 'quantity' in data and data['quantity'] != current_order['quantity']:
+            OrderMaterialStateService.assert_common_mutable(oid, txn)
 
         route_changed, process_ids_changed = OrderService._process_sync_service().prepare_update(
             txn, oid, current_order['route_id'], data
@@ -1090,11 +1095,10 @@ class OrderService:
             raise NotFoundError('订单不存在')
         if order['status'] == 'completed':
             raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
-        material_id = data.get('material_id')
-        quantity = data.get('quantity') or data.get('quantity_per_unit', 1)
-        process_id = data.get('process_id') or None
-        if not material_id:
-            raise ValidationError('物料 ID 不能为空')
+        recipe = MaterialRecipePolicy.normalize(data, quantity_field='quantity')
+        material_id = recipe['material_id']
+        quantity = recipe['quantity_per_unit']
+        process_id = recipe['process_id']
         repository = OrderService._material_repository()
         with OrderService._unit_of_work().transaction() as txn:
             current_order = OrderService._repository().find_by_id(order_id, db=txn)
@@ -1102,6 +1106,12 @@ class OrderService:
                 raise NotFoundError('订单不存在')
             if current_order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
+            if not ProductBomRepository.material_exists(material_id, db=txn):
+                raise NotFoundError('物料不存在')
+            if process_id is not None and not ProductBomRepository.process_exists(process_id, db=txn):
+                raise NotFoundError('工序不存在或已停用')
+            if process_id is None:
+                OrderMaterialStateService.assert_common_mutable(order_id, txn)
             if repository.find_duplicate(order_id, material_id, process_id, db=txn):
                 raise ConflictError('该物料已存在于订单物料配方中')
             new_id = repository.insert(
@@ -1119,8 +1129,14 @@ class OrderService:
                 raise NotFoundError('订单不存在')
             if order['status'] == 'completed':
                 raise ValueError(OrderService.COMPLETED_READONLY_MESSAGE)
-            if not material_repository.find_by_id_and_order(
-                item_id, order_id, db=txn
-            ):
+            material = material_repository.find_by_id(item_id, db=txn)
+            if not material or material['order_id'] != order_id:
                 raise NotFoundError('订单物料记录不存在')
+            if material['process_id'] is None:
+                OrderMaterialStateService.assert_common_mutable(order_id, txn)
             material_repository.delete(item_id, db=txn)
+            # This explicit deletion may create an intentionally empty snapshot.
+            remaining = material_repository.list_by_order(order_id, db=txn)
+            OrderMaterialStateService.mark_initialized(
+                order_id, None, len(remaining), txn
+            )
