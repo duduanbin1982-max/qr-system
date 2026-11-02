@@ -89,6 +89,24 @@ PINNED_ORDERS_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "d0abe1a02d23bee4b9327b0eaaaaaccb8e4f37ce"),
     ),
 }
+# PR #138 support changes are limited to this exact production-to-merge pair.
+# The separate tool update is not part of the customer business target.
+CUSTOMER_SUPPORT_BASELINE = "971a7a3deb307efe0cae765d71abf833e6bf03aa"
+CUSTOMER_SUPPORT_TARGET = "2a5a014d5e99655ad1e9ecdc9ac0ebc670e15875"
+PINNED_CUSTOMER_SUPPORT_TRANSITIONS = {
+    "frontend/tests/e2e/customer-management.spec.js": (
+        None,
+        ("100644", "blob", "d478125c6e610d01db284e75166c916ac4d2abb3"),
+    ),
+    "frontend/tests/unit/CustomerListRequests.spec.js": (
+        None,
+        ("100644", "blob", "083f92a6a0a06a20799ddd92d640e09da6ecea5d"),
+    ),
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "d0abe1a02d23bee4b9327b0eaaaaaccb8e4f37ce"),
+        ("100644", "blob", "347a25db4b7ac0504f2933a612c42ad46e35f5f7"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -158,10 +176,17 @@ def _tree_entry(repository, commit, path):
 
 
 def _validate_support_transition(repository, before, target, path):
-    if path in PINNED_ORDERS_SUPPORT_TRANSITIONS:
+    if (
+        path in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
+        and (before, target) == (CUSTOMER_SUPPORT_BASELINE, CUSTOMER_SUPPORT_TARGET)
+    ):
+        expected_before, expected_target = PINNED_CUSTOMER_SUPPORT_TRANSITIONS[path]
+    elif path in PINNED_ORDERS_SUPPORT_TRANSITIONS:
         if (before, target) != (ORDERS_SUPPORT_BASELINE, ORDERS_SUPPORT_TARGET):
             raise RuntimeError(f"orders support exception requires the reviewed baseline and target: {path}")
         expected_before, expected_target = PINNED_ORDERS_SUPPORT_TRANSITIONS[path]
+    elif path in PINNED_CUSTOMER_SUPPORT_TRANSITIONS:
+        raise RuntimeError(f"customer support exception requires the reviewed baseline and target: {path}")
     elif path in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
         if (before, target) != (PAYROLL_SUPPORT_BASELINE, PAYROLL_SUPPORT_TARGET):
             raise RuntimeError(f"payroll support exception requires the reviewed baseline and target: {path}")
@@ -195,6 +220,7 @@ def _validate_paths(repository, before, target, changed):
             normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
+            or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
