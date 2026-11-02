@@ -1,9 +1,12 @@
 """Material and supplier application services."""
+from modules.audit_writer import AuditCommand, AuditWriter
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
 from modules.domain.material_requirements import MaterialRequirementPolicy
+from modules.domain.material_values import finite_number
 from modules.repositories.material_repository import MaterialRepository, SupplierRepository
 from modules.repositories.material_consumption_repository import MaterialConsumptionRepository
+from modules.services.order_material_state_service import OrderMaterialStateService
 
 
 class MaterialNotFoundError(NotFoundError):
@@ -37,6 +40,12 @@ class MaterialService:
             user.get('id'),
             user.get('name') or user.get('username') or '系统',
         )
+
+    @staticmethod
+    def _material_name(value):
+        if not isinstance(value, str) or not value.strip():
+            raise ValidationError('物料名称不能为空')
+        return value.strip()
 
     @staticmethod
     def list_materials(page=1, limit=100, keyword='', material_type=''):
@@ -76,9 +85,7 @@ class MaterialService:
     @staticmethod
     def create_material(data, user=None):
         """Create material. Raises ValueError on empty name or duplicate name+spec+material_type."""
-        name = data.get('name', '').strip()
-        if not name:
-            raise ValidationError('物料名称不能为空')
+        name = MaterialService._material_name(data.get('name'))
         spec = (data.get('spec') or '').strip()
         mt = (data.get('material_type') or '').strip()
         repository = MaterialService._repository()
@@ -91,14 +98,16 @@ class MaterialService:
                     info += ', ' + '材质' + ':' + mt
                 info += ')'
             raise ConflictError('物料' + info + '已存在')
-        opening_quantity = float(data.get('quantity', 0))
+        opening_quantity = finite_number(
+            data.get('quantity', 0), '期初库存', nonnegative=True,
+        )
         data_tuple = (
             name,
             spec,
             data.get('unit', '件').strip(),
             opening_quantity,
-            float(data.get('unit_price', 0)),
-            float(data.get('safe_stock', 0)),
+            finite_number(data.get('unit_price', 0), '单价', nonnegative=True),
+            finite_number(data.get('safe_stock', 0), '安全库存', nonnegative=True),
             data.get('location', '').strip(),
             data.get('supplier_id') or None,
             data.get('remark', '').strip(),
@@ -135,9 +144,9 @@ class MaterialService:
 
         # Validate the effective unique material identity before updating.
         if 'name' in data:
-            name = str(data['name']).strip()
-            spec = str(data.get('spec', '')).strip()
-            mt = str(data.get('material_type', '')).strip()
+            name = MaterialService._material_name(data['name'])
+            spec = str(data.get('spec', row['spec']) or '').strip()
+            mt = str(data.get('material_type', row['material_type']) or '').strip()
             dup = repository.check_duplicate(name, spec, mt, exclude_id=mid)
             if dup:
                 info = name
@@ -153,14 +162,20 @@ class MaterialService:
         for k in ['name', 'spec', 'unit', 'location', 'remark', 'material_type']:
             if k in data:
                 set_clauses.append(f'{k} = ?')
-                params.append(str(data[k]).strip())
+                params.append(name if k == 'name' else str(data[k]).strip())
         for k in ['unit_price', 'safe_stock', 'supplier_id']:
             if k in data:
                 if data[k] is None and k == 'supplier_id':
                     set_clauses.append(f'{k} = NULL')
                 else:
                     set_clauses.append(f'{k} = ?')
-                    params.append(float(data[k] or 0))
+                    if k == 'supplier_id':
+                        params.append(float(data[k] or 0))
+                    else:
+                        field = '单价' if k == 'unit_price' else '安全库存'
+                        params.append(finite_number(
+                            data[k], field, nonnegative=True,
+                        ))
         if not set_clauses:
             raise ValidationError('没有可更新的字段')
 
@@ -169,35 +184,57 @@ class MaterialService:
             repository.update(mid, set_clauses, params, db=txn)
 
     @staticmethod
-    def check_impact(mid):
+    def _deletion_impact(mid, *, db=None):
         repository = MaterialService._repository()
-        mat = repository.find_by_id(mid)
+        mat = repository.find_by_id(mid, db=db)
         if not mat:
             raise MaterialNotFoundError('物料不存在')
-        references = repository.reference_counts(mid)
+        references = repository.reference_counts(mid, db=db)
+        refs = sum(references.values())
+        quantity = finite_number(
+            mat['quantity'] if mat['quantity'] is not None else 0,
+            '当前库存',
+            nonnegative=True,
+        )
+        log_count = repository.count_logs_by_material(mid, db=db)
+        blockers = []
+        if refs:
+            blockers.append('references')
+        if quantity != 0:
+            blockers.append('inventory')
+        if log_count:
+            blockers.append('stock_history')
         return {
             "material_id": mid,
             "name": mat["name"],
-            "refs": sum(references.values()),
+            "refs": refs,
             "references": references,
+            "inventory_quantity": quantity,
+            "stock_log_count": log_count,
+            "can_delete": not blockers,
+            "blockers": blockers,
         }
 
     @staticmethod
+    def check_impact(mid):
+        return MaterialService._deletion_impact(mid)
+
+    @staticmethod
     def delete_material(mid):
-        """Delete a material only when no business records reference it."""
+        """Delete only unused materials with no balance or inventory history."""
         repository = MaterialService._repository()
         with MaterialService._unit_of_work().transaction() as txn:
-            mat = repository.find_by_id(mid, db=txn)
-            if not mat:
-                raise MaterialNotFoundError('物料不存在')
-            references = repository.reference_counts(mid, db=txn)
-            refs = sum(references.values())
-            if refs > 0:
+            impact = MaterialService._deletion_impact(mid, db=txn)
+            if impact['refs'] > 0:
                 raise ConflictError(
-                    f'物料「{mat["name"]}」已有 {refs} 条关联记录，无法删除',
-                    details={'references': references},
+                    f'物料「{impact["name"]}」已有 {impact["refs"]} 条关联记录，无法删除',
+                    details=impact,
                 )
-            repository.delete_logs_by_material(mid, db=txn)
+            if not impact['can_delete']:
+                raise ConflictError(
+                    f'物料「{impact["name"]}」仍有库存或库存流水，无法删除',
+                    details=impact,
+                )
             repository.delete(mid, db=txn)
 
     @staticmethod
@@ -229,8 +266,7 @@ class MaterialService:
         """Apply a validated inbound or outbound stock movement."""
         if change_type not in ('in', 'out'):
             raise ValidationError('库存变动类型必须是 in 或 out')
-        if quantity <= 0:
-            raise ValidationError('数量必须大于 0')
+        quantity = finite_number(quantity, '数量', positive=True)
 
         repository = MaterialService._repository()
         with MaterialService._unit_of_work().transaction() as txn:
@@ -273,10 +309,9 @@ class MaterialService:
 
     @staticmethod
     def create_consumption(mid, order_id, process_id, quantity, notes='',
-                           operator_name='', user_id=None):
-        """Record material consumption and deduct stock atomically."""
-        if quantity <= 0:
-            raise ValidationError('数量必须大于 0')
+                           operator_name='', user_id=None, *, request_id=''):
+        """Commit consumption, stock, ledger, and required audit together."""
+        quantity = finite_number(quantity, '数量', positive=True)
 
         repository = MaterialService._repository()
         with MaterialService._unit_of_work().transaction() as txn:
@@ -302,6 +337,19 @@ class MaterialService:
                 source_id=consumption_id,
                 db=txn,
             )
+            try:
+                command = AuditCommand.create(
+                    user_id,
+                    'consume',
+                    'material',
+                    mid,
+                    f'consumed {quantity}, remaining: {transition["balance_after"]}',
+                    request_id=str(request_id or '')[:120],
+                )
+                AuditWriter.required(command, db=txn)
+            except Exception as exc:
+                # Storage faults must not become legacy integrity/HTTP 400 errors.
+                raise RuntimeError('物料消耗审计写入失败') from exc
         return transition['balance_after']
 
     @staticmethod
@@ -318,16 +366,17 @@ class MaterialService:
                 raise NotFoundError('物料消耗记录不存在')
             if (mc['status'] or 'active') != 'active':
                 raise ConflictError('该消耗记录已经撤销')
+            quantity = finite_number(mc['quantity'], '消耗数量', positive=True)
             transition = repository.apply_quantity_delta(
-                mc['material_id'], mc['quantity'], db=txn
+                mc['material_id'], quantity, db=txn
             )
-            original_log = repository.find_log_for_source(
-                'consumption', cid, db=txn
+            original_log = repository.find_log_for_consumption(
+                cid, mc['material_id'], db=txn
             )
             reversal_log_id = repository.insert_log(
                 mc['material_id'],
                 'reversal',
-                mc['quantity'],
+                quantity,
                 f'撤销消耗: {reason}',
                 operator_name,
                 operator_id=operator_id,
@@ -393,15 +442,18 @@ class MaterialService:
         consumption_id = repository.insert_consumption(
             requirement['material_id'],
             order_id,
-            process_id,
+            None if requirement.get('scope') == 'order' else process_id,
             requirement['required_quantity'],
             user_id,
             user_name,
-            'auto-deduct from order BOM',
-            source_work_record_id=work_record_id,
+            ('auto-deduct order common BOM'
+             if requirement.get('scope') == 'order' else 'auto-deduct from order BOM'),
+            source_work_record_id=(
+                None if requirement.get('scope') == 'order' else work_record_id
+            ),
             db=db,
         )
-        repository.insert_log(
+        log_id = repository.insert_log(
             requirement['material_id'],
             'out',
             requirement['required_quantity'],
@@ -410,10 +462,19 @@ class MaterialService:
             operator_id=user_id,
             balance_before=transition['balance_before'],
             balance_after=transition['balance_after'],
-            source_type='auto_consumption',
+            source_type=(
+                'order_common_consumption'
+                if requirement.get('scope') == 'order' else 'auto_consumption'
+            ),
             source_id=consumption_id,
             db=db,
         )
+        return {
+            'material_id': requirement['material_id'],
+            'quantity': requirement['required_quantity'],
+            'consumption_id': consumption_id,
+            'log_id': log_id,
+        }
 
     @staticmethod
     def deduct_for_process(
@@ -426,19 +487,43 @@ class MaterialService:
         work_record_id=None,
     ):
         """Apply approved-report material deductions through the stock ledger."""
-        material_rows = MaterialService._consumption_repository().deduction_candidates(
-            order_id, process_id, db=db
+        if not db.in_transaction:
+            raise ValueError('自动扣料必须加入报工写事务')
+        consumption_repository = MaterialService._consumption_repository()
+        if not consumption_repository.auto_deduction_enabled(db):
+            return []
+        snapshot = consumption_repository.snapshot_rows(order_id, db=db)
+        OrderMaterialStateService.assert_snapshot_known(order_id, snapshot, db)
+        material_rows = consumption_repository.deduction_candidates(
+            order_id, process_id, db=db, snapshot=snapshot
         )
         MaterialService._assert_consumption_not_recorded(
             material_rows, work_record_id, db
         )
-        requirements, shortages = MaterialRequirementPolicy.calculate(
-            material_rows, quantity
+        common_rows = [row for row in material_rows if row['process_id'] is None]
+        process_rows = [row for row in material_rows if row['process_id'] is not None]
+        basis = OrderMaterialStateService.prepare_common_basis(
+            order_id, common_rows, work_record_id, db
         )
-        MaterialRequirementPolicy.assert_sufficient(shortages)
+        requirements, _ = MaterialRequirementPolicy.calculate(
+            process_rows, quantity
+        )
+        common_requirements = []
+        if basis is not None and common_rows:
+            common_requirements, _ = MaterialRequirementPolicy.calculate(
+                common_rows, basis['order_quantity']
+            )
+            for requirement in common_requirements:
+                requirement['scope'] = 'order'
+        MaterialRequirementPolicy.assert_sufficient(
+            MaterialRequirementPolicy.combined_shortages(
+                common_requirements + requirements
+            )
+        )
 
-        for requirement in requirements:
-            MaterialService._apply_process_requirement(
+        allocations = []
+        for requirement in common_requirements + requirements:
+            allocation = MaterialService._apply_process_requirement(
                 requirement,
                 order_id,
                 process_id,
@@ -446,6 +531,12 @@ class MaterialService:
                 user_name,
                 work_record_id,
                 db,
+            )
+            if requirement.get('scope') == 'order':
+                allocations.append(allocation)
+        if basis is not None:
+            OrderMaterialStateService.record_common_basis(
+                order_id, basis, allocations, user_id, db
             )
         return []
 

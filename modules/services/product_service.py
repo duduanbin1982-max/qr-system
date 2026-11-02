@@ -8,6 +8,7 @@ from datetime import datetime
 import math
 from modules.services import BaseService
 from modules.domain.errors import ConflictError, NotFoundError, ValidationError
+from modules.domain.material_recipe import MaterialRecipePolicy
 from modules.config import generate_product_code
 from modules.repositories.product_repository import ProductRepository
 from modules.repositories.product_bom_repository import ProductBomRepository
@@ -619,17 +620,10 @@ class ProductService:
 
     @staticmethod
     def add_product_bom(product_id, data):
-        material_id = ProductService._optional_positive_id(data.get('material_id'), '物料 ID')
-        quantity = data.get('quantity_per_unit', data.get('quantity', 1))
-        process_id = ProductService._optional_positive_id(data.get('process_id'), '工序 ID')
-        if not material_id:
-            raise ValidationError('物料 ID 不能为空')
-        try:
-            quantity = float(quantity)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError('单位用量必须是有效数字') from exc
-        if not math.isfinite(quantity) or quantity <= 0:
-            raise ValidationError('单位用量必须是大于0的有限数字')
+        recipe = MaterialRecipePolicy.normalize(data)
+        material_id = recipe['material_id']
+        quantity = recipe['quantity_per_unit']
+        process_id = recipe['process_id']
         with BaseService.transaction() as txn:
             if not ProductBomRepository.product_exists(product_id, db=txn):
                 raise NotFoundError('产品不存在')

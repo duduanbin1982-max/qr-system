@@ -1,4 +1,5 @@
 """Persistence operations for materials, inventory movements, consumption, and suppliers."""
+from modules.domain.material_values import finite_number
 from modules.repositories.context import resolve_db
 from modules.process_fact_projection import (
     capture_process_fact_binding,
@@ -266,6 +267,18 @@ class MaterialRepository:
         ).fetchone()
 
     @staticmethod
+    def find_log_for_consumption(consumption_id, material_id, db=None):
+        """Find the original outward movement for manual or automatic usage."""
+        db = resolve_db(db)
+        return db.execute(
+            "SELECT * FROM material_logs WHERE source_type IN "
+            "('consumption', 'auto_consumption', 'order_common_consumption') "
+            "AND source_id = ? AND material_id = ? AND type = 'out' "
+            "ORDER BY id ASC LIMIT 1",
+            (consumption_id, material_id),
+        ).fetchone()
+
+    @staticmethod
     def count_refs(mid, db=None):
         """Count business records that prevent material deletion."""
         return sum(MaterialRepository.reference_counts(mid, db=db).values())
@@ -346,14 +359,15 @@ class MaterialRepository:
     def apply_quantity_delta(mid, delta, db=None):
         """Apply a stock delta and return the balance transition."""
         db = resolve_db(db)
+        delta = finite_number(delta, '库存变动数量')
         row = db.execute(
             'SELECT id, COALESCE(quantity, 0) AS quantity FROM materials WHERE id = ?',
             (mid,),
         ).fetchone()
         if not row:
             return None
-        balance_before = float(row['quantity'] or 0)
-        balance_after = balance_before + float(delta)
+        balance_before = finite_number(row['quantity'], '当前库存', nonnegative=True)
+        balance_after = finite_number(balance_before + delta, '变动后库存')
         if balance_after < 0:
             return {
                 'material_id': mid,

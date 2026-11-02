@@ -163,6 +163,7 @@ export function useMaterialActivity(selectedMaterial) {
     if (!detailConsumptions.value.length) return
     const consumptionByDate = {}
     detailConsumptions.value.forEach((consumption) => {
+      if (consumption.status === 'reversed') return
       const date = (consumption.created_at || '').slice(0, 10)
       if (!consumptionByDate[date]) consumptionByDate[date] = 0
       consumptionByDate[date] += Number(consumption.quantity || 0)
@@ -173,7 +174,7 @@ export function useMaterialActivity(selectedMaterial) {
       data: {
         labels: dates,
         datasets: [{
-          label: '消耗量',
+          label: '有效消耗量',
           data: dates.map(date => consumptionByDate[date]),
           backgroundColor: 'rgba(239,68,68,0.6)',
           borderColor: 'rgba(239,68,68,1)',
