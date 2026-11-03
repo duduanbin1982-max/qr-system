@@ -194,6 +194,99 @@ describe('Task 2F application context composables', () => {
     expect(trace.traceHistory.value[0]).toEqual({ code: 'SN-100', mode: 'serial' })
   })
 
+  it('drops malformed trace history entries before rendering', () => {
+    localStorage.setItem('qr_trace_history', JSON.stringify([
+      { code: 'SERIAL-VALID', mode: 'serial' },
+      { code: 'ORDER-INVALID-MODE', mode: 'shipment' },
+      { code: '', mode: 'order' },
+      null,
+      { code: 'ORDER-VALID', mode: 'order' },
+    ]))
+
+    const trace = useTracePage()
+
+    expect(trace.traceHistory.value).toEqual([
+      { code: 'SERIAL-VALID', mode: 'serial' },
+      { code: 'ORDER-VALID', mode: 'order' },
+    ])
+  })
+
+  it('continues tracing when local storage is unavailable', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage disabled')
+    })
+    try {
+      mocks.traceSearch.mockResolvedValue({ applied: true })
+      const trace = useTracePage()
+      trace.traceCode.value = 'SN-NO-STORAGE'
+
+      await expect(trace.doTrace()).resolves.toBeUndefined()
+      expect(trace.traceHistory.value[0]).toEqual({ code: 'SN-NO-STORAGE', mode: 'serial' })
+    } finally {
+      setItem.mockRestore()
+    }
+  })
+
+  it('reloads an independent order trace collection page', async () => {
+    mocks.traceSearch
+      .mockResolvedValueOnce({
+        applied: true,
+        data: {
+          meta: {
+            pagination: {
+              items: { page: 1, per_page: 100, total: 1, total_pages: 1 },
+              work_records: { page: 1, per_page: 50, total: 101, total_pages: 3 },
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ applied: true, data: { meta: { pagination: {} } } })
+    const trace = useTracePage()
+    trace.traceMode.value = 'order'
+    trace.traceCode.value = 'ORDER-100'
+
+    await trace.doTrace()
+    await trace.doCollectionTrace({ name: 'work_records', page: 2, perPage: 50 })
+
+    expect(mocks.traceSearch).toHaveBeenNthCalledWith(2, {
+      code: 'ORDER-100',
+      mode: 'order',
+      page: 1,
+      perPage: 100,
+      collectionPages: { work_records: 2 },
+      collectionPerPages: { work_records: 50 },
+    })
+  })
+
+  it('resets collection pages when tracing a different order', async () => {
+    mocks.traceSearch
+      .mockResolvedValueOnce({
+        applied: true,
+        data: {
+          meta: {
+            pagination: {
+              items: { page: 1, per_page: 100, total: 1, total_pages: 1 },
+              work_records: { page: 2, per_page: 50, total: 101, total_pages: 3 },
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ applied: true, data: { meta: { pagination: {} } } })
+    const trace = useTracePage()
+    trace.traceMode.value = 'order'
+    trace.traceCode.value = 'ORDER-OLD'
+    await trace.doTrace()
+    trace.traceCode.value = 'ORDER-NEW'
+    await trace.doTrace()
+
+    expect(mocks.traceSearch).toHaveBeenNthCalledWith(2, {
+      code: 'ORDER-NEW',
+      mode: 'order',
+      page: 1,
+      perPage: 100,
+    })
+  })
+
   it('keeps app layout route selection in the application coordinator', async () => {
     const Harness = { setup: () => useAppLayout(), template: '<div />' }
     const wrapper = mount(Harness)

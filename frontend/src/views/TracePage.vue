@@ -41,6 +41,7 @@
         @trace-serial="traceTarget($event, 'serial')"
         @trace-order="traceTarget($event, 'order')"
         @page="doTrace"
+        @collection-page="doCollectionTrace"
       />
       <TraceProductionHistory :result="result" />
       <TraceQualityRecords :result="result" />
@@ -63,7 +64,17 @@ import TraceProductionHistory from '@/components/TraceProductionHistory.vue'
 import TraceQualityRecords from '@/components/TraceQualityRecords.vue'
 import { useTracePage } from '@/composables/trace/useTracePage.js'
 
-const { traceCode, traceMode, searching, result, traceHistory, doTrace, traceTarget, printReport } = useTracePage()
+const {
+  traceCode,
+  traceMode,
+  searching,
+  result,
+  traceHistory,
+  doTrace,
+  doCollectionTrace,
+  traceTarget,
+  printReport,
+} = useTracePage()
 </script>
 
 <style scoped>
@@ -90,6 +101,6 @@ const { traceCode, traceMode, searching, result, traceHistory, doTrace, traceTar
 @media print {
   .trace-search-card { display: none !important; }
   :deep(.card) { break-inside: avoid; margin-bottom: 12px !important; }
-  :deep(.trace-pagination), :deep(.trace-order-link) { display: none !important; }
+  :deep(.trace-pagination), :deep(.trace-pagination-banner), :deep(.trace-order-link) { display: none !important; }
 }
 </style>

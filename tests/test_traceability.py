@@ -1,7 +1,19 @@
+import json
 import uuid
 
-from factories import create_inventory_item, create_material, create_order, ensure_process
+import pytest
+
+from factories import (
+    TEST_HASH,
+    TEST_PASS,
+    create_inventory_item,
+    create_material,
+    create_order,
+    ensure_process,
+)
+from modules.domain.errors import AuthorizationError
 from modules.db import get_db
+from modules.services.trace_service import TraceService
 
 
 def _create_serial_trace_fixture(client, serial_count=1):
@@ -66,6 +78,13 @@ def test_existing_serial_trace_returns_item_order_and_work_history(client, auth_
     assert payload["order"]["order_no"] == fixture["order_no"]
     assert len(payload["work_records"]) == 1
     assert payload["work_records"][0]["quantity"] == 1
+    assert set(payload["meta"]["history_evidence"]["counts"]) == {
+        "snapshot",
+        "version",
+        "legacy_fallback",
+        "missing",
+    }
+    assert payload["meta"]["history_evidence"]["has_legacy_fallback"] is True
 
 
 def test_missing_trace_targets_return_not_found(client, auth_headers):
@@ -90,6 +109,90 @@ def test_missing_trace_targets_return_not_found(client, auth_headers):
     }
 
 
+def test_trace_routes_require_trace_view_permission(client, worker_auth_headers):
+    response = client.get(
+        "/api/trace/TRACE-MISSING-SERIAL",
+        headers=worker_auth_headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_trace_service_denies_orders_outside_process_scope(client):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        with pytest.raises(AuthorizationError):
+            TraceService.trace_by_order(
+                fixture["order_no"],
+                data_scope_pids=[],
+            )
+
+
+def test_trace_routes_enforce_object_process_scope(client):
+    allowed = _create_serial_trace_fixture(client)
+    denied = _create_serial_trace_fixture(client)
+    suffix = uuid.uuid4().hex[:8]
+    username = f"trace_scope_{suffix}"
+    with client.application.app_context():
+        db = get_db()
+        role_code = f"trace_scope_role_{suffix}"
+        role_id = db.execute(
+            "INSERT INTO roles (name, code, description, permissions, status, level) "
+            "VALUES (?, ?, 'trace scope fixture', ?, 'active', 1)",
+            (
+                f"Trace Scope {suffix}",
+                role_code,
+                json.dumps(["trace:view"], ensure_ascii=False),
+            ),
+        ).lastrowid
+        user_id = db.execute(
+            "INSERT INTO users "
+            "(username, password, name, role, status, password_version, employee_no) "
+            "VALUES (?, ?, ?, ?, 'active', 2, ?)",
+            (
+                username,
+                TEST_HASH,
+                f"Trace Scope {suffix}",
+                role_code,
+                f"TRACE-SCOPE-{suffix.upper()}",
+            ),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+            (user_id, role_id),
+        )
+        db.execute(
+            "INSERT INTO user_processes (user_id, process_id) VALUES (?, ?)",
+            (user_id, allowed["process_id"]),
+        )
+        db.commit()
+
+    login = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": TEST_PASS},
+    )
+    assert login.status_code == 200, login.get_json()
+    headers = {"Authorization": f"Bearer {login.get_json()['user']['token']}"}
+
+    allowed_response = client.get(
+        f"/api/trace/{allowed['serial_numbers'][0]}",
+        headers=headers,
+    )
+    denied_serial = client.get(
+        f"/api/trace/{denied['serial_numbers'][0]}",
+        headers=headers,
+    )
+    denied_order = client.get(
+        f"/api/trace/order/{denied['order_no']}",
+        headers=headers,
+    )
+
+    assert allowed_response.status_code == 200, allowed_response.get_json()
+    assert denied_serial.status_code == 403
+    assert denied_order.status_code == 403
+
+
 def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(
     client,
     auth_headers,
@@ -97,7 +200,8 @@ def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(
     fixture = _create_serial_trace_fixture(client, serial_count=3)
 
     response = client.get(
-        f"/api/trace/order/{fixture['order_no']}?page=2&per_page=1",
+        f"/api/trace/order/{fixture['order_no']}?page=2&per_page=1"
+        "&work_records_page=2&work_records_per_page=1",
         headers=auth_headers,
     )
 
@@ -127,6 +231,8 @@ def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(
     ]
     assert "qr_content" not in payload["items"][0]
     assert "order_id" not in payload["items"][0]
+    assert "process_id" not in payload["work_records"][0]
+    assert "process_version_id" not in payload["work_records"][0]
     assert [record["serial_no"] for record in payload["work_records"]] == [
         fixture["serial_numbers"][1]
     ]
@@ -137,6 +243,62 @@ def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(
     assert payload["meta"]["total_pages"] == 3
     assert payload["meta"]["totals"]["items"] == 3
     assert payload["meta"]["totals"]["work_records"] == 3
+    assert payload["meta"]["pagination"]["items"] == {
+        "page": 2,
+        "per_page": 1,
+        "total": 3,
+        "total_pages": 3,
+    }
+    assert payload["meta"]["pagination"]["work_records"]["page"] == 2
+
+
+def test_order_trace_history_evidence_covers_records_beyond_current_page(
+    client,
+    auth_headers,
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        db = get_db()
+        process_version_id = db.execute(
+            "SELECT current_effective_version_id FROM processes WHERE id = ?",
+            (fixture["process_id"],),
+        ).fetchone()["current_effective_version_id"]
+        db.execute(
+            "UPDATE work_records SET process_version_id = ? WHERE id = ?",
+            (process_version_id, fixture["work_record_ids"][0]),
+        )
+        for index in range(99):
+            db.execute(
+                "INSERT INTO work_records "
+                "(order_id, process_id, process_version_id, user_id, type, quantity, status) "
+                "VALUES (?, ?, ?, ?, 'normal', 1, 'approved')",
+                (
+                    fixture["order_id"],
+                    fixture["process_id"],
+                    process_version_id,
+                    fixture["user_id"],
+                ),
+            )
+        db.execute(
+            "INSERT INTO work_records "
+            "(order_id, process_id, user_id, type, quantity, status) "
+            "VALUES (?, ?, ?, 'normal', 1, 'approved')",
+            (fixture["order_id"], fixture["process_id"], fixture["user_id"]),
+        )
+        db.commit()
+
+    response = client.get(
+        f"/api/trace/order/{fixture['order_no']}?per_page=100",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    evidence = response.get_json()["meta"]["history_evidence"]
+    assert evidence["scope"] == "full_order"
+    assert evidence["page_counts"]["legacy_fallback"] == 0
+    assert evidence["counts"]["legacy_fallback"] == 1
+    assert evidence["has_legacy_fallback"] is True
 
 
 def test_order_trace_rejects_invalid_pagination(client, auth_headers):
@@ -237,9 +399,7 @@ def test_serial_trace_separates_item_and_order_scope(client, auth_headers):
     ]
     assert len(serial_scope["quality_capa"]) == 1
     assert serial_scope["quality_capa"][0]["capa_no"] == f"TRACE-CAPA-{suffix}-0"
-    assert [row["source_work_record_id"] for row in serial_scope["material_consumptions"]] == [
-        fixture["work_record_ids"][0]
-    ]
+    assert "source_work_record_id" not in serial_scope["material_consumptions"][0]
     assert [row["id"] for row in payload["order_scope"]["manual_material_consumptions"]] == [
         manual_consumption.lastrowid
     ]

@@ -3,6 +3,34 @@
     <div v-if="result.item" class="trace-mode-label">🔢 序列号追溯结果</div>
     <div v-else class="trace-mode-label">📋 订单号追溯结果</div>
 
+    <div v-if="historyEvidence.hasLegacyFallback || historyEvidence.hasMissing" class="trace-evidence-banner">
+      <strong>历史证据提示：</strong>
+      <span v-if="historyEvidence.hasLegacyFallback">部分工序名称来自兼容回退，未使用历史快照/版本。</span>
+      <span v-if="historyEvidence.hasMissing">部分历史记录缺少可验证的工序快照或版本证据。</span>
+    </div>
+    <div v-if="collectionPagination.length" class="trace-evidence-banner trace-pagination-banner">
+      <strong>历史集合分页：</strong>
+      <div
+        v-for="collection in collectionPagination"
+        :key="collection.name"
+        class="trace-collection-pagination"
+      >
+        <span>{{ collection.label }}：第 {{ collection.page }} / {{ collection.totalPages }} 页（共 {{ collection.total }} 条）</span>
+        <button
+          class="btn btn-sm"
+          :disabled="collection.page <= 1 || searching"
+          title="上一页"
+          @click="emit('collection-page', { name: collection.name, page: collection.page - 1, perPage: collection.perPage })"
+        >←</button>
+        <button
+          class="btn btn-sm"
+          :disabled="collection.page >= collection.totalPages || searching"
+          title="下一页"
+          @click="emit('collection-page', { name: collection.name, page: collection.page + 1, perPage: collection.perPage })"
+        >→</button>
+      </div>
+    </div>
+
     <div v-if="result.item" class="card trace-card">
       <div class="card-header"><h3>🏷️ 产品信息</h3></div>
       <div class="card-body trace-summary">
@@ -66,27 +94,73 @@ const props = defineProps({
   result: { type: Object, required: true },
   searching: { type: Boolean, default: false },
 })
-const emit = defineEmits(['trace-serial', 'trace-order', 'page'])
+const emit = defineEmits(['trace-serial', 'trace-order', 'page', 'collection-page'])
 
-const pagination = computed(() => props.result.meta || { page: 1, total_pages: 1 })
+const pagination = computed(() => (
+  props.result.meta?.pagination?.items
+  || props.result.meta
+  || { page: 1, total_pages: 1 }
+))
+const historyEvidence = computed(() => {
+  const evidence = props.result.meta?.history_evidence || {}
+  return {
+    hasLegacyFallback: evidence.hasLegacyFallback ?? evidence.has_legacy_fallback ?? false,
+    hasMissing: evidence.hasMissing ?? evidence.has_missing ?? false,
+  }
+})
+const collectionLabels = {
+  work_records: '报工',
+  rework_records: '返工',
+  quality_inspections: '质检',
+  quality_tasks: '质量任务',
+  quality_nonconformances: '不合格品',
+  quality_capa: 'CAPA',
+  material_consumptions: '物料',
+  inventory_logs: '库存',
+  shipments: '发货',
+}
+const collectionPagination = computed(() => {
+  const all = props.result.meta?.pagination || {}
+  return Object.entries(all)
+    .filter(([name, item]) => name !== 'items' && item && item.total_pages > 1)
+    .map(([name, item]) => ({
+      name,
+      label: collectionLabels[name] || name,
+      page: item.page,
+      perPage: item.per_page,
+      total: item.total,
+      totalPages: item.total_pages,
+    }))
+})
 const itemStatusLabel = computed(() => statusLabel(props.result.item?.status))
 const itemStatusClass = computed(() => statusClass(props.result.item?.status))
 const orderStatusLabel = computed(() => {
-  const status = props.result.order?.status
-  return status === 'completed' ? '已完成' : status === 'producing' ? '生产中' : '待处理'
+  return statusLabel(props.result.order?.status)
 })
 
 function statusLabel(status) {
-  return status === 'completed' ? '已完成' : status === 'in_progress' ? '生产中' : '待处理'
+  return ({
+    completed: '已完成',
+    in_progress: '生产中',
+    producing: '生产中',
+    scrapped: '已报废',
+    deleted: '已删除',
+  })[status] || '未知状态'
 }
 
 function statusClass(status) {
-  return status === 'completed' ? 'badge-success' : status === 'in_progress' || status === 'producing' ? 'badge-warning' : 'badge-info'
+  if (status === 'completed') return 'badge-success'
+  if (status === 'in_progress' || status === 'producing') return 'badge-warning'
+  if (status === 'scrapped' || status === 'deleted') return 'badge-danger'
+  return 'badge-info'
 }
 </script>
 
 <style scoped>
 .trace-mode-label { margin-bottom: var(--space-3); color: var(--primary); font-size: var(--text-sm); font-weight: 600; }
+.trace-evidence-banner { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px; margin-bottom: var(--space-4); border-left: 3px solid var(--warning); background: var(--warning-light); color: var(--text-secondary); font-size: var(--text-sm); }
+.trace-pagination-banner { border-left-color: var(--primary); background: var(--primary-light); }
+.trace-collection-pagination { display: flex; align-items: center; gap: var(--space-2); width: 100%; }
 .trace-card { margin-bottom: var(--space-5); }
 .trace-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); font-size: var(--text-base); }
 .trace-summary span:first-child { color: var(--text-placeholder); }
