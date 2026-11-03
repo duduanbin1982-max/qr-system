@@ -234,6 +234,15 @@ def test_reviewed_traceability_support_constants_match_actual_production_and_mer
         )
 
 
+def test_traceability_support_pins_release_script_history_transition():
+    assert release.PINNED_TRACEABILITY_SUPPORT_TRANSITIONS[
+        "scripts/backend_frontend_static_release.py"
+    ] == (
+        ("100644", "blob", "01f4fdc4ae6cd25c0abce7afffcaec91268dba4f"),
+        ("100644", "blob", "5f6e5282816caea1d5b88bf4900fa6094c290699"),
+    )
+
+
 @pytest.mark.parametrize("drift", ["baseline", "target", "before_blob", "target_blob", "deleted", "mode", "symlink", "unlisted"])
 def test_traceability_support_exception_rejects_exact_transition_drift(tmp_path, monkeypatch, drift):
     _, repository, before, target = _release_repository(tmp_path)

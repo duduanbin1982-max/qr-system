@@ -135,6 +135,10 @@ PINNED_MATERIALS_SUPPORT_TRANSITIONS = {
 TRACEABILITY_SUPPORT_BASELINE = "d532973ef8e6b427d8018700182059bb737900c7"
 TRACEABILITY_SUPPORT_TARGET = "e04c40e445135d173b9b0f98f48b820a389e6c99"
 PINNED_TRACEABILITY_SUPPORT_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "01f4fdc4ae6cd25c0abce7afffcaec91268dba4f"),
+        ("100644", "blob", "5f6e5282816caea1d5b88bf4900fa6094c290699"),
+    ),
     "frontend/tests/unit/Task2FApplicationLayers.spec.js": (
         ("100644", "blob", "1e398b2539f79a7cbc5b7b118e5871fcd56d496a"),
         ("100644", "blob", "c0325bc97c69ae796f1e26bffc113ca5872baa9a"),
