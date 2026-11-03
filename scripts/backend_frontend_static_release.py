@@ -24,7 +24,6 @@ STATIC_FILE_MODE = 0o644
 
 ALLOWED_ROOTS = {"modules", "frontend", "tests", "docs"}
 ALLOWED_FRONTEND_PATHS = ("frontend/src/", "frontend/index.html")
-ALLOWED_FRONTEND_SUPPORT_PATHS = ("frontend/tests/", "frontend/docs/")
 # Reviewed support changes accompanying this production baseline only. These
 # entries authorize exact Git objects, not a general scripts/tests exception.
 SUPPORT_BASELINE = "c0448bfc945bcfa9c09e94ab1d4bf11f93a3c022"
@@ -131,6 +130,24 @@ PINNED_MATERIALS_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "01f4fdc4ae6cd25c0abce7afffcaec91268dba4f"),
     ),
 }
+# PR #142 traceability support files are approved only for this exact
+# production-to-merge pair. Test support is not a general frontend exception.
+TRACEABILITY_SUPPORT_BASELINE = "d532973ef8e6b427d8018700182059bb737900c7"
+TRACEABILITY_SUPPORT_TARGET = "e04c40e445135d173b9b0f98f48b820a389e6c99"
+PINNED_TRACEABILITY_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/Task2FApplicationLayers.spec.js": (
+        ("100644", "blob", "1e398b2539f79a7cbc5b7b118e5871fcd56d496a"),
+        ("100644", "blob", "c0325bc97c69ae796f1e26bffc113ca5872baa9a"),
+    ),
+    "frontend/tests/unit/TraceOverview.spec.js": (
+        None,
+        ("100644", "blob", "28efccd14ba19b60fce2fe2ae86fafe1e8cd3160"),
+    ),
+    "frontend/tests/unit/useTraceSearch.spec.js": (
+        ("100644", "blob", "2e5fe5e29ca1066ad7d895a7a14951e45bccf881"),
+        ("100644", "blob", "6a09c5b9e5bab4126b8458c995a24bcd21a70a81"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -201,6 +218,13 @@ def _tree_entry(repository, commit, path):
 
 def _validate_support_transition(repository, before, target, path):
     if (
+        path in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
+        and (before, target) == (TRACEABILITY_SUPPORT_BASELINE, TRACEABILITY_SUPPORT_TARGET)
+    ):
+        expected_before, expected_target = PINNED_TRACEABILITY_SUPPORT_TRANSITIONS[path]
+    elif path in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS:
+        raise RuntimeError(f"traceability support exception requires the reviewed baseline and target: {path}")
+    elif (
         path in PINNED_MATERIALS_SUPPORT_TRANSITIONS
         and (before, target) == (MATERIALS_SUPPORT_BASELINE, MATERIALS_SUPPORT_TARGET)
     ):
@@ -253,6 +277,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
+            or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
@@ -262,11 +287,6 @@ def _validate_paths(repository, before, target, changed):
             raise RuntimeError(f"release cannot change migration logic: {path}")
         if normalized in PROTECTED_EXACT_PATHS:
             raise RuntimeError(f"release cannot change protected path: {path}")
-        if parts[0] == "frontend" and any(
-            normalized == prefix or normalized.startswith(prefix)
-            for prefix in ALLOWED_FRONTEND_SUPPORT_PATHS
-        ):
-            continue
         if parts[0] == "frontend" and not any(
             normalized == prefix or normalized.startswith(prefix)
             for prefix in ALLOWED_FRONTEND_PATHS

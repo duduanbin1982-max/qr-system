@@ -79,18 +79,46 @@ def test_static_release_path_allows_backend_and_frontend_source_only(tmp_path):
     )
 
 
-def test_static_release_allows_frontend_regression_tests_without_publishing_them(tmp_path):
+def test_static_release_allows_only_reviewed_traceability_regression_files(tmp_path):
     _, repository, before, target = _release_repository(tmp_path)
-
-    release._validate_paths(
-        repository,
-        before,
-        target,
-        [
-            "frontend/tests/unit/TraceOverview.spec.js",
-            "frontend/docs/traceability-release.md",
-        ],
-    )
+    path = "frontend/tests/unit/TraceOverview.spec.js"
+    code_only_release._git(repository, "checkout", "--quiet", "--detach", before)
+    _write(repository / path, "BASELINE = True\n")
+    code_only_release._git(repository, "add", path)
+    code_only_release._git(repository, "commit", "--quiet", "-m", "traceability baseline")
+    support_before = release._git(repository, "rev-parse", "HEAD")
+    expected_before = release._tree_entry(repository, support_before, path)
+    _write(repository / path, "TARGET = True\n")
+    code_only_release._git(repository, "add", path)
+    code_only_release._git(repository, "commit", "--quiet", "-m", "traceability target")
+    support_target = release._git(repository, "rev-parse", "HEAD")
+    expected_target = release._tree_entry(repository, support_target, path)
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(release, "TRACEABILITY_SUPPORT_BASELINE", support_before)
+        monkeypatch.setattr(release, "TRACEABILITY_SUPPORT_TARGET", support_target)
+        monkeypatch.setattr(
+            release,
+            "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
+            {path: (expected_before, expected_target)},
+        )
+        release._validate_paths(repository, support_before, support_target, [path])
+        with pytest.raises(RuntimeError):
+            release._validate_paths(
+                repository,
+                support_before,
+                support_target,
+                ["frontend/tests/unit/unreviewed.spec.js"],
+            )
+        with pytest.raises(RuntimeError):
+            release._validate_paths(
+                repository,
+                support_before,
+                support_target,
+                ["frontend/docs/traceability-release.md"],
+            )
+    finally:
+        monkeypatch.undo()
 
 
 def test_static_release_rejects_symlink_removed_from_target_tree(tmp_path):
@@ -191,6 +219,77 @@ def test_reviewed_support_constants_match_actual_production_and_business_trees()
         assert release._tree_entry(repository, release.SUPPORT_BASELINE, path) == expected_before, path
         assert release._tree_entry(repository, reviewed_business_tree, path) == expected_target, path
         release._validate_paths(repository, release.SUPPORT_BASELINE, reviewed_business_tree, [path])
+
+
+def test_reviewed_traceability_support_constants_match_actual_production_and_merge_trees():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_TRACEABILITY_SUPPORT_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.TRACEABILITY_SUPPORT_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.TRACEABILITY_SUPPORT_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.TRACEABILITY_SUPPORT_BASELINE,
+            release.TRACEABILITY_SUPPORT_TARGET,
+            [path],
+        )
+
+
+@pytest.mark.parametrize("drift", ["baseline", "target", "before_blob", "target_blob", "deleted", "mode", "symlink", "unlisted"])
+def test_traceability_support_exception_rejects_exact_transition_drift(tmp_path, monkeypatch, drift):
+    _, repository, before, target = _release_repository(tmp_path)
+    path = "frontend/tests/unit/TraceOverview.spec.js"
+    code_only_release._git(repository, "checkout", "--quiet", "--detach", before)
+    _write(repository / path, "BASELINE = True\n")
+    code_only_release._git(repository, "add", path)
+    code_only_release._git(repository, "commit", "--quiet", "-m", "traceability baseline")
+    support_before = release._git(repository, "rev-parse", "HEAD")
+    expected_before = release._tree_entry(repository, support_before, path)
+    _write(repository / path, "TARGET = True\n")
+    code_only_release._git(repository, "add", path)
+    code_only_release._git(repository, "commit", "--quiet", "-m", "traceability target")
+    support_target = release._git(repository, "rev-parse", "HEAD")
+    expected_target = release._tree_entry(repository, support_target, path)
+    monkeypatch.setattr(release, "TRACEABILITY_SUPPORT_BASELINE", support_before)
+    monkeypatch.setattr(release, "TRACEABILITY_SUPPORT_TARGET", support_target)
+    monkeypatch.setattr(
+        release,
+        "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
+        {path: (expected_before, expected_target)},
+    )
+    actual_before, actual_target = support_before, support_target
+    if drift == "baseline":
+        actual_before = before
+    elif drift == "target":
+        actual_target = target
+    elif drift == "before_blob":
+        monkeypatch.setattr(
+            release,
+            "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
+            {path: (expected_target, expected_target)},
+        )
+    elif drift == "target_blob":
+        _write(repository / path, "UNREVIEWED = True\n")
+        code_only_release._git(repository, "add", path)
+        code_only_release._git(repository, "commit", "--quiet", "-m", "unreviewed target")
+        actual_target = release._git(repository, "rev-parse", "HEAD")
+    elif drift == "deleted":
+        code_only_release._git(repository, "rm", "--quiet", path)
+        code_only_release._git(repository, "commit", "--quiet", "-m", "deleted target")
+        actual_target = release._git(repository, "rev-parse", "HEAD")
+    elif drift in {"mode", "symlink"}:
+        mode = "100755" if drift == "mode" else "120000"
+        object_id = expected_target[2]
+        code_only_release._git(repository, "update-index", "--cacheinfo", f"{mode},{object_id},{path}")
+        code_only_release._git(repository, "commit", "--quiet", "-m", "unsafe target")
+        actual_target = release._git(repository, "rev-parse", "HEAD")
+    elif drift == "unlisted":
+        path = "frontend/tests/unit/Unreviewed.spec.js"
+        _write(repository / path, "UNREVIEWED = True\n")
+        code_only_release._git(repository, "add", path)
+        code_only_release._git(repository, "commit", "--quiet", "-m", "unlisted target")
+        actual_target = release._git(repository, "rev-parse", "HEAD")
+    with pytest.raises(RuntimeError):
+        release._validate_paths(repository, actual_before, actual_target, [path])
 
 
 @pytest.mark.parametrize("drift", [None, "baseline", "before_blob", "target_blob", "deleted", "mode", "symlink", "submodule", "unlisted"])
