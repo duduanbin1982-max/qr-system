@@ -84,4 +84,28 @@ describe('useTraceSearch', () => {
     expect(trace.result.value).toBeNull()
     expect(trace.searching.value).toBe(false)
   })
+
+  it('passes independent collection pagination parameters', async () => {
+    const traceApi = {
+      trace: vi.fn(),
+      traceByOrder: vi.fn().mockResolvedValue({ order: { order_no: 'ORDER-1' } }),
+    }
+    const trace = useTraceSearch(traceApi)
+
+    await trace.search({
+      code: 'ORDER-1',
+      mode: 'order',
+      page: 2,
+      perPage: 50,
+      collectionPages: { work_records: 3 },
+      collectionPerPages: { work_records: 25 },
+    })
+
+    expect(traceApi.traceByOrder).toHaveBeenCalledWith('ORDER-1', {
+      page: 2,
+      per_page: 50,
+      work_records_page: 3,
+      work_records_per_page: 25,
+    })
+  })
 })

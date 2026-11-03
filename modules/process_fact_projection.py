@@ -37,6 +37,21 @@ def process_value_sql(
     )
 
 
+def process_source_sql(fact_alias, version_alias, legacy_alias, role="process"):
+    """Return the provenance of a projected process name.
+
+    Historical facts must expose whether their label came from an immutable
+    snapshot, an exact process version, or the legacy live process row.
+    """
+    return (
+        f"CASE WHEN NULLIF({fact_alias}.{role}_name_snapshot,'') IS NOT NULL "
+        f"THEN 'snapshot' "
+        f"WHEN NULLIF({version_alias}.name,'') IS NOT NULL THEN 'version' "
+        f"WHEN NULLIF({legacy_alias}.name,'') IS NOT NULL THEN 'legacy_fallback' "
+        f"ELSE 'missing' END"
+    )
+
+
 def route_name_sql(fact_alias, version_alias, legacy_alias):
     """Return the canonical route snapshot projection."""
     return (

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from modules.repositories.context import resolve_db
 from modules.process_fact_projection import (
     process_value_sql,
+    process_source_sql,
     process_version_join,
     warn_legacy_fact_rows,
 )
@@ -66,10 +67,12 @@ class TraceRepository:
         """Return work reports for an order with process and user names."""
         db = resolve_db(db)
         process_name = process_value_sql("wr", "process_version", "p")
+        process_source = process_source_sql("wr", "process_version", "p")
         rows = db.execute('''
             SELECT wr.id, wr.serial_no, wr.quantity, wr.status, wr.type, wr.remark, wr.created_at,
                    wr.process_id,wr.process_version_id,'''
-            + process_name + ''' as process_name,u.name as worker_name
+            + process_name + ''' as process_name,''' + process_source + ''' as process_name_source,
+                   u.name as worker_name
             FROM work_records wr
             LEFT JOIN processes p ON wr.process_id = p.id
             ''' + process_version_join("wr", "process_version") + '''
@@ -86,10 +89,12 @@ class TraceRepository:
         """Return rework records for an order with process and user names."""
         db = resolve_db(db)
         process_name = process_value_sql("rr", "process_version", "p")
+        process_source = process_source_sql("rr", "process_version", "p")
         rows = db.execute('''
             SELECT rr.id, rr.quantity, rr.reason, rr.status, rr.created_at,
                    rr.completed_at,rr.process_id,rr.process_version_id,'''
-            + process_name + ''' as process_name,u.name as worker_name
+            + process_name + ''' as process_name,''' + process_source + ''' as process_name_source,
+                   u.name as worker_name
             FROM rework_records rr
             LEFT JOIN processes p ON rr.process_id = p.id
             ''' + process_version_join("rr", "process_version") + '''
@@ -105,10 +110,12 @@ class TraceRepository:
     def find_work_records_by_serial(serial_no, order_id, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("wr", "process_version", "p")
+        process_source = process_source_sql("wr", "process_version", "p")
         rows = db.execute('''
             SELECT wr.id, wr.serial_no, wr.quantity, wr.status, wr.type, wr.remark, wr.created_at,
                    wr.process_id,wr.process_version_id,'''
-            + process_name + ''' as process_name,u.name as worker_name
+            + process_name + ''' as process_name,''' + process_source + ''' as process_name_source,
+                   u.name as worker_name
             FROM work_records wr
             LEFT JOIN processes p ON wr.process_id = p.id
             ''' + process_version_join("wr", "process_version") + '''
@@ -171,11 +178,13 @@ class TraceRepository:
         """查订单物料消耗"""
         db = resolve_db(db)
         process_name = process_value_sql("mc", "process_version", "p")
+        process_source = process_source_sql("mc", "process_version", "p")
         rows = db.execute("""
             SELECT mc.id, mc.quantity, mc.notes, mc.operator_name, mc.created_at,
                    mc.source_work_record_id,mc.process_id,mc.process_version_id,
                    m.name as material_name, m.spec as material_spec,
-                   """ + process_name + """ as process_name
+                   """ + process_name + """ as process_name,
+                   """ + process_source + """ as process_name_source
             FROM material_consumptions mc
             LEFT JOIN materials m ON mc.material_id = m.id
             LEFT JOIN processes p ON mc.process_id = p.id
@@ -192,13 +201,16 @@ class TraceRepository:
         """查订单质检记录"""
         db = resolve_db(db)
         process_name = process_value_sql("qi", "process_version", "p")
+        process_source = process_source_sql("qi", "process_version", "p")
         rows = db.execute("""
             SELECT qi.id, qi.inspection_type, qi.quantity_checked, qi.quantity_passed,
                    qi.quantity_failed, qi.result, qi.notes, qi.inspected_at, qi.created_at,
                    qi.defect_category, qi.defect_quantity, qi.defect_level, qi.score_total,
                    qi.serial_no,qi.process_id,qi.process_version_id,
                    task.task_no, ncr.ncr_no,
-                   """ + process_name + """ as process_name,u.name as inspector_name
+                   """ + process_name + """ as process_name,
+                   """ + process_source + """ as process_name_source,
+                   u.name as inspector_name
             FROM quality_inspections qi
             LEFT JOIN processes p ON qi.process_id = p.id
             """ + process_version_join("qi", "process_version") + """
@@ -216,12 +228,14 @@ class TraceRepository:
     def find_quality_tasks_by_order(order_id, limit=100, offset=0, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("task", "process_version", "process")
+        process_source = process_source_sql("task", "process_version", "process")
         rows = db.execute("""
             SELECT task.id, task.task_no, task.inspection_type, task.trigger_type,
                    task.gate_mode, task.sample_qty, task.priority, task.status,
                    task.serial_no,task.due_at,task.started_at,task.completed_at,
                    task.created_at,task.process_id,task.process_version_id,
                    """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source,
                    standard.standard_no, standard.name AS standard_name,
                    assignee.name AS assigned_name
             FROM quality_inspection_tasks task
@@ -240,13 +254,16 @@ class TraceRepository:
     def find_quality_nonconformances_by_order(order_id, limit=100, offset=0, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("ncr", "process_version", "process")
+        process_source = process_source_sql("ncr", "process_version", "process")
         rows = db.execute("""
             SELECT ncr.id, ncr.ncr_no, ncr.defect_category, ncr.defect_level,
                    ncr.defect_quantity, ncr.description, ncr.disposition, ncr.status,
                    ncr.root_cause, ncr.corrective_action, ncr.verification_result,
                    ncr.due_at,ncr.closed_at,ncr.created_at,ncr.serial_no,
                    ncr.process_id,ncr.process_version_id,
-                   """ + process_name + """ AS process_name,owner.name AS owner_name,
+                   """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source,
+                   owner.name AS owner_name,
                    task.task_no,
                    (SELECT COUNT(*) FROM quality_nonconformance_actions action
                     WHERE action.ncr_id = ncr.id) AS action_count
@@ -298,12 +315,15 @@ class TraceRepository:
     def find_quality_inspections_by_serial(serial_no, order_id, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("qi", "process_version", "p")
+        process_source = process_source_sql("qi", "process_version", "p")
         rows = db.execute("""
             SELECT qi.id, qi.inspection_type, qi.quantity_checked, qi.quantity_passed,
                    qi.quantity_failed, qi.result, qi.notes, qi.inspected_at, qi.created_at,
                    qi.defect_category, qi.defect_quantity, qi.defect_level, qi.score_total,
                    qi.serial_no,qi.process_id,qi.process_version_id,task.task_no,ncr.ncr_no,
-                   """ + process_name + """ AS process_name,u.name AS inspector_name
+                   """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source,
+                   u.name AS inspector_name
             FROM quality_inspections qi
             LEFT JOIN processes p ON qi.process_id = p.id
             """ + process_version_join("qi", "process_version") + """
@@ -320,12 +340,14 @@ class TraceRepository:
     def find_quality_tasks_by_serial(serial_no, order_id, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("task", "process_version", "process")
+        process_source = process_source_sql("task", "process_version", "process")
         rows = db.execute("""
             SELECT task.id, task.task_no, task.inspection_type, task.trigger_type,
                    task.gate_mode, task.sample_qty, task.priority, task.status,
                    task.serial_no,task.due_at,task.started_at,task.completed_at,
                    task.created_at,task.process_id,task.process_version_id,
                    """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source,
                    standard.standard_no, standard.name AS standard_name,
                    assignee.name AS assigned_name
             FROM quality_inspection_tasks task
@@ -343,13 +365,16 @@ class TraceRepository:
     def find_quality_nonconformances_by_serial(serial_no, order_id, db=None):
         db = resolve_db(db)
         process_name = process_value_sql("ncr", "process_version", "process")
+        process_source = process_source_sql("ncr", "process_version", "process")
         rows = db.execute("""
             SELECT ncr.id, ncr.ncr_no, ncr.defect_category, ncr.defect_level,
                    ncr.defect_quantity, ncr.description, ncr.disposition, ncr.status,
                    ncr.root_cause, ncr.corrective_action, ncr.verification_result,
                    ncr.due_at,ncr.closed_at,ncr.created_at,ncr.serial_no,
                    ncr.process_id,ncr.process_version_id,
-                   """ + process_name + """ AS process_name,owner.name AS owner_name,
+                   """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source,
+                   owner.name AS owner_name,
                    task.task_no,
                    (SELECT COUNT(*) FROM quality_nonconformance_actions action
                     WHERE action.ncr_id = ncr.id) AS action_count
@@ -386,11 +411,13 @@ class TraceRepository:
         """Return automatic material deductions attributable to one serial number."""
         db = resolve_db(db)
         process_name = process_value_sql("mc", "process_version", "p")
+        process_source = process_source_sql("mc", "process_version", "p")
         rows = db.execute("""
             SELECT mc.id, mc.quantity, mc.notes, mc.operator_name, mc.created_at,
                    mc.source_work_record_id,mc.process_id,mc.process_version_id,
                    m.name AS material_name, m.spec AS material_spec,
-                   """ + process_name + """ AS process_name
+                   """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source
             FROM material_consumptions mc
             JOIN work_records wr ON wr.id = mc.source_work_record_id
             LEFT JOIN materials m ON mc.material_id = m.id
@@ -407,11 +434,13 @@ class TraceRepository:
         """Return material consumption records that cannot be assigned to one item."""
         db = resolve_db(db)
         process_name = process_value_sql("mc", "process_version", "p")
+        process_source = process_source_sql("mc", "process_version", "p")
         rows = db.execute("""
             SELECT mc.id, mc.quantity, mc.notes, mc.operator_name, mc.created_at,
                    mc.source_work_record_id,mc.process_id,mc.process_version_id,
                    m.name AS material_name, m.spec AS material_spec,
-                   """ + process_name + """ AS process_name
+                   """ + process_name + """ AS process_name,
+                   """ + process_source + """ AS process_name_source
             FROM material_consumptions mc
             LEFT JOIN work_records wr ON wr.id = mc.source_work_record_id
             LEFT JOIN materials m ON mc.material_id = m.id
@@ -444,3 +473,60 @@ class TraceRepository:
                 (SELECT COUNT(DISTINCT shipment_id) FROM shipment_items WHERE order_id = ?) AS shipments
         """, (order_id,) * 10).fetchone()
         return dict(row)
+
+    @staticmethod
+    def count_order_trace_history_evidence(order_id, db=None):
+        """Count process-label provenance across the complete order history.
+
+        The order trace endpoint pages each collection independently.  Evidence
+        flags therefore must not be derived only from the rows returned for the
+        current page.
+        """
+        db = resolve_db(db)
+        sources = {"snapshot": 0, "version": 0, "legacy_fallback": 0, "missing": 0}
+        queries = (
+            ("work_records", "wr", "p"),
+            ("rework_records", "rr", "p"),
+            ("quality_inspections", "qi", "p"),
+            ("quality_inspection_tasks", "task", "process"),
+            ("quality_nonconformances", "ncr", "process"),
+            ("material_consumptions", "mc", "p"),
+        )
+        for table, fact_alias, legacy_alias in queries:
+            process_source = process_source_sql(
+                fact_alias, "process_version", legacy_alias
+            )
+            process_join = process_version_join(fact_alias, "process_version")
+            rows = db.execute(
+                f"""
+                SELECT {process_source} AS process_name_source, COUNT(*) AS row_count
+                FROM {table} {fact_alias}
+                LEFT JOIN processes {legacy_alias}
+                  ON {fact_alias}.process_id = {legacy_alias}.id
+                {process_join}
+                WHERE {fact_alias}.order_id = ?
+                GROUP BY process_name_source
+                """,
+                (order_id,),
+            ).fetchall()
+            for row in rows:
+                source = row["process_name_source"]
+                if source in sources:
+                    sources[source] += int(row["row_count"])
+        return sources
+
+    @staticmethod
+    def order_has_process_in_scope(order_id, process_ids, db=None):
+        """Return whether an order belongs to a user's effective process scope."""
+        if process_ids is None:
+            return True
+        if not process_ids:
+            return False
+        db = resolve_db(db)
+        placeholders = ",".join("?" for _ in process_ids)
+        row = db.execute(
+            f"SELECT 1 FROM order_processes "
+            f"WHERE order_id = ? AND process_id IN ({placeholders}) LIMIT 1",
+            [order_id, *process_ids],
+        ).fetchone()
+        return row is not None
