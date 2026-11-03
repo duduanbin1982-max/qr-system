@@ -217,6 +217,9 @@ class TraceService:
 
             item_data = dict(item_row)
             order_id = item_data.get("trace_order_id")
+            if item_data.get("trace_order_deleted_at") is not None:
+                # Keep archived-order existence indistinguishable from a missing serial.
+                raise NotFoundError("产品序列号不存在")
             if order_id:
                 TraceService._require_scope(
                     order_id,

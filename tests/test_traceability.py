@@ -109,6 +109,69 @@ def test_missing_trace_targets_return_not_found(client, auth_headers):
     }
 
 
+def test_serial_trace_hides_soft_deleted_order(client, auth_headers):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET deleted_at = datetime('now','localtime') WHERE id = ?",
+            (fixture["order_id"],),
+        )
+        db.commit()
+
+    response = client.get(
+        f"/api/trace/{fixture['serial_numbers'][0]}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {
+        "error": "产品序列号不存在",
+        "code": "not_found",
+    }
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET deleted_at = '' WHERE id = ?",
+            (fixture["order_id"],),
+        )
+        db.commit()
+
+    empty_marker_response = client.get(
+        f"/api/trace/{fixture['serial_numbers'][0]}",
+        headers=auth_headers,
+    )
+    assert empty_marker_response.status_code == 404
+
+
+def test_serial_trace_keeps_orphan_product_item_semantics(client, auth_headers):
+    serial_no = f"TRACE-ORPHAN-{uuid.uuid4().hex[:8].upper()}"
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO product_items "
+            "(serial_no, order_id, position_no, qr_content, status) "
+            "VALUES (?, NULL, 1, '{}', 'in_progress')",
+            (serial_no,),
+        )
+        db.commit()
+
+    response = client.get(f"/api/trace/{serial_no}", headers=auth_headers)
+
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["item"]["serial_no"] == serial_no
+    assert payload["order"] is None
+    assert payload["order_scope"] == {
+        "rework_records": [],
+        "manual_material_consumptions": [],
+        "inventory_logs": [],
+        "shipments": [],
+    }
+
+
 def test_trace_routes_require_trace_view_permission(client, worker_auth_headers):
     response = client.get(
         "/api/trace/TRACE-MISSING-SERIAL",
@@ -191,6 +254,24 @@ def test_trace_routes_enforce_object_process_scope(client):
     assert allowed_response.status_code == 200, allowed_response.get_json()
     assert denied_serial.status_code == 403
     assert denied_order.status_code == 403
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET deleted_at = datetime('now','localtime') WHERE id = ?",
+            (allowed["order_id"],),
+        )
+        db.commit()
+
+    archived_serial = client.get(
+        f"/api/trace/{allowed['serial_numbers'][0]}",
+        headers=headers,
+    )
+    assert archived_serial.status_code == 404
+    assert archived_serial.get_json() == {
+        "error": "产品序列号不存在",
+        "code": "not_found",
+    }
 
 
 def test_order_trace_uses_public_dtos_snapshot_and_database_pagination(

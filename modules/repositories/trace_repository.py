@@ -54,9 +54,10 @@ class TraceRepository:
                    o.delivery_status AS trace_delivery_status,
                    o.created_at AS trace_order_created,
                    o.updated_at AS trace_order_updated,
+                   o.deleted_at AS trace_order_deleted_at,
                    COALESCE(c.name, o.customer) AS trace_customer
             FROM product_items pi
-            LEFT JOIN orders o ON pi.order_id = o.id AND o.deleted_at IS NULL
+            LEFT JOIN orders o ON pi.order_id = o.id
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN processes current_process ON current_process.id = pi.current_process_id
             WHERE pi.serial_no = ?
