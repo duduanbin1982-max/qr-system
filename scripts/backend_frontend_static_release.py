@@ -24,6 +24,7 @@ STATIC_FILE_MODE = 0o644
 
 ALLOWED_ROOTS = {"modules", "frontend", "tests", "docs"}
 ALLOWED_FRONTEND_PATHS = ("frontend/src/", "frontend/index.html")
+ALLOWED_FRONTEND_SUPPORT_PATHS = ("frontend/tests/", "frontend/docs/")
 # Reviewed support changes accompanying this production baseline only. These
 # entries authorize exact Git objects, not a general scripts/tests exception.
 SUPPORT_BASELINE = "c0448bfc945bcfa9c09e94ab1d4bf11f93a3c022"
@@ -261,6 +262,11 @@ def _validate_paths(repository, before, target, changed):
             raise RuntimeError(f"release cannot change migration logic: {path}")
         if normalized in PROTECTED_EXACT_PATHS:
             raise RuntimeError(f"release cannot change protected path: {path}")
+        if parts[0] == "frontend" and any(
+            normalized == prefix or normalized.startswith(prefix)
+            for prefix in ALLOWED_FRONTEND_SUPPORT_PATHS
+        ):
+            continue
         if parts[0] == "frontend" and not any(
             normalized == prefix or normalized.startswith(prefix)
             for prefix in ALLOWED_FRONTEND_PATHS

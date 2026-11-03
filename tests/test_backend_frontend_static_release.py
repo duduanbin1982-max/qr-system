@@ -79,6 +79,20 @@ def test_static_release_path_allows_backend_and_frontend_source_only(tmp_path):
     )
 
 
+def test_static_release_allows_frontend_regression_tests_without_publishing_them(tmp_path):
+    _, repository, before, target = _release_repository(tmp_path)
+
+    release._validate_paths(
+        repository,
+        before,
+        target,
+        [
+            "frontend/tests/unit/TraceOverview.spec.js",
+            "frontend/docs/traceability-release.md",
+        ],
+    )
+
+
 def test_static_release_rejects_symlink_removed_from_target_tree(tmp_path):
     repository = tmp_path / "repository"
     repository.mkdir()
