@@ -107,6 +107,29 @@ PINNED_CUSTOMER_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "347a25db4b7ac0504f2933a612c42ad46e35f5f7"),
     ),
 }
+# PR #140 material-management support files are approved only for this exact
+# production-to-merge pair. The separate release-tool update is not part of
+# the business target and must be pinned independently.
+MATERIALS_SUPPORT_BASELINE = "2a5a014d5e99655ad1e9ecdc9ac0ebc670e15875"
+MATERIALS_SUPPORT_TARGET = "d532973ef8e6b427d8018700182059bb737900c7"
+PINNED_MATERIALS_SUPPORT_TRANSITIONS = {
+    "frontend/tests/e2e/material-audit-regressions.spec.js": (
+        None,
+        ("100644", "blob", "bded26987d853a57d9bb35eb62dbed07b4c19e19"),
+    ),
+    "frontend/tests/unit/material-audit-behavior.spec.js": (
+        None,
+        ("100644", "blob", "1a2db529ef36691796a71819637b624a64fa25a2"),
+    ),
+    "frontend/tests/unit/material-options-pagination.spec.js": (
+        None,
+        ("100644", "blob", "05ebe7fa70fd4f26a8f854258ff7ae6b32a42d29"),
+    ),
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "347a25db4b7ac0504f2933a612c42ad46e35f5f7"),
+        ("100644", "blob", "01f4fdc4ae6cd25c0abce7afffcaec91268dba4f"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -177,6 +200,11 @@ def _tree_entry(repository, commit, path):
 
 def _validate_support_transition(repository, before, target, path):
     if (
+        path in PINNED_MATERIALS_SUPPORT_TRANSITIONS
+        and (before, target) == (MATERIALS_SUPPORT_BASELINE, MATERIALS_SUPPORT_TARGET)
+    ):
+        expected_before, expected_target = PINNED_MATERIALS_SUPPORT_TRANSITIONS[path]
+    elif (
         path in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
         and (before, target) == (CUSTOMER_SUPPORT_BASELINE, CUSTOMER_SUPPORT_TARGET)
     ):
@@ -191,6 +219,8 @@ def _validate_support_transition(repository, before, target, path):
         if (before, target) != (PAYROLL_SUPPORT_BASELINE, PAYROLL_SUPPORT_TARGET):
             raise RuntimeError(f"payroll support exception requires the reviewed baseline and target: {path}")
         expected_before, expected_target = PINNED_PAYROLL_SUPPORT_TRANSITIONS[path]
+    elif path in PINNED_MATERIALS_SUPPORT_TRANSITIONS:
+        raise RuntimeError(f"materials support exception requires the reviewed baseline and target: {path}")
     else:
         if before != SUPPORT_BASELINE:
             raise RuntimeError(f"support exception requires the reviewed baseline: {path}")
@@ -221,6 +251,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
+            or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
