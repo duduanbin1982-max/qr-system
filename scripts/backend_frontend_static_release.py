@@ -221,36 +221,57 @@ def _tree_entry(repository, commit, path):
 
 
 def _validate_support_transition(repository, before, target, path):
-    if (
-        path in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
-        and (before, target) == (TRACEABILITY_SUPPORT_BASELINE, TRACEABILITY_SUPPORT_TARGET)
-    ):
-        expected_before, expected_target = PINNED_TRACEABILITY_SUPPORT_TRANSITIONS[path]
-    elif path in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS:
-        raise RuntimeError(f"traceability support exception requires the reviewed baseline and target: {path}")
-    elif (
-        path in PINNED_MATERIALS_SUPPORT_TRANSITIONS
-        and (before, target) == (MATERIALS_SUPPORT_BASELINE, MATERIALS_SUPPORT_TARGET)
-    ):
-        expected_before, expected_target = PINNED_MATERIALS_SUPPORT_TRANSITIONS[path]
-    elif (
-        path in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
-        and (before, target) == (CUSTOMER_SUPPORT_BASELINE, CUSTOMER_SUPPORT_TARGET)
-    ):
-        expected_before, expected_target = PINNED_CUSTOMER_SUPPORT_TRANSITIONS[path]
-    elif path in PINNED_ORDERS_SUPPORT_TRANSITIONS:
-        if (before, target) != (ORDERS_SUPPORT_BASELINE, ORDERS_SUPPORT_TARGET):
-            raise RuntimeError(f"orders support exception requires the reviewed baseline and target: {path}")
-        expected_before, expected_target = PINNED_ORDERS_SUPPORT_TRANSITIONS[path]
-    elif path in PINNED_CUSTOMER_SUPPORT_TRANSITIONS:
-        raise RuntimeError(f"customer support exception requires the reviewed baseline and target: {path}")
-    elif path in PINNED_PAYROLL_SUPPORT_TRANSITIONS:
-        if (before, target) != (PAYROLL_SUPPORT_BASELINE, PAYROLL_SUPPORT_TARGET):
-            raise RuntimeError(f"payroll support exception requires the reviewed baseline and target: {path}")
-        expected_before, expected_target = PINNED_PAYROLL_SUPPORT_TRANSITIONS[path]
-    elif path in PINNED_MATERIALS_SUPPORT_TRANSITIONS:
-        raise RuntimeError(f"materials support exception requires the reviewed baseline and target: {path}")
+    pair = (before, target)
+    specifications = (
+        (
+            "traceability",
+            PINNED_TRACEABILITY_SUPPORT_TRANSITIONS,
+            TRACEABILITY_SUPPORT_BASELINE,
+            TRACEABILITY_SUPPORT_TARGET,
+            f"traceability support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "materials",
+            PINNED_MATERIALS_SUPPORT_TRANSITIONS,
+            MATERIALS_SUPPORT_BASELINE,
+            MATERIALS_SUPPORT_TARGET,
+            f"materials support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "customer",
+            PINNED_CUSTOMER_SUPPORT_TRANSITIONS,
+            CUSTOMER_SUPPORT_BASELINE,
+            CUSTOMER_SUPPORT_TARGET,
+            f"customer support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "payroll",
+            PINNED_PAYROLL_SUPPORT_TRANSITIONS,
+            PAYROLL_SUPPORT_BASELINE,
+            PAYROLL_SUPPORT_TARGET,
+            f"payroll support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "orders",
+            PINNED_ORDERS_SUPPORT_TRANSITIONS,
+            ORDERS_SUPPORT_BASELINE,
+            ORDERS_SUPPORT_TARGET,
+            f"orders support exception requires the reviewed baseline and target: {path}",
+        ),
+    )
+    candidates = []
+    for priority, (_, transitions, baseline, reviewed_target, message) in enumerate(specifications):
+        if path not in transitions:
+            continue
+        if pair == (baseline, reviewed_target):
+            expected_before, expected_target = transitions[path]
+            break
+        score = int(before == baseline) + int(target == reviewed_target)
+        candidates.append((score, -priority, message))
     else:
+        if candidates:
+            _, _, message = max(candidates)
+            raise RuntimeError(message)
         if before != SUPPORT_BASELINE:
             raise RuntimeError(f"support exception requires the reviewed baseline: {path}")
         expected_before, expected_target = PINNED_SUPPORT_TRANSITIONS[path]
