@@ -104,3 +104,14 @@ def test_role_identity_error_preserves_api_contract(policy_context, client, auth
     assert response.status_code == 400
     assert response.get_json() == {"error": "审批角色 ID 与编码不一致", "code": "validation_error"}
     assert _counts(db) == before
+
+
+def test_malformed_role_id_is_rejected_as_validation_error(policy_context):
+    db, pid, roles = policy_context
+    before = _counts(db)
+    with pytest.raises(ValidationError, match="审批角色 ID 必须是整数"):
+        ApprovalPolicyService.create_revision(
+            _payload(pid, [{"role_id": "not-an-integer", "code": roles[0]["code"]}]),
+            {"id": 1, "name": "Maker"},
+        )
+    assert _counts(db) == before

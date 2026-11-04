@@ -47,7 +47,11 @@ class ApprovalPolicyService:
             if not role:
                 raise ValidationError(f"角色“{step['code']}”不存在或已停用")
             if step.get("role_id") is not None:
-                selected = cls.role_repository.find_active_by_id(int(step["role_id"]), db=db)
+                try:
+                    role_id = int(step["role_id"])
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError("审批角色 ID 必须是整数") from exc
+                selected = cls.role_repository.find_active_by_id(role_id, db=db)
                 if not selected:
                     raise ValidationError("审批角色不存在或已停用")
                 if selected["id"] != role["id"]:
