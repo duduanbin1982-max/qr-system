@@ -13,6 +13,7 @@ from factories import (
 )
 from modules.domain.errors import AuthorizationError
 from modules.db import get_db
+from modules.repositories.trace_repository import TraceRepository
 from modules.services.trace_service import TraceService
 
 
@@ -537,6 +538,74 @@ def test_serial_trace_quality_inspection_with_multiple_ncrs_is_not_duplicated(
     assert len(inspections) == 1
     assert inspections[0]["id"] == inspection_id
     assert inspections[0]["ncr_no"] == "TRACE-SERIAL-NCR-LATEST"
+
+
+@pytest.mark.parametrize("scope", ("order", "serial"))
+def test_quality_trace_does_not_rescan_unrelated_ncrs_for_each_inspection(client, scope):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        db = get_db()
+        inspection_ids = []
+        for _ in range(200):
+            cursor = db.execute(
+                "INSERT INTO quality_inspections "
+                "(order_id, process_id, inspection_type, result, serial_no, created_at) "
+                "VALUES (?, ?, 'in_process', 'pass', ?, '2026-11-04 00:00:00')",
+                (fixture["order_id"], fixture["process_id"], fixture["serial_numbers"][0]),
+            )
+            inspection_ids.append(cursor.lastrowid)
+
+        other_order_id = create_order(db, [fixture["process_id"]])
+        other_inspection_id = db.execute(
+            "INSERT INTO quality_inspections "
+            "(order_id, process_id, inspection_type, result) "
+            "VALUES (?, ?, 'in_process', 'fail')",
+            (other_order_id, fixture["process_id"]),
+        ).lastrowid
+        db.executemany(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            (
+                (f"TRACE-UNRELATED-{index}", other_inspection_id, other_order_id)
+                for index in range(5000)
+            ),
+        )
+        db.executemany(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            (
+                (number, inspection_ids[0], fixture["order_id"])
+                for number in ("TRACE-PERF-FIRST", "TRACE-PERF-LATEST")
+            ),
+        )
+        db.commit()
+
+        # Bound SQLite work instead of wall-clock time: a repeated full NCR scan
+        # exceeds one million VM instructions; one grouped scan has ample margin.
+        progress_calls = 0
+
+        def enforce_work_budget():
+            nonlocal progress_calls
+            progress_calls += 1
+            return int(progress_calls >= 1000)
+
+        db.set_progress_handler(enforce_work_budget, 1000)
+        try:
+            if scope == "order":
+                rows = TraceRepository.find_quality_inspections_by_order(
+                    fixture["order_id"], limit=200, db=db
+                )
+            else:
+                rows = TraceRepository.find_quality_inspections_by_serial(
+                    fixture["serial_numbers"][0], fixture["order_id"], db=db
+                )
+        finally:
+            db.set_progress_handler(None, 0)
+
+        assert [row["id"] for row in rows] == inspection_ids
+        assert rows[0]["ncr_no"] == "TRACE-PERF-LATEST"
+        assert all(row["ncr_no"] is None for row in rows[1:])
 
 
 def test_serial_trace_separates_item_and_order_scope(client, auth_headers):
