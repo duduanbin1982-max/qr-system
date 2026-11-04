@@ -11,10 +11,24 @@ from factories import (
     create_order,
     ensure_process,
 )
-from modules.domain.errors import AuthorizationError
+from modules.domain.errors import AuthorizationError, ValidationError
 from modules.db import get_db
 from modules.repositories.trace_repository import TraceRepository
 from modules.services.trace_service import TraceService
+
+
+TRACE_COLLECTIONS = (
+    "items",
+    "work_records",
+    "rework_records",
+    "quality_inspections",
+    "quality_tasks",
+    "quality_nonconformances",
+    "quality_capa",
+    "material_consumptions",
+    "inventory_logs",
+    "shipments",
+)
 
 
 def _create_serial_trace_fixture(client, serial_count=1):
@@ -493,6 +507,167 @@ def test_order_trace_rejects_malformed_collection_pagination(
     assert response.status_code == 400
     assert response.get_json() == {
         "error": "分页参数必须是整数",
+        "code": "validation_error",
+    }
+
+
+@pytest.mark.parametrize(
+    "parameter",
+    ("page", "per_page")
+    + tuple(
+        f"{name}_{suffix}"
+        for name in TRACE_COLLECTIONS
+        for suffix in ("page", "per_page")
+    ),
+)
+def test_order_trace_validates_raw_pagination_before_queries(
+    client, auth_headers, monkeypatch, parameter
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    def unexpected_snapshot():
+        pytest.fail("Invalid pagination must be rejected before trace queries")
+
+    monkeypatch.setattr(TraceRepository, "read_snapshot", unexpected_snapshot)
+    invalid_values = [
+        ("abc", "分页参数必须是整数"),
+        ("", "分页参数必须是整数"),
+        ("1.5", "分页参数必须是整数"),
+    ]
+    range_message = (
+        "每页数量必须在 1 到 200 之间"
+        if parameter.endswith("per_page")
+        else "页码必须大于等于 1"
+    )
+    invalid_values.extend([("0", range_message), ("-1", range_message)])
+    if parameter.endswith("per_page"):
+        invalid_values.append(("201", range_message))
+
+    for value, message in invalid_values:
+        response = client.get(
+            f"/api/trace/order/{fixture['order_no']}",
+            query_string={parameter: value},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400, (parameter, value, response.get_json())
+        assert response.get_json() == {
+            "error": message,
+            "code": "validation_error",
+        }, (parameter, value)
+
+
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    (
+        (
+            {"page": "abc", "items_page": "0", "shipments_per_page": ""},
+            "分页参数必须是整数",
+        ),
+        (
+            {"items_page": "0", "work_records_page": "abc"},
+            "页码必须大于等于 1",
+        ),
+        (
+            {"quality_inspections_per_page": "201", "shipments_page": ""},
+            "每页数量必须在 1 到 200 之间",
+        ),
+    ),
+)
+def test_order_trace_multiple_invalid_parameters_have_stable_errors(
+    client, auth_headers, monkeypatch, parameters, message
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    def unexpected_snapshot():
+        pytest.fail("Invalid pagination must be rejected before trace queries")
+
+    monkeypatch.setattr(TraceRepository, "read_snapshot", unexpected_snapshot)
+    # Query-string order must not determine which validation error is returned.
+    for pairs in (list(parameters.items()), list(reversed(parameters.items()))):
+        response = client.get(
+            f"/api/trace/order/{fixture['order_no']}",
+            query_string=pairs,
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        assert response.get_json() == {
+            "error": message,
+            "code": "validation_error",
+        }
+
+
+@pytest.mark.parametrize(
+    ("parameters", "item_page", "other_page", "per_page"),
+    (
+        ({}, 1, 1, 100),
+        ({"page": "2", "per_page": "1"}, 2, 1, 1),
+        ({"per_page": "200"}, 1, 1, 200),
+        (
+            {
+                f"{name}_{suffix}": value
+                for name in TRACE_COLLECTIONS
+                for suffix, value in (("page", "1"), ("per_page", "200"))
+            },
+            1, 1, 200,
+        ),
+        (
+            {
+                f"{name}_{suffix}": value
+                for name in TRACE_COLLECTIONS
+                for suffix, value in (("page", "2"), ("per_page", "1"))
+            },
+            2, 2, 1,
+        ),
+    ),
+)
+def test_order_trace_pagination_defaults_and_valid_boundaries(
+    client, auth_headers, parameters, item_page, other_page, per_page
+):
+    fixture = _create_serial_trace_fixture(client, serial_count=3)
+    response = client.get(
+        f"/api/trace/order/{fixture['order_no']}",
+        query_string=parameters,
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["meta"]["page"] == item_page
+    assert payload["meta"]["per_page"] == per_page
+    for name in TRACE_COLLECTIONS:
+        pagination = payload["meta"]["pagination"][name]
+        assert pagination["page"] == (item_page if name == "items" else other_page)
+        assert pagination["per_page"] == per_page
+    assert payload["items"][0]["serial_no"] == fixture["serial_numbers"][
+        (item_page - 1) * per_page
+    ]
+
+
+@pytest.mark.parametrize(
+    ("page", "per_page", "message"),
+    (
+        ("abc", 100, "分页参数必须是整数"),
+        ("", 100, "分页参数必须是整数"),
+        ("1.5", 100, "分页参数必须是整数"),
+        (1.5, 100, "分页参数必须是整数"),
+        (True, 100, "分页参数必须是整数"),
+        (1, 1.5, "分页参数必须是整数"),
+        (1, True, "分页参数必须是整数"),
+        (None, 100, "分页参数必须是整数"),
+        (0, 100, "页码必须大于等于 1"),
+        (-1, 100, "页码必须大于等于 1"),
+        (1, 0, "每页数量必须在 1 到 200 之间"),
+        (1, -1, "每页数量必须在 1 到 200 之间"),
+        (1, 201, "每页数量必须在 1 到 200 之间"),
+    ),
+)
+def test_trace_pagination_preserves_domain_error_contract(page, per_page, message):
+    with pytest.raises(ValidationError) as exc_info:
+        TraceService._pagination(page, per_page)
+    assert type(exc_info.value) is ValidationError
+    assert str(exc_info.value) == message
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.to_payload() == {
+        "error": message,
         "code": "validation_error",
     }
 

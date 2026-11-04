@@ -37,13 +37,14 @@ def trace_order(order_no):
         "inventory_logs",
         "shipments",
     )
+    # Preserve supplied strings, including empty values; the service owns validation.
     collection_pages = {
-        name: request.args.get(f"{name}_page", 1)
+        name: request.args[f"{name}_page"]
         for name in collection_names
         if f"{name}_page" in request.args
     }
     collection_per_pages = {
-        name: request.args.get(f"{name}_per_page", 100)
+        name: request.args[f"{name}_per_page"]
         for name in collection_names
         if f"{name}_per_page" in request.args
     }

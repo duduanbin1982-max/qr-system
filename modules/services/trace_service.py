@@ -300,6 +300,14 @@ class TraceService:
         page, per_page = TraceService._pagination(page, per_page)
         collection_pages = collection_pages or {}
         collection_per_pages = collection_per_pages or {}
+        # Validate every collection before opening a snapshot or querying any page.
+        collection_pagination = {
+            name: TraceService._pagination(
+                collection_pages.get(name, page if name == "items" else 1),
+                collection_per_pages.get(name, per_page),
+            )
+            for name in COLLECTION_FIELDS
+        }
 
         with TraceRepository.read_snapshot() as (db, snapshot_at):
             order_row = TraceRepository.find_order_by_no(order_no, db=db)
@@ -331,13 +339,7 @@ class TraceService:
             raw_collections = {}
             pagination = {}
             for name, query in queries.items():
-                current_page = collection_pages.get(
-                    name, page if name == "items" else 1
-                )
-                current_per_page = collection_per_pages.get(name, per_page)
-                current_page, current_per_page = TraceService._pagination(
-                    current_page, current_per_page
-                )
+                current_page, current_per_page = collection_pagination[name]
                 offset = (current_page - 1) * current_per_page
                 raw_collections[name] = query(
                     order_id, current_per_page, offset, db=db
@@ -384,6 +386,12 @@ class TraceService:
 
     @staticmethod
     def _pagination(page, per_page):
+        # int() silently truncates floats and accepts booleans as page numbers.
+        if any(
+            isinstance(value, bool) or not isinstance(value, (str, int))
+            for value in (page, per_page)
+        ):
+            raise ValidationError("分页参数必须是整数")
         try:
             page = int(page)
             per_page = int(per_page)
