@@ -4,7 +4,7 @@
       <div class="card-header"><h3>📝 报工记录 ({{ workRecords.length }})</h3></div>
       <div class="card-body">
         <div v-if="workRecords.length" class="timeline">
-          <div v-for="(record, index) in workRecords" :key="record.id" class="timeline-row">
+          <div v-for="(record, index) in workRecords" :key="JSON.stringify([record.id, index])" class="timeline-row">
             <div class="timeline-index">{{ index + 1 }}</div>
             <div class="timeline-content">
               <div class="timeline-title">
@@ -25,26 +25,20 @@
 
     <div class="card trace-card">
       <div class="card-header"><h3>🕐 完整生命周期</h3></div>
-      <div class="card-body timeline">
-        <div v-if="result.order" class="timeline-row">
-          <div class="timeline-icon">📋</div>
-          <div><strong>订单创建</strong><div class="timeline-meta">{{ result.order.created_at }}</div></div>
-        </div>
-        <div v-for="(record, index) in workRecords" :key="`life-${record.id}`" class="timeline-row">
-          <div class="timeline-index">{{ index + 1 }}</div>
-          <div><strong>{{ record.process_name || '-' }}</strong><div class="timeline-meta">{{ record.worker_name || '-' }} · +{{ record.quantity }} · {{ record.created_at }}</div></div>
-        </div>
-        <div v-for="inspection in qualityInspections" :key="`quality-${inspection.id}`" class="timeline-row">
-          <div class="timeline-icon">🔍</div>
-          <div><strong>{{ inspection.process_name || '-' }} 质检</strong><div class="timeline-meta">{{ qualityResultLabel(inspection.result) }} · 抽检 {{ inspection.quantity_checked }} · {{ inspection.inspected_at || inspection.created_at }}</div></div>
-        </div>
-        <div v-for="log in inventoryLogs" :key="`inventory-${log.id}`" class="timeline-row">
-          <div class="timeline-icon">📦</div>
-          <div><strong>{{ result.item ? '订单入库' : '入库' }} · {{ log.product_name || log.product_model || '-' }}</strong><div class="timeline-meta">{{ log.type === 'in' ? '+' : '-' }}{{ log.quantity }} · {{ log.created_at }}</div></div>
-        </div>
-        <div v-for="shipment in shipments" :key="`shipment-${shipment.id}`" class="timeline-row">
-          <div class="timeline-icon">🚚</div>
-          <div><strong>{{ result.item ? '订单发货' : '发货' }} · {{ shipment.shipment_no }}</strong><div class="timeline-meta">数量 {{ shipment.order_quantity || shipment.total_quantity }} · {{ shipment.completed_at || shipment.created_at }}</div></div>
+      <div class="card-body timeline" data-testid="trace-lifecycle">
+        <div v-for="event in lifecycleEvents" :key="event.key" class="timeline-row" :data-kind="event.kind">
+          <div v-if="event.kind === 'work'" class="timeline-index">{{ event.ordinal }}</div>
+          <div v-else class="timeline-icon">{{ eventIcons[event.kind] }}</div>
+          <div>
+            <strong>{{ event.label }}</strong>
+            <div class="timeline-meta">
+              <span v-if="event.kind === 'work'">{{ event.payload.worker_name || '-' }} · +{{ event.payload.quantity }} ·</span>
+              <span v-else-if="event.kind === 'quality'">{{ qualityResultLabel(event.payload.result) }} · 抽检 {{ event.payload.quantity_checked }} ·</span>
+              <span v-else-if="event.kind === 'inventory'">{{ event.payload.type === 'in' ? '+' : '-' }}{{ event.payload.quantity }} ·</span>
+              <span v-else-if="event.kind === 'shipment'">数量 {{ event.payload.order_quantity || event.payload.total_quantity }} ·</span>
+              <span>{{ event.time_label }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -53,12 +47,12 @@
 
 <script setup>
 import { computed } from 'vue'
+import { buildTraceTimeline } from '@/lib/traceTimeline.js'
 
 const props = defineProps({ result: { type: Object, required: true } })
 const workRecords = computed(() => props.result.work_records || [])
-const qualityInspections = computed(() => props.result.quality_inspections || [])
-const inventoryLogs = computed(() => props.result.item ? props.result.order_scope?.inventory_logs || [] : props.result.inventory_logs || [])
-const shipments = computed(() => props.result.item ? props.result.order_scope?.shipments || [] : props.result.shipments || [])
+const lifecycleEvents = computed(() => buildTraceTimeline(props.result))
+const eventIcons = Object.freeze({ order: '📋', quality: '🔍', inventory: '📦', shipment: '🚚' })
 
 function timeDiff(index) {
   if (index === 0) return ''

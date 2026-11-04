@@ -19,6 +19,9 @@ function fixture(files, legacyEdges = new Map()) {
   if (!Object.hasOwn(files, 'lib/orderStatus.js')) {
     files = { ...files, 'lib/orderStatus.js': `export const getOrderStatus = () => ({ label: '未知状态', cls: 'badge-info' })` }
   }
+  if (!Object.hasOwn(files, 'lib/traceTimeline.js')) {
+    files = { ...files, 'lib/traceTimeline.js': `export const buildTraceTimeline = () => []` }
+  }
   for (const [name, body] of Object.entries(files)) {
     const path = join(root, name)
     mkdirSync(dirname(path), { recursive: true })
@@ -336,6 +339,29 @@ for (const [name, body] of [
       'lib/api.js': 'export const api = {}',
     })
     assert.ok(result.violations.includes('lib/orderStatus.js: presentation utility must have no imports, browser state or HTTP transport'))
+  })
+}
+
+test('components can use the pure trace timeline builder', () => {
+  const result = fixture({
+    'components/TraceProductionHistory.vue': `import { buildTraceTimeline } from '@/lib/traceTimeline.js'`,
+    'lib/traceTimeline.js': readFileSync(new URL('../../src/lib/traceTimeline.js', import.meta.url), 'utf8'),
+  })
+  assert.deepEqual(result.violations, [])
+})
+
+for (const [name, body] of [
+  ['imports', `import { api } from './api.js'; export const buildTraceTimeline = () => api`],
+  ['browser state', `export const buildTraceTimeline = () => localStorage.getItem('timeline')`],
+  ['HTTP transport', `export const buildTraceTimeline = () => fetch('/api/trace')`],
+]) {
+  test(`trace timeline builder cannot gain ${name}`, () => {
+    const result = fixture({
+      'components/TraceProductionHistory.vue': `import { buildTraceTimeline } from '@/lib/traceTimeline.js'`,
+      'lib/traceTimeline.js': body,
+      'lib/api.js': 'export const api = {}',
+    })
+    assert.ok(result.violations.includes('lib/traceTimeline.js: presentation utility must have no imports, browser state or HTTP transport'))
   })
 }
 
