@@ -394,6 +394,151 @@ def test_order_trace_rejects_invalid_pagination(client, auth_headers):
     assert response.get_json()["code"] == "validation_error"
 
 
+def test_order_trace_quality_inspection_pages_do_not_expand_for_multiple_ncrs(
+    client,
+    auth_headers,
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        db = get_db()
+        inspection_ids = []
+        for index in range(2):
+            cursor = db.execute(
+                "INSERT INTO quality_inspections "
+                "(order_id, process_id, inspection_type, result, created_at) "
+                "VALUES (?, ?, 'in_process', 'fail', ?)",
+                (
+                    fixture["order_id"],
+                    fixture["process_id"],
+                    f"2026-11-04 00:00:0{index}",
+                ),
+            )
+            inspection_ids.append(cursor.lastrowid)
+
+        db.execute(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            ("TRACE-NCR-FIRST", inspection_ids[0], fixture["order_id"]),
+        )
+        db.execute(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            ("TRACE-NCR-LATEST", inspection_ids[0], fixture["order_id"]),
+        )
+        db.execute(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            ("TRACE-NCR-SECOND", inspection_ids[1], fixture["order_id"]),
+        )
+        db.commit()
+
+    first_page = client.get(
+        f"/api/trace/order/{fixture['order_no']}?"
+        "quality_inspections_page=1&quality_inspections_per_page=1",
+        headers=auth_headers,
+    )
+    second_page = client.get(
+        f"/api/trace/order/{fixture['order_no']}?"
+        "quality_inspections_page=2&quality_inspections_per_page=1",
+        headers=auth_headers,
+    )
+
+    assert first_page.status_code == 200, first_page.get_json()
+    assert second_page.status_code == 200, second_page.get_json()
+    first_payload = first_page.get_json()
+    second_payload = second_page.get_json()
+    assert [row["id"] for row in first_payload["quality_inspections"]] == [
+        inspection_ids[0]
+    ]
+    assert [row["id"] for row in second_payload["quality_inspections"]] == [
+        inspection_ids[1]
+    ]
+    assert first_payload["quality_inspections"][0]["ncr_no"] == "TRACE-NCR-LATEST"
+    assert first_payload["meta"]["pagination"]["quality_inspections"] == {
+        "page": 1,
+        "per_page": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
+    assert second_payload["meta"]["pagination"]["quality_inspections"] == {
+        "page": 2,
+        "per_page": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    (
+        ("quality_inspections_page", "not-an-integer"),
+        ("work_records_per_page", "25.5"),
+    ),
+)
+def test_order_trace_rejects_malformed_collection_pagination(
+    client,
+    auth_headers,
+    parameter,
+    value,
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    response = client.get(
+        f"/api/trace/order/{fixture['order_no']}?{parameter}={value}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "分页参数必须是整数",
+        "code": "validation_error",
+    }
+
+
+def test_serial_trace_quality_inspection_with_multiple_ncrs_is_not_duplicated(
+    client,
+    auth_headers,
+):
+    fixture = _create_serial_trace_fixture(client)
+
+    with client.application.app_context():
+        db = get_db()
+        cursor = db.execute(
+            "INSERT INTO quality_inspections "
+            "(order_id, process_id, inspection_type, result, serial_no, created_at) "
+            "VALUES (?, ?, 'in_process', 'fail', ?, '2026-11-04 00:00:00')",
+            (
+                fixture["order_id"],
+                fixture["process_id"],
+                fixture["serial_numbers"][0],
+            ),
+        )
+        inspection_id = cursor.lastrowid
+        db.execute(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            ("TRACE-SERIAL-NCR-FIRST", inspection_id, fixture["order_id"]),
+        )
+        db.execute(
+            "INSERT INTO quality_nonconformances "
+            "(ncr_no, inspection_id, order_id) VALUES (?, ?, ?)",
+            ("TRACE-SERIAL-NCR-LATEST", inspection_id, fixture["order_id"]),
+        )
+        db.commit()
+
+    response = client.get(
+        f"/api/trace/{fixture['serial_numbers'][0]}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.get_json()
+    inspections = response.get_json()["serial_scope"]["quality_inspections"]
+    assert len(inspections) == 1
+    assert inspections[0]["id"] == inspection_id
+    assert inspections[0]["ncr_no"] == "TRACE-SERIAL-NCR-LATEST"
+
+
 def test_serial_trace_separates_item_and_order_scope(client, auth_headers):
     fixture = _create_serial_trace_fixture(client, serial_count=2)
     suffix = uuid.uuid4().hex[:8].upper()

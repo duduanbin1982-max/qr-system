@@ -208,7 +208,12 @@ class TraceRepository:
                    qi.quantity_failed, qi.result, qi.notes, qi.inspected_at, qi.created_at,
                    qi.defect_category, qi.defect_quantity, qi.defect_level, qi.score_total,
                    qi.serial_no,qi.process_id,qi.process_version_id,
-                   task.task_no, ncr.ncr_no,
+                   task.task_no,
+                   (SELECT ncr.ncr_no
+                    FROM quality_nonconformances ncr
+                    WHERE ncr.inspection_id = qi.id
+                    ORDER BY ncr.id DESC
+                    LIMIT 1) AS ncr_no,
                    """ + process_name + """ as process_name,
                    """ + process_source + """ as process_name_source,
                    u.name as inspector_name
@@ -217,7 +222,6 @@ class TraceRepository:
             """ + process_version_join("qi", "process_version") + """
             LEFT JOIN users u ON qi.inspector_id = u.id
             LEFT JOIN quality_inspection_tasks task ON task.id = qi.task_id
-            LEFT JOIN quality_nonconformances ncr ON ncr.inspection_id = qi.id
             WHERE qi.order_id = ?
             ORDER BY qi.created_at ASC, qi.id ASC
             LIMIT ? OFFSET ?
@@ -321,7 +325,12 @@ class TraceRepository:
             SELECT qi.id, qi.inspection_type, qi.quantity_checked, qi.quantity_passed,
                    qi.quantity_failed, qi.result, qi.notes, qi.inspected_at, qi.created_at,
                    qi.defect_category, qi.defect_quantity, qi.defect_level, qi.score_total,
-                   qi.serial_no,qi.process_id,qi.process_version_id,task.task_no,ncr.ncr_no,
+                   qi.serial_no,qi.process_id,qi.process_version_id,task.task_no,
+                   (SELECT ncr.ncr_no
+                    FROM quality_nonconformances ncr
+                    WHERE ncr.inspection_id = qi.id
+                    ORDER BY ncr.id DESC
+                    LIMIT 1) AS ncr_no,
                    """ + process_name + """ AS process_name,
                    """ + process_source + """ AS process_name_source,
                    u.name AS inspector_name
@@ -330,7 +339,6 @@ class TraceRepository:
             """ + process_version_join("qi", "process_version") + """
             LEFT JOIN users u ON qi.inspector_id = u.id
             LEFT JOIN quality_inspection_tasks task ON task.id = qi.task_id
-            LEFT JOIN quality_nonconformances ncr ON ncr.inspection_id = qi.id
             WHERE qi.order_id = ? AND qi.serial_no = ?
             ORDER BY qi.created_at, qi.id
         """, (order_id, serial_no)).fetchall()
