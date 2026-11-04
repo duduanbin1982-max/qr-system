@@ -10,6 +10,7 @@ const defaultSourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
 // Adding a lib module here requires reviewing that it has no IO, state or API calls.
 export const PURE_PRESENTATION_MODULES = Object.freeze([
   'lib/productionTime.js',
+  'lib/orderStatus.js',
 ])
 
 // The older UI imports app context and API calls directly. These exact edges are

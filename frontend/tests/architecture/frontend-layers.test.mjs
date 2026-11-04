@@ -16,6 +16,9 @@ function fixture(files, legacyEdges = new Map()) {
   if (!Object.hasOwn(files, 'lib/productionTime.js')) {
     files = { ...files, 'lib/productionTime.js': `export const productionDate = () => '2026-10-14'` }
   }
+  if (!Object.hasOwn(files, 'lib/orderStatus.js')) {
+    files = { ...files, 'lib/orderStatus.js': `export const getOrderStatus = () => ({ label: '未知状态', cls: 'badge-info' })` }
+  }
   for (const [name, body] of Object.entries(files)) {
     const path = join(root, name)
     mkdirSync(dirname(path), { recursive: true })
@@ -312,6 +315,29 @@ test('a whitelisted presentation utility loses its exception if it gains imports
   })
   assert.ok(result.violations.some((violation) => violation.includes('presentation utility must have no imports')))
 })
+
+test('components can use the shared pure order status mapping', () => {
+  const result = fixture({
+    'components/TraceOverview.vue': `import { getOrderStatus } from '@/lib/orderStatus.js'`,
+    'lib/orderStatus.js': readFileSync(new URL('../../src/lib/orderStatus.js', import.meta.url), 'utf8'),
+  })
+  assert.deepEqual(result.violations, [])
+})
+
+for (const [name, body] of [
+  ['imports', `import { api } from './api.js'; export const getOrderStatus = () => api`],
+  ['browser state', `export const getOrderStatus = () => localStorage.getItem('status')`],
+  ['HTTP transport', `export const getOrderStatus = () => fetch('/api/orders')`],
+]) {
+  test(`shared order status mapping cannot gain ${name}`, () => {
+    const result = fixture({
+      'components/TraceOverview.vue': `import { getOrderStatus } from '@/lib/orderStatus.js'`,
+      'lib/orderStatus.js': body,
+      'lib/api.js': 'export const api = {}',
+    })
+    assert.ok(result.violations.includes('lib/orderStatus.js: presentation utility must have no imports, browser state or HTTP transport'))
+  })
+}
 
 test('static imports, reexports and literal dynamic imports are checked', () => {
   assert.deepEqual([...importSpecifiers(`import '@/x.js'; export { x } from '../y.js'; import('@/z.js')`)],

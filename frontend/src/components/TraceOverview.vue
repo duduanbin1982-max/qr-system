@@ -35,7 +35,7 @@
       <div class="card-header"><h3>🏷️ 产品信息</h3></div>
       <div class="card-body trace-summary">
         <div><span>序列号：</span><code>{{ result.item.serial_no }}</code></div>
-        <div><span>状态：</span><span class="badge" :class="itemStatusClass">{{ itemStatusLabel }}</span></div>
+        <div><span>状态：</span><span class="badge" :class="itemStatus.cls">{{ itemStatus.label }}</span></div>
         <div><span>订单号：</span><code>{{ result.order?.order_no || '-' }}</code></div>
         <div><span>产品：</span>{{ result.order?.product_name || '-' }}</div>
         <div><span>位置序号：</span>{{ result.item.position_no || '-' }}</div>
@@ -52,7 +52,7 @@
             <tr v-for="item in result.items" :key="item.serial_no" class="trace-link-row" title="点击追溯该产品" @click="emit('trace-serial', item.serial_no)">
               <td><code>{{ item.serial_no }}</code></td>
               <td>{{ item.position_no || '-' }}</td>
-              <td><span class="badge" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span></td>
+              <td><span class="badge" :class="getOrderStatus(item.status).cls">{{ getOrderStatus(item.status).label }}</span></td>
               <td>{{ item.current_process_name || '-' }}</td>
               <td>{{ item.created_at }}</td>
             </tr>
@@ -80,7 +80,7 @@
         <div><span>产品名：</span>{{ result.order.product_name || '-' }}</div>
         <div><span>数量：</span><strong>{{ result.order.quantity }}</strong></div>
         <div><span>已完成：</span><strong class="text-success">{{ result.order.completed || 0 }}</strong></div>
-        <div><span>状态：</span><span class="badge" :class="statusClass(result.order.status)">{{ orderStatusLabel }}</span></div>
+        <div><span>状态：</span><span class="badge" :class="orderStatus.cls">{{ orderStatus.label }}</span></div>
         <div><span>创建时间：</span>{{ result.order.created_at }}</div>
       </div>
     </div>
@@ -89,6 +89,8 @@
 
 <script setup>
 import { computed } from 'vue'
+
+import { getOrderStatus } from '@/lib/orderStatus.js'
 
 const props = defineProps({
   result: { type: Object, required: true },
@@ -132,28 +134,8 @@ const collectionPagination = computed(() => {
       totalPages: item.total_pages,
     }))
 })
-const itemStatusLabel = computed(() => statusLabel(props.result.item?.status))
-const itemStatusClass = computed(() => statusClass(props.result.item?.status))
-const orderStatusLabel = computed(() => {
-  return statusLabel(props.result.order?.status)
-})
-
-function statusLabel(status) {
-  return ({
-    completed: '已完成',
-    in_progress: '生产中',
-    producing: '生产中',
-    scrapped: '已报废',
-    deleted: '已删除',
-  })[status] || '未知状态'
-}
-
-function statusClass(status) {
-  if (status === 'completed') return 'badge-success'
-  if (status === 'in_progress' || status === 'producing') return 'badge-warning'
-  if (status === 'scrapped' || status === 'deleted') return 'badge-danger'
-  return 'badge-info'
-}
+const itemStatus = computed(() => getOrderStatus(props.result.item?.status))
+const orderStatus = computed(() => getOrderStatus(props.result.order?.status))
 </script>
 
 <style scoped>
