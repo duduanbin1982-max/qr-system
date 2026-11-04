@@ -39,6 +39,27 @@ class ApprovalPolicyService:
         return {"revisions": [dict(row) for row in cls.policy_repository.list_revisions(policy_id)]}
 
     @classmethod
+    def _resolve_steps(cls, steps, db):
+        resolved = []
+        seen_role_ids = set()
+        for step in steps:
+            role = cls.role_repository.find_active_by_code(step["code"], db=db)
+            if not role:
+                raise ValidationError(f"角色“{step['code']}”不存在或已停用")
+            if step.get("role_id") is not None:
+                selected = cls.role_repository.find_active_by_id(int(step["role_id"]), db=db)
+                if not selected:
+                    raise ValidationError("审批角色不存在或已停用")
+                if selected["id"] != role["id"]:
+                    raise ValidationError("审批角色 ID 与编码不一致")
+            if role["id"] in seen_role_ids:
+                raise ValidationError("各级审批角色不能重复")
+            seen_role_ids.add(role["id"])
+            resolved.append({"level": step["level"], "role_id": role["id"],
+                             "code": role["code"], "name": role["name"]})
+        return resolved
+
+    @classmethod
     def create_revision(cls, payload, actor):
         if not config.APPROVAL_POLICY_VERSIONED_WRITE_ENABLED:
             raise ConflictError("审批策略版本化写入尚未启用")
@@ -58,6 +79,7 @@ class ApprovalPolicyService:
                 return dict(existing)
             if process_id is not None and not cls.process_repository.find_by_id(process_id, db=txn):
                 raise NotFoundError("工序不存在")
+            steps = cls._resolve_steps(normalized["steps"], txn)
             policy = cls.policy_repository.find_policy_by_process(process_id, db=txn)
             if not policy:
                 key = f"process:{process_id}" if process_id is not None else "global"
@@ -65,16 +87,6 @@ class ApprovalPolicyService:
             else:
                 policy_id = policy["id"]
             latest = cls.policy_repository.next_version(policy_id, txn)
-            steps = []
-            for step in normalized["steps"]:
-                role = None
-                if step.get("role_id"):
-                    role = cls.role_repository.find_active_by_id(int(step["role_id"]), db=txn)
-                if not role:
-                    role = cls.role_repository.find_active_by_code(step["code"], db=txn)
-                if not role:
-                    raise ValidationError(f"角色“{step['code']}”不存在或已停用")
-                steps.append({"level": step["level"], "role_id": role["id"], "code": role["code"], "name": role["name"]})
             revision_id = cls.policy_repository.create_revision(
                 policy_id, latest + 1, normalized["require_approval"], normalized["approval_level"],
                 idempotency_key, actor, steps, txn,
