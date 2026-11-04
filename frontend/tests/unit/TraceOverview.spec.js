@@ -23,6 +23,45 @@ function traceResult(status) {
 }
 
 describe('TraceOverview status contract', () => {
+  it.each([
+    ['pending', '待生产', 'badge-pending'],
+    ['producing', '生产中', 'badge-warning'],
+    ['completed', '已完成', 'badge-success'],
+    ['cancelled', '已取消', 'badge-danger'],
+    ['paused', '已暂停', 'badge-secondary'],
+    ['in_progress', '生产中', 'badge-warning'],
+    ['scrapped', '已报废', 'badge-danger'],
+    ['deleted', '已删除', 'badge-danger'],
+    ['unexpected', '未知状态', 'badge-info'],
+    ['toString', '未知状态', 'badge-info'],
+    [undefined, '未知状态', 'badge-info'],
+  ])('renders %s consistently in order and serial summaries and product rows', (status, label, cls) => {
+    const result = traceResult(status)
+    result.order.status = status
+    result.items = [{ ...result.item }]
+    const wrapper = mount(TraceOverview, { props: { result } })
+    const badges = wrapper.findAll('.badge')
+
+    expect(badges).toHaveLength(3)
+    for (const badge of badges) {
+      expect(badge.text()).toBe(label)
+      expect(badge.classes()).toContain(cls)
+    }
+  })
+
+  it('updates shared status presentation when a different order is loaded', async () => {
+    const wrapper = mount(TraceOverview, { props: { result: traceResult('completed') } })
+    const result = traceResult('paused')
+    result.order.status = 'cancelled'
+    await wrapper.setProps({ result })
+
+    const badges = wrapper.findAll('.badge')
+    expect(badges[0].text()).toBe('已暂停')
+    expect(badges[0].classes()).toContain('badge-secondary')
+    expect(badges[1].text()).toBe('已取消')
+    expect(badges[1].classes()).toContain('badge-danger')
+  })
+
   it('renders scrapped products as scrapped instead of pending', () => {
     const wrapper = mount(TraceOverview, { props: { result: traceResult('scrapped') } })
 
