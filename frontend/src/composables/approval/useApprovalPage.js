@@ -20,7 +20,10 @@ export function useApprovalPage() {
   const history = ref([])
   const historyTotal = ref(0)
   const historyPage = ref(1)
+  const historyLimit = ref(20)
+  const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyTotal.value / historyLimit.value)))
   const historyLoading = ref(false)
+  let historyRequest = 0
   const rejectComment = ref({})
 
   const canApprove = computed(() => can('approvals:decision'))
@@ -61,14 +64,28 @@ export function useApprovalPage() {
     load(nextPage)
   }
 
-  async function loadHistory() {
+  async function loadHistory(page = historyPage.value) {
+    const requestId = ++historyRequest
     historyLoading.value = true
     try {
-      const d = await api.domains.approvals.approvalHistory({ page: historyPage.value })
+      const d = await api.domains.approvals.approvalHistory({ page, limit: historyLimit.value })
+      if (requestId !== historyRequest) return
+      historyPage.value = d.page || page
+      historyLimit.value = d.limit || historyLimit.value
       history.value = d.approvals || []
       historyTotal.value = d.total || 0
-    } catch (e) { showToast(e.message || '加载失败', 'error') }
-    finally { historyLoading.value = false }
+    } catch (e) {
+      if (requestId === historyRequest) showToast(e.message || '加载失败', 'error')
+    } finally {
+      if (requestId === historyRequest) historyLoading.value = false
+    }
+  }
+
+  function changeHistoryPage(offset) {
+    if (historyLoading.value) return
+    const page = historyPage.value + offset
+    if (page < 1 || page > historyTotalPages.value) return
+    return loadHistory(page)
   }
 
   function toggleSelectAll() {
@@ -127,7 +144,8 @@ export function useApprovalPage() {
   return {
     approvals, approvalTotal, approvalPage, approvalLimit, loading, processing, canApprove, filteredApprovals,
     filterOrderNo, filterWorker, filterProcess,
-    activeTab, setTab, history, historyTotal, historyPage, historyLoading, loadHistory,
+    activeTab, setTab, history, historyTotal, historyPage, historyLimit, historyTotalPages,
+    historyLoading, loadHistory, changeHistoryPage,
     rejectComment, handle, selectedIds, selectAll, toggleSelectAll, batchHandle,
     stats, changeApprovalPage
   }

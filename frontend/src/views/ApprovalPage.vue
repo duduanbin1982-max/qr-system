@@ -107,7 +107,7 @@
         <p style="font-size:48px;margin:0">📋</p>
         <p style="margin-top:12px">暂无审批记录</p>
       </div>
-      <div v-else class="table-container">
+      <div v-show="history.length > 0" class="table-container">
         <table class="data-table">
           <thead>
             <tr>
@@ -152,10 +152,10 @@
             </tr>
           </tbody>
         </table>
-        <div v-if="historyTotal > 20" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
-          <button class="btn btn-default btn-sm" @click="historyPage--;loadHistory()" :disabled="historyPage <= 1">上一页</button>
-          <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ historyPage }} / {{ Math.ceil(historyTotal/20) }} 页</span>
-          <button class="btn btn-default btn-sm" @click="historyPage++;loadHistory()" :disabled="historyPage * 20 >= historyTotal">下一页</button>
+        <div v-if="historyTotalPages > 1" style="display:flex;justify-content:center;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
+          <button class="btn btn-default btn-sm" @click="changeHistoryPage(-1)" :disabled="historyLoading || historyPage <= 1">上一页</button>
+          <span style="font-size:var(--text-sm);color:var(--text-placeholder)">第 {{ historyPage }} / {{ historyTotalPages }} 页</span>
+          <button class="btn btn-default btn-sm" @click="changeHistoryPage(1)" :disabled="historyLoading || historyPage >= historyTotalPages">下一页</button>
         </div>
       </div>
     </div>
