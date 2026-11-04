@@ -11,6 +11,7 @@ const defaultSourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
 export const PURE_PRESENTATION_MODULES = Object.freeze([
   'lib/productionTime.js',
   'lib/orderStatus.js',
+  'lib/traceTimeline.js',
 ])
 
 // The older UI imports app context and API calls directly. These exact edges are
