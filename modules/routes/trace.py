@@ -38,12 +38,12 @@ def trace_order(order_no):
         "shipments",
     )
     collection_pages = {
-        name: request.args.get(f"{name}_page", 1, type=int)
+        name: request.args.get(f"{name}_page", 1)
         for name in collection_names
         if f"{name}_page" in request.args
     }
     collection_per_pages = {
-        name: request.args.get(f"{name}_per_page", 100, type=int)
+        name: request.args.get(f"{name}_per_page", 100)
         for name in collection_names
         if f"{name}_per_page" in request.args
     }

@@ -217,11 +217,17 @@ class TraceRepository:
             """ + process_version_join("qi", "process_version") + """
             LEFT JOIN users u ON qi.inspector_id = u.id
             LEFT JOIN quality_inspection_tasks task ON task.id = qi.task_id
-            LEFT JOIN quality_nonconformances ncr ON ncr.inspection_id = qi.id
+            LEFT JOIN (
+                SELECT inspection_id, MAX(id) AS ncr_id
+                FROM quality_nonconformances
+                WHERE order_id = ? AND inspection_id IS NOT NULL
+                GROUP BY inspection_id
+            ) latest_ncr ON latest_ncr.inspection_id = qi.id
+            LEFT JOIN quality_nonconformances ncr ON ncr.id = latest_ncr.ncr_id
             WHERE qi.order_id = ?
             ORDER BY qi.created_at ASC, qi.id ASC
             LIMIT ? OFFSET ?
-        """, (order_id, limit, offset)).fetchall()
+        """, (order_id, order_id, limit, offset)).fetchall()
         warn_legacy_fact_rows("quality_inspections", rows)
         return rows
 
@@ -330,10 +336,16 @@ class TraceRepository:
             """ + process_version_join("qi", "process_version") + """
             LEFT JOIN users u ON qi.inspector_id = u.id
             LEFT JOIN quality_inspection_tasks task ON task.id = qi.task_id
-            LEFT JOIN quality_nonconformances ncr ON ncr.inspection_id = qi.id
+            LEFT JOIN (
+                SELECT inspection_id, MAX(id) AS ncr_id
+                FROM quality_nonconformances
+                WHERE order_id = ? AND inspection_id IS NOT NULL
+                GROUP BY inspection_id
+            ) latest_ncr ON latest_ncr.inspection_id = qi.id
+            LEFT JOIN quality_nonconformances ncr ON ncr.id = latest_ncr.ncr_id
             WHERE qi.order_id = ? AND qi.serial_no = ?
             ORDER BY qi.created_at, qi.id
-        """, (order_id, serial_no)).fetchall()
+        """, (order_id, order_id, serial_no)).fetchall()
         warn_legacy_fact_rows("quality_inspections", rows)
         return rows
 
