@@ -6,6 +6,13 @@ from modules.process_fact_projection import (
     warn_legacy_fact_rows,
 )
 
+_APPROVAL_RELATIONS = (
+    "FROM approval_records ar "
+    "LEFT JOIN work_records wr ON ar.work_record_id=wr.id "
+    "LEFT JOIN orders o ON wr.order_id=o.id "
+)
+_VISIBLE_ORDER = "(o.deleted_at IS NULL OR o.id IS NULL)"
+
 
 class ApprovalRepository:
     """Approval persistence gateway."""
@@ -20,10 +27,8 @@ class ApprovalRepository:
         db = resolve_db(db)
         op = '=' if status_condition == 'pending' else '!='
         return db.execute(f'''
-            SELECT COUNT(*) FROM approval_records ar
-            LEFT JOIN work_records wr ON ar.work_record_id = wr.id
-            LEFT JOIN orders o ON wr.order_id = o.id
-            WHERE ar.status {op} 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL)
+            SELECT COUNT(*) {_APPROVAL_RELATIONS}
+            WHERE ar.status {op} 'pending' AND {_VISIBLE_ORDER}
         ''').fetchone()[0]
 
     @staticmethod
@@ -38,13 +43,11 @@ class ApprovalRepository:
             + process_name + " AS process_name,u.name AS worker_name,wr.quantity,"
             "wr.serial_no,wr.report_source,wr.actual_completed_at,wr.backfill_reason,"
             "wr.submit_position_id,wr.submit_position_name,wr.remark "
-            "FROM approval_records ar "
-            "LEFT JOIN work_records wr ON ar.work_record_id=wr.id "
-            "LEFT JOIN orders o ON wr.order_id=o.id "
-            "LEFT JOIN processes p ON wr.process_id=p.id "
+            + _APPROVAL_RELATIONS
+            + "LEFT JOIN processes p ON wr.process_id=p.id "
             + process_version_join("wr", "process_version")
             + "LEFT JOIN users u ON wr.user_id=u.id "
-            f"WHERE ar.status {op} 'pending' AND (o.deleted_at IS NULL OR o.id IS NULL) "
+            f"WHERE ar.status {op} 'pending' AND {_VISIBLE_ORDER} "
             f"ORDER BY {order_column} DESC,ar.id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
@@ -241,24 +244,22 @@ class ApprovalRepository:
     def get_approval_stats(db=None):
         """返回审批统计数据。"""
         db = resolve_db(db)
-        pending = db.execute("SELECT COUNT(*) FROM approval_records WHERE status='pending'").fetchone()[0]
-        avg_row = db.execute("""
-            SELECT ROUND(AVG(
-                (julianday(processed_at) - julianday(created_at)) * 24
-            ), 1) as avg_hours
-            FROM approval_records
-            WHERE status != 'pending' AND processed_at IS NOT NULL
+        row = db.execute(f"""
+            SELECT COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN ar.status='pending' THEN 1 ELSE 0 END),0) AS pending,
+                COALESCE(SUM(CASE WHEN ar.status='pending'
+                    AND ar.created_at < datetime('now','localtime','-24 hours')
+                    THEN 1 ELSE 0 END),0) AS pending_over_24h,
+                ROUND(AVG(CASE WHEN ar.status!='pending' AND ar.processed_at IS NOT NULL
+                    THEN (julianday(ar.processed_at)-julianday(ar.created_at))*24 END),1) AS avg_hours
+            {_APPROVAL_RELATIONS}
+            WHERE {_VISIBLE_ORDER}
         """).fetchone()
-        pending_over = db.execute("""
-            SELECT COUNT(*) FROM approval_records
-            WHERE status='pending' AND created_at < datetime('now','localtime','-24 hours')
-        """).fetchone()[0]
-        total = db.execute("SELECT COUNT(*) FROM approval_records").fetchone()[0]
         return {
-            "pending": pending,
-            "avg_hours": avg_row["avg_hours"] if avg_row and avg_row["avg_hours"] else 0,
-            "pending_over_24h": pending_over,
-            "total": total
+            "pending": row["pending"],
+            "avg_hours": row["avg_hours"] or 0,
+            "pending_over_24h": row["pending_over_24h"],
+            "total": row["total"]
         }
 
     @staticmethod
