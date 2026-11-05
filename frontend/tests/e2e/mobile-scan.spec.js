@@ -18,10 +18,17 @@ test('blocked mobile report opens required evaluation and restores the report', 
       && response.request().method() === 'POST'
       && response.status() === 409
   ))
+  const qualityTasks = page.waitForResponse(response => (
+    response.url().includes('/api/process-quality-evaluations/tasks')
+      && response.request().method() === 'GET'
+      && response.status() === 200
+  ))
   await page.locator('#btn-report').click()
   const blockedPayload = await (await blockedReport).json()
   expect(blockedPayload.code).toBe('quality_evaluation_required')
   await expect(page.locator('#s-quality-evaluation')).toHaveClass(/active/, { timeout: 10_000 })
+  await qualityTasks
+  await expect(page.locator('.quality-task')).toHaveCount(1, { timeout: 10_000 })
   await expect(page.locator('.toast')).toContainText('未完成的必评任务')
   await expect(page.locator('.quality-task')).not.toContainText('E2E Previous Worker')
   await expect(page.locator('.quality-identity-note')).toContainText('隐藏被评价人员身份')
