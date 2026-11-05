@@ -285,7 +285,7 @@ def _validate_support_transition(repository, before, target, path):
         raise RuntimeError(f"support exception mode/blob transition mismatch: {path}")
 
 
-def _validate_paths(repository, before, target, changed):
+def _validate_paths(repository, before, target, changed, *, allow_frontend_support=False):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
         parts = PurePosixPath(normalized).parts
@@ -315,9 +315,12 @@ def _validate_paths(repository, before, target, changed):
             raise RuntimeError(f"release cannot change migration logic: {path}")
         if normalized in PROTECTED_EXACT_PATHS:
             raise RuntimeError(f"release cannot change protected path: {path}")
+        frontend_allowed = ALLOWED_FRONTEND_PATHS
+        if allow_frontend_support:
+            frontend_allowed += ALLOWED_FRONTEND_SUPPORT_PATHS
         if parts[0] == "frontend" and not any(
             normalized == prefix or normalized.startswith(prefix)
-            for prefix in ALLOWED_FRONTEND_PATHS + ALLOWED_FRONTEND_SUPPORT_PATHS
+            for prefix in frontend_allowed
         ):
             raise RuntimeError(f"frontend release permits source files only: {path}")
         if any(token in lower for token in ("/attachments/", "production.db", "public/static", "dist/")):
@@ -328,7 +331,10 @@ def _validate_paths(repository, before, target, changed):
             continue
         if parts[0] == "modules":
             continue
-        if any(normalized == prefix or normalized.startswith(prefix) for prefix in ALLOWED_FRONTEND_SUPPORT_PATHS):
+        if allow_frontend_support and any(
+            normalized == prefix or normalized.startswith(prefix)
+            for prefix in ALLOWED_FRONTEND_SUPPORT_PATHS
+        ):
             continue
         if not any(normalized == prefix or normalized.startswith(prefix) for prefix in ALLOWED_FRONTEND_PATHS):
             raise RuntimeError(f"release path is not deployable code or static source: {path}")
@@ -419,7 +425,13 @@ def validate_release(
     }
     if any(tracked_data.values()):
         raise RuntimeError("backend/static release refuses commits that track production data/")
-    _validate_paths(tool_root, before_commit, target_commit, changed)
+    _validate_paths(
+        tool_root,
+        before_commit,
+        target_commit,
+        changed,
+        allow_frontend_support=True,
+    )
     code_only_release._assert_release_controls_unchanged(tool_root, before_commit, target_commit)
     code_only_release._assert_runtime_fence_unchanged(tool_root, before_commit, target_commit)
 

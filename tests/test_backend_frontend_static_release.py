@@ -102,12 +102,19 @@ def test_static_release_allows_frontend_support_files_and_rejects_other_paths(tm
             "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
             {path: (expected_before, expected_target)},
         )
-        release._validate_paths(repository, support_before, support_target, [path])
+        release._validate_paths(
+            repository,
+            support_before,
+            support_target,
+            [path],
+            allow_frontend_support=True,
+        )
         release._validate_paths(
             repository,
             support_before,
             support_target,
             ["frontend/tests/unit/unreviewed.spec.js"],
+            allow_frontend_support=True,
         )
         with pytest.raises(RuntimeError):
             release._validate_paths(
