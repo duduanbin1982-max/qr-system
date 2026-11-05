@@ -234,6 +234,34 @@ def test_reviewed_traceability_support_constants_match_actual_production_and_mer
         )
 
 
+def test_reviewed_approval_history_support_allows_only_the_exact_test_transition():
+    repository = Path(__file__).resolve().parents[1]
+    path = "frontend/tests/unit/ApprovalPageHistory.spec.js"
+    expected_before, expected_target = release.PINNED_APPROVAL_HISTORY_SUPPORT_TRANSITIONS[path]
+    assert release._tree_entry(repository, release.APPROVAL_HISTORY_SUPPORT_BASELINE, path) == expected_before
+    assert release._tree_entry(repository, release.APPROVAL_HISTORY_SUPPORT_TARGET, path) == expected_target
+    release._validate_paths(
+        repository,
+        release.APPROVAL_HISTORY_SUPPORT_BASELINE,
+        release.APPROVAL_HISTORY_SUPPORT_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.APPROVAL_HISTORY_SUPPORT_BASELINE,
+            "16f1bb67ce947baf39e6685eddfa825731762e11",
+            [path],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.APPROVAL_HISTORY_SUPPORT_BASELINE,
+            release.APPROVAL_HISTORY_SUPPORT_TARGET,
+            ["frontend/tests/unit/UnreviewedApproval.spec.js"],
+        )
+
+
 def test_traceability_support_pins_release_script_history_transition():
     assert release.PINNED_TRACEABILITY_SUPPORT_TRANSITIONS[
         "scripts/backend_frontend_static_release.py"

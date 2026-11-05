@@ -152,6 +152,16 @@ PINNED_TRACEABILITY_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "6a09c5b9e5bab4126b8458c995a24bcd21a70a81"),
     ),
 }
+# PR #152 adds one frontend history-pagination regression test alongside the
+# deployable source change. Permit only its exact production-to-merge entry.
+APPROVAL_HISTORY_SUPPORT_BASELINE = "9f3700ac9deb7c428feb86e171d3f30d1ecf2c2a"
+APPROVAL_HISTORY_SUPPORT_TARGET = "f18b57fdd647e355edb0098d2f741ccdf7acca1d"
+PINNED_APPROVAL_HISTORY_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/ApprovalPageHistory.spec.js": (
+        None,
+        ("100644", "blob", "e589afbf2d3172384885634af30ba0ac45314852"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -231,6 +241,13 @@ def _validate_support_transition(repository, before, target, path):
             f"traceability support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "approval history",
+            PINNED_APPROVAL_HISTORY_SUPPORT_TRANSITIONS,
+            APPROVAL_HISTORY_SUPPORT_BASELINE,
+            APPROVAL_HISTORY_SUPPORT_TARGET,
+            f"approval history support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "materials",
             PINNED_MATERIALS_SUPPORT_TRANSITIONS,
             MATERIALS_SUPPORT_BASELINE,
@@ -303,6 +320,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
+            or normalized in PINNED_APPROVAL_HISTORY_SUPPORT_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
