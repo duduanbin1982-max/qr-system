@@ -86,7 +86,6 @@ class ApprovalWorkflow:
             }
         else:
             normalized_roles = {cls.normalize_role_code(current_role)}
-        normalized_role = next(iter(normalized_roles), "")
         required_role = roles[level - 1]
         if required_role not in normalized_roles:
             names = role_names or {}
@@ -98,7 +97,7 @@ class ApprovalWorkflow:
         return ApprovalDecision(
             action=action,
             current_level=level,
-            current_role=normalized_role,
+            current_role=required_role,
             required_role=required_role,
             is_final=is_final,
             next_level=level + 1 if action == "approve" and not is_final else None,

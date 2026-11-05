@@ -256,3 +256,26 @@ def test_handle_approval_enforces_roles_and_records_steps(client, approval_write
             (fixture['approval_id'],),
         ).fetchone()[0]
     assert step_count == 2
+
+
+@pytest.mark.parametrize("level,action", [(1, "approve"), (2, "approve"), (1, "reject"), (2, "reject")])
+def test_multirole_step_audit_matches_authorized_identity(client, approval_writer_stub, level, action):
+    fixture = _make_approval_fixture(client, approval_level=2)
+    required = "production_manager" if level == 1 else "qc_inspector"
+    with client.application.app_context():
+        db = get_db()
+        roles = db.execute("SELECT id,code,name FROM roles WHERE code IN ('admin','production_manager','qc_inspector')").fetchall()
+        for role in roles:
+            db.execute("INSERT OR IGNORE INTO user_roles(user_id,role_id) VALUES (?,?)", (fixture["pm_id"], role["id"]))
+        db.execute("UPDATE approval_records SET current_level=? WHERE id=?", (level, fixture["approval_id"]))
+        db.commit()
+        ApprovalService.handle(fixture["approval_id"], action,
+                               {"id": fixture["pm_id"], "name": "Multi-role approver", "role": "worker"})
+        step = db.execute("SELECT approver_role,role_id_snapshot,role_code_snapshot,role_name_snapshot,action "
+                          "FROM approval_steps WHERE approval_record_id=?", (fixture["approval_id"],)).fetchone()
+        matched_role = next(role for role in roles if role["code"] == required)
+        assert step["approver_role"] == step["role_code_snapshot"] == required
+        assert step["role_id_snapshot"] == matched_role["id"]
+        assert step["role_name_snapshot"] == matched_role["name"]
+        assert step["action"] == ("advance" if level == 1 and action == "approve" else action)
+        assert bool(approval_writer_stub) is (level == 2 and action == "approve")

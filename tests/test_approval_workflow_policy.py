@@ -1,3 +1,5 @@
+from itertools import permutations
+
 import pytest
 
 from modules.domain.approval_workflow import ApprovalWorkflow
@@ -58,3 +60,20 @@ def test_approval_workflow_rejects_invalid_level():
 def test_approval_workflow_checks_quantity_invariant():
     with pytest.raises(ConflictError, match="将超过订单数量"):
         ApprovalWorkflow.validate_quantity(9, 2, 10)
+
+
+@pytest.mark.parametrize("roles", list(permutations(["admin", "production_manager", "qc_inspector"])))
+@pytest.mark.parametrize("level", [1, 2, 3])
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_multiple_roles_record_the_matched_step_role(roles, level, action):
+    decision = ApprovalWorkflow.decide(action, _config(3), level, list(roles))
+    expected = ["production_manager", "qc_inspector", "admin"][level - 1]
+    assert decision.current_role == expected
+    assert decision.required_role == expected
+    assert decision.is_final is (action == "approve" and level == 3)
+
+
+@pytest.mark.parametrize("roles", ["supervisor", ["worker", "supervisor"], {"admin", "supervisor"}])
+def test_legacy_alias_audit_uses_normalized_required_role(roles):
+    decision = ApprovalWorkflow.decide("approve", _config(), 1, roles)
+    assert decision.current_role == decision.required_role == "production_manager"
