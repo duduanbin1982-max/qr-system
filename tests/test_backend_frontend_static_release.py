@@ -79,7 +79,7 @@ def test_static_release_path_allows_backend_and_frontend_source_only(tmp_path):
     )
 
 
-def test_static_release_allows_only_reviewed_traceability_regression_files(tmp_path):
+def test_static_release_allows_frontend_support_files_and_rejects_other_paths(tmp_path):
     _, repository, before, target = _release_repository(tmp_path)
     path = "frontend/tests/unit/TraceOverview.spec.js"
     code_only_release._git(repository, "checkout", "--quiet", "--detach", before)
@@ -102,14 +102,20 @@ def test_static_release_allows_only_reviewed_traceability_regression_files(tmp_p
             "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
             {path: (expected_before, expected_target)},
         )
-        release._validate_paths(repository, support_before, support_target, [path])
-        with pytest.raises(RuntimeError):
-            release._validate_paths(
-                repository,
-                support_before,
-                support_target,
-                ["frontend/tests/unit/unreviewed.spec.js"],
-            )
+        release._validate_paths(
+            repository,
+            support_before,
+            support_target,
+            [path],
+            allow_frontend_support=True,
+        )
+        release._validate_paths(
+            repository,
+            support_before,
+            support_target,
+            ["frontend/tests/unit/unreviewed.spec.js"],
+            allow_frontend_support=True,
+        )
         with pytest.raises(RuntimeError):
             release._validate_paths(
                 repository,
@@ -292,7 +298,7 @@ def test_traceability_support_exception_rejects_exact_transition_drift(tmp_path,
         code_only_release._git(repository, "commit", "--quiet", "-m", "unsafe target")
         actual_target = release._git(repository, "rev-parse", "HEAD")
     elif drift == "unlisted":
-        path = "frontend/tests/unit/Unreviewed.spec.js"
+        path = "frontend/docs/Unreviewed.md"
         _write(repository / path, "UNREVIEWED = True\n")
         code_only_release._git(repository, "add", path)
         code_only_release._git(repository, "commit", "--quiet", "-m", "unlisted target")
