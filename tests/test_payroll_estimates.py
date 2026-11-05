@@ -111,6 +111,41 @@ def test_all_live_aggregates_sum_individually_rounded_cents(client, monkeypatch)
         }]
 
 
+@pytest.mark.parametrize("mutation", ("cancelled", "deleted"))
+def test_live_wage_queries_exclude_invalid_order_lifecycle(client, monkeypatch, mutation):
+    with client.application.app_context():
+        db = get_db()
+        worker_id = _seed_estimate_source(db, price="1")
+        order_id = db.execute(
+            "SELECT order_id FROM work_records WHERE user_id=? LIMIT 1",
+            (worker_id,),
+        ).fetchone()["order_id"]
+        if mutation == "cancelled":
+            db.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
+        else:
+            db.execute(
+                "UPDATE orders SET deleted_at=? WHERE id=?",
+                ("2026-11-05 00:00:00", order_id),
+            )
+        db.commit()
+        monkeypatch.setattr(
+            "modules.repositories.wage_repository.current_reporting_day",
+            lambda: "2026-07-15",
+        )
+
+        estimate = WageService.calculate_wages(
+            employee_id=worker_id,
+            date_from="2026-07-01",
+            date_to="2026-07-31",
+        )
+        assert estimate["wages"][0]["details"] == []
+        assert estimate["wages"][0]["total_wage"] == 0
+        assert WageService.monthly_summary("2026-07")["summary"] == []
+        assert WageService.process_wage_summary("2026-07")["summary"] == []
+        assert WageService.position_summary("2026-07")["summary"] == []
+        assert WageService.wage_trends(3) == []
+
+
 @pytest.mark.parametrize("month,start_previous,start,end_previous,end", [
     ("2026-07", "2026-07-01 06:59:59", "2026-07-01 07:00:00",
      "2026-08-01 06:59:59", "2026-08-01 07:00:00"),

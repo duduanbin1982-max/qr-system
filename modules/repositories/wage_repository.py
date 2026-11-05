@@ -46,6 +46,16 @@ class WageRepository:
     """工资核算数据访问 — 集中管理报工记录、工序汇总、工资计算相关查询。"""
 
     @staticmethod
+    def valid_order_fact_sql(work_alias="wr"):
+        """Restrict wage facts to active, non-deleted orders."""
+        return (
+            f"EXISTS (SELECT 1 FROM orders wage_order "
+            f"WHERE wage_order.id={work_alias}.order_id "
+            "AND wage_order.deleted_at IS NULL "
+            "AND wage_order.status != 'cancelled')"
+        )
+
+    @staticmethod
     def _has_versioned_prices(db):
         return db.execute(
             "SELECT 1 FROM sqlite_master "
@@ -188,7 +198,7 @@ class WageRepository:
             FROM work_records wr
             JOIN users u ON wr.user_id=u.id
             JOIN orders o ON wr.order_id=o.id
-            WHERE o.deleted_at IS NULL AND o.status != 'cancelled'
+            WHERE """ + WageRepository.valid_order_fact_sql("wr") + """
         """ + user_where + """
             GROUP BY u.id
             ORDER BY total_output DESC
@@ -317,6 +327,7 @@ class WageRepository:
             """
             + """
             WHERE wr.status = 'approved' AND wr.type = 'normal'
+            AND """ + cls.valid_order_fact_sql("wr") + """
             AND wr.created_at >= ? AND wr.created_at < ?
             ORDER BY wr.user_id, wr.process_id
             """
@@ -388,6 +399,7 @@ class WageRepository:
             JOIN users u ON wr.user_id = u.id
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND """ + cls.valid_order_fact_sql("wr") + """
               AND wr.created_at >= ? AND wr.created_at < ?
             GROUP BY wr.user_id
             ORDER BY total_wage DESC
@@ -399,6 +411,7 @@ class WageRepository:
             """
             SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr
             WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND """ + cls.valid_order_fact_sql("wr") + """
               AND wr.created_at >= ? AND wr.created_at < ?
             """,
             (month_start, month_end),
@@ -412,6 +425,7 @@ class WageRepository:
             FROM work_records wr
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND """ + cls.valid_order_fact_sql("wr") + """
               AND wr.created_at >= ? AND wr.created_at < ?
             """,
             (month_start, month_end),
@@ -446,6 +460,7 @@ class WageRepository:
             + """
             LEFT JOIN orders o ON wr.order_id = o.id
             WHERE wr.status = 'approved' AND wr.type = 'normal'
+              AND """ + cls.valid_order_fact_sql("wr") + """
               AND wr.created_at >= ? AND wr.created_at < ?
             GROUP BY wr.process_id,wr.process_version_id,"""
             + process_name
@@ -595,6 +610,7 @@ class WageRepository:
             "LEFT JOIN orders o ON wr.order_id = o.id "
             + " "
             "WHERE wr.status = 'approved' AND wr.type = 'normal' "
+            "AND " + cls.valid_order_fact_sql("wr") + " "
             "AND wr.created_at >= ? AND wr.created_at < ? "
             "GROUP BY " + reporting_month + " "
             "ORDER BY year_month ASC",
@@ -613,9 +629,10 @@ class WageRepository:
             + ") / 100.0 as total_wage FROM work_records wr "
             "JOIN users u ON wr.user_id = u.id "
             "LEFT JOIN positions pos ON u.position_id = pos.id "
-            "LEFT JOIN orders o ON wr.order_id = o.id AND o.deleted_at IS NULL "
+            "LEFT JOIN orders o ON wr.order_id = o.id "
             + " WHERE wr.status = 'approved' AND wr.type = 'normal' "
-            "AND wr.created_at >= ? AND wr.created_at < ? "
+            + " AND " + cls.valid_order_fact_sql("wr")
+            + " AND wr.created_at >= ? AND wr.created_at < ? "
             "GROUP BY pos.name ORDER BY total_wage DESC",
             (month_start, month_end),
         ).fetchall()
@@ -676,7 +693,7 @@ class WageRepository:
                FROM work_records wr
                JOIN users u ON wr.user_id=u.id
                JOIN orders o ON wr.order_id=o.id
-               WHERE o.deleted_at IS NULL""" + date_filter + """
+               WHERE o.deleted_at IS NULL AND o.status != 'cancelled'""" + date_filter + """
                GROUP BY wr.user_id ORDER BY total_output DESC""",
             params
         ).fetchall()
@@ -711,7 +728,7 @@ class WageRepository:
             + process_version_join("wr", "process_version")
             + """
                JOIN orders o ON wr.order_id=o.id
-               WHERE o.deleted_at IS NULL""" + date_filter + """
+               WHERE o.deleted_at IS NULL AND o.status != 'cancelled'""" + date_filter + """
                GROUP BY wr.process_id,wr.process_version_id,"""
             + process_name
             + ","
