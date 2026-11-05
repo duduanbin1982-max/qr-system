@@ -4,7 +4,8 @@ import { router } from '@/lib/router.js'
 export function useWageWorkspace() {
   const wage = useWage()
   const params = router.params || {}
-  if (params.wage_tab === 'priceversions') wage.switchTab('priceversions')
+  // URL navigation wins over persisted state, while switchTab enforces visibility.
+  if (params.wage_tab) wage.switchTab(params.wage_tab)
   return {
     ...wage,
     priceIntent: {

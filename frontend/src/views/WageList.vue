@@ -18,13 +18,13 @@
     />
     <MyPayrollTab v-if="activeTab==='my'" />
     <PieceworkTab v-if="activeTab==='piece'" />
-    <MonthlyTab v-if="activeTab==='monthly'" />
-    <ProcessWageTab v-if="activeTab==='process'" />
-    <CompareTab v-if="activeTab==='compare'" />
+    <MonthlyTab v-if="activeTab==='monthly'" :tab-active="activeTab" />
+    <ProcessWageTab v-if="activeTab==='process'" :tab-active="activeTab" />
+    <CompareTab v-if="activeTab==='compare'" :tab-active="activeTab" />
     <AdjustmentTab v-if="activeTab==='adjustment'" />
-    <TrendTab v-if="activeTab==='trend'" />
-    <PositionTab v-if="activeTab==='position'" />
-    <PredictTab v-if="activeTab==='predict'" />
+    <TrendTab v-if="activeTab==='trend'" :tab-active="activeTab" />
+    <PositionTab v-if="activeTab==='position'" :tab-active="activeTab" />
+    <PredictTab v-if="activeTab==='predict'" :tab-active="activeTab" />
 </div>
 </template>
 

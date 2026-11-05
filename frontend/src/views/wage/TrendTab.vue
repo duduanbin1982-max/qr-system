@@ -1,6 +1,6 @@
 <!-- TrendTab.vue — 工资历史趋势 -->
 <template>
-<div v-if="activeTab==='trend'">
+<div v-if="tabActive==='trend'">
   <div class="card" style="border-radius:var(--radius-lg);overflow:hidden;padding:0">
     <div class="card-header" style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 20px">
       <h3 style="font-size:var(--text-lg);font-weight:700;margin:0">📈 工资趋势</h3>
@@ -36,8 +36,12 @@
 import { useWage } from '@/composables/useWage.js'
 
 export default {
-  setup() {
-    return { ...useWage() }
+  props: {
+    tabActive: { type: String, default: '' },
+  },
+  setup(props) {
+    const wage = useWage()
+    return { ...wage, tabActive: props.tabActive || wage.activeTab }
   }
 }
 </script>

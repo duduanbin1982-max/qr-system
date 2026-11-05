@@ -1,5 +1,5 @@
 <template>
-  <div v-if="activeTab === 'process'" class="process-wage-page">
+  <div v-if="tabActive === 'process'" class="process-wage-page">
     <section v-if="canViewCoverage" class="coverage-workbench">
       <div class="coverage-heading">
         <div><h3>路线版本工价覆盖</h3><p>当前已发布路线的精确版本绑定</p></div>
@@ -66,7 +66,7 @@ import { useProcessWage } from '@/composables/wage/useProcessWage.js'
 
 const {
   wage,
-  activeTab,
+  activeTab: sharedActiveTab,
   processLoading,
   processData,
   processMonth,
@@ -86,6 +86,11 @@ const {
   money,
   loadCoverage
 } = useProcessWage()
+
+const props = defineProps({
+  tabActive: { type: String, default: '' },
+})
+const tabActive = props.tabActive || sharedActiveTab
 </script>
 
 <style scoped>
