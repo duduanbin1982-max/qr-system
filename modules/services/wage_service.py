@@ -14,7 +14,11 @@ class WageService:
     def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False, hide_zero=False):
         status_filter = "wr.status = 'approved'" if not include_pending else "wr.status IN ('approved','pending')"
         type_filter = "wr.type IN ('normal','rework')" if include_rework else "wr.type = 'normal'"
-        wr_where_parts = [status_filter, type_filter]
+        wr_where_parts = [
+            status_filter,
+            type_filter,
+            WageRepository.valid_order_fact_sql("wr"),
+        ]
         wr_params = []
         if employee_id:
             wr_where_parts.append('wr.user_id = ?'); wr_params.append(employee_id)
