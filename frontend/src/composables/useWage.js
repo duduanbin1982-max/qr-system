@@ -3,6 +3,7 @@ import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
 import { formatLocalMonth } from '@/composables/wage/payrollFormat.js'
+import { getVisibleWageTabs, resolveWageTab } from '@/composables/wage/wageTabs.js'
 
 const PROCESS_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1']
 
@@ -26,24 +27,9 @@ let _instance = null
 
 export function useWage() {
   if (_instance) return _instance
-    const tabs = computed(() => [
-      { id:"ledger", label:"批次台账", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
-      { id:"exceptions", label:"异常处理", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
-      { id:"adjustment", label:"调整项", show:can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
-      { id:"priceversions", label:"工价版本", show:can('wages:prepare') || can('wages:approve') },
-      { id:"my", label:"我的工资", show:can('wages:view_self') || can('wages:view_all') || can('wages:prepare') || can('wages:approve') },
-      { id:"piece", label:"实时预估", show:can('wages:view') },
-      { id:"monthly", label:"月度汇总", icon:"📊", show:can('wages:view_all') },
-      { id:"process", label:"工序分析", icon:"🔧", show:can('wages:view_all') },
-      { id:"compare", label:"工资对比", icon:"📈", show:can('wages:view_all') },
-      { id:"trend", label:"历史趋势", icon:"📈", show:can('wages:view_all') },
-      { id:"position", label:"岗位汇总", icon:"👥", show:can('wages:view_all') },
-      { id:"predict", label:"工资预测", icon:"🔮", show:can('wages:view_all') }
-    ].filter(tab => tab.show !== false))
+    const tabs = computed(() => getVisibleWageTabs(can))
     const preferredTab = localStorage.getItem('wageActiveTab')
-    const activeTab = ref(tabs.value.some(tab => tab.id === preferredTab)
-      ? preferredTab
-      : tabs.value[0]?.id || 'my')
+    const activeTab = ref(resolveWageTab('', preferredTab, tabs.value))
     let mounted = false
 
     // --- piece wage state ---
