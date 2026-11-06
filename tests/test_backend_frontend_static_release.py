@@ -253,6 +253,38 @@ def test_reviewed_payroll_price_uiux_support_matches_exact_business_merge():
         )
 
 
+def test_reviewed_payroll_bulk_approval_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_PAYROLL_BULK_APPROVAL_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.PAYROLL_BULK_APPROVAL_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.PAYROLL_BULK_APPROVAL_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.PAYROLL_BULK_APPROVAL_BASELINE,
+            release.PAYROLL_BULK_APPROVAL_TARGET,
+            [path],
+        )
+
+
+def test_payroll_bulk_approval_support_rejects_unreviewed_transition_and_path():
+    repository = Path(__file__).resolve().parents[1]
+    path = "frontend/tests/unit/PriceVersionTab.spec.js"
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_BULK_APPROVAL_BASELINE,
+            release.PAYROLL_PRICE_UIUX_TARGET,
+            [path],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_BULK_APPROVAL_BASELINE,
+            release.PAYROLL_BULK_APPROVAL_TARGET,
+            ["frontend/tests/unit/unreviewed-price-version.spec.js"],
+        )
+
+
 def test_payroll_price_uiux_support_rejects_unreviewed_transition_and_path():
     repository = Path(__file__).resolve().parents[1]
     with pytest.raises(RuntimeError, match="reviewed baseline and target"):
