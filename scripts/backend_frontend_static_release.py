@@ -24,9 +24,19 @@ STATIC_FILE_MODE = 0o644
 
 ALLOWED_ROOTS = {"modules", "frontend", "tests", "docs"}
 ALLOWED_FRONTEND_PATHS = ("frontend/src/", "frontend/index.html")
-# Frontend tests and documentation travel with a reviewed source release but
-# are never copied into the published static tree.
+# Frontend tests travel with a reviewed source release but are never copied
+# into the published static tree. Other frontend support paths remain denied.
 ALLOWED_FRONTEND_SUPPORT_PATHS = ("frontend/tests/",)
+# PR #157 changed this launcher in the business target. The transition is
+# admitted only for this exact production baseline and reviewed target tree.
+RELEASE_CONTROL_BASELINE = "276bb8236711fdf42557bb98912c3c98e6faa10b"
+RELEASE_CONTROL_TARGET = "c67777bdc47dcf47638d5466137a799abeb21ae8"
+PINNED_RELEASE_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "632ef4642ff6d8576fe1bd6f7dc75d6f8ac2a1f2"),
+        ("100644", "blob", "4c9022c964b2fc9f25ef7ebb1d0e78adc4c13b0f"),
+    ),
+}
 # Reviewed support changes accompanying this production baseline only. These
 # entries authorize exact Git objects, not a general scripts/tests exception.
 SUPPORT_BASELINE = "c0448bfc945bcfa9c09e94ab1d4bf11f93a3c022"
@@ -285,6 +295,19 @@ def _validate_support_transition(repository, before, target, path):
         raise RuntimeError(f"support exception mode/blob transition mismatch: {path}")
 
 
+def _validate_release_control_transition(repository, before, target, path):
+    if (before, target) != (RELEASE_CONTROL_BASELINE, RELEASE_CONTROL_TARGET):
+        raise RuntimeError(
+            f"release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_RELEASE_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_paths(repository, before, target, changed, *, allow_frontend_support=False):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
@@ -299,6 +322,12 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             raise RuntimeError(f"release contains a path outside backend/frontend scope: {path}")
         if target_path.is_symlink():
             raise RuntimeError(f"release cannot change a symlinked path: {path}")
+        if (
+            normalized in PINNED_RELEASE_CONTROL_TRANSITIONS
+            and (before, target) == (RELEASE_CONTROL_BASELINE, RELEASE_CONTROL_TARGET)
+        ):
+            _validate_release_control_transition(repository, before, target, normalized)
+            continue
         if (
             normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
