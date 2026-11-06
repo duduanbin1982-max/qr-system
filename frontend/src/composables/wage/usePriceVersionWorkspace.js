@@ -228,20 +228,28 @@ export function usePriceVersionWorkspace(props) {
     bulkApproving.value = true
     const selected = [...approvableDrafts.value]
     let approvedCount = 0
+    const failures = []
     try {
       for (const draft of selected) {
-        await api.domains.wages.approveRoutePriceVersion(draft.id, draft.row_version)
-        approvedCount += 1
+        try {
+          await api.domains.wages.approveRoutePriceVersion(draft.id, draft.row_version)
+          approvedCount += 1
+        } catch (error) {
+          failures.push({
+            id: draft.id,
+            message: error.message || '批准失败',
+          })
+        }
       }
-      showToast(`已集中批准 ${approvedCount} 条工价版本`)
-      await refresh()
-    } catch (error) {
-      showToast(
-        approvedCount
-          ? `已批准 ${approvedCount} 条，剩余项目未完成：${error.message || '批准失败'}`
-          : (error.message || '集中批准失败'),
-        'error'
-      )
+      if (failures.length) {
+        const details = failures.map(item => `${item.id}（${item.message}）`).join('；')
+        showToast(
+          `已批准 ${approvedCount} 条，${failures.length} 条失败：${details}`,
+          'error'
+        )
+      } else {
+        showToast(`已集中批准 ${approvedCount} 条工价版本`)
+      }
       await refresh()
     } finally {
       bulkApproving.value = false
