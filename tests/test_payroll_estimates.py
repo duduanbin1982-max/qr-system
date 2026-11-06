@@ -2,6 +2,7 @@ import pytest
 
 from factories import WORKER_HASH, ensure_user
 from modules.db import get_db
+from modules.repositories.payroll_repository import PayrollRepository
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.price_version_service import PriceVersionService
 from modules.services.wage_service import WageService
@@ -13,18 +14,36 @@ def _seed_estimate_source(db, *, price="1.005", work_type="normal", rate=None):
         db, with_price=False, work_type=work_type
     )
     binding = _exact_binding(db, route_id, process_id)
-    version = PriceVersionService.create({
-        "route_id": route_id,
-        "route_version_id": binding["route_version_id"],
-        "process_id": process_id,
-        "process_version_id": binding["process_version_id"],
-        "expected_route_content_digest": binding["route_content_digest"],
-        "expected_process_content_digest": binding["process_content_digest"],
-        "normal_unit_price": price,
-        "valid_from": "2025-01-01",
-        "rework_rate_percent": rate,
-        "idempotency_key": f"estimate-price-{route_id}",
-    }, {"id": 1, "name": "工价制单员"})
+    if price == "0":
+        # Keep the zero-price calculation fixture without weakening the write API.
+        version_id = PayrollRepository.create_price_version({
+            "route_id": route_id,
+            "route_version_id": binding["route_version_id"],
+            "process_id": process_id,
+            "process_version_id": binding["process_version_id"],
+            "normal_unit_price_micros": 0,
+            "valid_from": "2025-01-01 00:00:00",
+            "created_by": 1,
+            "created_by_name": "工价制单员",
+            "idempotency_key": f"estimate-price-{route_id}",
+            "route_content_digest_snapshot": binding["route_content_digest"],
+            "process_content_digest_snapshot": binding["process_content_digest"],
+        }, db)
+        version = PayrollRepository.price_version(version_id, db)
+        db.commit()
+    else:
+        version = PriceVersionService.create({
+            "route_id": route_id,
+            "route_version_id": binding["route_version_id"],
+            "process_id": process_id,
+            "process_version_id": binding["process_version_id"],
+            "expected_route_content_digest": binding["route_content_digest"],
+            "expected_process_content_digest": binding["process_content_digest"],
+            "normal_unit_price": price,
+            "valid_from": "2025-01-01",
+            "rework_rate_percent": rate,
+            "idempotency_key": f"estimate-price-{route_id}",
+        }, {"id": 1, "name": "工价制单员"})
     PriceVersionService.approve(
         version["id"], {"id": 2, "name": "工价审批员"}, version["row_version"]
     )
