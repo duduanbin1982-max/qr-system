@@ -199,6 +199,10 @@ PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS = {
         ("100644", "blob", "ccfa35dfccba07f8a70179eeb9731ffdc491a450"),
     ),
 }
+PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
+    path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
+    if path.startswith("frontend/tests/") or path == "scripts/backend_frontend_static_release.py"
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -370,13 +374,19 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             _validate_release_control_transition(repository, before, target, normalized)
             continue
         if (
-            normalized in PINNED_SUPPORT_TRANSITIONS
+            (
+                normalized in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
+                and (
+                    (before, target) == (PAYROLL_PRICE_UIUX_BASELINE, PAYROLL_PRICE_UIUX_TARGET)
+                    or normalized in PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS
+                )
+            )
+            or normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
-            or normalized in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
