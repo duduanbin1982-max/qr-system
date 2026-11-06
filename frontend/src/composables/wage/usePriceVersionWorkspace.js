@@ -31,8 +31,6 @@ export function usePriceVersionWorkspace(props) {
 
   const expandedRouteIds = ref(new Set())
 
-  const selectedDraftIds = ref(new Set())
-
   const intentHandled = ref(false)
 
   const manualReviews = ref([])
@@ -119,10 +117,6 @@ export function usePriceVersionWorkspace(props) {
     .filter(matchesSearch)
     .map(row => row.draft))
 
-  const selectedDraftCount = computed(() => approvableDrafts.value
-    .filter(draft => selectedDraftIds.value.has(draft.id))
-    .length)
-
   const filteredVoidedPrices = computed(() => voidedPrices.value.filter(matchesSearch))
 
   function routeLabel(row) {
@@ -161,21 +155,6 @@ export function usePriceVersionWorkspace(props) {
 
   function collapseAllGroups() {
     expandedRouteIds.value = new Set()
-  }
-
-  function toggleDraftSelection(draftId) {
-    const next = new Set(selectedDraftIds.value)
-    if (next.has(draftId)) next.delete(draftId)
-    else next.add(draftId)
-    selectedDraftIds.value = next
-  }
-
-  function selectAllDrafts() {
-    selectedDraftIds.value = new Set(approvableDrafts.value.map(draft => draft.id))
-  }
-
-  function clearDraftSelection() {
-    selectedDraftIds.value = new Set()
   }
 
   function closeEditor() {
@@ -236,9 +215,6 @@ export function usePriceVersionWorkspace(props) {
     try {
       await api.domains.wages.approveRoutePriceVersion(price.id, price.row_version)
       showToast('工价版本已批准')
-      const next = new Set(selectedDraftIds.value)
-      next.delete(price.id)
-      selectedDraftIds.value = next
       await refresh()
     } catch (error) {
       showToast(error.message || '批准工价失败', 'error')
@@ -247,26 +223,33 @@ export function usePriceVersionWorkspace(props) {
     }
   }
 
-  async function approveSelectedDrafts() {
-    if (bulkApproving.value || !selectedDraftCount.value) return
+  async function approveAllDrafts() {
+    if (bulkApproving.value || !approvableDrafts.value.length) return
     bulkApproving.value = true
-    const selected = approvableDrafts.value.filter(draft => selectedDraftIds.value.has(draft.id))
+    const selected = [...approvableDrafts.value]
     let approvedCount = 0
+    const failures = []
     try {
       for (const draft of selected) {
-        await api.domains.wages.approveRoutePriceVersion(draft.id, draft.row_version)
-        approvedCount += 1
+        try {
+          await api.domains.wages.approveRoutePriceVersion(draft.id, draft.row_version)
+          approvedCount += 1
+        } catch (error) {
+          failures.push({
+            id: draft.id,
+            message: error.message || '批准失败',
+          })
+        }
       }
-      clearDraftSelection()
-      showToast(`已集中批准 ${approvedCount} 条工价版本`)
-      await refresh()
-    } catch (error) {
-      showToast(
-        approvedCount
-          ? `已批准 ${approvedCount} 条，剩余项目未完成：${error.message || '批准失败'}`
-          : (error.message || '集中批准失败'),
-        'error'
-      )
+      if (failures.length) {
+        const details = failures.map(item => `${item.id}（${item.message}）`).join('；')
+        showToast(
+          `已批准 ${approvedCount} 条，${failures.length} 条失败：${details}`,
+          'error'
+        )
+      } else {
+        showToast(`已集中批准 ${approvedCount} 条工价版本`)
+      }
       await refresh()
     } finally {
       bulkApproving.value = false
@@ -288,7 +271,6 @@ export function usePriceVersionWorkspace(props) {
     approving,
     bulkApproving,
     expandedRouteIds,
-    selectedDraftIds,
     intentHandled,
     manualReviews,
     manualLoading,
@@ -305,7 +287,6 @@ export function usePriceVersionWorkspace(props) {
     displayedRows,
     groupedRows,
     approvableDrafts,
-    selectedDraftCount,
     filteredVoidedPrices,
     routeLabel,
     approvalMode,
@@ -322,9 +303,6 @@ export function usePriceVersionWorkspace(props) {
     toggleGroup,
     expandAllGroups,
     collapseAllGroups,
-    toggleDraftSelection,
-    selectAllDrafts,
-    clearDraftSelection,
-    approveSelectedDrafts
+    approveAllDrafts
   }
 }

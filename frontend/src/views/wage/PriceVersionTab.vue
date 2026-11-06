@@ -64,15 +64,13 @@
         <span>当前共 {{ approvableDrafts.length }} 条，可集中处理</span>
       </div>
       <div class="approval-queue-actions">
-        <button type="button" class="btn btn-default btn-sm" @click="selectAllDrafts">全选</button>
-        <button type="button" class="btn btn-default btn-sm" @click="clearDraftSelection">清除</button>
         <button
           type="button"
           class="btn btn-primary btn-sm"
-          :disabled="bulkApproving || !selectedDraftCount"
+          :disabled="bulkApproving || !approvableDrafts.length"
           data-testid="approve-selected-prices"
-          @click="approveSelectedDrafts"
-        >{{ bulkApproving ? '批准中...' : `集中批准 ${selectedDraftCount} 条` }}</button>
+          @click="approveAllDrafts"
+        >{{ bulkApproving ? '批准中...' : `集中批准 ${approvableDrafts.length} 条` }}</button>
       </div>
     </section>
 
@@ -147,19 +145,6 @@
                   </span>
                 </td>
                 <td>
-                  <label
-                    v-if="canApprove && row.draft && row.route_version_status === 'published'"
-                    class="select-draft"
-                    @click.stop
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="selectedDraftIds.has(row.draft.id)"
-                      :aria-label="`选择工价版本 ${row.draft.id}`"
-                      @change="toggleDraftSelection(row.draft.id)"
-                    >
-                    <span>待批准</span>
-                  </label>
                   <div class="row-actions">
                     <button
                       v-if="canPrepare && row.draft"
@@ -248,8 +233,6 @@ const {
   selectedRow,
   approving,
   bulkApproving,
-  selectedDraftIds,
-  selectedDraftCount,
   approvableDrafts,
   intentHandled,
   manualReviews,
@@ -270,10 +253,7 @@ const {
   toggleGroup,
   expandAllGroups,
   collapseAllGroups,
-  toggleDraftSelection,
-  selectAllDrafts,
-  clearDraftSelection,
-  approveSelectedDrafts,
+  approveAllDrafts,
   filteredVoidedPrices,
   routeLabel,
   approvalMode,

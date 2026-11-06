@@ -118,7 +118,7 @@ describe('PriceVersionTab exact-version workflow', () => {
     expect(wrapper.find('[data-testid="approve-price-102"]').exists()).toBe(false)
   })
 
-  it('selects published-route drafts in a centralized approval queue', async () => {
+  it('approves all published-route drafts from the centralized queue', async () => {
     mocks.listReferences.mockResolvedValue({
       items: [
         ...references,
@@ -156,16 +156,64 @@ describe('PriceVersionTab exact-version workflow', () => {
 
     expect(wrapper.find('[data-testid="price-approval-queue"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('当前共 2 条，可集中处理')
-    expect(wrapper.find('[data-testid="approve-selected-prices"]').attributes('disabled')).toBeDefined()
-
-    await wrapper.find('[data-testid="price-approval-queue"] .btn-default').trigger('click')
     expect(wrapper.find('[data-testid="approve-selected-prices"]').text()).toContain('集中批准 2 条')
+    expect(wrapper.find('[data-testid="approve-selected-prices"]').attributes('disabled')).toBeUndefined()
     await wrapper.find('[data-testid="approve-selected-prices"]').trigger('click')
     await flushPromises()
 
     expect(mocks.approveVersion).toHaveBeenNthCalledWith(1, 105, 3)
     expect(mocks.approveVersion).toHaveBeenNthCalledWith(2, 104, 2)
     expect(mocks.showToast).toHaveBeenCalledWith('已集中批准 2 条工价版本')
+  })
+
+  it('continues approving after one draft fails and summarizes failures', async () => {
+    mocks.listReferences.mockResolvedValue({
+      items: [
+        ...references,
+        {
+          ...references[0],
+          reference_key: '81:73',
+          process_version_id: 73,
+          process_version: 3,
+          process_name: '精车三序',
+          seq_order: 20,
+        },
+      ],
+    })
+    mocks.listVersions.mockResolvedValue({
+      versions: [
+        ...versions,
+        {
+          id: 104, route_id: 8, route_version_id: 81,
+          route_name: '标准机加工路线', process_id: 7, process_version_id: 73,
+          process_name: '精车三序', normal_unit_price_micros: 130000,
+          valid_from: '2026-10-01 07:00:00', valid_to: '', status: 'draft',
+          created_by_name: '制单人乙', row_version: 2,
+        },
+        {
+          id: 105, route_id: 8, route_version_id: 81,
+          route_name: '标准机加工路线', process_id: 7, process_version_id: 71,
+          process_name: '精车', normal_unit_price_micros: 110000,
+          valid_from: '2026-10-02 07:00:00', valid_to: '', status: 'draft',
+          created_by_name: '制单人丙', row_version: 3,
+        },
+      ],
+    })
+    mocks.approveVersion
+      .mockRejectedValueOnce(new Error('版本冲突'))
+      .mockResolvedValueOnce({ id: 104, status: 'approved' })
+
+    const wrapper = mount(PriceVersionTab)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="approve-selected-prices"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.approveVersion).toHaveBeenCalledTimes(2)
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      '已批准 1 条，1 条失败：105（版本冲突）',
+      'error'
+    )
   })
 
   it('shows historical confirmations by order, product, route and process, not internal keys', async () => {
