@@ -383,6 +383,7 @@ test('pending V2 price is exact, grouped, published, and leaves V1 history visib
   await main.getByRole('button', { name: '工价版本', exact: true }).click()
   await main.getByTestId('view-pending-route').click()
   await expect(main.getByText('标准机加工路线 · 待发布 V2')).toBeVisible()
+  await main.locator('button.group-heading').filter({ hasText: '标准机加工路线 · 待发布 V2' }).click()
   await main.getByTestId('create-price-82:72').click()
 
   const editor = page.getByTestId('price-version-editor')
