@@ -45,8 +45,8 @@ class PriceVersionService:
             normal_micros = yuan_to_micros(data.get("normal_unit_price"))
         else:
             normal_micros = int(normal_micros)
-            if normal_micros <= 0:
-                raise ValueError("工价必须大于 0")
+        if normal_micros <= 0:
+            raise ValueError("工价必须大于 0")
         rate = data.get("rework_rate_basis_points")
         configured = 0
         if rate is None and data.get("rework_rate_percent") is not None:

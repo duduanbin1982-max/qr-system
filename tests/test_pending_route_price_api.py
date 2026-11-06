@@ -113,6 +113,35 @@ def test_exact_create_is_idempotent_and_rejects_key_reuse(
     assert conflict.get_json()["code"] == "IDEMPOTENCY_CONFLICT"
 
 
+@pytest.mark.parametrize("amount", ["0.00001", "0.00004"])
+def test_create_rejects_positive_prices_that_round_to_zero_micros(
+    client, auth_headers, monkeypatch, amount
+):
+    _enable_pending(monkeypatch, write=True)
+    with client.application.app_context():
+        ids = _seed_versioned_reference(get_db())
+    response = client.post(
+        "/api/route-price-versions",
+        json=_payload(ids, amount=amount, key=f"tiny-price-{amount}"),
+        headers=auth_headers,
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "工价必须大于 0"
+
+
+def test_request_values_rejects_zero_micros():
+    with pytest.raises(ValueError, match="工价必须大于 0"):
+        PriceVersionService._request_values({
+            "route_id": 1,
+            "route_version_id": 2,
+            "process_id": 3,
+            "process_version_id": 4,
+            "normal_unit_price_micros": 0,
+            "valid_from": "2026-08-24 07:00:00",
+            "idempotency_key": "zero-micros-price",
+        })
+
+
 def test_create_rejects_stale_digest_and_unknown_properties(
     client, auth_headers, monkeypatch
 ):
