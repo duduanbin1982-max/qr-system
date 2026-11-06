@@ -27,6 +27,12 @@ export function usePriceVersionWorkspace(props) {
 
   const approving = ref(false)
 
+  const bulkApproving = ref(false)
+
+  const expandedRouteIds = ref(new Set())
+
+  const selectedDraftIds = ref(new Set())
+
   const intentHandled = ref(false)
 
   const manualReviews = ref([])
@@ -108,6 +114,15 @@ export function usePriceVersionWorkspace(props) {
     return [...groups.values()]
   })
 
+  const approvableDrafts = computed(() => referenceRows.value
+    .filter(row => row.route_version_status === 'published' && row.draft)
+    .filter(matchesSearch)
+    .map(row => row.draft))
+
+  const selectedDraftCount = computed(() => approvableDrafts.value
+    .filter(draft => selectedDraftIds.value.has(draft.id))
+    .length)
+
   const filteredVoidedPrices = computed(() => voidedPrices.value.filter(matchesSearch))
 
   function routeLabel(row) {
@@ -127,6 +142,40 @@ export function usePriceVersionWorkspace(props) {
     selectReference(row)
     selectedRow.value = row
     editorOpen.value = true
+  }
+
+  function isGroupExpanded(routeVersionId) {
+    return expandedRouteIds.value.has(routeVersionId)
+  }
+
+  function toggleGroup(routeVersionId) {
+    const next = new Set(expandedRouteIds.value)
+    if (next.has(routeVersionId)) next.delete(routeVersionId)
+    else next.add(routeVersionId)
+    expandedRouteIds.value = next
+  }
+
+  function expandAllGroups() {
+    expandedRouteIds.value = new Set(groupedRows.value.map(group => group.route_version_id))
+  }
+
+  function collapseAllGroups() {
+    expandedRouteIds.value = new Set()
+  }
+
+  function toggleDraftSelection(draftId) {
+    const next = new Set(selectedDraftIds.value)
+    if (next.has(draftId)) next.delete(draftId)
+    else next.add(draftId)
+    selectedDraftIds.value = next
+  }
+
+  function selectAllDrafts() {
+    selectedDraftIds.value = new Set(approvableDrafts.value.map(draft => draft.id))
+  }
+
+  function clearDraftSelection() {
+    selectedDraftIds.value = new Set()
   }
 
   function closeEditor() {
@@ -187,11 +236,40 @@ export function usePriceVersionWorkspace(props) {
     try {
       await api.domains.wages.approveRoutePriceVersion(price.id, price.row_version)
       showToast('工价版本已批准')
+      const next = new Set(selectedDraftIds.value)
+      next.delete(price.id)
+      selectedDraftIds.value = next
       await refresh()
     } catch (error) {
       showToast(error.message || '批准工价失败', 'error')
     } finally {
       approving.value = false
+    }
+  }
+
+  async function approveSelectedDrafts() {
+    if (bulkApproving.value || !selectedDraftCount.value) return
+    bulkApproving.value = true
+    const selected = approvableDrafts.value.filter(draft => selectedDraftIds.value.has(draft.id))
+    let approvedCount = 0
+    try {
+      for (const draft of selected) {
+        await api.domains.wages.approveRoutePriceVersion(draft.id, draft.row_version)
+        approvedCount += 1
+      }
+      clearDraftSelection()
+      showToast(`已集中批准 ${approvedCount} 条工价版本`)
+      await refresh()
+    } catch (error) {
+      showToast(
+        approvedCount
+          ? `已批准 ${approvedCount} 条，剩余项目未完成：${error.message || '批准失败'}`
+          : (error.message || '集中批准失败'),
+        'error'
+      )
+      await refresh()
+    } finally {
+      bulkApproving.value = false
     }
   }
 
@@ -208,6 +286,9 @@ export function usePriceVersionWorkspace(props) {
     editorOpen,
     selectedRow,
     approving,
+    bulkApproving,
+    expandedRouteIds,
+    selectedDraftIds,
     intentHandled,
     manualReviews,
     manualLoading,
@@ -223,6 +304,8 @@ export function usePriceVersionWorkspace(props) {
     matchesSearch,
     displayedRows,
     groupedRows,
+    approvableDrafts,
+    selectedDraftCount,
     filteredVoidedPrices,
     routeLabel,
     approvalMode,
@@ -234,6 +317,14 @@ export function usePriceVersionWorkspace(props) {
     refreshManualReviews,
     restoreExactIntent,
     handleEditorResult,
-    approveDraft
+    approveDraft,
+    isGroupExpanded,
+    toggleGroup,
+    expandAllGroups,
+    collapseAllGroups,
+    toggleDraftSelection,
+    selectAllDrafts,
+    clearDraftSelection,
+    approveSelectedDrafts
   }
 }
