@@ -199,14 +199,22 @@ PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS = {
         ("100644", "blob", "ccfa35dfccba07f8a70179eeb9731ffdc491a450"),
     ),
 }
-# PR #162 adds one reviewed unit-test support file for the bulk-approval
-# workflow. Permit only this exact production-to-business-merge transition.
+# PR #162 adds the reviewed bulk-approval support file and its release-control
+# history transition. Permit only this exact production-to-business-merge pair.
 PAYROLL_BULK_APPROVAL_BASELINE = "f708322d9aeaafa927a6e8952ba1af75ca81e8ac"
 PAYROLL_BULK_APPROVAL_TARGET = "275a6721f49896069c499c27615d772253809a1b"
 PINNED_PAYROLL_BULK_APPROVAL_TRANSITIONS = {
     "frontend/tests/unit/PriceVersionTab.spec.js": (
         ("100644", "blob", "27d5407e83afe49e51868389c0459b98c7f4954b"),
         ("100644", "blob", "a94482c2da24e8225a8a13205d4ce41264ac895e"),
+    ),
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "657af47a0260f85a855d0beca1cfad78eb6aebe8"),
+        ("100644", "blob", "764f58ce9d0b439158394fc503021a7417e2b461"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "ccfa35dfccba07f8a70179eeb9731ffdc491a450"),
+        ("100644", "blob", "48a1c613ca098f43748ef5a364146fe293be8db1"),
     ),
 }
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {

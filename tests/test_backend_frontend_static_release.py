@@ -283,6 +283,13 @@ def test_payroll_bulk_approval_support_rejects_unreviewed_transition_and_path():
             release.PAYROLL_BULK_APPROVAL_TARGET,
             ["frontend/tests/unit/unreviewed-price-version.spec.js"],
         )
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_BULK_APPROVAL_BASELINE,
+            release.PAYROLL_PRICE_UIUX_TARGET,
+            ["scripts/backend_frontend_static_release.py"],
+        )
 
 
 def test_payroll_price_uiux_support_rejects_unreviewed_transition_and_path():
