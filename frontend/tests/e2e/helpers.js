@@ -26,9 +26,13 @@ export function observeRuntimeFailures(page) {
 }
 
 export async function loginAdmin(page) {
-  await page.goto('/')
-  await page.getByPlaceholder('请输入用户名').fill('e2eadmin')
-  await page.getByPlaceholder('请输入密码').fill(TEST_PASSWORD)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  const username = page.getByPlaceholder('请输入用户名')
+  const password = page.getByPlaceholder('请输入密码')
+  await expect(username).toBeVisible({ timeout: 15_000 })
+  await expect(password).toBeVisible({ timeout: 15_000 })
+  await username.fill('e2eadmin')
+  await password.fill(TEST_PASSWORD)
   await page.getByRole('button', { name: '登 录' }).click()
   await expect(page.locator('.sidebar')).toBeVisible({ timeout: 15_000 })
 }

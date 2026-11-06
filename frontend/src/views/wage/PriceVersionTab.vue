@@ -54,24 +54,61 @@
       本工价绑定待发布路线，不能单独批准，只能随路线成组发布。
     </div>
 
+    <section
+      v-if="viewMode === 'published' && canApprove && approvableDrafts.length"
+      class="approval-queue"
+      data-testid="price-approval-queue"
+    >
+      <div>
+        <strong>待批准工价</strong>
+        <span>当前共 {{ approvableDrafts.length }} 条，可集中处理</span>
+      </div>
+      <div class="approval-queue-actions">
+        <button type="button" class="btn btn-default btn-sm" @click="selectAllDrafts">全选</button>
+        <button type="button" class="btn btn-default btn-sm" @click="clearDraftSelection">清除</button>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :disabled="bulkApproving || !selectedDraftCount"
+          data-testid="approve-selected-prices"
+          @click="approveSelectedDrafts"
+        >{{ bulkApproving ? '批准中...' : `集中批准 ${selectedDraftCount} 条` }}</button>
+      </div>
+    </section>
+
     <div v-if="loading" class="empty-state">正在加载工价版本...</div>
 
     <template v-else-if="viewMode !== 'voided'">
       <div v-if="!groupedRows.length" class="empty-state">没有符合条件的精确路线工序</div>
+      <div v-else class="group-toolbar">
+        <span>路线默认收起，按需展开查看工序明细</span>
+        <div>
+          <button type="button" class="btn btn-default btn-sm" @click="expandAllGroups">全部展开</button>
+          <button type="button" class="btn btn-default btn-sm" @click="collapseAllGroups">全部收起</button>
+        </div>
+      </div>
       <section
         v-for="group in groupedRows"
-        v-else
         :key="group.route_version_id"
         class="route-version-group"
       >
-        <div class="group-heading">
-          <div>
+        <button
+          type="button"
+          class="group-heading"
+          :aria-expanded="isGroupExpanded(group.route_version_id)"
+          @click="toggleGroup(group.route_version_id)"
+        >
+          <span class="group-heading-main">
             <strong>{{ routeLabel(group.rows[0]) }}</strong>
             <span>{{ group.rows[0].route_category || '未分类' }} · {{ group.rows.length }} 道工序</span>
-          </div>
-          <span class="version-state">{{ group.rows[0].route_version_status === 'published' ? '已发布' : '待审批' }}</span>
-        </div>
-        <div class="table-wrap">
+          </span>
+          <span class="group-heading-meta">
+            <span>{{ group.rows.filter(row => row.draft).length }} 条待批准</span>
+            <span class="version-state">{{ group.rows[0].route_version_status === 'published' ? '已发布' : '待审批' }}</span>
+            <span class="expand-indicator">{{ isGroupExpanded(group.route_version_id) ? '收起' : '展开' }}</span>
+          </span>
+        </button>
+        <div v-if="isGroupExpanded(group.route_version_id)" class="table-wrap">
           <table class="data-table price-table">
             <thead>
               <tr>
@@ -110,6 +147,19 @@
                   </span>
                 </td>
                 <td>
+                  <label
+                    v-if="canApprove && row.draft && row.route_version_status === 'published'"
+                    class="select-draft"
+                    @click.stop
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="selectedDraftIds.has(row.draft.id)"
+                      :aria-label="`选择工价版本 ${row.draft.id}`"
+                      @change="toggleDraftSelection(row.draft.id)"
+                    >
+                    <span>待批准</span>
+                  </label>
                   <div class="row-actions">
                     <button
                       v-if="canPrepare && row.draft"
@@ -197,6 +247,10 @@ const {
   editorOpen,
   selectedRow,
   approving,
+  bulkApproving,
+  selectedDraftIds,
+  selectedDraftCount,
+  approvableDrafts,
   intentHandled,
   manualReviews,
   manualLoading,
@@ -212,6 +266,14 @@ const {
   matchesSearch,
   displayedRows,
   groupedRows,
+  isGroupExpanded,
+  toggleGroup,
+  expandAllGroups,
+  collapseAllGroups,
+  toggleDraftSelection,
+  selectAllDrafts,
+  clearDraftSelection,
+  approveSelectedDrafts,
   filteredVoidedPrices,
   routeLabel,
   approvalMode,
@@ -228,6 +290,6 @@ const {
 </script>
 
 <style scoped>
-.price-version-page{min-width:0}.page-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.page-toolbar h3{margin:0;font-size:18px}.page-toolbar p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.toolbar-actions{display:flex;align-items:center;gap:8px}.search-field .form-input{width:240px}.icon-button{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface);color:var(--text-secondary);font-size:20px;cursor:pointer}.icon-button:disabled{opacity:.55;cursor:not-allowed}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.summary-band{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));margin-bottom:14px;border-block:1px solid var(--border-light)}.summary-band div{padding:10px 14px;border-right:1px solid var(--border-light)}.summary-band div:last-child{border-right:0}.summary-band span{display:block;color:var(--text-placeholder);font-size:12px}.summary-band strong{display:block;margin-top:2px;font-size:19px}.view-switch{display:inline-flex;margin-bottom:12px;padding:3px;border:1px solid var(--border-light);border-radius:7px;background:var(--bg-secondary)}.view-switch button{min-height:30px;padding:5px 13px;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer}.view-switch button.active{background:var(--bg-surface);color:var(--primary);box-shadow:var(--shadow-sm);font-weight:600}.pending-notice{margin-bottom:12px;padding:9px 12px;border-left:3px solid #d59b00;background:#fff8df;color:#755500;font-size:13px}.route-version-group{margin-bottom:18px}.group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 2px;border-bottom:1px solid var(--border)}.group-heading div{display:flex;align-items:baseline;gap:10px}.group-heading span{color:var(--text-placeholder);font-size:12px}.version-state{padding:2px 7px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary)!important}.table-wrap{overflow-x:auto;border-bottom:1px solid var(--border-light)}.price-table{width:100%;min-width:860px}.price-table th{white-space:nowrap}.price-table td{vertical-align:middle}.price-table small{display:block;margin-top:3px;color:var(--text-placeholder);font-size:11px}.sequence-column{width:64px}.price-column{width:160px}.action-column{width:190px}.binding-cell code{font-size:12px}.price-value{font-size:15px}.missing-value{color:var(--danger);font-weight:600}.approval-mode{display:inline-block;padding:3px 7px;border-radius:4px;background:var(--primary-light);color:var(--primary);font-size:12px}.approval-mode.grouped{background:#fff3cf;color:#7a5600}.row-actions{display:flex;align-items:center;gap:6px;min-height:32px}.empty-state{padding:36px 16px;color:var(--text-placeholder);text-align:center}.voided-table-wrap{border-top:1px solid var(--border-light)}.voided-table{min-width:780px}
-@media(max-width:760px){.page-toolbar{align-items:stretch;flex-direction:column}.toolbar-actions{width:100%}.search-field{flex:1}.search-field .form-input{width:100%}.summary-band{grid-template-columns:repeat(2,1fr)}.summary-band div:nth-child(2){border-right:0}.group-heading{align-items:flex-start}.group-heading div{align-items:flex-start;flex-direction:column;gap:2px}.view-switch{display:flex;width:100%;overflow-x:auto}.view-switch button{flex:1;white-space:nowrap}}
+.price-version-page{min-width:0}.page-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.page-toolbar h3{margin:0;font-size:18px}.page-toolbar p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.toolbar-actions{display:flex;align-items:center;gap:8px}.search-field .form-input{width:240px}.icon-button{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface);color:var(--text-secondary);font-size:20px;cursor:pointer}.icon-button:disabled{opacity:.55;cursor:not-allowed}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.summary-band{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));margin-bottom:14px;border-block:1px solid var(--border-light)}.summary-band div{padding:10px 14px;border-right:1px solid var(--border-light)}.summary-band div:last-child{border-right:0}.summary-band span{display:block;color:var(--text-placeholder);font-size:12px}.summary-band strong{display:block;margin-top:2px;font-size:19px}.view-switch{display:inline-flex;margin-bottom:12px;padding:3px;border:1px solid var(--border-light);border-radius:7px;background:var(--bg-secondary)}.view-switch button{min-height:30px;padding:5px 13px;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer}.view-switch button.active{background:var(--bg-surface);color:var(--primary);box-shadow:var(--shadow-sm);font-weight:600}.pending-notice{margin-bottom:12px;padding:9px 12px;border-left:3px solid #d59b00;background:#fff8df;color:#755500;font-size:13px}.approval-queue{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:11px 14px;border:1px solid var(--primary-light);border-radius:8px;background:var(--primary-light)}.approval-queue strong,.approval-queue span{display:block}.approval-queue span{margin-top:3px;color:var(--text-secondary);font-size:12px}.approval-queue-actions,.group-toolbar,.group-toolbar>div{display:flex;align-items:center;gap:6px}.group-toolbar{justify-content:space-between;margin:0 0 8px;color:var(--text-placeholder);font-size:12px}.route-version-group{margin-bottom:12px}.group-heading{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid var(--border-light);border-radius:8px;background:var(--bg-surface);color:inherit;text-align:left;cursor:pointer}.group-heading:hover{border-color:var(--primary-light);background:var(--bg-secondary)}.group-heading-main{display:flex;align-items:baseline;gap:10px}.group-heading-main>span,.group-heading-meta>span{color:var(--text-placeholder);font-size:12px}.group-heading-meta{display:flex;align-items:center;gap:8px;flex-shrink:0}.version-state{padding:2px 7px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary)!important}.expand-indicator{color:var(--primary)!important}.table-wrap{overflow-x:auto;border:1px solid var(--border-light);border-top:0;border-radius:0 0 8px 8px}.price-table{width:100%;min-width:860px}.price-table th{white-space:nowrap}.price-table td{vertical-align:middle}.price-table small{display:block;margin-top:3px;color:var(--text-placeholder);font-size:11px}.sequence-column{width:64px}.price-column{width:160px}.action-column{width:190px}.binding-cell code{font-size:12px}.price-value{font-size:15px}.missing-value{color:var(--danger);font-weight:600}.approval-mode{display:inline-block;padding:3px 7px;border-radius:4px;background:var(--primary-light);color:var(--primary);font-size:12px}.approval-mode.grouped{background:#fff3cf;color:#7a5600}.row-actions{display:flex;align-items:center;gap:6px;min-height:32px}.select-draft{display:inline-flex;align-items:center;gap:4px;margin-bottom:5px;color:var(--text-placeholder);font-size:11px;cursor:pointer}.empty-state{padding:36px 16px;color:var(--text-placeholder);text-align:center}.voided-table-wrap{border-top:1px solid var(--border-light)}.voided-table{min-width:780px}
+@media(max-width:760px){.page-toolbar{align-items:stretch;flex-direction:column}.toolbar-actions{width:100%}.search-field{flex:1}.search-field .form-input{width:100%}.summary-band{grid-template-columns:repeat(2,1fr)}.summary-band div:nth-child(2){border-right:0}.group-heading{align-items:flex-start}.group-heading-main{align-items:flex-start;flex-direction:column;gap:2px}.view-switch{display:flex;width:100%;overflow-x:auto}.view-switch button{flex:1;white-space:nowrap}}
 </style>
