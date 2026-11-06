@@ -118,7 +118,7 @@ describe('PriceVersionTab exact-version workflow', () => {
     expect(wrapper.find('[data-testid="approve-price-102"]').exists()).toBe(false)
   })
 
-  it('selects published-route drafts in a centralized approval queue', async () => {
+  it('approves all published-route drafts from the centralized queue', async () => {
     mocks.listReferences.mockResolvedValue({
       items: [
         ...references,
@@ -156,10 +156,8 @@ describe('PriceVersionTab exact-version workflow', () => {
 
     expect(wrapper.find('[data-testid="price-approval-queue"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('当前共 2 条，可集中处理')
-    expect(wrapper.find('[data-testid="approve-selected-prices"]').attributes('disabled')).toBeDefined()
-
-    await wrapper.find('[data-testid="price-approval-queue"] .btn-default').trigger('click')
     expect(wrapper.find('[data-testid="approve-selected-prices"]').text()).toContain('集中批准 2 条')
+    expect(wrapper.find('[data-testid="approve-selected-prices"]').attributes('disabled')).toBeUndefined()
     await wrapper.find('[data-testid="approve-selected-prices"]').trigger('click')
     await flushPromises()
 
