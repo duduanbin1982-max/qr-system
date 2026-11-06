@@ -240,6 +240,27 @@ def test_reviewed_traceability_support_constants_match_actual_production_and_mer
         )
 
 
+def test_payroll_release_control_transition_is_exactly_pinned():
+    repository = Path(__file__).resolve().parents[1]
+    path = "scripts/backend_frontend_static_release.py"
+    expected_before, expected_target = release.PINNED_RELEASE_CONTROL_TRANSITIONS[path]
+    assert release._tree_entry(repository, release.RELEASE_CONTROL_BASELINE, path) == expected_before
+    assert release._tree_entry(repository, release.RELEASE_CONTROL_TARGET, path) == expected_target
+    release._validate_paths(
+        repository,
+        release.RELEASE_CONTROL_BASELINE,
+        release.RELEASE_CONTROL_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.RELEASE_CONTROL_BASELINE,
+            release.RELEASE_CONTROL_TARGET,
+            ["scripts/backend_frontend_static_release.py", "frontend/docs/not-allowed.md"],
+        )
+
+
 def test_traceability_support_pins_release_script_history_transition():
     assert release.PINNED_TRACEABILITY_SUPPORT_TRANSITIONS[
         "scripts/backend_frontend_static_release.py"
