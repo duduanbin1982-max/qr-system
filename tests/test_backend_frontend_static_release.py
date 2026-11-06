@@ -240,6 +240,37 @@ def test_reviewed_traceability_support_constants_match_actual_production_and_mer
         )
 
 
+def test_reviewed_payroll_price_uiux_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.PAYROLL_PRICE_UIUX_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.PAYROLL_PRICE_UIUX_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PRICE_UIUX_BASELINE,
+            release.PAYROLL_PRICE_UIUX_TARGET,
+            [path],
+        )
+
+
+def test_payroll_price_uiux_support_rejects_unreviewed_transition_and_path():
+    repository = Path(__file__).resolve().parents[1]
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PRICE_UIUX_BASELINE,
+            "c67777bdc47dcf47638d5466137a799abeb21ae8",
+            ["frontend/tests/e2e/helpers.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PRICE_UIUX_BASELINE,
+            release.PAYROLL_PRICE_UIUX_TARGET,
+            ["frontend/tests/e2e/unreviewed-helper.js"],
+        )
+
+
 def test_payroll_release_control_transition_is_exactly_pinned():
     repository = Path(__file__).resolve().parents[1]
     path = "scripts/backend_frontend_static_release.py"

@@ -165,6 +165,40 @@ PINNED_TRACEABILITY_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "6a09c5b9e5bab4126b8458c995a24bcd21a70a81"),
     ),
 }
+# PR #160 adds the reviewed wage-price UI workflow and its E2E stability
+# adjustment. Permit only this exact production-to-merge transition.
+PAYROLL_PRICE_UIUX_BASELINE = "c67777bdc47dcf47638d5466137a799abeb21ae8"
+PAYROLL_PRICE_UIUX_TARGET = "f708322d9aeaafa927a6e8952ba1af75ca81e8ac"
+PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS = {
+    "frontend/src/composables/wage/usePriceVersionWorkspace.js": (
+        ("100644", "blob", "a7bfca368d079748d50cbb082ab46c1a7b68ff3b"),
+        ("100644", "blob", "3c808b5513490b00fc7581a4cf8aa609fe385287"),
+    ),
+    "frontend/src/views/wage/PriceVersionTab.vue": (
+        ("100644", "blob", "f5c84c57a47440f9d7229a2c994ed161ee694293"),
+        ("100644", "blob", "fadd27e0e923f0317f857e3318454b2e145b0cbb"),
+    ),
+    "frontend/tests/e2e/helpers.js": (
+        ("100644", "blob", "5ed81ed951880c0e3355232359adc9222fcbdafb"),
+        ("100644", "blob", "7b0ccc4ddd3d5872f52a9f1d1bb43fa844d7cf3d"),
+    ),
+    "frontend/tests/e2e/wage-price-versions.spec.js": (
+        ("100644", "blob", "33ab16a88b4ac0d97ccd116b6a152ca2bf12ebee"),
+        ("100644", "blob", "b0ce84f3bd36dce16558fb8f9a08627da2047344"),
+    ),
+    "frontend/tests/unit/PriceVersionTab.spec.js": (
+        ("100644", "blob", "77ceb495baaed93524138f2326d737898684fc8b"),
+        ("100644", "blob", "27d5407e83afe49e51868389c0459b98c7f4954b"),
+    ),
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "4c9022c964b2fc9f25ef7ebb1d0e78adc4c13b0f"),
+        ("100644", "blob", "657af47a0260f85a855d0beca1cfad78eb6aebe8"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "9518643d40573f633e0c5c4569c896a4cba4e797"),
+        ("100644", "blob", "ccfa35dfccba07f8a70179eeb9731ffdc491a450"),
+    ),
+}
 PROTECTED_EXACT_PATHS = {
     "modules/app.py",
     "modules/app_extensions.py",
@@ -265,6 +299,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll price UI",
+            PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS,
+            PAYROLL_PRICE_UIUX_BASELINE,
+            PAYROLL_PRICE_UIUX_TARGET,
+            f"payroll price UI support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "orders",
             PINNED_ORDERS_SUPPORT_TRANSITIONS,
             ORDERS_SUPPORT_BASELINE,
@@ -335,6 +376,7 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
