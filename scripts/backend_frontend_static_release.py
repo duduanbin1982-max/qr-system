@@ -199,6 +199,16 @@ PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS = {
         ("100644", "blob", "ccfa35dfccba07f8a70179eeb9731ffdc491a450"),
     ),
 }
+# PR #162 adds one reviewed unit-test support file for the bulk-approval
+# workflow. Permit only this exact production-to-business-merge transition.
+PAYROLL_BULK_APPROVAL_BASELINE = "f708322d9aeaafa927a6e8952ba1af75ca81e8ac"
+PAYROLL_BULK_APPROVAL_TARGET = "275a6721f49896069c499c27615d772253809a1b"
+PINNED_PAYROLL_BULK_APPROVAL_TRANSITIONS = {
+    "frontend/tests/unit/PriceVersionTab.spec.js": (
+        ("100644", "blob", "27d5407e83afe49e51868389c0459b98c7f4954b"),
+        ("100644", "blob", "a94482c2da24e8225a8a13205d4ce41264ac895e"),
+    ),
+}
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
     path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
     if path.startswith("frontend/tests/") or path == "scripts/backend_frontend_static_release.py"
@@ -308,6 +318,13 @@ def _validate_support_transition(repository, before, target, path):
             PAYROLL_PRICE_UIUX_BASELINE,
             PAYROLL_PRICE_UIUX_TARGET,
             f"payroll price UI support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "payroll bulk approval",
+            PINNED_PAYROLL_BULK_APPROVAL_TRANSITIONS,
+            PAYROLL_BULK_APPROVAL_BASELINE,
+            PAYROLL_BULK_APPROVAL_TARGET,
+            f"payroll bulk approval support exception requires the reviewed baseline and target: {path}",
         ),
         (
             "orders",
