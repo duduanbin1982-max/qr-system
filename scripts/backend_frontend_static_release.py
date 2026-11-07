@@ -240,6 +240,18 @@ PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS = {
         ("100644", "blob", "1462da372c13cdd04529d7f14627a4988efc16c8"),
         ("100644", "blob", "bf872d7253213a89cefd17ea1eb166476269a036"),
     ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "7fb2e5d6c65d73ba16fd0c24b39a27978ee98977"),
+        ("100644", "blob", "72b18b9a155b76fd8205ea135fbc28ad969b0f87"),
+    ),
+}
+# PR #167 also changed this release-control script. Admit only the exact
+# production-to-business-merge transition alongside the reviewed test pin.
+PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "adcd69a404cdf4016d5785816a4394423e102723"),
+        ("100644", "blob", "c242c93d0dd3a3bcef916549dc8e09d817aabfc7"),
+    ),
 }
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
     path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
@@ -416,6 +428,19 @@ def _validate_release_control_transition(repository, before, target, path):
         raise RuntimeError(f"release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_product_code_search_control_transition(repository, before, target, path):
+    if (before, target) != (PRODUCT_CODE_SEARCH_BASELINE, PRODUCT_CODE_SEARCH_TARGET):
+        raise RuntimeError(
+            f"product code search release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"product code search release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_paths(repository, before, target, changed):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
@@ -435,6 +460,12 @@ def _validate_paths(repository, before, target, changed):
             and (before, target) == (RELEASE_CONTROL_BASELINE, RELEASE_CONTROL_TARGET)
         ):
             _validate_release_control_transition(repository, before, target, normalized)
+            continue
+        if (
+            normalized in PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS
+            and (before, target) == (PRODUCT_CODE_SEARCH_BASELINE, PRODUCT_CODE_SEARCH_TARGET)
+        ):
+            _validate_product_code_search_control_transition(repository, before, target, normalized)
             continue
         if (
             (
