@@ -217,6 +217,20 @@ PINNED_PAYROLL_BULK_APPROVAL_TRANSITIONS = {
         ("100644", "blob", "48a1c613ca098f43748ef5a364146fe293be8db1"),
     ),
 }
+# PR #165 carries the reviewed inventory-threshold release-control history
+# transition. Admit only this exact production-to-business-merge pair.
+INVENTORY_THRESHOLD_BASELINE = "275a6721f49896069c499c27615d772253809a1b"
+INVENTORY_THRESHOLD_TARGET = "ca8703c4f1c3e8a31940c918f497f9fa937defc1"
+PINNED_INVENTORY_THRESHOLD_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "764f58ce9d0b439158394fc503021a7417e2b461"),
+        ("100644", "blob", "adcd69a404cdf4016d5785816a4394423e102723"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "48a1c613ca098f43748ef5a364146fe293be8db1"),
+        ("100644", "blob", "7fb2e5d6c65d73ba16fd0c24b39a27978ee98977"),
+    ),
+}
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
     path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
     if path.startswith("frontend/tests/") or path == "scripts/backend_frontend_static_release.py"
@@ -335,6 +349,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll bulk approval support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "inventory threshold",
+            PINNED_INVENTORY_THRESHOLD_TRANSITIONS,
+            INVENTORY_THRESHOLD_BASELINE,
+            INVENTORY_THRESHOLD_TARGET,
+            f"inventory threshold support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "orders",
             PINNED_ORDERS_SUPPORT_TRANSITIONS,
             ORDERS_SUPPORT_BASELINE,
@@ -412,6 +433,7 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
+            or normalized in PINNED_INVENTORY_THRESHOLD_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
