@@ -304,6 +304,27 @@ def test_reviewed_product_code_search_support_matches_exact_business_merge():
         )
 
 
+def test_reviewed_product_code_search_control_transition_is_exact():
+    repository = Path(__file__).resolve().parents[1]
+    path = "scripts/backend_frontend_static_release.py"
+    expected_before, expected_target = release.PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS[path]
+    assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_BASELINE, path) == expected_before
+    assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_TARGET, path) == expected_target
+    release._validate_paths(
+        repository,
+        release.PRODUCT_CODE_SEARCH_BASELINE,
+        release.PRODUCT_CODE_SEARCH_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.INVENTORY_THRESHOLD_TARGET,
+            [path],
+        )
+
+
 def test_product_code_search_support_rejects_unreviewed_transition():
     repository = Path(__file__).resolve().parents[1]
     with pytest.raises(RuntimeError, match="reviewed baseline and target"):
