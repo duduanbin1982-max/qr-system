@@ -85,6 +85,21 @@ describe('ProductList integrity', () => {
     expect(mocks.listProducts).toHaveBeenLastCalledWith({ page: 2, limit: 20 })
   })
 
+  it('passes product-code searches to the list API', async () => {
+    const wrapper = mount(ProductList)
+    await flushPromises()
+
+    wrapper.vm.searchKeyword = 'P-001'
+    await wrapper.vm.searchAndLoad()
+
+    expect(mocks.listProducts).toHaveBeenLastCalledWith({
+      page: 1,
+      limit: 20,
+      keyword: 'P-001',
+    })
+    expect(wrapper.find('input[placeholder*="产品编码"]').exists()).toBe(true)
+  })
+
   it('normalizes blank optional numbers before create', async () => {
     const wrapper = mount(ProductList)
     await flushPromises()
