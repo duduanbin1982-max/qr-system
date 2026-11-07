@@ -19,7 +19,7 @@
         <div style="display:flex;gap:var(--space-2);align-items:center">
           <div class="search-box" style="background:var(--bg-hover);border-radius:var(--radius-md);display:flex;align-items:center;padding:0 10px">
             <span>🔍</span>
-            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/型号/规格..." @keyup.enter="searchAndLoad" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
+            <input class="form-input" v-model="searchKeyword" placeholder="搜索名称/产品编码/型号/规格..." @keyup.enter="searchAndLoad" style="border:none;background:transparent;outline:none;padding:var(--space-2) 6px;font-size:var(--text-base);width:200px;box-shadow:none">
           </div>
           <button class="btn btn-default btn-sm" @click="searchAndLoad" style="white-space:nowrap">搜索</button>
           <button v-if="can('products:create')" class="btn btn-primary btn-sm" @click="openAdd" style="white-space:nowrap">+ 添加产品</button>

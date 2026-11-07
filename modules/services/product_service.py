@@ -164,8 +164,8 @@ class ProductService:
         where = 'deleted_at IS NOT NULL' if deleted else 'deleted_at IS NULL'
         params = []
         if keyword:
-            where += ' AND (product_name LIKE ? OR model LIKE ? OR spec LIKE ?)'
-            params.extend([f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'])
+            where += ' AND (product_name LIKE ? OR product_code LIKE ? OR model LIKE ? OR spec LIKE ?)'
+            params.extend([f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'])
         if category and category in ('结构件', '机加工'):
             where += ' AND category = ?'
             params.append(category)

@@ -87,6 +87,28 @@ def test_server_code_preview_matches_persisted_product(client, auth_headers):
     assert preview.get_json()["product_code"] == created.get_json()["product_code"]
 
 
+def test_product_list_search_matches_product_code(client, auth_headers):
+    product_id = _create_product(
+        client,
+        auth_headers,
+        product_name="编码搜索产品",
+        model="CODE-SEARCH-MODEL",
+    )
+    with client.application.app_context():
+        product_code = get_db().execute(
+            "SELECT product_code FROM products WHERE id=?", (product_id,)
+        ).fetchone()["product_code"]
+
+    response = client.get(
+        "/api/products",
+        headers=auth_headers,
+        query_string={"keyword": product_code},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert any(product["id"] == product_id for product in response.get_json()["products"])
+
+
 def test_bom_rejects_non_positive_quantity_and_duplicate_null_process(
     client, auth_headers
 ):
