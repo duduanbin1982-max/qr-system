@@ -343,6 +343,58 @@ def test_product_code_search_support_rejects_unreviewed_transition():
         )
 
 
+def test_reviewed_shipment_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_SHIPMENT_SUPPORT_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.SHIPMENT_SUPPORT_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.SHIPMENT_SUPPORT_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.SHIPMENT_SUPPORT_BASELINE,
+            release.SHIPMENT_SUPPORT_TARGET,
+            [path],
+        )
+
+
+def test_reviewed_shipment_control_transition_is_exact():
+    repository = Path(__file__).resolve().parents[1]
+    path = "scripts/backend_frontend_static_release.py"
+    expected_before, expected_target = release.PINNED_SHIPMENT_CONTROL_TRANSITIONS[path]
+    assert release._tree_entry(repository, release.SHIPMENT_SUPPORT_BASELINE, path) == expected_before
+    assert release._tree_entry(repository, release.SHIPMENT_SUPPORT_TARGET, path) == expected_target
+    release._validate_paths(
+        repository,
+        release.SHIPMENT_SUPPORT_BASELINE,
+        release.SHIPMENT_SUPPORT_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.SHIPMENT_SUPPORT_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
+            [path],
+        )
+
+
+def test_shipment_support_rejects_unreviewed_transition_and_path():
+    repository = Path(__file__).resolve().parents[1]
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.SHIPMENT_SUPPORT_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
+            ["frontend/tests/unit/shipment-composables.spec.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.SHIPMENT_SUPPORT_BASELINE,
+            release.SHIPMENT_SUPPORT_TARGET,
+            ["frontend/tests/unit/unreviewed-shipment.spec.js"],
+        )
+
+
 def test_payroll_bulk_approval_support_rejects_unreviewed_transition_and_path():
     repository = Path(__file__).resolve().parents[1]
     path = "frontend/tests/unit/PriceVersionTab.spec.js"
