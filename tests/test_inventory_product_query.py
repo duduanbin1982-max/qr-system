@@ -8,6 +8,7 @@ from io import BytesIO, StringIO
 from openpyxl import load_workbook
 
 from modules import config
+from modules.repositories.inventory_product_repository import InventoryProductRepository
 from modules.services.inventory_product_query_service import InventoryProductQueryService
 from factories import create_process_route, ensure_process
 from tests.inventory_product_helpers import (
@@ -341,6 +342,48 @@ def test_product_summary_uses_product_threshold_override(
     assert group["safe_stock"] == 20
     assert group["is_low"] == 1
     assert summary["low_stock"] == 1
+
+
+def test_product_threshold_drives_listing_alert_and_low_stock_filter(
+    client, auth_headers, db, monkeypatch
+):
+    monkeypatch.setattr(config, "INVENTORY_PRODUCT_THRESHOLD_ENABLED", True)
+    scenario = seed_product_inventory_scenario(
+        db, safe_stocks=(0, 0), quantities=(12, 8), reserved=(0, 0), frozen=(0, 0)
+    )
+    db.execute(
+        "INSERT INTO product_inventory_thresholds "
+        "(product_id,safe_stock,warning_buffer,updated_by,updated_by_name,updated_at) "
+        "VALUES(?,?,?,?,?,datetime('now','localtime'))",
+        (scenario["product_id"], 20, 5, 1, "测试"),
+    )
+    db.commit()
+
+    listing = client.get("/api/inventory/product-groups", headers=auth_headers).get_json()
+    group = next(item for item in listing["items"] if item["product_id"] == scenario["product_id"])
+    assert group["safe_stock"] == 20
+    assert group["warning_buffer"] == 5
+    assert group["is_low"] == 1
+    assert group["product_alert_level"] == "low"
+
+    filtered = client.get(
+        "/api/inventory/product-groups?low_stock=1", headers=auth_headers
+    ).get_json()
+    assert scenario["product_id"] in {item["product_id"] for item in filtered["items"]}
+
+
+def test_product_listing_does_not_query_threshold_per_row(
+    client, auth_headers, db, monkeypatch
+):
+    monkeypatch.setattr(config, "INVENTORY_PRODUCT_THRESHOLD_ENABLED", True)
+    seed_product_inventory_scenario(db)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("threshold lookup must be batched in the product query")
+
+    monkeypatch.setattr(InventoryProductRepository, "get_threshold", staticmethod(fail_if_called))
+    response = client.get("/api/inventory/product-groups", headers=auth_headers)
+    assert response.status_code == 200
 
 
 def test_product_group_keeps_incompatible_specifications_separate(
