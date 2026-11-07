@@ -353,6 +353,26 @@ def test_payment_ledger_is_idempotent_and_refund_updates_projection(client):
         db.rollback()
 
 
+def test_payment_idempotency_rejects_changed_request_details(client):
+    with client.application.app_context():
+        db = get_db()
+        order_id, order_no, inventory_id = _shipment_context(db)
+        shipment_id, _ = ShipmentService.create_shipment(
+            _shipment_payload(order_id, order_no, inventory_id), created_by=CURRENT_USER
+        )
+        _pass_outgoing_inspection(shipment_id)
+        ShipmentService.complete_shipment(shipment_id, CURRENT_USER)
+        ShipmentService.record_payment(
+            shipment_id, CURRENT_USER, 20, "bank", "first",
+            payment_date="2026-08-01", idempotency_key="same-key",
+        )
+        with pytest.raises(ConflictError, match="幂等键已用于其他收付款"):
+            ShipmentService.record_payment(
+                shipment_id, CURRENT_USER, 20, "cash", "changed",
+                payment_date="2026-08-01", idempotency_key="same-key",
+            )
+
+
 def test_paid_shipment_requires_refund_before_operational_reversal(client):
     with client.application.app_context():
         db = get_db()

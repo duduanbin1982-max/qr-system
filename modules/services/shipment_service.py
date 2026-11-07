@@ -449,6 +449,9 @@ class ShipmentService:
                     existing["shipment_id"] != shipment_id
                     or existing["type"] != payment_type
                     or _decimal(existing["amount"], "收付款金额") != amount
+                    or (existing["method"] or "") != method
+                    or (existing["payment_date"] or "") != payment_date
+                    or (existing["remark"] or "") != remark
                 ):
                     raise ConflictError("幂等键已用于其他收付款")
                 return row["shipment_no"]
@@ -514,7 +517,11 @@ class ShipmentService:
                 idempotency_key, db=txn
             )
             if existing:
-                if existing["shipment_id"] != shipment_id or existing["type"] != "reversal":
+                if (
+                    existing["shipment_id"] != shipment_id
+                    or existing["type"] != "reversal"
+                    or existing["reversal_of_id"] != payment_id
+                ):
                     raise ConflictError("幂等键已用于其他收付款")
                 return shipment["shipment_no"]
             payment = ShipmentRepository.find_payment_by_id(payment_id, db=txn)

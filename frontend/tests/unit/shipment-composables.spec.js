@@ -4,6 +4,7 @@ import { useDeliveryNote } from '@/composables/shipment/useDeliveryNote.js'
 import { useShipmentActions } from '@/composables/shipment/useShipmentActions.js'
 import { useShipmentEditor } from '@/composables/shipment/useShipmentEditor.js'
 import { useShipmentQuery } from '@/composables/shipment/useShipmentQuery.js'
+import { formatLocalDate } from '@/lib/date.js'
 
 
 const mocks = vi.hoisted(() => ({
@@ -70,6 +71,10 @@ describe('shipment composables', () => {
     mocks.updateLogistics.mockResolvedValue({ message: 'updated' })
     mocks.completeShipment.mockResolvedValue({ message: 'completed' })
     globalThis.confirm = vi.fn(() => true)
+  })
+
+  it('formats dates using the local calendar instead of UTC', () => {
+    expect(formatLocalDate(new Date(2026, 10, 7, 23, 59))).toBe('2026-11-07')
   })
 
   it('loads filtered shipments and derives receivable totals', async () => {

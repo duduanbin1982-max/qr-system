@@ -220,7 +220,10 @@ def batch_complete_shipments():
     )
     for item in result["success"]:
         safe_audit_log("complete", "shipment", item["id"], "批量完成出库 " + item["shipment_no"])
-    return jsonify(result)
+    status_code = 409 if result["failed"] and not result["success"] else (
+        207 if result["failed"] else 200
+    )
+    return jsonify(result), status_code
 
 
 @app.route("/api/shipments/batch-delete", methods=["POST"])
@@ -231,7 +234,10 @@ def batch_delete_shipments():
     result = ShipmentService.batch_delete(ids=data.get("ids", []), current_user=g.current_user)
     for item in result["success"]:
         safe_audit_log("cancel", "shipment", item["id"], "批量取消/冲销 " + item["shipment_no"])
-    return jsonify(result)
+    status_code = 409 if result["failed"] and not result["success"] else (
+        207 if result["failed"] else 200
+    )
+    return jsonify(result), status_code
 
 
 # ── P1: 物流信息 ──

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 
 import { api } from '@/lib/api.js'
+import { formatLocalDate } from '@/lib/date.js'
 import { showToast } from '@/lib/store.js'
 
 
@@ -20,7 +21,7 @@ export function useShipmentActions({ reload }) {
   const payMode = ref('receipt')
   const payAmount = ref(0)
   const payMethod = ref('')
-  const payDate = ref(new Date().toISOString().slice(0, 10))
+  const payDate = ref(formatLocalDate())
   const payRemark = ref('')
   const payIdempotencyKey = ref('')
 
@@ -31,7 +32,7 @@ export function useShipmentActions({ reload }) {
   const showReceiveModal = ref(false)
   const receiveTarget = ref(null)
   const receiverName = ref('')
-  const receiveDate = ref(new Date().toISOString().slice(0, 10))
+  const receiveDate = ref(formatLocalDate())
 
   const showLogisticsModal = ref(false)
   const logisticsTarget = ref(null)
@@ -73,7 +74,7 @@ export function useShipmentActions({ reload }) {
   function openReceive(shipment) {
     receiveTarget.value = shipment
     receiverName.value = ''
-    receiveDate.value = new Date().toISOString().slice(0, 10)
+    receiveDate.value = formatLocalDate()
     showReceiveModal.value = true
   }
 
@@ -119,7 +120,7 @@ export function useShipmentActions({ reload }) {
       ? Number(shipment.paid_amount || 0)
       : Math.max(0, Number(shipment.receivable_amount || 0) - Number(shipment.paid_amount || 0))
     payMethod.value = ''
-    payDate.value = new Date().toISOString().slice(0, 10)
+    payDate.value = formatLocalDate()
     payRemark.value = ''
     payIdempotencyKey.value = requestKey(mode, shipment.id)
     showPayModal.value = true
