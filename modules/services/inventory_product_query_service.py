@@ -41,24 +41,7 @@ class InventoryProductQueryService:
         rows = InventoryProductRepository.list_groups(
             filters, current_page, size, sort_by=sort_by, sort_dir=sort_dir
         )
-        enriched = []
-        for row in rows:
-            item = dict(row)
-            threshold = InventoryProductRepository.get_threshold(item["product_id"])
-            if config.INVENTORY_PRODUCT_THRESHOLD_ENABLED and threshold:
-                safe_stock = float(threshold["safe_stock"] or 0)
-                warning_buffer = float(threshold["warning_buffer"] or 0)
-                available = float(item["available_quantity"] or 0)
-                item["safe_stock"] = safe_stock
-                item["warning_buffer"] = warning_buffer
-                item["is_low"] = int(available <= safe_stock and safe_stock > 0)
-                item["product_alert_level"] = (
-                    "out_of_stock" if available <= 0 else
-                    "low" if available <= safe_stock and safe_stock > 0 else
-                    "attention" if available <= safe_stock + warning_buffer and (safe_stock + warning_buffer) > 0 else
-                    "normal"
-                )
-            enriched.append(item)
+        enriched = [dict(row) for row in rows]
         exceptions = []
         if filters["identity_status"] in {"unresolved", "conflict", "exceptions"}:
             expected_reason = {

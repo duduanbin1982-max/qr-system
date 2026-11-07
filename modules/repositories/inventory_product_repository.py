@@ -1,6 +1,7 @@
 """Read model and creation identity access for product-group inventory."""
 import hashlib
 
+from modules import config
 from modules.domain.errors import ConflictError
 from modules.repositories.context import resolve_db
 
@@ -32,6 +33,22 @@ NORMALIZED_SPECIFICATION_SQL = "TRIM(COALESCE(i.specification,''))"
 NORMALIZED_QUALITY_STATUS_SQL = (
     "COALESCE(NULLIF(TRIM(COALESCE(i.quality_status,'')),''),'qualified')"
 )
+
+
+def _effective_safe_stock_sql():
+    return (
+        "COALESCE(MAX(pt.safe_stock), SUM(COALESCE(i.safe_stock,0)))"
+        if config.INVENTORY_PRODUCT_THRESHOLD_ENABLED
+        else "SUM(COALESCE(i.safe_stock,0))"
+    )
+
+
+def _effective_warning_buffer_sql():
+    return (
+        "COALESCE(MAX(pt.warning_buffer), 0)"
+        if config.INVENTORY_PRODUCT_THRESHOLD_ENABLED
+        else "0"
+    )
 
 
 def compatibility_key(row):
@@ -114,9 +131,10 @@ class InventoryProductRepository:
         where = " AND ".join(clauses) if clauses else "1=1"
         having = ""
         if filters.get("low_stock"):
+            safe_stock_sql = _effective_safe_stock_sql()
             having = (
-                f"HAVING SUM({AVAILABLE_SQL}) <= COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) "
-                "AND COALESCE(MAX(pt.safe_stock),SUM(COALESCE(i.safe_stock,0))) > 0"
+                f"HAVING SUM({AVAILABLE_SQL}) <= {safe_stock_sql} "
+                f"AND {safe_stock_sql} > 0"
             )
         return where, having, params
 
@@ -153,6 +171,7 @@ class InventoryProductRepository:
         """Return summary values using exactly the same filters as the group list."""
         db = resolve_db(db)
         where, having, params = cls._group_filters(filters)
+        safe_stock_sql = _effective_safe_stock_sql()
         grouped_sql = (
             cls._resolved_cte()
             + ", grouped AS ("
@@ -163,8 +182,8 @@ class InventoryProductRepository:
               f"SUM({AVAILABLE_SQL}) AS available_quantity, "
               "SUM(i.quantity * COALESCE(i.canonical_price,0)) AS total_value, "
               "CASE WHEN SUM(" + AVAILABLE_SQL + ") <= "
-              "COALESCE(MAX(pt.safe_stock), SUM(COALESCE(i.safe_stock,0))) "
-              "AND COALESCE(MAX(pt.safe_stock), SUM(COALESCE(i.safe_stock,0))) > 0 "
+              f"{safe_stock_sql} "
+              f"AND {safe_stock_sql} > 0 "
               "THEN 1 ELSE 0 END AS is_low "
               "FROM resolved_inventory i "
               "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
@@ -223,6 +242,8 @@ class InventoryProductRepository:
     def list_groups(cls, filters, page, limit, sort_by="alert", sort_dir="desc", db=None):
         db = resolve_db(db)
         where, having, params = cls._group_filters(filters)
+        safe_stock_sql = _effective_safe_stock_sql()
+        warning_buffer_sql = _effective_warning_buffer_sql()
         offset = (page - 1) * limit
         sort_columns = {
             "product_code": "product_code COLLATE NOCASE",
@@ -253,19 +274,20 @@ class InventoryProductRepository:
               "SUM(COALESCE(i.reserved,0)) AS reserved_quantity, "
               "SUM(COALESCE(i.frozen_quantity,0)) AS frozen_quantity, "
               f"SUM({AVAILABLE_SQL}) AS available_quantity, "
-              "SUM(COALESCE(i.safe_stock,0)) AS safe_stock, "
+              f"{safe_stock_sql} AS safe_stock, "
+              f"{warning_buffer_sql} AS warning_buffer, "
               "COUNT(DISTINCT i.order_id) AS order_count, "
               "COUNT(*) AS inventory_count, "
               "COUNT(DISTINCT NULLIF(TRIM(i.location),'')) AS location_count, "
               "SUM(COALESCE(lc.lot_count,0)) AS lot_count, "
-              f"CASE WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
-              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 1 ELSE 0 END AS is_low, "
+              f"CASE WHEN SUM({AVAILABLE_SQL}) <= {safe_stock_sql} "
+              f"AND {safe_stock_sql} > 0 THEN 1 ELSE 0 END AS is_low, "
               f"CASE WHEN SUM({AVAILABLE_SQL}) <= 0 THEN 'out_of_stock' "
-              f"WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
-              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 'low' "
-              f"WHEN SUM({AVAILABLE_SQL}) <= SUM(COALESCE(i.safe_stock,0)) "
-              " + SUM(COALESCE(i.safe_stock,0)) * 0.25 "
-              "AND SUM(COALESCE(i.safe_stock,0)) > 0 THEN 'attention' "
+              f"WHEN SUM({AVAILABLE_SQL}) <= {safe_stock_sql} "
+              f"AND {safe_stock_sql} > 0 THEN 'low' "
+              f"WHEN SUM({AVAILABLE_SQL}) <= {safe_stock_sql} "
+              f" + {warning_buffer_sql} "
+              f"AND ({safe_stock_sql} + {warning_buffer_sql}) > 0 THEN 'attention' "
               "ELSE 'normal' END AS product_alert_level "
               "FROM resolved_inventory i "
               "LEFT JOIN product_inventory_thresholds pt ON pt.product_id=i.resolved_product_id "
