@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDeliveryNote } from '@/composables/shipment/useDeliveryNote.js'
-import { useShipmentActions } from '@/composables/shipment/useShipmentActions.js'
+import { formatLocalDate, useShipmentActions } from '@/composables/shipment/useShipmentActions.js'
 import { useShipmentEditor } from '@/composables/shipment/useShipmentEditor.js'
 import { useShipmentQuery } from '@/composables/shipment/useShipmentQuery.js'
-import { formatLocalDate } from '@/lib/date.js'
 
 
 const mocks = vi.hoisted(() => ({

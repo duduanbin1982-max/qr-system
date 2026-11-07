@@ -1,7 +1,6 @@
 import { ref } from 'vue'
 
 import { api } from '@/lib/api.js'
-import { formatLocalDate } from '@/lib/date.js'
 import { showToast } from '@/lib/store.js'
 
 
@@ -9,6 +8,15 @@ function requestKey(prefix, id) {
   const random = globalThis.crypto?.randomUUID?.()
     || `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return `${prefix}:${id}:${random}`
+}
+
+export function formatLocalDate(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 
