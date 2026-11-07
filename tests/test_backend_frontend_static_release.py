@@ -297,6 +297,30 @@ def test_inventory_threshold_support_rejects_unreviewed_transition_and_path():
         )
 
 
+def test_reviewed_product_code_search_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
+            [path],
+        )
+
+
+def test_product_code_search_support_rejects_unreviewed_transition():
+    repository = Path(__file__).resolve().parents[1]
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.INVENTORY_THRESHOLD_TARGET,
+            ["frontend/tests/unit/ProductList.spec.js"],
+        )
+
+
 def test_payroll_bulk_approval_support_rejects_unreviewed_transition_and_path():
     repository = Path(__file__).resolve().parents[1]
     path = "frontend/tests/unit/PriceVersionTab.spec.js"

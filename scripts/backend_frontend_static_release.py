@@ -231,6 +231,16 @@ PINNED_INVENTORY_THRESHOLD_TRANSITIONS = {
         ("100644", "blob", "7fb2e5d6c65d73ba16fd0c24b39a27978ee98977"),
     ),
 }
+# PR #167 adds the reviewed product-code-search frontend regression test.
+# Permit only this exact production-to-business-merge transition.
+PRODUCT_CODE_SEARCH_BASELINE = "ca8703c4f1c3e8a31940c918f497f9fa937defc1"
+PRODUCT_CODE_SEARCH_TARGET = "7c415dc6f3afbd4888bd1e395293a24ac6a356e1"
+PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS = {
+    "frontend/tests/unit/ProductList.spec.js": (
+        ("100644", "blob", "1462da372c13cdd04529d7f14627a4988efc16c8"),
+        ("100644", "blob", "bf872d7253213a89cefd17ea1eb166476269a036"),
+    ),
+}
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
     path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
     if path.startswith("frontend/tests/") or path == "scripts/backend_frontend_static_release.py"
@@ -356,6 +366,13 @@ def _validate_support_transition(repository, before, target, path):
             f"inventory threshold support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "product code search",
+            PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS,
+            PRODUCT_CODE_SEARCH_BASELINE,
+            PRODUCT_CODE_SEARCH_TARGET,
+            f"product code search support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "orders",
             PINNED_ORDERS_SUPPORT_TRANSITIONS,
             ORDERS_SUPPORT_BASELINE,
@@ -434,6 +451,7 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
             or normalized in PINNED_INVENTORY_THRESHOLD_TRANSITIONS
+            or normalized in PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
