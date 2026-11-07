@@ -231,6 +231,16 @@ PINNED_INVENTORY_THRESHOLD_TRANSITIONS = {
         ("100644", "blob", "7fb2e5d6c65d73ba16fd0c24b39a27978ee98977"),
     ),
 }
+# PR #167 adds the reviewed product-code-search frontend regression test.
+# Permit only this exact production-to-business-merge transition.
+PRODUCT_CODE_SEARCH_BASELINE = "ca8703c4f1c3e8a31940c918f497f9fa937defc1"
+PRODUCT_CODE_SEARCH_TARGET = "7c415dc6f3afbd4888bd1e395293a24ac6a356e1"
+PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS = {
+    "frontend/tests/unit/ProductList.spec.js": (
+        ("100644", "blob", "1462da372c13cdd04529d7f14627a4988efc16c8"),
+        ("100644", "blob", "bf872d7253213a89cefd17ea1eb166476269a036"),
+    ),
+}
 PAYROLL_PRICE_UIUX_STRICT_SUPPORT_PATHS = {
     path for path in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
     if path.startswith("frontend/tests/") or path == "scripts/backend_frontend_static_release.py"
@@ -356,6 +366,13 @@ def _validate_support_transition(repository, before, target, path):
             f"inventory threshold support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "product code search",
+            PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS,
+            PRODUCT_CODE_SEARCH_BASELINE,
+            PRODUCT_CODE_SEARCH_TARGET,
+            f"product code search support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "orders",
             PINNED_ORDERS_SUPPORT_TRANSITIONS,
             ORDERS_SUPPORT_BASELINE,
@@ -399,7 +416,7 @@ def _validate_release_control_transition(repository, before, target, path):
         raise RuntimeError(f"release-control mode/blob transition mismatch: {path}")
 
 
-def _validate_paths(repository, before, target, changed, *, allow_frontend_support=False):
+def _validate_paths(repository, before, target, changed):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
         parts = PurePosixPath(normalized).parts
@@ -434,6 +451,7 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
             or normalized in PINNED_INVENTORY_THRESHOLD_TRANSITIONS
+            or normalized in PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue
@@ -443,12 +461,9 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
             raise RuntimeError(f"release cannot change migration logic: {path}")
         if normalized in PROTECTED_EXACT_PATHS:
             raise RuntimeError(f"release cannot change protected path: {path}")
-        frontend_allowed = ALLOWED_FRONTEND_PATHS
-        if allow_frontend_support:
-            frontend_allowed += ALLOWED_FRONTEND_SUPPORT_PATHS
         if parts[0] == "frontend" and not any(
             normalized == prefix or normalized.startswith(prefix)
-            for prefix in frontend_allowed
+            for prefix in ALLOWED_FRONTEND_PATHS
         ):
             raise RuntimeError(f"frontend release permits source files only: {path}")
         if any(token in lower for token in ("/attachments/", "production.db", "public/static", "dist/")):
@@ -458,11 +473,6 @@ def _validate_paths(repository, before, target, changed, *, allow_frontend_suppo
         if parts[0] in {"tests", "docs"}:
             continue
         if parts[0] == "modules":
-            continue
-        if allow_frontend_support and any(
-            normalized == prefix or normalized.startswith(prefix)
-            for prefix in ALLOWED_FRONTEND_SUPPORT_PATHS
-        ):
             continue
         if not any(normalized == prefix or normalized.startswith(prefix) for prefix in ALLOWED_FRONTEND_PATHS):
             raise RuntimeError(f"release path is not deployable code or static source: {path}")
@@ -553,13 +563,7 @@ def validate_release(
     }
     if any(tracked_data.values()):
         raise RuntimeError("backend/static release refuses commits that track production data/")
-    _validate_paths(
-        tool_root,
-        before_commit,
-        target_commit,
-        changed,
-        allow_frontend_support=True,
-    )
+    _validate_paths(tool_root, before_commit, target_commit, changed)
     code_only_release._assert_release_controls_unchanged(tool_root, before_commit, target_commit)
     code_only_release._assert_runtime_fence_unchanged(tool_root, before_commit, target_commit)
 

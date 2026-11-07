@@ -79,7 +79,7 @@ def test_static_release_path_allows_backend_and_frontend_source_only(tmp_path):
     )
 
 
-def test_static_release_allows_frontend_support_files_and_rejects_other_paths(tmp_path):
+def test_static_release_allows_pinned_frontend_support_files_and_rejects_other_paths(tmp_path):
     _, repository, before, target = _release_repository(tmp_path)
     path = "frontend/tests/unit/TraceOverview.spec.js"
     code_only_release._git(repository, "checkout", "--quiet", "--detach", before)
@@ -102,20 +102,14 @@ def test_static_release_allows_frontend_support_files_and_rejects_other_paths(tm
             "PINNED_TRACEABILITY_SUPPORT_TRANSITIONS",
             {path: (expected_before, expected_target)},
         )
-        release._validate_paths(
-            repository,
-            support_before,
-            support_target,
-            [path],
-            allow_frontend_support=True,
-        )
-        release._validate_paths(
-            repository,
-            support_before,
-            support_target,
-            ["frontend/tests/unit/unreviewed.spec.js"],
-            allow_frontend_support=True,
-        )
+        release._validate_paths(repository, support_before, support_target, [path])
+        with pytest.raises(RuntimeError):
+            release._validate_paths(
+                repository,
+                support_before,
+                support_target,
+                ["frontend/tests/unit/unreviewed.spec.js"],
+            )
         with pytest.raises(RuntimeError):
             release._validate_paths(
                 repository,
@@ -294,6 +288,37 @@ def test_inventory_threshold_support_rejects_unreviewed_transition_and_path():
             release.INVENTORY_THRESHOLD_BASELINE,
             release.INVENTORY_THRESHOLD_TARGET,
             ["frontend/docs/unreviewed-inventory-support.md"],
+        )
+
+
+def test_reviewed_product_code_search_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_BASELINE, path) == expected_before, path
+        assert release._tree_entry(repository, release.PRODUCT_CODE_SEARCH_TARGET, path) == expected_target, path
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
+            [path],
+        )
+
+
+def test_product_code_search_support_rejects_unreviewed_transition():
+    repository = Path(__file__).resolve().parents[1]
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.INVENTORY_THRESHOLD_TARGET,
+            ["frontend/tests/unit/ProductList.spec.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PRODUCT_CODE_SEARCH_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
+            ["frontend/tests/unit/UnreviewedProductSupport.spec.js"],
         )
 
 
