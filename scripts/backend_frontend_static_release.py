@@ -254,6 +254,11 @@ PINNED_SHIPMENT_SUPPORT_TRANSITIONS = {
         ("100644", "blob", "e4e2905bd2388cea6ffee738bec26331e19c189c"),
         ("100644", "blob", "49971aa488f97e772c4b0968e25c0eda0be2392b"),
     ),
+    # Keep the release-tool regression contract paired with its business merge.
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "72b18b9a155b76fd8205ea135fbc28ad969b0f87"),
+        ("100644", "blob", "c206125d46415fb3ee0362312597a15dbf9cf313"),
+    ),
 }
 # PR #170 also carries the exact release-control tree transition from the
 # production baseline. Pin it separately; do not permit a generic control edit.

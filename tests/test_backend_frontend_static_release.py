@@ -384,6 +384,13 @@ def test_shipment_support_rejects_unreviewed_transition_and_path():
             repository,
             release.SHIPMENT_SUPPORT_BASELINE,
             release.PRODUCT_CODE_SEARCH_TARGET,
+            ["tests/test_backend_frontend_static_release.py"],
+        )
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.SHIPMENT_SUPPORT_BASELINE,
+            release.PRODUCT_CODE_SEARCH_TARGET,
             ["frontend/tests/unit/shipment-composables.spec.js"],
         )
     with pytest.raises(RuntimeError):
