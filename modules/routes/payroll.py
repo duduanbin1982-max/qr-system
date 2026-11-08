@@ -58,6 +58,17 @@ def payroll_batches():
     ))
 
 
+@app.route("/api/payroll/periods/<payroll_month>/control", methods=["GET"])
+@check_auth
+def payroll_period_control(payroll_month):
+    if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
+        return _deny()
+    try:
+        return jsonify(PayrollWorkflowService.period_control(payroll_month))
+    except ValueError as exc:
+        return _json_error(exc)
+
+
 @app.route("/api/payroll/batches", methods=["POST"])
 @check_auth
 def payroll_batch_create():

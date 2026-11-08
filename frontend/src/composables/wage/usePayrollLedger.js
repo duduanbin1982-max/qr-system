@@ -20,6 +20,10 @@ export function usePayrollLedger() {
 
   const detail = ref(null)
 
+  const periodControl = ref(null)
+
+  const controlLoading = ref(false)
+
   const canPrepare = computed(() => can('wages:prepare'))
 
   const canApprove = computed(() => can('wages:approve'))
@@ -46,13 +50,42 @@ export function usePayrollLedger() {
 
   function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported && !batch.input_changed }
 
+  function periodStatusLabel(value) {
+    return {
+      draft: '草稿',
+      exceptions_pending: '待异常处理',
+      review_pending: '待复核',
+      locked: '已锁定',
+      confirmed: '已确认',
+      voided: '已作废',
+    }[value] || '未生成'
+  }
+
   function idempotency(prefix) { return `${prefix}:${Date.now()}:${Math.random().toString(16).slice(2)}` }
+
+  async function loadControl() {
+    const getControl = api.domains.wages.getPayrollPeriodControl
+    if (typeof getControl !== 'function') {
+      periodControl.value = null
+      return
+    }
+    controlLoading.value = true
+    try {
+      periodControl.value = await getControl(month.value)
+    } catch (error) {
+      periodControl.value = null
+      showToast(error.message || '工资期间状态加载失败', 'error')
+    } finally {
+      controlLoading.value = false
+    }
+  }
 
   async function load() {
     loading.value = true
     try {
       const data = await api.domains.wages.listPayrollBatches({ payroll_month: month.value, status: status.value })
       batches.value = data.batches || []
+      await loadControl()
     } catch (error) { showToast(error.message || '工资批次加载失败', 'error') }
     finally { loading.value = false }
   }
@@ -116,6 +149,8 @@ export function usePayrollLedger() {
     working,
     selectedId,
     detail,
+    periodControl,
+    controlLoading,
     canPrepare,
     canApprove,
     canExport,
@@ -125,10 +160,12 @@ export function usePayrollLedger() {
     monthTotal,
     money,
     statusLabel,
+    periodStatusLabel,
     editable,
     canSubmit,
     idempotency,
     load,
+    loadControl,
     createBatch,
     act,
     regenerate,
