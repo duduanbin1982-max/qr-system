@@ -245,6 +245,24 @@ PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS = {
         ("100644", "blob", "72b18b9a155b76fd8205ea135fbc28ad969b0f87"),
     ),
 }
+# PR #170 adds the reviewed shipment composable regression test. Permit only
+# this exact production-to-business-merge transition.
+SHIPMENT_SUPPORT_BASELINE = "7c415dc6f3afbd4888bd1e395293a24ac6a356e1"
+SHIPMENT_SUPPORT_TARGET = "bebe066a48f04597d475d6067220f69edbb41d5a"
+PINNED_SHIPMENT_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/shipment-composables.spec.js": (
+        ("100644", "blob", "e4e2905bd2388cea6ffee738bec26331e19c189c"),
+        ("100644", "blob", "49971aa488f97e772c4b0968e25c0eda0be2392b"),
+    ),
+}
+# PR #170 also carries the exact release-control tree transition from the
+# production baseline. Pin it separately; do not permit a generic control edit.
+PINNED_SHIPMENT_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "c242c93d0dd3a3bcef916549dc8e09d817aabfc7"),
+        ("100644", "blob", "9c75fd47eedc53be794e1d5dda6b114463f81bbb"),
+    ),
+}
 # PR #167 also changed this release-control script. Admit only the exact
 # production-to-business-merge transition alongside the reviewed test pin.
 PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS = {
@@ -385,6 +403,13 @@ def _validate_support_transition(repository, before, target, path):
             f"product code search support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "shipment",
+            PINNED_SHIPMENT_SUPPORT_TRANSITIONS,
+            SHIPMENT_SUPPORT_BASELINE,
+            SHIPMENT_SUPPORT_TARGET,
+            f"shipment support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "orders",
             PINNED_ORDERS_SUPPORT_TRANSITIONS,
             ORDERS_SUPPORT_BASELINE,
@@ -441,6 +466,19 @@ def _validate_product_code_search_control_transition(repository, before, target,
         raise RuntimeError(f"product code search release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_shipment_control_transition(repository, before, target, path):
+    if (before, target) != (SHIPMENT_SUPPORT_BASELINE, SHIPMENT_SUPPORT_TARGET):
+        raise RuntimeError(
+            f"shipment release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_SHIPMENT_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"shipment release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_paths(repository, before, target, changed):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
@@ -468,6 +506,12 @@ def _validate_paths(repository, before, target, changed):
             _validate_product_code_search_control_transition(repository, before, target, normalized)
             continue
         if (
+            normalized in PINNED_SHIPMENT_CONTROL_TRANSITIONS
+            and (before, target) == (SHIPMENT_SUPPORT_BASELINE, SHIPMENT_SUPPORT_TARGET)
+        ):
+            _validate_shipment_control_transition(repository, before, target, normalized)
+            continue
+        if (
             (
                 normalized in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
                 and (
@@ -483,6 +527,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_TRACEABILITY_SUPPORT_TRANSITIONS
             or normalized in PINNED_INVENTORY_THRESHOLD_TRANSITIONS
             or normalized in PINNED_PRODUCT_CODE_SEARCH_TRANSITIONS
+            or normalized in PINNED_SHIPMENT_SUPPORT_TRANSITIONS
         ):
             _validate_support_transition(repository, before, target, normalized)
             continue

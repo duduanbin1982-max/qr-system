@@ -26,7 +26,27 @@ export function observeRuntimeFailures(page) {
 }
 
 export async function loginAdmin(page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  let bufferFailure = false
+  const onRequestFailed = request => {
+    const url = new URL(request.url())
+    if (url.origin === new URL(page.url()).origin
+      && url.pathname.startsWith('/static/assets/')
+      && request.resourceType() === 'script'
+      && request.failure()?.errorText === 'net::ERR_NO_BUFFER_SPACE') {
+      bufferFailure = true
+    }
+  }
+  page.on('requestfailed', onRequestFailed)
+  try {
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    if (bufferFailure) {
+      // Chromium can exhaust its network buffer on Windows. Recover only
+      // before entering credentials; never repeat a login or business action.
+      await page.reload({ waitUntil: 'domcontentloaded' })
+    }
+  } finally {
+    page.off('requestfailed', onRequestFailed)
+  }
   const username = page.getByPlaceholder('请输入用户名')
   const password = page.getByPlaceholder('请输入密码')
   await expect(username).toBeVisible({ timeout: 15_000 })
