@@ -234,6 +234,34 @@ def test_reviewed_traceability_support_constants_match_actual_production_and_mer
         )
 
 
+def test_reviewed_payroll_period_control_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in release.PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS.items():
+        assert release._tree_entry(repository, release.PAYROLL_PERIOD_CONTROL_BASELINE, path) == expected_before
+        assert release._tree_entry(repository, release.PAYROLL_PERIOD_CONTROL_TARGET, path) == expected_target
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PERIOD_CONTROL_BASELINE,
+            release.PAYROLL_PERIOD_CONTROL_TARGET,
+            [path],
+        )
+
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PERIOD_CONTROL_BASELINE,
+            release.PAYROLL_BULK_APPROVAL_TARGET,
+            ["frontend/tests/unit/payroll-period-control.spec.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_PERIOD_CONTROL_BASELINE,
+            release.PAYROLL_PERIOD_CONTROL_TARGET,
+            ["frontend/tests/unit/unreviewed-payroll.spec.js"],
+        )
+
+
 def test_reviewed_payroll_price_uiux_support_matches_exact_business_merge():
     repository = Path(__file__).resolve().parents[1]
     for path, (expected_before, expected_target) in release.PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS.items():

@@ -268,6 +268,16 @@ PINNED_SHIPMENT_CONTROL_TRANSITIONS = {
         ("100644", "blob", "9c75fd47eedc53be794e1d5dda6b114463f81bbb"),
     ),
 }
+# PR #173 adds one payroll period-control regression test. Permit only this
+# exact production-to-merge transition; frontend tests remain denied by default.
+PAYROLL_PERIOD_CONTROL_BASELINE = "bebe066a48f04597d475d6067220f69edbb41d5a"
+PAYROLL_PERIOD_CONTROL_TARGET = "2ffa312769411ee97bf915d18e2154a25b4f109b"
+PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS = {
+    "frontend/tests/unit/payroll-period-control.spec.js": (
+        None,
+        ("100644", "blob", "305eba2e360ec75e8c2d201e2acf85487d861b01"),
+    ),
+}
 # PR #167 also changed this release-control script. Admit only the exact
 # production-to-business-merge transition alongside the reviewed test pin.
 PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS = {
@@ -378,6 +388,13 @@ def _validate_support_transition(repository, before, target, path):
             PAYROLL_SUPPORT_BASELINE,
             PAYROLL_SUPPORT_TARGET,
             f"payroll support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "payroll period control",
+            PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS,
+            PAYROLL_PERIOD_CONTROL_BASELINE,
+            PAYROLL_PERIOD_CONTROL_TARGET,
+            f"payroll period control support exception requires the reviewed baseline and target: {path}",
         ),
         (
             "payroll price UI",
@@ -526,6 +543,7 @@ def _validate_paths(repository, before, target, changed):
             )
             or normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
