@@ -273,9 +273,27 @@ PINNED_SHIPMENT_CONTROL_TRANSITIONS = {
 PAYROLL_PERIOD_CONTROL_BASELINE = "bebe066a48f04597d475d6067220f69edbb41d5a"
 PAYROLL_PERIOD_CONTROL_TARGET = "2ffa312769411ee97bf915d18e2154a25b4f109b"
 PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS = {
+    "frontend/tests/e2e/helpers.js": (
+        ("100644", "blob", "7b0ccc4ddd3d5872f52a9f1d1bb43fa844d7cf3d"),
+        ("100644", "blob", "37d0f2d44407ef268772e24869372c91068bebcf"),
+    ),
+    "frontend/tests/e2e/login-recovery.spec.js": (
+        None,
+        ("100644", "blob", "f42cc217a82c6ec8a218baf7a568122cd4e5b669"),
+    ),
     "frontend/tests/unit/payroll-period-control.spec.js": (
         None,
         ("100644", "blob", "305eba2e360ec75e8c2d201e2acf85487d861b01"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "c206125d46415fb3ee0362312597a15dbf9cf313"),
+        ("100644", "blob", "2a6ce7730035e2c7e34bf81267c3d5b33acd9453"),
+    ),
+}
+PINNED_PAYROLL_PERIOD_CONTROL_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "9c75fd47eedc53be794e1d5dda6b114463f81bbb"),
+        ("100644", "blob", "5529ae62c37d166b299477c28dfe575ec6068815"),
     ),
 }
 # PR #167 also changed this release-control script. Admit only the exact
@@ -501,6 +519,19 @@ def _validate_shipment_control_transition(repository, before, target, path):
         raise RuntimeError(f"shipment release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_period_control_transition(repository, before, target, path):
+    if (before, target) != (PAYROLL_PERIOD_CONTROL_BASELINE, PAYROLL_PERIOD_CONTROL_TARGET):
+        raise RuntimeError(
+            f"payroll period-control release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_PERIOD_CONTROL_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll period-control release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_paths(repository, before, target, changed):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
@@ -532,6 +563,12 @@ def _validate_paths(repository, before, target, changed):
             and (before, target) == (SHIPMENT_SUPPORT_BASELINE, SHIPMENT_SUPPORT_TARGET)
         ):
             _validate_shipment_control_transition(repository, before, target, normalized)
+            continue
+        if (
+            normalized in PINNED_PAYROLL_PERIOD_CONTROL_CONTROL_TRANSITIONS
+            and (before, target) == (PAYROLL_PERIOD_CONTROL_BASELINE, PAYROLL_PERIOD_CONTROL_TARGET)
+        ):
+            _validate_payroll_period_control_transition(repository, before, target, normalized)
             continue
         if (
             (
