@@ -23,6 +23,22 @@
       <div><span>筛选月应发</span><strong>{{ money(monthTotal) }}</strong></div>
     </div>
 
+    <div v-if="periodControl" class="payroll-period-control" data-testid="payroll-period-control">
+      <div class="payroll-period-control-title">
+        <strong>{{ periodControl.payroll_month || month }} 期间控制</strong>
+        <span v-if="controlLoading" class="text-placeholder">刷新中...</span>
+      </div>
+      <div class="payroll-period-control-grid">
+        <div><span>当前状态</span><strong>{{ periodControl.status_label || periodStatusLabel(periodControl.status) }}</strong></div>
+        <div><span>有效版本</span><strong>{{ periodControl.version ? 'V' + periodControl.version : '未生成' }}</strong></div>
+        <div><span>数据截止</span><strong>{{ periodControl.source_cutoff_at || '未冻结' }}</strong></div>
+        <div><span>待处理异常</span><strong :class="{ 'text-warning': Number(periodControl.pending_exception_count || 0) }">{{ periodControl.pending_exception_count ?? 0 }}</strong></div>
+        <div><span>重算</span><strong>{{ periodControl.can_regenerate ? '允许' : periodControl.status === 'unstarted' ? '未生成' : '需按流程处理' }}</strong></div>
+        <div><span>补差/调整</span><strong>{{ periodControl.can_adjust ? '允许' : '须通过修订批次' }}</strong></div>
+      </div>
+      <p v-if="!periodControl.can_adjust" class="payroll-period-control-note">该期间当前版本不允许直接新增调整；请完成当前批次流程后，在修订版本中补录。</p>
+    </div>
+
     <div class="card payroll-table-wrap">
       <div v-if="loading" class="payroll-empty">加载中...</div>
       <div v-else-if="!batches.length" class="payroll-empty">暂无工资批次</div>
@@ -99,6 +115,8 @@ const {
   working,
   selectedId,
   detail,
+  periodControl,
+  controlLoading,
   canPrepare,
   canApprove,
   canExport,
@@ -108,6 +126,7 @@ const {
   monthTotal,
   money,
   statusLabel,
+  periodStatusLabel,
   editable,
   canSubmit,
   idempotency,
@@ -125,5 +144,5 @@ const {
 </script>
 
 <style scoped>
-.payroll-toolbar,.payroll-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.payroll-toolbar h3,.payroll-detail h3{margin:0;font-size:18px}.payroll-toolbar p,.payroll-detail p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.payroll-toolbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.payroll-toolbar-actions .form-input{width:145px}.payroll-summary{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));border-top:1px solid var(--border-light);border-bottom:1px solid var(--border-light);margin-bottom:12px}.payroll-summary div{padding:12px 16px;border-right:1px solid var(--border-light)}.payroll-summary div:last-child{border-right:0}.payroll-summary span{display:block;color:var(--text-placeholder);font-size:12px}.payroll-summary strong{display:block;margin-top:4px;font-size:20px}.payroll-table-wrap{padding:0;overflow-x:auto;border-radius:8px}.payroll-table{width:100%;min-width:900px}.payroll-table tr.selected{background:var(--bg-hover)}.payroll-status{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;background:var(--bg-secondary)}.status-exceptions_pending{color:var(--warning-dark);background:var(--warning-lighter)}.status-review_pending,.status-locked{color:var(--primary);background:var(--primary-light)}.status-confirmed{color:var(--success);background:var(--success-light)}.status-voided{color:var(--danger);background:var(--danger-light)}.payroll-row-actions{display:flex;gap:5px;min-width:210px;flex-wrap:wrap}.payroll-empty{text-align:center;padding:48px;color:var(--text-placeholder)}.payroll-detail{margin-top:16px;padding-top:16px;border-top:2px solid var(--border-light);overflow-x:auto}.payroll-detail-note{padding:10px 12px;margin-top:10px;border-left:3px solid var(--warning);background:var(--warning-lighter);font-size:12px}.text-right{text-align:right}@media(max-width:800px){.payroll-toolbar{flex-direction:column}.payroll-summary{grid-template-columns:repeat(2,1fr)}.payroll-summary div:nth-child(2){border-right:0}.payroll-toolbar-actions{width:100%}}
+.payroll-toolbar,.payroll-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.payroll-toolbar h3,.payroll-detail h3{margin:0;font-size:18px}.payroll-toolbar p,.payroll-detail p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.payroll-toolbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.payroll-toolbar-actions .form-input{width:145px}.payroll-summary{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));border-top:1px solid var(--border-light);border-bottom:1px solid var(--border-light);margin-bottom:12px}.payroll-summary div{padding:12px 16px;border-right:1px solid var(--border-light)}.payroll-summary div:last-child{border-right:0}.payroll-summary span{display:block;color:var(--text-placeholder);font-size:12px}.payroll-summary strong{display:block;margin-top:4px;font-size:20px}.payroll-period-control{padding:12px 16px;margin-bottom:12px;border:1px solid var(--border-light);border-radius:8px;background:var(--bg-secondary)}.payroll-period-control-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.payroll-period-control-grid{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:10px}.payroll-period-control-grid span{display:block;color:var(--text-placeholder);font-size:12px}.payroll-period-control-grid strong{display:block;margin-top:3px;font-size:14px}.payroll-period-control-note{margin:10px 0 0;padding:8px 10px;border-left:3px solid var(--warning);background:var(--warning-lighter);font-size:12px}.payroll-table-wrap{padding:0;overflow-x:auto;border-radius:8px}.payroll-table{width:100%;min-width:900px}.payroll-table tr.selected{background:var(--bg-hover)}.payroll-status{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;background:var(--bg-secondary)}.status-exceptions_pending{color:var(--warning-dark);background:var(--warning-lighter)}.status-review_pending,.status-locked{color:var(--primary);background:var(--primary-light)}.status-confirmed{color:var(--success);background:var(--success-light)}.status-voided{color:var(--danger);background:var(--danger-light)}.payroll-row-actions{display:flex;gap:5px;min-width:210px;flex-wrap:wrap}.payroll-empty{text-align:center;padding:48px;color:var(--text-placeholder)}.payroll-detail{margin-top:16px;padding-top:16px;border-top:2px solid var(--border-light);overflow-x:auto}.payroll-detail-note{padding:10px 12px;margin-top:10px;border-left:3px solid var(--warning);background:var(--warning-lighter);font-size:12px}.text-right{text-align:right}@media(max-width:800px){.payroll-toolbar{flex-direction:column}.payroll-summary{grid-template-columns:repeat(2,1fr)}.payroll-summary div:nth-child(2){border-right:0}.payroll-period-control-grid{grid-template-columns:repeat(2,minmax(120px,1fr))}.payroll-toolbar-actions{width:100%}}
 </style>

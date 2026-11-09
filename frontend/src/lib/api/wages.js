@@ -2,6 +2,7 @@ import { request, buildQuery } from './client.js'
 
 export const wagesApi = {
   listPayrollBatches: (params) => request('GET', '/api/payroll/batches' + buildQuery(params)),
+  getPayrollPeriodControl: (payrollMonth) => request('GET', '/api/payroll/periods/' + encodeURIComponent(payrollMonth) + '/control'),
   createPayrollBatch: (data) => request('POST', '/api/payroll/batches', data),
   getPayrollBatch: (id) => request('GET', '/api/payroll/batches/' + id),
   regeneratePayrollBatch: (id, rowVersion) => request('POST', `/api/payroll/batches/${id}/regenerate`, { row_version: rowVersion }),

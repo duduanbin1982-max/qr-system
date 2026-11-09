@@ -738,6 +738,7 @@ class PayrollWorkflowService:
         if amount_cents <= 0:
             raise ValueError("调整金额必须大于 0")
         with BaseService.transaction() as db:
+            PayrollWorkflowService._ensure_adjustment_period_editable(month, db)
             employee = PayrollRepository.user_snapshot(employee_id, db)
             if not employee:
                 raise ValueError("员工不存在")
@@ -762,6 +763,9 @@ class PayrollWorkflowService:
             original = PayrollRepository.get_adjustment(adjustment_id, db)
             if not original:
                 raise ValueError("调整项不存在")
+            PayrollWorkflowService._ensure_adjustment_period_editable(
+                original["payroll_month"], db, action="冲销工资调整"
+            )
             if original.get("reversal_of_id"):
                 raise ValueError("不能再次冲销冲销记录")
             if PayrollRepository.has_adjustment_reversal(adjustment_id, db):
@@ -778,6 +782,25 @@ class PayrollWorkflowService:
                 "reason": reason.strip(), "payload": {"adjustment_id": adjustment_id, "reversal_id": new_id},
             }, db)
             return {"ok": True, "id": new_id, "reversal_of_id": adjustment_id}
+
+    @staticmethod
+    def _ensure_adjustment_period_editable(month, db, action="新增工资调整"):
+        """Prevent adjustments from bypassing a submitted or finalized snapshot."""
+        batch = PayrollRepository.latest_active_batch(month, db)
+        if not batch:
+            return
+        if batch.get("legacy_imported"):
+            raise ValueError(f"{month} 期间为旧版导入快照，不能直接{action}，请通过修订批次处理")
+        if batch["status"] in ("draft", "exceptions_pending"):
+            return
+        if batch["status"] in ("locked", "confirmed"):
+            label = "锁定" if batch["status"] == "locked" else "确认"
+            raise ValueError(
+                f"{month} 期间已{label}，不能直接{action}，请先通过修订批次或补差流程处理"
+            )
+        raise ValueError(
+            f"{month} 期间已提交复核，不能直接{action}，请先生成可编辑的修订批次"
+        )
 
     @staticmethod
     def serialize_batch(batch):
@@ -822,6 +845,41 @@ class PayrollWorkflowService:
             {**batch, "input_changed": PayrollCalculationService.input_changed(batch, db)}
             for batch in PayrollRepository.list_batches(month, status, db)
         ]}
+
+    @staticmethod
+    def period_control(month):
+        """Summarize the current payroll-period controls for UI and operators."""
+        month = validate_payroll_month(month)
+        db = BaseService.db()
+        batch = PayrollRepository.latest_active_batch(month, db)
+        exceptions = (
+            PayrollRepository.list_exceptions(batch_id=batch["id"], db=db)
+            if batch else []
+        )
+        pending_statuses = {"pending", "proposed", "rejected"}
+        adjustment_statuses = {"draft", "exceptions_pending"}
+        regenerate_statuses = {"draft", "exceptions_pending"}
+        status = batch["status"] if batch else "unstarted"
+        can_adjust = batch is None or (
+            status in adjustment_statuses and not batch.get("legacy_imported")
+        )
+        return {
+            "payroll_month": month,
+            "status": status,
+            "batch": PayrollWorkflowService.serialize_batch(batch),
+            "version": batch.get("version") if batch else None,
+            "source_cutoff_at": batch.get("source_cutoff_at") if batch else None,
+            "exception_count": len(exceptions),
+            "pending_exception_count": sum(
+                1 for item in exceptions if item.get("status") in pending_statuses
+            ),
+            "adjustment_count": len(PayrollRepository.list_adjustments(month, db=db)),
+            "can_adjust": can_adjust,
+            "can_regenerate": bool(
+                batch and status in regenerate_statuses and not batch.get("legacy_imported")
+            ),
+            "requires_revision": bool(batch and not can_adjust),
+        }
 
     @staticmethod
     def compare_batches(batch_id, other_id):

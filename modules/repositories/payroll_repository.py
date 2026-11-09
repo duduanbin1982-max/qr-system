@@ -78,6 +78,16 @@ class PayrollRepository:
         return dict(row) if row else None
 
     @staticmethod
+    def latest_active_batch(month, db=None):
+        """Return the newest non-voided batch governing a payroll period."""
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_batches WHERE payroll_month=? AND status<>'voided' "
+            "ORDER BY version DESC,id DESC LIMIT 1", (month,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def insert_batch(payload, db):
         columns = (
             "payroll_month", "version", "period_start", "period_end", "status", "source_cutoff_at",

@@ -433,11 +433,12 @@ def test_submitted_snapshot_freezes_inputs_through_lock_and_confirmation(
         ) is with_snapshot_digest
         _copy_work(db, work_id)
         _manual_resolution(db, work_id, approver)
-        PayrollWorkflowService.create_adjustment(
-            preparer, {"employee_id": employee_id, "payroll_month": "2026-07",
-                       "adjustment_type": "bonus", "amount_cents": 100,
-                       "reason": "已提交后的新奖金"},
-        )
+        with pytest.raises(ValueError, match="已提交复核"):
+            PayrollWorkflowService.create_adjustment(
+                preparer, {"employee_id": employee_id, "payroll_month": "2026-07",
+                           "adjustment_type": "bonus", "amount_cents": 100,
+                           "reason": "已提交后的新奖金"},
+            )
         assert PayrollWorkflowService.batch_detail(batch["id"])["batch"]["input_changed"] is False
         locked = PayrollWorkflowService.lock(batch["id"], approver, submitted["row_version"])
         confirmed = PayrollWorkflowService.confirm(batch["id"], approver, locked["row_version"])
