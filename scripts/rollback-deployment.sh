@@ -88,7 +88,7 @@ for _ in {1..20}; do
     health_payload="$(curl -ksSf --max-time 5 "$HEALTH_URL" 2>/dev/null || true)"
     if [[ -n "$health_payload" ]] && printf '%s' "$health_payload" \
         | python3 -c 'import json,sys; raise SystemExit(json.load(sys.stdin).get("status") != "ok")'; then
-        if [[ "$deployment_scope" == "backend_frontend_static" ]] \
+        if [[ "$deployment_scope" == "backend_frontend_static" || "$deployment_scope" == "backend_frontend_migration" ]] \
             && ! printf '%s' "$health_payload" \
                 | python3 -c 'import json,sys; p=json.load(sys.stdin); raise SystemExit(p.get("db") != "connected" or p.get("commit") != sys.argv[1] or p.get("write_fenced") is not True or p.get("deployment_key") != sys.argv[2])' \
                     "$before_commit" "$deployment_key"; then
@@ -126,10 +126,14 @@ for _ in {1..20}; do
             # release-fence already wrote the terminal non-data rollback state.
             exit 0
         fi
+        rollback_detail="failure snapshot preserved; code, database, attachments, and release restored"
+        if [[ "$deployment_scope" == "backend_frontend_migration" ]]; then
+            rollback_detail="failure snapshot preserved; code, database, and release restored; unchanged attachments verified"
+        fi
         python3 "$MANIFEST_TOOL_SNAPSHOT" update \
             --manifest "$MANIFEST_PATH" \
             --status rolled_back \
-            --detail "failure snapshot preserved; code, database, attachments, and release restored"
+            --detail "$rollback_detail"
         exit 0
     fi
     sleep 1

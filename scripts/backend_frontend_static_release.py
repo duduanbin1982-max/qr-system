@@ -296,6 +296,39 @@ PINNED_PAYROLL_PERIOD_CONTROL_CONTROL_TRANSITIONS = {
         ("100644", "blob", "5529ae62c37d166b299477c28dfe575ec6068815"),
     ),
 }
+# PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
+# launcher consumes these exact support/control transitions; the ordinary
+# backend/static launcher continues to reject migration paths and V96->V97.
+PAYROLL_SETTLEMENT_BASELINE = "2ffa312769411ee97bf915d18e2154a25b4f109b"
+PAYROLL_SETTLEMENT_TARGET = "c369cf212a2054e14cff0d17b76e5501d26a0b06"
+PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS = {
+    "frontend/tests/e2e/payroll-settlement.spec.js": (
+        None,
+        ("100644", "blob", "6b4de82f7e94bc7a74fab3a05ad00fa5999e6143"),
+    ),
+    "frontend/tests/unit/api-transport-contract.spec.js": (
+        ("100644", "blob", "86bd56998d0bac6bce1a80b82e46abfc6386a191"),
+        ("100644", "blob", "2ec12a081d5362138166bb866bad587ae5991d53"),
+    ),
+    "frontend/tests/unit/payroll-settlement.spec.js": (
+        None,
+        ("100644", "blob", "5107a80e2333ff9b4050a55c8db3443798ad3c0a"),
+    ),
+    "frontend/tests/unit/wageTabs.spec.js": (
+        ("100644", "blob", "0bb211ed5078d9168716fdc2f31a800ba75084e0"),
+        ("100644", "blob", "938703f1a423acebea046b41dc78f334c822a344"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "2a6ce7730035e2c7e34bf81267c3d5b33acd9453"),
+        ("100644", "blob", "aadf321dd68e072b9ec82ba8a92fec970fbddfad"),
+    ),
+}
+PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "5529ae62c37d166b299477c28dfe575ec6068815"),
+        ("100644", "blob", "5c3fd55d05db4a0c446a188f7f39fa38e09f2637"),
+    ),
+}
 # PR #167 also changed this release-control script. Admit only the exact
 # production-to-business-merge transition alongside the reviewed test pin.
 PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS = {
@@ -415,6 +448,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll period control support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll settlement",
+            PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
+            PAYROLL_SETTLEMENT_BASELINE,
+            PAYROLL_SETTLEMENT_TARGET,
+            f"payroll settlement support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll price UI",
             PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS,
             PAYROLL_PRICE_UIUX_BASELINE,
@@ -532,6 +572,19 @@ def _validate_payroll_period_control_transition(repository, before, target, path
         raise RuntimeError(f"payroll period-control release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_settlement_control_transition(repository, before, target, path):
+    if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
+        raise RuntimeError(
+            f"payroll settlement release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll settlement release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_paths(repository, before, target, changed):
     for path in changed:
         normalized = PurePosixPath(path).as_posix()
@@ -571,6 +624,12 @@ def _validate_paths(repository, before, target, changed):
             _validate_payroll_period_control_transition(repository, before, target, normalized)
             continue
         if (
+            normalized in PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS
+            and (before, target) == (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET)
+        ):
+            _validate_payroll_settlement_control_transition(repository, before, target, normalized)
+            continue
+        if (
             (
                 normalized in PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS
                 and (
@@ -581,6 +640,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
+            or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS

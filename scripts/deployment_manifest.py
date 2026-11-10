@@ -29,6 +29,7 @@ WRITE_FENCE_SCHEMA = "qr-system-write-fence/v1"
 DEPLOYMENT_SCOPE_FULL = "full"
 DEPLOYMENT_SCOPE_CODE_ONLY = "code_only"
 DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC = "backend_frontend_static"
+DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION = "backend_frontend_migration"
 NON_DATA_RELEASE_SCOPES = {
     DEPLOYMENT_SCOPE_CODE_ONLY,
     DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
@@ -297,6 +298,7 @@ def prepare_deployment_manifest(args):
         DEPLOYMENT_SCOPE_FULL,
         DEPLOYMENT_SCOPE_CODE_ONLY,
         DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+        DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
     }:
         raise RuntimeError(f"unsupported deployment scope: {scope!r}")
     existing = None
@@ -339,7 +341,10 @@ def prepare_deployment_manifest(args):
     with tarfile.open(release_backup, "r:gz") as archive:
         safe_tar_members(archive, MANAGED_RELEASE_ROOTS)
     target_static = None
-    if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC:
+    if scope in {
+        DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+        DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
+    }:
         target_static_path = Path(args.target_static_backup).resolve()
         if not target_static_path.is_file():
             raise RuntimeError("built frontend static backup does not exist")
@@ -368,10 +373,17 @@ def prepare_deployment_manifest(args):
         "deployment_key": args.deployment_key,
         "scope": scope,
         "operations": {
-            "database_migration": scope == DEPLOYMENT_SCOPE_FULL,
+            "database_migration": scope in {
+                DEPLOYMENT_SCOPE_FULL,
+                DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
+            },
             "attachment_migration": scope == DEPLOYMENT_SCOPE_FULL,
             "frontend_publish": scope
-            in {DEPLOYMENT_SCOPE_FULL, DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC},
+            in {
+                DEPLOYMENT_SCOPE_FULL,
+                DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+                DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
+            },
             "code_switch": True,
             "service_restart": True,
         },
@@ -560,6 +572,14 @@ def managed_path_inventory(project_root, roots):
         "manifest_sha256": canonical_digest(files),
         "files": files,
     }
+
+
+def inventory_content_identity(inventory):
+    """Compare managed content by path and digest, independent of stat quirks."""
+    return tuple(
+        (item["path"], item["sha256"])
+        for item in sorted(inventory.get("files", []), key=lambda value: value["path"])
+    )
 
 
 def code_only_state(database, project_root):
@@ -1365,8 +1385,23 @@ def restore_deployment(args):
             observed["user_version"],
         )
         return
-    if scope != DEPLOYMENT_SCOPE_FULL:
+    if scope not in {
+        DEPLOYMENT_SCOPE_FULL,
+        DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
+    }:
         raise RuntimeError(f"unsupported deployment scope in rollback: {scope!r}")
+
+    project_root = Path(args.project_root).resolve()
+    if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION:
+        current_attachments = managed_path_inventory(
+            project_root, MANAGED_ATTACHMENT_ROOTS
+        )
+        if inventory_content_identity(current_attachments) != inventory_content_identity(
+            backup["attachments"]["inventory"]
+        ):
+            raise RuntimeError(
+                "migration rollback refused because managed attachments changed"
+            )
 
     database = Path(args.database).resolve()
     database.parent.mkdir(parents=True, exist_ok=True)
@@ -1380,14 +1415,18 @@ def restore_deployment(args):
     finally:
         temporary.unlink(missing_ok=True)
 
-    project_root = Path(args.project_root).resolve()
-    restore_archive(attachment_backup, project_root, MANAGED_ATTACHMENT_ROOTS)
+    if scope == DEPLOYMENT_SCOPE_FULL:
+        restore_archive(attachment_backup, project_root, MANAGED_ATTACHMENT_ROOTS)
     restore_archive(release_backup, project_root, MANAGED_RELEASE_ROOTS)
 
     record_verified_rollback_scope(
         args.manifest,
         "data_restored",
-        "database, attachments, and release assets restored from verified backups",
+        (
+            "database and release assets restored; unchanged attachments verified"
+            if scope == DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION
+            else "database, attachments, and release assets restored from verified backups"
+        ),
         observed["user_version"],
     )
 
@@ -1423,6 +1462,7 @@ def build_parser():
             DEPLOYMENT_SCOPE_FULL,
             DEPLOYMENT_SCOPE_CODE_ONLY,
             DEPLOYMENT_SCOPE_BACKEND_FRONTEND_STATIC,
+            DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
         ),
         default=DEPLOYMENT_SCOPE_FULL,
     )
