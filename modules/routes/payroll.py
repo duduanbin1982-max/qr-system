@@ -10,6 +10,10 @@ from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
 from modules.services.payroll_service import PayrollWorkflowService
 from modules.services.payroll_read_service import PayrollReadService
+from modules.services.payroll_settlement_service import (
+    MAX_RECEIPT_BYTES,
+    PayrollSettlementService,
+)
 from modules.services.price_version_service import PriceVersionService
 from modules.services.historical_price_binding_service import HistoricalPriceBindingService
 from modules.domain.payroll_policy import PayrollConflictError
@@ -33,8 +37,28 @@ def _json_error(exc):
     return jsonify({"error": str(exc)}), 400
 
 
+def _no_store_json(payload, status=200):
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response if status == 200 else (response, status)
+
+
 def _actor():
     return getattr(g, "current_user", {}) or {}
+
+
+def _idempotency_key(data=None):
+    data = data or {}
+    return request.headers.get("Idempotency-Key") or data.get("idempotency_key")
+
+
+def _json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("请求内容必须是 JSON 对象")
+    return data
 
 
 @app.route("/api/payroll/me", methods=["GET"])
@@ -233,12 +257,160 @@ def payroll_batch_export(batch_id):
         safe_values = [("'" + str(value)) if str(value).startswith(("=", "+", "-", "@")) else value for value in values]
         writer.writerow(safe_values)
     output.seek(0)
-    safe_audit_log("payroll_export", "payroll_batch", batch_id, "formal payroll export")
-    return send_file(
+    safe_audit_log("payroll_export_preview", "payroll_batch", batch_id, "preview only")
+    response = send_file(
         io.BytesIO(output.getvalue().encode("utf-8-sig")),
         mimetype="text/csv; charset=utf-8-sig", as_attachment=True,
-        download_name=f"payroll_{batch['payroll_month']}_v{batch['version']}.csv",
+        download_name=f"payroll_preview_{batch['payroll_month']}_v{batch['version']}.csv",
     )
+    response.headers["X-Payroll-Export-Mode"] = "preview"
+    response.headers["X-Payroll-Export-Notice"] = (
+        "Preview only; use settlement export APIs for payment lists."
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/payroll/batches/<int:batch_id>/settlement", methods=["GET"])
+@check_auth
+def payroll_settlement_detail(batch_id):
+    if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
+        return _deny()
+    try:
+        return _no_store_json(PayrollSettlementService.get_by_batch(batch_id))
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/batches/<int:batch_id>/settlement/exports", methods=["POST"])
+@check_auth
+def payroll_settlement_export_create(batch_id):
+    if not _allowed("wages:export"):
+        return _deny()
+    try:
+        data = _json_object()
+        result = PayrollSettlementService.create_export(
+            batch_id, _actor(), _idempotency_key(data)
+        )
+        safe_audit_log(
+            "payroll_settlement_export_created", "payroll_batch", batch_id,
+            str(result.get("id", "")),
+        )
+        return _no_store_json(result, 200 if result.get("replayed") else 201)
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/settlement/exports/<int:export_id>/download", methods=["GET"])
+@check_auth
+def payroll_settlement_export_download(export_id):
+    if not _allowed("wages:export"):
+        return _deny()
+    try:
+        content = PayrollSettlementService.download_export(export_id)
+        safe_audit_log(
+            "payroll_settlement_export_downloaded", "payroll_export_batch", export_id, ""
+        )
+        response = send_file(
+            io.BytesIO(content),
+            mimetype="text/csv; charset=utf-8-sig",
+            as_attachment=True,
+            download_name=f"payroll_payment_list_{export_id}.csv",
+        )
+        response.headers["X-Payroll-Export-Mode"] = "payment_list"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/settlement/exports/<int:export_id>/receipts", methods=["POST"])
+@check_auth
+def payroll_settlement_receipt_upload(export_id):
+    if not _allowed("wages:receipt"):
+        return _deny()
+    if (
+        request.content_length is not None
+        and request.content_length > MAX_RECEIPT_BYTES + 64 * 1024
+    ):
+        return jsonify({"error": "回执文件不能超过 2 MB"}), 413
+    receipt_file = request.files.get("file") or request.files.get("receipt")
+    if receipt_file is None:
+        return jsonify({"error": "缺少回执 CSV 文件"}), 400
+    content = receipt_file.stream.read(MAX_RECEIPT_BYTES + 1)
+    if len(content) > MAX_RECEIPT_BYTES:
+        return jsonify({"error": "回执文件不能超过 2 MB"}), 400
+    try:
+        result = PayrollSettlementService.upload_receipt(
+            export_id,
+            _actor(),
+            request.headers.get("Idempotency-Key") or request.form.get("idempotency_key"),
+            receipt_file.filename,
+            content,
+        )
+        safe_audit_log(
+            "payroll_settlement_receipt_uploaded", "payroll_export_batch", export_id,
+            str(result.get("id", "")),
+        )
+        return _no_store_json(result, 200 if result.get("replayed") else 201)
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/settlements/<int:settlement_id>/reconcile", methods=["POST"])
+@check_auth
+def payroll_settlement_reconcile(settlement_id):
+    if not _allowed("wages:reconcile"):
+        return _deny()
+    try:
+        data = _json_object()
+        result = PayrollSettlementService.reconcile(
+            settlement_id, _actor(), _idempotency_key(data)
+        )
+        safe_audit_log(
+            "payroll_settlement_reconciled", "payroll_settlement", settlement_id,
+            str(result.get("id", "")),
+        )
+        return _no_store_json(result, 200 if result.get("replayed") else 201)
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/settlement/differences/<int:item_id>/resolve", methods=["POST"])
+@check_auth
+def payroll_settlement_difference_resolve(item_id):
+    if not _allowed("wages:reconcile"):
+        return _deny()
+    try:
+        data = _json_object()
+        data["idempotency_key"] = _idempotency_key(data)
+        result = PayrollSettlementService.resolve_difference(item_id, _actor(), data)
+        safe_audit_log(
+            "payroll_settlement_difference_resolved",
+            "payroll_reconciliation_item", item_id,
+            str(data.get("resolution_code", "")),
+        )
+        return _no_store_json(result, 200 if result.get("replayed") else 201)
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/settlements/<int:settlement_id>/close", methods=["POST"])
+@check_auth
+def payroll_settlement_close(settlement_id):
+    if not _allowed("wages:close"):
+        return _deny()
+    try:
+        data = _json_object()
+        data["idempotency_key"] = _idempotency_key(data)
+        result = PayrollSettlementService.close(settlement_id, _actor(), data)
+        safe_audit_log(
+            "payroll_settlement_closed", "payroll_settlement", settlement_id,
+            str(result.get("id", "")),
+        )
+        return _no_store_json(result, 200 if result.get("replayed") else 201)
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
 
 
 @app.route("/api/payroll/exceptions", methods=["GET"])

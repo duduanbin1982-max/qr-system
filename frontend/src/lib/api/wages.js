@@ -1,4 +1,4 @@
-import { request, buildQuery } from './client.js'
+import { request, buildQuery, uploadFile } from './client.js'
 
 export const wagesApi = {
   listPayrollBatches: (params) => request('GET', '/api/payroll/batches' + buildQuery(params)),
@@ -11,6 +11,13 @@ export const wagesApi = {
   confirmPayrollBatch: (id, rowVersion) => request('POST', `/api/payroll/batches/${id}/confirm`, { row_version: rowVersion }),
   voidPayrollBatch: (id, rowVersion, reason) => request('POST', `/api/payroll/batches/${id}/void`, { row_version: rowVersion, reason }),
   revisePayrollBatch: (id, data) => request('POST', `/api/payroll/batches/${id}/revisions`, data),
+  getPayrollSettlement: (batchId) => request('GET', `/api/payroll/batches/${batchId}/settlement`),
+  createPayrollSettlementExport: (batchId, data) => request('POST', `/api/payroll/batches/${batchId}/settlement/exports`, data),
+  payrollSettlementExportDownloadUrl: (exportId) => `/api/payroll/settlement/exports/${exportId}/download`,
+  uploadPayrollSettlementReceipt: (exportId, formData) => uploadFile(`/api/payroll/settlement/exports/${exportId}/receipts`, formData),
+  reconcilePayrollSettlement: (settlementId, data) => request('POST', `/api/payroll/settlements/${settlementId}/reconcile`, data),
+  resolvePayrollSettlementDifference: (itemId, data) => request('POST', `/api/payroll/settlement/differences/${itemId}/resolve`, data),
+  closePayrollSettlement: (settlementId, data) => request('POST', `/api/payroll/settlements/${settlementId}/close`, data),
   comparePayrollBatches: (id, otherId) => request('GET', `/api/payroll/batches/${id}/compare/${otherId}`),
   getMyPayroll: (payrollMonth) => request('GET', '/api/payroll/me' + buildQuery({ payroll_month: payrollMonth })),
   listPayrollExceptions: (params) => request('GET', '/api/payroll/exceptions' + buildQuery(params)),

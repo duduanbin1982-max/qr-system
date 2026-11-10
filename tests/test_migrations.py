@@ -41,6 +41,13 @@ def test_run_migrations_uses_supplied_connection():
         assert "quality_capa_records" in table_names
         assert "quality_supplier_inspections" in table_names
         assert "quality_gauges" in table_names
+        assert {
+            "payroll_settlements",
+            "payroll_export_batches",
+            "payroll_receipt_batches",
+            "payroll_reconciliation_runs",
+            "payroll_close_records",
+        }.issubset(table_names)
         order_columns = {
             row["name"] for row in db.execute("PRAGMA table_info(orders)").fetchall()
         }
@@ -135,8 +142,10 @@ def test_read_only_migration_plan_does_not_modify_database(tmp_path):
 
     assert report["connection_mode"] == "read-only"
     assert report["current_version"] == 70
-    assert report["target_version"] == 96
-    assert [item["version"] for item in report["pending"]] == list(range(71, 97))
+    from modules.migrations import LATEST_VERSION
+
+    assert report["target_version"] == LATEST_VERSION
+    assert [item["version"] for item in report["pending"]] == list(range(71, LATEST_VERSION + 1))
     assert database.read_bytes() == before
 
 
@@ -261,6 +270,7 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_schedule_standard_binding_v085",
             "modules.migration_production_nodes",
             "modules.migration_inventory_product_views",
+        "modules.migration_payroll_settlement",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -374,7 +384,7 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[94] == "modules.migration_production_nodes"
     assert by_version[95] == "modules.migration_production_nodes"
     assert by_version[96] == "modules.migration_inventory_product_views"
-    assert migrations.LATEST_VERSION == 96
+    assert migrations.LATEST_VERSION == 97
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():
@@ -1352,6 +1362,57 @@ def test_failed_migration_does_not_advance_database_version(monkeypatch):
         with pytest.raises(sqlite3.OperationalError, match="table_that_does_not_exist"):
             migrations.run_migrations(db)
         assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_payroll_settlement_migration_rolls_back_all_ddl_on_failure():
+    from modules.migration_payroll_settlement import m097_payroll_settlement
+
+    db = sqlite3.connect(":memory:")
+
+    def deny_last_trigger(action, object_name, _table_name, _database_name, _source):
+        if (
+            action == sqlite3.SQLITE_CREATE_TRIGGER
+            and object_name == "prevent_payroll_settlement_delete"
+        ):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    db.set_authorizer(deny_last_trigger)
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            m097_payroll_settlement(db)
+        table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='payroll_settlements'"
+        ).fetchone()
+        assert table is None
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_schema_96_upgrades_only_payroll_settlement_migration():
+    from modules import migrations
+
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(
+            """
+            CREATE TABLE users(id INTEGER PRIMARY KEY);
+            CREATE TABLE payroll_batches(id INTEGER PRIMARY KEY);
+            CREATE TABLE payroll_employee_lines(id INTEGER PRIMARY KEY);
+            PRAGMA user_version=96;
+            """
+        )
+
+        assert migrations.run_migrations(db) == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 97
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='payroll_settlements'"
+        ).fetchone()
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         db.close()
 

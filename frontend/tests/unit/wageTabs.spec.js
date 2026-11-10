@@ -10,7 +10,7 @@ describe('wage tab policy', () => {
     expect(Object.isFrozen(WAGE_TAB_DEFINITIONS)).toBe(true)
     expect(Object.isFrozen(WAGE_TAB_DEFINITIONS[0])).toBe(true)
     expect(WAGE_TAB_DEFINITIONS.map(tab => tab.id)).toEqual([
-      'ledger', 'exceptions', 'adjustment', 'priceversions', 'my', 'piece',
+      'ledger', 'settlement', 'exceptions', 'adjustment', 'priceversions', 'my', 'piece',
       'monthly', 'process', 'compare', 'trend', 'position', 'predict',
     ])
   })
@@ -18,6 +18,13 @@ describe('wage tab policy', () => {
   it('filters tabs by any granted permission', () => {
     const visible = getVisibleWageTabs(permission => permission === 'wages:view_self')
     expect(visible.map(tab => tab.id)).toEqual(['my'])
+  })
+
+  it('exposes settlement to finance permissions but not employee self-view', () => {
+    const visible = getVisibleWageTabs(permission => permission === 'wages:receipt')
+    expect(visible.map(tab => tab.id)).toContain('settlement')
+    expect(getVisibleWageTabs(permission => permission === 'wages:view_self')
+      .map(tab => tab.id)).not.toContain('settlement')
   })
 
   it('prefers an allowed URL tab, then allowed persisted state, then the first tab', () => {

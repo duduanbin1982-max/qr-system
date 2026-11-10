@@ -63,6 +63,9 @@ ACTION_LABELS = {
     "allocate": "分配",
     "reserve": "预留",
     "manage_threshold": "安全库存管理",
+    "receipt": "支付回执",
+    "reconcile": "财务对账",
+    "close": "结账锁定",
 }
 
 ACTION_PERMISSION_DEFS = {
@@ -167,7 +170,10 @@ ACTION_PERMISSION_DEFS = {
     ),
     "wages": (
         "工资核算",
-        ["view", "edit", "view_self", "view_all", "prepare", "approve", "export"],
+        [
+            "view", "edit", "view_self", "view_all", "prepare", "approve",
+            "export", "receipt", "reconcile", "close",
+        ],
     ),
     "performance": (
         "绩效量化",
@@ -410,6 +416,9 @@ PERMISSION_IMPLICATIONS = {
     "wages:prepare": ["wages:view", "wages:view_all"],
     "wages:approve": ["wages:view", "wages:view_all"],
     "wages:export": ["wages:view", "wages:view_all"],
+    "wages:receipt": ["wages:view", "wages:view_all"],
+    "wages:reconcile": ["wages:view", "wages:view_all"],
+    "wages:close": ["wages:view", "wages:view_all"],
     "performance:review_department": ["performance:view_department"],
     "performance:prepare": ["performance:view_all"],
     "performance:approve": ["performance:view_all"],
