@@ -267,6 +267,100 @@ describe('payroll settlement workspace', () => {
     wrapper.unmount()
   })
 
+  it('shows every export version and filters differences by type, blocking state, and employee', async () => {
+    mocks.wages.getPayrollSettlement.mockResolvedValue(settlement({
+      status: 'difference_pending',
+      current_export: {
+        id: 72, export_version: 2, row_count: 4, total_cents: 12500,
+        content_sha256: 'current-digest', created_at: '2026-09-03 09:00:00',
+      },
+      exports: [
+        { id: 72, export_version: 2, status: 'active', row_count: 4, total_cents: 12500 },
+        { id: 71, export_version: 1, status: 'superseded', row_count: 4, total_cents: 12500 },
+      ],
+      receipt_batches: [{ id: 81, status: 'accepted', accepted_row_count: 4, failed_row_count: 0 }],
+      latest_reconciliation: {
+        run_version: 2,
+        status: 'difference_pending',
+        blocking_count: 1,
+        items: [
+          {
+            id: 61, difference_type: 'underpaid', payment_reference: 'PAY-EMP-1',
+            employee_no_snapshot: 'EMP-001', employee_name_snapshot: '张三',
+            expected_cents: 10000, successful_paid_cents: 8000, difference_cents: 2000,
+            blocking: 1, detail_json: '{}',
+          },
+          {
+            id: 62, difference_type: 'unknown_reference', payment_reference: 'PAY-UNKNOWN',
+            expected_cents: 0, successful_paid_cents: 0, difference_cents: 0,
+            blocking: 0, detail_json: '{}',
+          },
+        ],
+      },
+    }))
+    const wrapper = mountTab()
+    await flushPromises()
+
+    const versions = wrapper.get('[data-testid="export-version-list"]')
+    expect(versions.text()).toContain('V2')
+    expect(versions.text()).toContain('当前有效')
+    expect(versions.text()).toContain('V1')
+    expect(versions.text()).toContain('已被替代')
+    expect(wrapper.find('[data-testid="settlement-difference-61"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settlement-difference-62"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="difference-type-filter"]').setValue('underpaid')
+    expect(wrapper.find('[data-testid="settlement-difference-61"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settlement-difference-62"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="blocking-filter"]').setValue('informational')
+    expect(wrapper.text()).toContain('没有符合当前筛选条件的差异')
+    await wrapper.get('[data-testid="difference-type-filter"]').setValue('all')
+    expect(wrapper.find('[data-testid="settlement-difference-62"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="blocking-filter"]').setValue('all')
+    await wrapper.get('[data-testid="employee-filter"]').setValue('张三')
+    expect(wrapper.find('[data-testid="settlement-difference-61"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settlement-difference-62"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows and confirms the final close summary before locking the settlement', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('财务核对完成')
+    mocks.wages.getPayrollSettlement.mockResolvedValue(settlement({
+      status: 'reconciled',
+      successful_paid_cents: 12500,
+      difference_cents: 0,
+      current_export: {
+        id: 72, export_version: 2, row_count: 4, total_cents: 12500,
+        content_sha256: 'current-digest',
+      },
+      exports: [{ id: 72, export_version: 2, status: 'active', row_count: 4, total_cents: 12500 }],
+      receipt_batches: [{ id: 81 }, { id: 82 }],
+      latest_reconciliation: { run_version: 3, status: 'reconciled', blocking_count: 0, items: [] },
+      can_close: true,
+    }))
+    const wrapper = mountTab()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('最终金额 ¥125.00')
+    expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('当前导出版本 V2')
+    expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('回执批次数量 2')
+    expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('对账运行版本 第 3 次')
+    await wrapper.get('[data-testid="close-settlement"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('最终金额：¥125.00'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('当前导出版本：V2'))
+    expect(mocks.wages.closePayrollSettlement).toHaveBeenCalledWith(51, {
+      row_version: 4,
+      close_reason: '财务核对完成',
+      idempotency_key: expect.stringMatching(/^payroll-settlement-ui:close:/),
+    })
+    confirm.mockRestore()
+    prompt.mockRestore()
+    wrapper.unmount()
+  })
+
   it('hides settlement actions from a self-view-only employee', async () => {
     mocks.permissions = new Set(['wages:view_self'])
     const wrapper = mountTab()

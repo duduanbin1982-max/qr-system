@@ -189,6 +189,274 @@ def _receipt_digest(receipt_items, resolutions):
     return _sha256(_json({"receipts": rows, "resolutions": resolutions}).encode("utf-8"))
 
 
+def _finding(export_item_id, reference, expected, paid, kind, blocking, detail):
+    return {
+        "export_item_id": export_item_id,
+        "payment_reference": reference,
+        "expected_cents": int(expected),
+        "successful_paid_cents": int(paid),
+        "difference_cents": int(expected) - int(paid),
+        "difference_type": kind,
+        "blocking": int(bool(blocking)),
+        "detail_json": _json(detail),
+    }
+
+
+def _resolution_receipt_ids(resolutions):
+    excluded_ids = {
+        int(row["receipt_item_id"]) for row in resolutions
+        if row.get("receipt_item_id") is not None
+        and row["resolution_code"] in ("exclude_duplicate", "exclude_unknown_reference")
+    }
+    accepted_name_ids = {
+        int(row["receipt_item_id"]) for row in resolutions
+        if row.get("receipt_item_id") is not None
+        and row["resolution_code"] == "accept_name_mismatch"
+    }
+    return excluded_ids, accepted_name_ids
+
+
+def _partition_receipts(receipt_items, expected_by_ref, excluded_ids):
+    grouped = {}
+    unknown = []
+    invalid = []
+    for receipt in receipt_items:
+        if int(receipt["id"]) in excluded_ids:
+            continue
+        if receipt["validation_status"] != "valid":
+            invalid.append(receipt)
+        elif receipt["payment_reference"] not in expected_by_ref:
+            unknown.append(receipt)
+        else:
+            grouped.setdefault(receipt["payment_reference"], []).append(receipt)
+    return grouped, unknown, invalid
+
+
+def _success_identity(export_item, receipts, accepted_name_ids):
+    reference = export_item["payment_reference"]
+    expected = int(export_item["payable_cents"])
+    identity_valid = []
+    findings = []
+    for receipt in (row for row in receipts if row["payment_status"] == "success"):
+        number_mismatch = (
+            bool(export_item["employee_no_snapshot"])
+            and receipt["employee_no_snapshot"] != export_item["employee_no_snapshot"]
+        )
+        name_mismatch = (
+            bool(export_item["employee_name_snapshot"])
+            and receipt["employee_name_snapshot"] != export_item["employee_name_snapshot"]
+        )
+        accepted_name = int(receipt["id"]) in accepted_name_ids
+        if number_mismatch or (name_mismatch and not accepted_name):
+            findings.append(_finding(
+                export_item["id"], reference, expected, int(receipt["paid_cents"] or 0),
+                "employee_mismatch", True,
+                {
+                    "receipt_item_id": receipt["id"],
+                    "employee_no_mismatch": number_mismatch,
+                    "employee_name_mismatch": name_mismatch,
+                },
+            ))
+        else:
+            identity_valid.append(receipt)
+    return identity_valid, findings
+
+
+def _deduplicate_successes(export_item, receipts, transaction_receipt_ids):
+    unique_receipts = []
+    findings = []
+    for receipt in receipts:
+        transaction_no = str(receipt.get("external_transaction_no") or "").strip()
+        first_receipt_id = transaction_receipt_ids.get(transaction_no) if transaction_no else None
+        if first_receipt_id is not None:
+            findings.append(_finding(
+                export_item["id"], export_item["payment_reference"],
+                int(export_item["payable_cents"]), int(receipt["paid_cents"] or 0),
+                "duplicate_success", True,
+                {
+                    "receipt_item_id": receipt["id"],
+                    "first_success_receipt_item_id": first_receipt_id,
+                    "external_transaction_no": transaction_no,
+                },
+            ))
+            continue
+        unique_receipts.append(receipt)
+        if transaction_no:
+            transaction_receipt_ids[transaction_no] = receipt["id"]
+    return unique_receipts, findings
+
+
+def _reconcile_export_item(export_item, receipts, accepted_name_ids, transaction_receipt_ids):
+    reference = export_item["payment_reference"]
+    expected = int(export_item["payable_cents"])
+    identity_valid, findings = _success_identity(export_item, receipts, accepted_name_ids)
+    countable, duplicates = _deduplicate_successes(
+        export_item, identity_valid, transaction_receipt_ids
+    )
+    findings.extend(duplicates)
+    paid = sum(int(row["paid_cents"] or 0) for row in countable)
+
+    if expected != paid:
+        has_failed_payment = any(
+            row["payment_status"] in ("failed", "returned") for row in receipts
+        )
+        if paid == 0 and has_failed_payment and not countable:
+            findings.append(_finding(
+                export_item["id"], reference, expected, 0, "failed_payment", True,
+                {"payment_statuses": sorted({row["payment_status"] for row in receipts})},
+            ))
+        else:
+            kind = "missing_receipt" if paid == 0 and expected else (
+                "underpaid" if paid < expected else "overpaid"
+            )
+            findings.append(_finding(
+                export_item["id"], reference, expected, paid, kind, True,
+                {
+                    "employee_no": export_item["employee_no_snapshot"],
+                    "employee_name": export_item["employee_name_snapshot"],
+                },
+            ))
+    return paid, findings
+
+
+def _reconcile_invalid_receipts(invalid, expected_by_ref, grouped):
+    findings = []
+    for receipt in invalid:
+        reference = receipt["payment_reference"]
+        if not reference or reference not in expected_by_ref:
+            findings.append(_finding(
+                None, reference, 0, 0, "unknown_reference", True,
+                {
+                    "receipt_item_id": receipt["id"],
+                    "validation_error": receipt["validation_error"],
+                    "employee_no": receipt.get("employee_no_snapshot") or "",
+                    "employee_name": receipt.get("employee_name_snapshot") or "",
+                },
+            ))
+        elif not grouped.get(reference):
+            export_item = expected_by_ref[reference]
+            findings.append(_finding(
+                export_item["id"], reference, int(export_item["payable_cents"]), 0,
+                "invalid_amount", True,
+                {
+                    "receipt_item_id": receipt["id"],
+                    "validation_error": receipt["validation_error"],
+                },
+            ))
+    return findings
+
+
+def _calculate_reconciliation(items, receipt_items, resolutions):
+    excluded_ids, accepted_name_ids = _resolution_receipt_ids(resolutions)
+    expected_by_ref = {row["payment_reference"]: row for row in items}
+    grouped, unknown, invalid = _partition_receipts(
+        receipt_items, expected_by_ref, excluded_ids
+    )
+    paid_total = 0
+    findings = []
+    transaction_receipt_ids = {}
+    for export_item in items:
+        paid, item_findings = _reconcile_export_item(
+            export_item, grouped.get(export_item["payment_reference"], []),
+            accepted_name_ids, transaction_receipt_ids,
+        )
+        paid_total += paid
+        findings.extend(item_findings)
+    findings.extend(
+        _finding(
+            None, receipt["payment_reference"], 0, 0, "unknown_reference", True,
+            {
+                "receipt_item_id": receipt["id"],
+                "payment_status": receipt["payment_status"],
+                "employee_no": receipt.get("employee_no_snapshot") or "",
+                "employee_name": receipt.get("employee_name_snapshot") or "",
+            },
+        )
+        for receipt in unknown
+    )
+    findings.extend(_reconcile_invalid_receipts(invalid, expected_by_ref, grouped))
+    return paid_total, findings
+
+
+def _reconciliation_context(settlement_id, key, db):
+    existing = Repo.get_run_by_key(key, db)
+    if existing and existing["settlement_id"] != settlement_id:
+        raise PayrollConflictError("幂等键已用于不同的工资对账请求")
+    settlement = Repo.get_settlement(settlement_id, db)
+    if not settlement:
+        raise ValueError("工资结算记录不存在")
+    export_id = settlement.get("current_export_batch_id")
+    export = Repo.get_export(export_id, db) if export_id else None
+    items = Repo.export_items(export_id, db)
+    receipt_items = Repo.receipt_items(export_id, db)
+    resolutions = Repo.list_resolutions(settlement_id, export_id, db)
+    receipt_digest = _receipt_digest(receipt_items, resolutions)
+    if existing:
+        if (
+            existing["settlement_id"] != settlement_id
+            or existing["export_batch_id"] != export_id
+            or existing["receipt_digest"] != receipt_digest
+        ):
+            raise PayrollConflictError("幂等键已用于不同的工资对账请求")
+        return {
+            "replay": {
+                **existing,
+                "items": Repo.list_reconciliation_items(existing["id"], db),
+                "replayed": True,
+            }
+        }
+    if settlement["status"] == "closed":
+        raise ValueError("已结账工资不能重新对账")
+    if not export or export["status"] != "active":
+        raise ValueError("没有当前有效的工资支付清单")
+    return {
+        "settlement": settlement,
+        "export": export,
+        "export_id": export_id,
+        "items": items,
+        "receipt_items": receipt_items,
+        "resolutions": resolutions,
+        "receipt_digest": receipt_digest,
+    }
+
+
+def _persist_reconciliation(context, key, actor_id, actor_name, db):
+    settlement = context["settlement"]
+    settlement_id = settlement["id"]
+    export = context["export"]
+    export_id = context["export_id"]
+    version = Repo.next_reconciliation_version(settlement_id, db)
+    expected_total = int(export["total_cents"])
+    paid_total, findings = _calculate_reconciliation(
+        context["items"], context["receipt_items"], context["resolutions"]
+    )
+    difference = expected_total - paid_total
+    blocking_count = sum(row["blocking"] for row in findings)
+    status = "reconciled" if difference == 0 and blocking_count == 0 else "difference_pending"
+    run_id = Repo.create_reconciliation_run(
+        settlement_id, export_id, version, status, expected_total, paid_total,
+        difference, blocking_count, context["receipt_digest"], key, actor_id, actor_name,
+        findings, db,
+    )
+    Repo.update_reconciliation_summary(
+        settlement_id, status, paid_total, difference, blocking_count, run_id, db
+    )
+    batch = PayrollRepository.get_batch(settlement["batch_id"], db)
+    _emit_event(
+        batch["id"], "payroll_settlement_reconciled", actor_id, actor_name, "",
+        {
+            "settlement_id": settlement_id, "export_batch_id": export_id,
+            "reconciliation_run_id": run_id, "run_version": version,
+            "status": status, "expected_total_cents": expected_total,
+            "successful_paid_cents": paid_total, "difference_cents": difference,
+            "blocking_count": blocking_count,
+            "receipt_digest": context["receipt_digest"],
+        },
+        key, db,
+    )
+    return Repo.run_detail(run_id, db)
+
+
 def _emit_event(batch_id, event_type, actor_id, actor_name, reason, payload, key, db):
     Repo.insert_event({
         "batch_id": batch_id,
@@ -272,6 +540,7 @@ class PayrollSettlementService:
             if total != int(batch["payable_wage_cents"] or 0):
                 raise ValueError("员工明细合计与工资批次应发金额不一致")
 
+            superseded_export_id = None
             if settlement:
                 current_id = settlement.get("current_export_batch_id")
                 if current_id:
@@ -280,7 +549,7 @@ class PayrollSettlementService:
                         raise ValueError("当前支付清单已有回执，不能替代导出版本")
                     old_export = Repo.get_export(current_id, db)
                     if old_export:
-                        Repo.supersede_export(current_id, db)
+                        superseded_export_id = current_id
             else:
                 settlement = Repo.create_settlement(
                     batch_id, total, actor_id, actor_name, db
@@ -306,6 +575,8 @@ class PayrollSettlementService:
                 settlement["id"], version, rows, total, digest, content, key,
                 actor_id, actor_name, db,
             )
+            if superseded_export_id is not None:
+                Repo.supersede_export(superseded_export_id, export_id, db)
             Repo.activate_export(settlement["id"], total, export_id, db)
             _emit_event(
                 batch_id, "payroll_settlement_export_created", actor_id, actor_name, "",
@@ -378,177 +649,10 @@ class PayrollSettlementService:
         key = _key(idempotency_key)
         actor_id, actor_name = _actor(actor_user)
         with BaseService.transaction() as db:
-            existing = Repo.get_run_by_key(key, db)
-            if existing:
-                if existing["settlement_id"] != settlement_id:
-                    raise PayrollConflictError("幂等键已用于其他工资对账")
-                return {**existing, "items": Repo.list_reconciliation_items(existing["id"], db),
-                        "replayed": True}
-            settlement = Repo.get_settlement(settlement_id, db)
-            if not settlement:
-                raise ValueError("工资结算记录不存在")
-            if settlement["status"] == "closed":
-                raise ValueError("已结账工资不能重新对账")
-            export_id = settlement.get("current_export_batch_id")
-            export = Repo.get_export(export_id, db) if export_id else None
-            if not export or export["status"] != "active":
-                raise ValueError("没有当前有效的工资支付清单")
-
-            items = Repo.export_items(export_id, db)
-            receipt_items = Repo.receipt_items(export_id, db)
-            resolutions = Repo.list_resolutions(settlement_id, export_id, db)
-            receipt_digest = _receipt_digest(receipt_items, resolutions)
-            excluded_ids = {
-                int(row["receipt_item_id"]) for row in resolutions
-                if row.get("receipt_item_id") is not None
-                and row["resolution_code"] in ("exclude_duplicate", "exclude_unknown_reference")
-            }
-            accepted_name_ids = {
-                int(row["receipt_item_id"]) for row in resolutions
-                if row.get("receipt_item_id") is not None
-                and row["resolution_code"] == "accept_name_mismatch"
-            }
-            expected_by_ref = {row["payment_reference"]: row for row in items}
-            grouped = {}
-            unknown = []
-            invalid = []
-            for receipt in receipt_items:
-                if int(receipt["id"]) in excluded_ids:
-                    continue
-                if receipt["validation_status"] != "valid":
-                    invalid.append(receipt)
-                    continue
-                if receipt["payment_reference"] not in expected_by_ref:
-                    unknown.append(receipt)
-                else:
-                    grouped.setdefault(receipt["payment_reference"], []).append(receipt)
-
-            version = Repo.next_reconciliation_version(settlement_id, db)
-            expected_total = int(export["total_cents"])
-            paid_total = 0
-            findings = []
-
-            def finding(export_item_id, reference, expected, paid, kind, blocking, detail):
-                findings.append({
-                    "export_item_id": export_item_id,
-                    "payment_reference": reference,
-                    "expected_cents": int(expected),
-                    "successful_paid_cents": int(paid),
-                    "difference_cents": int(expected) - int(paid),
-                    "difference_type": kind,
-                    "blocking": int(bool(blocking)),
-                    "detail_json": _json(detail),
-                })
-
-            for export_item in items:
-                reference = export_item["payment_reference"]
-                expected = int(export_item["payable_cents"])
-                receipts = grouped.get(reference, [])
-                successes = [row for row in receipts if row["payment_status"] == "success"]
-                identity_valid = []
-                for receipt in successes:
-                    number_mismatch = (
-                        bool(export_item["employee_no_snapshot"])
-                        and receipt["employee_no_snapshot"] != export_item["employee_no_snapshot"]
-                    )
-                    name_mismatch = (
-                        bool(export_item["employee_name_snapshot"])
-                        and receipt["employee_name_snapshot"] != export_item["employee_name_snapshot"]
-                    )
-                    accepted_name = int(receipt["id"]) in accepted_name_ids
-                    if number_mismatch or (name_mismatch and not accepted_name):
-                        finding(
-                            export_item["id"], reference, expected, int(receipt["paid_cents"] or 0),
-                            "employee_mismatch", True,
-                            {"receipt_item_id": receipt["id"], "employee_no_mismatch": number_mismatch,
-                             "employee_name_mismatch": name_mismatch},
-                        )
-                    else:
-                        identity_valid.append(receipt)
-
-                paid_for_item = sum(int(row["paid_cents"] or 0) for row in identity_valid)
-                paid_total += paid_for_item
-                if len(identity_valid) > 1:
-                    for duplicate in identity_valid[1:]:
-                        finding(
-                            export_item["id"], reference, expected, int(duplicate["paid_cents"] or 0),
-                            "duplicate_success", True,
-                            {"receipt_item_id": duplicate["id"], "first_success_receipt_item_id": identity_valid[0]["id"]},
-                        )
-                if expected != paid_for_item and not (
-                    expected > 0 and not identity_valid and any(
-                        row["payment_status"] in ("failed", "returned") for row in receipts
-                    )
-                ):
-                    kind = "missing_receipt" if paid_for_item == 0 and expected else (
-                        "underpaid" if paid_for_item < expected else "overpaid"
-                    )
-                    finding(
-                        export_item["id"], reference, expected, paid_for_item, kind, True,
-                        {"employee_no": export_item["employee_no_snapshot"],
-                         "employee_name": export_item["employee_name_snapshot"]},
-                    )
-                elif expected > 0 and not identity_valid and receipts:
-                    finding(
-                        export_item["id"], reference, expected, 0, "failed_payment", True,
-                        {"payment_statuses": sorted({row["payment_status"] for row in receipts})},
-                    )
-                elif expected > 0 and not identity_valid and not receipts:
-                    finding(
-                        export_item["id"], reference, expected, 0, "missing_receipt", True,
-                        {"employee_no": export_item["employee_no_snapshot"],
-                         "employee_name": export_item["employee_name_snapshot"]},
-                    )
-
-            for receipt in unknown:
-                finding(
-                    None, receipt["payment_reference"], 0, 0, "unknown_reference", True,
-                    {"receipt_item_id": receipt["id"], "payment_status": receipt["payment_status"]},
-                )
-            known_refs = set(expected_by_ref)
-            for receipt in invalid:
-                if (
-                    not receipt["payment_reference"]
-                    or receipt["payment_reference"] not in known_refs
-                ):
-                    finding(
-                        None, receipt["payment_reference"], 0, 0, "unknown_reference", True,
-                        {"receipt_item_id": receipt["id"], "validation_error": receipt["validation_error"]},
-                    )
-                elif receipt["payment_reference"] in known_refs and not grouped.get(receipt["payment_reference"]):
-                    finding(
-                        expected_by_ref[receipt["payment_reference"]]["id"],
-                        receipt["payment_reference"],
-                        int(expected_by_ref[receipt["payment_reference"]]["payable_cents"]),
-                        0, "invalid_amount", True,
-                        {"receipt_item_id": receipt["id"], "validation_error": receipt["validation_error"]},
-                    )
-
-            difference = expected_total - paid_total
-            blocking_count = sum(row["blocking"] for row in findings)
-            status = "reconciled" if difference == 0 and blocking_count == 0 else "difference_pending"
-            run_id = Repo.create_reconciliation_run(
-                settlement_id, export_id, version, status, expected_total, paid_total,
-                difference, blocking_count, receipt_digest, key, actor_id, actor_name,
-                findings, db,
-            )
-            Repo.update_reconciliation_summary(
-                settlement_id,
-                "reconciled" if status == "reconciled" else "difference_pending",
-                paid_total, difference, blocking_count, run_id, db,
-            )
-            batch = PayrollRepository.get_batch(settlement["batch_id"], db)
-            _emit_event(
-                batch["id"], "payroll_settlement_reconciled", actor_id, actor_name, "",
-                {"settlement_id": settlement_id, "export_batch_id": export_id,
-                 "reconciliation_run_id": run_id, "run_version": version,
-                 "status": status, "expected_total_cents": expected_total,
-                 "successful_paid_cents": paid_total, "difference_cents": difference,
-                 "blocking_count": blocking_count, "receipt_digest": receipt_digest},
-                key, db,
-            )
-            result = Repo.run_detail(run_id, db)
-            return result
+            context = _reconciliation_context(settlement_id, key, db)
+            if context.get("replay"):
+                return context["replay"]
+            return _persist_reconciliation(context, key, actor_id, actor_name, db)
 
     @staticmethod
     def resolve_difference(item_id, actor_user, data):
@@ -566,8 +670,16 @@ class PayrollSettlementService:
         with BaseService.transaction() as db:
             previous = Repo.get_resolution_by_key(key, db)
             if previous:
-                if previous["reconciliation_item_id"] != item_id:
-                    raise PayrollConflictError("幂等键已用于其他差异处理")
+                if (
+                    previous["reconciliation_item_id"] != item_id
+                    or previous["resolution_code"] != code
+                    or previous["resolution_reason"] != reason
+                    or (
+                        receipt_item_id is not None
+                        and previous.get("receipt_item_id") != receipt_item_id
+                    )
+                ):
+                    raise PayrollConflictError("幂等键已用于不同的差异处理请求")
                 return {**previous, "replayed": True}
             item = Repo.get_reconciliation_item_context(item_id, db)
             if not item:
@@ -625,13 +737,19 @@ class PayrollSettlementService:
             raise ValueError("缺少有效的 row_version") from exc
         with BaseService.transaction() as db:
             existing = Repo.get_close_record_by_key(key, db)
-            if existing:
-                if existing["settlement_id"] != settlement_id:
-                    raise PayrollConflictError("幂等键已用于其他工资结账")
-                return {**existing, "replayed": True}
+            if existing and existing["settlement_id"] != settlement_id:
+                raise PayrollConflictError("幂等键已用于不同的工资结账请求")
             settlement = Repo.get_settlement(settlement_id, db)
             if not settlement:
                 raise ValueError("工资结算记录不存在")
+            if existing:
+                if (
+                    existing["close_reason"] != reason
+                    or settlement["status"] != "closed"
+                    or int(settlement["row_version"]) != expected_version + 1
+                ):
+                    raise PayrollConflictError("幂等键已用于不同的工资结账请求")
+                return {**existing, "replayed": True}
             if settlement["status"] == "closed":
                 raise ValueError("工资结算已经结账")
             if int(settlement["row_version"]) != expected_version:

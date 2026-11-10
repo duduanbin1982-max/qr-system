@@ -191,6 +191,70 @@ def m097_payroll_settlement(db):
         CREATE INDEX IF NOT EXISTS idx_payroll_reconciliation_items_run
             ON payroll_reconciliation_items(reconciliation_run_id,blocking,difference_type);
 
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_export_batch_insert
+        BEFORE INSERT ON payroll_export_batches
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_settlements
+            WHERE id=NEW.settlement_id AND status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject export batches'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_export_batch_update
+        BEFORE UPDATE ON payroll_export_batches
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_settlements
+            WHERE id=OLD.settlement_id AND status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject export updates'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_export_item_insert
+        BEFORE INSERT ON payroll_export_items
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_export_batches export
+            JOIN payroll_settlements settlement ON settlement.id=export.settlement_id
+            WHERE export.id=NEW.export_batch_id AND settlement.status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject export items'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_receipt_batch_insert
+        BEFORE INSERT ON payroll_receipt_batches
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_export_batches export
+            JOIN payroll_settlements settlement ON settlement.id=export.settlement_id
+            WHERE export.id=NEW.export_batch_id AND settlement.status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject receipt batches'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_receipt_item_insert
+        BEFORE INSERT ON payroll_receipt_items
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_receipt_batches receipt
+            JOIN payroll_export_batches export ON export.id=receipt.export_batch_id
+            JOIN payroll_settlements settlement ON settlement.id=export.settlement_id
+            WHERE receipt.id=NEW.receipt_batch_id AND settlement.status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject receipt items'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_reconciliation_run_insert
+        BEFORE INSERT ON payroll_reconciliation_runs
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_settlements
+            WHERE id=NEW.settlement_id AND status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject reconciliation runs'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_reconciliation_item_insert
+        BEFORE INSERT ON payroll_reconciliation_items
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_reconciliation_runs run
+            JOIN payroll_settlements settlement ON settlement.id=run.settlement_id
+            WHERE run.id=NEW.reconciliation_run_id AND settlement.status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject reconciliation items'); END;
+        CREATE TRIGGER IF NOT EXISTS prevent_closed_payroll_resolution_insert
+        BEFORE INSERT ON payroll_reconciliation_resolutions
+        WHEN EXISTS (
+            SELECT 1 FROM payroll_reconciliation_items item
+            JOIN payroll_reconciliation_runs run ON run.id=item.reconciliation_run_id
+            JOIN payroll_settlements settlement ON settlement.id=run.settlement_id
+            WHERE item.id=NEW.reconciliation_item_id AND settlement.status='closed'
+        )
+        BEGIN SELECT RAISE(ABORT,'closed payroll settlements reject resolutions'); END;
+
         CREATE TRIGGER IF NOT EXISTS protect_payroll_export_item_update
         BEFORE UPDATE ON payroll_export_items
         BEGIN SELECT RAISE(ABORT,'payroll export items are immutable'); END;

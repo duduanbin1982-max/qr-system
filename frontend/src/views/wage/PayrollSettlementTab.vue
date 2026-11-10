@@ -95,6 +95,27 @@
             <p v-if="currentExport" class="settlement-digest">
               文件 SHA-256：<code>{{ currentExport.content_sha256 }}</code>
             </p>
+            <div v-if="exportVersions.length" class="settlement-export-versions" data-testid="export-version-list">
+              <strong>导出版本历史</strong>
+              <div
+                v-for="version in exportVersions"
+                :key="version.id"
+                class="settlement-export-version"
+                :class="{ active: version.id === currentExport?.id }"
+              >
+                <span>V{{ version.export_version }}</span>
+                <span>{{ version.id === currentExport?.id ? '当前有效' : '已被替代' }}</span>
+                <span>{{ version.row_count }} 人 · {{ money(version.total_cents) }}</span>
+                <span>{{ version.created_at || '生成时间未知' }}</span>
+                <a
+                  v-if="canExport"
+                  class="btn-default btn-sm"
+                  :href="downloadUrl(version.id)"
+                  target="_blank"
+                  rel="noopener"
+                >下载</a>
+              </div>
+            </div>
             <p v-if="currentExport && receiptBatches.length" class="settlement-inline-note">
               当前清单已有回执，不能替换版本。
             </p>
@@ -171,9 +192,37 @@
             <p v-if="latestReconciliation && !latestReconciliation.items?.length" class="settlement-success-note">
               当前回执与应付金额一致，可以进入结账审核。
             </p>
-            <div v-else-if="latestReconciliation?.items?.length" class="settlement-differences">
+            <div v-if="latestReconciliation?.items?.length" class="settlement-difference-filters" aria-label="差异筛选">
+              <label>
+                差异类型
+                <select v-model="differenceTypeFilter" class="form-input" data-testid="difference-type-filter">
+                  <option value="all">全部类型</option>
+                  <option v-for="type in differenceTypes" :key="type" :value="type">
+                    {{ differenceTypeLabel(type) }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                阻断状态
+                <select v-model="blockingFilter" class="form-input" data-testid="blocking-filter">
+                  <option value="all">全部状态</option>
+                  <option value="blocking">阻断结账</option>
+                  <option value="informational">非阻断提示</option>
+                </select>
+              </label>
+              <label>
+                员工
+                <input
+                  v-model="employeeFilter"
+                  class="form-input"
+                  placeholder="工号或姓名"
+                  data-testid="employee-filter"
+                >
+              </label>
+            </div>
+            <div v-if="latestReconciliation?.items?.length" class="settlement-differences">
               <article
-                v-for="item in latestReconciliation.items"
+                v-for="item in filteredDifferences"
                 :key="item.id"
                 class="settlement-difference-row"
                 :data-testid="`settlement-difference-${item.id}`"
@@ -203,6 +252,7 @@
                   >记录处理</button>
                 </div>
               </article>
+              <p v-if="!filteredDifferences.length" class="settlement-empty-inline">没有符合当前筛选条件的差异。</p>
             </div>
             <p v-else-if="receiptBatches.length && !latestReconciliation" class="settlement-inline-note">
               已收到回执，运行对账后才能查看差异或结账。
@@ -213,7 +263,12 @@
             <div>
               <strong>{{ settlement.status === 'closed' ? '结算已锁定' : '结账锁定' }}</strong>
               <p v-if="settlement.status === 'closed'">本批次的回执、对账结果和结账记录已归档。</p>
-              <p v-else>仅当最新对账完全通过后，才可锁定本次结算。</p>
+              <div v-else class="settlement-close-summary" data-testid="close-summary">
+                <span>最终金额 {{ closeSummary.finalAmount }}</span>
+                <span>当前导出版本 V{{ closeSummary.exportVersion }}</span>
+                <span>回执批次数量 {{ closeSummary.receiptBatchCount }}</span>
+                <span>对账运行版本 第 {{ closeSummary.reconciliationVersion }} 次</span>
+              </div>
             </div>
             <button
               v-if="canClose"
@@ -239,8 +294,15 @@ const {
   selectedBatchId,
   settlement,
   currentExport,
+  exportVersions,
   receiptBatches,
   latestReconciliation,
+  differenceTypes,
+  filteredDifferences,
+  differenceTypeFilter,
+  blockingFilter,
+  employeeFilter,
+  closeSummary,
   loading,
   detailLoading,
   working,
@@ -269,5 +331,5 @@ const {
 </script>
 
 <style scoped>
-.settlement-page{min-width:0}.settlement-toolbar,.settlement-detail-header,.settlement-section-heading,.settlement-close-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.settlement-toolbar{margin-bottom:12px}.settlement-toolbar h3,.settlement-detail-header h4{margin:0;font-size:18px}.settlement-toolbar p,.settlement-detail-header p,.settlement-section-heading p,.settlement-close-row p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.settlement-toolbar-actions{display:flex;align-items:flex-end;gap:8px}.settlement-month-label{display:grid;gap:4px;color:var(--text-secondary);font-size:12px}.settlement-month-label .form-input{width:160px}.settlement-boundary-note{padding:9px 12px;margin:0 0 12px;border-left:3px solid var(--primary);background:var(--bg-secondary);font-size:13px}.settlement-layout{display:grid;grid-template-columns:minmax(230px,290px) minmax(0,1fr);border-top:1px solid var(--border-light);border-bottom:1px solid var(--border-light)}.settlement-batch-list{min-width:0;padding:14px 12px 14px 0;border-right:1px solid var(--border-light)}.settlement-batch-list h4,.settlement-section h5{margin:0;font-size:14px}.settlement-batch-option{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:58px;padding:9px 10px;margin-top:6px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer}.settlement-batch-option:hover{background:var(--bg-secondary)}.settlement-batch-option.selected{border-color:var(--primary);background:var(--primary-light)}.settlement-batch-option span{display:grid;gap:4px;min-width:0}.settlement-batch-option strong{font-size:13px}.settlement-batch-option small,.settlement-receipt-row small,.settlement-difference-main small{display:block;color:var(--text-placeholder);font-size:11px;overflow-wrap:anywhere}.settlement-detail{min-width:0;padding:14px 0 14px 16px}.settlement-detail-header{align-items:center;padding-bottom:12px;border-bottom:1px solid var(--border-light)}.settlement-status,.settlement-receipt-status{flex:none;padding:4px 8px;border-radius:4px;background:var(--bg-secondary);font-size:12px}.status-reconciled{background:var(--success-light);color:var(--success)}.status-difference_pending{background:var(--warning-lighter);color:var(--warning-dark)}.status-closed{background:var(--text-secondary);color:var(--bg-primary)}.settlement-totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--border-light)}.settlement-totals div{min-width:0;padding:11px 10px;border-right:1px solid var(--border-light)}.settlement-totals div:last-child{border-right:0}.settlement-totals span{display:block;color:var(--text-placeholder);font-size:11px}.settlement-totals strong{display:block;margin-top:4px;font-size:16px;overflow-wrap:anywhere}.settlement-section{padding:14px 0;border-bottom:1px solid var(--border-light)}.settlement-section-heading{align-items:center}.settlement-actions,.settlement-upload-row,.settlement-resolution-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settlement-digest{margin:8px 0 0;color:var(--text-placeholder);font-size:11px;overflow-wrap:anywhere}.settlement-digest code{word-break:break-all}.settlement-inline-note,.settlement-empty-inline{margin:8px 0 0;color:var(--text-placeholder);font-size:12px}.settlement-upload-row{margin-top:12px}.settlement-upload-row input[type=file]{max-width:min(100%,380px);font-size:12px}.settlement-file-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.settlement-receipt-list{margin-top:10px}.settlement-receipt-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px 12px;align-items:start;padding:10px 0;border-top:1px solid var(--border-light);font-size:12px}.settlement-receipt-row>div{min-width:0}.settlement-receipt-row>div strong{overflow-wrap:anywhere}.settlement-invalid-rows{grid-column:1/-1;margin:0;padding:8px 10px 8px 26px;background:var(--warning-lighter);font-size:12px}.settlement-success-note{padding:10px 12px;margin:10px 0 0;background:var(--success-light);color:var(--success);font-size:13px}.settlement-differences{margin-top:8px}.settlement-difference-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(170px,auto);gap:10px 16px;padding:12px 0;border-top:1px solid var(--border-light)}.settlement-difference-main{display:grid;gap:4px;min-width:0}.settlement-difference-main strong{font-size:13px}.settlement-difference-amounts{display:grid;gap:3px;text-align:right;font-size:12px}.settlement-resolution-form{grid-column:1/-1}.settlement-resolution-form .form-input{flex:1 1 220px;min-width:0}.settlement-close-row{align-items:center;padding-top:14px}.settlement-empty{text-align:center;padding:24px 8px;color:var(--text-placeholder);font-size:13px}.text-warning{color:var(--warning-dark)}@media(max-width:900px){.settlement-layout{grid-template-columns:minmax(0,1fr)}.settlement-batch-list{padding:12px 0;border-right:0;border-bottom:1px solid var(--border-light)}.settlement-batch-option{display:inline-flex;width:min(100%,360px);vertical-align:top;margin-right:6px}.settlement-detail{padding:14px 0}}@media(max-width:600px){.settlement-toolbar,.settlement-detail-header,.settlement-section-heading,.settlement-close-row{flex-direction:column}.settlement-toolbar-actions{width:100%;align-items:flex-end}.settlement-month-label{flex:1}.settlement-month-label .form-input{width:100%}.settlement-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-totals div:nth-child(2){border-right:0}.settlement-totals div:nth-child(-n+2){border-bottom:1px solid var(--border-light)}.settlement-receipt-row{grid-template-columns:minmax(0,1fr) auto}.settlement-receipt-status{grid-column:2;grid-row:1}.settlement-difference-row{grid-template-columns:minmax(0,1fr)}.settlement-difference-amounts{text-align:left}.settlement-section-heading .settlement-actions{width:100%}.settlement-upload-row{align-items:flex-start;flex-direction:column}.settlement-invalid-rows{grid-column:1/-1}}
+.settlement-page{min-width:0}.settlement-toolbar,.settlement-detail-header,.settlement-section-heading,.settlement-close-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.settlement-toolbar{margin-bottom:12px}.settlement-toolbar h3,.settlement-detail-header h4{margin:0;font-size:18px}.settlement-toolbar p,.settlement-detail-header p,.settlement-section-heading p,.settlement-close-row p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.settlement-toolbar-actions{display:flex;align-items:flex-end;gap:8px}.settlement-month-label{display:grid;gap:4px;color:var(--text-secondary);font-size:12px}.settlement-month-label .form-input{width:160px}.settlement-boundary-note{padding:9px 12px;margin:0 0 12px;border-left:3px solid var(--primary);background:var(--bg-secondary);font-size:13px}.settlement-layout{display:grid;grid-template-columns:minmax(230px,290px) minmax(0,1fr);border-top:1px solid var(--border-light);border-bottom:1px solid var(--border-light)}.settlement-batch-list{min-width:0;padding:14px 12px 14px 0;border-right:1px solid var(--border-light)}.settlement-batch-list h4,.settlement-section h5{margin:0;font-size:14px}.settlement-batch-option{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:58px;padding:9px 10px;margin-top:6px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer}.settlement-batch-option:hover{background:var(--bg-secondary)}.settlement-batch-option.selected{border-color:var(--primary);background:var(--primary-light)}.settlement-batch-option span{display:grid;gap:4px;min-width:0}.settlement-batch-option strong{font-size:13px}.settlement-batch-option small,.settlement-receipt-row small,.settlement-difference-main small{display:block;color:var(--text-placeholder);font-size:11px;overflow-wrap:anywhere}.settlement-detail{min-width:0;padding:14px 0 14px 16px}.settlement-detail-header{align-items:center;padding-bottom:12px;border-bottom:1px solid var(--border-light)}.settlement-status,.settlement-receipt-status{flex:none;padding:4px 8px;border-radius:4px;background:var(--bg-secondary);font-size:12px}.status-reconciled{background:var(--success-light);color:var(--success)}.status-difference_pending{background:var(--warning-lighter);color:var(--warning-dark)}.status-closed{background:var(--text-secondary);color:var(--bg-primary)}.settlement-totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--border-light)}.settlement-totals div{min-width:0;padding:11px 10px;border-right:1px solid var(--border-light)}.settlement-totals div:last-child{border-right:0}.settlement-totals span{display:block;color:var(--text-placeholder);font-size:11px}.settlement-totals strong{display:block;margin-top:4px;font-size:16px;overflow-wrap:anywhere}.settlement-section{padding:14px 0;border-bottom:1px solid var(--border-light)}.settlement-section-heading{align-items:center}.settlement-actions,.settlement-upload-row,.settlement-resolution-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settlement-digest{margin:8px 0 0;color:var(--text-placeholder);font-size:11px;overflow-wrap:anywhere}.settlement-digest code{word-break:break-all}.settlement-inline-note,.settlement-empty-inline{margin:8px 0 0;color:var(--text-placeholder);font-size:12px}.settlement-export-versions{display:grid;gap:6px;margin-top:12px}.settlement-export-version{display:grid;grid-template-columns:auto auto minmax(130px,1fr) minmax(130px,1fr) auto;gap:8px;align-items:center;padding:8px;border:1px solid var(--border-light);border-radius:5px;font-size:12px}.settlement-export-version.active{border-color:var(--primary);background:var(--primary-light)}.settlement-upload-row{margin-top:12px}.settlement-upload-row input[type=file]{max-width:min(100%,380px);font-size:12px}.settlement-file-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.settlement-receipt-list{margin-top:10px}.settlement-receipt-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px 12px;align-items:start;padding:10px 0;border-top:1px solid var(--border-light);font-size:12px}.settlement-receipt-row>div{min-width:0}.settlement-receipt-row>div strong{overflow-wrap:anywhere}.settlement-invalid-rows{grid-column:1/-1;margin:0;padding:8px 10px 8px 26px;background:var(--warning-lighter);font-size:12px}.settlement-success-note{padding:10px 12px;margin:10px 0 0;background:var(--success-light);color:var(--success);font-size:13px}.settlement-difference-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.settlement-difference-filters label{display:grid;gap:4px;color:var(--text-secondary);font-size:11px}.settlement-differences{margin-top:8px}.settlement-difference-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(170px,auto);gap:10px 16px;padding:12px 0;border-top:1px solid var(--border-light)}.settlement-difference-main{display:grid;gap:4px;min-width:0}.settlement-difference-main strong{font-size:13px}.settlement-difference-amounts{display:grid;gap:3px;text-align:right;font-size:12px}.settlement-resolution-form{grid-column:1/-1}.settlement-resolution-form .form-input{flex:1 1 220px;min-width:0}.settlement-close-row{align-items:center;padding-top:14px}.settlement-close-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;color:var(--text-placeholder);font-size:12px}.settlement-empty{text-align:center;padding:24px 8px;color:var(--text-placeholder);font-size:13px}.text-warning{color:var(--warning-dark)}@media(max-width:900px){.settlement-layout{grid-template-columns:minmax(0,1fr)}.settlement-batch-list{padding:12px 0;border-right:0;border-bottom:1px solid var(--border-light)}.settlement-batch-option{display:inline-flex;width:min(100%,360px);vertical-align:top;margin-right:6px}.settlement-detail{padding:14px 0}.settlement-export-version{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-difference-filters{grid-template-columns:minmax(0,1fr)}}@media(max-width:600px){.settlement-toolbar,.settlement-detail-header,.settlement-section-heading,.settlement-close-row{flex-direction:column}.settlement-toolbar-actions{width:100%;align-items:flex-end}.settlement-month-label{flex:1}.settlement-month-label .form-input{width:100%}.settlement-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-totals div:nth-child(2){border-right:0}.settlement-totals div:nth-child(-n+2){border-bottom:1px solid var(--border-light)}.settlement-receipt-row{grid-template-columns:minmax(0,1fr) auto}.settlement-receipt-status{grid-column:2;grid-row:1}.settlement-difference-row{grid-template-columns:minmax(0,1fr)}.settlement-difference-amounts{text-align:left}.settlement-section-heading .settlement-actions{width:100%}.settlement-upload-row{align-items:flex-start;flex-direction:column}.settlement-invalid-rows{grid-column:1/-1}}
 </style>

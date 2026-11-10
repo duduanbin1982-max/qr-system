@@ -61,6 +61,9 @@ export function usePayrollSettlement() {
   const working = ref(false)
   const receiptFile = ref(null)
   const resolutionReasons = ref({})
+  const differenceTypeFilter = ref('all')
+  const blockingFilter = ref('all')
+  const employeeFilter = ref('')
 
   const availableBatches = computed(() => batches.value.filter(batch => (
     batch.status === 'confirmed' && !batch.superseded_by_batch_id
@@ -69,8 +72,29 @@ export function usePayrollSettlement() {
     batch => batch.id === selectedBatchId.value,
   ) || null)
   const currentExport = computed(() => settlement.value?.current_export || null)
+  const exportVersions = computed(() => settlement.value?.exports || [])
   const receiptBatches = computed(() => settlement.value?.receipt_batches || [])
   const latestReconciliation = computed(() => settlement.value?.latest_reconciliation || null)
+  const reconciliationItems = computed(() => latestReconciliation.value?.items || [])
+  const differenceTypes = computed(() => [...new Set(
+    reconciliationItems.value.map(item => item.difference_type).filter(Boolean),
+  )])
+  const filteredDifferences = computed(() => {
+    const employeeQuery = employeeFilter.value.trim().toLocaleLowerCase()
+    return reconciliationItems.value.filter(item => {
+      if (differenceTypeFilter.value !== 'all'
+        && item.difference_type !== differenceTypeFilter.value) return false
+      if (blockingFilter.value !== 'all'
+        && Boolean(item.blocking) !== (blockingFilter.value === 'blocking')) return false
+      if (!employeeQuery) return true
+      const detail = detailForDifference(item)
+      const identity = [
+        item.employee_no_snapshot, item.employee_name_snapshot,
+        detail.employee_no, detail.employee_name,
+      ].filter(Boolean).join(' ').toLocaleLowerCase()
+      return identity.includes(employeeQuery)
+    })
+  })
   const canView = computed(() => can('wages:view_all') || can('wages:prepare') || can('wages:approve'))
   const canExport = computed(() => can('wages:export'))
   const canReceipt = computed(() => can('wages:receipt'))
@@ -90,6 +114,12 @@ export function usePayrollSettlement() {
   const canClose = computed(() => Boolean(
     settlement.value?.can_close && canClosePermission.value && !isClosed.value
   ))
+  const closeSummary = computed(() => ({
+    finalAmount: money(settlement.value?.successful_paid_cents),
+    exportVersion: currentExport.value?.export_version || '-',
+    receiptBatchCount: receiptBatches.value.length,
+    reconciliationVersion: latestReconciliation.value?.run_version || '-',
+  }))
 
   function money(cents) {
     return `¥${(Number(cents || 0) / 100).toFixed(2)}`
@@ -320,7 +350,15 @@ export function usePayrollSettlement() {
 
   function closeSettlement() {
     if (!canClose.value) return Promise.resolve(null)
-    if (!window.confirm('结账后将锁定本次工资结算，不能继续上传回执或处理差异。')) {
+    const summary = closeSummary.value
+    if (!window.confirm([
+      '确认结账并锁定本次工资结算？',
+      `最终金额：${summary.finalAmount}`,
+      `当前导出版本：V${summary.exportVersion}`,
+      `回执批次数量：${summary.receiptBatchCount}`,
+      `对账运行版本：第 ${summary.reconciliationVersion} 次`,
+      '结账后不能继续上传回执或处理差异。',
+    ].join('\n'))) {
       return Promise.resolve(null)
     }
     const reason = window.prompt('请填写结账说明')?.trim()
@@ -353,8 +391,15 @@ export function usePayrollSettlement() {
     selectedBatchId,
     settlement,
     currentExport,
+    exportVersions,
     receiptBatches,
     latestReconciliation,
+    differenceTypes,
+    filteredDifferences,
+    differenceTypeFilter,
+    blockingFilter,
+    employeeFilter,
+    closeSummary,
     loading,
     detailLoading,
     working,

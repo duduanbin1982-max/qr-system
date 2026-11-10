@@ -38,12 +38,13 @@ class PayrollSettlementRepository:
         return int(row["count"])
 
     @staticmethod
-    def supersede_export(export_id, db=None):
+    def supersede_export(export_id, superseded_by_export_id, db=None):
         db = resolve_db(db)
         return db.execute(
             "UPDATE payroll_export_batches SET status='superseded',"
-            "superseded_at=datetime('now','localtime') WHERE id=? AND status='active'",
-            (export_id,),
+            "superseded_at=datetime('now','localtime'),superseded_by_export_id=? "
+            "WHERE id=? AND status='active'",
+            (superseded_by_export_id, export_id),
         ).rowcount
 
     @staticmethod
@@ -424,8 +425,11 @@ class PayrollSettlementRepository:
     def list_reconciliation_items(run_id, db=None):
         db = resolve_db(db)
         return [dict(row) for row in db.execute(
-            "SELECT * FROM payroll_reconciliation_items "
-            "WHERE reconciliation_run_id=? ORDER BY id", (run_id,),
+            "SELECT item.*,export_item.employee_no_snapshot,"
+            "export_item.employee_name_snapshot "
+            "FROM payroll_reconciliation_items item "
+            "LEFT JOIN payroll_export_items export_item ON export_item.id=item.export_item_id "
+            "WHERE item.reconciliation_run_id=? ORDER BY item.id", (run_id,),
         ).fetchall()]
 
     @staticmethod
