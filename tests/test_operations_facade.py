@@ -48,7 +48,7 @@ def test_schedule_preflight_preserves_read_only_source_and_coverage_shape(tmp_pa
     finally:
         check.close()
 
-    assert before_version == after_version == 96
+    assert before_version == after_version == 97
     assert result["work_time_coverage"]["operation_count"] == 0
     assert result["work_time_coverage"]["missing_standard_operation_count"] == 0
 
@@ -77,7 +77,7 @@ def test_importing_facade_has_no_application_bootstrap_side_effects():
 
 def test_migration_steps_are_frozen_metadata_without_callbacks():
     steps = OperationsFacade.pending_migration_steps(94)
-    assert [step.version for step in steps] == [95, 96]
+    assert [step.version for step in steps] == [95, 96, 97]
     assert all(not hasattr(step, "callback") for step in steps)
     with pytest.raises(FrozenInstanceError):
         steps[0].version = 999
