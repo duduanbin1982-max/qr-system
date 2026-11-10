@@ -9,6 +9,7 @@
     </div>
 
     <PayrollLedgerTab v-if="activeTab==='ledger'" />
+    <PayrollSettlementTab v-if="activeTab==='settlement'" />
     <PayrollExceptionsTab v-if="activeTab==='exceptions'" />
     <PriceVersionTab
       v-if="activeTab==='priceversions'"
@@ -38,13 +39,14 @@ import TrendTab from '@/views/wage/TrendTab.vue'
 import PositionTab from '@/views/wage/PositionTab.vue'
 import PredictTab from '@/views/wage/PredictTab.vue'
 import PayrollLedgerTab from '@/views/wage/PayrollLedgerTab.vue'
+import PayrollSettlementTab from '@/views/wage/PayrollSettlementTab.vue'
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PriceVersionTab from '@/views/wage/PriceVersionTab.vue'
 import MyPayrollTab from '@/views/wage/MyPayrollTab.vue'
 import { useWageWorkspace } from '@/composables/wage/useWageWorkspace.js'
 
 export default {
-  components: { PayrollLedgerTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
+  components: { PayrollLedgerTab, PayrollSettlementTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
   setup() {
     return useWageWorkspace()
   }

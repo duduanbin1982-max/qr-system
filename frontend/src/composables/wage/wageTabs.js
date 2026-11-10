@@ -1,5 +1,6 @@
 const WAGE_TAB_DEFINITIONS_SOURCE = [
   { id: 'ledger', label: '批次台账', permissions: ['wages:view_all', 'wages:prepare', 'wages:approve'] },
+  { id: 'settlement', label: '导出对账', permissions: ['wages:view_all', 'wages:export', 'wages:receipt', 'wages:reconcile', 'wages:close'] },
   { id: 'exceptions', label: '异常处理', permissions: ['wages:view_all', 'wages:prepare', 'wages:approve'] },
   { id: 'adjustment', label: '调整项', permissions: ['wages:view_all', 'wages:prepare', 'wages:approve'] },
   { id: 'priceversions', label: '工价版本', permissions: ['wages:prepare', 'wages:approve'] },

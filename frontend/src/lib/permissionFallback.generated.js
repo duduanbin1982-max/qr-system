@@ -530,6 +530,18 @@ export const IMPLIED_PERMISSIONS = {
     "wages:view",
     "wages:view_all"
   ],
+  "wages:receipt": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:reconcile": [
+    "wages:view",
+    "wages:view_all"
+  ],
+  "wages:close": [
+    "wages:view",
+    "wages:view_all"
+  ],
   "performance:review_department": [
     "performance:view_department"
   ],

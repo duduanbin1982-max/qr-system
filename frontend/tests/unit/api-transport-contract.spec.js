@@ -240,4 +240,64 @@ describe('API facade transport contracts', () => {
       expect.objectContaining({ method: 'POST', body: JSON.stringify(lockCommand) }),
     )
   })
+
+  it('exposes payroll settlement commands and keeps receipt uploads multipart', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(201, { id: 51, status: 'ok' }),
+    )
+    const createPayload = { idempotency_key: 'settlement-export-1' }
+
+    await api.domains.wages.getPayrollSettlement(31)
+    await api.domains.wages.createPayrollSettlementExport(31, createPayload)
+    const receipt = new FormData()
+    receipt.append('file', new File(['receipt'], 'receipt.csv', { type: 'text/csv' }))
+    receipt.append('idempotency_key', 'settlement-receipt-1')
+    await api.domains.wages.uploadPayrollSettlementReceipt(41, receipt)
+    await api.domains.wages.reconcilePayrollSettlement(51, { idempotency_key: 'reconcile-1' })
+    await api.domains.wages.resolvePayrollSettlementDifference(61, {
+      resolution_code: 'exclude_duplicate',
+      resolution_reason: '重复记录已核实',
+      idempotency_key: 'resolve-1',
+    })
+    await api.domains.wages.closePayrollSettlement(51, {
+      row_version: 3,
+      close_reason: '账实一致',
+      idempotency_key: 'close-1',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/payroll/batches/31/settlement',
+      { method: 'GET', headers: {}, credentials: 'same-origin' },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/payroll/batches/31/settlement/exports',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(createPayload) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/payroll/settlement/exports/41/receipts',
+      expect.objectContaining({ method: 'POST', body: receipt, credentials: 'same-origin' }),
+    )
+    expect(fetchMock.mock.calls[2][1].headers).toBeUndefined()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/payroll/settlements/51/reconcile',
+      expect.objectContaining({ body: JSON.stringify({ idempotency_key: 'reconcile-1' }) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      '/api/payroll/settlement/differences/61/resolve',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      '/api/payroll/settlements/51/close',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(api.domains.wages.payrollSettlementExportDownloadUrl(41)).toBe(
+      '/api/payroll/settlement/exports/41/download',
+    )
+  })
 })

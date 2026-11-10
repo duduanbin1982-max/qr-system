@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import sqlite3
 
 import pytest
@@ -13,6 +16,10 @@ from factories import (
 from modules.db import get_db
 from modules.domain.payroll_policy import PayrollConflictError, work_amount_cents
 from modules.services.payroll_service import PayrollWorkflowService
+from modules.services.payroll_settlement_service import (
+    PayrollSettlementService,
+    _parse_receipt,
+)
 from modules.services.price_version_service import PriceVersionService
 from modules.services.wage_service import WageService
 
@@ -382,3 +389,250 @@ def test_idempotency_key_cannot_be_reused_for_different_month(client):
         PayrollWorkflowService.create_batch("2026-07", preparer, "same-payroll-key")
         with pytest.raises(PayrollConflictError, match="幂等键"):
             PayrollWorkflowService.create_batch("2026-08", preparer, "same-payroll-key")
+
+
+def _confirmed_batch_for_settlement(db, preparer, approver):
+    _seed_price_and_work(db)
+    batch = PayrollWorkflowService.create_batch(
+        "2026-07", preparer, "payroll-settlement-batch"
+    )
+    submitted = PayrollWorkflowService.submit(
+        batch["id"], preparer, batch["row_version"]
+    )
+    locked = PayrollWorkflowService.lock(
+        batch["id"], approver, submitted["row_version"]
+    )
+    return PayrollWorkflowService.confirm(
+        batch["id"], approver, locked["row_version"]
+    )
+
+
+def _receipt_csv_for_payments(payments):
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow([
+        "payment_reference", "employee_no", "employee_name", "paid_amount",
+        "payment_status", "paid_at", "external_transaction_no", "failure_reason",
+    ])
+    for index, payment in enumerate(payments, start=1):
+        writer.writerow([
+            payment["payment_reference"], payment["employee_no"], payment["employee_name"],
+            payment["payable_amount"], "success", "2026-07-02 10:00:00",
+            f"TX-{index}", "",
+        ])
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
+def _export_payment_rows(content):
+    return list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "银行账户", "收款账户", "收款人账号", "银行账号", "银行卡号",
+        "账户", "帐号", "account_number", "bank_account",
+    ],
+)
+def test_receipt_parser_rejects_account_headers(header):
+    content = (
+        "payment_reference,employee_no,employee_name,paid_amount,payment_status,"
+        f"{header}\nPAY-1,EMP-1,员工,1.00,success,ignored\n"
+    ).encode("utf-8")
+
+    with pytest.raises(ValueError, match="不得包含银行卡号"):
+        _parse_receipt(content)
+
+
+def test_settlement_export_metadata_is_separate_from_download_content(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-1"
+        )
+        assert "csv_content_blob" not in export
+        replay = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-1"
+        )
+        assert replay["id"] == export["id"]
+        assert replay["replayed"] is True
+        assert "csv_content_blob" not in replay
+
+        status = PayrollSettlementService.get_by_batch(batch["id"])
+        assert "csv_content_blob" not in status["current_export"]
+        content = PayrollSettlementService.download_export(export["id"])
+        assert isinstance(content, bytes)
+        payment = _export_payment_rows(content)[0]
+        assert payment["payable_amount"] == "3.75"
+
+
+def test_settlement_receipt_reconciliation_and_close_are_idempotent(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-close"
+        )
+        payments = _export_payment_rows(
+            PayrollSettlementService.download_export(export["id"])
+        )
+        content = _receipt_csv_for_payments(payments)
+
+        receipt = PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-1", "bank.csv", content
+        )
+        receipt_replay = PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-1", "bank.csv", content
+        )
+        assert receipt_replay["id"] == receipt["id"]
+        assert receipt_replay["replayed"] is True
+
+        run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-1"
+        )
+        assert run["status"] == "reconciled"
+        assert run["expected_total_cents"] == run["successful_paid_cents"] == 375
+        replay = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-1"
+        )
+        assert replay["id"] == run["id"]
+        assert replay["replayed"] is True
+
+        status = PayrollSettlementService.get_by_batch(batch["id"])
+        close_data = {
+            "row_version": status["row_version"],
+            "idempotency_key": "settlement-close-1",
+            "close_reason": "财务回执核对一致",
+        }
+        close_record = PayrollSettlementService.close(
+            export["settlement_id"], approver, close_data
+        )
+        close_replay = PayrollSettlementService.close(
+            export["settlement_id"], approver, close_data
+        )
+        assert close_replay["id"] == close_record["id"]
+        assert close_replay["replayed"] is True
+        assert PayrollSettlementService.get_by_batch(batch["id"])["status"] == "closed"
+
+
+def test_invalid_receipt_without_reference_blocks_close_until_explicitly_excluded(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-missing-reference"
+        )
+        payments = _export_payment_rows(
+            PayrollSettlementService.download_export(export["id"])
+        )
+        receipt_text = _receipt_csv_for_payments(payments).decode("utf-8-sig").rstrip("\r\n")
+        receipt_text += (
+            "\r\n,UNKNOWN,未知员工,1.00,success,2026-07-02 10:05:00,TX-UNKNOWN,"
+            "\r\n"
+        )
+        PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-missing-reference",
+            "bank.csv", receipt_text.encode("utf-8"),
+        )
+
+        run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver,
+            "settlement-reconcile-missing-reference",
+        )
+        assert run["status"] == "difference_pending"
+        unknown = next(
+            item for item in run["items"]
+            if item["difference_type"] == "unknown_reference"
+        )
+        assert unknown["payment_reference"] == ""
+        detail = json.loads(unknown["detail_json"])
+        assert detail["receipt_item_id"]
+        assert detail["validation_error"] == "缺少 payment_reference"
+
+        status = PayrollSettlementService.get_by_batch(batch["id"])
+        with pytest.raises(ValueError, match="只有最新对账完全通过"):
+            PayrollSettlementService.close(
+                export["settlement_id"], approver,
+                {
+                    "row_version": status["row_version"],
+                    "idempotency_key": "settlement-close-missing-reference",
+                    "close_reason": "不应通过",
+                },
+            )
+
+        resolution = PayrollSettlementService.resolve_difference(
+            unknown["id"],
+            approver,
+            {
+                "resolution_code": "exclude_unknown_reference",
+                "resolution_reason": "财务确认该空引用行为回执附加噪声，予以排除",
+                "receipt_item_id": detail["receipt_item_id"],
+                "idempotency_key": "settlement-resolution-missing-reference",
+            },
+        )
+        assert resolution["ok"] is True
+        resolved_run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver,
+            "settlement-reconcile-after-missing-reference-resolution",
+        )
+        assert resolved_run["status"] == "reconciled"
+        assert resolved_run["blocking_count"] == 0
+        assert resolved_run["successful_paid_cents"] == 375
+
+
+def test_duplicate_payment_requires_resolution_before_settlement_close(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-duplicate"
+        )
+        payment = _export_payment_rows(
+            PayrollSettlementService.download_export(export["id"])
+        )[0]
+        content = _receipt_csv_for_payments([payment, payment])
+        PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-duplicate", "bank.csv", content
+        )
+
+        run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-duplicate"
+        )
+        duplicate = next(
+            item for item in run["items"]
+            if item["difference_type"] == "duplicate_success"
+        )
+        status = PayrollSettlementService.get_by_batch(batch["id"])
+        with pytest.raises(ValueError, match="只有最新对账完全通过"):
+            PayrollSettlementService.close(
+                export["settlement_id"], approver,
+                {
+                    "row_version": status["row_version"],
+                    "idempotency_key": "settlement-close-blocked",
+                    "close_reason": "不应通过",
+                },
+            )
+
+        detail = json.loads(duplicate["detail_json"])
+        resolution = PayrollSettlementService.resolve_difference(
+            duplicate["id"],
+            approver,
+            {
+                "resolution_code": "exclude_duplicate",
+                "resolution_reason": "银行回执重复行，经财务核实排除",
+                "receipt_item_id": detail["receipt_item_id"],
+                "idempotency_key": "settlement-resolution-duplicate",
+            },
+        )
+        assert resolution["ok"] is True
+        resolved_run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-after-resolution"
+        )
+        assert resolved_run["status"] == "reconciled"
+        assert resolved_run["successful_paid_cents"] == 375
