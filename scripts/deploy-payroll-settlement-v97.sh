@@ -146,10 +146,31 @@ on_error() {
             fi
             if [[ $rollback_code -eq 0 ]]; then FENCE_OWNED=false; log "verified V96 rollback completed"; else systemctl --user stop qr-system.service >/dev/null 2>&1 || true; log "rollback failed; service stopped and fence retained"; fi
         else
-            python3 "$MANIFEST_TOOL" abandon-fence --path "$FENCE" --deployment-key "$DEPLOYMENT_KEY" --target-commit "$TARGET_COMMIT" || true
-            FENCE_OWNED=false
             systemctl --user start qr-system.service || true
             SERVICE_STOPPED=false
+            if wait_health "$EXPECTED_BEFORE" true "$DEPLOYMENT_KEY"; then
+                if python3 "$MANIFEST_TOOL" abandon-fence --path "$FENCE" --deployment-key "$DEPLOYMENT_KEY" --target-commit "$TARGET_COMMIT"; then
+                    FENCE_OWNED=false
+                    if ! wait_health "$EXPECTED_BEFORE" false ""; then
+                        systemctl --user stop qr-system.service >/dev/null 2>&1 || true
+                        SERVICE_STOPPED=true
+                        if python3 "$MANIFEST_TOOL" acquire-fence --path "$FENCE" --deployment-key "$DEPLOYMENT_KEY" --target-commit "$TARGET_COMMIT"; then
+                            FENCE_OWNED=true
+                            log "baseline health failed after fence release; service stopped and fence restored"
+                        else
+                            log "baseline health failed after fence release; service stopped but fence restoration failed"
+                        fi
+                    fi
+                else
+                    systemctl --user stop qr-system.service >/dev/null 2>&1 || true
+                    SERVICE_STOPPED=true
+                    log "pre-manifest fence release failed; service stopped and fence retained"
+                fi
+            else
+                systemctl --user stop qr-system.service >/dev/null 2>&1 || true
+                SERVICE_STOPPED=true
+                log "baseline failed fenced health recovery; service stopped and fence retained"
+            fi
         fi
     fi
     exit "$code"

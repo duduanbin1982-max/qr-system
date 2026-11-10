@@ -210,6 +210,20 @@ def test_launcher_switches_marker_before_checkout_and_bootstrap_pins_controls():
     assert "--scope backend_frontend_migration" in launcher
     assert "--target-database-version 97" in launcher
     assert "verify-attachments" in launcher
+    early_failure = launcher.index('if [[ "$PREPARED" == true ]]')
+    early_recovery = launcher.index(
+        'systemctl --user start qr-system.service || true', early_failure
+    )
+    fenced_health = launcher.index(
+        'wait_health "$EXPECTED_BEFORE" true "$DEPLOYMENT_KEY"', early_recovery
+    )
+    abandon = launcher.index('abandon-fence', fenced_health)
+    unfenced_health = launcher.index(
+        'wait_health "$EXPECTED_BEFORE" false ""', abandon
+    )
+    assert early_recovery < fenced_health < abandon < unfenced_health
+    assert "service stopped and fence retained" in launcher
+    assert "service stopped and fence restored" in launcher
     assert (
         'deployment_scope" == "backend_frontend_static" || "$deployment_scope" == "backend_frontend_migration"'
         in rollback
