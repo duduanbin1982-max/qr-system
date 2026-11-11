@@ -93,17 +93,25 @@ export function useWage() {
     async function exportCSV() {
       if (exportingPiecework.value) return
       exportingPiecework.value = true
+      const exportParams = pieceworkParams(1, PIECEWORK_EXPORT_PAGE_SIZE)
+      const exportHideZero = hideZero.value
+      const exportDateFrom = dateFrom.value
+      const exportDateTo = dateTo.value
       try {
         const result = await collectAllPages(
-          (pageNumber, pageSize) => api.domains.wages.listWages(pieceworkParams(pageNumber, pageSize)),
+          (pageNumber, pageSize) => api.domains.wages.listWages({
+            ...exportParams, page: pageNumber, limit: pageSize,
+          }),
           'wages',
           PIECEWORK_EXPORT_PAGE_SIZE,
         )
-        const exportWages = hideZero.value ? result.wages.filter(item => item.total_quantity > 0) : result.wages
+        const exportWages = exportHideZero
+          ? result.wages.filter(item => item.total_quantity > 0)
+          : result.wages
         if (!exportWages.length) { showToast('没有数据可导出', 'warning'); return }
         downloadCSV(
           buildPieceworkCsvRows(exportWages, fmtDate, fmtMoney),
-          "工资明细_"+(dateFrom.value||"全部")+"_"+(dateTo.value||"全部"),
+          "工资明细_"+(exportDateFrom||"全部")+"_"+(exportDateTo||"全部"),
         )
       } catch (error) { showToast(error.message || '导出失败', 'error') }
       finally { exportingPiecework.value = false }
@@ -149,14 +157,18 @@ export function useWage() {
     async function exportMonthlyCSV() {
       if (exportingMonthly.value) return
       exportingMonthly.value = true
+      const exportMonth = monthlyMonth.value
+      const exportParams = { year_month: exportMonth }
       try {
         const result = await collectAllPages(
-          (pageNumber, pageSize) => api.domains.wages.getMonthlySummary({ year_month: monthlyMonth.value, page: pageNumber, limit: pageSize }),
+          (pageNumber, pageSize) => api.domains.wages.getMonthlySummary({
+            ...exportParams, page: pageNumber, limit: pageSize,
+          }),
           'summary',
           MONTHLY_EXPORT_PAGE_SIZE,
         )
         if (!result.summary.length) { showToast('没有数据可导出', 'warning'); return }
-        downloadCSV(buildMonthlyCsvRows(result.summary, result, fmtMoney), "月度汇总_"+monthlyMonth.value)
+        downloadCSV(buildMonthlyCsvRows(result.summary, result, fmtMoney), "月度汇总_"+exportMonth)
       } catch (error) { showToast(error.message || '导出失败', 'error') }
       finally { exportingMonthly.value = false }
     }

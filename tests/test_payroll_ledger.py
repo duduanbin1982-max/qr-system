@@ -871,6 +871,42 @@ def test_invalid_receipt_without_reference_blocks_close_until_explicitly_exclude
         assert resolved_run["successful_paid_cents"] == 375
 
 
+def test_invalid_receipt_for_known_reference_blocks_even_with_valid_payment(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-known-invalid"
+        )
+        payment = _export_payment_rows(
+            PayrollSettlementService.download_export(export["id"])
+        )[0]
+        receipt_text = _receipt_csv_for_payments([payment]).decode("utf-8-sig").rstrip("\r\n")
+        receipt_text += (
+            f"\r\n{payment['payment_reference']},{payment['employee_no']},"
+            f"{payment['employee_name']},not-a-number,success,2026-07-02 10:05:00,"
+            "TX-INVALID-AMOUNT,\r\n"
+        )
+        PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-known-invalid",
+            "bank.csv", receipt_text.encode("utf-8"),
+        )
+
+        run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-known-invalid"
+        )
+
+        assert run["status"] == "difference_pending"
+        assert run["successful_paid_cents"] == 375
+        assert run["blocking_count"] == 1
+        invalid = next(
+            item for item in run["items"] if item["difference_type"] == "invalid_amount"
+        )
+        detail = json.loads(invalid["detail_json"])
+        assert detail["validation_error"] == "金额格式无效"
+
+
 def test_duplicate_payment_requires_resolution_before_settlement_close(client):
     with client.application.app_context():
         db = get_db()

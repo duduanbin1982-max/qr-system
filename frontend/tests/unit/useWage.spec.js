@@ -162,6 +162,48 @@ describe('wage export risk closure', () => {
     wrapper.unmount()
   })
 
+  it('freezes piecework export filters while later pages are loading', async () => {
+    localStorage.setItem('wageActiveTab', 'piece')
+    const wrapper = mount(Harness)
+    await flushPromises()
+    let resolveFirstPage
+    const firstPage = new Promise(resolve => { resolveFirstPage = resolve })
+    mocks.listWages.mockReset()
+    mocks.listWages.mockImplementationOnce(() => firstPage)
+      .mockResolvedValueOnce({
+        wages: [{ employee_name: '第二页', total_quantity: 1, total_wage: 1, details: [] }],
+        total: 1001,
+      })
+    const vm = wrapper.vm
+    vm.dateFrom = '2026-11-01'
+    vm.dateTo = '2026-11-30'
+    vm.includeRework = true
+    vm.hideZero = true
+
+    const exportPromise = vm.exportCSV()
+    vm.dateFrom = '2026-12-01'
+    vm.dateTo = '2026-12-31'
+    vm.includeRework = false
+    vm.hideZero = false
+    resolveFirstPage({
+      wages: Array.from({ length: 1000 }, (_, index) => ({
+        employee_name: `第一页${index + 1}`,
+        total_quantity: 1,
+        total_wage: 1,
+        details: [],
+      })),
+      total: 1001,
+    })
+    await exportPromise
+
+    expect(mocks.listWages).toHaveBeenNthCalledWith(2, {
+      page: 2, limit: 1000, date_from: '2026-11-01', date_to: '2026-11-30',
+      include_rework: '1', hide_zero: '1',
+    })
+    expect(mocks.downloadCSV.mock.calls[0][1]).toBe('工资明细_2026-11-01_2026-11-30')
+    wrapper.unmount()
+  })
+
   it('exports the full monthly summary with global ranks and aligned totals', async () => {
     const totalRows = 501
     mocks.getMonthlySummary.mockImplementation(params => {
@@ -194,6 +236,41 @@ describe('wage export risk closure', () => {
     expect(rows).toHaveLength(503)
     expect(rows[501][0]).toBe(501)
     expect(rows[502]).toEqual(['', '', '合计', 501, '501.00', '100.0%'])
+    expect(mocks.downloadCSV.mock.calls[0][1]).toBe('月度汇总_2026-10')
+    wrapper.unmount()
+  })
+
+  it('freezes the monthly export month while later pages are loading', async () => {
+    localStorage.setItem('wageActiveTab', 'monthly')
+    const wrapper = mount(Harness)
+    await flushPromises()
+    let resolveFirstPage
+    const firstPage = new Promise(resolve => { resolveFirstPage = resolve })
+    mocks.getMonthlySummary.mockReset()
+    mocks.getMonthlySummary.mockImplementationOnce(() => firstPage)
+      .mockResolvedValueOnce({
+        summary: [{ employee_name: '第二页', employee_no: 'E501', total_quantity: 1, total_wage: 1 }],
+        total: 501, grand_total_quantity: 501, grand_total_wage: 501,
+      })
+    const vm = wrapper.vm
+    vm.monthlyMonth = '2026-10'
+
+    const exportPromise = vm.exportMonthlyCSV()
+    vm.monthlyMonth = '2026-11'
+    resolveFirstPage({
+      summary: Array.from({ length: 500 }, (_, index) => ({
+        employee_name: `第一页${index + 1}`,
+        employee_no: `E${index + 1}`,
+        total_quantity: 1,
+        total_wage: 1,
+      })),
+      total: 501, grand_total_quantity: 501, grand_total_wage: 501,
+    })
+    await exportPromise
+
+    expect(mocks.getMonthlySummary).toHaveBeenNthCalledWith(2, {
+      year_month: '2026-10', page: 2, limit: 500,
+    })
     expect(mocks.downloadCSV.mock.calls[0][1]).toBe('月度汇总_2026-10')
     wrapper.unmount()
   })

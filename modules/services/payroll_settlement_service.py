@@ -338,7 +338,7 @@ def _reconcile_export_item(export_item, receipts, accepted_name_ids, transaction
     return paid, findings
 
 
-def _reconcile_invalid_receipts(invalid, expected_by_ref, grouped):
+def _reconcile_invalid_receipts(invalid, expected_by_ref):
     findings = []
     for receipt in invalid:
         reference = receipt["payment_reference"]
@@ -352,7 +352,7 @@ def _reconcile_invalid_receipts(invalid, expected_by_ref, grouped):
                     "employee_name": receipt.get("employee_name_snapshot") or "",
                 },
             ))
-        elif not grouped.get(reference):
+        else:
             export_item = expected_by_ref[reference]
             findings.append(_finding(
                 export_item["id"], reference, int(export_item["payable_cents"]), 0,
@@ -393,7 +393,7 @@ def _calculate_reconciliation(items, receipt_items, resolutions):
         )
         for receipt in unknown
     )
-    findings.extend(_reconcile_invalid_receipts(invalid, expected_by_ref, grouped))
+    findings.extend(_reconcile_invalid_receipts(invalid, expected_by_ref))
     return paid_total, findings
 
 

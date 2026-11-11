@@ -151,8 +151,10 @@ def daily_report():
         writer.writerow(['员工姓名', '工号', '工序', '数量'])
         for r in report:
             for proc_id, p in r['processes'].items():
-                writer.writerow([r['employee_name'], r['employee_no'],
-                                 p['process_name'], p['quantity']])
+                writer.writerow([safe_csv_cell(value) for value in [
+                    r['employee_name'], r['employee_no'],
+                    p['process_name'], p['quantity'],
+                ]])
         output.seek(0)
         return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')),
                          mimetype='text/csv; charset=utf-8-sig',

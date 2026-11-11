@@ -46,6 +46,28 @@ def test_live_wage_csv_neutralizes_formula_like_text(client, auth_headers, monke
     assert row[7] == "'@SUM(A1)"
 
 
+def test_daily_report_csv_neutralizes_formula_like_text(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(
+        WageService,
+        "daily_report",
+        staticmethod(lambda _date: {
+            "report": [{
+                "employee_name": "=HYPERLINK(\"bad\")",
+                "employee_no": "\t@CMD",
+                "processes": {
+                    "p1": {"process_name": "+SUM(A1)", "quantity": 1},
+                },
+            }],
+        }),
+    )
+
+    response = client.get("/api/daily-report?date=2026-11-10&export=csv", headers=auth_headers)
+
+    assert response.status_code == 200
+    row = _csv_rows(response)[1]
+    assert row == ["'=HYPERLINK(\"bad\")", "'\t@CMD", "'+SUM(A1)", "1"]
+
+
 def test_payroll_preview_csv_neutralizes_whitespace_prefixed_formulas(
     client, auth_headers
 ):
