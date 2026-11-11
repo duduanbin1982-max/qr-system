@@ -50,6 +50,24 @@ def _fixed_snapshot(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
+def _normalized_reason(value):
+    return " ".join(str(value or "").split())
+
+
+def _adjustment_idempotency_key(value):
+    key = str(value or "").strip()
+    if not key or len(key) > 128:
+        raise ValueError("必须提供 1 到 128 个字符的幂等键")
+    return key
+
+
+def _request_digest(payload):
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class PayrollCalculationService:
     @staticmethod
     def collect_inputs(batch, db, cutoff=None):
@@ -476,6 +494,10 @@ class PayrollWorkflowService:
                 raise ValueError("被修订批次不存在")
             if supersedes and supersedes["payroll_month"] != month:
                 raise ValueError("修订批次月份不一致")
+            if supersedes and PayrollRepository.settlement_for_batch(supersedes_batch_id, db):
+                raise ValueError(
+                    "该工资批次已生成正式支付清单，请在后续期间通过补差或冲销处理"
+                )
             if supersedes and not revision_reason.strip():
                 raise ValueError("修订必须填写原因")
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -540,9 +562,14 @@ class PayrollWorkflowService:
             if PayrollRepository.list_exceptions(batch_id=batch_id, status="pending", db=db) or PayrollRepository.list_exceptions(batch_id=batch_id, status="proposed", db=db):
                 raise ValueError("仍有未处理工资异常")
             PayrollCalculationService.require_complete_snapshot(batch, db)
+            PayrollWorkflowService._require_nonnegative_payable(batch_id, db)
             old_id = batch.get("supersedes_batch_id")
             if old_id:
                 old = PayrollRepository.get_batch(old_id, db)
+                if PayrollRepository.settlement_for_batch(old_id, db):
+                    raise ValueError(
+                        "原工资批次已生成正式支付清单，不能确认整批修订；请在后续期间补差或冲销"
+                    )
                 if old and old.get("status") != "voided":
                     PayrollRepository.mark_superseded(old_id, batch_id, db)
             PayrollRepository.transition_batch(
@@ -565,6 +592,10 @@ class PayrollWorkflowService:
         with BaseService.transaction() as db:
             batch = PayrollRepository.get_batch(batch_id, db)
             PayrollWorkflowService._check_approval(batch, actor_id, ("locked", "confirmed"))
+            if PayrollRepository.settlement_for_batch(batch_id, db):
+                raise ValueError(
+                    "该工资批次已生成正式支付清单，不能普通作废；请在后续期间补差或冲销"
+                )
             PayrollRepository.transition_batch(
                 batch_id, expected_row_version, "voided",
                 {"voided_by": actor_id, "voided_by_name": actor_name,
@@ -610,6 +641,7 @@ class PayrollWorkflowService:
             else:
                 PayrollWorkflowService._check_approval(batch, actor_id, "review_pending")
                 PayrollCalculationService.require_complete_snapshot(batch, db)
+            PayrollWorkflowService._require_nonnegative_payable(batch_id, db)
             fields = {}
             if status == "review_pending":
                 fields["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -726,18 +758,35 @@ class PayrollWorkflowService:
     @staticmethod
     def create_adjustment(actor_user, data):
         actor_id, actor_name = _actor(actor_user)
+        idempotency_key = _adjustment_idempotency_key(data.get("idempotency_key"))
         month = validate_payroll_month(data.get("payroll_month"))
         adjustment_type = str(data.get("adjustment_type") or "").strip()
         if adjustment_type not in ("bonus", "allowance", "deduction"):
             raise ValueError("调整类型无效")
-        reason = str(data.get("reason") or "").strip()
+        reason = _normalized_reason(data.get("reason"))
         if not reason:
             raise ValueError("调整项必须填写原因")
         employee_id = int(data.get("employee_id"))
         amount_cents = int(data.get("amount_cents")) if data.get("amount_cents") is not None else yuan_to_cents(data.get("amount"))
         if amount_cents <= 0:
             raise ValueError("调整金额必须大于 0")
+        request_digest = _request_digest({
+            "operation": "create_adjustment",
+            "actor_id": actor_id,
+            "employee_id": employee_id,
+            "payroll_month": month,
+            "adjustment_type": adjustment_type,
+            "amount_cents": amount_cents,
+            "reason": reason,
+        })
         with BaseService.transaction() as db:
+            existing = PayrollRepository.adjustment_by_idempotency_key(
+                idempotency_key, db
+            )
+            if existing:
+                if existing.get("request_digest") != request_digest:
+                    raise PayrollConflictError("幂等键已用于不同的工资调整请求")
+                return {"ok": True, "id": existing["id"], "replayed": True}
             PayrollWorkflowService._ensure_adjustment_period_editable(month, db)
             employee = PayrollRepository.user_snapshot(employee_id, db)
             if not employee:
@@ -747,19 +796,42 @@ class PayrollWorkflowService:
                 "employee_no_snapshot": employee["employee_no"] or "", "payroll_month": month,
                 "adjustment_type": adjustment_type, "amount_cents": amount_cents, "reason": reason,
                 "created_by": actor_id, "created_by_name": actor_name,
+                "idempotency_key": idempotency_key, "request_digest": request_digest,
             }, db)
             PayrollRepository.insert_event({
                 "event_type": "adjustment_created", "operator_id": actor_id, "operator_name": actor_name,
                 "reason": reason, "payload": {"adjustment_id": adjustment_id, "payroll_month": month},
+                "idempotency_key": f"payroll-adjustment-create:{idempotency_key}",
             }, db)
-            return {"ok": True, "id": adjustment_id}
+            return {"ok": True, "id": adjustment_id, "replayed": False}
 
     @staticmethod
-    def reverse_adjustment(adjustment_id, actor_user, reason):
+    def reverse_adjustment(adjustment_id, actor_user, reason, idempotency_key=None):
         actor_id, actor_name = _actor(actor_user)
-        if not str(reason or "").strip():
+        idempotency_key = _adjustment_idempotency_key(idempotency_key)
+        reason = _normalized_reason(reason)
+        if not reason:
             raise ValueError("冲销必须填写原因")
+        request_digest = _request_digest({
+            "operation": "reverse_adjustment",
+            "actor_id": actor_id,
+            "adjustment_id": int(adjustment_id),
+            "reason": reason,
+        })
         with BaseService.transaction() as db:
+            existing = PayrollRepository.adjustment_by_idempotency_key(
+                idempotency_key, db
+            )
+            if existing:
+                if (
+                    existing.get("request_digest") != request_digest
+                    or existing.get("reversal_of_id") != int(adjustment_id)
+                ):
+                    raise PayrollConflictError("幂等键已用于不同的工资调整冲销请求")
+                return {
+                    "ok": True, "id": existing["id"],
+                    "reversal_of_id": int(adjustment_id), "replayed": True,
+                }
             original = PayrollRepository.get_adjustment(adjustment_id, db)
             if not original:
                 raise ValueError("调整项不存在")
@@ -768,20 +840,41 @@ class PayrollWorkflowService:
             )
             if original.get("reversal_of_id"):
                 raise ValueError("不能再次冲销冲销记录")
-            if PayrollRepository.has_adjustment_reversal(adjustment_id, db):
+            if PayrollRepository.adjustment_reversal(adjustment_id, db):
                 raise ValueError("该调整项已经冲销")
             new_id = PayrollRepository.create_adjustment({
                 "employee_id": original["employee_id"], "employee_name_snapshot": original["employee_name_snapshot"],
                 "employee_no_snapshot": original["employee_no_snapshot"], "payroll_month": original["payroll_month"],
                 "adjustment_type": original["adjustment_type"], "amount_cents": original["amount_cents"],
-                "reason": reason.strip(), "created_by": actor_id, "created_by_name": actor_name,
+                "reason": reason, "created_by": actor_id, "created_by_name": actor_name,
                 "reversal_of_id": adjustment_id,
+                "idempotency_key": idempotency_key, "request_digest": request_digest,
             }, db)
             PayrollRepository.insert_event({
                 "event_type": "adjustment_reversed", "operator_id": actor_id, "operator_name": actor_name,
-                "reason": reason.strip(), "payload": {"adjustment_id": adjustment_id, "reversal_id": new_id},
+                "reason": reason, "payload": {"adjustment_id": adjustment_id, "reversal_id": new_id},
+                "idempotency_key": f"payroll-adjustment-reverse:{idempotency_key}",
             }, db)
-            return {"ok": True, "id": new_id, "reversal_of_id": adjustment_id}
+            return {
+                "ok": True, "id": new_id, "reversal_of_id": adjustment_id,
+                "replayed": False,
+            }
+
+    @staticmethod
+    def _require_nonnegative_payable(batch_id, db):
+        negative = PayrollRepository.list_negative_payable_lines(batch_id, db)
+        if not negative:
+            return
+        sample = "、".join(
+            row.get("employee_name_snapshot")
+            or row.get("employee_no_snapshot")
+            or str(row.get("employee_id") or "未知员工")
+            for row in negative[:3]
+        )
+        suffix = f"（{sample}）" if sample else ""
+        raise ValueError(
+            f"存在 {len(negative)} 名员工应付工资为负数{suffix}，不能提交、锁定或确认"
+        )
 
     @staticmethod
     def _ensure_adjustment_period_editable(month, db, action="新增工资调整"):
@@ -852,6 +945,8 @@ class PayrollWorkflowService:
         month = validate_payroll_month(month)
         db = BaseService.db()
         batch = PayrollRepository.latest_active_batch(month, db)
+        if batch:
+            batch = PayrollRepository.get_batch(batch["id"], db)
         exceptions = (
             PayrollRepository.list_exceptions(batch_id=batch["id"], db=db)
             if batch else []
@@ -893,7 +988,7 @@ class PayrollWorkflowService:
         if not batch:
             raise ValueError("工资批次不存在")
         if batch["status"] not in ("locked", "confirmed"):
-            raise ValueError("只有锁定或确认批次可以正式导出")
+            raise ValueError("只有锁定或确认批次可以下载工资清单预览")
         return batch, PayrollRepository.list_lines(batch_id)
 
     @staticmethod

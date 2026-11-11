@@ -270,7 +270,8 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_schedule_standard_binding_v085",
             "modules.migration_production_nodes",
             "modules.migration_inventory_product_views",
-        "modules.migration_payroll_settlement",
+            "modules.migration_payroll_settlement",
+            "modules.migration_payroll_risk_closure",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -384,7 +385,9 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[94] == "modules.migration_production_nodes"
     assert by_version[95] == "modules.migration_production_nodes"
     assert by_version[96] == "modules.migration_inventory_product_views"
-    assert migrations.LATEST_VERSION == 97
+    assert by_version[97] == "modules.migration_payroll_settlement"
+    assert by_version[98] == "modules.migration_payroll_risk_closure"
+    assert migrations.LATEST_VERSION == 98
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():
@@ -1392,27 +1395,276 @@ def test_payroll_settlement_migration_rolls_back_all_ddl_on_failure():
         db.close()
 
 
-def test_schema_96_upgrades_only_payroll_settlement_migration():
+def _create_minimal_payroll_v96_schema(db):
+    db.executescript(
+        """
+        CREATE TABLE users(id INTEGER PRIMARY KEY);
+        CREATE TABLE payroll_batches(
+            id INTEGER PRIMARY KEY,
+            status TEXT NOT NULL,
+            superseded_by_batch_id INTEGER,
+            legacy_imported INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE payroll_employee_lines(
+            id INTEGER PRIMARY KEY,
+            batch_id INTEGER NOT NULL,
+            payable_wage_cents INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(batch_id) REFERENCES payroll_batches(id)
+        );
+        CREATE TABLE payroll_adjustments(id INTEGER PRIMARY KEY);
+        """
+    )
+
+
+def _upgrade_minimal_payroll_schema_to_v97(db):
+    from modules.migration_payroll_settlement import m097_payroll_settlement
+
+    _create_minimal_payroll_v96_schema(db)
+    m097_payroll_settlement(db)
+    db.execute("PRAGMA user_version=97")
+    db.commit()
+
+
+def test_schema_96_upgrades_payroll_settlement_and_risk_closure_migrations():
     from modules import migrations
 
     db = sqlite3.connect(":memory:")
     try:
         db.execute("PRAGMA foreign_keys=ON")
-        db.executescript(
-            """
-            CREATE TABLE users(id INTEGER PRIMARY KEY);
-            CREATE TABLE payroll_batches(id INTEGER PRIMARY KEY);
-            CREATE TABLE payroll_employee_lines(id INTEGER PRIMARY KEY);
-            PRAGMA user_version=96;
-            """
-        )
+        _create_minimal_payroll_v96_schema(db)
+        db.execute("PRAGMA user_version=96")
 
-        assert migrations.run_migrations(db) == 1
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 97
+        assert migrations.run_migrations(db) == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 98
         assert db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='payroll_settlements'"
         ).fetchone()
+        adjustment_columns = {
+            row[1] for row in db.execute("PRAGMA table_info(payroll_adjustments)")
+        }
+        assert {"idempotency_key", "request_digest"}.issubset(adjustment_columns)
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        db.close()
+
+
+def test_payroll_risk_closure_migration_is_idempotent_and_installs_named_guards():
+    from modules import migrations
+    from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute("PRAGMA foreign_keys=ON")
+        _upgrade_minimal_payroll_schema_to_v97(db)
+
+        assert migrations.run_migrations(db) == 1
+        m098_payroll_risk_closure(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 98
+        assert {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'trg_payroll_%'"
+            )
+        } == {
+            "trg_payroll_settlement_current_batch_insert",
+            "trg_payroll_settlement_batch_immutable",
+            "trg_payroll_settled_batch_immutable",
+            "trg_payroll_batch_nonnegative_transition",
+            "trg_payroll_employee_line_insert_immutable",
+            "trg_payroll_export_item_nonnegative",
+        }
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='idx_payroll_adjustment_idempotency'"
+        ).fetchone()
+    finally:
+        db.close()
+
+
+def test_payroll_risk_closure_migration_rolls_back_columns_and_ddl_on_failure():
+    from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+    db = sqlite3.connect(":memory:")
+    _upgrade_minimal_payroll_schema_to_v97(db)
+
+    def deny_last_trigger(action, object_name, _table_name, _database_name, _source):
+        if (
+            action == sqlite3.SQLITE_CREATE_TRIGGER
+            and object_name == "trg_payroll_export_item_nonnegative"
+        ):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    db.set_authorizer(deny_last_trigger)
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            m098_payroll_risk_closure(db)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(payroll_adjustments)")}
+        assert "idempotency_key" not in columns
+        assert "request_digest" not in columns
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+            "AND name='trg_payroll_settlement_current_batch_insert'"
+        ).fetchone() is None
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 97
+    finally:
+        db.close()
+
+
+def test_payroll_risk_closure_rejects_inconsistent_v97_settlement_without_changes():
+    from modules import migrations
+    from modules.migration_helpers import MigrationInvariantError
+
+    db = sqlite3.connect(":memory:")
+    try:
+        _upgrade_minimal_payroll_schema_to_v97(db)
+        db.execute(
+            "INSERT INTO payroll_batches(id,status) VALUES(1,'voided')"
+        )
+        db.execute(
+            "INSERT INTO payroll_settlements(batch_id,status) VALUES(1,'exported')"
+        )
+        db.commit()
+
+        with pytest.raises(MigrationInvariantError, match="current confirmed batch"):
+            migrations.run_migrations(db)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 97
+        columns = {row[1] for row in db.execute("PRAGMA table_info(payroll_adjustments)")}
+        assert "idempotency_key" not in columns
+    finally:
+        db.close()
+
+
+def test_payroll_risk_closure_rejects_existing_negative_formal_export():
+    from modules import migrations
+    from modules.migration_helpers import MigrationInvariantError
+
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute("PRAGMA foreign_keys=ON")
+        _upgrade_minimal_payroll_schema_to_v97(db)
+        db.execute("INSERT INTO payroll_batches(id,status) VALUES(1,'confirmed')")
+        db.execute(
+            "INSERT INTO payroll_employee_lines(id,batch_id,payable_wage_cents) "
+            "VALUES(1,1,-1)"
+        )
+        db.execute(
+            "INSERT INTO payroll_settlements(id,batch_id,status) VALUES(1,1,'exported')"
+        )
+        db.execute(
+            "INSERT INTO payroll_export_batches("
+            "id,settlement_id,export_version,row_count,total_cents,content_sha256,"
+            "csv_content_blob,idempotency_key) "
+            "VALUES(1,1,1,1,-1,?,zeroblob(0),'negative-export')",
+            ("0" * 64,),
+        )
+        db.execute(
+            "INSERT INTO payroll_export_items("
+            "export_batch_id,employee_line_id,employee_name_snapshot,payable_cents,"
+            "payment_reference,sequence_no) VALUES(1,1,'员工',-1,'NEG-1',1)"
+        )
+        db.commit()
+
+        with pytest.raises(MigrationInvariantError, match="negative payroll export item"):
+            migrations.run_migrations(db)
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 97
+    finally:
+        db.close()
+
+
+def test_payroll_risk_closure_enforces_adjustment_and_state_invariants():
+    from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute("PRAGMA foreign_keys=ON")
+        _upgrade_minimal_payroll_schema_to_v97(db)
+        m098_payroll_risk_closure(db)
+
+        db.execute(
+            "INSERT INTO payroll_adjustments(id,idempotency_key,request_digest) "
+            "VALUES(1,'adjustment-key','digest')"
+        )
+        db.execute(
+            "INSERT INTO payroll_adjustments(id,idempotency_key,request_digest) "
+            "VALUES(2,'','')"
+        )
+        db.execute(
+            "INSERT INTO payroll_adjustments(id,idempotency_key,request_digest) "
+            "VALUES(3,'','')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            db.execute(
+                "INSERT INTO payroll_adjustments(id,idempotency_key,request_digest) "
+                "VALUES(4,'adjustment-key','other')"
+            )
+
+        db.executemany(
+            "INSERT INTO payroll_batches(id,status,superseded_by_batch_id) VALUES(?,?,?)",
+            [
+                (10, "draft", None),
+                (20, "draft", None),
+                (21, "confirmed", None),
+                (22, "draft", None),
+                (23, "confirmed", 21),
+            ],
+        )
+        db.execute(
+            "INSERT INTO payroll_employee_lines(id,batch_id,payable_wage_cents) "
+            "VALUES(10,10,-1)"
+        )
+        for status in ("review_pending", "locked", "confirmed"):
+            with pytest.raises(sqlite3.IntegrityError, match="negative payroll"):
+                db.execute(
+                    "UPDATE payroll_batches SET status=? WHERE id=10",
+                    (status,),
+                )
+
+        for invalid_batch_id in (22, 23):
+            with pytest.raises(sqlite3.IntegrityError, match="current confirmed batch"):
+                db.execute(
+                    "INSERT INTO payroll_settlements(batch_id,status) VALUES(?,'exported')",
+                    (invalid_batch_id,),
+                )
+
+        db.execute(
+            "INSERT INTO payroll_employee_lines(id,batch_id,payable_wage_cents) "
+            "VALUES(20,20,1)"
+        )
+        db.execute("UPDATE payroll_batches SET status='confirmed' WHERE id=20")
+        db.execute(
+            "INSERT INTO payroll_settlements(id,batch_id,status) VALUES(20,20,'exported')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="employee lines are immutable"):
+            db.execute(
+                "INSERT INTO payroll_employee_lines(id,batch_id,payable_wage_cents) "
+                "VALUES(21,20,-1)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="batch is immutable"):
+            db.execute("UPDATE payroll_settlements SET batch_id=21 WHERE id=20")
+        with pytest.raises(sqlite3.IntegrityError, match="remain current confirmed"):
+            db.execute("UPDATE payroll_batches SET status='voided' WHERE id=20")
+        with pytest.raises(sqlite3.IntegrityError, match="remain current confirmed"):
+            db.execute(
+                "UPDATE payroll_batches SET superseded_by_batch_id=21 WHERE id=20"
+            )
+
+        db.execute(
+            "INSERT INTO payroll_export_batches("
+            "id,settlement_id,export_version,row_count,total_cents,content_sha256,"
+            "csv_content_blob,idempotency_key) "
+            "VALUES(20,20,1,1,1,?,zeroblob(0),'export-key')",
+            ("1" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="negative payroll export"):
+            db.execute(
+                "INSERT INTO payroll_export_items("
+                "export_batch_id,employee_line_id,employee_name_snapshot,payable_cents,"
+                "payment_reference,sequence_no) VALUES(20,20,'员工',-1,'NEG-20',1)"
+            )
     finally:
         db.close()
 

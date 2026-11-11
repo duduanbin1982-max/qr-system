@@ -24,7 +24,7 @@
         <span style="color:var(--text-placeholder);font-size:var(--text-xs)">至</span>
         <input v-model="dateTo" type="date" aria-label="预估结束日期" class="form-input" style="width:130px;font-size:var(--text-xs);padding:var(--space-1) 8px" @change="load(1)">
         <button class="btn-default btn-sm" @click="load(1)" style="margin-left:4px">查询</button>
-        <button class="btn-primary btn-sm" @click="exportCSV" style="margin-left:4px;background:var(--success);border-color:var(--success)">📥 导出CSV</button>
+        <button class="btn-primary btn-sm" :disabled="exportingPiecework" @click="exportCSV" style="margin-left:4px;background:var(--success);border-color:var(--success)">📥 {{ exportingPiecework ? '导出中...' : '导出全部CSV' }}</button>
       </div>
     </div>
 

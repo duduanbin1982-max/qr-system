@@ -53,21 +53,23 @@
             <td>
               <span class="payroll-status" :class="'status-'+batch.status">{{ statusLabel(batch.status) }}</span>
               <p v-if="batch.input_changed" class="text-warning">输入已变化，请重算后提交</p>
+              <p v-if="negativePayableCount(batch)" class="text-danger">负数应付 {{ negativePayableCount(batch) }} 人，不能提交或结算</p>
+              <p v-if="hasFormalSettlement(batch)" class="text-placeholder">已进入财务结算</p>
             </td>
             <td>{{ batch.legacy_imported ? 'Legacy 快照' : '版本化计算' }}</td>
             <td>{{ batch.priced_record_count }} / {{ batch.source_record_count }}</td>
             <td :class="{'text-warning':batch.exception_count}">{{ batch.exception_count }}</td>
-            <td class="text-right"><strong>{{ money(batch.payable_wage_cents) }}</strong></td>
+            <td class="text-right" :class="{ 'text-danger': Number(batch.payable_wage_cents || 0) < 0 }"><strong>{{ money(batch.payable_wage_cents) }}</strong></td>
             <td>{{ batch.prepared_by_name || batch.prepared_user_name || '-' }}</td>
             <td>
               <div class="payroll-row-actions">
                 <button class="btn-default btn-sm" @click="openBatch(batch)">查看</button>
                 <button v-if="canPrepare && editable(batch)" class="btn-default btn-sm" :disabled="working" @click="regenerate(batch)">重算</button>
                 <button v-if="canPrepare && canSubmit(batch)" class="btn-primary btn-sm" :disabled="working" @click="submit(batch)">提交</button>
-                <button v-if="canApprove && batch.status==='review_pending'" class="btn-primary btn-sm" :disabled="working" @click="lock(batch)">锁定</button>
-                <button v-if="canApprove && batch.status==='locked'" class="btn-primary btn-sm" :disabled="working" @click="confirmBatch(batch)">确认</button>
-                <button v-if="canExport && ['locked','confirmed'].includes(batch.status)" class="btn-default btn-sm" @click="exportBatch(batch)">导出</button>
-                <button v-if="canPrepare && batch.status==='confirmed' && !batch.superseded_by_batch_id" class="btn-default btn-sm" :disabled="working" @click="revise(batch)">修订</button>
+                <button v-if="canApprove && canLock(batch)" class="btn-primary btn-sm" :disabled="working" @click="lock(batch)">锁定</button>
+                <button v-if="canApprove && canConfirm(batch)" class="btn-primary btn-sm" :disabled="working" @click="confirmBatch(batch)">确认</button>
+                <button v-if="canExport && ['locked','confirmed'].includes(batch.status)" class="btn-default btn-sm" @click="exportBatch(batch)">下载预览</button>
+                <button v-if="canPrepare && canRevise(batch)" class="btn-default btn-sm" :disabled="working" @click="revise(batch)">修订</button>
               </div>
             </td>
           </tr>
@@ -92,7 +94,7 @@
             <td>{{ line.normal_quantity }}</td><td>{{ line.rework_quantity }}</td>
             <td class="text-right">{{ money(line.normal_wage_cents) }}</td><td class="text-right">{{ money(line.rework_wage_cents) }}</td>
             <td class="text-right">{{ money(line.bonus_cents + line.allowance_cents - line.deduction_cents) }}</td>
-            <td class="text-right"><strong>{{ money(line.payable_wage_cents) }}</strong></td>
+            <td class="text-right" :class="{ 'text-danger': Number(line.payable_wage_cents || 0) < 0 }"><strong>{{ money(line.payable_wage_cents) }}</strong></td>
           </tr>
         </tbody>
       </table>
@@ -128,7 +130,12 @@ const {
   statusLabel,
   periodStatusLabel,
   editable,
+  negativePayableCount,
+  hasFormalSettlement,
   canSubmit,
+  canLock,
+  canConfirm,
+  canRevise,
   idempotency,
   load,
   createBatch,

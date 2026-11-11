@@ -8,6 +8,7 @@ from datetime import datetime
 
 from flask import request, jsonify, send_file, g
 
+from modules.csv_utils import safe_csv_cell
 from modules.route_decorators import (
     app,
     check_auth,
@@ -119,13 +120,13 @@ def calculate_wages():
                          '日期', '订单号', '产品名称', '工序', '数量', '单价', '工资'])
         for w in wages:
             for d in w['details']:
-                writer.writerow([
+                writer.writerow([safe_csv_cell(value) for value in [
                     w['employee_name'], w['employee_no'],
                     w['total_quantity'], w['total_wage'],
                     d['date'][:10] if d['date'] else '',
                     d.get('order_no', ''), d.get('product_name', ''),
                     d['process_name'], d['quantity'], d['unit_price'], d['wage']
-                ])
+                ]])
         output.seek(0)
         return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')),
                          mimetype='text/csv; charset=utf-8-sig',

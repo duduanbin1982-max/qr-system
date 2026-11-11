@@ -8,6 +8,8 @@ describe('formatCSVCell', () => {
     ['=1+1', "'=1+1"],
     [' +SUM(A1:A2)', "' +SUM(A1:A2)"],
     ['\t-2+3', "'\t-2+3"],
+    ['\tplain', "'\tplain"],
+    ['\rplain', "\"'\rplain\""],
     ['@cmd', "'@cmd"],
   ])('neutralizes spreadsheet formulas in %j', (value, expected) => {
     expect(formatCSVCell(value)).toBe(expected)

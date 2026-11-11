@@ -272,7 +272,8 @@ def test_draft_input_drift_is_read_only_and_requires_regeneration(
             adjustment = PayrollWorkflowService.create_adjustment(
                 preparer, {"employee_id": employee_id, "payroll_month": "2026-07",
                            "adjustment_type": "bonus", "amount_cents": 100,
-                           "reason": "月度奖金"},
+                           "reason": "月度奖金",
+                           "idempotency_key": "integrity-drift-reversal-create"},
             )
         batch = PayrollWorkflowService.create_batch(
             "2026-07", preparer, f"integrity-drift-{change}"
@@ -306,10 +307,14 @@ def test_draft_input_drift_is_read_only_and_requires_regeneration(
             PayrollWorkflowService.create_adjustment(
                 preparer, {"employee_id": employee_id, "payroll_month": "2026-07",
                            "adjustment_type": "bonus", "amount_cents": 100,
-                           "reason": "追加月度奖金"},
+                           "reason": "追加月度奖金",
+                           "idempotency_key": "integrity-drift-adjustment"},
             )
         else:
-            PayrollWorkflowService.reverse_adjustment(adjustment["id"], preparer, "奖金复核冲销")
+            PayrollWorkflowService.reverse_adjustment(
+                adjustment["id"], preparer, "奖金复核冲销",
+                "integrity-drift-reversal",
+            )
 
         for _ in range(2):
             detail = PayrollWorkflowService.batch_detail(batch["id"])
@@ -437,7 +442,8 @@ def test_submitted_snapshot_freezes_inputs_through_lock_and_confirmation(
             PayrollWorkflowService.create_adjustment(
                 preparer, {"employee_id": employee_id, "payroll_month": "2026-07",
                            "adjustment_type": "bonus", "amount_cents": 100,
-                           "reason": "已提交后的新奖金"},
+                           "reason": "已提交后的新奖金",
+                           "idempotency_key": "integrity-after-submit"},
             )
         assert PayrollWorkflowService.batch_detail(batch["id"])["batch"]["input_changed"] is False
         locked = PayrollWorkflowService.lock(batch["id"], approver, submitted["row_version"])

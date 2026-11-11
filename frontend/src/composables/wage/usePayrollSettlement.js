@@ -67,6 +67,7 @@ export function usePayrollSettlement() {
 
   const availableBatches = computed(() => batches.value.filter(batch => (
     batch.status === 'confirmed' && !batch.superseded_by_batch_id
+    && Number(batch.negative_payable_count || 0) === 0
   )))
   const selectedBatch = computed(() => availableBatches.value.find(
     batch => batch.id === selectedBatchId.value,
@@ -102,7 +103,8 @@ export function usePayrollSettlement() {
   const canClosePermission = computed(() => can('wages:close'))
   const isClosed = computed(() => settlement.value?.status === 'closed')
   const canCreateExport = computed(() => Boolean(
-    selectedBatch.value && canExport.value && !isClosed.value && receiptBatches.value.length === 0
+    selectedBatch.value && Number(selectedBatch.value.negative_payable_count || 0) === 0
+    && canExport.value && !isClosed.value && receiptBatches.value.length === 0
   ))
   const canUploadReceipt = computed(() => Boolean(
     currentExport.value && canReceipt.value && !isClosed.value

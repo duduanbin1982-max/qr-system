@@ -18,7 +18,7 @@ export function buildParams(start, end, filterCode) {
 
 export function formatCSVCell(value) {
   let text = String(value == null ? "" : value)
-  if (/^[\t\r\n ]*[=+\-@]/.test(text)) text = "'" + text
+  if (/^[\t\r]|^[\t\r\n ]*[=+\-@]/.test(text)) text = "'" + text
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text
 }
 
