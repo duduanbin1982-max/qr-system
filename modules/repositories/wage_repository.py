@@ -384,53 +384,63 @@ class WageRepository:
         ).fetchall()
 
     @classmethod
-    def get_monthly_summary(cls, year_month, page=1, limit=100, db=None):
+    def _fetch_monthly_summary(cls, year_month, page=None, limit=None, db=None):
+        """Read page data and totals from one deterministically ordered SQL snapshot."""
         db = resolve_db(db)
         month_start, month_end = reporting_month_bounds(validate_payroll_month(year_month))
         amount_cents = cls._work_amount_expr(db)
-        rows = db.execute(
-            """
-            SELECT wr.user_id, u.name as employee_name, u.employee_no,
-                   SUM(wr.quantity) as total_quantity,
-                   SUM("""
-            + amount_cents
-            + """) / 100.0 as total_wage
-            FROM work_records wr
-            JOIN users u ON wr.user_id = u.id
-            LEFT JOIN orders o ON wr.order_id = o.id
-            WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND """ + cls.valid_order_fact_sql("wr") + """
-              AND wr.created_at >= ? AND wr.created_at < ?
-            GROUP BY wr.user_id
-            ORDER BY total_wage DESC
-            LIMIT ? OFFSET ?
-            """,
-            (month_start, month_end, limit, (page - 1) * limit),
-        ).fetchall()
-        total_count = db.execute(
-            """
-            SELECT COUNT(DISTINCT wr.user_id) FROM work_records wr
-            WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND """ + cls.valid_order_fact_sql("wr") + """
-              AND wr.created_at >= ? AND wr.created_at < ?
-            """,
-            (month_start, month_end),
-        ).fetchone()[0]
-        grand_total = db.execute(
-            """
-            SELECT COALESCE(SUM(wr.quantity),0) as total_qty,
-                   COALESCE(SUM("""
-            + amount_cents
-            + """),0) / 100.0 as total_wage
-            FROM work_records wr
-            LEFT JOIN orders o ON wr.order_id = o.id
-            WHERE wr.status = 'approved' AND wr.type = 'normal'
-              AND """ + cls.valid_order_fact_sql("wr") + """
-              AND wr.created_at >= ? AND wr.created_at < ?
-            """,
-            (month_start, month_end),
-        ).fetchone()
-        return rows, total_count, grand_total
+        query = """
+            WITH employee_summary AS (
+                SELECT wr.user_id, u.name as employee_name, u.employee_no,
+                       SUM(wr.quantity) as total_quantity,
+                       SUM(""" + amount_cents + """) as total_wage_cents
+                FROM work_records wr
+                JOIN users u ON wr.user_id = u.id
+                LEFT JOIN orders o ON wr.order_id = o.id
+                WHERE wr.status = 'approved' AND wr.type = 'normal'
+                  AND """ + cls.valid_order_fact_sql("wr") + """
+                  AND wr.created_at >= ? AND wr.created_at < ?
+                GROUP BY wr.user_id
+            ), totals AS (
+                SELECT COUNT(*) as total_count,
+                       COALESCE(SUM(total_quantity), 0) as total_qty,
+                       COALESCE(SUM(total_wage_cents), 0) / 100.0 as total_wage
+                FROM employee_summary
+            ), page_rows AS (
+                SELECT * FROM employee_summary
+                ORDER BY total_wage_cents DESC, user_id ASC
+        """
+        params = [month_start, month_end]
+        if page is not None and limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend((limit, (page - 1) * limit))
+        query += """
+            )
+            SELECT page_rows.user_id, page_rows.employee_name, page_rows.employee_no,
+                   page_rows.total_quantity, page_rows.total_wage_cents / 100.0 as total_wage,
+                   totals.total_count, totals.total_qty, totals.total_wage as grand_total_wage
+            FROM totals LEFT JOIN page_rows ON 1=1
+            ORDER BY page_rows.total_wage_cents DESC, page_rows.user_id ASC
+        """
+        rows = db.execute(query, params).fetchall()
+        first = rows[0]
+        total_count = first["total_count"]
+        grand_total = {"total_qty": first["total_qty"], "total_wage": first["grand_total_wage"]}
+        summary = [
+            {key: row[key] for key in (
+                "user_id", "employee_name", "employee_no", "total_quantity", "total_wage"
+            )}
+            for row in rows if row["user_id"] is not None
+        ]
+        return summary, total_count, grand_total
+
+    @classmethod
+    def get_monthly_summary(cls, year_month, page=1, limit=100, db=None):
+        return cls._fetch_monthly_summary(year_month, page, limit, db)
+
+    @classmethod
+    def get_monthly_summary_snapshot(cls, year_month, db=None):
+        return cls._fetch_monthly_summary(year_month, db=db)
 
     @classmethod
     def get_process_wage_summary(cls, year_month, db=None):

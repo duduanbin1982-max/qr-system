@@ -133,6 +133,18 @@ class WageService:
         }
 
     @staticmethod
+    def monthly_summary_export(year_month):
+        """月度 CSV 导出数据在单条查询内读取，避免跨页快照漂移。"""
+        rows, total_count, grand_total = WageRepository.get_monthly_summary_snapshot(year_month)
+        return {
+            'year_month': year_month,
+            'summary': [dict(row) for row in rows],
+            'grand_total_wage': round(grand_total['total_wage'] or 0, 2),
+            'grand_total_quantity': grand_total['total_qty'] or 0,
+            'total': total_count, 'page': 1, 'limit': total_count,
+        }
+
+    @staticmethod
     def process_wage_summary(year_month):
         """按工序维度的工资汇总（用于分析各工序工资支出）。"""
         rows = WageRepository.get_process_wage_summary(year_month)

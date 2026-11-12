@@ -6,7 +6,7 @@ import { formatLocalMonth } from '@/composables/wage/payrollFormat.js'
 import { getVisibleWageTabs, resolveWageTab } from '@/composables/wage/wageTabs.js'
 import {
   buildMonthlyCsvRows, buildPayslipHtml, buildPieceworkCsvRows, collectAllPages,
-  MONTHLY_EXPORT_PAGE_SIZE, PIECEWORK_EXPORT_PAGE_SIZE,
+  PIECEWORK_EXPORT_PAGE_SIZE,
 } from '@/composables/wage/wageExport.js'
 import { exportCSV as downloadCSV } from '@/composables/reports/reportSupport.js'
 
@@ -158,15 +158,8 @@ export function useWage() {
       if (exportingMonthly.value) return
       exportingMonthly.value = true
       const exportMonth = monthlyMonth.value
-      const exportParams = { year_month: exportMonth }
       try {
-        const result = await collectAllPages(
-          (pageNumber, pageSize) => api.domains.wages.getMonthlySummary({
-            ...exportParams, page: pageNumber, limit: pageSize,
-          }),
-          'summary',
-          MONTHLY_EXPORT_PAGE_SIZE,
-        )
+        const result = await api.domains.wages.getMonthlySummaryExport(exportMonth)
         if (!result.summary.length) { showToast('没有数据可导出', 'warning'); return }
         downloadCSV(buildMonthlyCsvRows(result.summary, result, fmtMoney), "月度汇总_"+exportMonth)
       } catch (error) { showToast(error.message || '导出失败', 'error') }

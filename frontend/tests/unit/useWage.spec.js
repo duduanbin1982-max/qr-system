@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   listWages: vi.fn(),
   getMonthlySummary: vi.fn(),
+  getMonthlySummaryExport: vi.fn(),
   downloadCSV: vi.fn(),
   toast: vi.fn(),
 }))
@@ -13,6 +14,7 @@ vi.mock('@/lib/api.js', () => ({
   api: { domains: { wages: {
     listWages: mocks.listWages,
     getMonthlySummary: mocks.getMonthlySummary,
+    getMonthlySummaryExport: mocks.getMonthlySummaryExport,
   } } },
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.toast }))
@@ -37,6 +39,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.listWages.mockResolvedValue({ wages: [], total: 0 })
   mocks.getMonthlySummary.mockResolvedValue({
+    summary: [], total: 0, grand_total_quantity: 0, grand_total_wage: 0,
+  })
+  mocks.getMonthlySummaryExport.mockResolvedValue({
     summary: [], total: 0, grand_total_quantity: 0, grand_total_wage: 0,
   })
 })
@@ -206,20 +211,16 @@ describe('wage export risk closure', () => {
 
   it('exports the full monthly summary with global ranks and aligned totals', async () => {
     const totalRows = 501
-    mocks.getMonthlySummary.mockImplementation(params => {
-      const start = (params.page - 1) * params.limit
-      const end = Math.min(start + params.limit, totalRows)
-      return Promise.resolve({
-        summary: Array.from({ length: Math.max(end - start, 0) }, (_, offset) => {
-          const employeeId = start + offset + 1
-          return {
-            user_id: employeeId,
-            employee_name: employeeId === totalRows ? '末页员工' : `员工${employeeId}`,
-            employee_no: `E${employeeId}`, total_quantity: 1, total_wage: 1,
-          }
-        }),
-        total: totalRows, grand_total_quantity: totalRows, grand_total_wage: totalRows,
-      })
+    mocks.getMonthlySummaryExport.mockResolvedValue({
+      summary: Array.from({ length: totalRows }, (_, index) => {
+        const employeeId = index + 1
+        return {
+          user_id: employeeId,
+          employee_name: employeeId === totalRows ? '末页员工' : `员工${employeeId}`,
+          employee_no: `E${employeeId}`, total_quantity: 1, total_wage: 1,
+        }
+      }),
+      total: totalRows, grand_total_quantity: totalRows, grand_total_wage: totalRows,
     })
     localStorage.setItem('wageActiveTab', 'piece')
     const wrapper = mount(Harness)
@@ -231,7 +232,9 @@ describe('wage export risk closure', () => {
     await vm.exportMonthlyCSV()
 
     expect(vm.monthlyPage).toBe(4)
-    expect(mocks.getMonthlySummary).toHaveBeenCalledWith({ year_month: '2026-10', page: 2, limit: 500 })
+    expect(mocks.getMonthlySummaryExport).toHaveBeenCalledOnce()
+    expect(mocks.getMonthlySummaryExport).toHaveBeenCalledWith('2026-10')
+    expect(mocks.getMonthlySummary).not.toHaveBeenCalled()
     const rows = mocks.downloadCSV.mock.calls[0][0]
     expect(rows).toHaveLength(503)
     expect(rows[501][0]).toBe(501)
@@ -240,37 +243,27 @@ describe('wage export risk closure', () => {
     wrapper.unmount()
   })
 
-  it('freezes the monthly export month while later pages are loading', async () => {
+  it('freezes the monthly export month for its single snapshot request', async () => {
     localStorage.setItem('wageActiveTab', 'monthly')
     const wrapper = mount(Harness)
     await flushPromises()
     let resolveFirstPage
     const firstPage = new Promise(resolve => { resolveFirstPage = resolve })
-    mocks.getMonthlySummary.mockReset()
-    mocks.getMonthlySummary.mockImplementationOnce(() => firstPage)
-      .mockResolvedValueOnce({
-        summary: [{ employee_name: '第二页', employee_no: 'E501', total_quantity: 1, total_wage: 1 }],
-        total: 501, grand_total_quantity: 501, grand_total_wage: 501,
-      })
+    mocks.getMonthlySummaryExport.mockReset()
+    mocks.getMonthlySummaryExport.mockImplementationOnce(() => firstPage)
     const vm = wrapper.vm
     vm.monthlyMonth = '2026-10'
 
     const exportPromise = vm.exportMonthlyCSV()
     vm.monthlyMonth = '2026-11'
     resolveFirstPage({
-      summary: Array.from({ length: 500 }, (_, index) => ({
-        employee_name: `第一页${index + 1}`,
-        employee_no: `E${index + 1}`,
-        total_quantity: 1,
-        total_wage: 1,
-      })),
-      total: 501, grand_total_quantity: 501, grand_total_wage: 501,
+      summary: [{ employee_name: '快照员工', employee_no: 'E1', total_quantity: 1, total_wage: 1 }],
+      total: 1, grand_total_quantity: 1, grand_total_wage: 1,
     })
     await exportPromise
 
-    expect(mocks.getMonthlySummary).toHaveBeenNthCalledWith(2, {
-      year_month: '2026-10', page: 2, limit: 500,
-    })
+    expect(mocks.getMonthlySummaryExport).toHaveBeenCalledOnce()
+    expect(mocks.getMonthlySummaryExport).toHaveBeenCalledWith('2026-10')
     expect(mocks.downloadCSV.mock.calls[0][1]).toBe('月度汇总_2026-10')
     wrapper.unmount()
   })

@@ -1,5 +1,4 @@
 export const PIECEWORK_EXPORT_PAGE_SIZE = 1000
-export const MONTHLY_EXPORT_PAGE_SIZE = 500
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, character => ({

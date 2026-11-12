@@ -180,6 +180,13 @@ def monthly_summary():
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     return jsonify(WageService.monthly_summary(year_month, page, limit))
 
+@app.route('/api/wages/monthly-summary/export', methods=['GET'])
+@check_auth
+@check_permission('wages:view_all')
+def monthly_summary_export():
+    year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
+    return jsonify(WageService.monthly_summary_export(year_month))
+
 @app.route('/api/wages/process-summary', methods=['GET'])
 @check_auth
 @check_permission('wages:view_all')

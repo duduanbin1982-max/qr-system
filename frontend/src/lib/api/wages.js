@@ -38,6 +38,7 @@ export const wagesApi = {
   listWages:          (params) => request('GET', '/api/wages' + buildQuery(params)),
   getSnapshotStatus:  (yearMonth) => request('GET', '/api/wages/snapshot-status' + buildQuery({ year_month: yearMonth })),
   getMonthlySummary:  (params) => request('GET', '/api/wages/monthly-summary' + buildQuery(params)),
+  getMonthlySummaryExport: (yearMonth) => request('GET', '/api/wages/monthly-summary/export' + buildQuery({ year_month: yearMonth })),
   getProcessSummary:  (yearMonth) => request('GET', '/api/wages/process-summary' + buildQuery({ year_month: yearMonth })),
   listAdjustments:    (yearMonth) => request('GET', '/api/wages/adjustments' + buildQuery({ year_month: yearMonth })),
   getWageTrends:      (months) => request('GET', '/api/wages/trends' + buildQuery({ months })),
