@@ -106,7 +106,9 @@ def calculate_wages():
     include_rework = request.args.get('include_rework', '0') == '1'
     hide_zero = request.args.get('hide_zero', '0') == '1'
     if export:
-        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999, include_pending, include_rework, hide_zero)
+        result = WageService.calculate_wages_snapshot(
+            employee_id, date_from, date_to, include_pending, include_rework, hide_zero
+        )
     else:
         page = max(request.args.get('page', 1, type=int), 1)
         limit = min(max(request.args.get('limit', 200, type=int), 1), 1000)

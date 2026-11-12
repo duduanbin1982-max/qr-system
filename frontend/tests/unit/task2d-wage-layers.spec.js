@@ -256,6 +256,7 @@ describe('Task 2D payroll permissions, totals and commands through Vue consumers
   it('keeps ledger totals free of superseded and voided amounts and export permission', async () => {
     mocks.wages.listPayrollBatches.mockResolvedValue({ batches: [
       { id: 1, status: 'confirmed', payable_wage_cents: 10000, exception_count: 0 },
+      { id: 4, status: 'draft', supersedes_batch_id: 1, payable_wage_cents: 12000, exception_count: 0 },
       { id: 2, status: 'confirmed', superseded_by_batch_id: 1, payable_wage_cents: 9000, exception_count: 2 },
       { id: 3, status: 'voided', payable_wage_cents: 3000, exception_count: 1 },
     ] })
@@ -263,6 +264,17 @@ describe('Task 2D payroll permissions, totals and commands through Vue consumers
     await flushPromises()
     expect(state(reader).monthTotal).toBe(10000)
     expect(state(reader).pendingExceptions).toBe(3)
+    state(reader).status = 'draft'
+    await state(reader).load()
+    expect(state(reader).batches.map(batch => batch.id)).toEqual([4])
+    expect(state(reader).monthTotal).toBe(10000)
+    state(reader).status = ''
+    mocks.wages.listPayrollBatches.mockResolvedValueOnce({ batches: [
+      { id: 1, status: 'confirmed', superseded_by_batch_id: 4, payable_wage_cents: 10000 },
+      { id: 4, status: 'confirmed', supersedes_batch_id: 1, payable_wage_cents: 12000 },
+    ] })
+    await state(reader).load()
+    expect(state(reader).monthTotal).toBe(12000)
     expect(buttons(reader)).not.toContain('下载预览')
     mocks.permissions.add('wages:export')
     const exporter = render(PayrollLedgerTab)
@@ -281,7 +293,7 @@ describe('Task 2D payroll permissions, totals and commands through Vue consumers
     const vm = state(wrapper)
     vm.month = '2026-09'; vm.status = 'locked'
     await vm.load()
-    expect(mocks.wages.listPayrollBatches).toHaveBeenLastCalledWith({ payroll_month: '2026-09', status: 'locked' })
+    expect(mocks.wages.listPayrollBatches).toHaveBeenLastCalledWith({ payroll_month: '2026-09' })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await vm.confirmBatch(lockedBatch)
     expect(mocks.wages.confirmPayrollBatch).toHaveBeenCalledWith(8, 3)

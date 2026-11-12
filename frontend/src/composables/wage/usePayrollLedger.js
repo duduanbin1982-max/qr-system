@@ -10,7 +10,11 @@ export function usePayrollLedger() {
 
   const status = ref('')
 
-  const batches = ref([])
+  const allBatches = ref([])
+
+  const batches = computed(() => status.value
+    ? allBatches.value.filter(item => item.status === status.value)
+    : allBatches.value)
 
   const loading = ref(false)
 
@@ -40,7 +44,9 @@ export function usePayrollLedger() {
 
   const confirmedCount = computed(() => batches.value.filter(item => item.status === 'confirmed').length)
 
-  const monthTotal = computed(() => batches.value.filter(item => !item.superseded_by_batch_id && item.status !== 'voided').reduce((sum, item) => sum + Number(item.payable_wage_cents || 0), 0))
+  const monthTotal = computed(() => allBatches.value
+    .filter(item => item.status === 'confirmed' && !item.superseded_by_batch_id)
+    .reduce((sum, item) => sum + Number(item.payable_wage_cents || 0), 0))
 
   function money(cents) { return `¥${(Number(cents || 0) / 100).toFixed(2)}` }
 
@@ -95,8 +101,8 @@ export function usePayrollLedger() {
   async function load() {
     loading.value = true
     try {
-      const data = await api.domains.wages.listPayrollBatches({ payroll_month: month.value, status: status.value })
-      batches.value = data.batches || []
+      const data = await api.domains.wages.listPayrollBatches({ payroll_month: month.value })
+      allBatches.value = data.batches || []
       await loadControl()
     } catch (error) { showToast(error.message || '工资批次加载失败', 'error') }
     finally { loading.value = false }

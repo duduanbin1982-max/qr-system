@@ -5,8 +5,7 @@ import { can } from '@/lib/auth.js'
 import { formatLocalMonth } from '@/composables/wage/payrollFormat.js'
 import { getVisibleWageTabs, resolveWageTab } from '@/composables/wage/wageTabs.js'
 import {
-  buildMonthlyCsvRows, buildPayslipHtml, buildPieceworkCsvRows, collectAllPages,
-  PIECEWORK_EXPORT_PAGE_SIZE,
+  buildMonthlyCsvRows, buildPayslipHtml, buildPieceworkCsvRows,
 } from '@/composables/wage/wageExport.js'
 import { exportCSV as downloadCSV } from '@/composables/reports/reportSupport.js'
 
@@ -53,13 +52,17 @@ export function useWage() {
       return Object.values(map).sort((a,b) => a.date.localeCompare(b.date))
     }
 
-    function pieceworkParams(pageValue, limitValue) {
-      const params = { page: pageValue, limit: limitValue }
+    function pieceworkFilters() {
+      const params = {}
       if (dateFrom.value) params.date_from = dateFrom.value
       if (dateTo.value) params.date_to = dateTo.value
       if (includeRework.value) params.include_rework = "1"
       if (hideZero.value) params.hide_zero = "1"
       return params
+    }
+
+    function pieceworkParams(pageValue, limitValue) {
+      return { page: pageValue, limit: limitValue, ...pieceworkFilters() }
     }
 
     async function load(pg) {
@@ -93,18 +96,12 @@ export function useWage() {
     async function exportCSV() {
       if (exportingPiecework.value) return
       exportingPiecework.value = true
-      const exportParams = pieceworkParams(1, PIECEWORK_EXPORT_PAGE_SIZE)
+      const exportParams = pieceworkFilters()
       const exportHideZero = hideZero.value
       const exportDateFrom = dateFrom.value
       const exportDateTo = dateTo.value
       try {
-        const result = await collectAllPages(
-          (pageNumber, pageSize) => api.domains.wages.listWages({
-            ...exportParams, page: pageNumber, limit: pageSize,
-          }),
-          'wages',
-          PIECEWORK_EXPORT_PAGE_SIZE,
-        )
+        const result = await api.domains.wages.listWages({ ...exportParams, export: 'snapshot' })
         const exportWages = exportHideZero
           ? result.wages.filter(item => item.total_quantity > 0)
           : result.wages

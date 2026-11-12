@@ -1,3 +1,6 @@
+import sqlite3
+from contextlib import closing
+
 import pytest
 
 from factories import WORKER_HASH, ensure_user
@@ -261,6 +264,86 @@ def test_monthly_summary_export_route_returns_all_rows_and_totals(client, monkey
     assert len(payload["summary"]) == 1
     assert payload["grand_total_quantity"] == 5
     assert payload["grand_total_wage"] == 5
+
+
+def test_piecework_snapshot_export_keeps_membership_stable_when_same_total_changes(
+    client, monkeypatch,
+):
+    with client.application.app_context():
+        db = get_db()
+        worker_id = _seed_estimate_source(db, price="1")
+        replacement_id = ensure_user(
+            db, "snapshot-membership-replacement", WORKER_HASH,
+            "快照替换员工", "worker", "SNAP-REPLACEMENT",
+        )
+        database_path = db.execute("PRAGMA database_list").fetchone()[2]
+        fetch_worker_page = WageRepository.get_worker_paged_by_role
+        mutations = []
+
+        def fetch_page_then_replace_worker(
+            employee_id="", db=None, page=1, limit=50,
+            matching_work_where="", matching_work_params=None,
+        ):
+            result = fetch_worker_page(
+                employee_id, db=db, page=page, limit=limit,
+                matching_work_where=matching_work_where,
+                matching_work_params=matching_work_params,
+            )
+            with closing(sqlite3.connect(database_path)) as writer:
+                writer.execute(
+                    "UPDATE work_records SET user_id=? WHERE user_id=?",
+                    (replacement_id, worker_id),
+                )
+                writer.commit()
+            mutations.append(True)
+            return result
+
+        monkeypatch.setattr(
+            WageRepository, "get_worker_paged_by_role",
+            staticmethod(fetch_page_then_replace_worker),
+        )
+        result = WageService.calculate_wages_snapshot(
+            date_from="2026-07-01",
+            date_to="2026-07-31",
+            hide_zero=True,
+        )
+
+        assert mutations == [True]
+        assert result["total"] == 1
+        assert [row["employee_id"] for row in result["wages"]] == [worker_id]
+        assert result["wages"][0]["total_quantity"] == 3
+        with closing(sqlite3.connect(database_path)) as writer:
+            current_members = writer.execute(
+                "SELECT DISTINCT user_id FROM work_records WHERE status='approved'"
+            ).fetchall()
+        assert current_members == [(replacement_id,)]
+
+
+def test_piecework_export_route_uses_snapshot_reader_and_preserves_filters(client, monkeypatch):
+    from modules.middleware.auth import AuthSessionService
+
+    actor = {"id": 1, "name": "工资导出测试员", "_permissions": ["wages:view_all"]}
+    monkeypatch.setattr(
+        AuthSessionService, "authenticate", lambda _token: (dict(actor), None)
+    )
+    calls = []
+
+    def snapshot(*args):
+        calls.append(args)
+        return {"wages": [], "total": 0, "page": 1, "limit": 999999}
+
+    monkeypatch.setattr(WageService, "calculate_wages_snapshot", staticmethod(snapshot))
+    response = client.get(
+        "/api/wages?export=snapshot&date_from=2026-07-01&date_to=2026-07-31"
+        "&include_rework=1&hide_zero=1",
+        headers={"Authorization": "Bearer piecework-snapshot-test"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["total"] == 0
+    assert calls == [
+        (None, "2026-07-01", "2026-07-31", False, True, True),
+    ]
 
 
 def test_hide_zero_counts_matching_workers_before_paging(client):

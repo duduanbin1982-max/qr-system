@@ -25,7 +25,6 @@ import {
   buildMonthlyCsvRows,
   buildPayslipHtml,
   buildPieceworkCsvRows,
-  collectAllPages,
 } from '@/composables/wage/wageExport.js'
 import { useWage } from '@/composables/useWage.js'
 
@@ -107,39 +106,19 @@ describe('wage export risk closure', () => {
     expect(html).toContain('A&amp;B')
   })
 
-  it('collects every stable page and rejects a changing export result', async () => {
-    const fetchPage = vi.fn()
-      .mockResolvedValueOnce({ items: [{ id: 1 }, { id: 2 }], total: 3 })
-      .mockResolvedValueOnce({ items: [{ id: 3 }], total: 3 })
-
-    await expect(collectAllPages(fetchPage, 'items', 2)).resolves.toMatchObject({
-      items: [{ id: 1 }, { id: 2 }, { id: 3 }], total: 3,
-    })
-    expect(fetchPage).toHaveBeenNthCalledWith(2, 2, 2)
-
-    await expect(collectAllPages(vi.fn()
-      .mockResolvedValueOnce({ items: [{ id: 1 }], total: 2 })
-      .mockResolvedValueOnce({ items: [{ id: 2 }], total: 3 }), 'items', 1))
-      .rejects.toThrow('导出期间数据发生变化')
-  })
-
-  it('exports all piecework pages with the active filters without changing the visible page', async () => {
+  it('exports all piecework rows from one snapshot request without changing the visible page', async () => {
     const totalRows = 1001
-    mocks.listWages.mockImplementation(params => {
-      const start = (params.page - 1) * params.limit
-      const end = Math.min(start + params.limit, totalRows)
-      return Promise.resolve({
-        wages: Array.from({ length: Math.max(end - start, 0) }, (_, offset) => {
-          const employeeId = start + offset + 1
-          return {
-            employee_id: employeeId,
-            employee_name: employeeId === totalRows ? '=FORMULA' : `员工${employeeId}`,
-            employee_no: employeeId === totalRows ? '@CMD' : `E${employeeId}`,
-            total_quantity: 1, total_wage: 1, details: [],
-          }
-        }),
-        total: totalRows,
-      })
+    mocks.listWages.mockResolvedValue({
+      wages: Array.from({ length: totalRows }, (_, index) => {
+        const employeeId = index + 1
+        return {
+          employee_id: employeeId,
+          employee_name: employeeId === totalRows ? '=FORMULA' : `员工${employeeId}`,
+          employee_no: employeeId === totalRows ? '@CMD' : `E${employeeId}`,
+          total_quantity: 1, total_wage: 1, details: [],
+        }
+      }),
+      total: totalRows,
     })
     const wrapper = mount(Harness)
     await flushPromises()
@@ -154,20 +133,18 @@ describe('wage export risk closure', () => {
 
     expect(vm.page).toBe(2)
     expect(mocks.listWages).toHaveBeenCalledWith({
-      page: 1, limit: 1000, date_from: '2026-11-01', date_to: '2026-11-30',
+      date_from: '2026-11-01', date_to: '2026-11-30',
       include_rework: '1', hide_zero: '1',
+      export: 'snapshot',
     })
-    expect(mocks.listWages).toHaveBeenCalledWith({
-      page: 2, limit: 1000, date_from: '2026-11-01', date_to: '2026-11-30',
-      include_rework: '1', hide_zero: '1',
-    })
+    expect(mocks.listWages).toHaveBeenCalledOnce()
     expect(mocks.downloadCSV).toHaveBeenCalledOnce()
     expect(mocks.downloadCSV.mock.calls[0][0]).toHaveLength(1003)
     expect(mocks.downloadCSV.mock.calls[0][1]).toBe('工资明细_2026-11-01_2026-11-30')
     wrapper.unmount()
   })
 
-  it('freezes piecework export filters while later pages are loading', async () => {
+  it('freezes piecework export filters while the snapshot request is loading', async () => {
     localStorage.setItem('wageActiveTab', 'piece')
     const wrapper = mount(Harness)
     await flushPromises()
@@ -175,10 +152,6 @@ describe('wage export risk closure', () => {
     const firstPage = new Promise(resolve => { resolveFirstPage = resolve })
     mocks.listWages.mockReset()
     mocks.listWages.mockImplementationOnce(() => firstPage)
-      .mockResolvedValueOnce({
-        wages: [{ employee_name: '第二页', total_quantity: 1, total_wage: 1, details: [] }],
-        total: 1001,
-      })
     const vm = wrapper.vm
     vm.dateFrom = '2026-11-01'
     vm.dateTo = '2026-11-30'
@@ -201,9 +174,11 @@ describe('wage export risk closure', () => {
     })
     await exportPromise
 
-    expect(mocks.listWages).toHaveBeenNthCalledWith(2, {
-      page: 2, limit: 1000, date_from: '2026-11-01', date_to: '2026-11-30',
+    expect(mocks.listWages).toHaveBeenCalledOnce()
+    expect(mocks.listWages).toHaveBeenCalledWith({
+      date_from: '2026-11-01', date_to: '2026-11-30',
       include_rework: '1', hide_zero: '1',
+      export: 'snapshot',
     })
     expect(mocks.downloadCSV.mock.calls[0][1]).toBe('工资明细_2026-11-01_2026-11-30')
     wrapper.unmount()

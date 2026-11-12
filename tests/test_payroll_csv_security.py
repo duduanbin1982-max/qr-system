@@ -14,7 +14,7 @@ def _csv_rows(response):
 def test_live_wage_csv_neutralizes_formula_like_text(client, auth_headers, monkeypatch):
     monkeypatch.setattr(
         WageService,
-        "calculate_wages",
+        "calculate_wages_snapshot",
         staticmethod(lambda *_args, **_kwargs: {
             "wages": [{
                 "employee_name": "  =HYPERLINK(\"bad\")",
