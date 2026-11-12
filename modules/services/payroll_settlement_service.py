@@ -7,6 +7,7 @@ import io
 import json
 import re
 
+from modules.csv_utils import safe_csv_cell
 from modules.domain.payroll_policy import PayrollConflictError, cents_to_yuan
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.repositories.payroll_settlement_repository import PayrollSettlementRepository as Repo
@@ -56,13 +57,6 @@ def _key(value):
 
 def _sha256(value):
     return hashlib.sha256(value).hexdigest()
-
-
-def _csv_cell(value):
-    text = str(value or "")
-    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
-        return "'" + text
-    return text
 
 
 def _payment_reference(batch_id, export_version, line_id):
@@ -171,8 +165,8 @@ def _write_csv(rows):
             row["payment_reference"],
             row["payroll_month"],
             row["payroll_version"],
-            _csv_cell(row["employee_no_snapshot"]),
-            _csv_cell(row["employee_name_snapshot"]),
+            safe_csv_cell(row["employee_no_snapshot"]),
+            safe_csv_cell(row["employee_name_snapshot"]),
             cents_to_yuan(row["payable_cents"]),
         ])
     return ("\ufeff" + output.getvalue()).encode("utf-8")
@@ -187,6 +181,31 @@ def _receipt_digest(receipt_items, resolutions):
         )
     } for row in receipt_items]
     return _sha256(_json({"receipts": rows, "resolutions": resolutions}).encode("utf-8"))
+
+
+def _require_current_confirmed_batch(settlement, db):
+    batch = PayrollRepository.get_batch(settlement["batch_id"], db) if settlement else None
+    if (
+        not batch
+        or batch["status"] != "confirmed"
+        or batch.get("superseded_by_batch_id") is not None
+    ):
+        raise ValueError("工资结算关联的批次已不是当前有效的已确认批次")
+    return batch
+
+
+def _require_nonnegative_export_lines(lines):
+    negative = [line for line in lines if int(line.get("payable_wage_cents") or 0) < 0]
+    if not negative:
+        return
+    sample = "、".join(
+        str(line.get("employee_name_snapshot") or line.get("employee_no_snapshot") or line["id"])
+        for line in negative[:3]
+    )
+    detail = f"（例如：{sample}）" if sample else ""
+    raise ValueError(
+        f"工资批次存在 {len(negative)} 名员工应付金额为负数{detail}，不能创建正式支付清单"
+    )
 
 
 def _finding(export_item_id, reference, expected, paid, kind, blocking, detail):
@@ -319,7 +338,7 @@ def _reconcile_export_item(export_item, receipts, accepted_name_ids, transaction
     return paid, findings
 
 
-def _reconcile_invalid_receipts(invalid, expected_by_ref, grouped):
+def _reconcile_invalid_receipts(invalid, expected_by_ref):
     findings = []
     for receipt in invalid:
         reference = receipt["payment_reference"]
@@ -333,7 +352,7 @@ def _reconcile_invalid_receipts(invalid, expected_by_ref, grouped):
                     "employee_name": receipt.get("employee_name_snapshot") or "",
                 },
             ))
-        elif not grouped.get(reference):
+        else:
             export_item = expected_by_ref[reference]
             findings.append(_finding(
                 export_item["id"], reference, int(export_item["payable_cents"]), 0,
@@ -374,7 +393,7 @@ def _calculate_reconciliation(items, receipt_items, resolutions):
         )
         for receipt in unknown
     )
-    findings.extend(_reconcile_invalid_receipts(invalid, expected_by_ref, grouped))
+    findings.extend(_reconcile_invalid_receipts(invalid, expected_by_ref))
     return paid_total, findings
 
 
@@ -407,6 +426,7 @@ def _reconciliation_context(settlement_id, key, db):
         }
     if settlement["status"] == "closed":
         raise ValueError("已结账工资不能重新对账")
+    _require_current_confirmed_batch(settlement, db)
     if not export or export["status"] != "active":
         raise ValueError("没有当前有效的工资支付清单")
     return {
@@ -509,6 +529,8 @@ class PayrollSettlementService:
                 settlement["status"] == "reconciled"
                 and latest
                 and latest["status"] == "reconciled"
+                and batch["status"] == "confirmed"
+                and batch.get("superseded_by_batch_id") is None
             ),
         }
 
@@ -536,6 +558,7 @@ class PayrollSettlementService:
             lines = PayrollRepository.list_lines(batch_id, db=db)
             if not lines:
                 raise ValueError("工资批次没有员工支付明细")
+            _require_nonnegative_export_lines(lines)
             total = sum(int(line["payable_wage_cents"] or 0) for line in lines)
             if total != int(batch["payable_wage_cents"] or 0):
                 raise ValueError("员工明细合计与工资批次应发金额不一致")
@@ -623,6 +646,7 @@ class PayrollSettlementService:
             settlement = Repo.get_settlement(export["settlement_id"], db)
             if not settlement or settlement["status"] == "closed":
                 raise ValueError("已结账工资不能再接收支付回执")
+            batch = _require_current_confirmed_batch(settlement, db)
 
             valid_count = sum(1 for row in rows if row["validation_status"] == "valid")
             failed_count = len(rows) - valid_count
@@ -634,7 +658,6 @@ class PayrollSettlementService:
             for row in rows:
                 Repo.insert_receipt_item(receipt_batch_id, row, db)
             Repo.mark_receipting(settlement["id"], db)
-            batch = PayrollRepository.get_batch(settlement["batch_id"], db)
             _emit_event(
                 batch["id"], "payroll_settlement_receipt_uploaded", actor_id, actor_name, "",
                 {"settlement_id": settlement["id"], "export_batch_id": export_id,
@@ -687,6 +710,7 @@ class PayrollSettlementService:
             settlement = Repo.get_settlement(item["settlement_id"], db)
             if not settlement or settlement["status"] == "closed":
                 raise ValueError("已结账工资不能处理差异")
+            batch = _require_current_confirmed_batch(settlement, db)
             if settlement.get("latest_reconciliation_run_id") != item["run_id"]:
                 raise ValueError("只能处理最新对账运行中的差异")
             detail = json.loads(item["detail_json"] or "{}")
@@ -715,7 +739,6 @@ class PayrollSettlementService:
                 item_id, receipt_item_id, code, reason, key, actor_id, actor_name, db
             )
             Repo.mark_receipting(item["settlement_id"], db)
-            batch = PayrollRepository.get_batch(settlement["batch_id"], db)
             _emit_event(
                 batch["id"], "payroll_settlement_difference_resolved", actor_id, actor_name,
                 reason, {"settlement_id": item["settlement_id"], "reconciliation_item_id": item_id,
@@ -754,6 +777,7 @@ class PayrollSettlementService:
                 raise ValueError("工资结算已经结账")
             if int(settlement["row_version"]) != expected_version:
                 raise PayrollConflictError("工资结算版本冲突，请刷新后重试")
+            batch = _require_current_confirmed_batch(settlement, db)
             run = Repo.latest_run(settlement_id, db)
             export_id = settlement.get("current_export_batch_id")
             export = Repo.get_export(export_id, db) if export_id else None
@@ -784,7 +808,6 @@ class PayrollSettlementService:
             )
             if Repo.mark_closed(settlement_id, expected_version, db) != 1:
                 raise PayrollConflictError("工资结算版本冲突，请刷新后重试")
-            batch = PayrollRepository.get_batch(settlement["batch_id"], db)
             _emit_event(
                 batch["id"], "payroll_settlement_closed", actor_id, actor_name, reason,
                 {"settlement_id": settlement_id, "close_record_id": close_record_id,

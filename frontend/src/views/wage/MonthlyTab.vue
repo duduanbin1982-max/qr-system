@@ -7,7 +7,7 @@
       <div style="display:flex;gap:var(--space-2);align-items:center;margin-left:auto">
         <input v-model="monthlyMonth" type="month" class="form-input" style="width:160px;font-size:var(--text-sm);padding:var(--space-1) 8px" @change="loadMonthly">
         <button class="btn-default btn-sm" @click="loadMonthly">查询</button>
-        <button class="btn-primary btn-sm" @click="exportMonthlyCSV" style="background:var(--success);border-color:var(--success)">📥 导出</button>
+        <button class="btn-primary btn-sm" :disabled="exportingMonthly" @click="exportMonthlyCSV" style="background:var(--success);border-color:var(--success)">📥 {{ exportingMonthly ? '导出中...' : '导出全月' }}</button>
       </div>
     </div>
     <div v-if="monthlyLoading" style="text-align:center;padding:60px">⏳ 加载中...</div>

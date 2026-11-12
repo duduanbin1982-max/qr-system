@@ -5,6 +5,7 @@ import io
 
 from flask import g, jsonify, request, send_file
 
+from modules.csv_utils import safe_csv_cell
 from modules.middleware.auth import has_permission
 from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
@@ -254,8 +255,7 @@ def payroll_batch_export(batch_id):
             cents_to_yuan(line["bonus_cents"]), cents_to_yuan(line["allowance_cents"]),
             cents_to_yuan(line["deduction_cents"]), cents_to_yuan(line["payable_wage_cents"]),
         ]
-        safe_values = [("'" + str(value)) if str(value).startswith(("=", "+", "-", "@")) else value for value in values]
-        writer.writerow(safe_values)
+        writer.writerow([safe_csv_cell(value) for value in values])
     output.seek(0)
     safe_audit_log("payroll_export_preview", "payroll_batch", batch_id, "preview only")
     response = send_file(
@@ -461,7 +461,9 @@ def payroll_adjustment_create():
     if not _allowed("wages:prepare"):
         return _deny()
     try:
-        return jsonify(PayrollWorkflowService.create_adjustment(_actor(), request.get_json() or {}))
+        data = _json_object()
+        data["idempotency_key"] = _idempotency_key(data)
+        return jsonify(PayrollWorkflowService.create_adjustment(_actor(), data))
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)
 
@@ -472,8 +474,9 @@ def payroll_adjustment_reverse(adjustment_id):
     if not _allowed("wages:prepare"):
         return _deny()
     try:
+        data = _json_object()
         return jsonify(PayrollWorkflowService.reverse_adjustment(
-            adjustment_id, _actor(), (request.get_json() or {}).get("reason")
+            adjustment_id, _actor(), data.get("reason"), _idempotency_key(data)
         ))
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)

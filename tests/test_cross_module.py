@@ -295,7 +295,7 @@ class TestCrossModuleIntegration:
 
         adjustment_response = client.post(
             "/api/payroll/adjustments",
-            headers=auth_headers,
+            headers={**auth_headers, "Idempotency-Key": "cross-module-payroll-adjustment"},
             json={
                 "employee_id": worker_id,
                 "payroll_month": year_month,

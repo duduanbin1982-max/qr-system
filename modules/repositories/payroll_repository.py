@@ -31,7 +31,15 @@ class PayrollRepository:
     @staticmethod
     def get_batch(batch_id, db=None):
         db = resolve_db(db)
-        row = db.execute("SELECT * FROM payroll_batches WHERE id=?", (batch_id,)).fetchone()
+        row = db.execute(
+            "SELECT pb.*,"
+            "(SELECT COUNT(*) FROM payroll_employee_lines el "
+            " WHERE el.batch_id=pb.id AND el.payable_wage_cents<0) AS negative_payable_count,"
+            "COALESCE((SELECT settlement.status FROM payroll_settlements settlement "
+            " WHERE settlement.batch_id=pb.id),'') AS settlement_status "
+            "FROM payroll_batches pb WHERE pb.id=?",
+            (batch_id,),
+        ).fetchone()
         return dict(row) if row else None
 
     @staticmethod
@@ -52,7 +60,11 @@ class PayrollRepository:
             params.append(status)
         return [dict(row) for row in db.execute(
             "SELECT pb.*, prepared.name AS prepared_user_name, locked.name AS locked_user_name, "
-            "confirmed.name AS confirmed_user_name "
+            "confirmed.name AS confirmed_user_name,"
+            "(SELECT COUNT(*) FROM payroll_employee_lines el "
+            " WHERE el.batch_id=pb.id AND el.payable_wage_cents<0) AS negative_payable_count,"
+            "COALESCE((SELECT settlement.status FROM payroll_settlements settlement "
+            " WHERE settlement.batch_id=pb.id),'') AS settlement_status "
             "FROM payroll_batches pb "
             "LEFT JOIN users prepared ON prepared.id=pb.prepared_by "
             "LEFT JOIN users locked ON locked.id=pb.locked_by "
@@ -448,6 +460,24 @@ class PayrollRepository:
         ).fetchall()]
 
     @staticmethod
+    def list_negative_payable_lines(batch_id, db=None):
+        db = resolve_db(db)
+        return [dict(row) for row in db.execute(
+            "SELECT id,employee_id,employee_name_snapshot,employee_no_snapshot,payable_wage_cents "
+            "FROM payroll_employee_lines WHERE batch_id=? AND payable_wage_cents<0 "
+            "ORDER BY payable_wage_cents,id",
+            (batch_id,),
+        ).fetchall()]
+
+    @staticmethod
+    def settlement_for_batch(batch_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_settlements WHERE batch_id=?", (batch_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
     def list_details(batch_id, employee_id=None, db=None):
         db = resolve_db(db)
         clauses, params = ["d.batch_id=?"], [batch_id]
@@ -532,17 +562,27 @@ class PayrollRepository:
             """
             INSERT INTO payroll_adjustments (
                 employee_id,employee_name_snapshot,employee_no_snapshot,payroll_month,adjustment_type,
-                amount_cents,reason,created_by,created_by_name,reversal_of_id,replacement_for_id
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                amount_cents,reason,created_by,created_by_name,reversal_of_id,replacement_for_id,
+                idempotency_key,request_digest
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 payload.get("employee_id"), payload["employee_name_snapshot"], payload.get("employee_no_snapshot", ""),
                 payload["payroll_month"], payload["adjustment_type"], payload["amount_cents"], payload["reason"],
                 payload.get("created_by"), payload.get("created_by_name", ""), payload.get("reversal_of_id"),
-                payload.get("replacement_for_id"),
+                payload.get("replacement_for_id"), payload["idempotency_key"], payload["request_digest"],
             ),
         )
         return cursor.lastrowid
+
+    @staticmethod
+    def adjustment_by_idempotency_key(idempotency_key, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_adjustments WHERE idempotency_key=?",
+            (str(idempotency_key or ""),),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def get_adjustment(adjustment_id, db=None):
@@ -557,6 +597,15 @@ class PayrollRepository:
             "SELECT 1 FROM payroll_adjustments WHERE reversal_of_id=?",
             (adjustment_id,),
         ).fetchone())
+
+    @staticmethod
+    def adjustment_reversal(adjustment_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_adjustments WHERE reversal_of_id=?",
+            (adjustment_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def list_adjustments(month="", employee_id=None, db=None):

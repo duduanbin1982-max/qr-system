@@ -300,4 +300,36 @@ describe('API facade transport contracts', () => {
       '/api/payroll/settlement/exports/41/download',
     )
   })
+
+  it('preserves payroll adjustment idempotency payloads', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(200, { id: 71 }),
+    )
+    const createPayload = {
+      employee_id: 8,
+      payroll_month: '2026-11',
+      adjustment_type: 'bonus',
+      amount: '12.50',
+      reason: '夜班奖励',
+      idempotency_key: 'payroll-adjustment-create-1',
+    }
+    const reversePayload = {
+      reason: '原调整错误',
+      idempotency_key: 'payroll-adjustment-reverse-1',
+    }
+
+    await api.domains.wages.createPayrollAdjustment(createPayload)
+    await api.domains.wages.reversePayrollAdjustment(71, reversePayload)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/payroll/adjustments',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(createPayload) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/payroll/adjustments/71/reverse',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(reversePayload) }),
+    )
+  })
 })

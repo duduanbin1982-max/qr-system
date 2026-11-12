@@ -35,6 +35,7 @@ def test_period_control_reports_draft_snapshot_and_adjustment_readiness(client):
             "adjustment_type": "bonus",
             "amount_cents": 100,
             "reason": "草稿期间追加奖金",
+            "idempotency_key": "period-control-draft-bonus",
         })
         assert PayrollWorkflowService.batch_detail(batch["id"])["batch"]["input_changed"] is True
 
@@ -77,6 +78,7 @@ def test_locked_period_rejects_new_and_reversal_adjustments(client):
             "adjustment_type": "bonus",
             "amount_cents": 100,
             "reason": "锁定前奖金",
+            "idempotency_key": "period-control-before-lock",
         })
         batch = PayrollWorkflowService.create_batch("2026-07", preparer, "period-control-locked")
         submitted = PayrollWorkflowService.submit(batch["id"], preparer, batch["row_version"])
@@ -95,9 +97,12 @@ def test_locked_period_rejects_new_and_reversal_adjustments(client):
                 "adjustment_type": "allowance",
                 "amount_cents": 50,
                 "reason": "不应绕过锁定",
+                "idempotency_key": "period-control-after-lock",
             })
         with pytest.raises(ValueError, match="锁定"):
-            PayrollWorkflowService.reverse_adjustment(original["id"], preparer, "锁定后冲销")
+            PayrollWorkflowService.reverse_adjustment(
+                original["id"], preparer, "锁定后冲销", "period-control-reverse-locked"
+            )
 
         confirmed = PayrollWorkflowService.confirm(batch["id"], approver, locked["row_version"])
         confirmed_control = PayrollWorkflowService.period_control("2026-07")
@@ -110,6 +115,7 @@ def test_locked_period_rejects_new_and_reversal_adjustments(client):
                 "adjustment_type": "allowance",
                 "amount_cents": 50,
                 "reason": "不应绕过确认状态",
+                "idempotency_key": "period-control-after-confirm",
             })
 
         revision = PayrollWorkflowService.create_batch(
@@ -140,6 +146,7 @@ def test_submitted_period_reports_revision_requirement_and_rejects_adjustment(cl
                 "adjustment_type": "bonus",
                 "amount_cents": 100,
                 "reason": "送审中不可直接调整",
+                "idempotency_key": "period-control-after-submit",
             })
 
 
@@ -154,6 +161,7 @@ def test_legacy_imported_period_requires_revision_for_adjustments(client):
             "adjustment_type": "bonus",
             "amount_cents": 100,
             "reason": "导入前调整",
+            "idempotency_key": "period-control-before-import",
         })
         batch = PayrollWorkflowService.create_batch("2026-07", preparer, "period-control-legacy")
         db.execute("UPDATE payroll_batches SET legacy_imported=1 WHERE id=?", (batch["id"],))
@@ -171,6 +179,9 @@ def test_legacy_imported_period_requires_revision_for_adjustments(client):
                 "adjustment_type": "allowance",
                 "amount_cents": 50,
                 "reason": "导入后不可直接调整",
+                "idempotency_key": "period-control-after-import",
             })
         with pytest.raises(ValueError, match="旧版导入快照"):
-            PayrollWorkflowService.reverse_adjustment(original["id"], preparer, "导入后不可冲销")
+            PayrollWorkflowService.reverse_adjustment(
+                original["id"], preparer, "导入后不可冲销", "period-control-reverse-import"
+            )

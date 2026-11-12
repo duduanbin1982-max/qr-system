@@ -127,6 +127,7 @@ def test_privileged_batch_reader_preserves_full_metadata(client, monkeypatch, pe
 GLOBAL_READS = (
     "/api/daily-report?date=2026-07-01",
     "/api/wages/monthly-summary?year_month=2026-07",
+    "/api/wages/monthly-summary/export?year_month=2026-07",
     "/api/wages/process-summary?year_month=2026-07",
     "/api/wages/trends",
     "/api/wages/position-summary?year_month=2026-07",

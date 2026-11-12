@@ -11,7 +11,10 @@ class WageService:
     """计件工资 + 日报 + 生产进度。"""
 
     @staticmethod
-    def calculate_wages(employee_id='', date_from='', date_to='', page=1, limit=200, include_pending=False, include_rework=False, hide_zero=False):
+    def calculate_wages(
+        employee_id='', date_from='', date_to='', page=1, limit=200,
+        include_pending=False, include_rework=False, hide_zero=False, db=None,
+    ):
         status_filter = "wr.status = 'approved'" if not include_pending else "wr.status IN ('approved','pending')"
         type_filter = "wr.type IN ('normal','rework')" if include_rework else "wr.type = 'normal'"
         wr_where_parts = [
@@ -29,7 +32,7 @@ class WageService:
         wr_where = ' AND '.join(wr_where_parts)
 
         user_rows, total = WageRepository.get_worker_paged_by_role(
-            employee_id, page=page, limit=limit,
+            employee_id, db=db, page=page, limit=limit,
             matching_work_where=wr_where if hide_zero else "",
             matching_work_params=wr_params if hide_zero else None,
         )
@@ -38,7 +41,7 @@ class WageService:
         if not user_ids:
             return {'wages': [], 'total': total, 'page': page, 'limit': limit}
 
-        rows = WageRepository.get_wage_rows_for_workers(wr_where, wr_params, user_ids)
+        rows = WageRepository.get_wage_rows_for_workers(wr_where, wr_params, user_ids, db=db)
         wages = {}
         wage_totals_cents = {}
         for uid, info in user_map.items():
@@ -81,6 +84,36 @@ class WageService:
         for uid, wage in wages.items():
             wage['total_wage'] = wage_totals_cents[uid] / 100
         return {'wages': list(wages.values()), 'total': total, 'page': page, 'limit': limit}
+
+    @staticmethod
+    def calculate_wages_snapshot(
+        employee_id='', date_from='', date_to='', include_pending=False,
+        include_rework=False, hide_zero=False,
+    ):
+        """Read a full export from one SQLite snapshot across all source queries."""
+        db = BaseService.db()
+        owns_transaction = not db.in_transaction
+        if owns_transaction:
+            db.execute('BEGIN')
+        try:
+            result = WageService.calculate_wages(
+                employee_id=employee_id,
+                date_from=date_from,
+                date_to=date_to,
+                page=1,
+                limit=999999,
+                include_pending=include_pending,
+                include_rework=include_rework,
+                hide_zero=hide_zero,
+                db=db,
+            )
+            if owns_transaction:
+                db.commit()
+            return result
+        except Exception:
+            if owns_transaction and db.in_transaction:
+                db.rollback()
+            raise
 
     @staticmethod
     def daily_report(date):
@@ -130,6 +163,18 @@ class WageService:
             'grand_total_wage': round(grand_total['total_wage'] or 0, 2),
             'grand_total_quantity': grand_total['total_qty'] or 0,
             'total': total_count, 'page': page, 'limit': limit,
+        }
+
+    @staticmethod
+    def monthly_summary_export(year_month):
+        """月度 CSV 导出数据在单条查询内读取，避免跨页快照漂移。"""
+        rows, total_count, grand_total = WageRepository.get_monthly_summary_snapshot(year_month)
+        return {
+            'year_month': year_month,
+            'summary': [dict(row) for row in rows],
+            'grand_total_wage': round(grand_total['total_wage'] or 0, 2),
+            'grand_total_quantity': grand_total['total_qty'] or 0,
+            'total': total_count, 'page': 1, 'limit': total_count,
         }
 
     @staticmethod

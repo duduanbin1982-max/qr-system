@@ -10,7 +10,11 @@ export function usePayrollLedger() {
 
   const status = ref('')
 
-  const batches = ref([])
+  const allBatches = ref([])
+
+  const batches = computed(() => status.value
+    ? allBatches.value.filter(item => item.status === status.value)
+    : allBatches.value)
 
   const loading = ref(false)
 
@@ -40,7 +44,9 @@ export function usePayrollLedger() {
 
   const confirmedCount = computed(() => batches.value.filter(item => item.status === 'confirmed').length)
 
-  const monthTotal = computed(() => batches.value.filter(item => !item.superseded_by_batch_id && item.status !== 'voided').reduce((sum, item) => sum + Number(item.payable_wage_cents || 0), 0))
+  const monthTotal = computed(() => allBatches.value
+    .filter(item => item.status === 'confirmed' && !item.superseded_by_batch_id)
+    .reduce((sum, item) => sum + Number(item.payable_wage_cents || 0), 0))
 
   function money(cents) { return `¥${(Number(cents || 0) / 100).toFixed(2)}` }
 
@@ -48,7 +54,19 @@ export function usePayrollLedger() {
 
   function editable(batch) { return ['draft', 'exceptions_pending'].includes(batch.status) && !batch.legacy_imported }
 
-  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported && !batch.input_changed }
+  function negativePayableCount(batch) { return Number(batch.negative_payable_count || 0) }
+
+  function hasFormalSettlement(batch) {
+    return Boolean(batch.settlement_status && batch.settlement_status !== 'not_exported')
+  }
+
+  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported && !batch.input_changed && negativePayableCount(batch) === 0 }
+
+  function canLock(batch) { return batch.status === 'review_pending' && negativePayableCount(batch) === 0 }
+
+  function canConfirm(batch) { return batch.status === 'locked' && negativePayableCount(batch) === 0 }
+
+  function canRevise(batch) { return batch.status === 'confirmed' && !batch.superseded_by_batch_id && !hasFormalSettlement(batch) }
 
   function periodStatusLabel(value) {
     return {
@@ -83,8 +101,8 @@ export function usePayrollLedger() {
   async function load() {
     loading.value = true
     try {
-      const data = await api.domains.wages.listPayrollBatches({ payroll_month: month.value, status: status.value })
-      batches.value = data.batches || []
+      const data = await api.domains.wages.listPayrollBatches({ payroll_month: month.value })
+      allBatches.value = data.batches || []
       await loadControl()
     } catch (error) { showToast(error.message || '工资批次加载失败', 'error') }
     finally { loading.value = false }
@@ -111,20 +129,43 @@ export function usePayrollLedger() {
 
   function submit(batch) {
     if (!canSubmit(batch)) {
-      showToast(batch.input_changed ? '输入已变化，请重算后提交' : '当前批次不可提交', 'error')
+      const message = batch.input_changed
+        ? '输入已变化，请重算后提交'
+        : negativePayableCount(batch)
+          ? `存在 ${negativePayableCount(batch)} 名员工应付工资为负数，请修正后重算`
+          : '当前批次不可提交'
+      showToast(message, 'error')
       return
     }
     return act(() => api.domains.wages.submitPayrollBatch(batch.id, batch.row_version), '批次已提交复核')
   }
 
-  function lock(batch) { return act(() => api.domains.wages.lockPayrollBatch(batch.id, batch.row_version), '批次已锁定') }
+  function lock(batch) {
+    if (!canLock(batch)) {
+      showToast(negativePayableCount(batch)
+        ? `存在 ${negativePayableCount(batch)} 名员工应付工资为负数，请修正后重算`
+        : '当前批次不可锁定', 'error')
+      return
+    }
+    return act(() => api.domains.wages.lockPayrollBatch(batch.id, batch.row_version), '批次已锁定')
+  }
 
   function confirmBatch(batch) {
+    if (!canConfirm(batch)) {
+      showToast(negativePayableCount(batch)
+        ? `存在 ${negativePayableCount(batch)} 名员工应付工资为负数，请修正后重算`
+        : '当前批次不可确认', 'error')
+      return
+    }
     if (!window.confirm(`确认 ${batch.payroll_month} / V${batch.version} 工资批次？`)) return
     return act(() => api.domains.wages.confirmPayrollBatch(batch.id, batch.row_version), '批次已确认')
   }
 
   function revise(batch) {
+    if (!canRevise(batch)) {
+      showToast(hasFormalSettlement(batch) ? '该批次已进入财务结算，请在后续期间通过补差或冲销处理' : '当前批次不可修订', 'error')
+      return
+    }
     const reason = window.prompt('请输入生成修订版的原因')
     if (!reason?.trim()) return
     return act(() => api.domains.wages.revisePayrollBatch(batch.id, { revision_reason:reason.trim(), idempotency_key:idempotency('payroll-revision') }), '修订版已生成')
@@ -162,7 +203,12 @@ export function usePayrollLedger() {
     statusLabel,
     periodStatusLabel,
     editable,
+    negativePayableCount,
+    hasFormalSettlement,
     canSubmit,
+    canLock,
+    canConfirm,
+    canRevise,
     idempotency,
     load,
     loadControl,

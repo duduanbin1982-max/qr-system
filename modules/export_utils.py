@@ -2,6 +2,8 @@
 import csv
 import io
 from datetime import datetime
+
+from modules.csv_utils import safe_csv_cell
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -14,14 +16,7 @@ def _csv_cell(value):
     an apostrophe to prevent spreadsheet formula injection. Numeric values are
     intentionally left numeric, including negative quantities.
     """
-    if value is None:
-        return ""
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value
-    text = str(value)
-    if text[:1] in ("=", "+", "-", "@"):
-        return "'" + text
-    return text
+    return safe_csv_cell(value)
 
 
 def export_rows_to_csv(headers, rows):

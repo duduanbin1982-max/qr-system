@@ -84,6 +84,20 @@ describe('payroll settlement workspace', () => {
     wrapper.unmount()
   })
 
+  it('excludes confirmed batches with negative employee payables from formal export', async () => {
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [{ ...batch, negative_payable_count: 1, payable_wage_cents: -100 }],
+    })
+    const wrapper = mountTab()
+    await flushPromises()
+
+    expect(wrapper.findAll('.settlement-batch-option')).toHaveLength(0)
+    expect(wrapper.text()).toContain('当前月份没有可结算的已确认批次')
+    expect(mocks.wages.getPayrollSettlement).not.toHaveBeenCalled()
+    expect(mocks.wages.createPayrollSettlementExport).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('hides the payment-list download link without export permission', async () => {
     mocks.permissions.delete('wages:export')
     mocks.wages.getPayrollSettlement.mockResolvedValue(settlement({

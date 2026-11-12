@@ -8,6 +8,7 @@ from datetime import datetime
 
 from flask import request, jsonify, send_file, g
 
+from modules.csv_utils import safe_csv_cell
 from modules.route_decorators import (
     app,
     check_auth,
@@ -105,7 +106,9 @@ def calculate_wages():
     include_rework = request.args.get('include_rework', '0') == '1'
     hide_zero = request.args.get('hide_zero', '0') == '1'
     if export:
-        result = WageService.calculate_wages(employee_id, date_from, date_to, 1, 999999, include_pending, include_rework, hide_zero)
+        result = WageService.calculate_wages_snapshot(
+            employee_id, date_from, date_to, include_pending, include_rework, hide_zero
+        )
     else:
         page = max(request.args.get('page', 1, type=int), 1)
         limit = min(max(request.args.get('limit', 200, type=int), 1), 1000)
@@ -119,13 +122,13 @@ def calculate_wages():
                          '日期', '订单号', '产品名称', '工序', '数量', '单价', '工资'])
         for w in wages:
             for d in w['details']:
-                writer.writerow([
+                writer.writerow([safe_csv_cell(value) for value in [
                     w['employee_name'], w['employee_no'],
                     w['total_quantity'], w['total_wage'],
                     d['date'][:10] if d['date'] else '',
                     d.get('order_no', ''), d.get('product_name', ''),
                     d['process_name'], d['quantity'], d['unit_price'], d['wage']
-                ])
+                ]])
         output.seek(0)
         return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')),
                          mimetype='text/csv; charset=utf-8-sig',
@@ -150,8 +153,10 @@ def daily_report():
         writer.writerow(['员工姓名', '工号', '工序', '数量'])
         for r in report:
             for proc_id, p in r['processes'].items():
-                writer.writerow([r['employee_name'], r['employee_no'],
-                                 p['process_name'], p['quantity']])
+                writer.writerow([safe_csv_cell(value) for value in [
+                    r['employee_name'], r['employee_no'],
+                    p['process_name'], p['quantity'],
+                ]])
         output.seek(0)
         return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')),
                          mimetype='text/csv; charset=utf-8-sig',
@@ -176,6 +181,13 @@ def monthly_summary():
     page = max(request.args.get('page', 1, type=int), 1)
     limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
     return jsonify(WageService.monthly_summary(year_month, page, limit))
+
+@app.route('/api/wages/monthly-summary/export', methods=['GET'])
+@check_auth
+@check_permission('wages:view_all')
+def monthly_summary_export():
+    year_month = request.args.get('year_month', datetime.now().strftime('%Y-%m'))
+    return jsonify(WageService.monthly_summary_export(year_month))
 
 @app.route('/api/wages/process-summary', methods=['GET'])
 @check_auth

@@ -307,13 +307,17 @@ def test_same_type_adjustments_are_append_only_and_reversible(client):
         first = PayrollWorkflowService.create_adjustment(preparer, {
             "employee_id": worker_id, "payroll_month": "2026-07", "adjustment_type": "bonus",
             "amount_cents": 100, "reason": "第一笔奖金",
+            "idempotency_key": "payroll-adjustment-first",
         })
         second = PayrollWorkflowService.create_adjustment(preparer, {
             "employee_id": worker_id, "payroll_month": "2026-07", "adjustment_type": "bonus",
             "amount_cents": 200, "reason": "第二笔奖金",
+            "idempotency_key": "payroll-adjustment-second",
         })
         assert first["id"] != second["id"]
-        reversal = PayrollWorkflowService.reverse_adjustment(first["id"], preparer, "冲销第一笔")
+        reversal = PayrollWorkflowService.reverse_adjustment(
+            first["id"], preparer, "冲销第一笔", "payroll-adjustment-first-reverse"
+        )
         rows = db.execute(
             "SELECT amount_cents,reversal_of_id FROM payroll_adjustments WHERE employee_id=? ORDER BY id",
             (worker_id,),
@@ -321,6 +325,204 @@ def test_same_type_adjustments_are_append_only_and_reversible(client):
         assert len(rows) == 3
         assert rows[-1]["reversal_of_id"] == first["id"]
         assert reversal["reversal_of_id"] == first["id"]
+
+
+def test_adjustment_idempotency_replays_after_period_lock_and_rejects_conflict(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        worker_id, _route_id, _process_id, _worker = _seed_price_and_work(db)
+        payload = {
+            "employee_id": worker_id,
+            "payroll_month": "2026-07",
+            "adjustment_type": "bonus",
+            "amount_cents": 100,
+            "reason": "  月度   奖金  ",
+            "idempotency_key": "adjustment-replay-after-lock",
+        }
+        created = PayrollWorkflowService.create_adjustment(preparer, payload)
+        assert created["replayed"] is False
+
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "adjustment-replay-lock-batch"
+        )
+        submitted = PayrollWorkflowService.submit(
+            batch["id"], preparer, batch["row_version"]
+        )
+        PayrollWorkflowService.lock(
+            batch["id"], approver, submitted["row_version"]
+        )
+
+        replayed = PayrollWorkflowService.create_adjustment(preparer, {
+            **payload,
+            "reason": "月度 奖金",
+        })
+        assert replayed == {"ok": True, "id": created["id"], "replayed": True}
+        assert db.execute(
+            "SELECT COUNT(*) FROM payroll_adjustments WHERE idempotency_key=?",
+            (payload["idempotency_key"],),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT COUNT(*) FROM payroll_events WHERE idempotency_key=?",
+            ("payroll-adjustment-create:" + payload["idempotency_key"],),
+        ).fetchone()[0] == 1
+
+        with pytest.raises(PayrollConflictError, match="幂等键"):
+            PayrollWorkflowService.create_adjustment(preparer, {
+                **payload,
+                "amount_cents": 200,
+            })
+
+
+def test_adjustment_reversal_idempotency_is_stable(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, _approver = _actors(db)
+        worker_id = ensure_user(
+            db, "payroll-reverse-worker", WORKER_HASH,
+            "冲销测试员工", "worker", "PAY-REV"
+        )
+        original = PayrollWorkflowService.create_adjustment(preparer, {
+            "employee_id": worker_id,
+            "payroll_month": "2026-07",
+            "adjustment_type": "deduction",
+            "amount_cents": 100,
+            "reason": "考勤扣款",
+            "idempotency_key": "adjustment-reverse-original",
+        })
+        reversed_once = PayrollWorkflowService.reverse_adjustment(
+            original["id"], preparer, "  审批   撤回  ",
+            "adjustment-reverse-command",
+        )
+        replayed = PayrollWorkflowService.reverse_adjustment(
+            original["id"], preparer, "审批 撤回",
+            "adjustment-reverse-command",
+        )
+        assert replayed["id"] == reversed_once["id"]
+        assert replayed["replayed"] is True
+        assert db.execute(
+            "SELECT COUNT(*) FROM payroll_adjustments WHERE reversal_of_id=?",
+            (original["id"],),
+        ).fetchone()[0] == 1
+
+        with pytest.raises(PayrollConflictError, match="幂等键"):
+            PayrollWorkflowService.reverse_adjustment(
+                original["id"], preparer, "不同原因",
+                "adjustment-reverse-command",
+            )
+
+
+def test_adjustment_commands_require_idempotency_keys(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, _approver = _actors(db)
+        worker_id = ensure_user(
+            db, "payroll-key-worker", WORKER_HASH,
+            "幂等测试员工", "worker", "PAY-KEY"
+        )
+        with pytest.raises(ValueError, match="幂等键"):
+            PayrollWorkflowService.create_adjustment(preparer, {
+                "employee_id": worker_id,
+                "payroll_month": "2026-07",
+                "adjustment_type": "bonus",
+                "amount_cents": 100,
+                "reason": "缺少幂等键",
+            })
+        with pytest.raises(ValueError, match="1 到 128"):
+            PayrollWorkflowService.create_adjustment(preparer, {
+                "employee_id": worker_id,
+                "payroll_month": "2026-07",
+                "adjustment_type": "bonus",
+                "amount_cents": 100,
+                "reason": "超长幂等键",
+                "idempotency_key": "x" * 129,
+            })
+
+        original = PayrollWorkflowService.create_adjustment(preparer, {
+            "employee_id": worker_id,
+            "payroll_month": "2026-07",
+            "adjustment_type": "bonus",
+            "amount_cents": 100,
+            "reason": "有幂等键",
+            "idempotency_key": "adjustment-key-required-original",
+        })
+        with pytest.raises(ValueError, match="幂等键"):
+            PayrollWorkflowService.reverse_adjustment(
+                original["id"], preparer, "缺少幂等键"
+            )
+
+
+def test_adjustment_api_requires_key_and_returns_409_for_conflicting_reuse(
+    client, auth_headers
+):
+    with client.application.app_context():
+        db = get_db()
+        worker_id = ensure_user(
+            db, "payroll-api-key-worker", WORKER_HASH,
+            "接口幂等测试员工", "worker", "PAY-API-KEY"
+        )
+
+    payload = {
+        "employee_id": worker_id,
+        "payroll_month": "2026-07",
+        "adjustment_type": "allowance",
+        "amount_cents": 100,
+        "reason": "接口幂等验证",
+    }
+    missing = client.post(
+        "/api/payroll/adjustments", headers=auth_headers, json=payload
+    )
+    assert missing.status_code == 400
+    assert "幂等键" in missing.get_json()["error"]
+
+    headers = {**auth_headers, "Idempotency-Key": "adjustment-api-conflict"}
+    created = client.post(
+        "/api/payroll/adjustments", headers=headers, json=payload
+    )
+    assert created.status_code == 200
+    replayed = client.post(
+        "/api/payroll/adjustments", headers=headers, json=payload
+    )
+    assert replayed.status_code == 200
+    assert replayed.get_json()["id"] == created.get_json()["id"]
+    assert replayed.get_json()["replayed"] is True
+
+    conflict = client.post(
+        "/api/payroll/adjustments",
+        headers=headers,
+        json={**payload, "amount_cents": 200},
+    )
+    assert conflict.status_code == 409
+    assert "幂等键" in conflict.get_json()["error"]
+
+
+def test_negative_payable_draft_is_visible_but_cannot_be_submitted(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, _approver = _actors(db)
+        worker_id, _route_id, _process_id, _worker = _seed_price_and_work(db)
+        PayrollWorkflowService.create_adjustment(preparer, {
+            "employee_id": worker_id,
+            "payroll_month": "2026-07",
+            "adjustment_type": "deduction",
+            "amount_cents": 500,
+            "reason": "超过本期工资的扣款",
+            "idempotency_key": "negative-payable-deduction",
+        })
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "negative-payable-batch"
+        )
+        assert batch["status"] == "draft"
+        assert batch["payable_wage_cents"] == -125
+        assert batch["negative_payable_count"] == 1
+
+        with pytest.raises(ValueError, match="1 名员工应付工资为负数"):
+            PayrollWorkflowService.submit(
+                batch["id"], preparer, batch["row_version"]
+            )
+        saved = PayrollWorkflowService.batch_detail(batch["id"])["batch"]
+        assert saved["status"] == "draft"
+        assert saved["negative_payable_count"] == 1
 
 
 def test_manual_rework_rate_resolution_persists_into_revision(client):
@@ -405,6 +607,63 @@ def _confirmed_batch_for_settlement(db, preparer, approver):
     return PayrollWorkflowService.confirm(
         batch["id"], approver, locked["row_version"]
     )
+
+
+def test_formal_settlement_blocks_void_and_full_revision(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        confirmed = _confirmed_batch_for_settlement(db, preparer, approver)
+        PayrollSettlementService.create_export(
+            confirmed["id"], preparer, "settled-batch-freeze-export"
+        )
+
+        with pytest.raises(ValueError, match="正式支付清单"):
+            PayrollWorkflowService.create_batch(
+                confirmed["payroll_month"], preparer,
+                "settled-batch-full-revision", "整批修订不应绕过结算",
+                confirmed["id"],
+            )
+        with pytest.raises(ValueError, match="正式支付清单"):
+            PayrollWorkflowService.void(
+                confirmed["id"], approver, confirmed["row_version"],
+                "结算后不得普通作废",
+            )
+
+        saved = PayrollWorkflowService.batch_detail(confirmed["id"])["batch"]
+        assert saved["status"] == "confirmed"
+        assert saved["settlement_status"] == "exported"
+
+
+def test_revision_created_before_export_cannot_supersede_settled_batch(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        confirmed = _confirmed_batch_for_settlement(db, preparer, approver)
+        revision = PayrollWorkflowService.create_batch(
+            confirmed["payroll_month"], preparer,
+            "revision-before-settlement-export", "先建修订后生成支付清单",
+            confirmed["id"],
+        )
+        PayrollSettlementService.create_export(
+            confirmed["id"], preparer, "export-after-revision-created"
+        )
+        submitted = PayrollWorkflowService.submit(
+            revision["id"], preparer, revision["row_version"]
+        )
+        locked = PayrollWorkflowService.lock(
+            revision["id"], approver, submitted["row_version"]
+        )
+
+        with pytest.raises(ValueError, match="不能确认整批修订"):
+            PayrollWorkflowService.confirm(
+                revision["id"], approver, locked["row_version"]
+            )
+        original = PayrollWorkflowService.batch_detail(confirmed["id"])["batch"]
+        saved_revision = PayrollWorkflowService.batch_detail(revision["id"])["batch"]
+        assert original["status"] == "confirmed"
+        assert original["superseded_by_batch_id"] is None
+        assert saved_revision["status"] == "locked"
 
 
 def _receipt_csv_for_payments(payments):
@@ -610,6 +869,42 @@ def test_invalid_receipt_without_reference_blocks_close_until_explicitly_exclude
         assert resolved_run["status"] == "reconciled"
         assert resolved_run["blocking_count"] == 0
         assert resolved_run["successful_paid_cents"] == 375
+
+
+def test_invalid_receipt_for_known_reference_blocks_even_with_valid_payment(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        batch = _confirmed_batch_for_settlement(db, preparer, approver)
+        export = PayrollSettlementService.create_export(
+            batch["id"], preparer, "settlement-export-known-invalid"
+        )
+        payment = _export_payment_rows(
+            PayrollSettlementService.download_export(export["id"])
+        )[0]
+        receipt_text = _receipt_csv_for_payments([payment]).decode("utf-8-sig").rstrip("\r\n")
+        receipt_text += (
+            f"\r\n{payment['payment_reference']},{payment['employee_no']},"
+            f"{payment['employee_name']},not-a-number,success,2026-07-02 10:05:00,"
+            "TX-INVALID-AMOUNT,\r\n"
+        )
+        PayrollSettlementService.upload_receipt(
+            export["id"], approver, "settlement-receipt-known-invalid",
+            "bank.csv", receipt_text.encode("utf-8"),
+        )
+
+        run = PayrollSettlementService.reconcile(
+            export["settlement_id"], approver, "settlement-reconcile-known-invalid"
+        )
+
+        assert run["status"] == "difference_pending"
+        assert run["successful_paid_cents"] == 375
+        assert run["blocking_count"] == 1
+        invalid = next(
+            item for item in run["items"] if item["difference_type"] == "invalid_amount"
+        )
+        detail = json.loads(invalid["detail_json"])
+        assert detail["validation_error"] == "金额格式无效"
 
 
 def test_duplicate_payment_requires_resolution_before_settlement_close(client):
