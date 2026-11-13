@@ -40,7 +40,9 @@ export function usePayrollLedger() {
     { value:'confirmed', label:'已确认' }, { value:'voided', label:'已作废' },
   ]
 
-  const pendingExceptions = computed(() => batches.value.reduce((sum, item) => sum + Number(item.exception_count || 0), 0))
+  const pendingExceptions = computed(() => batches.value.reduce(
+    (sum, item) => sum + Number(item.exception_count || 0) + Number(item.audit_finding_count || 0), 0
+  ))
 
   const confirmedCount = computed(() => batches.value.filter(item => item.status === 'confirmed').length)
 
@@ -60,7 +62,7 @@ export function usePayrollLedger() {
     return Boolean(batch.settlement_status && batch.settlement_status !== 'not_exported')
   }
 
-  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.legacy_imported && !batch.input_changed && negativePayableCount(batch) === 0 }
+  function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.audit_finding_count && !batch.legacy_imported && !batch.input_changed && negativePayableCount(batch) === 0 }
 
   function canLock(batch) { return batch.status === 'review_pending' && negativePayableCount(batch) === 0 }
 

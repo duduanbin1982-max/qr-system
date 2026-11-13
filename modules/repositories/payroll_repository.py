@@ -37,6 +37,10 @@ class PayrollRepository:
             " WHERE el.batch_id=pb.id AND el.payable_wage_cents<0) AS negative_payable_count,"
             "COALESCE((SELECT settlement.status FROM payroll_settlements settlement "
             " WHERE settlement.batch_id=pb.id),'') AS settlement_status "
+            ",(SELECT COUNT(*) FROM payroll_audit_findings finding "
+            " WHERE finding.batch_id=pb.id "
+            "AND finding.calculation_version=pb.audit_run_version "
+            "AND finding.status='open') AS audit_finding_count "
             "FROM payroll_batches pb WHERE pb.id=?",
             (batch_id,),
         ).fetchone()
@@ -64,7 +68,16 @@ class PayrollRepository:
             "(SELECT COUNT(*) FROM payroll_employee_lines el "
             " WHERE el.batch_id=pb.id AND el.payable_wage_cents<0) AS negative_payable_count,"
             "COALESCE((SELECT settlement.status FROM payroll_settlements settlement "
-            " WHERE settlement.batch_id=pb.id),'') AS settlement_status "
+            " WHERE settlement.batch_id=pb.id),'') AS settlement_status,"
+            "(SELECT COUNT(*) FROM payroll_audit_findings finding "
+            " WHERE finding.batch_id=pb.id "
+            "AND finding.calculation_version=pb.audit_run_version "
+            "AND finding.status='open') AS audit_finding_count,"
+            "(SELECT COUNT(*) FROM payroll_audit_findings finding "
+            " WHERE finding.batch_id=pb.id "
+            "AND finding.calculation_version=pb.audit_run_version "
+            "AND finding.status='open' AND finding.severity='blocking') "
+            "AS audit_blocking_count "
             "FROM payroll_batches pb "
             "LEFT JOIN users prepared ON prepared.id=pb.prepared_by "
             "LEFT JOIN users locked ON locked.id=pb.locked_by "
@@ -157,6 +170,157 @@ class PayrollRepository:
         ).fetchall()
         warn_legacy_fact_rows("work_records", rows)
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def audit_work_records(period_start, period_end, cutoff, db=None):
+        db = resolve_db(db)
+        process_name = process_value_sql("wr", "process_version", "proc")
+        rows = db.execute(
+            "SELECT wr.id AS work_record_id,wr.order_id,wr.process_id,wr.user_id,"
+            "wr.type AS work_type,wr.status,wr.quantity,wr.serial_no,"
+            "wr.created_at,wr.actual_completed_at,u.name AS employee_name,u.employee_no,"
+            "o.order_no," + process_name + " AS process_name "
+            "FROM work_records wr JOIN users u ON u.id=wr.user_id "
+            "LEFT JOIN orders o ON o.id=wr.order_id "
+            "LEFT JOIN processes proc ON proc.id=wr.process_id "
+            + process_version_join("wr", "process_version")
+            + "WHERE wr.status<>'rejected' AND wr.type IN ('normal','rework') "
+            "AND wr.created_at>=? AND wr.created_at<? "
+            "AND wr.created_at<=? ORDER BY wr.created_at,wr.id",
+            (period_start, period_end, cutoff),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def historical_payroll_wages(employee_ids, before_month, db=None):
+        db = resolve_db(db)
+        ids = sorted({int(value) for value in employee_ids if value is not None})
+        if not ids:
+            return {}
+        rows = []
+        for offset in range(0, len(ids), 500):
+            chunk = ids[offset:offset + 500]
+            rows.extend(db.execute(
+                "WITH period_candidates AS ("
+                "SELECT line.employee_id,batch.payroll_month,batch.version,"
+                "line.payable_wage_cents,"
+                "ROW_NUMBER() OVER (PARTITION BY line.employee_id,batch.payroll_month "
+                "ORDER BY batch.version DESC,batch.id DESC) AS period_version "
+                "FROM payroll_employee_lines line "
+                "JOIN payroll_batches batch ON batch.id=line.batch_id "
+                "WHERE line.employee_id IN (" + ",".join("?" for _ in chunk) + ") "
+                "AND batch.status='confirmed' AND batch.superseded_by_batch_id IS NULL "
+                "AND batch.payroll_month<?"
+                "), period_wages AS ("
+                "SELECT employee_id,payroll_month,version,payable_wage_cents "
+                "FROM period_candidates WHERE period_version=1"
+                "), ranked_periods AS ("
+                "SELECT employee_id,payroll_month,version,payable_wage_cents,"
+                "ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY payroll_month DESC) "
+                "AS period_rank FROM period_wages"
+                ") SELECT employee_id,payroll_month,version,payable_wage_cents "
+                "FROM ranked_periods WHERE period_rank<=3 "
+                "ORDER BY employee_id,payroll_month DESC,version DESC",
+                (*chunk, before_month),
+            ).fetchall())
+        result = {employee_id: [] for employee_id in ids}
+        for row in rows:
+            history = result[row["employee_id"]]
+            if len(history) < 3:
+                history.append(dict(row))
+        return result
+
+    @staticmethod
+    def insert_audit_finding(payload, db):
+        cursor = db.execute(
+            """
+            INSERT INTO payroll_audit_findings (
+                batch_id,calculation_version,finding_type,severity,status,subject_type,
+                subject_id,rule_version,snapshot_json
+            ) VALUES (?,?,?,?, 'open',?,?,?,?)
+            """,
+            (
+                payload["batch_id"], payload["calculation_version"], payload["finding_type"],
+                payload["severity"], payload["subject_type"], payload["subject_id"],
+                payload["rule_version"], json.dumps(
+                    payload["snapshot"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ),
+            ),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
+    def supersede_audit_findings(batch_id, calculation_version, db):
+        db.execute(
+            """
+            UPDATE payroll_audit_findings
+            SET status='superseded',resolution_code='superseded_by_recalculation',
+                resolution_reason=?,resolved_by=NULL,
+                resolved_at=datetime('now','localtime')
+            WHERE batch_id=? AND calculation_version<? AND status='open'
+            """,
+            (f"工资批次已重算，旧发现由计算版本 {calculation_version} 取代",
+             batch_id, calculation_version),
+        )
+
+    @staticmethod
+    def get_audit_finding(finding_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_audit_findings WHERE id=?", (finding_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def resolve_audit_finding(finding_id, expected_status, payload, db):
+        cursor = db.execute(
+            """
+            UPDATE payroll_audit_findings
+            SET status='resolved',resolution_code=?,resolution_reason=?,
+                resolved_by=?,resolved_at=datetime('now','localtime')
+            WHERE id=? AND status=?
+            """,
+            (
+                payload["resolution_code"], payload["resolution_reason"],
+                payload["resolved_by"], finding_id, expected_status,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PayrollConflictError("工资审计异常状态已变化，请刷新")
+
+    @staticmethod
+    def list_audit_findings(
+        month="", batch_id=None, status="", severity="", finding_type="",
+        calculation_version=None, current_only=True, db=None,
+    ):
+        db = resolve_db(db)
+        clauses, params = ["1=1"], []
+        for column, value in (
+            ("pb.payroll_month", month),
+            ("finding.batch_id", batch_id),
+            ("finding.status", status),
+            ("finding.severity", severity),
+            ("finding.finding_type", finding_type),
+            ("finding.calculation_version", calculation_version),
+        ):
+            if value not in (None, ""):
+                clauses.append(f"{column}=?")
+                params.append(value)
+        if current_only:
+            clauses.append("finding.calculation_version=pb.audit_run_version")
+            clauses.append("pb.audit_run_version>0")
+        return [dict(row) for row in db.execute(
+            "SELECT finding.*,pb.payroll_month,pb.version AS batch_version,"
+            "pb.status AS batch_status,pb.audit_run_version AS current_calculation_version,"
+            "resolver.name AS resolved_by_name "
+            "FROM payroll_audit_findings finding "
+            "JOIN payroll_batches pb ON pb.id=finding.batch_id "
+            "LEFT JOIN users resolver ON resolver.id=finding.resolved_by "
+            "WHERE " + " AND ".join(clauses) +
+            " ORDER BY pb.payroll_month DESC,pb.version DESC,"
+            "finding.calculation_version DESC,finding.finding_type,finding.subject_id",
+            params,
+        ).fetchall()]
 
     @staticmethod
     def price_candidates(
@@ -346,7 +510,8 @@ class PayrollRepository:
         values.extend([batch_id, expected_row_version])
         cursor = db.execute(
             "UPDATE payroll_batches SET " + ",".join(f"{key}=?" for key in assignments) +
-            ",row_version=row_version+1,updated_at=datetime('now','localtime') "
+            ",row_version=row_version+1,audit_run_version=audit_run_version+1,"
+            "updated_at=datetime('now','localtime') "
             "WHERE id=? AND row_version=? AND status IN ('draft','exceptions_pending')",
             values,
         )

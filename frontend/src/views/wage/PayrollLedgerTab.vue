@@ -33,6 +33,7 @@
         <div><span>有效版本</span><strong>{{ periodControl.version ? 'V' + periodControl.version : '未生成' }}</strong></div>
         <div><span>数据截止</span><strong>{{ periodControl.source_cutoff_at || '未冻结' }}</strong></div>
         <div><span>待处理异常</span><strong :class="{ 'text-warning': Number(periodControl.pending_exception_count || 0) }">{{ periodControl.pending_exception_count ?? 0 }}</strong></div>
+        <div><span>待复核审计</span><strong :class="{ 'text-warning': Number(periodControl.pending_audit_finding_count || 0) }">{{ periodControl.pending_audit_finding_count ?? 0 }}</strong></div>
         <div><span>重算</span><strong>{{ periodControl.can_regenerate ? '允许' : periodControl.status === 'unstarted' ? '未生成' : '需按流程处理' }}</strong></div>
         <div><span>补差/调整</span><strong>{{ periodControl.can_adjust ? '允许' : '须通过修订批次' }}</strong></div>
       </div>
@@ -44,7 +45,7 @@
       <div v-else-if="!batches.length" class="payroll-empty">暂无工资批次</div>
       <table v-else class="data-table payroll-table">
         <thead><tr>
-          <th>工资月 / 版本</th><th>状态</th><th>来源</th><th>记录</th><th>异常</th>
+          <th>工资月 / 版本</th><th>状态</th><th>来源</th><th>记录</th><th>工价 / 审计异常</th>
           <th class="text-right">应发工资</th><th>制单人</th><th>操作</th>
         </tr></thead>
         <tbody>
@@ -58,7 +59,9 @@
             </td>
             <td>{{ batch.legacy_imported ? 'Legacy 快照' : '版本化计算' }}</td>
             <td>{{ batch.priced_record_count }} / {{ batch.source_record_count }}</td>
-            <td :class="{'text-warning':batch.exception_count}">{{ batch.exception_count }}</td>
+            <td :class="{'text-warning':batch.exception_count || batch.audit_finding_count}">
+              工价 {{ batch.exception_count }} / 审计 {{ batch.audit_finding_count }}
+            </td>
             <td class="text-right" :class="{ 'text-danger': Number(batch.payable_wage_cents || 0) < 0 }"><strong>{{ money(batch.payable_wage_cents) }}</strong></td>
             <td>{{ batch.prepared_by_name || batch.prepared_user_name || '-' }}</td>
             <td>
@@ -100,6 +103,9 @@
       </table>
       <div v-if="detail.exceptions && detail.exceptions.length" class="payroll-detail-note">
         当前版本有 {{ detail.exceptions.length }} 条工资异常，请在“异常处理”中完成双人复核后再重算。
+      </div>
+      <div v-if="detail.audit_findings && detail.audit_findings.some(item => item.status==='open')" class="payroll-detail-note text-warning">
+        当前计算版本有 {{ detail.audit_findings.filter(item => item.status==='open').length }} 条未处理审计异常，请在“异常处理”中完成复核或修正来源后重算。
       </div>
     </div>
   </div>

@@ -54,8 +54,10 @@ beforeEach(() => {
     listPayrollBatches: { batches: [] },
     getMyPayroll: { lines: [] },
     listPayrollExceptions: { exceptions: [] },
+    listPayrollAuditFindings: { audit_findings: [] },
     listHistoricalPriceManualReviews: { reviews: [] },
     approvePayrollException: {},
+    resolvePayrollAuditFinding: {},
     regeneratePayrollBatch: {},
     submitPayrollBatch: {},
   }
@@ -320,5 +322,73 @@ describe('payroll input drift and exception approval workflow', () => {
     await button(wrapper, '提交').trigger('click')
     await flushPromises()
     expect(mocks.wages.submitPayrollBatch).toHaveBeenCalledWith(8, 5)
+  })
+})
+
+describe('payroll audit findings', () => {
+  it('shows blocking guidance and records only a reasoned review finding', async () => {
+    mocks.permissions = ['wages:view_all', 'wages:approve']
+    localStorage.setItem('wageActiveTab', 'exceptions')
+    mocks.wages.listPayrollAuditFindings.mockResolvedValue({
+      audit_findings: [
+        {
+          id: 41, payroll_month: '2026-10', batch_version: 2, calculation_version: 3,
+          finding_type: 'duplicate_work_candidate', severity: 'review', status: 'open',
+          subject_type: 'work_record', subject_id: 501, rule_version: 'payroll-audit-v1',
+          snapshot_json: JSON.stringify({
+            summary: '员工、订单、工序、类型、数量和实际时间完全相同',
+            work_record: { employee_name: '张三', order_no: 'ORD-1', process_name: '组装' },
+          }),
+        },
+        {
+          id: 42, payroll_month: '2026-10', batch_version: 2, calculation_version: 3,
+          finding_type: 'pending_approval_work', severity: 'blocking', status: 'open',
+          subject_type: 'work_record', subject_id: 502, rule_version: 'payroll-audit-v1',
+          snapshot_json: JSON.stringify({
+            summary: '报工记录 502 在工资批次截止时仍待审批',
+            work_record: { employee_name: '李四', order_no: 'ORD-2', process_name: '缝制' },
+          }),
+        },
+      ],
+    })
+    mocks.wages.resolvePayrollAuditFinding.mockResolvedValue({ status: 'resolved' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = render(WageList)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('工资异常中心')
+    expect(wrapper.text()).toContain('疑似重复报工')
+    expect(wrapper.text()).toContain('张三 · ORD-1 · 组装 · 报工 #501')
+    expect(wrapper.text()).toContain('修正来源记录后重算')
+    expect(button(wrapper, '记录复核')).toBeDefined()
+
+    await wrapper.find('[aria-label="复核原因 41"]').setValue('已核对两条为不同的实际作业')
+    await button(wrapper, '记录复核').trigger('click')
+    await flushPromises()
+
+    expect(mocks.wages.resolvePayrollAuditFinding).toHaveBeenCalledWith(41, {
+      resolution_code: 'confirmed_distinct_work',
+      resolution_reason: '已核对两条为不同的实际作业',
+    })
+  })
+
+  it('does not expose audit resolution actions to read-only payroll viewers', async () => {
+    mocks.permissions = ['wages:view_all']
+    localStorage.setItem('wageActiveTab', 'exceptions')
+    mocks.wages.listPayrollAuditFindings.mockResolvedValue({
+      audit_findings: [{
+        id: 51, payroll_month: '2026-10', batch_version: 1, calculation_version: 1,
+        finding_type: 'high_payroll_deviation', severity: 'review', status: 'open',
+        subject_type: 'employee', subject_id: 5, rule_version: 'payroll-audit-v1',
+        snapshot_json: JSON.stringify({ summary: '工资偏差达到复核阈值', employee_name: '王五' }),
+      }],
+    })
+
+    const wrapper = render(WageList)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('工资偏差较大')
+    expect(button(wrapper, '记录复核')).toBeUndefined()
   })
 })

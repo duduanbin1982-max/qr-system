@@ -12,6 +12,7 @@ from modules.domain.payroll_policy import (
     yuan_to_cents,
 )
 from modules.domain.reporting_day import reporting_month_bounds
+from modules.domain.payroll_audit_rules import evaluate_payroll_audit
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.services import BaseService
 
@@ -68,12 +69,128 @@ def _request_digest(payload):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class PayrollAuditService:
+    RESOLUTION_CODES = {
+        "duplicate_work_candidate": {"confirmed_distinct_work"},
+        "high_payroll_deviation": {"confirmed_variance"},
+    }
+
+    @staticmethod
+    def evaluate(batch, db):
+        work_records = PayrollRepository.audit_work_records(
+            batch["period_start"], batch["period_end"], batch["source_cutoff_at"], db
+        )
+        lines = PayrollRepository.list_lines(batch["id"], db=db)
+        history = PayrollRepository.historical_payroll_wages(
+            [line.get("employee_id") for line in lines], batch["payroll_month"], db
+        )
+        findings = evaluate_payroll_audit(batch, work_records, lines, history)
+        calculation_version = int(batch["audit_run_version"])
+        PayrollRepository.supersede_audit_findings(
+            batch["id"], calculation_version, db
+        )
+        for finding in findings:
+            PayrollRepository.insert_audit_finding({
+                **finding,
+                "batch_id": batch["id"],
+                "calculation_version": calculation_version,
+            }, db)
+        return findings
+
+    @staticmethod
+    def require_resolved(batch_id, db):
+        batch = PayrollRepository.get_batch(batch_id, db)
+        if not batch or not batch.get("audit_run_version"):
+            return
+        open_findings = PayrollRepository.list_audit_findings(
+            batch_id=batch_id,
+            status="open",
+            calculation_version=batch["audit_run_version"],
+            db=db,
+        )
+        if open_findings:
+            blocking = sum(item["severity"] == "blocking" for item in open_findings)
+            review = len(open_findings) - blocking
+            details = []
+            if blocking:
+                details.append(f"{blocking} 条阻断")
+            if review:
+                details.append(f"{review} 条待复核")
+            raise ValueError(
+                "存在未处理工资审计异常（" + "、".join(details) +
+                "），请处理复核项或修正来源后重算"
+            )
+
+    @staticmethod
+    def resolve(finding_id, actor_user, data):
+        actor_id, actor_name = _actor(actor_user)
+        if actor_id is None:
+            raise ValueError("当前用户无审批身份")
+        resolution_code = str(data.get("resolution_code") or "").strip()
+        resolution_reason = str(data.get("resolution_reason") or "").strip()
+        if len(resolution_reason) < 4 or len(resolution_reason) > 1000:
+            raise ValueError("复核原因必须为 4 到 1000 个字符")
+        with BaseService.transaction() as db:
+            finding = PayrollRepository.get_audit_finding(finding_id, db)
+            if not finding:
+                raise ValueError("工资审计异常不存在")
+            batch = PayrollRepository.get_batch(finding["batch_id"], db)
+            if not batch:
+                raise ValueError("工资批次不存在")
+            if finding["calculation_version"] != batch["audit_run_version"]:
+                raise PayrollConflictError("该审计异常已被后续重算取代")
+            if finding["status"] != "open":
+                raise ValueError("该工资审计异常已处理")
+            if batch.get("prepared_by") is not None and batch["prepared_by"] == actor_id:
+                raise ValueError("工资制单人与审计复核人必须为不同用户")
+            if batch["status"] not in ("draft", "exceptions_pending"):
+                raise ValueError("仅可处理草稿或待异常处理批次的审计异常")
+            if finding["severity"] == "blocking":
+                raise ValueError("阻断类异常必须修正来源并重算，不能手动忽略")
+            if resolution_code not in PayrollAuditService.RESOLUTION_CODES.get(
+                finding["finding_type"], set()
+            ):
+                raise ValueError("该异常的复核结论无效")
+            PayrollRepository.resolve_audit_finding(
+                finding_id, "open", {
+                    "resolution_code": resolution_code,
+                    "resolution_reason": resolution_reason,
+                    "resolved_by": actor_id,
+                }, db,
+            )
+            PayrollRepository.insert_event({
+                "batch_id": batch["id"],
+                "event_type": "audit_finding_resolved",
+                "operator_id": actor_id,
+                "operator_name": actor_name,
+                "reason": resolution_reason,
+                "payload": {
+                    "finding_id": finding_id,
+                    "finding_type": finding["finding_type"],
+                    "subject_type": finding["subject_type"],
+                    "subject_id": finding["subject_id"],
+                    "calculation_version": finding["calculation_version"],
+                    "resolution_code": resolution_code,
+                },
+            }, db)
+            return {
+                "ok": True,
+                "id": finding_id,
+                "status": "resolved",
+                "resolution_code": resolution_code,
+                "resolution_reason": resolution_reason,
+            }
+
+
 class PayrollCalculationService:
     @staticmethod
     def collect_inputs(batch, db, cutoff=None):
         """Read the inputs and effective decisions from one database view."""
         cutoff = cutoff or batch["source_cutoff_at"]
         rows = PayrollRepository.source_work_records(
+            batch["period_start"], batch["period_end"], cutoff, db
+        )
+        audit_work = PayrollRepository.audit_work_records(
             batch["period_start"], batch["period_end"], cutoff, db
         )
         adjustments = PayrollRepository.adjustments_for_month(
@@ -92,6 +209,12 @@ class PayrollCalculationService:
                     approved_exception["id"] if approved_exception else None
                 ),
             })
+        audit_employee_ids = {
+            item["row"].get("user_id") for item in resolved
+        } | {item.get("employee_id") for item in adjustments}
+        audit_history = PayrollRepository.historical_payroll_wages(
+            audit_employee_ids, batch["payroll_month"], db
+        )
         digest = hashlib.sha256(_fixed_snapshot({
             "work": [
                 {
@@ -102,7 +225,9 @@ class PayrollCalculationService:
                 }
                 for item in resolved
             ],
+            "audit_work": audit_work,
             "adjustments": adjustments,
+            "audit_history": audit_history,
         }).encode("utf-8")).hexdigest()
         return resolved, adjustments, digest
 
@@ -459,11 +584,18 @@ class PayrollCalculationService:
             "source_record_count": len(resolved), "priced_record_count": priced_count, "exception_count": exception_count,
         }
         PayrollRepository.update_batch_calculation(batch["id"], batch["row_version"], totals, db)
+        calculated_batch = PayrollRepository.get_batch(batch["id"], db)
+        audit_findings = PayrollAuditService.evaluate(calculated_batch, db)
         return {
             "batch_id": batch["id"], **totals, "employee_count": len(employees),
             "detail_count": len(details), "unsettled_work_record_ids": failed_work_ids,
+            "audit_run_version": calculated_batch["audit_run_version"],
+            "audit_finding_count": len(audit_findings),
+            "audit_blocking_count": sum(
+                item["severity"] == "blocking" for item in audit_findings
+            ),
             "snapshot_digest": PayrollCalculationService.snapshot_digest(
-                PayrollRepository.get_batch(batch["id"], db),
+                calculated_batch,
                 PayrollRepository.list_lines(batch["id"], db=db),
                 PayrollRepository.list_details(batch["id"], db=db),
             ),
@@ -561,6 +693,7 @@ class PayrollWorkflowService:
                 raise PayrollConflictError("工资批次版本冲突")
             if PayrollRepository.list_exceptions(batch_id=batch_id, status="pending", db=db) or PayrollRepository.list_exceptions(batch_id=batch_id, status="proposed", db=db):
                 raise ValueError("仍有未处理工资异常")
+            PayrollAuditService.require_resolved(batch_id, db)
             PayrollCalculationService.require_complete_snapshot(batch, db)
             PayrollWorkflowService._require_nonnegative_payable(batch_id, db)
             old_id = batch.get("supersedes_batch_id")
@@ -638,8 +771,10 @@ class PayrollWorkflowService:
                 if inputs[2] != batch["input_digest"]:
                     raise PayrollConflictError("工资输入已变化，请重新生成后提交")
                 PayrollCalculationService.require_complete_snapshot(batch, db, inputs)
+                PayrollAuditService.require_resolved(batch_id, db)
             else:
                 PayrollWorkflowService._check_approval(batch, actor_id, "review_pending")
+                PayrollAuditService.require_resolved(batch_id, db)
                 PayrollCalculationService.require_complete_snapshot(batch, db)
             PayrollWorkflowService._require_nonnegative_payable(batch_id, db)
             fields = {}
@@ -918,6 +1053,9 @@ class PayrollWorkflowService:
             "lines": PayrollRepository.list_lines(batch_id, employee_id, db),
             "details": PayrollRepository.list_details(batch_id, employee_id, db),
             "exceptions": PayrollRepository.list_exceptions(batch_id=batch_id, db=db),
+            "audit_findings": PayrollRepository.list_audit_findings(
+                batch_id=batch_id, current_only=True, db=db
+            ),
             "events": PayrollRepository.list_events(batch_id, db),
         }
 
@@ -968,6 +1106,9 @@ class PayrollWorkflowService:
             "pending_exception_count": sum(
                 1 for item in exceptions if item.get("status") in pending_statuses
             ),
+            "pending_audit_finding_count": (
+                int(batch.get("audit_finding_count", 0)) if batch else 0
+            ),
             "adjustment_count": len(PayrollRepository.list_adjustments(month, db=db)),
             "can_adjust": can_adjust,
             "can_regenerate": bool(
@@ -994,6 +1135,20 @@ class PayrollWorkflowService:
     @staticmethod
     def list_exceptions(month="", batch_id=None, status=""):
         return {"exceptions": PayrollRepository.list_exceptions(month, batch_id, status)}
+
+    @staticmethod
+    def list_audit_findings(
+        month="", batch_id=None, status="", severity="", finding_type="",
+        include_history=False,
+    ):
+        return {"audit_findings": PayrollRepository.list_audit_findings(
+            month=month,
+            batch_id=batch_id,
+            status=status,
+            severity=severity,
+            finding_type=finding_type,
+            current_only=not include_history,
+        )}
 
     @staticmethod
     def list_adjustments(month="", employee_id=None):
