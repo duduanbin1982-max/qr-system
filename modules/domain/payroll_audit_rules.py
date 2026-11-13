@@ -6,7 +6,7 @@ from datetime import timedelta
 from modules.domain.production_time import parse_database_timestamp
 
 
-PAYROLL_AUDIT_RULE_VERSION = "payroll-audit-v1"
+PAYROLL_AUDIT_RULE_VERSION = "payroll-audit-v2"
 
 
 def _timestamp(value):
@@ -83,7 +83,7 @@ def evaluate_payroll_audit(batch, work_records, employee_lines, historical_wages
             serial_groups[(row.get("order_id"), row.get("process_id"), serial_no)].append(row)
 
         effective_time = _timestamp(row.get("actual_completed_at")) or _timestamp(row.get("created_at"))
-        if effective_time is not None:
+        if not serial_no and effective_time is not None:
             candidate_groups[(
                 row.get("user_id"), row.get("order_id"), row.get("process_id"),
                 row.get("work_type", row.get("type")), row.get("quantity"),

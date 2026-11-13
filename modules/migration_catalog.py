@@ -22,6 +22,9 @@ from modules.migration_order_completion import MIGRATIONS as ORDER_COMPLETION_MI
 from modules.migration_order_qr_print import MIGRATIONS as ORDER_QR_PRINT_MIGRATIONS
 from modules.migration_payroll_ledger import MIGRATIONS as PAYROLL_LEDGER_MIGRATIONS
 from modules.migration_payroll_audit import MIGRATIONS as PAYROLL_AUDIT_MIGRATIONS
+from modules.migration_payroll_audit_policy import (
+    MIGRATIONS as PAYROLL_AUDIT_POLICY_MIGRATIONS,
+)
 from modules.migration_payroll_risk_closure import (
     MIGRATIONS as PAYROLL_RISK_CLOSURE_MIGRATIONS,
 )
@@ -87,13 +90,14 @@ MIGRATIONS = sorted(
         *PAYROLL_SETTLEMENT_MIGRATIONS,
         *PAYROLL_RISK_CLOSURE_MIGRATIONS,
         *PAYROLL_AUDIT_MIGRATIONS,
+        *PAYROLL_AUDIT_POLICY_MIGRATIONS,
     ],
     key=lambda migration: migration[0],
 )
 
 # SQLite user_version represents one linear schema state. Keeping the chain separate
 # from function registration makes missing versions and accidental reordering explicit.
-MIGRATION_VERSION_CHAIN = (1, *range(13, 100))
+MIGRATION_VERSION_CHAIN = (1, *range(13, 101))
 MIGRATION_DEPENDENCIES = {
     version: (() if index == 0 else (MIGRATION_VERSION_CHAIN[index - 1],))
     for index, version in enumerate(MIGRATION_VERSION_CHAIN)

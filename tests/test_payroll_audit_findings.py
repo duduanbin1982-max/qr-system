@@ -17,6 +17,9 @@ from modules.services.payroll_service import (
     PayrollAuditService,
     PayrollWorkflowService,
 )
+import modules.services.payroll_service as payroll_service
+from modules.domain.payroll_audit_rules import PAYROLL_AUDIT_RULE_VERSION
+from modules.repositories.payroll_repository import PayrollRepository
 from modules.services.price_version_service import PriceVersionService
 
 
@@ -141,6 +144,49 @@ def test_blocking_findings_require_source_correction_and_recalculation(client):
             batch["id"], preparer, regenerated["row_version"]
         )
         assert submitted["status"] == "review_pending"
+
+
+def test_zero_finding_batch_freezes_rule_version_and_stale_review_can_be_recalculated(
+    client, monkeypatch
+):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        _seed_batch_inputs(db, statuses=("approved",), serials=("SERIAL-UNIQUE",))
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "b2-zero-findings-rule-version"
+        )
+
+        stored = PayrollRepository.get_batch(batch["id"], db)
+        event = PayrollRepository.latest_calculation_event(batch["id"], db)
+        event_payload = json.loads(event["payload_json"])
+        assert _finding_by_type(db, batch["id"], "duplicate_serial_work") == []
+        assert stored["audit_rule_version"] == PAYROLL_AUDIT_RULE_VERSION
+        assert event_payload["audit_rule_version"] == PAYROLL_AUDIT_RULE_VERSION
+
+        submitted = PayrollWorkflowService.submit(
+            batch["id"], preparer, batch["row_version"]
+        )
+        monkeypatch.setattr(
+            payroll_service, "PAYROLL_AUDIT_RULE_VERSION", "payroll-audit-next"
+        )
+        with pytest.raises(ValueError, match="规则版本已变化"):
+            PayrollWorkflowService.lock(
+                batch["id"], approver, submitted["row_version"]
+            )
+
+        recalculated = PayrollWorkflowService.regenerate(
+            batch["id"], preparer, submitted["row_version"]
+        )
+        assert recalculated["status"] == "draft"
+        assert recalculated["submitted_at"] == ""
+        assert recalculated["audit_rule_version"] == "payroll-audit-next"
+        new_event = PayrollRepository.latest_calculation_event(batch["id"], db)
+        assert json.loads(new_event["payload_json"])["audit_rule_version"] == "payroll-audit-next"
+        resubmitted = PayrollWorkflowService.submit(
+            batch["id"], preparer, recalculated["row_version"]
+        )
+        assert resubmitted["status"] == "review_pending"
 
 
 def test_duplicate_serial_work_blocks_until_one_source_record_is_rejected(client):

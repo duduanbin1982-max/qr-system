@@ -334,7 +334,7 @@ describe('payroll audit findings', () => {
         {
           id: 41, payroll_month: '2026-10', batch_version: 2, calculation_version: 3,
           finding_type: 'duplicate_work_candidate', severity: 'review', status: 'open',
-          subject_type: 'work_record', subject_id: 501, rule_version: 'payroll-audit-v1',
+          subject_type: 'work_record', subject_id: 501, rule_version: 'payroll-audit-v2',
           snapshot_json: JSON.stringify({
             summary: '员工、订单、工序、类型、数量和实际时间完全相同',
             work_record: { employee_name: '张三', order_no: 'ORD-1', process_name: '组装' },
@@ -343,7 +343,7 @@ describe('payroll audit findings', () => {
         {
           id: 42, payroll_month: '2026-10', batch_version: 2, calculation_version: 3,
           finding_type: 'pending_approval_work', severity: 'blocking', status: 'open',
-          subject_type: 'work_record', subject_id: 502, rule_version: 'payroll-audit-v1',
+          subject_type: 'work_record', subject_id: 502, rule_version: 'payroll-audit-v2',
           snapshot_json: JSON.stringify({
             summary: '报工记录 502 在工资批次截止时仍待审批',
             work_record: { employee_name: '李四', order_no: 'ORD-2', process_name: '缝制' },
@@ -380,7 +380,7 @@ describe('payroll audit findings', () => {
       audit_findings: [{
         id: 51, payroll_month: '2026-10', batch_version: 1, calculation_version: 1,
         finding_type: 'high_payroll_deviation', severity: 'review', status: 'open',
-        subject_type: 'employee', subject_id: 5, rule_version: 'payroll-audit-v1',
+        subject_type: 'employee', subject_id: 5, rule_version: 'payroll-audit-v2',
         snapshot_json: JSON.stringify({ summary: '工资偏差达到复核阈值', employee_name: '王五' }),
       }],
     })

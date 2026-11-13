@@ -48,7 +48,7 @@ def test_pending_approval_is_blocking_and_rejected_work_is_ignored():
     assert findings[0]["snapshot"]["cutoff_at"] == "2026-11-01 12:00:00"
 
 
-def test_duplicate_serial_and_exact_work_candidate_are_separate_rules():
+def test_duplicate_serial_work_does_not_create_a_second_candidate_finding():
     findings = evaluate_payroll_audit(
         _batch(),
         [
@@ -62,11 +62,8 @@ def test_duplicate_serial_and_exact_work_candidate_are_separate_rules():
     assert [(item["finding_type"], item["subject_id"], item["severity"]) for item in findings] == [
         ("duplicate_serial_work", 1, "blocking"),
         ("duplicate_serial_work", 2, "blocking"),
-        ("duplicate_work_candidate", 1, "review"),
-        ("duplicate_work_candidate", 2, "review"),
     ]
     assert findings[0]["snapshot"]["work_record_ids"] == [1, 2]
-    assert findings[2]["snapshot"]["effective_at"] == "2026-10-02 08:00:00"
 
 
 def test_duplicate_candidate_requires_identical_fields_and_second_level_time():

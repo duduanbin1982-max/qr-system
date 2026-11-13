@@ -266,7 +266,7 @@ def test_high_fanout_is_limited_to_documented_composition_roots():
         "modules/migration_catalog.py",
         "modules/schemas/__init__.py",
     }
-    assert len(_module_fanout(migration_catalog)) == 40
+    assert len(_module_fanout(migration_catalog)) == 41
     assert len(_module_fanout(schema_registry)) == 19
     assert _fanout_violations(tuple(_source_files())) == []
     assert _composition_root_service_import_violations(

@@ -505,14 +505,16 @@ class PayrollRepository:
             "status", "input_digest", "source_cutoff_at", "normal_wage_cents", "rework_wage_cents",
             "bonus_cents", "allowance_cents", "deduction_cents", "payable_wage_cents",
             "source_record_count", "priced_record_count", "exception_count",
+            "audit_rule_version", "submitted_at",
         )
-        values = [payload.get(key, 0) for key in assignments]
+        values = [payload.get(key, "" if key in ("audit_rule_version", "submitted_at") else 0)
+                  for key in assignments]
         values.extend([batch_id, expected_row_version])
         cursor = db.execute(
             "UPDATE payroll_batches SET " + ",".join(f"{key}=?" for key in assignments) +
             ",row_version=row_version+1,audit_run_version=audit_run_version+1,"
             "updated_at=datetime('now','localtime') "
-            "WHERE id=? AND row_version=? AND status IN ('draft','exceptions_pending')",
+            "WHERE id=? AND row_version=? AND status IN ('draft','exceptions_pending','review_pending')",
             values,
         )
         if cursor.rowcount != 1:

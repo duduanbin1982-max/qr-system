@@ -12,7 +12,10 @@ from modules.domain.payroll_policy import (
     yuan_to_cents,
 )
 from modules.domain.reporting_day import reporting_month_bounds
-from modules.domain.payroll_audit_rules import evaluate_payroll_audit
+from modules.domain.payroll_audit_rules import (
+    PAYROLL_AUDIT_RULE_VERSION,
+    evaluate_payroll_audit,
+)
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.services import BaseService
 
@@ -100,8 +103,16 @@ class PayrollAuditService:
     @staticmethod
     def require_resolved(batch_id, db):
         batch = PayrollRepository.get_batch(batch_id, db)
-        if not batch or not batch.get("audit_run_version"):
+        if not batch or batch.get("legacy_imported"):
             return
+        event = PayrollRepository.latest_calculation_event(batch_id, db)
+        event_payload = json.loads(event["payload_json"]) if event else {}
+        if (
+            not batch.get("audit_run_version")
+            or batch.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
+            or event_payload.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
+        ):
+            raise ValueError("工资审计规则版本已变化，请重新生成并提交复核")
         open_findings = PayrollRepository.list_audit_findings(
             batch_id=batch_id,
             status="open",
@@ -228,6 +239,7 @@ class PayrollCalculationService:
             "audit_work": audit_work,
             "adjustments": adjustments,
             "audit_history": audit_history,
+            "audit_rule_version": PAYROLL_AUDIT_RULE_VERSION,
         }).encode("utf-8")).hexdigest()
         return resolved, adjustments, digest
 
@@ -245,7 +257,8 @@ class PayrollCalculationService:
         fields = (
             "id", "payroll_month", "version", "period_start", "period_end",
             "prepared_by", "supersedes_batch_id", "legacy_imported",
-            "source_cutoff_at", "input_digest", "source_record_count", "priced_record_count",
+            "source_cutoff_at", "input_digest", "audit_rule_version",
+            "source_record_count", "priced_record_count",
             "exception_count", "normal_wage_cents", "rework_wage_cents",
             "bonus_cents", "allowance_cents", "deduction_cents", "payable_wage_cents",
         )
@@ -263,7 +276,13 @@ class PayrollCalculationService:
         lines = PayrollRepository.list_lines(batch["id"], db=db)
         details = PayrollRepository.list_details(batch["id"], db=db)
         event = PayrollRepository.latest_calculation_event(batch["id"], db)
-        saved_digest = json.loads(event["payload_json"]).get("snapshot_digest") if event else None
+        event_payload = json.loads(event["payload_json"]) if event else {}
+        if (
+            batch.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
+            or event_payload.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
+        ):
+            raise ValueError("工资审计规则版本已变化，请重新生成")
+        saved_digest = event_payload.get("snapshot_digest")
         if saved_digest and saved_digest != PayrollCalculationService.snapshot_digest(batch, lines, details):
             raise ValueError("工资结算快照不完整或已变化，请重新生成")
         work = [row for row in details if row["source_type"] in ("normal_work", "rework_work")]
@@ -582,6 +601,8 @@ class PayrollCalculationService:
             "deduction_cents": sum(item["deduction_cents"] for item in employees.values()),
             "payable_wage_cents": sum(item["payable_wage_cents"] for item in employees.values()),
             "source_record_count": len(resolved), "priced_record_count": priced_count, "exception_count": exception_count,
+            "audit_rule_version": PAYROLL_AUDIT_RULE_VERSION,
+            "submitted_at": "",
         }
         PayrollRepository.update_batch_calculation(batch["id"], batch["row_version"], totals, db)
         calculated_batch = PayrollRepository.get_batch(batch["id"], db)
@@ -589,6 +610,7 @@ class PayrollCalculationService:
         return {
             "batch_id": batch["id"], **totals, "employee_count": len(employees),
             "detail_count": len(details), "unsettled_work_record_ids": failed_work_ids,
+            "audit_rule_version": PAYROLL_AUDIT_RULE_VERSION,
             "audit_run_version": calculated_batch["audit_run_version"],
             "audit_finding_count": len(audit_findings),
             "audit_blocking_count": sum(
@@ -659,8 +681,12 @@ class PayrollWorkflowService:
             batch = PayrollRepository.get_batch(batch_id, db)
             if not batch:
                 raise ValueError("工资批次不存在")
-            if batch["status"] not in ("draft", "exceptions_pending"):
-                raise ValueError("只有草稿或待异常处理批次可以重算")
+            stale_review = (
+                batch["status"] == "review_pending"
+                and batch.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
+            )
+            if batch["status"] not in ("draft", "exceptions_pending") and not stale_review:
+                raise ValueError("只有草稿、待异常处理或规则版本过期的待复核批次可以重算")
             if batch["prepared_by"] not in (None, actor_id):
                 raise ValueError("只能由制单人重算该批次")
             if batch["row_version"] != expected_row_version:
@@ -670,6 +696,7 @@ class PayrollWorkflowService:
             PayrollRepository.insert_event({
                 "batch_id": batch_id, "event_type": "regenerated", "from_status": batch["status"],
                 "to_status": calculation["status"], "operator_id": actor_id, "operator_name": actor_name,
+                "reason": "审计规则版本变化后重新计算" if stale_review else "",
                 "payload": calculation,
             }, db)
             return {**PayrollWorkflowService.serialize_batch(PayrollRepository.get_batch(batch_id, db)), **calculation}
