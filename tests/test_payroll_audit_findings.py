@@ -15,6 +15,7 @@ from modules.db import get_db
 from modules.middleware.auth import AuthSessionService
 from modules.services.payroll_service import (
     PayrollAuditService,
+    PayrollCalculationService,
     PayrollWorkflowService,
 )
 import modules.services.payroll_service as payroll_service
@@ -187,6 +188,58 @@ def test_zero_finding_batch_freezes_rule_version_and_stale_review_can_be_recalcu
             batch["id"], preparer, recalculated["row_version"]
         )
         assert resubmitted["status"] == "review_pending"
+
+
+def test_pre_audit_locked_batch_keeps_legacy_snapshot_gate_and_can_be_confirmed(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        _seed_batch_inputs(db, statuses=("approved",), serials=("SERIAL-LEGACY",))
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "b2-pre-audit-locked"
+        )
+        stored = PayrollRepository.get_batch(batch["id"], db)
+        lines = PayrollRepository.list_lines(batch["id"], db=db)
+        details = PayrollRepository.list_details(batch["id"], db=db)
+        legacy_digest = PayrollCalculationService.snapshot_digest(
+            {**stored, "audit_rule_version": ""},
+            lines,
+            details,
+            include_audit_rule_version=False,
+        )
+        event = PayrollRepository.latest_calculation_event(batch["id"], db)
+        event_payload = json.loads(event["payload_json"])
+        event_payload.pop("audit_rule_version", None)
+        event_payload["snapshot_digest"] = legacy_digest
+
+        db.execute("DROP TRIGGER protect_payroll_audit_rule_version")
+        db.execute("DROP TRIGGER prevent_payroll_event_update")
+        db.execute(
+            "UPDATE payroll_batches SET audit_run_version=0,audit_rule_version='' WHERE id=?",
+            (batch["id"],),
+        )
+        db.execute(
+            "UPDATE payroll_events SET payload_json=? WHERE id=?",
+            (json.dumps(event_payload, ensure_ascii=False), event["id"]),
+        )
+        db.execute(
+            "UPDATE payroll_batches SET status='review_pending' WHERE id=?",
+            (batch["id"],),
+        )
+        db.commit()
+
+        with pytest.raises(ValueError, match="规则版本已变化"):
+            PayrollWorkflowService.lock(batch["id"], approver, batch["row_version"])
+
+        db.execute(
+            "UPDATE payroll_batches SET status='locked' WHERE id=?",
+            (batch["id"],),
+        )
+        db.commit()
+        confirmed = PayrollWorkflowService.confirm(
+            batch["id"], approver, batch["row_version"]
+        )
+        assert confirmed["status"] == "confirmed"
 
 
 def test_duplicate_serial_work_blocks_until_one_source_record_is_rejected(client):

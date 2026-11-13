@@ -72,6 +72,15 @@ def _request_digest(payload):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _is_pre_audit_locked_batch(batch):
+    return bool(
+        batch
+        and batch.get("status") == "locked"
+        and not batch.get("audit_run_version")
+        and not str(batch.get("audit_rule_version") or "").strip()
+    )
+
+
 class PayrollAuditService:
     RESOLUTION_CODES = {
         "duplicate_work_candidate": {"confirmed_distinct_work"},
@@ -103,7 +112,11 @@ class PayrollAuditService:
     @staticmethod
     def require_resolved(batch_id, db):
         batch = PayrollRepository.get_batch(batch_id, db)
-        if not batch or batch.get("legacy_imported"):
+        if (
+            not batch
+            or batch.get("legacy_imported")
+            or _is_pre_audit_locked_batch(batch)
+        ):
             return
         event = PayrollRepository.latest_calculation_event(batch_id, db)
         event_payload = json.loads(event["payload_json"]) if event else {}
@@ -253,15 +266,17 @@ class PayrollCalculationService:
         return digest != batch["input_digest"]
 
     @staticmethod
-    def snapshot_digest(batch, lines, details):
-        fields = (
+    def snapshot_digest(batch, lines, details, *, include_audit_rule_version=True):
+        fields = [
             "id", "payroll_month", "version", "period_start", "period_end",
             "prepared_by", "supersedes_batch_id", "legacy_imported",
-            "source_cutoff_at", "input_digest", "audit_rule_version",
+            "source_cutoff_at", "input_digest",
             "source_record_count", "priced_record_count",
             "exception_count", "normal_wage_cents", "rework_wage_cents",
             "bonus_cents", "allowance_cents", "deduction_cents", "payable_wage_cents",
-        )
+        ]
+        if include_audit_rule_version:
+            fields.insert(10, "audit_rule_version")
         return hashlib.sha256(_fixed_snapshot({
             "batch": {key: batch[key] for key in fields},
             "lines": lines,
@@ -277,13 +292,20 @@ class PayrollCalculationService:
         details = PayrollRepository.list_details(batch["id"], db=db)
         event = PayrollRepository.latest_calculation_event(batch["id"], db)
         event_payload = json.loads(event["payload_json"]) if event else {}
-        if (
+        pre_audit_locked = _is_pre_audit_locked_batch(batch)
+        if not pre_audit_locked and (
             batch.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
             or event_payload.get("audit_rule_version") != PAYROLL_AUDIT_RULE_VERSION
         ):
             raise ValueError("工资审计规则版本已变化，请重新生成")
         saved_digest = event_payload.get("snapshot_digest")
-        if saved_digest and saved_digest != PayrollCalculationService.snapshot_digest(batch, lines, details):
+        expected_digest = PayrollCalculationService.snapshot_digest(
+            batch,
+            lines,
+            details,
+            include_audit_rule_version=not pre_audit_locked,
+        )
+        if saved_digest and saved_digest != expected_digest:
             raise ValueError("工资结算快照不完整或已变化，请重新生成")
         work = [row for row in details if row["source_type"] in ("normal_work", "rework_work")]
         work_ids = [row["work_record_id"] for row in work]
