@@ -9,7 +9,7 @@ from modules.csv_utils import safe_csv_cell
 from modules.middleware.auth import has_permission
 from modules.middleware.validate import validate_json
 from modules.route_decorators import app, check_auth, safe_audit_log
-from modules.services.payroll_service import PayrollWorkflowService
+from modules.services.payroll_service import PayrollAuditService, PayrollWorkflowService
 from modules.services.payroll_read_service import PayrollReadService
 from modules.services.payroll_settlement_service import (
     MAX_RECEIPT_BYTES,
@@ -441,6 +441,34 @@ def payroll_exception_approve(exception_id):
         return _deny()
     try:
         return jsonify(PayrollWorkflowService.approve_exception(exception_id, _actor()))
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/audit-findings", methods=["GET"])
+@check_auth
+def payroll_audit_findings():
+    if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
+        return _deny()
+    return _no_store_json(PayrollWorkflowService.list_audit_findings(
+        request.args.get("payroll_month", ""),
+        request.args.get("batch_id", type=int),
+        request.args.get("status", ""),
+        request.args.get("severity", ""),
+        request.args.get("finding_type", ""),
+        request.args.get("include_history") == "1",
+    ))
+
+
+@app.route("/api/payroll/audit-findings/<int:finding_id>/resolve", methods=["POST"])
+@check_auth
+def payroll_audit_finding_resolve(finding_id):
+    if not _allowed("wages:approve"):
+        return _deny()
+    try:
+        return _no_store_json(PayrollAuditService.resolve(
+            finding_id, _actor(), _json_object()
+        ))
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)
 

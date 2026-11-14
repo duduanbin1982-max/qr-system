@@ -204,7 +204,7 @@ def test_code_only_preflight_accepts_clean_backend_change_and_untracked_data(tmp
 def test_target_schema_version_reads_real_repository_without_importing_target_code():
     root = Path(__file__).resolve().parents[1]
 
-    assert code_only_release._target_schema_version(root) == 98
+    assert code_only_release._target_schema_version(root) == 100
 
 
 def test_target_schema_version_accepts_integer_literal_fixture(tmp_path):

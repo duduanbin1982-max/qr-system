@@ -272,6 +272,8 @@ def test_migration_registry_is_split_by_domain_without_duplicate_versions():
             "modules.migration_inventory_product_views",
             "modules.migration_payroll_settlement",
             "modules.migration_payroll_risk_closure",
+            "modules.migration_payroll_audit",
+            "modules.migration_payroll_audit_policy",
         }
     assert len((PROJECT_ROOT / "modules" / "migrations.py").read_text(encoding="utf-8").splitlines()) < 100
 
@@ -387,7 +389,9 @@ def test_audit_event_and_process_config_migration_versions_are_stable():
     assert by_version[96] == "modules.migration_inventory_product_views"
     assert by_version[97] == "modules.migration_payroll_settlement"
     assert by_version[98] == "modules.migration_payroll_risk_closure"
-    assert migrations.LATEST_VERSION == 98
+    assert by_version[99] == "modules.migration_payroll_audit"
+    assert by_version[100] == "modules.migration_payroll_audit_policy"
+    assert migrations.LATEST_VERSION == 100
 
 
 def test_payroll_ledger_migration_rounds_legacy_adjustments_and_locks_legacy_tables():
@@ -1434,8 +1438,8 @@ def test_schema_96_upgrades_payroll_settlement_and_risk_closure_migrations():
         _create_minimal_payroll_v96_schema(db)
         db.execute("PRAGMA user_version=96")
 
-        assert migrations.run_migrations(db) == 2
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 98
+        assert migrations.run_migrations(db) == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 100
         assert db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='payroll_settlements'"
         ).fetchone()
@@ -1449,7 +1453,6 @@ def test_schema_96_upgrades_payroll_settlement_and_risk_closure_migrations():
 
 
 def test_payroll_risk_closure_migration_is_idempotent_and_installs_named_guards():
-    from modules import migrations
     from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
 
     db = sqlite3.connect(":memory:")
@@ -1457,8 +1460,9 @@ def test_payroll_risk_closure_migration_is_idempotent_and_installs_named_guards(
         db.execute("PRAGMA foreign_keys=ON")
         _upgrade_minimal_payroll_schema_to_v97(db)
 
-        assert migrations.run_migrations(db) == 1
         m098_payroll_risk_closure(db)
+        db.execute("PRAGMA user_version=98")
+        db.commit()
 
         assert db.execute("PRAGMA user_version").fetchone()[0] == 98
         assert {
@@ -1479,6 +1483,145 @@ def test_payroll_risk_closure_migration_is_idempotent_and_installs_named_guards(
             "SELECT 1 FROM sqlite_master WHERE type='index' "
             "AND name='idx_payroll_adjustment_idempotency'"
         ).fetchone()
+    finally:
+        db.close()
+
+
+def test_payroll_audit_migration_is_idempotent_and_installs_immutable_findings():
+    from modules.migration_payroll_audit import m099_payroll_audit_findings
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        _create_minimal_payroll_v96_schema(db)
+        from modules.migration_payroll_settlement import m097_payroll_settlement
+        from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+        m097_payroll_settlement(db)
+        m098_payroll_risk_closure(db)
+        m099_payroll_audit_findings(db)
+        m099_payroll_audit_findings(db)
+
+        columns = {
+            row[1] for row in db.execute("PRAGMA table_info(payroll_batches)")
+        }
+        assert "audit_run_version" in columns
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='payroll_audit_findings'"
+        ).fetchone()
+        triggers = {
+            row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'trg_payroll_audit_finding_%'"
+            )
+        }
+        assert triggers == {
+            "trg_payroll_audit_finding_definition_immutable",
+            "trg_payroll_audit_finding_resolution_once",
+            "trg_payroll_audit_finding_no_delete",
+        }
+    finally:
+        db.close()
+
+
+def test_payroll_audit_migration_rolls_back_column_and_ddl_on_failure():
+    from modules.migration_payroll_audit import m099_payroll_audit_findings
+
+    db = sqlite3.connect(":memory:")
+    _create_minimal_payroll_v96_schema(db)
+    from modules.migration_payroll_settlement import m097_payroll_settlement
+    from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+    m097_payroll_settlement(db)
+    m098_payroll_risk_closure(db)
+
+    def deny_trigger(action, object_name, _table_name, _database_name, _source):
+        if (
+            action == sqlite3.SQLITE_CREATE_TRIGGER
+            and object_name == "trg_payroll_audit_finding_no_delete"
+        ):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    db.set_authorizer(deny_trigger)
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            m099_payroll_audit_findings(db)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(payroll_batches)")}
+        assert "audit_run_version" not in columns
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='payroll_audit_findings'"
+        ).fetchone() is None
+    finally:
+        db.close()
+
+
+def test_payroll_audit_policy_migration_freezes_rule_version_and_allows_stale_recalculation():
+    from modules.migration_payroll_audit import m099_payroll_audit_findings
+    from modules.migration_payroll_audit_policy import m100_payroll_audit_policy_version
+    from modules.migration_payroll_settlement import m097_payroll_settlement
+    from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
+
+    db = sqlite3.connect(":memory:")
+    try:
+        _create_minimal_payroll_v96_schema(db)
+        db.execute(
+            "ALTER TABLE payroll_batches ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"
+        )
+        m097_payroll_settlement(db)
+        m098_payroll_risk_closure(db)
+        m099_payroll_audit_findings(db)
+        m100_payroll_audit_policy_version(db)
+        m100_payroll_audit_policy_version(db)
+
+        columns = {row[1] for row in db.execute("PRAGMA table_info(payroll_batches)")}
+        assert "audit_rule_version" in columns
+
+        db.execute(
+            "INSERT INTO payroll_batches(id,status,row_version,audit_run_version,audit_rule_version) "
+            "VALUES (1,'review_pending',7,4,'payroll-audit-v1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="invalid payroll batch status transition"):
+            db.execute("UPDATE payroll_batches SET status='draft' WHERE id=1")
+        db.execute(
+            "UPDATE payroll_batches SET status='draft',audit_rule_version='payroll-audit-v2',"
+            "audit_run_version=5,row_version=8 WHERE id=1"
+        )
+
+        db.execute(
+            "INSERT INTO payroll_batches(id,status,row_version,audit_run_version,audit_rule_version) "
+            "VALUES (3,'review_pending',9,6,'payroll-audit-v1')"
+        )
+        db.execute(
+            "UPDATE payroll_batches SET status='exceptions_pending',"
+            "audit_rule_version='payroll-audit-v2',audit_run_version=7,row_version=10 WHERE id=3"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="audit rule version requires recalculation"):
+            db.execute(
+                "UPDATE payroll_batches SET status='locked',audit_rule_version='payroll-audit-v3',"
+                "audit_run_version=8,row_version=11 WHERE id=3"
+            )
+
+        db.execute(
+            "INSERT INTO payroll_batches(id,status,row_version,audit_run_version,audit_rule_version) "
+            "VALUES (4,'review_pending',12,9,'payroll-audit-v1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="audit rule version requires recalculation"):
+            db.execute(
+                "UPDATE payroll_batches SET status='locked',audit_rule_version='payroll-audit-v2',"
+                "audit_run_version=10,row_version=13 WHERE id=4"
+            )
+
+        db.execute(
+            "INSERT INTO payroll_batches(id,status,row_version,audit_rule_version) "
+            "VALUES (2,'locked',1,'payroll-audit-v2')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="audit rule version requires recalculation"):
+            db.execute(
+                "UPDATE payroll_batches SET audit_rule_version='payroll-audit-v3' WHERE id=2"
+            )
     finally:
         db.close()
 
